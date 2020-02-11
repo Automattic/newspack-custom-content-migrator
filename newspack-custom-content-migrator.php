@@ -3,7 +3,7 @@
  * Plugin Name: Newspack Custom Content Migrator
  * Author:      Automattic
  * Author URI:  https://automattic.com
- * Version:     0.1.0
+ * Version:     0.1.1
  *
  * @package     Newspack_Custom_Content_Migrator
  */
@@ -13,6 +13,36 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
 }
 
-require_once( 'inc/utils.php' );
-require_once( 'inc/posts-migrator.php' );
-require_once( 'inc/css-migrator.php' );
+require 'vendor/autoload.php';
+require_once(ABSPATH . 'wp-settings.php');
+
+
+// Check and setup WordPress Importer.
+setup_wordpress_importer();
+
+
+// Register migrator commands.
+$migrator_classes = array(
+	\NewspackCustomContentMigrator\CssMigrator::class,
+	\NewspackCustomContentMigrator\PostsMigrator::class,
+);
+foreach ( $migrator_classes as $migrator_class ) {
+    $migrator_class::get_instance()->register_commands();
+}
+
+
+/**
+ * Checks whether wordpress-importer is active and valid, and if not, installs and activates it.
+ */
+function setup_wordpress_importer() {
+	$installed = false;
+	foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
+		if ( false !== strrpos( $plugin, 'wordpress-importer.php' ) ) {
+			$installed = true;
+		}
+	}
+
+	if ( ! $installed ) {
+		WP_CLI::runcommand( "plugin install wordpress-importer --activate" );
+	}
+}
