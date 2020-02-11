@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name: Newspack Custom Content Migrator
- * Author:      Automattic
+ * Author:	  Automattic
  * Author URI:  https://automattic.com
- * Version:     0.1.1
+ * Version:	 0.1.1
  *
- * @package     Newspack_Custom_Content_Migrator
+ * @package	 Newspack_Custom_Content_Migrator
  */
 
 // Don't do anything outside WP CLI.
@@ -17,17 +17,16 @@ require 'vendor/autoload.php';
 require_once(ABSPATH . 'wp-settings.php');
 
 
-// Check and setup WordPress Importer.
 setup_wordpress_importer();
 
 
-// Register migrator commands.
+// Register migrators and their commands.
 $migrator_classes = array(
 	\NewspackCustomContentMigrator\CssMigrator::class,
 	\NewspackCustomContentMigrator\PostsMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
-    $migrator_class::get_instance()->register_commands();
+	$migrator_class::get_instance()->register_commands();
 }
 
 
