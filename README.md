@@ -3,7 +3,7 @@ Custom migration tasks for launching and migrating Newspack sites on Atomic.
 
 ## Setup
 
-- `composer install`
+Run `composer install`
 
 ## Migrators
 
