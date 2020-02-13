@@ -24,6 +24,7 @@ setup_wordpress_importer();
 $migrator_classes = array(
 	\NewspackCustomContentMigrator\CssMigrator::class,
 	\NewspackCustomContentMigrator\PostsMigrator::class,
+	\NewspackCustomContentMigrator\MenusMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
 	$migrator_class::get_instance()->register_commands();
