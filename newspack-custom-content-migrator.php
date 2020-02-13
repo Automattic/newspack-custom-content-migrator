@@ -16,3 +16,4 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 require_once( 'inc/utils.php' );
 require_once( 'inc/posts-migrator.php' );
 require_once( 'inc/css-migrator.php' );
+require_once( 'inc/publisher-asiatimes.php' );
