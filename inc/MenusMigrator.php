@@ -5,10 +5,23 @@ namespace NewspackCustomContentMigrator;
 use \NewspackCustomContentMigrator\InterfaceMigrator;
 use \WP_CLI;
 
+/**
+ * Exports and imports menus and associated content.
+ */
 class MenusMigrator implements InterfaceMigrator {
 
 	/**
-	 * @var null|PostsMigrator Instance.
+	 * @var string Menu file name.
+	 */
+	const MENU_EXPORT_FILE = 'newspack-menu-export.json';
+
+	/**
+	 * @var string Posts file name.
+	 */
+	const POSTS_EXPORT_FILE = 'newspack-menu-export-posts.xml';
+
+	/**
+	 * @var null|MenusMigrator Instance.
 	 */
 	private static $instance = null;
 
@@ -21,7 +34,7 @@ class MenusMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PostsMigrator|null
+	 * @return MenusMigrator|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -46,44 +59,16 @@ class MenusMigrator implements InterfaceMigrator {
 					'optional'    => false,
 					'repeating'   => false,
 				],
-				[
-					'type'        => 'assoc',
-					'name'        => 'file-export-menus',
-					'description' => 'Menu export XML filename.',
-					'optional'    => false,
-					'repeating'   => false,
-				],
 			],
 		] );
 
 		WP_CLI::add_command( 'newspack-live-migrate import-menus', array( $this, 'cmd_import_menus' ), [
-			'shortdesc' => 'Imports custom menus and new pages from the export XML file.',
+			'shortdesc' => 'Imports custom menus and new pages from the export JSON file.',
 			'synopsis'  => [
 				[
 					'type'        => 'assoc',
-					'name'        => 'dir',
-					'description' => 'Directory with exported resources, full path (no ending slash).',
-					'optional'    => false,
-					'repeating'   => false,
-				],
-				[
-					'type'        => 'assoc',
-					'name'        => 'hostname-export',
-					'description' => "Hostname of the site where the export was performed.",
-					'optional'    => false,
-					'repeating'   => false,
-				],
-				[
-					'type'        => 'assoc',
-					'name'        => 'hostname-import',
-					'description' => "Hostname of the site where the import is being performed (this).",
-					'optional'    => false,
-					'repeating'   => false,
-				],
-				[
-					'type'        => 'assoc',
-					'name'        => 'file-menus',
-					'description' => 'Exported Menus XML file.',
+					'name'        => 'input-dir',
+					'description' => 'Exported Menus JSON and XML files directory.',
 					'optional'    => false,
 					'repeating'   => false,
 				],
@@ -94,23 +79,29 @@ class MenusMigrator implements InterfaceMigrator {
 	/**
 	 * Callable for export-menus command.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args
+	 * @param array $assoc_args
 	 */
 	public function cmd_export_menus( $args, $assoc_args ) {
 		$export_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
-		$file_output_menus = isset( $assoc_args[ 'file-export-menus' ] ) ? $assoc_args[ 'file-export-menus' ] : null;
 
 		WP_CLI::line( sprintf( 'Exporting active menus' ) );
-		$this->export_menus( $export_dir, $file_output_menus );
+		$this->export_menus( $export_dir );
 
 		wp_cache_flush();
 	}
 
-	public function export_menus( $export_dir, $file_output_menus ) {
+	/**
+	 * Export the site menus into two files: one for the menu info, one for the posts linked in the menu.
+	 *
+	 * @param string $export_dir
+	 */
+	public function export_menus( $export_dir ) {
 		// Get all menus info gathered together.
 		$menu_ids = array_unique( get_nav_menu_locations() );
+		$locations = array_flip( get_nav_menu_locations() );
 		$menus = [];
+
 		foreach ( $menu_ids as $menu_id ) {
 			$menu = wp_get_nav_menu_object( $menu_id );
 			if ( ! $menu ) {
@@ -118,8 +109,9 @@ class MenusMigrator implements InterfaceMigrator {
 			}
 
 			$menu_data = [
-				'menu' => $menu,
+				'menu'       => $menu,
 				'menu_items' => [],
+				'location'   => $locations[ $menu_id ],
 			];
 
 			$menu_items = wp_get_nav_menu_items( $menu_id );
@@ -130,77 +122,143 @@ class MenusMigrator implements InterfaceMigrator {
 			$menus[] = $menu_data;
 		}
 
-		// Output testing
-		// @todo output to file
+		// Export menus and menu items.
+		$menu_file = $export_dir . '/' . self::MENU_EXPORT_FILE;
+		$open_menu_file = fopen( $menu_file, 'w' );
+		if ( ! $open_menu_file ) {
+			WP_CLI::error( 'Error creating or opening output file: ' . $menu_file );
+		}
+		$write = fputs( $open_menu_file, json_encode( $menus ) );
+		if ( ! $write ) {
+			WP_CLI::error( 'Error writing to output file: ' . $menu_file );
+		}
+		fclose( $open_menu_file );
+
+		// Export posts linked in menu items.
+		$post_ids = [];
 		foreach ( $menus as $menu ) {
-			echo "###########\n";
-			echo $menu['menu']->name . "\n";
 			foreach ( $menu['menu_items'] as $menu_item ) {
-				echo '-' . $menu_item->title . ' (' . $menu_item->object . ' - ' . $menu_item->ID . ")\n";
+				if ( 'post' !== $menu_item->object && 'page' !== $menu_item->object ) {
+					continue;
+				}
+
+				$post_ids[] = $menu_item->object_id;
+
+				// Add a meta value so the import can correctly associate new and existing posts.
+				update_post_meta( $menu_item->object_id, 'newspack_menu_original_post_id', $menu_item->object_id );
 			}
 		}
-
-		// types: 'page', 'post', 'custom', 'category', all others skip export
-
-		// export menus
-		// export menu items
-		// export associated posts/pages
-
-		//var_dump( $menus );
-		WP_CLI::error("TODO");
+		$output = WP_CLI::runcommand( 'export --dir="' . $export_dir . '" --post__in="' . implode( ' ', $post_ids ) . '" --with_attachments --filename_format="' . self::POSTS_EXPORT_FILE . '"' );
+		
+		WP_CLI::line( $output );
+		WP_CLI::line( 'Completed menu export: ' . $menu_file );
 	}
 
 	/**
 	 * Callable for import-menus command.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args
+	 * @param array $assoc_args
 	 */
 	public function cmd_import_menus( $args, $assoc_args ) {
-/*
-		$dir = isset( $assoc_args[ 'dir' ] ) ? $assoc_args[ 'dir' ] : null;
-		$file_mapping_csv = isset( $assoc_args[ 'mapping-csv-file' ] ) ? $assoc_args[ 'mapping-csv-file' ] : null;
-		$file_posts = isset( $assoc_args[ 'file-posts' ] ) ? $assoc_args[ 'file-posts' ] : null;
-		$hostname_export = isset( $assoc_args[ 'hostname-export' ] ) ? $assoc_args[ 'hostname-export' ] : null;
-		$hostname_import = isset( $assoc_args[ 'hostname-import' ] ) ? $assoc_args[ 'hostname-import' ] : null;
+		$directory = isset( $assoc_args['input-dir'] ) ? $assoc_args['input-dir'] : null;
 
-		if ( is_null( $dir ) || ! file_exists( $dir ) ) {
-			WP_CLI::error( 'Invalid dir.' );
-		}
-		if ( is_null( $file_mapping_csv ) || ! file_exists( $file_mapping_csv ) ) {
-			WP_CLI::error( "Invalid mapping.csv file, which is used by the WP import command's authors option (see https://developer.wordpress.org/cli/commands/import/)." );
-		}
-		if ( is_null( $file_posts ) || ! file_exists( $dir . '/' . $file_posts ) ) {
-			WP_CLI::error( 'Invalid posts file.' );
-		}
-		if ( is_null( $hostname_export ) ) {
-			WP_CLI::error( 'Invalid hostname of the export site.' );
-		}
-		if ( is_null( $hostname_import ) ) {
-			WP_CLI::error( 'Invalid hostname of the the current site where import is being performed.' );
+		if ( ! $directory ) {
+			WP_CLI::error( 'Invalid directory' );
 		}
 
-		WP_CLI::line( 'Importing posts...' );
-		$this->import_posts( $dir, $file_posts, $file_mapping_csv );
-
-		wp_cache_flush();*/
+		WP_CLI::line( sprintf( 'Importing menus from: ' . $directory ) );
+		$this->import_menus( $directory . '/' . self::MENU_EXPORT_FILE, $directory . '/' . self::POSTS_EXPORT_FILE);
+		wp_cache_flush();
 	}
 
 	/**
-	 * @param $dir
-	 * @param $file_posts
-	 * @param $file_mapping_csv
+	 * Import menus and any associated posts.
 	 *
-	 * @return mixed
+	 * @param string $menu_file Full path to menu json file.
+	 * @param string $posts_file Full path to posts xml file.
 	 */
-	public function import_posts( $dir, $file_posts, $file_mapping_csv ) {
-		$options = [
-			'return'     => true,
-			// 'parse'      => 'json',
-		];
-		$output = WP_CLI::runcommand( "import $dir/$file_posts --authors=$file_mapping_csv", $options );
+	public function import_menus( $menu_file, $posts_file ) {
+		global $wpdb;
 
-		return $output;
+		$menu_read = file_get_contents( $menu_file );
+		if ( empty( $menu_read ) ) {
+			WP_CLI::error( 'Error reading from menu file' );
+		}
+
+		$output = WP_CLI::runcommand( 'import ' . $posts_file . ' --authors=create' );
+		WP_CLI::line( $output );
+
+		$menu_item_parent_mapping = [];
+		$menu_item_object_mapping = [];
+
+		// Populate object mapping.
+		$raw_mapped_ids = $wpdb->get_results( "SELECT post_id, meta_value FROM {$wpdb->prefix}postmeta WHERE meta_key = 'newspack_menu_original_post_id'", ARRAY_A );
+		foreach ( $raw_mapped_ids as $raw_id ) {
+			$menu_item_object_mapping[ $raw_id['meta_value'] ] = $raw_id['post_id'];
+		}
+
+		$menus = json_decode( $menu_read );
+		foreach ( $menus as $menu ) {
+
+			// Get the menu. It will have been created by the XML import if needed.
+			$menu_object = wp_get_nav_menu_object( $menu->menu->slug );
+			if ( ! $menu_object ) {
+				WP_CLI::error( 'Error rebuilding menu: ' . $menu->menu->slug );
+			}
+			$menu_id = $menu_object->term_id;
+
+			// Delete existing items in menu.
+			$existing_items = wp_get_nav_menu_items( $menu_id );
+			foreach ( $existing_items as $existing_item ) {
+				wp_delete_post( $existing_item->ID, true );
+			}
+
+			// Create new menu items.
+			foreach ( $menu->menu_items as $menu_item ) {
+				// Map old post references to new ones if needed.
+				if ( 'post_type' === $menu_item->type && isset( $menu_item_object_mapping[ $menu_item->object_id ] ) ) {
+					$menu_item_object_id = $menu_item_object_mapping[ $menu_item->object_id ];
+				} else {
+					$menu_item_object_id = $menu_item->object_id;
+				}
+
+				// Don't reference old menu items as parents.
+				$menu_item_parent = $menu_item->menu_item_parent;
+				if ( '0' !== $menu_item_parent && isset( $menu_item_parent_mapping[ $menu_item_parent ] ) ) {
+					$menu_item_parent = $menu_item_parent_mapping[ $menu_item_parent ];
+				}
+
+				$menu_item_args = [
+					'menu-item-object-id'   => $menu_item_object_id,
+					'menu-item-object'      => $menu_item->object,
+					'menu-item-parent-id'   => $menu_item_parent,
+					'menu-item-position'    => $menu_item->menu_order,
+					'menu-item-type'        => $menu_item->type,
+					'menu-item-title'       => $menu_item->title,
+					'menu-item-url'         => $menu_item->url,
+					'menu-item-description' => $menu_item->description,
+					'menu-item-attr-title'  => $menu_item->attr_title,
+					'menu-item-target'      => $menu_item->target,
+					'menu-item-classes'     => implode( ' ', $menu_item->classes ),
+					'menu-item-xfn'         => $menu_item->xfn,
+					'menu-item-status'      => 'publish',
+				];
+				$menu_item_id = wp_update_nav_menu_item( $menu_id, 0, $menu_item_args );
+				if ( ! is_wp_error( $menu_item_id ) ) {
+					$menu_item_parent_mapping[ $menu_item->ID ] = $menu_item_id;
+				}
+			}
+
+			// Set menus where possible.
+			$valid_locations = get_registered_nav_menus();
+			$set_menus       = get_theme_mod( 'nav_menu_locations', [] );
+			if ( isset( $valid_locations[ $menu->location ] ) ) {
+				$set_menus[ $menu->location ] = $menu_id;
+				set_theme_mod( 'nav_menu_locations', $set_menus );
+			}
+		}
+
+		WP_CLI::line( 'Completed menu import' );
 	}
-
 }
