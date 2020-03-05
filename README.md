@@ -7,6 +7,6 @@ Run `composer install`
 
 ## Migrators
 
-Migrators are simple classes which provide export and import functionality for various types content. They register their export and import commands with the WP CLI.
+Migrators are simple classes which provide export and import functionality for various types content. They register their actionable commands with the WP CLI.
 
-Create a migrator class/file modelled after an existing one, then add it to list in the main plugin file.
+To create a new migrator, use an existing one as a template, then add it to list of migrators in the main plugin file.
