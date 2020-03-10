@@ -62,7 +62,7 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 			$post_ids = get_posts( [
 				'post_type'      => 'post',
 				'fields'         => 'ids',
-				'posts_per_page' => 10,
+				'posts_per_page' => -1,
 			] );
 		}
 
