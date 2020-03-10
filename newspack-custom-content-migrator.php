@@ -23,6 +23,7 @@ setup_wordpress_importer();
 // Register migrators and their commands.
 $migrator_classes = array(
 	\NewspackCustomContentMigrator\CssMigrator::class,
+	\NewspackCustomContentMigrator\InlineFeaturedImageMigrator::class,
 	\NewspackCustomContentMigrator\PostsMigrator::class,
 	\NewspackCustomContentMigrator\MenusMigrator::class,
 	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
