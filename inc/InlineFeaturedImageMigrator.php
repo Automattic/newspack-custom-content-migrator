@@ -68,6 +68,8 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( 'Checking %d posts.', count( $post_ids ) ) );
 
+		$started = time();
+
 		foreach ( $post_ids as $id ) {
 			$thumbnail_id = get_post_thumbnail_id( $id );
 			if ( ! $thumbnail_id ) {
@@ -95,6 +97,12 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 				}
 			}
 		}
+
+		WP_CLI::line( sprintf(
+			'Finished processing %d records in %d seconds',
+			count( $post_ids ),
+			time() - $started
+		) );
 
 	}
 
