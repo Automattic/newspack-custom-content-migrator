@@ -10,7 +10,7 @@ use \WP_CLI;
 class PluginInstaller {
 
 	/**
-	 * @var null|PostsMigrator Instance.
+	 * @var null|PluginInstaller Instance.
 	 */
 	private static $instance = null;
 
@@ -23,7 +23,7 @@ class PluginInstaller {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PostsMigrator|null
+	 * @return PluginInstaller|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -36,7 +36,7 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Requires dependencies from WP.
+	 * Ensures dependencies from WP are available.
 	 */
 	private static function require_dependencies_from_core() {
 		if ( ! function_exists( 'plugins_api' ) ) {
@@ -51,7 +51,7 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Checks whether the plugin is installed.
+	 * Checks whether a plugin is installed.
 	 *
 	 * @param string $plugin_slug Plugin slug.
 	 *
@@ -64,7 +64,7 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Checks whether the plugin is active.
+	 * Checks whether a plugin is active.
 	 *
 	 * @param string $plugin_slug Plugin slug.
 	 *
@@ -82,11 +82,11 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Activates the plugin.
+	 * Activates a plugin.
 	 *
 	 * @param string $plugin_slug Plugin slug.
 	 *
-	 * @throws \Exception If an error occurs, the exception is thrown.
+	 * @throws \Exception Thrown if an error occurs.
 	 */
 	public function activate( $plugin_slug ) {
 		$plugins = array_reduce( array_keys( get_plugins() ), array( __CLASS__, 'reduce_plugin_info' ) );
@@ -97,11 +97,11 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Installs the plugin.
+	 * Installs a plugin.
 	 *
 	 * @param string $plugin_slug Plugin slug.
 	 *
-	 * @throws \Exception If an error occurs, the exception is thrown.
+	 * @throws \Exception Thrown if an error occurs.
 	 */
 	public function install( $plugin_slug ) {
 		$plugin_info = plugins_api(
@@ -133,11 +133,11 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Downloads and installs the plugin from URL.
+	 * Downloads and installs a plugin from URL.
 	 *
 	 * @param string $plugin_url Plugin URL.
 	 *
-	 * @throws \Exception If an error occurs, the exception is thrown.
+	 * @throws \Exception Thrown if an error occurs.
 	 */
 	private static function install_from_url( $plugin_url ) {
 		WP_Filesystem();
@@ -185,10 +185,10 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Reduce get_plugins() info to form 'folder => file'.
+	 * Reduces get_plugins() info to form 'folder => file'.
 	 *
 	 * @param array  $plugins Associative array of plugin files to paths.
-	 * @param string $key Plugin relative path. Example: newspack/newspack.php.
+	 * @param string $key     Plugin relative path. Example: newspack/newspack.php.
 	 *
 	 * @return array
 	 */
@@ -200,4 +200,3 @@ class PluginInstaller {
 		return $plugins;
 	}
 }
-
