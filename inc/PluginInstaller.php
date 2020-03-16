@@ -185,10 +185,10 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Reduce get_plugins() info to form 'folder => file'.
+	 * Reduces get_plugins() info to form 'folder => file'.
 	 *
 	 * @param array  $plugins Associative array of plugin files to paths.
-	 * @param string $key Plugin relative path. Example: newspack/newspack.php.
+	 * @param string $key     Plugin relative path. Example: newspack/newspack.php.
 	 *
 	 * @return array
 	 */
@@ -200,4 +200,3 @@ class PluginInstaller {
 		return $plugins;
 	}
 }
-
