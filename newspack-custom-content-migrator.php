@@ -20,14 +20,17 @@ setup_wordpress_importer();
 
 // Register migrators and their commands.
 $migrator_classes = array(
-	\NewspackCustomContentMigrator\CssMigrator::class,
 	\NewspackCustomContentMigrator\InlineFeaturedImageMigrator::class,
 	\NewspackCustomContentMigrator\PostsMigrator::class,
+	\NewspackCustomContentMigrator\CssMigrator::class,
 	\NewspackCustomContentMigrator\MenusMigrator::class,
 	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
-	$migrator_class::get_instance()->register_commands();
+	$migrator = $migrator_class::get_instance();
+	if ( $migrator instanceof \NewspackCustomContentMigrator\InterfaceMigrator ) {
+		$migrator->register_commands();
+	}
 }
 
 /**

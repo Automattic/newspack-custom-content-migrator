@@ -23,7 +23,7 @@ class PluginInstaller {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PluginInstaller|null
+	 * @return PluginInstaller
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -36,7 +36,7 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Ensures dependencies from WP are available.
+	 * Includes used dependencies from WP.
 	 */
 	private static function require_dependencies_from_core() {
 		if ( ! function_exists( 'plugins_api' ) ) {
@@ -86,7 +86,7 @@ class PluginInstaller {
 	 *
 	 * @param string $plugin_slug Plugin slug.
 	 *
-	 * @throws \Exception Thrown if an error occurs.
+	 * @throws \Exception Thrown in case of an error.
 	 */
 	public function activate( $plugin_slug ) {
 		$plugins = array_reduce( array_keys( get_plugins() ), array( __CLASS__, 'reduce_plugin_info' ) );
@@ -97,11 +97,11 @@ class PluginInstaller {
 	}
 
 	/**
-	 * Installs a plugin.
+	 * Installs a plugin directly from the WordPress.org Plugins API.
 	 *
 	 * @param string $plugin_slug Plugin slug.
 	 *
-	 * @throws \Exception Thrown if an error occurs.
+	 * @throws \Exception Thrown in case of an error.
 	 */
 	public function install( $plugin_slug ) {
 		$plugin_info = plugins_api(
@@ -137,7 +137,7 @@ class PluginInstaller {
 	 *
 	 * @param string $plugin_url Plugin URL.
 	 *
-	 * @throws \Exception Thrown if an error occurs.
+	 * @throws \Exception Thrown in case of an error.
 	 */
 	private static function install_from_url( $plugin_url ) {
 		WP_Filesystem();
