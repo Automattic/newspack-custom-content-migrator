@@ -58,22 +58,20 @@ class SubtitleMigrator implements InterfaceMigrator {
 	public function cmd_migrate_excerpt_to_subtitle() {
 		global $wpdb;
 
-		$posts = get_posts( [
-			'post_type'      => 'post',
-			'posts_per_page' => -1,
-		] );
+		$data = $wpdb->get_results( "SELECT ID, post_excerpt FROM $wpdb->posts WHERE post_type='post' AND post_excerpt != ''", ARRAY_A );
 
-		foreach ( $posts as $post ) {
-			if ( empty( trim( $post->post_excerpt ) ) ) {
+		foreach ( $data as $post_data ) {
+			if ( empty( trim ( $post_data['post_excerpt'] ) ) ) {
 				continue;
 			}
 
-			update_post_meta( $post->ID, self::NEWSPACK_SUBTITLE_META_FIELD, $post->post_excerpt );
-			WP_CLI::line( "Updated: " . $post->ID );
+			update_post_meta( $post_data['ID'], self::NEWSPACK_SUBTITLE_META_FIELD, $post_data['post_excerpt'] );
+			WP_CLI::line( "Updated: " . $post_data['ID'] );
 		}
 
 		$wpdb->query( "UPDATE $wpdb->posts SET post_excerpt = '' WHERE post_type = 'post'" );
 
+		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
 	}
 }

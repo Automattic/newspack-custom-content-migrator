@@ -46,15 +46,6 @@ class AsiaTimesMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-
-		WP_CLI::add_command(
-			'newspack-live-migrate asiatimes-excerpts',
-			[ $this, 'cmd_asiatimes_excerpts' ],
-			[
-				'shortdesc' => 'Migrates the Asia Times excerpts to post subtitles',
-				'synopsis'  => [],
-			]
-		);
 	}
 
 	/**
@@ -116,31 +107,6 @@ class AsiaTimesMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( 'Completed topic to tag migration.' );
-		wp_cache_flush();
-	}
-
-	/**
-	 * Copy the post excerpt to the subtitle field and delete the excerpt.
-	 */
-	public function cmd_asiatimes_excerpts() {
-		global $wpdb;
-
-		$data = $wpdb->get_results( "SELECT ID, post_excerpt FROM {$wpdb->prefix}posts WHERE post_type='post' AND post_excerpt != ''", ARRAY_A );
-
-		foreach ( $data as $post_data ) {
-			if ( update_post_meta( $post_data['ID'], 'newspack_post_subtitle', $post_data['post_excerpt'] ) ) {
-				wp_update_post( [
-					'ID'           => $post_data['ID'],
-					'post_excerpt' => '',
-				] );
-
-				WP_CLI::line( sprintf( 'Moved excerpt to subtitle for post %d.', $post_data['ID'] ) );
-			} else {
-				WP_CLI::line( sprintf( 'Failed to update subtitle for post %d. Skipping.', $post_data['ID'] ) );
-			}
-		}
-
-		WP_CLI::line( 'Completed excerpt to subtitle migration.' );
 		wp_cache_flush();
 	}
 }
