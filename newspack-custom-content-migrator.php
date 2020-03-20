@@ -25,6 +25,7 @@ $migrator_classes = array(
 	\NewspackCustomContentMigrator\CssMigrator::class,
 	\NewspackCustomContentMigrator\MenusMigrator::class,
 	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
+	\NewspackCustomContentMigrator\SubtitleMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
 	$migrator = $migrator_class::get_instance();
