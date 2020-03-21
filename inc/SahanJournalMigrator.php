@@ -49,7 +49,7 @@ class SahanJournalMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-		
+
 	}
 
 	/**
@@ -85,6 +85,9 @@ class SahanJournalMigrator implements InterfaceMigrator {
 					continue; // Skip to next author.
 				}
 			}
+
+			// Update the Author post to record the alternative user ID.
+			update_post_meta( $author->ID, 'user_id', $user->ID );
 
 			// Verify the migrated user looks good.
 			$verified = $this->verify_migrated_author( $author, $user );
