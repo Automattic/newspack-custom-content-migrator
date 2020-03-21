@@ -3,7 +3,7 @@
  * Plugin Name: Newspack Custom Content Migrator
  * Author:	  Automattic
  * Author URI:  https://automattic.com
- * Version:	 0.1.1
+ * Version:	 0.2.0
  *
  * @package	 Newspack_Custom_Content_Migrator
  */
@@ -24,8 +24,11 @@ $migrator_classes = array(
 	\NewspackCustomContentMigrator\PostsMigrator::class,
 	\NewspackCustomContentMigrator\CssMigrator::class,
 	\NewspackCustomContentMigrator\MenusMigrator::class,
-	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
 	\NewspackCustomContentMigrator\SubtitleMigrator::class,
+
+	// Publisher-specific migration classes.
+	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
+	\NewspackCustomContentMigrator\SahanJournalMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
 	$migrator = $migrator_class::get_instance();
