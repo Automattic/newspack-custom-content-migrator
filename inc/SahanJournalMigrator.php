@@ -5,6 +5,8 @@ namespace NewspackCustomContentMigrator;
 use \NewspackCustomContentMigrator\InterfaceMigrator;
 use \WP_CLI;
 use \WP_Error;
+use \CoAuthors_Guest_Authors;
+use \CoAuthors_Plus;
 
 /**
  * Custom migration scripts for Sahan Journal.
@@ -46,6 +48,16 @@ class SahanJournalMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_sahanjournal_authors' ],
 			[
 				'shortdesc' => 'Migrates the Sahan Journal "Authors" CPT to native WP users.',
+				'synopsis'  => [],
+			]
+		);
+
+		// Assign posts to new users.
+		WP_CLI::add_command(
+			'newspack-live-migrate sahanjournal-posts-to-users',
+			[ $this, 'cmd_sahanjournal_posts_to_users' ],
+			[
+				'shortdesc' => 'Assigns posts to WP users based on the old author CPT.',
 				'synopsis'  => [],
 			]
 		);
@@ -108,6 +120,115 @@ class SahanJournalMigrator implements InterfaceMigrator {
 			esc_html__( 'Completed CPT to Users migration with %d issues.' ),
 			$error_count
 		) );
+
+	}
+
+	public function cmd_sahanjournal_posts_to_users() {
+
+		// Temporarily register the CPT if it's not already registered.
+		if ( ! post_type_exists( 'authors' ) ) {
+			register_post_type( 'authors' );
+		}
+
+		// Get the posts with the author meta.
+		$posts = get_posts( [
+			'post_type'      => 'post',
+			'posts_per_page' => 100,
+			'post_status'    => 'any',
+			'meta_query'     => [ [
+				'key'     => 'authors',
+				'compare' => 'EXISTS',
+			] ],
+		] );
+
+		if ( empty( $posts ) ) {
+			WP_CLI::success( 'No more posts left to process.' );
+		}
+
+		// Loop through each post to set the users.
+		foreach ( $posts as $post ) {
+
+			WP_CLI::line( sprintf( esc_html__( 'Migrating authors for post %d'), $post->ID ) );
+
+			// Grab the author IDs from the existing meta.
+			$authors = get_post_meta( $post->ID, 'authors', true );
+			array_map( 'intval', $authors );
+
+			foreach ( $authors as $author ) {
+
+				// Check an author post actually exists.
+				$author_post = get_post( $author );
+				if ( ! is_a( $author_post, 'WP_Post' ) ) {
+					WP_CLI::warning( sprintf(
+						esc_html__( '-- Couldn\'t find valid author %d' ),
+						$author
+					) );
+					continue 2; // Skip this post.
+				}
+
+				// Get the new user ID for this author.
+				$new_user = get_post_meta( $author, 'user_id', true );
+				if ( empty( $new_user ) ) {
+					WP_CLI::warning( sprintf(
+						esc_html__( '-- User ID meta not found on author %d' ),
+						$author
+					) );
+					continue 2; // Skip this post.
+				}
+
+				// Get the new user account details.
+				$wp_user = get_user_by( 'ID', $new_user );
+				if ( ! $wp_user ) {
+					WP_CLI::warning( sprintf(
+						esc_html__( '-- Could not find user with ID %d' ),
+						$new_user
+					) );
+					continue 2; // Skip this post.
+				}
+
+			}
+
+			if ( count( $authors ) === 1 ) {
+
+				// Update the post with the new user as author.
+				$updated = wp_update_post( [
+					'ID'          => $post->ID,
+					'post_author' => $new_user,
+				] );
+
+				if ( is_wp_error( $updated ) ) {
+					WP_CLI::warning( sprintf( esc_html__( '-- Failed to update post %d' ), $post->ID ) );
+				}
+
+			} else {
+
+				global $coauthors_plus;
+				$coauthors_guest_authors = new CoAuthors_Guest_Authors();
+
+				// Create a Guest Author for each user.
+				$guest_authors = [];
+				foreach ( $authors as $author ) {
+					$new_user_id = get_post_meta( $author, 'user_id', true );
+					$coauthor = $coauthors_guest_authors->create_guest_author_from_user_id( $new_user_id );
+					if ( is_wp_error( $coauthor ) ) {
+						WP_CLI::warning( sprintf(
+							'-- Failed to create coauthor for user %d because "%s"',
+							$author,
+							$coauthor->get_error_message()
+						) );
+						continue 2;
+					}
+					$guest_authors[] = $coauthor;
+				}
+
+				$this->assign_guest_authors_to_post( $guest_authors, $post->ID, $coauthors_plus, $coauthors_guest_authors );
+
+			}
+
+			// Remove the authors meta now we don't need it anymore.
+			delete_post_meta( $post->ID, 'authors' );
+
+		}
 
 	}
 
@@ -274,6 +395,21 @@ class SahanJournalMigrator implements InterfaceMigrator {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
+	 *
+	 * @param array $guest_author_ids Guest Author IDs.
+	 * @param int   $post_id          Post IDs.
+	 */
+	public function assign_guest_authors_to_post( array $guest_author_ids, $post_id, $coauthors_plus, $coauthors_guest_authors ) {
+		$coauthors = [];
+		foreach ( $guest_author_ids as $guest_author_id ) {
+			$guest_author = $coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
+			$coauthors[]  = $guest_author->user_nicename;
+		}
+		$coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users = false );
 	}
 
 }
