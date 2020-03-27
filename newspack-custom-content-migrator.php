@@ -29,6 +29,7 @@ $migrator_classes = array(
 	// Publisher-specific migration classes.
 	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
 	\NewspackCustomContentMigrator\SahanJournalMigrator::class,
+	\NewspackCustomContentMigrator\HKFPMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
 	$migrator = $migrator_class::get_instance();
