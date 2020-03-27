@@ -3,5 +3,8 @@
     "psr-4": {
       "NewspackCustomContentMigrator\\": "inc/"
     }
+  },
+  "require": {
+    "paquettg/php-html-parser": "^2.2"
   }
 }
