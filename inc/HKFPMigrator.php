@@ -112,6 +112,8 @@ class HKFPMigrator implements InterfaceMigrator {
 
 		$getty_embed_predicate_string = 'embed-cdn.gettyimages.com/widgets.js';
 
+		$tiny_mcs_intruder = '<span style="display: inline-block; width: 0px; overflow: hidden; line-height: 0;" data-mce-type="bookmark" class="mce_SELRES_start">﻿</span>';
+
 		foreach ( $posts as $post ) {
 			$post_content = $post->post_content;
 
@@ -121,6 +123,17 @@ class HKFPMigrator implements InterfaceMigrator {
 				// - anchor tag with a fallback link
 				// - inline script for initialisation and providing data
 				// - script that fetches the SDK
+
+				// An old TinyMCE bug inserted a span in post content.
+				// https://generatepress.com/forums/topic/4-9-anyone-else-having-tinymce-issues/
+				if (strpos($post_content, $tiny_mcs_intruder) !== false) {
+					WP_CLI::log( "Detected TinyMCE span, removing from post content." );
+					$post_content = str_replace(
+						$tiny_mcs_intruder,
+						'',
+						$post_content
+					);
+				}
 
 				$post_dom = new Dom;
 				$post_dom->load(
