@@ -103,11 +103,23 @@ class HKFPMigrator implements InterfaceMigrator {
 
 	/**
 	 * Search for posts which contain the JS embed code and replace those with legacy embeds.
+	 *
+	 * <post_ids>
+	 * : Ids of posts to process. If not set, will process all posts.
+	 *
 	 */
-	public function cmd_hkfp_getty_embeds_conversion() {
-		$posts = get_posts(array(
-			"numberposts" => -1,
-		));
+	public function cmd_hkfp_getty_embeds_conversion( $args ) {
+		if ( isset( $args[0] ) ) {
+			WP_CLI::log( "Specified posts ids: " . implode(', ', $args) );
+			$posts = get_posts(array(
+				"include" => $args,
+			));
+		} else {
+			$posts = get_posts(array(
+				"numberposts" => -1,
+			));
+		}
+
 		$has_found = false;
 
 		$getty_embed_predicate_string = 'embed-cdn.gettyimages.com/widgets.js';
