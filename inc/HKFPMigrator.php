@@ -174,15 +174,19 @@ class HKFPMigrator implements InterfaceMigrator {
 								$post_content
 							);
 
-							// Save updated post content.
-							$post_id = wp_update_post(array(
-								'ID' => $post->ID,
-								'post_content' => $post_content,
-							));
-							if ( is_wp_error( $post_id ) ) {
-								WP_CLI::error( $post_id->get_error_message() );
+							if (strpos($post_content, $anchor_node->outerHtml) !== false) {
+								WP_CLI::warning( "Post #$post_id content not updated successfully." );
 							} else {
-								WP_CLI::success( "Updated post $post_id." );
+								// Save updated post content.
+								$post_id = wp_update_post(array(
+									'ID' => $post->ID,
+									'post_content' => $post_content,
+								));
+								if ( is_wp_error( $post_id ) ) {
+									WP_CLI::error( $post_id->get_error_message() );
+								} else {
+									WP_CLI::success( "Updated post #$post_id." );
+								}
 							}
 						} else {
 							WP_CLI::warning( "Load script not found adjacent to anchor tag. The embed might be malformated. Skipping this embed." );
