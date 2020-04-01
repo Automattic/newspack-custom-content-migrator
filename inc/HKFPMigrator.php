@@ -120,7 +120,7 @@ class HKFPMigrator implements InterfaceMigrator {
 			));
 		}
 
-		$has_found = false;
+		$processed_amount = 0;
 
 		$getty_embed_predicate_string = 'embed-cdn.gettyimages.com/widgets.js';
 
@@ -147,7 +147,6 @@ class HKFPMigrator implements InterfaceMigrator {
 				);
 				if ($embeds_count) {
 					WP_CLI::log( "Detected $embeds_count Getty JS embed(s) in post '$post->post_title' ($post->ID)." );
-					$has_found = true;
 				}
 
 				foreach($embed_anchors_nodes as $anchor_node) {
@@ -198,6 +197,7 @@ class HKFPMigrator implements InterfaceMigrator {
 									WP_CLI::error( $post_id->get_error_message() );
 								} else {
 									WP_CLI::success( "Updated post #$post_id." );
+									$processed_amount = $processed_amount + 1;
 								}
 							}
 						} else {
@@ -208,8 +208,8 @@ class HKFPMigrator implements InterfaceMigrator {
 			}
 		}
 
-		if ($has_found) {
-			WP_CLI::success( 'Completed Getty embeds conversion.' );
+		if ($processed_amount > 0) {
+			WP_CLI::success( "Completed $processed_amount Getty embeds conversion." );
 		} else {
 			WP_CLI::log( 'No JS Getty embeds found.' );
 		}
