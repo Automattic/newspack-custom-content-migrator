@@ -30,6 +30,7 @@ $migrator_classes = array(
 	\NewspackCustomContentMigrator\AsiaTimesMigrator::class,
 	\NewspackCustomContentMigrator\SahanJournalMigrator::class,
 	\NewspackCustomContentMigrator\HKFPMigrator::class,
+	\NewspackCustomContentMigrator\YubaNetMigrator::class,
 );
 foreach ( $migrator_classes as $migrator_class ) {
 	$migrator = $migrator_class::get_instance();
