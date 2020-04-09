@@ -57,6 +57,16 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 
+    WP_CLI::add_command(
+			'newspack-live-migrate hkfp-lens-template',
+			[ $this, 'cmd_hkfp_lens_template' ],
+			[
+				'shortdesc' => 'Makes sure all "Lens" posts are using the "One Column Wide" post template.',
+				'synopsis'  => [],
+			]
+		);
+	}
+
 		WP_CLI::add_command(
 			'newspack-live-migrate hkfp-accordions',
 			[ $this, 'cmd_hkfp_accordions_conversion' ],
@@ -103,6 +113,31 @@ class HKFPMigrator implements InterfaceMigrator {
 
 				}
 
+			}
+
+		}
+
+	}
+
+	/**
+	 * Run through all posts and make sure In Pictures ones are set to the Wide template.
+	 */
+	public function cmd_hkfp_lens_template() {
+
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			'category_name'  => 'hkfp-lens',
+		] );
+
+		foreach ( $posts as $post ) {
+
+			if ( 'single-wide.php' !== get_post_meta( $post->ID, '_wp_page_template', true ) ) {
+
+				WP_CLI::line( sprintf(
+					'Updating template on #%d',
+					$post->ID
+				) );
+				update_post_meta( $post->ID, '_wp_page_template', 'single-wide.php' );
 			}
 
 		}
