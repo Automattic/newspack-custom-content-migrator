@@ -261,12 +261,24 @@ class HKFPMigrator implements InterfaceMigrator {
 
 	/**
 	 * Search for posts which contain the JS embed code and replace those with legacy embeds.
+	 *
+	 * <post_ids>
+	 * : Ids of posts to process. If not set, will process all posts.
+	 *
 	 */
-	public function cmd_hkfp_getty_embeds_conversion() {
-		$posts = get_posts(array(
-			"numberposts" => -1,
-		));
-		$has_found = false;
+	public function cmd_hkfp_getty_embeds_conversion( $args ) {
+		if ( isset( $args[0] ) ) {
+			WP_CLI::log( "Specified posts ids: " . implode(', ', $args) );
+			$posts = get_posts(array(
+				"include" => $args,
+			));
+		} else {
+			$posts = get_posts(array(
+				"numberposts" => -1,
+			));
+		}
+
+		$processed_amount = 0;
 
 		$getty_embed_predicate_string = 'embed-cdn.gettyimages.com/widgets.js';
 
@@ -306,7 +318,6 @@ class HKFPMigrator implements InterfaceMigrator {
 				);
 				if ($embeds_count) {
 					WP_CLI::log( "Detected $embeds_count Getty JS embed(s) in post '$post->post_title' ($post->ID)." );
-					$has_found = true;
 				}
 
 				foreach($embed_anchors_nodes as $anchor_node) {
@@ -345,15 +356,20 @@ class HKFPMigrator implements InterfaceMigrator {
 								$post_content
 							);
 
-							// Save updated post content.
-							$post_id = wp_update_post(array(
-								'ID' => $post->ID,
-								'post_content' => $post_content,
-							));
-							if ( is_wp_error( $post_id ) ) {
-								WP_CLI::error( $post_id->get_error_message() );
+							if (strpos($post_content, $anchor_node->outerHtml) !== false) {
+								WP_CLI::warning( "Post #$post_id content not updated successfully." );
 							} else {
-								WP_CLI::success( "Updated post $post_id." );
+								// Save updated post content.
+								$post_id = wp_update_post(array(
+									'ID' => $post->ID,
+									'post_content' => $post_content,
+								));
+								if ( is_wp_error( $post_id ) ) {
+									WP_CLI::error( $post_id->get_error_message() );
+								} else {
+									WP_CLI::success( "Updated post #$post_id." );
+									$processed_amount = $processed_amount + 1;
+								}
 							}
 						} else {
 							WP_CLI::warning( "Load script not found adjacent to anchor tag. The embed might be malformated. Skipping this embed." );
@@ -363,8 +379,8 @@ class HKFPMigrator implements InterfaceMigrator {
 			}
 		}
 
-		if ($has_found) {
-			WP_CLI::success( 'Completed Getty embeds conversion.' );
+		if ($processed_amount > 0) {
+			WP_CLI::success( "Completed $processed_amount Getty embeds conversion." );
 		} else {
 			WP_CLI::log( 'No JS Getty embeds found.' );
 		}
