@@ -47,7 +47,8 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-		WP_CLI::add_command(
+
+    WP_CLI::add_command(
 			'newspack-live-migrate hkfp-in-pictures-template',
 			[ $this, 'cmd_hkfp_in_pictures_template' ],
 			[
@@ -55,7 +56,8 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-		WP_CLI::add_command(
+
+    WP_CLI::add_command(
 			'newspack-live-migrate hkfp-lens-template',
 			[ $this, 'cmd_hkfp_lens_template' ],
 			[
@@ -64,6 +66,17 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 	}
+
+		WP_CLI::add_command(
+			'newspack-live-migrate hkfp-accordions',
+			[ $this, 'cmd_hkfp_accordions_conversion' ],
+			[
+				'shortdesc' => 'Migrates mks_accordion shortcode blocks to Atomic blocks Accordion blocks.',
+				'synopsis'  => [],
+			]
+		);
+
+  }
 
 	/**
 	 * Run through all posts and make sure In Pictures ones are set to the Wide template.
@@ -280,5 +293,90 @@ class HKFPMigrator implements InterfaceMigrator {
 			WP_CLI::log( 'No JS Getty embeds found.' );
 		}
 		wp_cache_flush();
+	}
+
+	/**
+	 * Convert all mks_accordion shortcodes into accordion blocks.
+	 */
+	public function cmd_hkfp_accordions_conversion() {
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's'              => 'mks_accordion',
+			'post_type'      => [ 'post', 'page' ],
+		] );
+
+		$accordion_regex      = '#<!-- wp:shortcode -->\s*\[mks_accordion\](.*)\[\/mks_accordion\]\s*<!-- \/wp:shortcode -->#isU';
+		$accordion_item_regex = '#\[mks_accordion_item title=(.*)\](.*)\[\/mks_accordion_item\]#isU';
+
+		foreach ( $posts as $post ) {
+			$num_accordion_shortcode_matches = preg_match_all( $accordion_regex, $post->post_content, $accordion_shortcode_matches, PREG_OFFSET_CAPTURE );
+			if ( ! $num_accordion_shortcode_matches ) {
+				continue;
+			}
+
+			$replacements = [];
+			foreach ( $accordion_shortcode_matches[0] as $full_shortcode_match ) {
+				$replacements[] = $full_shortcode_match[0];
+			}
+
+			$accordion_blocks = [];
+			foreach ( $accordion_shortcode_matches[1] as $accordion_shortcode_match ) {
+				$accordion_block            = '';
+				$full_shortcode             = $accordion_shortcode_match[0];
+				$num_shortcode_item_matches = preg_match_all( $accordion_item_regex, $full_shortcode, $shortcode_item_matches, PREG_SET_ORDER );
+				if ( ! $num_shortcode_item_matches ) {
+					$accordion_blocks[] = '';
+					continue;
+				}
+
+				foreach ( $shortcode_item_matches as $shortcode_item_match ) {
+					$accordion_block .= self::get_accordion_block_markup( $shortcode_item_match[1], $shortcode_item_match[2] );
+				}
+				$accordion_blocks[] = $accordion_block;
+			}
+
+			$updated_content = str_replace( $replacements, $accordion_blocks, $post->post_content );
+			if ( $post->post_content !== $updated_content ) {
+				$result = wp_update_post( [
+					'ID'           => $post->ID,
+					'post_content' => $updated_content,
+				], true );
+				if ( is_wp_error( $result ) ) {
+					WP_CLI::warning( 'Failed to update post: ' . $post->ID );
+				} else {
+					WP_CLI::line( "Updated post: " . $post->ID );
+					ob_flush();
+				}
+			}
+		}
+		WP_CLI::line( 'Completed migration' );
+	}
+
+	/**
+	 * Get markup for an accordion block.
+	 *
+	 * @param string $title Title of the accordion banner.
+	 * @param string $content HTML content to put inside the accordion.
+	 * @return string Raw block markup.
+	 */
+	public static function get_accordion_block_markup( $title, $content ) {
+		$title   = str_replace( [ '"', '”', '\'', '“' ], '', trim( wp_strip_all_tags( $title ) ) );
+		$content = wpautop( trim( $content ) );
+		ob_start();
+		?>
+		<!-- wp:atomic-blocks/ab-accordion -->
+		<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
+			<details>
+				<summary class="ab-accordion-title"><?php echo $title; ?></summary>
+				<div class="ab-accordion-text">
+					<!-- wp:html -->
+					<?php echo $content; ?>
+					<!-- /wp:html -->
+				</div>
+			</details>
+		</div>
+		<!-- /wp:atomic-blocks/ab-accordion -->
+		<?php
+		return ob_get_clean();
 	}
 }
