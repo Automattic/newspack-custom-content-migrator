@@ -47,7 +47,8 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-		WP_CLI::add_command(
+
+    WP_CLI::add_command(
 			'newspack-live-migrate hkfp-in-pictures-template',
 			[ $this, 'cmd_hkfp_in_pictures_template' ],
 			[
@@ -55,7 +56,8 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-		WP_CLI::add_command(
+
+    WP_CLI::add_command(
 			'newspack-live-migrate hkfp-lens-template',
 			[ $this, 'cmd_hkfp_lens_template' ],
 			[
@@ -72,6 +74,17 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 	}
+
+		WP_CLI::add_command(
+			'newspack-live-migrate hkfp-accordions',
+			[ $this, 'cmd_hkfp_accordions_conversion' ],
+			[
+				'shortdesc' => 'Migrates mks_accordion shortcode blocks to Atomic blocks Accordion blocks.',
+				'synopsis'  => [],
+			]
+		);
+
+  }
 
 	/**
 	 * Run through all posts and make sure In Pictures ones are set to the Wide template.
@@ -248,14 +261,28 @@ class HKFPMigrator implements InterfaceMigrator {
 
 	/**
 	 * Search for posts which contain the JS embed code and replace those with legacy embeds.
+	 *
+	 * <post_ids>
+	 * : Ids of posts to process. If not set, will process all posts.
+	 *
 	 */
-	public function cmd_hkfp_getty_embeds_conversion() {
-		$posts = get_posts(array(
-			"numberposts" => -1,
-		));
-		$has_found = false;
+	public function cmd_hkfp_getty_embeds_conversion( $args ) {
+		if ( isset( $args[0] ) ) {
+			WP_CLI::log( "Specified posts ids: " . implode(', ', $args) );
+			$posts = get_posts(array(
+				"include" => $args,
+			));
+		} else {
+			$posts = get_posts(array(
+				"numberposts" => -1,
+			));
+		}
+
+		$processed_amount = 0;
 
 		$getty_embed_predicate_string = 'embed-cdn.gettyimages.com/widgets.js';
+
+		$tiny_mcs_intruder = '<span style="display: inline-block; width: 0px; overflow: hidden; line-height: 0;" data-mce-type="bookmark" class="mce_SELRES_start">﻿</span>';
 
 		foreach ( $posts as $post ) {
 			$post_content = $post->post_content;
@@ -266,6 +293,17 @@ class HKFPMigrator implements InterfaceMigrator {
 				// - anchor tag with a fallback link
 				// - inline script for initialisation and providing data
 				// - script that fetches the SDK
+
+				// An old TinyMCE bug inserted a span in post content.
+				// https://generatepress.com/forums/topic/4-9-anyone-else-having-tinymce-issues/
+				if (strpos($post_content, $tiny_mcs_intruder) !== false) {
+					WP_CLI::log( "Detected TinyMCE span, removing from post content." );
+					$post_content = str_replace(
+						$tiny_mcs_intruder,
+						'',
+						$post_content
+					);
+				}
 
 				$post_dom = new Dom;
 				$post_dom->load(
@@ -280,7 +318,6 @@ class HKFPMigrator implements InterfaceMigrator {
 				);
 				if ($embeds_count) {
 					WP_CLI::log( "Detected $embeds_count Getty JS embed(s) in post '$post->post_title' ($post->ID)." );
-					$has_found = true;
 				}
 
 				foreach($embed_anchors_nodes as $anchor_node) {
@@ -319,15 +356,20 @@ class HKFPMigrator implements InterfaceMigrator {
 								$post_content
 							);
 
-							// Save updated post content.
-							$post_id = wp_update_post(array(
-								'ID' => $post->ID,
-								'post_content' => $post_content,
-							));
-							if ( is_wp_error( $post_id ) ) {
-								WP_CLI::error( $post_id->get_error_message() );
+							if (strpos($post_content, $anchor_node->outerHtml) !== false) {
+								WP_CLI::warning( "Post #$post_id content not updated successfully." );
 							} else {
-								WP_CLI::success( "Updated post $post_id." );
+								// Save updated post content.
+								$post_id = wp_update_post(array(
+									'ID' => $post->ID,
+									'post_content' => $post_content,
+								));
+								if ( is_wp_error( $post_id ) ) {
+									WP_CLI::error( $post_id->get_error_message() );
+								} else {
+									WP_CLI::success( "Updated post #$post_id." );
+									$processed_amount = $processed_amount + 1;
+								}
 							}
 						} else {
 							WP_CLI::warning( "Load script not found adjacent to anchor tag. The embed might be malformated. Skipping this embed." );
@@ -337,11 +379,96 @@ class HKFPMigrator implements InterfaceMigrator {
 			}
 		}
 
-		if ($has_found) {
-			WP_CLI::success( 'Completed Getty embeds conversion.' );
+		if ($processed_amount > 0) {
+			WP_CLI::success( "Completed $processed_amount Getty embeds conversion." );
 		} else {
 			WP_CLI::log( 'No JS Getty embeds found.' );
 		}
 		wp_cache_flush();
+	}
+
+	/**
+	 * Convert all mks_accordion shortcodes into accordion blocks.
+	 */
+	public function cmd_hkfp_accordions_conversion() {
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's'              => 'mks_accordion',
+			'post_type'      => [ 'post', 'page' ],
+		] );
+
+		$accordion_regex      = '#<!-- wp:shortcode -->\s*\[mks_accordion\](.*)\[\/mks_accordion\]\s*<!-- \/wp:shortcode -->#isU';
+		$accordion_item_regex = '#\[mks_accordion_item title=(.*)\](.*)\[\/mks_accordion_item\]#isU';
+
+		foreach ( $posts as $post ) {
+			$num_accordion_shortcode_matches = preg_match_all( $accordion_regex, $post->post_content, $accordion_shortcode_matches, PREG_OFFSET_CAPTURE );
+			if ( ! $num_accordion_shortcode_matches ) {
+				continue;
+			}
+
+			$replacements = [];
+			foreach ( $accordion_shortcode_matches[0] as $full_shortcode_match ) {
+				$replacements[] = $full_shortcode_match[0];
+			}
+
+			$accordion_blocks = [];
+			foreach ( $accordion_shortcode_matches[1] as $accordion_shortcode_match ) {
+				$accordion_block            = '';
+				$full_shortcode             = $accordion_shortcode_match[0];
+				$num_shortcode_item_matches = preg_match_all( $accordion_item_regex, $full_shortcode, $shortcode_item_matches, PREG_SET_ORDER );
+				if ( ! $num_shortcode_item_matches ) {
+					$accordion_blocks[] = '';
+					continue;
+				}
+
+				foreach ( $shortcode_item_matches as $shortcode_item_match ) {
+					$accordion_block .= self::get_accordion_block_markup( $shortcode_item_match[1], $shortcode_item_match[2] );
+				}
+				$accordion_blocks[] = $accordion_block;
+			}
+
+			$updated_content = str_replace( $replacements, $accordion_blocks, $post->post_content );
+			if ( $post->post_content !== $updated_content ) {
+				$result = wp_update_post( [
+					'ID'           => $post->ID,
+					'post_content' => $updated_content,
+				], true );
+				if ( is_wp_error( $result ) ) {
+					WP_CLI::warning( 'Failed to update post: ' . $post->ID );
+				} else {
+					WP_CLI::line( "Updated post: " . $post->ID );
+					ob_flush();
+				}
+			}
+		}
+		WP_CLI::line( 'Completed migration' );
+	}
+
+	/**
+	 * Get markup for an accordion block.
+	 *
+	 * @param string $title Title of the accordion banner.
+	 * @param string $content HTML content to put inside the accordion.
+	 * @return string Raw block markup.
+	 */
+	public static function get_accordion_block_markup( $title, $content ) {
+		$title   = str_replace( [ '"', '”', '\'', '“' ], '', trim( wp_strip_all_tags( $title ) ) );
+		$content = wpautop( trim( $content ) );
+		ob_start();
+		?>
+		<!-- wp:atomic-blocks/ab-accordion -->
+		<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
+			<details>
+				<summary class="ab-accordion-title"><?php echo $title; ?></summary>
+				<div class="ab-accordion-text">
+					<!-- wp:html -->
+					<?php echo $content; ?>
+					<!-- /wp:html -->
+				</div>
+			</details>
+		</div>
+		<!-- /wp:atomic-blocks/ab-accordion -->
+		<?php
+		return ob_get_clean();
 	}
 }
