@@ -48,6 +48,15 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 
+    WP_CLI::add_command(
+			'newspack-live-migrate hkfp-in-pictures-template',
+			[ $this, 'cmd_hkfp_in_pictures_template' ],
+			[
+				'shortdesc' => 'Makes sure all "In Pictures" posts are using the "One Column Wide" post template.',
+				'synopsis'  => [],
+			]
+		);
+
 		WP_CLI::add_command(
 			'newspack-live-migrate hkfp-accordions',
 			[ $this, 'cmd_hkfp_accordions_conversion' ],
@@ -56,6 +65,48 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+
+  }
+
+	/**
+	 * Run through all posts and make sure In Pictures ones are set to the Wide template.
+	 */
+	public function cmd_hkfp_in_pictures_template() {
+
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+		] );
+
+		foreach ( $posts as $post ) {
+
+			// Only operate on Posts in the "In Pictures" section.
+			if ( 0 === stripos( $post->post_title, 'In pictures:' ) ) {
+				WP_CLI::line( sprintf(
+					'Editing #%d: "%s"',
+					$post->ID,
+					$post->post_title
+				) );
+
+				WP_CLI::line( sprintf(
+					'Adding tag #%d',
+					$post->ID
+				) );
+				wp_set_object_terms( $post->ID, 'in-pictures', 'post_tag', true );
+
+				if ( 'single-wide.php' !== get_post_meta( $post->ID, '_wp_page_template', true ) ) {
+
+					WP_CLI::line( sprintf(
+						'Updating template on #%d',
+						$post->ID
+					) );
+					update_post_meta( $post->ID, '_wp_page_template', 'single-wide.php' );
+
+				}
+
+			}
+
+		}
+
 	}
 
 	/**
