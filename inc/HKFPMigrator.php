@@ -65,6 +65,14 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-live-migrate hkfp-pages-featured-images',
+			[ $this, 'cmd_hkfp_pages_featured_images' ],
+			[
+				'shortdesc' => 'Makes sure pages do not use a featured image but set FB and Twitter images.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 		WP_CLI::add_command(
@@ -141,6 +149,61 @@ class HKFPMigrator implements InterfaceMigrator {
 			}
 
 		}
+
+	}
+
+	/**
+	 * Run through all posts and make sure In Pictures ones are set to the Wide template.
+	 */
+	public function cmd_hkfp_pages_featured_images() {
+
+		$pages = get_posts( [
+			'post_type'      => 'page',
+			'posts_per_page' => -1,
+			'meta_query'     => [ [
+				'key'     => '_thumbnail_id',
+				'compare' => 'EXISTS',
+			] ],
+		] );
+
+		$backup_thumbnail_id = 249452;
+		$backup_thumbnail_url = 'https://hongkongfp-launch.newspackstaging.com/wp-content/uploads/2020/03/Desktop-wallpaper-1080x1920px.jpg';
+
+		WP_CLI::line( sprintf( 'Checking %d pages', count( $pages ) ) );
+		$update_count = 0;
+
+		foreach ( $pages as $page ) {
+
+			$thumbnail_id = get_post_meta( $page->ID, '_thumbnail_id', true );
+			$thumbnail_url = wp_get_attachment_url( $thumbnail_id );
+			if ( empty( $thumbnail_id ) || ! $thumbnail_url ) {
+				$thumbnail_id = $backup_thumbnail_id;
+				$thumbnail_url = $backup_thumbnail_url;
+			}
+
+			$fb_img = get_post_meta( $page->ID, '_yoast_wpseo_opengraph-image-id', true );
+			if ( empty( $fb_img ) ) {
+				WP_CLI::line( sprintf( 'Updating FB URL on page %d', $page->ID ) );
+				update_post_meta( $page->ID, '_yoast_wpseo_opengraph', $thumbnail_id );
+				update_post_meta( $page->ID, '_yoast_wpseo_opengraph-image', $thumbnail_url );
+				$update_count++;
+			}
+
+			$tw_img = get_post_meta( $page->ID, '_yoast_wpseo_twitter-image-id', true );
+			if ( empty( $tw_img ) ) {
+				WP_CLI::line( sprintf( 'Updating Twitter URL on page %d', $page->ID ) );
+				update_post_meta( $page->ID, '_yoast_wpseo_twitter-image-id', $thumbnail_id );
+				update_post_meta( $page->ID, '_yoast_wpseo_twitter-image', $thumbnail_url );
+				$update_count++;
+			}
+
+			// Backup and delete the original thumbnail ID.
+			update_post_meta( $page->ID, '_thumbnail_id_backup', $thumbnail_id );
+			delete_post_meta( $page->ID, '_thumbnail_id' );
+
+		}
+
+		WP_CLI::success( sprintf( 'Made %d updates', $update_count ) );
 
 	}
 
