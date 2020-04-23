@@ -73,7 +73,6 @@ class HKFPMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-	}
 
 		WP_CLI::add_command(
 			'newspack-live-migrate hkfp-accordions',
