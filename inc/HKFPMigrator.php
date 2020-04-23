@@ -48,7 +48,7 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 
-    WP_CLI::add_command(
+		WP_CLI::add_command(
 			'newspack-live-migrate hkfp-in-pictures-template',
 			[ $this, 'cmd_hkfp_in_pictures_template' ],
 			[
@@ -57,7 +57,7 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 
-    WP_CLI::add_command(
+		WP_CLI::add_command(
 			'newspack-live-migrate hkfp-lens-template',
 			[ $this, 'cmd_hkfp_lens_template' ],
 			[
