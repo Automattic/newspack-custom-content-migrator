@@ -1,8 +1,8 @@
 <?php
 
-namespace NewspackCustomContentMigrator;
+namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use PHPHtmlParser\Dom;
 
@@ -12,7 +12,7 @@ use PHPHtmlParser\Dom;
 class HKFPMigrator implements InterfaceMigrator {
 
 	/**
-	 * @var null|PostsMigrator Instance.
+	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
@@ -24,7 +24,7 @@ class HKFPMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PostsMigrator|null
+	 * @return InterfaceMigrator|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -40,7 +40,7 @@ class HKFPMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-live-migrate hkfp-getty-embeds',
+			'newspack-content-migrator hkfp-getty-embeds',
 			[ $this, 'cmd_hkfp_getty_embeds_conversion' ],
 			[
 				'shortdesc' => 'Migrates JS Getty embeds (not AMP-compatible) to legacy embeds (using a simple iframe).',

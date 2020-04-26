@@ -1,8 +1,8 @@
 <?php
 
-namespace NewspackCustomContentMigrator;
+namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
 /**
@@ -11,7 +11,7 @@ use \WP_CLI;
 class AsiaTimesMigrator implements InterfaceMigrator {
 
 	/**
-	 * @var null|PostsMigrator Instance.
+	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
@@ -23,7 +23,7 @@ class AsiaTimesMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PostsMigrator|null
+	 * @return InterfaceMigrator|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -38,8 +38,8 @@ class AsiaTimesMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 
-			'newspack-live-migrate asiatimes-topics',
+		WP_CLI::add_command(
+			'newspack-content-migrator asiatimes-topics',
 			[ $this, 'cmd_asiatimes_topics' ],
 			[
 				'shortdesc' => 'Migrates the Asia Times "Topics" taxonomy to terms in "Tag" taxonomy',

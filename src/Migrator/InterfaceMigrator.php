@@ -1,6 +1,6 @@
 <?php
 
-namespace NewspackCustomContentMigrator;
+namespace NewspackCustomContentMigrator\Migrator;
 
 interface InterfaceMigrator {
 

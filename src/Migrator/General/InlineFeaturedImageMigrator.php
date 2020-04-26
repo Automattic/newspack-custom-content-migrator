@@ -1,14 +1,14 @@
 <?php
 
-namespace NewspackCustomContentMigrator;
+namespace NewspackCustomContentMigrator\Migrator\General;
 
-use \NewspackCustomContentMigrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
 class InlineFeaturedImageMigrator implements InterfaceMigrator {
 
 	/**
-	 * @var null|InlineFeaturedImageMigrator Instance.
+	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
@@ -21,7 +21,7 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return InlineFeaturedImageMigrator|null
+	 * @return InterfaceMigrator|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -36,7 +36,7 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-live-migrate de-dupe-featured-images', array( $this, 'cmd_de_dupe_featured_images' ), [
+		WP_CLI::add_command( 'newspack-content-migrator de-dupe-featured-images', array( $this, 'cmd_de_dupe_featured_images' ), [
 			'shortdesc' => 'Moves featured images from the top of content to only the featured image meta.',
 			'synopsis'  => [
 				[

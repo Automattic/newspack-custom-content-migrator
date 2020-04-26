@@ -1,8 +1,8 @@
 <?php
 
-namespace NewspackCustomContentMigrator;
+namespace NewspackCustomContentMigrator\Migrator\General;
 
-use \NewspackCustomContentMigrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
 class SubtitleMigrator implements InterfaceMigrator {
@@ -15,7 +15,7 @@ class SubtitleMigrator implements InterfaceMigrator {
 	CONST NEWSPACK_SUBTITLE_META_FIELD = 'newspack_post_subtitle';
 
 	/**
-	 * @var null|PostsMigrator Instance.
+	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
@@ -28,7 +28,7 @@ class SubtitleMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PostsMigrator|null
+	 * @return InterfaceMigrator|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -43,8 +43,8 @@ class SubtitleMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 
-			'newspack-custom-content-migrator migrate-excerpt-to-subtitle',
+		WP_CLI::add_command(
+			'newspack-content-migrator migrate-excerpt-to-subtitle',
 			[ $this, 'cmd_migrate_excerpt_to_subtitle' ],
 			[
 				'shortdesc' => 'Convert all post excerpts into post subtitles.',

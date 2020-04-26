@@ -1,8 +1,8 @@
 <?php
 
-namespace NewspackCustomContentMigrator;
+namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use \WP_Error;
 use \CoAuthors_Guest_Authors;
@@ -26,7 +26,7 @@ class SahanJournalMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return PostsMigrator|null
+	 * @return InterfaceMigrator|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -44,7 +44,7 @@ class SahanJournalMigrator implements InterfaceMigrator {
 
 		// Migrate Author CPT to WP User accounts.
 		WP_CLI::add_command(
-			'newspack-live-migrate sahanjournal-authors',
+			'newspack-content-migrator sahanjournal-authors',
 			[ $this, 'cmd_sahanjournal_authors' ],
 			[
 				'shortdesc' => 'Migrates the Sahan Journal "Authors" CPT to native WP users.',
@@ -54,7 +54,7 @@ class SahanJournalMigrator implements InterfaceMigrator {
 
 		// Assign posts to new users.
 		WP_CLI::add_command(
-			'newspack-live-migrate sahanjournal-posts-to-users',
+			'newspack-content-migrator sahanjournal-posts-to-users',
 			[ $this, 'cmd_sahanjournal_posts_to_users' ],
 			[
 				'shortdesc' => 'Assigns posts to WP users based on the old author CPT.',
