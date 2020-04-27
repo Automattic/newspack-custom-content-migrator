@@ -2,13 +2,13 @@
 
 This plugin is a set of WP CLI commands (**Migrator classes**), and scripts scripts (**Recipes**) used during Newspack sites Live Launches and/or Content Updates.
 
-- [Installation]()
-- [Usage]()
-- [Migrators and Recipes]()
-- [Creating a Migrator]()
-- [Creating a Recipe]()
-- [Running the Update Recipe]()
-- [Sharing the Recipes and Teamwork Flow]()
+- [Installation](https://github.com/Automattic/newspack-custom-content-migrator#installation)
+- [Usage](https://github.com/Automattic/newspack-custom-content-migrator#usage)
+- [Migrators and Recipes](https://github.com/Automattic/newspack-custom-content-migrator#migrators-and-recipes)
+- [Creating a Migrator](https://github.com/Automattic/newspack-custom-content-migrator#creating-a-migrator)
+- [Creating a Recipe](https://github.com/Automattic/newspack-custom-content-migrator#creating-a-recipe)
+- [Running the Update Recipe](https://github.com/Automattic/newspack-custom-content-migrator#running-the-update-recipe)
+- [Sharing the Recipes and Teamwork Flow](https://github.com/Automattic/newspack-custom-content-migrator#sharing-the-recipes-and-teamwork-flow)
 
 ## Installation
 
