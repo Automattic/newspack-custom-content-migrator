@@ -7,7 +7,6 @@
 
 # ---------- USER SET VARIABLES:
 # DB params
-DB_NAME=dbname
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
 DB_DEFAULT_CHARSET=utf8mb4
@@ -37,6 +36,9 @@ LIVE_SQL_DUMP_FILE_REPLACED="${TEMP_DIR}/live_db_hostnames_replaced.sql"
 # A separate temp dir for Migration Plugin's output files (the Plugin uses hard-coded
 # file names).
 MIGRATOR_TEMP_DIR=$TEMP_DIR/migration_exports
+# If left empty, will be fetched from the user name, which is a convention on the
+# Atomic environment. But ff a DB schema name is given, it will be used.
+DB_NAME=""
 # Atomic DB host.
 DB_HOST=127.0.0.1
 # Path to the public folder. No ending slash.

@@ -58,6 +58,7 @@ function update_plugin_status() {
 
 function validate_user_config_params() {
   validate_and_download_vip_search_replace
+  validate_and_set_db_name
   validate_db_connection
   validate_db_default_charset
   validate_table_prefix
@@ -237,7 +238,7 @@ function set_public_content_file_permissions() {
 # tool and sets its path.
 function validate_and_download_vip_search_replace() {
   # If it's set, use it
-  if [ -f "$SEARCH_REPLACE" ]; then
+  if [ "" = "$SEARCH_REPLACE" ]; then
     chmod 755 $SEARCH_REPLACE
     return
   fi
@@ -254,6 +255,13 @@ function validate_and_download_vip_search_replace() {
   if [ ! -f $SEARCH_REPLACE ]; then
     echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and set its path in the SEARCH_REPLACE var.'
     exit
+  fi
+}
+
+# Checks the DB_NAME, an if it is empty, it fetches it from the Atomic user name.
+function validate_and_set_db_name() {
+  if [ "" = "$DB_NAME" ]; then
+    DB_NAME=$( whoami )
   fi
 }
 
