@@ -77,7 +77,7 @@ Next, edit the configuration variables at the top of the script. The config vars
 
 Once you've created a custom Update Recipe in the [`cli_scripts/update_recipes`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/cli_scripts/update_recipes) folder, set proper file permissions, and execute the Recipe scipt.
 
-## Sharing the Recipes and Teamwork Flow
+## Sharing the Recipes and Team Workflow
 
 The current workflow is a simplest one, and consists of:
 - generate PRs for every update to the Plugin, Migrators and Recipes,
