@@ -16,30 +16,6 @@ function set_var_by_previous_exit_code() {
   fi
 }
 
-# Echoes a green string with a timestamp.
-#	- arg1: echo string
-function echo_ts() {
-  GREEN=`tput setaf 2; tput setab 0`
-  RESET_COLOR=`tput sgr0`
-  echo -e "${GREEN}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
-}
-
-# Same like echo_ts, only uses red color.
-# - arg1: echo string
-function echo_ts_red() {
-  RED=`tput setaf 1; tput setab 0`
-  RESET_COLOR=`tput sgr0`
-  echo -e "${RED}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
-}
-
-# Same like echo_ts, only uses color yellow.
-# - arg1: echo string
-function echo_ts_yellow() {
-  YELLOW=`tput setaf 3; tput setab 0`
-  RESET_COLOR=`tput sgr0`
-  echo -e "${YELLOW}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
-}
-
 # Checks if Plugin is active, and activates it if not.
 function update_plugin_status() {
   local PLUGIN_STATUS=$(wp_cli plugin list | grep "$THIS_PLUGINS_NAME" | awk '{print $2}')
@@ -313,4 +289,28 @@ function validate_live_db_hostname_replacements() {
     echo_ts_red "ERROR: hostname replacements not defined in LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS variable."
     exit
   fi
+}
+
+# Echoes a green string with a timestamp.
+# - arg1: echo string
+function echo_ts() {
+  GREEN=`tput setaf 2; tput setab 0`
+  RESET_COLOR=`tput sgr0`
+  echo -e "${GREEN}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
+}
+
+# Same like echo_ts, only uses red color.
+# - arg1: echo string
+function echo_ts_red() {
+  RED=`tput setaf 1; tput setab 0`
+  RESET_COLOR=`tput sgr0`
+  echo -e "${RED}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
+}
+
+# Same like echo_ts, only uses color yellow.
+# - arg1: echo string
+function echo_ts_yellow() {
+  YELLOW=`tput setaf 3; tput setab 0`
+  RESET_COLOR=`tput sgr0`
+  echo -e "${YELLOW}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }
