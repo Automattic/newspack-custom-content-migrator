@@ -80,5 +80,5 @@ Once you've created a custom Update Recipe in the [`cli_scripts/update_recipes`]
 ## Sharing the Recipes and Team Workflow
 
 The current workflow is a simplest one, and consists of:
-- generate PRs for every update to the Plugin, Migrators and Recipes,
-- keep all the Migrators and Recipe scripts on the `master` branch, so that it's easily shared between team members.
+- we keep generating PRs for every update to the Plugin, Migrators and Recipes,
+- we keep all the Migrators and all the individual Publishers' Recipe scripts on the `master` branch, so that it's easily shared between team members.
