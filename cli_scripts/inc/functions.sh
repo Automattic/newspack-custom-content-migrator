@@ -50,7 +50,7 @@ function purge_temp_folder() {
 }
 
 function backup_staging_site_db() {
-  dump_db ${TEMP_DIR}/${DB_NAME}_backup_${DB_DEFAULT_CHARSET}.sql
+  dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql
 }
 
 function export_staging_site_pages() {
@@ -112,7 +112,7 @@ function replace_hostnames() {
     fi
     TMP_OUT_FILE=$TEMP_DIR/live_replaced_$i.sql
   
-    echo_ts "replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
+    echo_ts "replacing //$HOSTNAME_FROM to //$HOSTNAME_TO..."
     cat $TMP_IN_FILE | $SEARCH_REPLACE //$HOSTNAME_FROM //$HOSTNAME_TO > $TMP_OUT_FILE
   
     # Remove previous temp TMP_IN_FILE.
@@ -126,7 +126,7 @@ function replace_hostnames() {
 }
 
 function import_live_sql_dump() {
-  mysql -h $DB_HOST --default-character-set=$DB_DEFAULT_CHARSET ${DB_NAME} < $LIVE_SQL_DUMP_FILE_REPLACED
+  mysql -h $DB_HOST_LOCAL --default-character-set=$DB_DEFAULT_CHARSET ${DB_NAME_LOCAL} < $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
 # Syncs files from the live archive.
@@ -147,9 +147,9 @@ function update_files_from_live_site() {
 # Dumps the DB.
 #	- arg1: output file (full path)
 function dump_db() {
-  mysqldump -h $DB_HOST --max_allowed_packet=512M \
+  mysqldump -h $DB_HOST_LOCAL --max_allowed_packet=512M \
     --default-character-set=$DB_DEFAULT_CHARSET \
-    $DB_NAME \
+    $DB_NAME_LOCAL \
     > $1
 }
 
@@ -158,9 +158,9 @@ function dump_db() {
 function replace_staging_tables_with_live_tables() {
   for TABLE in "${IMPORT_TABLES[@]}"; do
       # Add prefix `staging_` to current table.
-      mysql -h $DB_HOST -e "USE $DB_NAME; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
+      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
       # Use the live table.
-      mysql -h $DB_HOST -e "USE $DB_NAME; RENAME TABLE live_$TABLE_PREFIX$TABLE TO $TABLE_PREFIX$TABLE;"
+      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE live_$TABLE_PREFIX$TABLE TO $TABLE_PREFIX$TABLE;"
   done
 }
 
@@ -172,8 +172,8 @@ function import_blocks_content_from_staging_site() {
   wp_cli plugin delete newspack-content-converter
   # The NCC plugin will drop the table only if 'deleted' from Dashboard, but not from CLI;
   # this needs update, but for now manually drop ncc_wp_posts table and clean the options.
-  mysql -h $DB_HOST -e "USE $DB_NAME; DROP TABLE IF EXISTS ncc_wp_posts; "
-  mysql -h $DB_HOST -e "USE $DB_NAME; DELETE FROM ${TABLE_PREFIX}options \
+  mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DROP TABLE IF EXISTS ncc_wp_posts; "
+  mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DELETE FROM ${TABLE_PREFIX}options \
     WHERE option_name IN ( 'ncc-conversion_batch_size', 'ncc-conversion_max_batches', 'ncc-convert_post_statuses_csv', \
     'ncc-convert_post_types_csv', 'ncc-is_queued_conversion', 'ncc-patching_batch_size', 'ncc-patching_max_batches', \
     'ncc-is_queued_retry_failed_conversion', 'ncc-conversion_queued_batches_csv', 'ncc-retry_conversion_failed_queued_batches_csv', \
@@ -188,7 +188,7 @@ function import_blocks_content_from_staging_site() {
 }
 
 function clean_up_options() {
-  mysql -h $DB_HOST -e "USE ${DB_NAME}; \
+  mysql -h $DB_HOST_LOCAL -e "USE ${DB_NAME_LOCAL}; \
       DELETE FROM ${TABLE_PREFIX}options WHERE option_name IN ( 'googlesitekit_search_console_property' ) ; "
 }
 
@@ -196,13 +196,13 @@ function drop_temp_db_tables() {
   # Get the names of all the temporary imported Live tables.
   local SQL_SELECT_TABLES_TO_DROP="SELECT GROUP_CONCAT(table_name) AS statement \
     FROM information_schema.tables \
-    WHERE table_schema = '$DB_NAME' \
+    WHERE table_schema = '$DB_NAME_LOCAL' \
     AND table_name LIKE 'live_%' \
     AND table_name LIKE 'staging_%' ; "
-  local CMD_GET_TABLES_TO_DROP="mysql -h $DB_HOST -sN -e \"$SQL_SELECT_TABLES_TO_DROP\""
+  local CMD_GET_TABLES_TO_DROP="mysql -h $DB_HOST_LOCAL -sN -e \"$SQL_SELECT_TABLES_TO_DROP\""
   eval TABLES_TO_DROP_CSV=\$\($CMD_GET_TABLES_TO_DROP\)
   # Drop all these temporary Live tables.
-  mysql -h $DB_HOST -e "USE ${DB_NAME}; DROP TABLES ${TABLES_TO_DROP_CSV}; "
+  mysql -h $DB_HOST_LOCAL -e "USE ${DB_NAME_LOCAL}; DROP TABLES ${TABLES_TO_DROP_CSV}; "
 }
 
 function set_public_content_file_permissions() {
@@ -214,7 +214,7 @@ function set_public_content_file_permissions() {
 # tool and sets its path.
 function validate_and_download_vip_search_replace() {
   # If it's set, use it
-  if [ "" = "$SEARCH_REPLACE" ]; then
+  if [ "" -ne "$SEARCH_REPLACE" ]; then
     chmod 755 $SEARCH_REPLACE
     return
   fi
@@ -234,15 +234,15 @@ function validate_and_download_vip_search_replace() {
   fi
 }
 
-# Checks the DB_NAME, an if it is empty, it fetches it from the Atomic user name.
+# Checks the DB_NAME_LOCAL, an if it is empty, it fetches it from the Atomic user name.
 function validate_and_set_db_name() {
-  if [ "" = "$DB_NAME" ]; then
-    DB_NAME=$( whoami )
+  if [ "" = "$DB_NAME_LOCAL" ]; then
+    DB_NAME_LOCAL=$( whoami )
   fi
 }
 
 function validate_db_connection() {
-  if ! mysql -h $DB_HOST -e "USE $DB_NAME;"; then
+  if ! mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL;"; then
     echo_ts_red 'ERROR: DB connection not working. Check DB config params.'
     exit
   fi
@@ -259,9 +259,9 @@ function validate_table_prefix() {
   local SQL_COUNT_TABLES_W_PREFIX="SELECT COUNT(*) table_name \
     FROM information_schema.tables \
     WHERE table_type='BASE TABLE' \
-    AND table_schema='$DB_NAME' \
+    AND table_schema='$DB_NAME_LOCAL' \
     AND table_name LIKE '$TABLE_PREFIX%'; "
-  local CMD_COUNT_TABLES="mysql -h $DB_HOST -sN -e \"$SQL_COUNT_TABLES_W_PREFIX\""
+  local CMD_COUNT_TABLES="mysql -h $DB_HOST_LOCAL -sN -e \"$SQL_COUNT_TABLES_W_PREFIX\""
   eval COUNT=\$\($CMD_COUNT_TABLES\)
 
   if [ 0 = $COUNT ]; then
