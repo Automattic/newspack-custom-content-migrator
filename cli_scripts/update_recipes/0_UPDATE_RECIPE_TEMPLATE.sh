@@ -36,11 +36,11 @@ LIVE_SQL_DUMP_FILE_REPLACED="${TEMP_DIR}/live_db_hostnames_replaced.sql"
 # A separate temp dir for Migration Plugin's output files (the Plugin uses hard-coded
 # file names).
 MIGRATOR_TEMP_DIR=$TEMP_DIR/migration_exports
-# If left empty, the DB_NAME will be fetched from the user name, as a convention on
+# If left empty, the DB_NAME_LOCAL will be fetched from the user name, as a convention on
 # Atomic environment. But if a DB schema name is given, it will be used.
-DB_NAME=""
+DB_NAME_LOCAL=""
 # Atomic DB host.
-DB_HOST=127.0.0.1
+DB_HOST_LOCAL=127.0.0.1
 # Path to the public folder. No ending slash.
 HTDOCS_PATH=/srv/htdocs
 # Atomic WP CLI params.
@@ -67,7 +67,7 @@ purge_temp_folder
 
 validate_user_config_params
 
-echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME}_backup_${DB_DEFAULT_CHARSET}.sql..."
+echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
 backup_staging_site_db
 
 # --- export:
