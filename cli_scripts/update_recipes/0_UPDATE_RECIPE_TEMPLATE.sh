@@ -65,7 +65,7 @@ update_plugin_status
 echo_ts 'purging the temp folder...'
 purge_temp_folder
 
-validate_user_config_params
+validate_and_set_user_config_params
 
 echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
 backup_staging_site_db

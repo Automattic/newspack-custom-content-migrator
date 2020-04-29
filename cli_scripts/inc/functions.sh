@@ -32,7 +32,7 @@ function update_plugin_status() {
   fi
 }
 
-function validate_user_config_params() {
+function validate_and_set_user_config_params() {
   validate_and_download_vip_search_replace
   validate_and_set_db_name
   validate_db_connection

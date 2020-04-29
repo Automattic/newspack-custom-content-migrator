@@ -65,7 +65,7 @@ update_plugin_status
 echo_ts 'purging the temp folder...'
 purge_temp_folder
 
-validate_user_config_params
+validate_and_set_user_config_params
 
 echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
 backup_staging_site_db
@@ -97,6 +97,9 @@ import_live_sql_dump
 
 echo_ts 'switching Staging site tables to Live site tables...'
 replace_staging_tables_with_live_tables
+
+echo_ts 'updating Kawowo imported live table collations from utf8mb4_unicode_520_ci to utf8mb4_unicode_ci...'
+wp_cli newspack-content-migrator kawowo-update-collations
 
 echo_ts 'activating this plugin after the table switch...'
 wp_cli plugin activate $THIS_PLUGINS_NAME
