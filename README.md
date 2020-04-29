@@ -2,7 +2,17 @@
 
 This plugin is a set of WP CLI commands (**Migrator classes**), and scripts scripts (**Recipes**) used during Newspack sites Live Launches and/or Content Updates.
 
-## Install
+## TOC
+
+- [Installation](https://github.com/Automattic/newspack-custom-content-migrator#installation)
+- [Usage](https://github.com/Automattic/newspack-custom-content-migrator#usage)
+- [Migrators and Recipes](https://github.com/Automattic/newspack-custom-content-migrator#migrators-and-recipes)
+- [Creating a Migrator](https://github.com/Automattic/newspack-custom-content-migrator#creating-a-migrator)
+- [Creating a Recipe](https://github.com/Automattic/newspack-custom-content-migrator#creating-a-recipe)
+- [Running the Update Recipe](https://github.com/Automattic/newspack-custom-content-migrator#running-the-update-recipe)
+- [Sharing the Recipes and Team Workflow](https://github.com/Automattic/newspack-custom-content-migrator#sharing-the-recipes-and-team-workflow)
+
+## Installation
 
 Run `composer install`.
 
@@ -55,7 +65,7 @@ Migrator classes implement the [`InterfaceMigrator`](https://github.com/Automatt
 
 The new Migrator should be registered in the [`newspack-custom-content-migrator.php`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/newspack-custom-content-migrator.php).
 
-## Creating a Recipe for the Launch
+## Creating a Recipe
 
 As mentioned, the [`0_UPDATE_RECIPE_TEMPLATE.sh`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/cli_scripts/update_recipes) always contains the most recent version of the Update Recipe.
 
@@ -65,10 +75,10 @@ Next, edit the configuration variables at the top of the script. The config vars
 
 ## Running the Update Recipe
 
-Once you've created a custom Update Recipe in the [`cli_scripts/update_recipes`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/cli_scripts/update_recipes) folder, download the Plugin to the Launch Site, and execute the Recipe scipt.
+Once you've created a custom Update Recipe in the [`cli_scripts/update_recipes`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/cli_scripts/update_recipes) folder, set proper file permissions, and execute the Recipe scipt.
 
-## Sharing the Recipes and Teamwork Flow
+## Sharing the Recipes and Team Workflow
 
 The current workflow is a simplest one, and consists of:
-- generate PRs for every update to the Plugin, Migrators and Recipes,
-- keep all the Migrators and Recipe scripts on the `master` branch, so that it's easily shared between team members.
+- we keep generating PRs for every update to the Plugin, Migrators and Recipes,
+- we keep all the Migrators and all the individual Publishers' Recipe scripts on the `master` branch, so that it's easily shared between team members.
