@@ -112,7 +112,7 @@ function replace_hostnames() {
     fi
     TMP_OUT_FILE=$TEMP_DIR/live_replaced_$i.sql
   
-    echo_ts "replacing //$HOSTNAME_FROM to //$HOSTNAME_TO..."
+    echo_ts "replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
     cat $TMP_IN_FILE | $SEARCH_REPLACE //$HOSTNAME_FROM //$HOSTNAME_TO > $TMP_OUT_FILE
   
     # Remove previous temp TMP_IN_FILE.
