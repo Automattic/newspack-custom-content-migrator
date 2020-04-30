@@ -6,10 +6,14 @@ function wp_cli() {
 }
 
 # Based on the last previously executed command's exit code, sets a custom variable's
-# value to 0 if the exit code was 0, or 1 otherwise.
-#  - arg1: custom name variable to set to 0 or 1.
+# value to 1 if the exit code was 0, or 0 otherwise.
+# If this seems confusing, here's the logic behind it: shell returns 0 exit code for
+# success, and the vars we're setting here are logical success variables represented
+# as 1 or 0.
+#  - arg1: your custom name variable to set to 1 (success) or 0 (otherwise).
 function set_var_by_previous_exit_code() {
-  if [ 0 != $? ]; then
+  # If exit code was 0, then this is a success, so set the var to 1.
+  if [ 0 = $? ]; then
     eval $1'=1'
   else
     eval $1'=0'
