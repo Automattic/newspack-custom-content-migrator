@@ -32,15 +32,50 @@ function update_plugin_status() {
   fi
 }
 
-function validate_and_set_user_config_params() {
-  validate_and_download_vip_search_replace
-  validate_and_set_db_name
+# Checks if SEARCH_REPLACE is set, an if it isn't it downloads the search-replace
+# tool and sets its path.
+function download_vip_search_replace() {
+  # If it's set, use it
+  if [ "" -ne "$SEARCH_REPLACE" ]; then
+    chmod 755 $SEARCH_REPLACE
+    return
+  fi
+
+  echo_ts 'downloading the search-replace bin...'
+  local ARCHIVE="$TEMP_DIR/search-replace.gz"
+  SEARCH_REPLACE=$TEMP_DIR/search-replace
+  rm -f $ARCHIVE
+  curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
+    -o "$ARCHIVE" && \
+  gzip -f -d $ARCHIVE && \
+  chmod 755 $SEARCH_REPLACE
+
+  if [ ! -f $SEARCH_REPLACE ]; then
+    echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and set it in the SEARCH_REPLACE var.'
+    exit
+  fi
+}
+
+# Sets the default config variables from the environment, so that the user doesn't have to set them manually.
+function set_default_config_variables() {
+  set_db_name
+}
+
+# Checks the DB_NAME_LOCAL, an if it is empty, it fetches it from the Atomic user name.
+function set_db_name() {
+  if [ "" = "$DB_NAME_LOCAL" ]; then
+    DB_NAME_LOCAL=$( whoami )
+  fi
+}
+
+function validate_all_config_params() {
   validate_db_connection
   validate_db_default_charset
   validate_table_prefix
   validate_live_files
   validate_live_sql_dump_file
   validate_live_db_hostname_replacements
+  validate_vip_search_replace
 }
 
 function purge_temp_folder() {
@@ -101,7 +136,7 @@ function replace_hostnames() {
   i=0
   for HOSTNAME_FROM in "${!LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS[@]}"; do
     HOSTNAME_TO=${LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS[$HOSTNAME_FROM]}
-  
+
     # We can't output the result of individual replacement to one same file, so each
     # replacement is done to a new temporary output file.
     ((i++))
@@ -111,10 +146,10 @@ function replace_hostnames() {
       TMP_IN_FILE=$TEMP_DIR/live_replaced_$((i-1)).sql
     fi
     TMP_OUT_FILE=$TEMP_DIR/live_replaced_$i.sql
-  
+
     echo_ts "replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
     cat $TMP_IN_FILE | $SEARCH_REPLACE //$HOSTNAME_FROM //$HOSTNAME_TO > $TMP_OUT_FILE
-  
+
     # Remove previous temp TMP_IN_FILE.
     if [[ $i > 1 ]]; then
       rm $TMP_IN_FILE
@@ -178,11 +213,11 @@ function import_blocks_content_from_staging_site() {
     'ncc-convert_post_types_csv', 'ncc-is_queued_conversion', 'ncc-patching_batch_size', 'ncc-patching_max_batches', \
     'ncc-is_queued_retry_failed_conversion', 'ncc-conversion_queued_batches_csv', 'ncc-retry_conversion_failed_queued_batches_csv', \
     'ncc-retry_conversion_failed_max_batches' ) ; "
-  
+
   echo_ts "reinstalling the Newspack Content Converter Plugin..."
   wp_cli plugin install --force https://github.com/Automattic/newspack-content-converter/releases/latest/download/newspack-content-converter.zip
   wp_cli plugin activate newspack-content-converter
-  
+
   echo_ts "updating wp_posts and NCC Plugins's table with block contents from Staging site..."
   wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX
 }
@@ -212,32 +247,10 @@ function set_public_content_file_permissions() {
 
 # Checks if SEARCH_REPLACE is set, an if it isn't it downloads the search-replace
 # tool and sets its path.
-function validate_and_download_vip_search_replace() {
-  # If it's set, use it
-  if [ "" -ne "$SEARCH_REPLACE" ]; then
-    chmod 755 $SEARCH_REPLACE
-    return
-  fi
-
-  echo_ts 'downloading the search-replace bin...'
-  local ARCHIVE="$TEMP_DIR/search-replace.gz"
-  SEARCH_REPLACE=$TEMP_DIR/search-replace
-  rm -f $ARCHIVE
-  curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
-    -o "$ARCHIVE" && \
-  gzip -f -d $ARCHIVE && \
-  chmod 755 $SEARCH_REPLACE
-
+function validate_vip_search_replace() {
   if [ ! -f $SEARCH_REPLACE ]; then
-    echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and set its path in the SEARCH_REPLACE var.'
+    echo_ts_red 'ERROR: search-replace bin not found.'
     exit
-  fi
-}
-
-# Checks the DB_NAME_LOCAL, an if it is empty, it fetches it from the Atomic user name.
-function validate_and_set_db_name() {
-  if [ "" = "$DB_NAME_LOCAL" ]; then
-    DB_NAME_LOCAL=$( whoami )
   fi
 }
 

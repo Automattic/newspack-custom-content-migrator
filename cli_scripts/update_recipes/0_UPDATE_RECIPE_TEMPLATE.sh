@@ -9,7 +9,7 @@
 # DB params
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
-DB_DEFAULT_CHARSET=utf8mb4
+  DB_DEFAULT_CHARSET=utf8mb4
 # Location of Live site files. No ending slash. Should contain wp-content.
 # Remove any sensitive data or unsupported content, since this is synced to htdocs.
 LIVE_FILES=/tmp/launch/live_dump/files
@@ -21,13 +21,13 @@ LIVE_SQL_DUMP_FILE=/tmp/launch/live_dump/sql/live.sql
 # Pure host names, no pre- or post-slashes. One replacement per domain or subdomain.
 # It's recommended to also replace the origin Staging site's hostname before cloning.
 declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
-  # Dummy example entries, edit these:
-  [publisherlive.org]=publisher-launch.newspackstaging.com
-  [www.publisherlive.org]=publisher-launch.newspackstaging.com
-  [publisher-newspack.newspackstaging.com]=publisher-launch.newspackstaging.com
+  # Here are three example entries. Edit and uncomment these, and enter at least one:
+  # [publisher.com]=publisher-launch.newspackstaging.com
+  # [www.publisher.com]=publisher-launch.newspackstaging.com
+  # [publisher-newspack.newspackstaging.com]=publisher-launch.newspackstaging.com
 )
 
-# ---------- DEFAULT VARIABLES FOR ATOMIC, probably no need to change these:
+# ---------- DEFAULT VARIABLES FOR ATOMIC, no need to change these:
 THIS_PLUGINS_NAME='newspack-custom-content-migrator'
 # Temp folder for script's resources. No ending slash. Will be purged.
 TEMP_DIR=/tmp/launch/tmp_update
@@ -48,14 +48,23 @@ WP_CLI_BIN=/usr/local/bin/wp-cli
 WP_CLI_PATH=/srv/htdocs/__wp__/
 # Tables to import fully from the Live Site, given here without the table prefix.
 declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
-# VIP's search-replace tool. If this var is left empty, it will be downloaded from
+# If this var is left empty, the VIP's search-replace tool will be downloaded from
 # https://github.com/Automattic/go-search-replace, otherwise full path to binary.
 SEARCH_REPLACE=""
 
 # START -----------------------------------------------------------------------------
 
+# --- init script:
+
 TIME_START=`date +%s`
 . ./../inc/functions.sh
+
+echo_ts 'purging the temp folder...'
+purge_temp_folder
+
+set_default_config_variables
+download_vip_search_replace
+validate_all_config_params
 
 # --- prepare:
 
@@ -64,8 +73,6 @@ update_plugin_status
 
 echo_ts 'purging the temp folder...'
 purge_temp_folder
-
-validate_and_set_user_config_params
 
 echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
 backup_staging_site_db
