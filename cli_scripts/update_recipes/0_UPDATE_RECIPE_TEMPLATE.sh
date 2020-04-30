@@ -111,26 +111,36 @@ wp_cli plugin activate $THIS_PLUGINS_NAME
 if [[ 1 == $IS_EXPORTED_STAGING_PAGES ]]; then
   echo_ts 'importing Pages from the Staging site...'
   wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$MIGRATOR_TEMP_DIR
+else
+  echo_ts_yellow 'Skipping importing Pages from the Staging site.'
 fi
 
 if [[ 1 == $IS_EXPORTED_STAGING_MENUS ]]; then
   echo_ts 'importing Menus from the Staging site...'
   wp_cli newspack-content-migrator import-menus --input-dir=$MIGRATOR_TEMP_DIR
+else
+  echo_ts_yellow 'Skipping importing Menus from the Staging site.'
 fi
 
 if [[ 1 == $IS_EXPORTED_CUSTOM_CSS ]]; then
   echo_ts 'importing custom CSS from the Staging site...'
   wp_cli newspack-content-migrator import-custom-css-file --input-dir=$MIGRATOR_TEMP_DIR
+else
+  echo_ts_yellow 'Skipping importing custom CSS from the Staging site.'
 fi
 
 if [[ 1 == $IS_EXPORTED_PAGES_SETTINGS ]]; then
   echo_ts 'importing pages settings from the Staging site...'
   wp_cli newspack-content-migrator import-pages-settings --input-dir=$MIGRATOR_TEMP_DIR
+else
+  echo_ts_yellow 'Skipping importing pages settings from the Staging site.'
 fi
 
 if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
   echo_ts 'importing Staging content site which was previously already converted to blocks...'
   import_blocks_content_from_staging_site
+else
+  echo_ts_yellow 'Skipping importing blocks contents from the Staging site.'
 fi
 
 echo_ts 'updating WooComm pages IDs...'
