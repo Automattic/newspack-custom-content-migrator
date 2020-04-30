@@ -25,6 +25,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\CssMigrator::class,
 	Migrator\General\ContentConverterPluginMigrator::class,
 	Migrator\General\SettingsMigrator::class,
+	Migrator\General\WooCommMigrator::class,
 	// Migrator\General\InlineFeaturedImageMigrator::class,
 	// Migrator\General\SubtitleMigrator::class,
 

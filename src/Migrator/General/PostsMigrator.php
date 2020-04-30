@@ -371,4 +371,27 @@ class PostsMigrator implements InterfaceMigrator {
 
 		WP_CLI::success( 'Done.' );
 	}
+
+	/**
+	 * When exporting objects, the PostsMigrator sets PostsMigrator::META_KEY_ORIGINAL_ID meta key with the ID they had at the
+	 * time. This function gets the new/current ID which changed when they were imported.
+	 *
+	 * @param $original_post_id ID.
+	 *
+	 * @return |null
+	 */
+	public function get_current_post_id_from_original_post_id( $original_post_id ) {
+		global $wpdb;
+
+		$new_id = $wpdb->get_var( $wpdb->prepare( "SELECT p.ID
+			FROM kaw_posts p
+			JOIN kaw_postmeta pm ON pm.post_id = p.ID
+			AND pm.meta_key = '%s'
+			AND pm.meta_value = %d ; ",
+			self::META_KEY_ORIGINAL_ID,
+			$original_post_id
+		) );
+
+		return isset( $new_id ) ? $new_id : null;
+	}
 }

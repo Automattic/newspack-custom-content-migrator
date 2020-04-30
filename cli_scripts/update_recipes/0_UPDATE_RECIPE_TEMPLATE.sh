@@ -126,6 +126,9 @@ if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
   import_blocks_content_from_staging_site
 fi
 
+echo_ts 'updating WooComm pages IDs...'
+wp_cli newspack-content-migrator woocomm-update-pages
+
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
 
