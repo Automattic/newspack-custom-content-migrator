@@ -123,44 +123,17 @@ class SettingsMigrator implements InterfaceMigrator {
 		}
 
 		$options = json_decode( $contents, true );
+		$posts_migrator = PostsMigrator::get_instance();
 
 		$option_names = array( 'page_on_front', 'page_for_posts' );
 		foreach ( $option_names as $option_name ) {
 			$original_id = isset( $options[ $option_name ] ) && ! empty( $options[ $option_name ] ) ? $options[ $option_name ] : null;
 			if ( null !== $original_id && 0 != $original_id) {
-				$current_id = $this->get_current_post_id_from_original_post_id( $original_id );
+				$current_id = $posts_migrator->get_current_post_id_from_original_post_id( $original_id );
 				update_option( $option_name, $current_id );
 			}
 		}
 
 		WP_CLI::success( 'Done.' );
-	}
-
-	/**
-	 * When exporting objects, the PostsMigrator sets PostsMigrator::META_KEY_ORIGINAL_ID meta key with the ID they had at the
-	 * time. This function gets the new/current ID which changed when they were imported.
-	 *
-	 * @param $original_post_id ID.
-	 *
-	 * @return |null
-	 */
-	private function get_current_post_id_from_original_post_id( $original_post_id ) {
-		$args = array(
-			'meta_query' => array(
-				array(
-					'key' => PostsMigrator::META_KEY_ORIGINAL_ID,
-					'value' => $original_post_id,
-				)
-			)
-		);
-		$query = new \WP_Query( $args );
-		$posts = $query->posts;
-		if ( ! $query->have_posts() ) {
-			return null;
-		}
-
-		foreach ( $posts as $post ) {
-			return $post->ID;
-		}
 	}
 }
