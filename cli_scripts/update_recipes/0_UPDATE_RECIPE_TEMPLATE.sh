@@ -9,13 +9,12 @@
 # DB params
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
-  DB_DEFAULT_CHARSET=utf8mb4
-# Location of Live site files. No ending slash. Should contain wp-content.
-# Remove any sensitive data or unsupported content, since this is synced to htdocs.
-LIVE_FILES=/tmp/launch/live_dump/files
-# Live site's SQL dump file. This dump needs to contain only tables specified in
-# the IMPORT_TABLES variable (see below).
-LIVE_SQL_DUMP_FILE=/tmp/launch/live_dump/sql/live.sql
+DB_DEFAULT_CHARSET=utf8mb4
+# To provide content for import from the Live site,
+#   1. either set path to VaultPress archive in LIVE_VAULTPRESS_ARCHIVE
+#   2. or set both LIVE_FILES and LIVE_SQL_DUMP_FILE and leave
+#      LIVE_VAULTPRESS_ARCHIVE as an empty string ( LIVE_VAULTPRESS_ARCHIVE="" ).
+LIVE_VAULTPRESS_ARCHIVE=/tmp/live_export/vaultpress.tar.gz
 # Hostname replacements to perform on the Live DB dump before importing it.
 # Associative array with REPLACE_HOST_FROM -> REPLACE_HOST_TO as key-value pairs.
 # Pure host names, no pre- or post-slashes. One replacement per domain or subdomain.
@@ -27,15 +26,18 @@ declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
   # [publisher-newspack.newspackstaging.com]=publisher-launch.newspackstaging.com
 )
 
-# ---------- DEFAULT VARIABLES FOR ATOMIC, no need to change these:
+# ---------- AUTOMATICALLY SET AND DEFAULT VARIABLES, no need to change these:
 THIS_PLUGINS_NAME='newspack-custom-content-migrator'
 # Temp folder for script's resources. No ending slash. Will be purged.
 TEMP_DIR=/tmp/launch/tmp_update
-# Name of file where to save the Live SQL dump after hostname replacements.
-LIVE_SQL_DUMP_FILE_REPLACED="${TEMP_DIR}/live_db_hostnames_replaced.sql"
-# A separate temp dir for Migration Plugin's output files (the Plugin uses hard-coded
-# file names).
-MIGRATOR_TEMP_DIR=$TEMP_DIR/migration_exports
+# If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
+# set path to the folder containing Live files, no ending slash. Should contain wp-content.
+LIVE_HTDOCS_FILES=""
+# If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
+# set path to Live SQL dump file. This dump should contain only tables from IMPORT_TABLES.
+LIVE_SQL_DUMP_FILE=""
+# Tables to import fully from the Live Site, given here without the table prefix.
+declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
 # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as a convention on
 # Atomic environment. But if a DB schema name is given, it will be used.
 DB_NAME_LOCAL=""
@@ -46,33 +48,42 @@ HTDOCS_PATH=/srv/htdocs
 # Atomic WP CLI params.
 WP_CLI_BIN=/usr/local/bin/wp-cli
 WP_CLI_PATH=/srv/htdocs/__wp__/
-# Tables to import fully from the Live Site, given here without the table prefix.
-declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
 # If this var is left empty, the VIP's search-replace tool will be downloaded from
 # https://github.com/Automattic/go-search-replace, otherwise full path to binary.
 SEARCH_REPLACE=""
 
+# ---------- SCRIPT VARIABLES, do not change these:
+# Migration Plugin's output dir (the Plugin uses hard-coded file names).
+TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
+# VaultPress export temp dir, where the SQL dump and files get extracted to.
+TEMP_DIR_VAULTPRESS=$TEMP_DIR/vaultpress_archive
+# Another VP temp dir, where the archive initially gets extracted to.
+TEMP_DIR_VAULTPRESS_UNZIP=$TEMP_DIR_VAULTPRESS/unzip
+# Name of file where to save the Live SQL dump after hostname replacements are made.
+LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
+
 # START -----------------------------------------------------------------------------
 
-# --- init script:
+# --- init:
 
 TIME_START=`date +%s`
 . ./../inc/functions.sh
 
-echo_ts 'purging the temp folder...'
-purge_temp_folder
+echo_ts 'preparing temp folder...'
+prepare_temp_folders
 
-set_default_config_variables
-download_vip_search_replace
+set_auto_config_variables
 validate_all_config_params
 
 # --- prepare:
 
+download_vip_search_replace
+
+echo_ts 'starting to unpack the VaultPress archive and prepare contents for import...'
+handle_vaultpress_archive
+
 echo_ts "checking $THIS_PLUGINS_NAME plugin's status..."
 update_plugin_status
-
-echo_ts 'purging the temp folder...'
-purge_temp_folder
 
 echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
 backup_staging_site_db
@@ -110,28 +121,28 @@ wp_cli plugin activate $THIS_PLUGINS_NAME
 
 if [[ 1 == $IS_EXPORTED_STAGING_PAGES ]]; then
   echo_ts 'importing Pages from the Staging site...'
-  wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$MIGRATOR_TEMP_DIR
+  wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
 else
   echo_ts_yellow 'Skipping importing Pages from the Staging site.'
 fi
 
 if [[ 1 == $IS_EXPORTED_STAGING_MENUS ]]; then
   echo_ts 'importing Menus from the Staging site...'
-  wp_cli newspack-content-migrator import-menus --input-dir=$MIGRATOR_TEMP_DIR
+  wp_cli newspack-content-migrator import-menus --input-dir=$TEMP_DIR_MIGRATOR
 else
   echo_ts_yellow 'Skipping importing Menus from the Staging site.'
 fi
 
 if [[ 1 == $IS_EXPORTED_CUSTOM_CSS ]]; then
   echo_ts 'importing custom CSS from the Staging site...'
-  wp_cli newspack-content-migrator import-custom-css-file --input-dir=$MIGRATOR_TEMP_DIR
+  wp_cli newspack-content-migrator import-custom-css-file --input-dir=$TEMP_DIR_MIGRATOR
 else
   echo_ts_yellow 'Skipping importing custom CSS from the Staging site.'
 fi
 
 if [[ 1 == $IS_EXPORTED_PAGES_SETTINGS ]]; then
   echo_ts 'importing pages settings from the Staging site...'
-  wp_cli newspack-content-migrator import-pages-settings --input-dir=$MIGRATOR_TEMP_DIR
+  wp_cli newspack-content-migrator import-pages-settings --input-dir=$TEMP_DIR_MIGRATOR
 else
   echo_ts_yellow 'Skipping importing pages settings from the Staging site.'
 fi
