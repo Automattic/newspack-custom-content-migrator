@@ -86,7 +86,7 @@ echo_ts "checking $THIS_PLUGINS_NAME plugin's status..."
 update_plugin_status
 
 echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
-backup_staging_site_db
+back_up_staging_site_db
 
 # --- export:
 

@@ -161,7 +161,7 @@ function vaultpress_archive_prepare_files_for_sync() {
   rm -rf $TEMP_DIR_VAULTPRESS_UNZIP
 }
 
-function backup_staging_site_db() {
+function back_up_staging_site_db() {
   dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql
 }
 
@@ -189,8 +189,8 @@ function back_up_newspack_content_migrator_staging_table() {
   wp_cli newspack-content-migrator back-up-converter-plugin-staging-table
   set_var_by_previous_exit_code IS_BACKED_UP_STAGING_NCC_TABLE
 
-  if [ 0 != $IS_BACKED_UP_STAGING_NCC_TABLE ]; then
-    echo_ts 'content converter table not found or backed up. Continuing...'
+  if [ 1 != $IS_BACKED_UP_STAGING_NCC_TABLE ]; then
+    echo_ts_yellow 'content converter table not found or backed up. Continuing.'
   fi
 }
 
@@ -224,7 +224,7 @@ function replace_hostnames() {
     fi
     TMP_OUT_FILE=$TEMP_DIR/live_replaced_$i.sql
 
-    echo_ts "replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
+    echo_ts "- replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
     cat $TMP_IN_FILE | $SEARCH_REPLACE //$HOSTNAME_FROM //$HOSTNAME_TO > $TMP_OUT_FILE
 
     # Remove previous temp TMP_IN_FILE.
@@ -271,8 +271,9 @@ function replace_staging_tables_with_live_tables() {
   for TABLE in "${IMPORT_TABLES[@]}"; do
       # Add prefix `staging_` to current table.
       mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
-      # Use the live table.
-      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE live_$TABLE_PREFIX$TABLE TO $TABLE_PREFIX$TABLE;"
+      # This ensures the table charset definition stays the same, only the data from live gets inserted.
+      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; CREATE TABLE $TABLE_PREFIX$TABLE LIKE staging_$TABLE_PREFIX$TABLE;"
+      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; INSERT INTO $TABLE_PREFIX$TABLE SELECT * FROM live_$TABLE_PREFIX$TABLE;"
   done
 }
 
