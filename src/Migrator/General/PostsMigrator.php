@@ -384,8 +384,8 @@ class PostsMigrator implements InterfaceMigrator {
 		global $wpdb;
 
 		$new_id = $wpdb->get_var( $wpdb->prepare( "SELECT p.ID
-			FROM kaw_posts p
-			JOIN kaw_postmeta pm ON pm.post_id = p.ID
+			FROM {$wpdb->prefix}posts p
+			JOIN {$wpdb->prefix}postmeta pm ON pm.post_id = p.ID
 			AND pm.meta_key = '%s'
 			AND pm.meta_value = %d ; ",
 			self::META_KEY_ORIGINAL_ID,
