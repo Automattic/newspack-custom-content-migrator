@@ -84,6 +84,8 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$file = $output_dir . '/' . self::PAGES_SETTINGS_FILENAME;
 		$data = array(
+			// This is the radio button setting on Customize > Homepage settings > "Your homepage displays".
+			'show_on_front' => get_option( 'show_on_front' ),
 			// Homepage post ID.
 			'page_on_front' => get_option( 'page_on_front' ),
 			// Posts page ID.
@@ -125,6 +127,13 @@ class SettingsMigrator implements InterfaceMigrator {
 		$options = json_decode( $contents, true );
 		$posts_migrator = PostsMigrator::get_instance();
 
+		// Copy over these as they are.
+		$option_names = array( 'show_on_front' );
+		foreach ( $option_names as $option_name ) {
+			update_option( $option_name, $options[ $option_name ] );
+		}
+
+		// Update IDs for these.
 		$option_names = array( 'page_on_front', 'page_for_posts' );
 		foreach ( $option_names as $option_name ) {
 			$original_id = isset( $options[ $option_name ] ) && ! empty( $options[ $option_name ] ) ? $options[ $option_name ] : null;
