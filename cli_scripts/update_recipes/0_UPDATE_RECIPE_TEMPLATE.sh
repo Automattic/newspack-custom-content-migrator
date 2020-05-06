@@ -6,7 +6,8 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 # ---------- USER SET VARIABLES:
-# DB params
+# Local DB table prefix. In a rare case when the VaultPress SQL dump uses a different
+# table prefix than the local DB one, you may set it in the VAULTPRESS_TABLE_PREFIX var.
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
 DB_DEFAULT_CHARSET=utf8mb4
@@ -36,6 +37,9 @@ LIVE_HTDOCS_FILES=""
 # If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
 # set path to Live SQL dump file. This dump should contain only tables from IMPORT_TABLES.
 LIVE_SQL_DUMP_FILE=""
+# Set the VAULTPRESS_TABLE_PREFIX if the VaultPress SQL dump has a different prefix than
+# the local Staging/Launch DB.
+VAULTPRESS_TABLE_PREFIX=""
 # Tables to import fully from the Live Site, given here without the table prefix.
 declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
 # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as a convention on
@@ -80,7 +84,7 @@ validate_all_config_params
 download_vip_search_replace
 
 echo_ts 'starting to unpack the VaultPress archive and prepare contents for import...'
-handle_vaultpress_archive
+unpack_vaultpress_archive
 
 echo_ts "checking $THIS_PLUGINS_NAME plugin's status..."
 update_plugin_status
