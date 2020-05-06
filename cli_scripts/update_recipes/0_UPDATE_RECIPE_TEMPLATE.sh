@@ -73,7 +73,7 @@ LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
 TIME_START=`date +%s`
 . ./../inc/functions.sh
 
-echo_ts 'preparing temp folder...'
+echo_ts 'purging temp folder...'
 prepare_temp_folders
 
 set_auto_config_variables
