@@ -109,15 +109,15 @@ export_staging_site_page_settings
 echo_ts 'backing up the Newspack Content Converter Plugin table...'
 back_up_newspack_content_migrator_staging_table
 
+# --- import:
+
 echo_ts 'preparing Live site SQL dump for import...'
 prepare_live_sql_dump_for_import
-
-# --- import:
 
 echo_ts 'importing Live DB tables...'
 import_live_sql_dump
 
-echo_ts 'switching Staging site tables to Live site tables...'
+echo_ts 'switching Staging site tables with Live site tables...'
 replace_staging_tables_with_live_tables
 
 echo_ts 'activating this plugin after the table switch...'
@@ -152,7 +152,7 @@ else
 fi
 
 if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
-  echo_ts 'importing Staging content site which was previously already converted to blocks...'
+  echo_ts 'importing Staging content previously already converted to blocks...'
   import_blocks_content_from_staging_site
 else
   echo_ts_yellow 'Skipping importing blocks contents from the Staging site.'
