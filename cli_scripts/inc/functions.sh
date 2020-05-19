@@ -301,7 +301,7 @@ function import_blocks_content_from_staging_site() {
   wp_cli plugin install --force https://github.com/Automattic/newspack-content-converter/releases/latest/download/newspack-content-converter.zip
   wp_cli plugin activate newspack-content-converter
 
-  echo_ts "importing block contents previously converted on the Staging site..."
+  echo_ts "importing block contents from the Staging site..."
   wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX
 }
 

@@ -127,7 +127,7 @@ echo_ts 'activating this plugin after the table switch...'
 wp_cli plugin activate $THIS_PLUGINS_NAME
 
 if [[ 1 == $IS_EXPORTED_STAGING_PAGES ]]; then
-  echo_ts 'importing Pages from the Staging site...'
+  echo_ts 'importing all Pages from the Staging site and new pages from the Live site...'
   wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
 else
   echo_ts_yellow 'Skipping importing Pages from the Staging site.'
@@ -162,7 +162,7 @@ else
 fi
 
 if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
-  echo_ts 'importing Staging content previously already converted to blocks...'
+  echo_ts 'starting to import Staging content previously already converted to blocks...'
   import_blocks_content_from_staging_site
 else
   echo_ts_yellow 'Skipping importing blocks contents from the Staging site.'
