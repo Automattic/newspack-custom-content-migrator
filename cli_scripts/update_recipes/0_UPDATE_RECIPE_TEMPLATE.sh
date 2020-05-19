@@ -106,18 +106,21 @@ export_staging_site_custom_css
 echo_ts "exporting Staging pages settings..."
 export_staging_site_page_settings
 
+echo_ts "exporting Staging site identity settings..."
+export_staging_site_identity_settings
+
 echo_ts 'backing up the Newspack Content Converter Plugin table...'
 back_up_newspack_content_migrator_staging_table
+
+# --- import:
 
 echo_ts 'preparing Live site SQL dump for import...'
 prepare_live_sql_dump_for_import
 
-# --- import:
-
 echo_ts 'importing Live DB tables...'
 import_live_sql_dump
 
-echo_ts 'switching Staging site tables to Live site tables...'
+echo_ts 'switching Staging site tables with Live site tables...'
 replace_staging_tables_with_live_tables
 
 echo_ts 'activating this plugin after the table switch...'
@@ -151,8 +154,15 @@ else
   echo_ts_yellow 'Skipping importing pages settings from the Staging site.'
 fi
 
+if [[ 1 == $IS_EXPORTED_PAGES_IDENTITY_SETTINGS ]]; then
+  echo_ts 'importing identity settings from the Staging site...'
+  wp_cli newspack-content-migrator import-customize-site-identity-settings --input-dir=$TEMP_DIR_MIGRATOR
+else
+  echo_ts_yellow 'Skipping importing pages settings from the Staging site.'
+fi
+
 if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
-  echo_ts 'importing Staging content site which was previously already converted to blocks...'
+  echo_ts 'importing Staging content previously already converted to blocks...'
   import_blocks_content_from_staging_site
 else
   echo_ts_yellow 'Skipping importing blocks contents from the Staging site.'

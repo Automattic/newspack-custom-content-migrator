@@ -124,7 +124,7 @@ function vaultpress_archive_extract() {
   if [ 0 -ne $? ]; then
     echo_ts_red "error extracting VaultPress archive $LIVE_VAULTPRESS_ARCHIVE."
     exit
-  fi  
+  fi
 }
 
 # Prepares the live SQL dump from the VP export, sets its location to LIVE_SQL_DUMP_FILE
@@ -183,6 +183,11 @@ function export_staging_site_custom_css() {
 function export_staging_site_page_settings() {
   wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MIGRATOR
   set_var_by_previous_exit_code IS_EXPORTED_PAGES_SETTINGS
+}
+
+function export_staging_site_identity_settings() {
+  wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
+  set_var_by_previous_exit_code IS_EXPORTED_PAGES_IDENTITY_SETTINGS
 }
 
 function back_up_newspack_content_migrator_staging_table() {
