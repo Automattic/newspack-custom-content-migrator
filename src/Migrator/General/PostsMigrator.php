@@ -147,7 +147,7 @@ class PostsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Exports posts ans sets a meta with the original ID when it was exported.
+	 * Exports posts and sets a meta with the original ID when it was exported.
 	 *
 	 * @param array  $post_ids    Post IDs.
 	 * @param string $output_dir  Output dir.
