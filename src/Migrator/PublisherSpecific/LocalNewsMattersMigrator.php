@@ -57,7 +57,7 @@ class LocalNewsMattersMigrator implements InterfaceMigrator {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'dry_run',
+						'name'        => 'dry-run',
 						'description' => __('Perform a dry run, making no changes.'),
 						'optional'    => true,
 					],
@@ -73,24 +73,23 @@ class LocalNewsMattersMigrator implements InterfaceMigrator {
 	public function cmd_lnm_posts_to_users( $args, $assoc_args ) {
 
 		list( $post_id ) = $args;
-		$dry_run = ( isset( $assoc_args['dry_run'] ) );
+		$dry_run = $assoc_args['dry-run'];
 
-		WP_CLI::line( sprintf( 'Post ID is %d', $post_id ) );
-		WP_CLI::line( sprintf( 'Dry run is %s', $dry_run ) );
-		wp_die();
-
-		// Let us count the ways in which we fail.
-		$error_count = 0;
-
-		$posts = get_posts( [
-			'post_type'      => 'post',
-			'post_status'    => 'publish',
-			'posts_per_page' => -1,
-			'meta_query'     => [ [
-				'key'     => 'sfly_guest_author_names',
-				'compare' => 'EXISTS',
-			] ],
-		] );
+		if ( ! $post_id ) {
+			$posts = get_posts( [
+				'post_type'      => 'post',
+				'post_status'    => 'publish',
+				'posts_per_page' => -1,
+				'meta_query'     => [ [
+					'key'     => 'sfly_guest_author_names',
+					'compare' => 'EXISTS',
+				] ],
+			] );
+		} else {
+			$posts = [
+				get_post( $post_id )
+			];
+		}
 
 		if ( empty( $posts ) ) {
 			WP_CLI::error( __('No posts found.') );
@@ -109,7 +108,7 @@ class LocalNewsMattersMigrator implements InterfaceMigrator {
 
 			// Get the guest author data out.
 			$original_guest_authors = get_post_meta( $post->ID, 'sfly_guest_author_names', true );
-			$original_guest_authors = explode( ',', $original_guest_authors );
+			$original_guest_authors = preg_split( "@(,|&|and)@", $original_guest_authors );
 
 			WP_CLI::line( sprintf( __('Checking %d guest authors'), count( $original_guest_authors ) ) );
 
@@ -121,15 +120,15 @@ class LocalNewsMattersMigrator implements InterfaceMigrator {
 				WP_CLI::line( sprintf( __('Handling guest author called %s'), $author_name ) );
 
 				// Find an existing guest author.
-				$cap_guest_author = $coauthors_guest_authors->get_guest_author_by( 'user_nicename', $author_name );
+				$cap_guest_author = $coauthors_guest_authors->get_guest_author_by( 'user_nicename', sanitize_title( $author_name ) );
 				if ( ! $cap_guest_author ) {
-					$coauthors_guest_authors->get_guest_author_by( 'login', $author_name );
+					$coauthors_guest_authors->get_guest_author_by( 'login', sanitize_title( $author_name ) );
 				}
 
 				if ( ! $cap_guest_author ) { // No guest author was found.
 					WP_CLI::line( __('No CAP Guest Author found.') );
 				} else {
-					$new_guest_authors[] = $cap_guest_author;
+					$new_guest_authors[] = $cap_guest_author->ID;
 				}
 
 			}
