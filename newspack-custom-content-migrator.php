@@ -27,10 +27,11 @@ PluginSetup::register_migrators( array(
 	Migrator\General\SettingsMigrator::class,
 	Migrator\General\WooCommMigrator::class,
 	Migrator\General\InlineFeaturedImageMigrator::class,
-	// Migrator\General\SubtitleMigrator::class,
+	Migrator\General\SubtitleMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
-	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
+	Migrator\PublisherSpecific\SahanJournalMigrator::class,
 	// Migrator\PublisherSpecific\HKFPMigrator::class,
+	Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
 ) );
