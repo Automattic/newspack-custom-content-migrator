@@ -120,9 +120,9 @@ class LocalNewsMattersMigrator implements InterfaceMigrator {
 				WP_CLI::line( sprintf( __('Handling guest author called %s'), $author_name ) );
 
 				// Find an existing guest author.
-				$cap_guest_author = $coauthors_guest_authors->get_guest_author_by( 'user_nicename', sanitize_title( $author_name ) );
+				$cap_guest_author = $coauthors_guest_authors->get_guest_author_by( 'user_nicename', sanitize_user( $author_name ) );
 				if ( ! $cap_guest_author ) {
-					$coauthors_guest_authors->get_guest_author_by( 'login', sanitize_title( $author_name ) );
+					$coauthors_guest_authors->get_guest_author_by( 'login', sanitize_user( $author_name ) );
 				}
 
 				if ( ! $cap_guest_author ) { // No guest author was found.
