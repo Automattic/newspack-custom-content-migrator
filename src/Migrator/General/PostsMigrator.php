@@ -165,10 +165,13 @@ class PostsMigrator implements InterfaceMigrator {
 			WP_CLI::warning( 'No posts to export.' );
 			return false;
 		}
+
+		wp_cache_flush();
 		foreach ( $post_ids as $key => $post_id ) {
 			update_post_meta( $post_id, self::META_KEY_ORIGINAL_ID, $post_id );
 		}
 
+		wp_cache_flush();
 		$post_ids = array_values( $post_ids );
 		$this->export_posts( $post_ids, $output_dir, $output_file );
 
