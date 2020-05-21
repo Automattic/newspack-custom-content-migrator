@@ -18,12 +18,12 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	private $tag_author_prefix = 'author:';
 
 	/**
-	 * @var CoAuthors_Plus $coauthors_plus
+	 * @var null|CoAuthors_Plus $coauthors_plus
 	 */
 	private $coauthors_plus;
 
 	/**
-	 * @var CoAuthors_Guest_Authors
+	 * @var null|CoAuthors_Guest_Authors
 	 */
 	private $coauthors_guest_authors;
 
@@ -41,7 +41,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	/**
 	 * Validates whether Co-Author Plus plugin's dependencies were successfully set.
 	 *
-	 * @return bool
+	 * @return bool Is everything set up OK.
 	 */
 	private function validate_co_authors_plus_dependencies() {
 		if ( ( ! $this->coauthors_plus instanceof CoAuthors_Plus ) || ( ! $this->coauthors_guest_authors instanceof CoAuthors_Guest_Authors ) ) {
@@ -56,7 +56,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Singleton get_instance().
+	 * Sets up Co-Authors Plus plugin dependencies.
 	 *
 	 * @return InterfaceMigrator|null
 	 */
@@ -71,7 +71,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			$included_2 = include_once __DIR__ . '/../../../../co-authors-plus/php/class-coauthors-guest-authors.php';
 
 			if ( is_null( $coauthors_plus ) || ( false === $included_1 ) || ( false === $included_2 ) || ( ! $coauthors_plus instanceof CoAuthors_Plus ) ) {
-				return;
+				return self::$instance;
 			}
 
 			self::$instance->coauthors_plus          = $coauthors_plus;
