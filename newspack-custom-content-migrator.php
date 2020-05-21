@@ -1,9 +1,11 @@
 <?php
 /**
  * Plugin Name: Newspack Custom Content Migrator
- * Author:	    Automattic
- * Author URI:  https://automattic.com
- * Version:	    0.3.0
+ * Description: A set of tools in CLI environment to assist during a Newspack site content migration.
+ * Plugin URI:  https://newspack.blog/
+ * Author:      Automattic
+ * Author URI:  https://newspack.blog/
+ * Version:	    0.4.0
  *
  * @package	 Newspack_Custom_Content_Migrator
  */
@@ -27,6 +29,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\SettingsMigrator::class,
 	Migrator\General\WooCommMigrator::class,
 	Migrator\General\InlineFeaturedImageMigrator::class,
+	Migrator\General\CoAuthorPlusMigrator::class,
 	// Migrator\General\SubtitleMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
