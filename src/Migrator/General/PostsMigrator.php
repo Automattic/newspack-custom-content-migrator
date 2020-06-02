@@ -292,16 +292,23 @@ class PostsMigrator implements InterfaceMigrator {
 		WP_CLI::line( 'First clearing all Live site Pages which will be imported from Staging site to prevent duplicates...' );
 		$this->delete_pages_duplicated_on_staging_site();
 
-		$post_ids = $this->get_all_pages();
-		WP_CLI::line( sprintf( 'Exporting %d unique Live site Pages to %s ...', count( $post_ids ), $input_dir . '/' . self::LIVE_PAGES_UNIQUE_EXPORT_FILE ) );
-		// Here not setting the self::META_KEY_ORIGINAL_ID meta for pages from Live (by not using self::migrator_export_posts).
-		$this->export_posts( $post_ids, $input_dir, self::LIVE_PAGES_UNIQUE_EXPORT_FILE );
+		$post_ids_live = $this->get_all_pages();
+		if ( count( $post_ids_live ) > 0 ) {
+			WP_CLI::line( sprintf( 'Exporting %d unique Live site Pages to %s ...', count( $post_ids_live ), $input_dir . '/' . self::LIVE_PAGES_UNIQUE_EXPORT_FILE ) );
+			// Here not setting the self::META_KEY_ORIGINAL_ID meta for pages from Live (by not using self::migrator_export_posts).
+			$this->export_posts( $post_ids_live, $input_dir, self::LIVE_PAGES_UNIQUE_EXPORT_FILE );
+		} else {
+			WP_CLI::warning( 'No unique Live site Pages found, none will be imported.' );
+		}
 
 		WP_CLI::line( 'Importing Pages from the Staging site (using `wp import`, might take a little longer) ...' );
 		$this->import_posts( $input_dir . '/' . self::STAGING_PAGES_EXPORT_FILE );
 
-		WP_CLI::line( 'Importing unique Pages from the Live site (using `wp import`, might take a little longer) ...' );
-		$this->import_posts( $input_dir . '/' . self::LIVE_PAGES_UNIQUE_EXPORT_FILE );
+		if ( count( $post_ids_live ) > 0 ) {
+			WP_CLI::line( 'Importing unique Pages from the Live site (using `wp import`, might take a little longer) ...' );
+			$this->import_posts( $input_dir . '/' . self::LIVE_PAGES_UNIQUE_EXPORT_FILE );
+		}
+		
 		wp_cache_flush();
 
 		WP_CLI::success( 'Done.' );
