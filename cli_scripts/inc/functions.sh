@@ -274,6 +274,7 @@ function dump_db() {
 # `live_` table name prefix).
 function replace_staging_tables_with_live_tables() {
   for TABLE in "${IMPORT_TABLES[@]}"; do
+      echo "- switching $TABLE..."
       # Add prefix `staging_` to current table.
       mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
       # This ensures the table charset definition stays the same, only the data from live gets inserted.
