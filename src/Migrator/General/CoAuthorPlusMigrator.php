@@ -67,8 +67,11 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 
 			// Set Co-Authors Plus dependencies.
 			global $coauthors_plus;
-			$included_1 = include_once __DIR__ . '/../../../../co-authors-plus/co-authors-plus.php';
-			$included_2 = include_once __DIR__ . '/../../../../co-authors-plus/php/class-coauthors-guest-authors.php';
+
+			$file_1 = ABSPATH . 'wp-content/plugins/co-authors-plus/co-authors-plus.php';
+			$file_2 = ABSPATH . 'wp-content/plugins/co-authors-plus/php/class-coauthors-guest-authors.php';
+			$included_1 = is_file( $file_1 ) && include_once $file_1;
+			$included_2 = is_file( $file_2 ) && include_once $file_2;
 
 			if ( is_null( $coauthors_plus ) || ( false === $included_1 ) || ( false === $included_2 ) || ( ! $coauthors_plus instanceof CoAuthors_Plus ) ) {
 				return self::$instance;
