@@ -61,6 +61,20 @@ class CPTMigrator implements InterfaceMigrator {
 					'optional'    => true,
 					'repeating'   => false,
 				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'assign-category',
+					'description' => 'ID of a post category to apply to the converted post.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'assign-tag',
+					'description' => 'Slug of a post tag to apply to the converted post.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			]
 		] );
 	}
@@ -90,7 +104,9 @@ class CPTMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( __('Post type %s does not exist!' ), $cpt_to ) );
 		}
 
-		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
+		$post_id         = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
+		$assign_category = isset( $assoc_args[ 'assign-category' ] ) ? (int) $assoc_args['assign-category'] : false;
+		$assign_tag      = isset( $assoc_args[ 'assign-tag' ] ) ? $assoc_args['assign-tag'] : false;
 
 		// Grab the posts to convert then.
 		if ( $post_id ) {
@@ -117,8 +133,23 @@ class CPTMigrator implements InterfaceMigrator {
 			$converted = set_post_type( $post->ID, $cpt_to );
 
 			if ( 1 === $converted ) {
+
 				// Set a meta to help us remember what CPT this was converted from.
 				add_post_meta( $post->ID, '_cpt_converted_from', $cpt_from );
+
+				// For posts, and if specified, assign a category/tag.
+				if ( 'post' == $cpt_to && ( $assign_category || $assign_tag ) ) {
+
+					if ( $assign_category ) {
+						wp_set_post_terms( $post->ID, $assign_category, 'category' );
+					}
+
+					if ( $assign_tag ) {
+						wp_set_post_terms( $post->ID, $assign_tag, 'post_tag' );
+					}
+
+				}
+
 			} else {
 				// Log the failure so we know to re-run.
 				$failed++;
