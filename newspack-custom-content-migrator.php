@@ -45,7 +45,7 @@ $publisher_migrators = [
 	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
 	// Migrator\PublisherSpecific\HKFPMigrator::class,
 	// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-	Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+	// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
 ];
 
 PluginSetup::register_migrators( \array_merge( $general_migrators, $publisher_migrators ) );
