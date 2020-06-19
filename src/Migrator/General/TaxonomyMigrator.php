@@ -53,6 +53,13 @@ class TaxonomyMigrator implements InterfaceMigrator {
 					'optional'    => true,
 					'repeating'   => false,
 				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'term_ids',
+					'description' => 'CSV of Terms IDs. If provided, the command will only convert these specific Terms.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			],
 		] );
 		WP_CLI::add_command( 'newspack-content-migrator terms-with-taxonomy-to-tags', array( $this, 'cmd_terms_with_taxonomy_to_tags' ), [
@@ -65,7 +72,13 @@ class TaxonomyMigrator implements InterfaceMigrator {
 					'optional'    => false,
 					'repeating'   => false,
 				],
-
+				[
+					'type'        => 'assoc',
+					'name'        => 'term_ids',
+					'description' => 'CSV of Terms IDs. If provided, the command will only convert these specific Terms.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			],
 		] );
 	}
@@ -81,7 +94,10 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		if ( is_null( $taxonomy ) ) {
 			WP_CLI::error( 'Invalid Taxonomy.' );
 		}
+
 		$create_parent_category = isset( $assoc_args[ 'create-parent-category' ] ) ? true : false;
+
+		$term_ids_for_conversion = isset( $assoc_args[ 'term_ids' ] ) ? explode( ',', $assoc_args[ 'term_ids' ] ) : [];
 
 		WP_CLI::line( sprintf( 'Converting Terms with Taxonomy %s to Categories...', $taxonomy ) );
 
@@ -114,6 +130,11 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		}
 
 		foreach ( $terms as $term ) {
+			// If `term_ids` argument is provided, only convert those Terms.
+			if ( ! empty( $term_ids_for_conversion ) && ! in_array( $term->term_id , $term_ids_for_conversion ) ) {
+				continue;
+			}
+
 			// Get post objects.
 			$posts = $this->get_post_objects_with_taxonomy_and_term( $taxonomy, $term->term_id, $all_post_types );
 			if ( empty( $posts ) ) {
@@ -150,6 +171,8 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			WP_CLI::error( 'Invalid Taxonomy.' );
 		}
 
+		$term_ids_for_conversion = isset( $assoc_args[ 'term_ids' ] ) ? explode( ',', $assoc_args[ 'term_ids' ] ) : [];
+
 		WP_CLI::line( sprintf( 'Converting Terms with Taxonomy %s to Tags...', $taxonomy ) );
 
 		$all_post_types = $this->get_all_db_post_types();
@@ -171,6 +194,11 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		}
 
 		foreach ( $terms as $term ) {
+			// If `term_ids` argument is provided, only convert those Terms.
+			if ( ! empty( $term_ids_for_conversion ) && ! in_array( $term->term_id , $term_ids_for_conversion ) ) {
+				continue;
+			}
+
 			// Get post objects.
 			$posts = $this->get_post_objects_with_taxonomy_and_term( $taxonomy, $term->term_id, $all_post_types );
 			if ( empty( $posts ) ) {
