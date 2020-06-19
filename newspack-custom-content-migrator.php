@@ -31,6 +31,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\InlineFeaturedImageMigrator::class,
 	Migrator\General\SubtitleMigrator::class,
 	Migrator\General\CoAuthorPlusMigrator::class,
+	Migrator\General\CPTMigrator::class,
 	Migrator\General\TaxonomyMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
