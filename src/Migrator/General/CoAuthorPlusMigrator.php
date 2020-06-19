@@ -112,6 +112,60 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				),
 			),
 		] );
+		WP_CLI::add_command( 'newspack-content-migrator co-authors-cpt-to-guest-authors', array( $this, 'cmd_cpt_to_guest_authors' ), [
+			'shortdesc' => "Converts a CPT used for describing authors to a CAP Guest Authors.",
+			'synopsis'  => [
+				[
+					'type'        => 'positional',
+					'name'        => 'cpt',
+					'description' => 'The slug of the custom post type we want to convert.',
+					'optional'    => false,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'display_name',
+					'description' => 'Where the CPT stores the author\'s display name.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'first_name',
+					'description' => 'Where the CPT stores the author\'s first name.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'last_name',
+					'description' => 'Where the CPT stores the author\'s last name.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'email',
+					'description' => 'Where the CPT stores the author\'s email address.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'website',
+					'description' => 'Where the CPT stores the author\'s website address.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'bio',
+					'description' => 'Where the CPT stores the author\'s biographical information.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
+			],
+		] );
 	}
 
 	/**
@@ -193,6 +247,42 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		wp_reset_postdata();
 
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for the 'newspack-content-migrator co-authors-cpt-to-guest-authors' command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_cpt_to_guest_authors( $args, $assoc_args ) {
+
+		$cpt_from = $args[0];
+
+		// Make sure we have a valid post type.
+		if ( ! \in_array( $cpt_from, get_post_types() ) ) {
+			// Register the post type temporarily.
+			register_post_type( $cpt_from );
+		}
+
+		$authors = $this->get_cpt_authors( $cpt_from );
+
+		// Let us count the ways in which we fail.
+		$error_count = 0;
+
+		foreach ( $authors as $author ) {
+
+			WP_CLI::line( sprintf( 'Migrating author %s (%d)', get_the_title( $author->ID ), $author->ID ) );
+
+			
+
+		}
+
+		WP_CLI::success( sprintf(
+			esc_html__( 'Completed CPT to Users migration with %d issues.' ),
+			$error_count
+		) );
+
 	}
 
 	/**
@@ -424,4 +514,27 @@ SQL;
 
 		return $tags_diff;
 	}
+
+	/**
+	 * Grab the author posts.
+	 *
+	 * @return array List of authors as an array of WP_Post objects
+	 */
+	private function get_cpt_authors( $cpt ) {
+
+		// Grab an array of WP_Post objects for the authors.
+		$authors = get_posts( [
+			'post_type'      => $cpt,
+			'posts_per_page' => -1,
+			'post_status'    => 'any',
+		] );
+
+		if ( empty( $authors ) ) {
+			WP_CLI::error( sprintf( 'No authors found!' ) );
+		}
+
+		return $authors;
+
+	}
+
 }
