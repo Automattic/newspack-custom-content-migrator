@@ -64,14 +64,14 @@ class CPTMigrator implements InterfaceMigrator {
 				[
 					'type'        => 'assoc',
 					'name'        => 'assign-category',
-					'description' => 'ID of a post category to apply to the converted post.',
+					'description' => 'ID of a post category to apply to the converted posts.',
 					'optional'    => true,
 					'repeating'   => false,
 				],
 				[
 					'type'        => 'assoc',
 					'name'        => 'assign-tag',
-					'description' => 'Slug of a post tag to apply to the converted post.',
+					'description' => 'Slug of a post tag to apply to the converted posts.',
 					'optional'    => true,
 					'repeating'   => false,
 				],
