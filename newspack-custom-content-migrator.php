@@ -32,11 +32,12 @@ PluginSetup::register_migrators( array(
 	Migrator\General\SubtitleMigrator::class,
 	Migrator\General\CoAuthorPlusMigrator::class,
 	Migrator\General\CPTMigrator::class,
+	Migrator\General\TaxonomyMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
 	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
 	// Migrator\PublisherSpecific\HKFPMigrator::class,
-  // Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-  Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+    // Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
+    Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
 ) );
