@@ -21,7 +21,8 @@ require 'vendor/autoload.php';
 require_once( ABSPATH . 'wp-settings.php' );
 
 PluginSetup::setup_wordpress_importer();
-PluginSetup::register_migrators( array(
+
+$general_migrators = [
 	Migrator\General\PostsMigrator::class,
 	Migrator\General\MenusMigrator::class,
 	Migrator\General\CssMigrator::class,
@@ -30,13 +31,21 @@ PluginSetup::register_migrators( array(
 	Migrator\General\WooCommMigrator::class,
 	Migrator\General\InlineFeaturedImageMigrator::class,
 	Migrator\General\SubtitleMigrator::class,
-	Migrator\General\CoAuthorPlusMigrator::class,
 	Migrator\General\TaxonomyMigrator::class,
+];
 
+// Only load the CAP migrator if CAP is active.
+if ( \class_exists() ) {
+	$general_migrators[] = Migrator\General\CoAuthorPlusMigrator::class;
+}
+
+$publisher_migrators = [
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
 	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
 	// Migrator\PublisherSpecific\HKFPMigrator::class,
-    // Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-    Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
-) );
+	// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
+	Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+];
+
+PluginSetup::register_migrators( \array_merge( $general_migrators, $publisher_migrators ) );
