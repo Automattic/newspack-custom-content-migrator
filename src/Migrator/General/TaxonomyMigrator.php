@@ -103,7 +103,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		}
 
 		// Get all Terms with this Taxonomy.
-		$terms = get_terms( [ 'taxonomy' => $taxonomy, 'hide_empty' => false ] );
+		$terms = get_terms( [ 'taxonomy' => $taxonomy ] );
 		if ( is_wp_error( $terms ) ) {
 			$err_msg = is_wp_error( $terms ) ? $terms->get_error_message() : 'empty';
 			WP_CLI::error( sprintf( 'Error retrieving terms: %s', $err_msg ) );
@@ -160,7 +160,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		}
 
 		// Get all Terms with this Taxonomy.
-		$terms = get_terms( [ 'taxonomy' => $taxonomy, 'hide_empty' => false ] );
+		$terms = get_terms( [ 'taxonomy' => $taxonomy ] );
 		if ( is_wp_error( $terms ) ) {
 			$err_msg = is_wp_error( $terms ) ? $terms->get_error_message() : 'empty';
 			WP_CLI::error( sprintf( 'Error retrieving terms: %s', $err_msg ) );
