@@ -109,7 +109,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Error retrieving terms: %s', $err_msg ) );
 		}
 		if ( empty( $terms ) ) {
-			WP_CLI::error( sprintf( "No Terms found with Taxonomy '%s'.", $taxonomy ) );
+			WP_CLI::error( sprintf( "No used Terms found with Taxonomy '%s'.", $taxonomy ) );
 			exit;
 		}
 
@@ -166,7 +166,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Error retrieving terms: %s', $err_msg ) );
 		}
 		if ( empty( $terms ) ) {
-			WP_CLI::error( sprintf( 'No Terms found with Taxonomy %s.', $taxonomy ) );
+			WP_CLI::error( sprintf( 'No used Terms found with Taxonomy %s.', $taxonomy ) );
 			exit;
 		}
 
