@@ -28,6 +28,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\ContentConverterPluginMigrator::class,
 	Migrator\General\SettingsMigrator::class,
 	Migrator\General\WooCommMigrator::class,
+	Migrator\General\ReaderRevenueMigrator::class,
 	Migrator\General\InlineFeaturedImageMigrator::class,
 	Migrator\General\SubtitleMigrator::class,
 	Migrator\General\CoAuthorPlusMigrator::class,

@@ -190,6 +190,11 @@ function export_staging_site_identity_settings() {
   set_var_by_previous_exit_code IS_EXPORTED_PAGES_IDENTITY_SETTINGS
 }
 
+function export_staging_site_donation_products() {
+  wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
+  set_var_by_previous_exit_code IS_EXPORTED_DONATION_PRODUCTS
+}
+
 function back_up_newspack_content_migrator_staging_table() {
   wp_cli newspack-content-migrator back-up-converter-plugin-staging-table
   set_var_by_previous_exit_code IS_BACKED_UP_STAGING_NCC_TABLE
