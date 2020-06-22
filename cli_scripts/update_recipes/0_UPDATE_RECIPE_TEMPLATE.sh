@@ -112,6 +112,9 @@ export_staging_site_identity_settings
 echo_ts "exporting Staging site donation products..."
 export_staging_site_donation_products
 
+echo_ts "exporting Staging site campaigns..."
+export_staging_site_campaigns
+
 echo_ts 'backing up the Newspack Content Converter Plugin table...'
 back_up_newspack_content_migrator_staging_table
 
@@ -169,6 +172,13 @@ if [[ 1 == $IS_EXPORTED_DONATION_PRODUCTS ]]; then
   wp_cli newspack-content-migrator import-reader-revenue --input-dir=$TEMP_DIR_MIGRATOR
 else
   echo_ts_yellow 'Skipping importing reader revenue products from the Staging site.'
+fi
+
+if [[ 1 == $IS_EXPORTED_CAMPAIGNS ]]; then
+  echo_ts 'importing campaigns from the Staging site...'
+  wp_cli newspack-content-migrator import-campaigns --input-dir=$TEMP_DIR_MIGRATOR
+else
+  echo_ts_yellow 'Skipping importing Newspack Campaigns from the Staging site.'
 fi
 
 if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
