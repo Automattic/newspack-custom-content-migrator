@@ -199,6 +199,9 @@ update_files_from_live_site
 echo_ts 'cleaning up options...'
 clean_up_options
 
+echo_ts 'updating seo settings...'
+wp_cli newspack-content-migrator update-seo-settings
+
 echo_ts 'setting file permissions to public content...'
 set_public_content_file_permissions
 

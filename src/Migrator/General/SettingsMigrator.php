@@ -103,6 +103,11 @@ class SettingsMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+
+		WP_CLI::add_command( 'newspack-content-migrator update-seo-settings', array( $this, 'cmd_update_seo_settings' ), [
+			'shortdesc' => 'Checks and sets SEO settings.',
+		] );
+
 	}
 
 	/**
@@ -283,5 +288,46 @@ class SettingsMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for update-seo-settings.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_seo_settings( $args, $assoc_args ) {
+		WP_CLI::success( 'Disabling Yoast XML sitemaps...' );
+		$this->turn_off_yoast_xml_sitemap();
+
+		WP_CLI::success( 'Unchecking the `Discourage search engines from indexing this site` option...' );
+		$this->uncheck_discourage_search_engines();
+
+		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Disables Yoast's XML sitemap.
+	 */
+	private function turn_off_yoast_xml_sitemap() {
+		$option_name = 'wpseo';
+		$option_param = 'enable_xml_sitemap';
+
+		$option = get_option( $option_name );
+		if ( ! $option || ! isset( $option[ $option_param ] ) ) {
+			return;
+		}
+
+		$option[ $option_param ] = false;
+
+		update_option( $option_name, $option );
+	}
+
+	/**
+	 * Updates the `blog_public` option to true, which in turn unchecks the `Discourage search engines from indexing this site`
+	 * WP Settings > Reading option.
+	 */
+	private function uncheck_discourage_search_engines() {
+		update_option( 'blog_public', 1 );
 	}
 }
