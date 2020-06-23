@@ -115,9 +115,6 @@ export_staging_site_donation_products
 echo_ts "exporting Staging site campaigns..."
 export_staging_site_campaigns
 
-echo_ts 'backing up the Newspack Content Converter Plugin table...'
-back_up_newspack_content_migrator_staging_table
-
 # --- import:
 
 echo_ts 'preparing Live site SQL dump for import...'
@@ -181,12 +178,8 @@ else
   echo_ts_yellow 'Skipping importing Newspack Campaigns from the Staging site.'
 fi
 
-if [[ 1 == $IS_BACKED_UP_STAGING_NCC_TABLE ]]; then
-  echo_ts 'starting to import Staging content previously already converted to blocks...'
-  import_blocks_content_from_staging_site
-else
-  echo_ts_yellow 'Skipping importing blocks contents from the Staging site.'
-fi
+echo_ts 'importing Staging content previously converted to blocks...'
+import_blocks_content_from_staging_site
 
 echo_ts 'updating WooComm pages IDs...'
 wp_cli newspack-content-migrator woocomm-update-pages

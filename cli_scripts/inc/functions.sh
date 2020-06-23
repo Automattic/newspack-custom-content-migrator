@@ -200,15 +200,6 @@ function export_staging_site_campaigns() {
   set_var_by_previous_exit_code IS_EXPORTED_CAMPAIGNS
 }
 
-function back_up_newspack_content_migrator_staging_table() {
-  wp_cli newspack-content-migrator back-up-converter-plugin-staging-table
-  set_var_by_previous_exit_code IS_BACKED_UP_STAGING_NCC_TABLE
-
-  if [ 1 != $IS_BACKED_UP_STAGING_NCC_TABLE ]; then
-    echo_ts_yellow 'content converter table not found or backed up. Continuing.'
-  fi
-}
-
 function prepare_live_sql_dump_for_import() {
   echo_ts 'replacing hostnames in the Live SQL dump file...'
   replace_hostnames $LIVE_SQL_DUMP_FILE $LIVE_SQL_DUMP_FILE_REPLACED
