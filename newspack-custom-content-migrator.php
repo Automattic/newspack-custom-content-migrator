@@ -41,5 +41,6 @@ PluginSetup::register_migrators( array(
 	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
 	// Migrator\PublisherSpecific\HKFPMigrator::class,
     // Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-    Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+    // Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+     Migrator\PublisherSpecific\TRNNMigrator::class,
 ) );
