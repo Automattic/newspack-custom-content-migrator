@@ -113,7 +113,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			),
 		] );
 		WP_CLI::add_command( 'newspack-content-migrator co-authors-cpt-to-guest-authors', array( $this, 'cmd_cpt_to_guest_authors' ), [
-			'shortdesc' => "Converts a CPT used for describing authors to a CAP Guest Authors.",
+			'shortdesc' => "Converts a CPT used for describing authors to a CAP Guest Authors. The associative arguments tell the command where to find info needed to create the Guest Author objects. For example, the GA's 'display name' could be located in the CPT's 'post_title', the GA's 'description' (bio) could be in the CPT's 'post_content', and the email address in a CPT's meta field called 'author_email' -- and these could all be provided like this: `--display_name=post_title --description=post_content --email=meta:author_email`.",
 			'synopsis'  => [
 				[
 					'type'        => 'positional',
@@ -125,8 +125,8 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				[
 					'type'        => 'assoc',
 					'name'        => 'display_name',
-					'description' => 'Where the CPT stores the author\'s display name.',
-					'optional'    => true,
+					'description' => 'Where the CPT stores the author\'s display name. This is the only mandatory field for GAs.',
+					'optional'    => false,
 					'repeating'   => false,
 				],
 				[
@@ -159,7 +159,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				],
 				[
 					'type'        => 'assoc',
-					'name'        => 'bio',
+					'name'        => 'description',
 					'description' => 'Where the CPT stores the author\'s biographical information.',
 					'optional'    => true,
 					'repeating'   => false,
@@ -201,12 +201,21 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			while ( $the_query->have_posts() ) {
 				$progress_bar->tick();
 				$the_query->the_post();
-				$this->convert_tags_to_guest_authors( get_the_ID(), $unset_author_tags );
+				$errors = $this->convert_tags_to_guest_authors( get_the_ID(), $unset_author_tags );
 			}
 		}
 		$progress_bar->finish();
 
 		wp_reset_postdata();
+
+		if ( isset( $errors ) && ! empty( $errors ) ) {
+			WP_CLI::warning( 'Errors occurred:' );
+			foreach ( $errors as $error ) {
+				WP_CLI::warning( $error );
+			}
+
+			WP_CLI::error( 'Done with errors.' );
+		}
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -238,13 +247,31 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		foreach ( $post_ids as $post_id ) {
 			$progress_bar->tick();
 
+			$guest_author_ids = [];
+			$errors           = [];
 			$author_names     = $this->get_post_tags_with_taxonomy( $post_id, $tag_taxonomy );
-			$guest_author_ids = $this->create_guest_authors( $author_names );
+			foreach ( $author_names as $author_name ) {
+				try {
+					$guest_author_ids[] = $this->create_guest_author( [ 'display_name' => $author_name ] );
+				} catch ( \Exception $e ) {
+					$errors[] = sprintf( "Error creating '%s', %s", $author_name, $e->getMessage() );
+				}
+			}
+
 			$this->assign_guest_authors_to_post( $guest_author_ids, $post_id );
 		}
 		$progress_bar->finish();
 
 		wp_reset_postdata();
+
+		if ( isset( $errors ) && ! empty( $errors ) ) {
+			WP_CLI::warning( 'Errors occurred:' );
+			foreach ( $errors as $error ) {
+				WP_CLI::warning( $error );
+			}
+
+			WP_CLI::error( 'Done with errors.' );
+		}
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -256,33 +283,106 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_cpt_to_guest_authors( $args, $assoc_args ) {
+		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
 
-		$cpt_from = $args[0];
+		// Get input args.
+		$cpt_from = isset( $args[0] ) ? $args[0] : null;
+		if ( null === $cpt_from ) {
+			WP_CLI::error( 'Missing CPT slug.' );
+		}
+		$display_name_from = isset( $assoc_args[ 'display_name' ] ) ? $assoc_args[ 'display_name' ] : null;
+		if ( null === $display_name_from ) {
+			WP_CLI::error( "Missing Guest Author's display_name." );
+		}
+		$first_name_from  = isset( $assoc_args[ 'first_name' ] ) && ! empty( $assoc_args[ 'first_name' ] ) ? $assoc_args[ 'first_name' ] : null;
+		$last_name_from   = isset( $assoc_args[ 'last_name' ] ) && ! empty( $assoc_args[ 'last_name' ] ) ? $assoc_args[ 'last_name' ] : null;
+		$email_from       = isset( $assoc_args[ 'email' ] ) && ! empty( $assoc_args[ 'email' ] ) ? $assoc_args[ 'email' ] : null;
+		$website_from     = isset( $assoc_args[ 'website' ] ) && ! empty( $assoc_args[ 'website' ] ) ? $assoc_args[ 'website' ] : null;
+		$description_from = isset( $assoc_args[ 'description' ] ) && ! empty( $assoc_args[ 'description' ] ) ? $assoc_args[ 'description' ] : null;
 
-		// Make sure we have a valid post type.
-		if ( ! \in_array( $cpt_from, get_post_types() ) ) {
-			// Register the post type temporarily.
+		// Register the post type temporarily.
+		if ( ! in_array( $cpt_from, get_post_types() ) ) {
 			register_post_type( $cpt_from );
 		}
 
-		$authors = $this->get_cpt_authors( $cpt_from );
+		// Create the Guest Authors.
+		$guest_author_ids = [];
+		$errors           = [];
+		$cpts             = $this->get_custom_post_types( $cpt_from );
+		foreach ( $cpts as $cpt ) {
+			WP_CLI::line( sprintf( 'Migrating author %s (CPT ID %d)', get_the_title( $cpt->ID ), $cpt->ID ) );
 
-		// Let us count the ways in which we fail.
-		$error_count = 0;
+			try {
+				$args = [];
 
-		foreach ( $authors as $author ) {
+				$args[ 'display_name' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $display_name_from );
+				if ( $first_name_from ) {
+					$args[ 'first_name' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $first_name_from );
+				}
+				if ( $last_name_from ) {
+					$args[ 'last_name' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $last_name_from );
+				}
+				if ( $email_from ) {
+					$args[ 'user_email' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $email_from );
+				}
+				if ( $website_from ) {
+					$args[ 'website' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $website_from );
+				}
+				if ( $description_from ) {
+					$args[ 'description' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $description_from );
+				}
 
-			WP_CLI::line( sprintf( 'Migrating author %s (%d)', get_the_title( $author->ID ), $author->ID ) );
+				$guest_author_ids[] = $this->create_guest_author( $args );
 
-			
+			} catch ( \Exception $e ) {
+				$errors[] = sprintf( 'ID %d -- %s', $cpt->ID, $e->getMessage() );
+			}
+		}
 
+		if ( isset( $errors ) && ! empty( $errors ) ) {
+			WP_CLI::warning( 'Errors occurred:' );
+			foreach ( $errors as $error ) {
+				WP_CLI::warning( $error );
+			}
+
+			WP_CLI::error( 'Done with errors.' );
 		}
 
 		WP_CLI::success( sprintf(
-			esc_html__( 'Completed CPT to Users migration with %d issues.' ),
-			$error_count
+			'Created %d GAs from total %d CTPs, and had %d errors.',
+			count( $guest_author_ids ),
+			count( $cpts ),
+			count( $errors )
 		) );
+	}
 
+	/**
+	 * Takes one of the positional argument which describe a Guest Author object that's about to be created by the
+	 * `co-authors-cpt-to-guest-authors` command, and returns it's value.
+	 *
+	 * These positional arguments may specify one of these:
+	 *  - a column/property of the \WP_Post object (`wp_posts` table), e.g. `post_title`
+	 *  - its meta key, prefixed with 'meta:', e.g. `meta:author_email`.
+	 *
+	 * And this function returns the actual value.
+	 *
+	 * @param \WP_Post $cpt            CPT from which a Guest Author is getting created.
+	 * @param string   $get_value_from The positional argument which describes a new Guest Author to create from the CPTs.
+	 *
+	 * @return string The actual value specified by the $get_value_from.
+	 */
+	private function get_cpt_2_ga_cmd_param_value( $cpt, $get_value_from ) {
+		// Get the value from meta.
+		if ( 0 === strpos( $get_value_from, 'meta:' ) ) {
+			$meta_key = substr( $get_value_from, 5 );
+
+			return get_post_meta( $cpt->ID, $meta_key, true );
+		}
+
+		return $cpt->$get_value_from;
 	}
 
 	/**
@@ -374,6 +474,8 @@ SQL;
 	 *
 	 * @param int  $post_id           Post ID.
 	 * @param bool $unset_author_tags Should the "author tags" be unset from the post once they've been converted to Guest Users.
+	 *
+	 * @return array Descriptive error messages, if any errors occurred.
 	 */
 	public function convert_tags_to_guest_authors( $post_id, $unset_author_tags = true ) {
 		$all_tags = get_the_tags( $post_id );
@@ -393,7 +495,16 @@ SQL;
 			$author_names[] = $author_tag_with_name['author_name'];
 		}
 
-		$guest_author_ids = $this->create_guest_authors( $author_names );
+		$guest_author_ids = [];
+		$errors           = [];
+		foreach ( $author_names as $author_name ) {
+			try {
+				$guest_author_ids[] = $this->create_guest_author( [ 'display_name' => $author_name ] );
+			} catch ( \Exception $e ) {
+				$errors[] = sprintf( "Error creating '%s', %s", $author_name, $e->getMessage() );
+			}
+		}
+
 		$this->assign_guest_authors_to_post( $guest_author_ids, $post_id );
 
 		if ( $unset_author_tags ) {
@@ -405,6 +516,8 @@ SQL;
 
 			wp_set_post_terms( $post_id, implode( ',', $new_tag_names ), 'post_tag' );
 		}
+
+		return $errors;
 	}
 
 	/**
@@ -443,33 +556,39 @@ SQL;
 	/**
 	 * Creates Guest Authors from their full names.
 	 *
-	 * @param array $authors_names Authors' names.
+	 * Takes the same $args param as the \CoAuthors_Guest_Authors::create does, which is an array with the following keys:
+	 *      - 'display_name' -> this is the only required param
+	 *      - 'user_login'   -> this param is optional, because this function automatically creates it from the 'display_name'
+	 *      - 'first_name'
+	 *      - 'last_name'
+	 *      - 'user_email'
+	 *      - 'website'
+	 *      - 'description'
+	 *
+	 * @param array $args The $args param for the \CoAuthors_Guest_Authors::create method.
 	 *
 	 * @return array An array of Guest Author IDs.
+	 *
+	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
 	 */
-	public function create_guest_authors( array $authors_names ) {
-		$guest_author_ids = [];
-
-		foreach ( $authors_names as $author_name ) {
-			$author_login = sanitize_title( $author_name );
-			$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $author_login );
-
-			// If the Guest author doesn't exist, creates it first.
-			if ( false === $guest_author ) {
-				$coauthor_id = $this->coauthors_guest_authors->create(
-					array(
-						'display_name' => $author_name,
-						'user_login'   => $author_login,
-					)
-				);
-			} else {
-				$coauthor_id = $guest_author->ID;
-			}
-
-			$guest_author_ids[] = $coauthor_id;
+	public function create_guest_author( array $args ) {
+		if ( ! isset( $args[ 'display_name' ] ) ) {
+			throw new \UnexpectedValueException( 'The `display_name` param is mandatory for Guest Author creation.' );
 		}
 
-		return $guest_author_ids;
+		// If not provided, automatically set `user_login` from display_name.
+		if ( ! isset( $args[ 'user_login' ] ) ) {
+			$args[ 'user_login' ] = sanitize_title( $args[ 'display_name' ] );
+		}
+
+		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args[ 'user_login' ] );
+		if ( false === $guest_author ) {
+			$coauthor_id = $this->coauthors_guest_authors->create( $args );
+		} else {
+			$coauthor_id = $guest_author->ID;
+		}
+
+		return $coauthor_id;
 	}
 
 	/**
@@ -516,24 +635,23 @@ SQL;
 	}
 
 	/**
-	 * Grab the author posts.
+	 * Grab the Custom Post Types.
 	 *
-	 * @return array List of authors as an array of WP_Post objects
+	 * @return array WP_Post
 	 */
-	private function get_cpt_authors( $cpt ) {
+	private function get_custom_post_types( $post_type ) {
 
-		// Grab an array of WP_Post objects for the authors.
-		$authors = get_posts( [
-			'post_type'      => $cpt,
+		$posts = get_posts( [
+			'post_type'      => $post_type,
 			'posts_per_page' => -1,
 			'post_status'    => 'any',
 		] );
 
-		if ( empty( $authors ) ) {
-			WP_CLI::error( sprintf( 'No authors found!' ) );
+		if ( empty( $posts ) ) {
+			WP_CLI::error( sprintf( "No '%s' post types found!", $post_type ) );
 		}
 
-		return $authors;
+		return $posts;
 
 	}
 
