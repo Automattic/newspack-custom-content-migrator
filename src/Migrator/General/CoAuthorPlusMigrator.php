@@ -311,7 +311,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		// Create the Guest Authors.
 		$guest_author_ids = [];
 		$errors           = [];
-		$cpts             = $this->get_custom_post_types( $cpt_from );
+		$cpts             = $this->get_posts( $cpt_from );
 		foreach ( $cpts as $cpt ) {
 			WP_CLI::line( sprintf( 'Migrating author %s (CPT ID %d)', get_the_title( $cpt->ID ), $cpt->ID ) );
 
@@ -639,7 +639,7 @@ SQL;
 	 *
 	 * @return array WP_Post
 	 */
-	private function get_custom_post_types( $post_type ) {
+	private function get_posts( $post_type ) {
 
 		$posts = get_posts( [
 			'post_type'      => $post_type,
