@@ -164,6 +164,13 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 					'optional'    => true,
 					'repeating'   => false,
 				],
+				[
+					'type'        => 'flag',
+					'name'        => 'dry-run',
+					'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			],
 		] );
 	}
@@ -302,6 +309,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		$email_from       = isset( $assoc_args[ 'email' ] ) && ! empty( $assoc_args[ 'email' ] ) ? $assoc_args[ 'email' ] : null;
 		$website_from     = isset( $assoc_args[ 'website' ] ) && ! empty( $assoc_args[ 'website' ] ) ? $assoc_args[ 'website' ] : null;
 		$description_from = isset( $assoc_args[ 'description' ] ) && ! empty( $assoc_args[ 'description' ] ) ? $assoc_args[ 'description' ] : null;
+		$dry_run          = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
 
 		// Register the post type temporarily.
 		if ( ! in_array( $cpt_from, get_post_types() ) ) {
@@ -333,6 +341,10 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				}
 				if ( $description_from ) {
 					$args[ 'description' ] = $this->get_cpt_2_ga_cmd_param_value( $cpt, $description_from );
+				}
+
+				if ( true === $dry_run ) {
+					continue;
 				}
 
 				$guest_author_ids[] = $this->create_guest_author( $args );
