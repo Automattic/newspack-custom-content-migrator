@@ -349,7 +349,11 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 					continue;
 				}
 
-				$guest_author_ids[] = $this->create_guest_author( $args );
+				$new_guest_author   = $this->create_guest_author( $args );
+				$guest_author_ids[] = $new_guest_author;
+
+				// Record the original post ID that we migrated from.
+				add_post_meta( $new_guest_author, '_post_migrated_from', $cpt->ID );
 
 			} catch ( \Exception $e ) {
 				$errors[] = sprintf( 'ID %d -- %s', $cpt->ID, $e->getMessage() );
