@@ -313,7 +313,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		$errors           = [];
 		$cpts             = $this->get_posts( $cpt_from );
 		foreach ( $cpts as $cpt ) {
-			WP_CLI::line( sprintf( 'Migrating author %s (CPT ID %d)', get_the_title( $cpt->ID ), $cpt->ID ) );
+			WP_CLI::line( sprintf( 'Migrating author %s (Post ID %d)', get_the_title( $cpt->ID ), $cpt->ID ) );
 
 			try {
 				$args = [];
