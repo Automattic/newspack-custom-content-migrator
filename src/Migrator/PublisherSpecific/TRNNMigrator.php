@@ -320,7 +320,6 @@ class TRNNMigrator implements InterfaceMigrator {
 				WP_CLI::line( 'No new guest authors found.' );
 			}
 		}
-WP_CLI::line(\sprintf('New GAs: %s',var_export($new_guest_authors,true)));
 
 		return $new_guest_authors;
 	}
