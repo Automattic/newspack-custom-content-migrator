@@ -32,7 +32,10 @@ class TRNNMigrator implements InterfaceMigrator {
 	 * @return bool Is everything set up OK.
 	 */
 	private function validate_co_authors_plus_dependencies() {
-		if ( ( ! $this->coauthors_plus instanceof CoAuthors_Plus ) || ( ! $this->coauthors_guest_authors instanceof CoAuthors_Guest_Authors ) ) {
+		if (
+			( ! is_a( $this->coauthors_plus, CoAuthors_Plus ) ) ||
+			( ! is_a( $this->coauthors_guest_authors, CoAuthors_Guest_Authors ) )
+		) {
 			return false;
 		}
 
@@ -41,6 +44,22 @@ class TRNNMigrator implements InterfaceMigrator {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Checks whether Co-authors Plus is installed and active.
+	 *
+	 * @return bool Is active.
+	 */
+	public function is_coauthors_active() {
+		$active = false;
+		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
+			if ( false !== strrpos( $plugin, 'co-authors-plus.php' ) ) {
+				$active = true;
+			}
+		}
+
+		return $active;
 	}
 
 	/**
@@ -63,12 +82,17 @@ class TRNNMigrator implements InterfaceMigrator {
 			$included_1 = is_file( $file_1 ) && include_once $file_1;
 			$included_2 = is_file( $file_2 ) && include_once $file_2;
 
-			if ( is_null( $coauthors_plus ) || ( false === $included_1 ) || ( false === $included_2 ) || ( ! $coauthors_plus instanceof CoAuthors_Plus ) ) {
+			if (
+				is_null( $coauthors_plus ) ||
+				( false === $included_1 ) ||
+				( false === $included_2 ) ||
+				( ! is_a( $coauthors_plus, 'CoAuthors_Plus' ) )
+			) {
 				return self::$instance;
 			}
 
 			self::$instance->coauthors_plus          = $coauthors_plus;
-			self::$instance->coauthors_guest_authors = new CoAuthors_Guest_Authors();
+			self::$instance->coauthors_guest_authors = new \CoAuthors_Guest_Authors();
 		}
 
 		return self::$instance;
