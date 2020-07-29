@@ -17,9 +17,50 @@ class TRNNMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var null|CoAuthors_Guest_Authors
+	 */
+	private $coauthors_guest_authors;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {}
+
+	/**
+	 * Validates whether Co-Author Plus plugin's dependencies were successfully set.
+	 *
+	 * @return bool Is everything set up OK.
+	 */
+	private function validate_co_authors_plus_dependencies() {
+		if (
+			( ! is_a( $this->coauthors_plus, CoAuthors_Plus ) ) ||
+			( ! is_a( $this->coauthors_guest_authors, CoAuthors_Guest_Authors ) )
+		) {
+			return false;
+		}
+
+		if ( false === $this->is_coauthors_active() ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Checks whether Co-authors Plus is installed and active.
+	 *
+	 * @return bool Is active.
+	 */
+	public function is_coauthors_active() {
+		$active = false;
+		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
+			if ( false !== strrpos( $plugin, 'co-authors-plus.php' ) ) {
+				$active = true;
+			}
+		}
+
+		return $active;
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -30,6 +71,28 @@ class TRNNMigrator implements InterfaceMigrator {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
 			self::$instance = new $class;
+
+			// Set Co-Authors Plus dependencies.
+			global $coauthors_plus;
+
+			$plugin_path = defined( 'WP_PLUGIN_DIR' ) ? WP_PLUGIN_DIR : ABSPATH . 'wp-content/plugins';
+
+			$file_1 = $plugin_path . '/co-authors-plus/co-authors-plus.php';
+			$file_2 = $plugin_path . '/co-authors-plus/php/class-coauthors-guest-authors.php';
+			$included_1 = is_file( $file_1 ) && include_once $file_1;
+			$included_2 = is_file( $file_2 ) && include_once $file_2;
+
+			if (
+				is_null( $coauthors_plus ) ||
+				( false === $included_1 ) ||
+				( false === $included_2 ) ||
+				( ! is_a( $coauthors_plus, 'CoAuthors_Plus' ) )
+			) {
+				return self::$instance;
+			}
+
+			self::$instance->coauthors_plus          = $coauthors_plus;
+			self::$instance->coauthors_guest_authors = new \CoAuthors_Guest_Authors();
 		}
 
 		return self::$instance;
@@ -41,10 +104,10 @@ class TRNNMigrator implements InterfaceMigrator {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator trnn-migrate-video-content',
-			[ $this, 'cmd_trnn_migrate' ],
+			[ $this, 'cmd_trnn_migrate_videos' ],
 			[
 				'shortdesc' => 'Migrate video content from meta into regular post content.',
-				'synopsis' => [
+				'synopsis'  => [
 					[
 						'type'        => 'positional',
 						'name'        => 'post_id',
@@ -60,12 +123,35 @@ class TRNNMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator trnn-migrate-authors',
+			[ $this, 'cmd_trnn_migrate_authors' ],
+			[
+				'shortdesc' => 'Migrate the old CPT-based authors to CPA Guest Authors we\'ve already created',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually migrate any authors.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
 	 * Migrate video content from meta into regular post content.
 	 */
-	public function cmd_trnn_migrate( $args, $assoc_args ) {
+	public function cmd_trnn_migrate_videos( $args, $assoc_args ) {
 		global $wpdb;
 
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
@@ -82,7 +168,7 @@ class TRNNMigrator implements InterfaceMigrator {
 							'compare' => '=',
 						],
 					],
-				] 
+				]
 			);
 		} else {
 			$post_id = $args[0];
@@ -155,6 +241,89 @@ class TRNNMigrator implements InterfaceMigrator {
 		WP_CLI::line( __( 'Completed' ) );
 	}
 
+	public function cmd_trnn_migrate_authors( $args, $assoc_args ) {
+
+		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
+
+		$dry_run = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
+
+		// Grab the posts to convert then.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			$posts = get_posts( [
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'meta_query'     => [ [
+					'key'     => 'bios',
+					'compare' => 'EXISTS',
+				] ],
+			] );
+		}
+
+		if ( empty( $posts ) ) {
+			WP_CLI::error( 'No posts found.' );
+		}
+
+		foreach ( $posts as $post ) {
+			WP_CLI::line( sprintf( 'Processing post %d', $post->ID ) );
+			$old_author_posts = get_post_meta( $post->ID, 'bios', true );
+			if ( empty( $old_author_posts ) ) {
+				WP_CLI::warning( \sprintf( 'No author found in post %d', $post->ID ) );
+				continue; // Skip it, 'cause there's no data to use.
+			}
+
+			// Get the new guest author using the original post IDs.
+			$new_guest_authors = $this->get_new_ga_by_original_id( $old_author_posts );
+			$coauthors = [];
+			foreach ( $new_guest_authors as $new_guest_author ) {
+				WP_CLI::line( sprintf( 'Retrieving guest author from ID %d', $new_guest_author ) );
+				$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'id', $new_guest_author );
+				WP_CLI::line( sprintf( 'Found author "%s"', $guest_author->user_nicename ) );
+				$coauthors[]  = $guest_author->user_nicename;
+			}
+			WP_CLI::line( 'Assigning GAs to post.' );
+			if ( true !== $dry_run ) {
+				$this->coauthors_plus->add_coauthors( $post->ID, $coauthors, $append_to_existing_users = false );
+			}
+		}
+
+		WP_CLI::success( sprintf( 'Finished processing %d posts', count( $posts ) ) );
+
+	}
+
+	protected function get_new_ga_by_original_id( $old_author_posts ) {
+
+		WP_CLI::line( 'Searching for new authors using original IDs...' );
+
+		$new_guest_authors = [];
+
+		// Loop through each old author post, finding the new GA for that author.
+		foreach ( $old_author_posts as $old_author_post ) {
+			$search = get_posts( [
+				'post_type'      => 'guest-author',
+				'post_status'    => 'any',
+				'posts_per_page' => 1,
+				'meta_query'     => [ [
+					'key'   => '_post_migrated_from',
+					'value' => $old_author_post,
+				] ],
+			] );
+			if ( ! empty( $search ) ) {
+				$new_guest_authors[] = $search[0]->ID;
+				WP_CLI::line( sprintf( 'Found new guest author %d from original ID %d', $search[0]->ID, $old_author_post ) );
+			} else {
+				WP_CLI::line( 'No new guest authors found.' );
+			}
+		}
+
+		return $new_guest_authors;
+	}
+
 	/**
 	 * Get synopses for a post.
 	 *
@@ -168,7 +337,7 @@ class TRNNMigrator implements InterfaceMigrator {
 		if ( ! $synopses_ids ) {
 			$synopses_ids = [];
 		}
-		
+
 		WP_CLI::line( sprintf( __( '%d synopses found for post %d' ), count( $synopses_ids ), $post_id ) );
 
 		foreach ( $synopses_ids as $synopsis_id ) {
@@ -183,11 +352,11 @@ class TRNNMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Get video for a post. This is designed for the WP auto-embed handling 
+	 * Get video for a post. This is designed for the WP auto-embed handling
 	 * in which video URLs on their own line get automatically converted into embeds.
 	 *
 	 * @param int $post_id Post ID.
-	 * @return string The video embed. 
+	 * @return string The video embed.
 	 */
 	protected function get_video( $post_id ) {
 		$video_id = get_post_meta( $post_id, 'trnn_youtubeurl', true );
