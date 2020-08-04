@@ -175,6 +175,25 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+		WP_CLI::add_command( 'newspack-content-migrator co-authors-link-guest-author-to-existing-user', array( $this, 'cmd_link_ga_to_user' ), [
+			'shortdesc' => "Links a Guest Author to an existing WP User.",
+			'synopsis'  => [
+				[
+					'type'        => 'assoc',
+					'name'        => 'ga_id',
+					'description' => 'Guest Author ID which will be linked to the existing WP User.',
+					'optional'    => false,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'user_id',
+					'description' => 'WP User ID to which to link the Guest Author to.',
+					'optional'    => false,
+					'repeating'   => false,
+				],
+			],
+		] );
 	}
 
 	/**
@@ -375,6 +394,42 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			count( $cpts ),
 			count( $errors )
 		) );
+	}
+
+	/**
+	 * Callable for the 'co-authors-link-guest-author-to-existing-user' command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_link_ga_to_user( $args, $assoc_args ) {
+		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
+
+		$ga_id   = isset( $assoc_args[ 'ga_id' ] ) ? (int) $assoc_args[ 'ga_id' ] : null;
+		$user_id = isset( $assoc_args[ 'user_id' ] ) ? (int) $assoc_args[ 'user_id' ] : null;
+
+		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'ID', $ga_id );
+		$user         = get_user_by( 'id', $user_id );
+		if (  ! $guest_author ) {
+			WP_CLI::error( sprintf( 'Guest Author by ID %d not found.', $ga_id ) );
+		}
+		if (  ! $user ) {
+			WP_CLI::error( sprintf( 'WP User by ID %d not found.', $user_id ) );
+		}
+
+		WP_CLI::line( sprintf( "Linking Guest Author '%s' (ID %d) to WP User '%s' (ID %d)", $guest_author->user_login, $ga_id, $user->user_login, $user_id ) );
+
+		// Since GAs and WP Users can't have the same login, update it if they're the same.
+		$cap_user_login = get_post_meta( $ga_id, 'cap-user_login', true );
+		if ( $cap_user_login == $user->user_nicename ) {
+			update_post_meta( $ga_id, 'cap-user_login', 'cap-' . $cap_user_login );
+		}
+
+		// WP User mapping.
+		update_post_meta( $ga_id, 'cap-linked_account', $user->user_login );
 	}
 
 	/**
