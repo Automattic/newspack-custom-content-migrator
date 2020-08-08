@@ -234,6 +234,8 @@ class SettingsMigrator implements InterfaceMigrator {
 			'page_on_front' => get_option( 'page_on_front' ),
 			// Posts page ID.
 			'page_for_posts' => get_option( 'page_for_posts' ),
+			// Donation page ID.
+			'newspack_donation_page_id' => get_option( 'newspack_donation_page_id' ),
 		);
 		$written = file_put_contents( $file, json_encode( $data ) );
 		if ( false === $written ) {
@@ -277,8 +279,8 @@ class SettingsMigrator implements InterfaceMigrator {
 			update_option( $option_name, $options[ $option_name ] );
 		}
 
-		// Update IDs for these.
-		$option_names = array( 'page_on_front', 'page_for_posts' );
+		// Update IDs for these Pages saved as option values, by referring to the PostsMigrator::META_KEY_ORIGINAL_ID meta.
+		$option_names = array( 'page_on_front', 'page_for_posts', 'newspack_donation_page_id' );
 		foreach ( $option_names as $option_name ) {
 			$original_id = isset( $options[ $option_name ] ) && ! empty( $options[ $option_name ] ) ? $options[ $option_name ] : null;
 			if ( null !== $original_id && 0 != $original_id) {
