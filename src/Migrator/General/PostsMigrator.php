@@ -18,11 +18,6 @@ class PostsMigrator implements InterfaceMigrator {
 	const STAGING_PAGES_EXPORT_FILE = 'newspack-staging_pages_all.xml';
 
 	/**
-	 * @var string Live site pages export file name.
-	 */
-	const LIVE_PAGES_UNIQUE_EXPORT_FILE = 'newspack-live_pages_unique.xml';
-
-	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -180,6 +175,8 @@ class PostsMigrator implements InterfaceMigrator {
 
 	/**
 	 * Actual exporting of posts to file.
+	 * NOTE: this function doesn't set the self::META_KEY_ORIGINAL_ID meta on exported posts, so be sure that's what you want to do.
+	 *       Otherwise, use the self::migrator_export_posts() function to set the meta, too.
 	 *
 	 * @param array  $post_ids    Post IDs.
 	 * @param string $output_dir  Output dir.
@@ -274,6 +271,21 @@ class PostsMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Updates titles of given pages with a prefix, and sets their statuses to drafts.
+	 *
+	 * @param array $page_ids IDs of pages.
+	 */
+	public function preserve_unique_pages_from_live_as_drafts( $page_ids ) {
+		foreach ( $page_ids as $id ) {
+			$page = get_post( $id );
+			$page->post_title  = '[Live] ' . $page->post_title;
+			$page->post_name   .= '-live_migrated';
+			$page->post_status = 'draft';
+			wp_update_post( $page );
+		}
+	}
+
+	/**
 	 * Callable for import-posts command.
 	 *
 	 * @param array $args
@@ -285,39 +297,40 @@ class PostsMigrator implements InterfaceMigrator {
 			WP_CLI::error( 'Invalid input dir.' );
 		}
 
-		// The particular way of how the pages get exported & imported here assures mainly that Staging site pages get
-		// advantage over the Live site pages (in cases such as identical slugs, but different content we'd like to preserve).
+		// The following Page migration strategy aims to achieve two things:
+		//      - to keep all the Pages from the Staging site,
+		//      - to keep only the unique (new, different) pages from Live, but import them as Drafts, with their titles and permalinks updated.
+
 		WP_CLI::line( 'Importing all Pages from Staging site and new pages from the Live site...' );
 
+		// First delete those Live Pages which we're not keeping.
 		WP_CLI::line( 'First clearing all Live site Pages which will be imported from Staging site to prevent duplicates...' );
-		$this->delete_pages_duplicated_on_staging_site();
+		$this->delete_duplicate_live_site_pages();
 
-		$post_ids_live = $this->get_all_pages();
-		if ( count( $post_ids_live ) > 0 ) {
-			WP_CLI::line( sprintf( 'Exporting %d unique Live site Pages to %s ...', count( $post_ids_live ), $input_dir . '/' . self::LIVE_PAGES_UNIQUE_EXPORT_FILE ) );
-			// Here not setting the self::META_KEY_ORIGINAL_ID meta for pages from Live (by not using self::migrator_export_posts).
-			$this->export_posts( $post_ids_live, $input_dir, self::LIVE_PAGES_UNIQUE_EXPORT_FILE );
+		// Get IDs of the unique Live Pages which we are keeping.
+		$pages_live_ids = $this->get_all_pages();
+
+		// Update the remaining Live Pages which we are keeping: save them as drafts, and change their permalinks and titles.
+		if ( count( $pages_live_ids ) > 0 ) {
+			$this->preserve_unique_pages_from_live_as_drafts( $pages_live_ids );
+			wp_cache_flush();
 		} else {
-			WP_CLI::warning( 'No unique Live site Pages found, none will be imported.' );
+			WP_CLI::warning( 'No unique Live site Pages found, continuing.' );
 		}
 
-		WP_CLI::line( 'Importing Pages from the Staging site (using `wp import`, might take a little longer) ...' );
+		// Import Pages from Staging site.
+		WP_CLI::line( 'Importing Pages from the Staging site (uses `wp import` and might take a bit longer) ...' );
 		$this->import_posts( $input_dir . '/' . self::STAGING_PAGES_EXPORT_FILE );
 
-		if ( count( $post_ids_live ) > 0 ) {
-			WP_CLI::line( 'Importing unique Pages from the Live site (using `wp import`, might take a little longer) ...' );
-			$this->import_posts( $input_dir . '/' . self::LIVE_PAGES_UNIQUE_EXPORT_FILE );
-		}
-		
 		wp_cache_flush();
 
 		WP_CLI::success( 'Done.' );
 	}
 
 	/**
-	 * Deletes all pages which will be imported from the Staging site.
+	 * Deletes all Live site Pages which will not be preserved, since they'll be imported from the Staging site anyway.
 	 */
-	public function delete_pages_duplicated_on_staging_site() {
+	public function delete_duplicate_live_site_pages() {
 		$post_ids = $this->get_all_pages_duplicates_on_staging();
 		if ( empty( $post_ids ) ) {
 			WP_CLI::success( 'No Pages found.' );
@@ -328,7 +341,6 @@ class PostsMigrator implements InterfaceMigrator {
 		foreach ( $post_ids as $id ) {
 			$progress->tick();
 			wp_delete_post( $id, true );
-			clean_post_cache( $id );
 		}
 		$progress->finish();
 
