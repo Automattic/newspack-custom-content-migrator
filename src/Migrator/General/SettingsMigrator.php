@@ -14,11 +14,6 @@ class SettingsMigrator implements InterfaceMigrator {
 	const PAGES_SETTINGS_FILENAME = 'newspack-settings-pages.json';
 
 	/**
-	 * @var string Site identity posts export filename.
-	 */
-	const SITE_IDENTITY_POSTS_FILENAME = 'newspack-site-identity-posts.xml';
-
-	/**
 	 * @var string Exported options for site identity.
 	 */
 	const SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME = 'newspack-site-identity-exported-options.json';
@@ -124,7 +119,7 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( 'Exporting site identity settings...' ) );
 
-		$result = $this->export_current_theme_site_identity_posts( $output_dir );
+		$result = $this->export_current_theme_site_identity( $output_dir );
 		if ( true === $result ) {
 			exit(0);
 		} else {
@@ -134,34 +129,37 @@ class SettingsMigrator implements InterfaceMigrator {
 		WP_CLI::success( 'Done.' );
 	}
 
-	private function export_current_theme_site_identity_posts( $output_dir ) {
+	/**
+	 * Exports all relevant site identity settings, such as current Theme mods and site icon.
+	 *
+	 * @param string $output_dir
+	 *
+	 * @return bool Success.
+	 */
+	private function export_current_theme_site_identity( $output_dir ) {
 		wp_cache_flush();
 
 		// Get theme mods with IDs.
-		$export_mods = array();
-
+		$json_data       = [];
 		$custom_logo_id = get_theme_mod( 'custom_logo' );
 		if ( false !== $custom_logo_id ) {
-			$export_mods[ 'custom_logo' ] = $custom_logo_id;
+			$json_data[ 'custom_logo' ]      = $custom_logo_id;
+			$json_data[ 'custom_logo_file' ] = get_attached_file( $custom_logo_id );
 		}
 		$newspack_footer_logo_id = get_theme_mod( 'newspack_footer_logo' );
 		if ( false !== $newspack_footer_logo_id ) {
-			$export_mods[ 'newspack_footer_logo' ] = $newspack_footer_logo_id;
+			$json_data[ 'newspack_footer_logo' ]      = $newspack_footer_logo_id;
+			$json_data[ 'newspack_footer_logo_file' ] = get_attached_file( $newspack_footer_logo_id );
 		}
 
-		$ids = array_values( $export_mods );
-		if ( empty( $ids ) ) {
-			return false;
+		// Get site icon Post (attachment) ID.
+		$site_icon_id = get_option( 'site_icon', false );
+		if ( $site_icon_id ) {
+			$json_data[ 'site_icon_file' ] = get_attached_file( $site_icon_id );
 		}
 
 		// Write JSON file for reference to what was exported.
-		$written = file_put_contents( $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME, json_encode( $export_mods ) );
-		if ( false === $written ) {
-			return false;
-		}
-
-		// Export the attachment post types.
-		return PostsMigrator::get_instance()->migrator_export_posts( $ids, $output_dir, self::SITE_IDENTITY_POSTS_FILENAME );
+		return file_put_contents( $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME, json_encode( $json_data ) );
 	}
 
 	/**
@@ -176,48 +174,74 @@ class SettingsMigrator implements InterfaceMigrator {
 			WP_CLI::error( 'Invalid input dir.' );
 		}
 
-		$posts_import_file   = $input_dir . '/' . self::SITE_IDENTITY_POSTS_FILENAME;
 		$options_import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
-		if ( ! is_file( $posts_import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $posts_import_file ) );
-		}
 		if ( ! is_file( $options_import_file ) ) {
 			WP_CLI::error( sprintf( 'Can not find %s.', $options_import_file ) );
 		}
 
 		WP_CLI::line( 'Importing site identity settings...' );
 
-		PostsMigrator::get_instance()->import_posts( $posts_import_file );
-		$imported_mods = json_decode( file_get_contents( $options_import_file ), true );
-		$this->update_theme_mod_site_identity_post_ids( $imported_mods );
+		// Update current Theme mods.
+		$imported_mods_and_options = json_decode( file_get_contents( $options_import_file ), true );
+
+		// Import and set logo.
+		$logo_id = null;
+		if ( isset( $imported_mods_and_options['custom_logo_file'] ) && ! empty( $imported_mods_and_options['custom_logo_file'] ) ) {
+			$logo_file = $imported_mods_and_options['custom_logo_file'];
+			if ( file_exists( $logo_file ) ) {
+				$logo_id   = PostsMigrator::get_instance()->import_media_from_path( $logo_file );
+			}
+		}
+
+		// Import and set footer logo.
+		$footer_logo_id = null;
+		if ( isset( $imported_mods_and_options['newspack_footer_logo_file'] ) && ! empty( $imported_mods_and_options['newspack_footer_logo_file'] ) ) {
+			$footer_logo_file = $imported_mods_and_options['newspack_footer_logo_file'];
+			if ( file_exists( $footer_logo_file ) ) {
+				$footer_logo_id = PostsMigrator::get_instance()->import_media_from_path( $footer_logo_file );
+			}
+		}
+
+		// Set current Theme mods IDs.
+		$this->update_theme_mod_site_identity_post_ids( $logo_id, $footer_logo_id );
+
+		// Import and set the site icon.
+		if ( isset( $imported_mods_and_options['site_icon_file'] ) && ! empty( $imported_mods_and_options['site_icon_file'] ) ) {
+			$icon_file = $imported_mods_and_options['site_icon_file'];
+			if ( file_exists( $icon_file ) ) {
+				$icon_id   = PostsMigrator::get_instance()->import_media_from_path( $icon_file );
+				if ( is_numeric( $icon_id ) ) {
+					update_option( 'site_icon', $icon_id );
+				}
+			}
+		}
 
 		WP_CLI::success( 'Done.' );
 	}
 
-	private function update_theme_mod_site_identity_post_ids( $imported_mods ) {
+	/**
+	 * Updates the Theme mods logo images IDs.
+	 *
+	 * @param int $logo_id
+	 * @param int $footer_logo_id
+	 */
+	private function update_theme_mod_site_identity_post_ids( $logo_id = null, $footer_logo_id = null ) {
 		wp_cache_flush();
 
-		// Update values/IDs for these mod names only.
-		$mods_with_post_id = array(
-			'custom_logo',
-			'newspack_footer_logo',
-		);
-
-		$posts_migrator = PostsMigrator::get_instance();
-		foreach ( $imported_mods as $mod_name => $original_post_id ) {
-			if ( ! in_array( $mod_name, $mods_with_post_id ) ) {
-				continue;
-			}
-
-			$new_post_id = $posts_migrator->get_current_post_id_from_original_post_id( $original_post_id );
-			if ( $new_post_id ) {
-				set_theme_mod( $mod_name, $new_post_id );
-			}
+		if ( $logo_id ) {
+			set_theme_mod( 'custom_logo', $logo_id );
 		}
-
-		wp_cache_flush();
+		if ( $footer_logo_id ) {
+			set_theme_mod( 'newspack_footer_logo', $footer_logo_id );
+		}
 	}
 
+	/**
+	 * Callable for the `newspack-content-migrator export-pages-settings` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
 	public function cmd_export_pages_settings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
