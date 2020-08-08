@@ -177,9 +177,25 @@ class CampaignsMigrator implements InterfaceMigrator {
 	 */
 	private function include_wp_importer_dependencies() {
 		require_once( ABSPATH . 'wp-admin/includes/class-wp-importer.php' );
-		require_once( ABSPATH . 'wp-content/plugins/wordpress-importer/class-wp-import.php' );
-		require_once( ABSPATH . 'wp-content/plugins/wordpress-importer/parsers/class-wxr-parser.php' );
-		require_once( ABSPATH . 'wp-content/plugins/wordpress-importer/parsers/class-wxr-parser-simplexml.php' );
+
+		// For the following several classes, consider the different install structure on Atomic.
+		$plugin_path = defined( 'WP_PLUGIN_DIR' ) ? WP_PLUGIN_DIR : ABSPATH . 'wp-content/plugins';
+		if ( file_exists( ABSPATH . 'wp-content/plugins/wordpress-importer/class-wp-import.php' ) ) {
+			require_once( ABSPATH . 'wp-content/plugins/wordpress-importer/class-wp-import.php' );
+		} else {
+			require_once( $plugin_path . '/wordpress-importer/class-wp-import.php' );
+		}
+		if ( file_exists( ABSPATH . 'wp-content/plugins/wordpress-importer/parsers/class-wxr-parser.php' ) ) {
+			require_once( ABSPATH . 'wp-content/plugins/wordpress-importer/parsers/class-wxr-parser.php' );
+		} else {
+			require_once( $plugin_path . '/wordpress-importer/parsers/class-wxr-parser.php' );
+		}
+		if ( file_exists( ABSPATH . 'wp-content/plugins/wordpress-importer/parsers/class-wxr-parser-simplexml.php' ) ) {
+			require_once( ABSPATH . 'wp-content/plugins/wordpress-importer/parsers/class-wxr-parser-simplexml.php' );
+		} else {
+			require_once( $plugin_path . '/wordpress-importer/parsers/class-wxr-parser-simplexml.php' );
+		}
+
 		require_once( ABSPATH . 'wp-admin/includes/import.php' );
 		require_once( ABSPATH . 'wp-admin/includes/post.php' );
 	}
