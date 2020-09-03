@@ -76,9 +76,36 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 				continue;
 			}
 
-			$regex    = '#\s*(<!-- wp:image[^{]*{[^}]*"id":' . absint( $thumbnail_id ) . '.*\/wp:image -->)#sU';
+			$regex    = '#\s*(<!-- wp:image[^{]*{[^}]*"id":' . absint( $thumbnail_id ) . '.*\/wp:image -->)#isU';
 			$content  = get_post_field( 'post_content', $id );
 			$replaced = preg_replace( $regex, '', $content, 1 );
+
+			// If we are unable to find the featured images by ID, see if we can use the image URL.
+			if ( $content === $replaced ) {
+				$image_src = wp_get_attachment_image_src( $thumbnail_id, 'full' );
+				if ( ! $image_src ) {
+					continue;
+				}
+
+				$image_path = wp_parse_url( $image_src[0] )['path'];
+				$image_path = explode( '.', $image_path )[0]; // Remove media extension (jpg, etc.).
+
+				$src_regex = '#<!-- wp:image.*' . addslashes( $image_path ) . '.*\/wp:image -->#isU';
+				$replaced = preg_replace( $src_regex, '', $content, 1 );
+			}
+
+			// If still no luck, see if we can use the attachment page.		
+			if ( $content === $replaced ) {
+				$image_page = get_permalink( $thumbnail_id );
+				if ( ! $image_page ) {
+					continue;
+				}
+
+				$page_path = wp_parse_url( $image_page )['path'];
+
+				$page_regex = '#<!-- wp:image.*' . addslashes( $page_path ) . '.*\/wp:image -->#isU';
+				$replaced = preg_replace( $page_regex, '', $content, 1 );
+			}
 
 			if ( $content != $replaced ) {
 				$updated = [
