@@ -33,8 +33,8 @@ class TRNNMigrator implements InterfaceMigrator {
 	 */
 	private function validate_co_authors_plus_dependencies() {
 		if (
-			( ! is_a( $this->coauthors_plus, CoAuthors_Plus ) ) ||
-			( ! is_a( $this->coauthors_guest_authors, CoAuthors_Guest_Authors ) )
+			( ! is_a( $this->coauthors_plus, 'CoAuthors_Plus' ) ) ||
+			( ! is_a( $this->coauthors_guest_authors, 'CoAuthors_Guest_Authors' ) )
 		) {
 			return false;
 		}
@@ -251,29 +251,50 @@ class TRNNMigrator implements InterfaceMigrator {
 		$dry_run = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
 		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
 
+		$author_meta_keys = [ 'bios', 'host-author', 'collaborators' ];
+
 		// Grab the posts to convert then.
 		if ( $post_id ) {
-			$posts = [ get_post( $post_id ) ];
+			$posts = [ $post_id ];
 		} else {
-			$posts = get_posts( [
-				'posts_per_page' => -1,
-				'post_type'      => 'post',
-				'meta_query'     => [ [
-					'key'     => 'bios',
-					'compare' => 'EXISTS',
-				] ],
-			] );
+			$posts = [];
+
+			// This approach actually seems faster than trying to do one query that gets all posts with all metas at the same time.
+			foreach ( $author_meta_keys as $author_meta_key ) {
+				$query_args = [
+					'posts_per_page' => -1,
+					'post_type'      => 'post',
+					'fields'         => 'ids',
+					'meta_query'     => [
+						'key'     => $author_meta_key,
+						'compare' => 'EXISTS',
+					],
+				];
+				$posts = array_merge( $posts, get_posts( $query_args ) );
+			}
+
+			$posts = array_unique( $posts );
 		}
 
 		if ( empty( $posts ) ) {
 			WP_CLI::error( 'No posts found.' );
 		}
 
-		foreach ( $posts as $post ) {
-			WP_CLI::line( sprintf( 'Processing post %d', $post->ID ) );
-			$old_author_posts = get_post_meta( $post->ID, 'bios', true );
-			if ( empty( $old_author_posts ) ) {
-				WP_CLI::warning( \sprintf( 'No author found in post %d', $post->ID ) );
+		foreach ( $posts as $post_id ) {
+			@ob_flush();
+			WP_CLI::line( sprintf( 'Processing post %d', $post_id ) );
+
+			$old_author_posts = false;
+			foreach ( $author_meta_keys as $author_meta_key ) {
+				$old_author_posts = get_post_meta( $post_id, $author_meta_key, true );
+				WP_CLI::line( sprintf( '%d | %s | %s', $post_id, $author_meta_key, maybe_serialize( $old_author_posts ) ) );
+				if ( $old_author_posts ) {
+					break;
+				}
+			}
+
+			if ( ! $old_author_posts ) {
+				WP_CLI::warning( \sprintf( 'No author found in post %d', $post_id ) );
 				continue; // Skip it, 'cause there's no data to use.
 			}
 
@@ -288,7 +309,7 @@ class TRNNMigrator implements InterfaceMigrator {
 			}
 			WP_CLI::line( 'Assigning GAs to post.' );
 			if ( true !== $dry_run ) {
-				$this->coauthors_plus->add_coauthors( $post->ID, $coauthors, $append_to_existing_users = false );
+				$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users = false );
 			}
 		}
 
