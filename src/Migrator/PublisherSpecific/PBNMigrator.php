@@ -66,8 +66,6 @@ class PBNMigrator implements InterfaceMigrator {
 			] );
 		}
 
-		$post_ids = [ 219167 ]; // Test.
-
 		WP_CLI::line( sprintf( 'Checking %d posts.', count( $post_ids ) ) );
 
 		$started = time();
