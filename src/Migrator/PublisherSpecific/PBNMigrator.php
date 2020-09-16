@@ -66,7 +66,7 @@ class PBNMigrator implements InterfaceMigrator {
 			] );
 		}
 
-		$post_ids = [ 1 ]; // Test.
+		$post_ids = [ 219167 ]; // Test.
 
 		WP_CLI::line( sprintf( 'Checking %d posts.', count( $post_ids ) ) );
 
@@ -91,16 +91,7 @@ class PBNMigrator implements InterfaceMigrator {
 			$caption = $matches[1];
 			$remove = $matches[0];
 
-			// Get the featured image so we can add the caption to it.
-			$metadata = wp_get_attachment_metadata( $thumbnail_id );
-			if ( ! empty( $metadata['image_meta']['caption'] ) ) {
-				WP_CLI::warning( sprintf(
-					'Not updating caption for attachment %d because one exists already.',
-					$thumbnail_id
-				) );
-				continue; // Don't change existing captions.
-			}
-
+			// PSA: Technically this next bit with metadata is irrelevant but I'm leaving it in anyway.
 			$metadata['image_meta']['caption'] = $caption;
 			$update_caption = wp_update_attachment_metadata( $thumbnail_id, $metadata );
 			if ( ! $update_caption ) {
@@ -112,12 +103,36 @@ class PBNMigrator implements InterfaceMigrator {
 				WP_CLI::success( sprintf( 'Updated caption for %d', $thumbnail_id ) );
 			}
 
+			// Update the "excerpt" for the attachment post because apparently
+			// we live in bizarro world where excerpt === caption.
+			$excerpt = get_the_excerpt( $thumbnail_id );
+			if ( ! empty( $excerpt ) ) {
+				WP_CLI::warning( sprintf(
+					'Not updating caption for attachment %d because one exists already.',
+					$thumbnail_id
+				) );
+			} else {
+				$result = wp_update_post( [
+					'ID' => $thumbnail_id,
+					'post_excerpt' => $caption,
+				] );
+				if ( is_wp_error( $result ) ) {
+					WP_CLI::warning( sprintf(
+						'Failed to update caption on #%d because %s',
+						$thumbnail_id,
+						$result->get_error_messages()
+					) );
+				} else {
+					WP_CLI::success( sprintf( 'Updated caption on #%d', $thumbnail_id ) );
+				}
+			}
+
 			// Remove the broken image and update the content.
 			$replaced = str_replace( $remove, '', $content );
 			if ( $content != $replaced ) {
 				$updated = [
 					'ID'           => $id,
-					'post_content' => $replaced
+					'post_content' => $replaced,
 				];
 				$result = wp_update_post( $updated );
 				if ( is_wp_error( $result ) ) {
