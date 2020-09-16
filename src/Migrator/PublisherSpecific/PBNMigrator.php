@@ -91,18 +91,6 @@ class PBNMigrator implements InterfaceMigrator {
 			$caption = $matches[1];
 			$remove = $matches[0];
 
-			// PSA: Technically this next bit with metadata is irrelevant but I'm leaving it in anyway.
-			$metadata['image_meta']['caption'] = $caption;
-			$update_caption = wp_update_attachment_metadata( $thumbnail_id, $metadata );
-			if ( ! $update_caption ) {
-				WP_CLI::warning( sprintf(
-					'Failed to update caption for attachemnt %d for some reason.',
-					$thumbnail_id
-				) );
-			} else {
-				WP_CLI::success( sprintf( 'Updated caption for %d', $thumbnail_id ) );
-			}
-
 			// Update the "excerpt" for the attachment post because apparently
 			// we live in bizarro world where excerpt === caption.
 			$excerpt = get_the_excerpt( $thumbnail_id );
