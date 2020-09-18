@@ -71,7 +71,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 
 		$tags = get_tags();
 		if ( ! $tags ) {
-			WP_CLI::error( 'No tags were found 🤔.' );
+			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
 		}
 
 		// Check the parent Page for Pages we're about to create.
