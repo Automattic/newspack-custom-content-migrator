@@ -141,7 +141,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 					add_post_meta( $new_page_id, '_migrated_from_tag', $tag->slug );
 
 					// Create a redirect rule to redirect this Tag's legacy URL to the new Page.
-					$this->create_redirection_from_tag_to_page(
+					$this->create_redirection_rule(
 						'Archive Tag to Page -- ' . $tag->slug,
 						'/about/' . $tag->slug . '[/]?',
 						get_the_permalink( $new_page_id )
@@ -160,7 +160,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				}
 
 				// Redirect config: if we didn't create a Page, redirect this Tag's old URL `/about/{TAG_SLUG}` to the new `/tag/{TAG_SLUG}` URL.
-				$this->create_redirection_from_tag_to_page(
+				$this->create_redirection_rule(
 					'Archive Tag to new URL -- ' . $tag->slug,
 					'/about/' . $tag->slug . '[/]?',
 					'/tag/' . $tag->slug
@@ -232,7 +232,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	 * @param string $url_from A regex flavored URL, param such as is used by Red_Item::create().
 	 * @param string $url_to   An absolute URL to redirect to.
 	 */
-	private function create_redirection_from_tag_to_page( $title, $url_from, $url_to ) {
+	private function create_redirection_rule( $title, $url_from, $url_to ) {
 		\Red_Item::create( [
 			'action_code' => 301,
 			'action_data' => [
