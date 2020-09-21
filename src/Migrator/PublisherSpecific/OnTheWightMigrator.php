@@ -143,7 +143,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 					// Create a redirect rule to redirect this Tag's legacy URL to the new Page.
 					$this->create_redirection_rule(
 						'Archive Tag to Page -- ' . $tag->slug,
-						'/about/' . $tag->slug . '[/]?',
+						'/tag/' . $tag->slug . '[/]?',
 						get_the_permalink( $new_page_id )
 					);
 
