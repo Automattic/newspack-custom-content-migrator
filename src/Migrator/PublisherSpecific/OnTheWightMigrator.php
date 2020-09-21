@@ -117,6 +117,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 
 					if ( $dry_run ) {
 						WP_CLI::line( sprintf( '👍 creating Page from Tag %s', $tag->slug ) );
+						WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_tag', $tag->slug ) );
 					} else {
 						// Create a Page.
 						$post_details = array(
@@ -151,7 +152,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 							$url_from,
 							get_the_permalink( $new_page_id )
 						);
-						
+
 						WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
 					}
 
