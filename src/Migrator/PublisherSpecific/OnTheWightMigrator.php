@@ -117,38 +117,45 @@ class OnTheWightMigrator implements InterfaceMigrator {
 
 					if ( $dry_run ) {
 						WP_CLI::line( sprintf( '👍 creating Page from Tag %s', $tag->slug ) );
-						continue;
-					}
+					} else {
+						// Create a Page.
+						$post_details = array(
+							'post_title'   => $h1_node->text,
+							'post_content' => $description_without_heading,
+							'post_parent'  => $parent_page->ID,
+							'post_author'  => 1,
+							'post_type'    => 'page',
+							'post_status'  => 'publish',
+						);
+						$new_page_id  = wp_insert_post( $post_details );
+						if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
+							WP_CLI::error( sprintf(
+								"Something went wrong when trying to create a Page from Tag term_id = %d. 🥺 So sorry about that...",
+								$tag->term_id
+							) );
+						}
 
-					// Create a Page.
-					$post_details = array(
-						'post_title'   => $h1_node->text,
-						'post_content' => $description_without_heading,
-						'post_parent'  => $parent_page->ID,
-						'post_author'  => 1,
-						'post_type'    => 'page',
-						'post_status'  => 'publish',
-					);
-					$new_page_id  = wp_insert_post( $post_details );
-					if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
-						WP_CLI::error( sprintf(
-							"Something went wrong when trying to create a Page from Tag term_id = %d. 🥺 So sorry about that...",
-							$tag->term_id
-						) );
-					}
+						// Add meta to the new page to indicate which tag it came from.
+						add_post_meta( $new_page_id, '_migrated_from_tag', $tag->slug );
 
-					// Add meta to the new page to indicate which tag it came from.
-					add_post_meta( $new_page_id, '_migrated_from_tag', $tag->slug );
+						WP_CLI::line( sprintf( '👍 created Page ID %d from Tag %s', $new_page_id, $tag->slug ) );
+					}
 
 					// Create a redirect rule to redirect this Tag's legacy URL to the new Page.
-					$this->create_redirection_rule(
-						'Archive Tag to Page -- ' . $tag->slug,
-						'/tag/' . $tag->slug . '[/]?',
-						get_the_permalink( $new_page_id )
-					);
+					$url_from = '/tag/' . $tag->slug . '[/]?';
+					if ( $dry_run ) {
+						WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
+					} else {
+						$this->create_redirection_rule(
+							'Archive Tag to Page -- ' . $tag->slug,
+							$url_from,
+							get_the_permalink( $new_page_id )
+						);
+						
+						WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
+					}
 
 					$is_tag_converted_to_page = true;
-					WP_CLI::line( sprintf( '👍 created Page ID %d from Tag %s', $new_page_id, $tag->slug ) );
 				}
 			}
 
