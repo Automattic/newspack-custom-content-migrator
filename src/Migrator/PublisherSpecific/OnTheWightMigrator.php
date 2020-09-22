@@ -124,6 +124,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 							'post_title'   => $h1_node->text,
 							'post_content' => $description_without_heading,
 							'post_parent'  => $parent_page->ID,
+							'post_name'    => $tag->slug,
 							'post_author'  => 1,
 							'post_type'    => 'page',
 							'post_status'  => 'publish',
