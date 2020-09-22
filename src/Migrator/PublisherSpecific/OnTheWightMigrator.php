@@ -136,7 +136,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 					} else {
 						// Fix broken image URLs in the tag descriptions.
 						$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
-						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $string );
+						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
 
 						// Create a Page.
 						$post_details = array(
@@ -253,7 +253,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 					} else {
 						// Fix broken image URLs in the category descriptions.
 						$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
-						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $string );
+						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
 
 						// Create a Page.
 						$post_details = array(
@@ -279,7 +279,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 					}
 
 					// Create a redirect rule to redirect this Category's legacy URL to the new Page.
-					$url_from = '/' . $category->slug . '[/]?';
+					$url_from = '/category/' . $category->slug . '[/]?';
 					if ( $dry_run ) {
 						WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
 					} else {
