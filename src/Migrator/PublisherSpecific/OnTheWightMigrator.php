@@ -55,6 +55,21 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-categories-to-pages',
+			[ $this, 'cmd_categories_to_pages' ],
+			[
+				'shortdesc' => 'Migrates On The Wight categories containing HTML description to Pages, and does redirect corrections.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => __('Perform a dry run, making no changes.'),
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -185,6 +200,122 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Callable for the `newspack-content-migrator cmd_tags_to_pages command`.
+	 */
+	public function cmd_categories_to_pages( $args, $assoc_args ) {
+		$dry_run = $assoc_args['dry-run'] ? true : false;
+
+		if ( ! class_exists( \Red_Item::class ) ) {
+			WP_CLI::error( '🤭 The johngodley/redirection plugin is required for this command to work. Please first install and activate it.' );
+		}
+
+		WP_CLI::confirm( "❗ Warning/info ❗ Only run this command once since re-running it would create duplicate Pages and redirection rules. There's also the `--dry-run` flag you can use. Continue?" );
+
+		$categories = get_categories();
+		if ( ! $categories ) {
+			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
+		}
+
+		if ( ! $dry_run ) {
+			// Update category Base URL and rewrite rules to use `/category/{category_slug}` URL schema for categories.
+			$this->update_wp_category_base_and_existing_rewrite_rules( 'topic/', 'category/' );
+		}
+
+		// His name is Dom. Probably short for Dominic. (who says we can't have fun while migrating content... :) )
+		$dom_parser = new Dom;
+
+		foreach ( $categories as $category ) {
+
+			$is_category_converted_to_page = false;
+
+			// Don't create Pages for Categories without description.
+			if ( ! empty( $category->description ) ) {
+
+				$dom_parser->loadStr( $category->description );
+				$h1_node = $dom_parser->find( 'h1', 0 );
+				if ( ! $h1_node ) {
+					continue;
+				}
+
+				// Get the rest of the description without the heading part.
+				$heading_html                = $h1_node->outerHtml();
+				$description_without_heading = trim( substr(
+					$category->description,
+					strpos( $category->description, $heading_html ) + strlen( $heading_html )
+				) );
+
+				// If there's some more HTML in the description, create a Page for the Tag.
+				if ( $this->has_string_html( $description_without_heading ) ) {
+
+					if ( $dry_run ) {
+						WP_CLI::line( sprintf( '👍 creating Page from Category %s', $category->slug ) );
+						WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_category', $category->slug ) );
+					} else {
+						// Fix broken image URLs in the category descriptions.
+						$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
+						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $string );
+
+						// Create a Page.
+						$post_details = array(
+							'post_title'   => $h1_node->text,
+							'post_content' => $description_without_heading,
+							'post_parent'  => $parent_page->ID,
+							'post_name'    => $category->slug,
+							'post_author'  => 1,
+							'post_type'    => 'page',
+							'post_status'  => 'publish',
+						);
+						$new_page_id  = wp_insert_post( $post_details );
+						if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
+							WP_CLI::error( sprintf(
+								"Something went wrong when trying to create a Page from Category id = %d. 🥺 So sorry about that...",
+								$category->term_id
+							) );
+						}
+
+						// Add meta to the new page to indicate which category it came from.
+						add_post_meta( $new_page_id, '_migrated_from_category', $category->slug );
+
+						WP_CLI::line( sprintf( '👍 created Page ID %d from Category %s', $new_page_id, $category->slug ) );
+					}
+
+					// Create a redirect rule to redirect this Category's legacy URL to the new Page.
+					$url_from = '/' . $category->slug . '[/]?';
+					if ( $dry_run ) {
+						WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
+					} else {
+						$this->create_redirection_rule(
+							'Archive Category to Page -- ' . $category->slug,
+							$url_from,
+							get_the_permalink( $new_page_id )
+						);
+
+						WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
+					}
+
+					$is_category_converted_to_page = true;
+				}
+			}
+
+			if ( ! $is_category_converted_to_page ) {
+				WP_CLI::line( sprintf( '✓ creating redirection rule for updated Category URL %s', $category->slug ) );
+
+				if ( ! $dry_run ) {
+					// Redirect config: if we didn't create a Page, redirect this Category's old URL `/{CATEGORY_SLUG}` to the new `/category/{CATEGORY_SLUG}` URL.
+					$this->create_redirection_rule(
+						'Archive Tag to new URL -- ' . $category->slug,
+						'/' . $category->slug . '[/]?',
+						'/category/' . $category->slug
+					);
+				}
+
+			}
+		}
+
+		WP_CLI::line( "All done! 🙌 Oh, and you'll probably want to run `wp newspack-content-converter reset` next, and run the conversion for these new pages, too." );
+	}
+
+	/**
 	 * Checks whether the given string contains HTML.
 	 *
 	 * @param $string
@@ -227,6 +358,35 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		foreach ( $rewrite_rules as $pattern => $url ) {
 			if ( 0 === strpos( $pattern, $old_tag_base ) ) {
 				$updated_pattern                           = $new_tag_base . substr( $pattern, strlen( $old_tag_base ) );
+				$updated_rewrite_rules[ $updated_pattern ] = $url;
+			} else {
+				$updated_rewrite_rules[ $pattern ] = $url;
+			}
+		}
+
+		if ( $rewrite_rules != $updated_rewrite_rules ) {
+			update_option( 'rewrite_rules', $updated_rewrite_rules );
+		}
+	}
+
+	/**
+	 * Updates WP's categories URL schema config, and updates existing rewrite rules too.
+	 *
+	 * @param string $old_category_base E.g. '/'.
+	 * @param string $new_category_base E.g. 'category/'.
+	 */
+	private function update_wp_category_base_and_existing_rewrite_rules( $old_category_base, $new_category_base ) {
+
+		// 1/2 Update the Category base; if the Category Base" option is left empty, WP will use the `/category/{CATEGORY_SLUG}` schema by default, so let's do that!
+		update_option( 'category_base', '' );
+
+		// 2/2 Update existing WP rewrite rules from `/topic/{CATEGORY_SLUG}` to `/category/{CATEGORY_SLUG}`.
+		$rewrite_rules         = get_option( 'rewrite_rules' );
+		$updated_rewrite_rules = [];
+
+		foreach ( $rewrite_rules as $pattern => $url ) {
+			if ( 0 === strpos( $pattern, $old_category_base ) ) {
+				$updated_pattern                           = $new_category_base . substr( $pattern, strlen( $old_category_base ) );
 				$updated_rewrite_rules[ $updated_pattern ] = $url;
 			} else {
 				$updated_rewrite_rules[ $pattern ] = $url;
