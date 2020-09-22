@@ -211,7 +211,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 
 		WP_CLI::confirm( "❗ Warning/info ❗ Only run this command once since re-running it would create duplicate Pages and redirection rules. There's also the `--dry-run` flag you can use. Continue?" );
 
-		$categories = get_categories();
+		$categories = get_categories( [ 'hide_empty' => false, ] );
 		if ( ! $categories ) {
 			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
 		}
