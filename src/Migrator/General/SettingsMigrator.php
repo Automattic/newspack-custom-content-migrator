@@ -121,12 +121,11 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$result = $this->export_current_theme_site_identity( $output_dir );
 		if ( true === $result ) {
+			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
 			exit(1);
 		}
-
-		WP_CLI::success( 'Done.' );
 	}
 
 	/**
