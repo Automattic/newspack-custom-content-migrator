@@ -75,8 +75,8 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		}
 
 		// Check the parent Page for Pages we're about to create.
-		$parent_page_slug = 'about-us';
-		$parent_page      = get_page_by_path( 'about-us' );
+		$parent_page_slug = 'about';
+		$parent_page      = get_page_by_path( $parent_page_slug );
 		if ( ! $parent_page ) {
 			WP_CLI::error( sprintf(
 				"Could not find parent Page with slug '%s'... 🤭 Please edit this Migrator, update the hard-coded parent Page slug, and then give it another spin.",
