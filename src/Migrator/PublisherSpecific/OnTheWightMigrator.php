@@ -303,8 +303,9 @@ class OnTheWightMigrator implements InterfaceMigrator {
 					// Redirect config: if we didn't create a Page, redirect this Category's old URL `/{CATEGORY_SLUG}` to the new `/category/{CATEGORY_SLUG}` URL.
 					$this->create_redirection_rule(
 						'Archive Tag to new URL -- ' . $category->slug,
-						'/' . $category->slug . '[/]?',
-						'/category/' . $category->slug
+						'/' . $category->slug . '/',
+						'/category/' . $category->slug,
+						false // Not a regex.
 					);
 				}
 
@@ -404,7 +405,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	 * @param string $url_from A regex flavored URL, param such as is used by Red_Item::create().
 	 * @param string $url_to   An absolute URL to redirect to.
 	 */
-	private function create_redirection_rule( $title, $url_from, $url_to ) {
+	private function create_redirection_rule( $title, $url_from, $url_to, $regex = true ) {
 		\Red_Item::create( [
 			'action_code' => 301,
 			'action_data' => [
@@ -416,7 +417,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				'source' => [
 					'flag_case'     => false,
 					'flag_query'    => 'exact',
-					'flag_regex'    => true,
+					'flag_regex'    => $regex,
 					'flag_trailing' => false,
 				],
 			],
