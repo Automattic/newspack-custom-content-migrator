@@ -5,6 +5,8 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use PHPHtmlParser\Dom as Dom;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator as WpBlockManipulator;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator as SquareBracketsElementManipulator;
 
 /**
  * Custom migration scripts for On The Wight.
@@ -55,6 +57,110 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-helper-analyze-used-shortcodes',
+			[ $this, 'cmd_helper_analyze_used_shortcodes' ],
+			[
+				'shortdesc' => 'Helper command, scans all content for used shortcodes, outputs the shortcode designations with Post count or exact Post IDs where they were used.',
+			]
+		);
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator onthewight-helper-analyze-used-shortcodes`.
+	 */
+	public function cmd_helper_analyze_used_shortcodes( $args, $assoc_args ) {
+		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
+		}
+
+		global $wpdb;
+		$block_manipulator = new WpBlockManipulator;
+		$shortcodes = [];
+
+		WP_CLI::line( 'Fetching Posts...' );
+		$results = $wpdb->get_results( $wpdb->prepare( sprintf ("SELECT ID FROM %s WHERE post_status = 'publish' and post_type = 'post';", $wpdb->prefix . 'posts' ) ) );
+		if ( ! $results ) {
+			WP_CLI::error( 'No public Posts found 🤭 Highly dubious!' );
+		}
+
+		foreach ( $results as $k => $result ) {
+
+			$post_id = (int) $result->ID;
+			$post    = get_post( $post_id );
+			$content = $post->post_content;
+
+			// Get WP Shortcode blocks.
+			$shortcode_block_matches = $block_manipulator->match_wp_block( 'wp:shortcode', $content );
+			if ( null === $shortcode_block_matches ) {
+				continue;
+			}
+
+			// Loop through the preg_match_all result with Shortcode Blocks matches.
+			foreach ( $shortcode_block_matches[0] as $key => $match ) {
+
+				$shortcode_block = $shortcode_block_matches[0][ $key ][0];
+
+				// Now get the Shortcodes inside this block.
+				$shortcode_designations_matches = $this->match_all_shortcode_designations( $shortcode_block );
+				if ( ! isset( $shortcode_designations_matches[1][0] ) || empty( $shortcode_designations_matches[1][0] ) ) {
+					continue;
+				}
+
+				// Check if this designation was saved to the $shortcodes before.
+				$key_existing = null;
+				foreach ( $shortcodes as $k => $shortcodes_found_element ) {
+					if ( $shortcode_designations_matches[1] === $shortcodes_found_element[ 'shortcode_matches' ] ) {
+						$key_existing = $k;
+						break;
+					}
+				}
+
+				// Add to list of shortcodes, and the Post ID too.
+				if ( ! is_null( $key_existing ) ) {
+					$shortcodes[ $key_existing ][ 'ids' ][] = $post_id;
+				} else {
+					$shortcodes[] = [
+						'shortcode_matches' => $shortcode_designations_matches[1],
+						'ids' => [ $post_id ]
+					];
+				}
+			}
+		}
+
+		// Output found shortcodes ordered ascending by number of Posts they're used in.
+		$results_shortcodes_by_usage = [];
+		foreach ( $shortcodes as $shortcode ) {
+			$results_shortcodes_by_usage[ count( $shortcode['ids'] ) ] .=
+				( isset( $results_shortcodes_by_usage[ count( $shortcode['ids'] ) ] ) ? "\n" : '' ) .
+				sprintf(
+					'👉 %s',
+					implode( $shortcode['shortcode_matches'], ' > ' )
+				) .
+				"\n" .
+				'total IDs ' . count( $shortcode['ids'] ) . ': ' . implode( $shortcode['ids'], ',' );
+		}
+		ksort( $results_shortcodes_by_usage );
+		WP_CLI::line( implode( "\n", $results_shortcodes_by_usage ) );
+	}
+
+	/**
+	 * Result of preg_match_all matching all shortcode designations.
+	 *
+	 * @param string $content
+	 *
+	 * @return mixed
+	 */
+	private function match_all_shortcode_designations( $content ) {
+		$pattern_shortcode_designation = '|
+			\[          # shortcode opening bracket
+			([^\s/\]]+) # match the shortcode designation string (which is anything except space, forward slash, and closing bracket)
+			[^\]]+      # zero or more of any char except closing bracket
+			\]          # closing bracket
+		|xim';
+		preg_match_all( $pattern_shortcode_designation, $content, $matches );
+
+		return $matches;
 	}
 
 	/**
