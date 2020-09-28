@@ -7,6 +7,7 @@ use \WP_CLI;
 use PHPHtmlParser\Dom as Dom;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator as WpBlockManipulator;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator as SquareBracketsElementManipulator;
+use \NewspackCustomContentMigrator\Migrator\PublisherSpecific\Exceptions\Onthewight_No_Wpshortode_Blocks_Found_In_Post;
 
 /**
  * Custom migration scripts for On The Wight.
@@ -83,6 +84,13 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Migrates On The Wight custom shortcodes to regular blocks.',
 				'synopsis'  => [
 					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
 						'description' => __('Perform a dry run, making no changes.'),
@@ -103,8 +111,27 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		}
 
 		global $wpdb;
-		$dry_run = $assoc_args['dry-run'] ? true : false;
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
 
+		// Convert only one specific Post.
+		if ( $post_id ) {
+			$post = get_post( $post_id );
+			if ( ! $post ) {
+				WP_CLI::error( sprintf( 'Post with ID %d not found.', $post_id ) );
+			}
+
+			try {
+				$this->convert_post_custom_blocks( $post_id, $dry_run );
+			} catch ( Onthewight_No_Wpshortode_Blocks_Found_In_Post $e_no_shortcodes )  {
+				// Catch -- it might have been already converted, so it's not an error.
+				WP_CLI::line( sprintf( 'No shortcodes found for Post ID %d.', $post_id ) );
+			}
+
+			exit;
+		}
+
+		// Convert all Posts.
 		WP_CLI::line( 'Fetching Posts...' );
 		$results = $wpdb->get_results( $wpdb->prepare( sprintf ("SELECT ID FROM %s WHERE post_status = 'publish' and post_type = 'post';", $wpdb->prefix . 'posts' ) ) );
 		if ( ! $results ) {
@@ -112,37 +139,50 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		}
 
 		foreach ( $results as $result ) {
-
 			$post_id = (int) $result->ID;
-			$post    = get_post( $post_id );
-			$content = $post->post_content;
-
-			// Get WP Shortcode blocks.
-			$shortcode_block_matches = $this->block_manipulator->match_wp_block( 'wp:shortcode', $content );
-			if ( null === $shortcode_block_matches ) {
+			try {
+				$this->convert_post_custom_blocks( $post_id, $dry_run );
+			} catch ( Onthewight_No_Wpshortode_Blocks_Found_In_Post $e_no_shortcodes )  {
+				// Skip this post if no `wp:shortode`s found.
 				continue;
 			}
+		}
+	}
 
-			// Go through the preg_match_all results containing the wp:shortcode blocks matches.
-			$content_updated = $content;
-			foreach ( $shortcode_block_matches[0] as $key => $match ) {
-				$wp_shortcode_block        = $shortcode_block_matches[0][ $key ][0];
+	/**
+	 * Converts a single Post's custom blocks to standard blocks.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	private function convert_post_custom_blocks( $post_id, $dry_run = false ) {
+		$post    = get_post( $post_id );
+		$content = $post->post_content;
 
-				// Do all the custom conversions here, making changes to $content_updated.
-				$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_accordion( $wp_shortcode_block );
-				if ( $converted_shortcode_block ) {
-					$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
-				}
+		// Get WP Shortcode blocks.
+		$shortcode_block_matches = $this->block_manipulator->match_wp_block( 'wp:shortcode', $content );
+		if ( null === $shortcode_block_matches ) {
+			throw new Onthewight_No_Wpshortode_Blocks_Found_In_Post();
+		}
+
+		// Go through the preg_match_all results containing the wp:shortcode blocks matches.
+		$content_updated = $content;
+		foreach ( $shortcode_block_matches[0] as $key => $match ) {
+			$wp_shortcode_block = $shortcode_block_matches[0][ $key ][0];
+
+			// Do all the custom conversions here, making changes to $content_updated.
+			$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_accordion( $wp_shortcode_block );
+			if ( $converted_shortcode_block ) {
+				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
 			}
+		}
 
-			// Save Post.
-			if ( $content_updated != $content ) {
-				WP_CLI::line( sprintf( '👉 converted blocks in Post ID %d', $post_id ) );
+		// Save Post.
+		if ( $content_updated != $content ) {
+			WP_CLI::line( sprintf( '👉 converted blocks in Post ID %d', $post_id ) );
 
-				if ( ! $dry_run ) {
-					$post->post_content = $content_updated;
-					wp_update_post( $post );
-				}
+			if ( ! $dry_run ) {
+				$post->post_content = $content_updated;
+				wp_update_post( $post );
 			}
 		}
 	}
