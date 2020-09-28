@@ -141,7 +141,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 						// Create a Page.
 						$post_details = array(
 							'post_title'   => $h1_node->text,
-							'post_content' => $description_without_heading,
+							'post_content' => $this->generate_page_content( $description_without_heading, $tag->ID, 'tag' ),
 							'post_parent'  => $parent_page->ID,
 							'post_name'    => $tag->slug,
 							'post_author'  => 1,
@@ -215,7 +215,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		if ( ! $categories ) {
 			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
 		}
-
+$categories = [ get_category( 8 ) ];
 		if ( ! $dry_run ) {
 			// Update category Base URL and rewrite rules to use `/category/{category_slug}` URL schema for categories.
 			$this->update_wp_category_base_and_existing_rewrite_rules( 'topic/', 'category/' );
@@ -258,7 +258,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 						// Create a Page.
 						$post_details = array(
 							'post_title'   => $h1_node->text,
-							'post_content' => $description_without_heading,
+							'post_content' => $this->generate_page_content( $description_without_heading, $category->ID, 'category' ),
 							'post_name'    => $category->slug,
 							'post_author'  => 1,
 							'post_type'    => 'page',
@@ -426,5 +426,47 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			'title' => $title,
 			'url' => $url_from,
 		] );
+	}
+
+	/**
+	 * Generates the content for the new tag/category page.
+	 */
+	private function generate_page_content( $description, $term, $taxonomy ) {
+
+		// Construct the category/tag filter as required for the hompage posts block.
+		switch ( $taxonomy ) {
+			case 'category':
+				$tax_filter = '"categories":["%d"]';
+				break;
+			case 'tag':
+				$tax_filter = '"tags":["%d"]';
+				break;
+		}
+		$tax_filter_string = sprintf( $tax_filter, $term );
+
+		// The template for the page content. The description goes into a
+		// Classic block in order to maintain the HTML.
+		$content = '<!-- wp:atomic-blocks/ab-accordion -->
+<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
+	<details>
+		<summary class="ab-accordion-title">See details</summary>
+		<div class="ab-accordion-text">
+			<!-- wp:freeform -->%1$s<!-- /wp:freeform -->
+		</div>
+	</details>
+</div>
+<!-- /wp:atomic-blocks/ab-accordion -->
+
+<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-default","showAvatar":false,"postsToShow":1,%2$s} /-->
+
+<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-borders","showExcerpt":false,"moreButton":true,"showAvatar":false,"postsToShow":15,"mediaPosition":"left",%2$s,"imageScale":1} /-->';
+
+		$blocks = sprintf(
+			$content, // The content template.
+			$description, // The current term description.
+			$tax_filter_string // The taxonomy filter for the homepage posts blocks.
+		);
+
+		return $blocks;
 	}
 }
