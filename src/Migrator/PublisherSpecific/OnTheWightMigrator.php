@@ -203,15 +203,18 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		}
 
 		// Get su_spoiler `title` param.
-		$attributes = shortcode_parse_atts( $shortcode_designations_matches[0][1] );
-		$title      = isset( $attributes['title'] ) ? $this->trim_all_quotes( $attributes['title'] ) : '';
+		$title = $this->get_shortcode_attribute(
+			html_entity_decode( $shortcode_designations_matches[0][1] ),
+			'title'
+		);
+		$title = $this->trim_all_quotes( $title );
 
 		// Get the whole su_spoiler shortcode element.
 		$su_spoiler_shortcode_element = $this->get_shortcode_element( 'su_spoiler', $wp_shortcode_block );
 
 		// Get su_spoiler content.
 		$content = $this->get_shortcode_contents( $su_spoiler_shortcode_element );
-		// $content = html_entity_decode( $content );
+		$content = html_entity_decode( $content );
 
 		$converted_block = <<<BLOCK
 <!-- wp:atomic-blocks/ab-accordion -->
@@ -225,7 +228,39 @@ BLOCK;
 	}
 
 	/**
+	 * Extracts a shortcode attribute.
+	 *
+	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
+	 *
+	 * @param string $shortcode
+	 * @param string $attribute_name
+	 *
+	 * @return string|null
+	 */
+	private function get_shortcode_attribute( $shortcode, $attribute_name ) {
+		$attributes_values = shortcode_parse_atts( $shortcode );
+		if ( empty( $attributes_values ) || ! $attributes_values ) {
+			return null;
+		}
+
+		// The WP's shortcode_parse_atts() explodes the attributes' values using spaces as delimiters, so let's combine the whole attribute values from the result.
+		$previous_key = null;
+		foreach ( $attributes_values as $key => $value ) {
+			if ( $previous_key && is_numeric( $key ) ) {
+				$attributes_values[ $previous_key ] .= ' ' . $value;
+				unset( $attributes_values[ $key ] );
+				continue;
+			}
+			$previous_key = $key;
+		}
+
+		return isset( $attributes_values[ $attribute_name ] ) ? $attributes_values[ $attribute_name ] : null;
+	}
+
+	/**
 	 * Gets a full shortcode element.
+	 *
+	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
 	 * @param string $shortcode_designation
 	 * @param string $html
@@ -270,6 +305,8 @@ BLOCK;
 
 	/**
 	 * Returns the content inside shortcodes.
+	 *
+	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
 	 * @param string $shortcode Shortcode name.
 	 *
@@ -362,6 +399,8 @@ BLOCK;
 
 	/**
 	 * Result of preg_match_all matching all shortcode designations.
+	 *
+	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
 	 * @param string $content
 	 *
