@@ -213,7 +213,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		$su_spoiler_shortcode_element = $this->get_shortcode_element( 'su_spoiler', $wp_shortcode_block );
 
 		// Get su_spoiler content.
-		$content = $this->get_shortcode_contents( $su_spoiler_shortcode_element );
+		$content = $this->get_shortcode_contents( $su_spoiler_shortcode_element, [ 'su_spoiler' ] );
 		$content = html_entity_decode( $content );
 
 		$converted_block = <<<BLOCK
@@ -308,12 +308,13 @@ BLOCK;
 	 *
 	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
-	 * @param string $shortcode Shortcode name.
+	 * @param string      $shortcode Shortcode name.
+	 * @param null|string $tagnames  Optional array of shortcode names, as defined by the get_shortcode_contents() function.
 	 *
 	 * @return string|null
 	 */
-	private function get_shortcode_contents( $shortcode ) {
-		$pattern = get_shortcode_regex();
+	private function get_shortcode_contents( $shortcode, $tagnames = null ) {
+		$pattern = get_shortcode_regex( $tagnames );
 		$matches = [];
 		preg_match( "/$pattern/s", $shortcode, $matches );
 
