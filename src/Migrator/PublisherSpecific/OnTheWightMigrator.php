@@ -99,7 +99,6 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				],
 			]
 		);
-
 	}
 
 	/**
@@ -114,7 +113,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
 
-		// Convert only one specific Post.
+		// Convert just one specific Post.
 		if ( $post_id ) {
 			$post = get_post( $post_id );
 			if ( ! $post ) {
@@ -170,8 +169,8 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			$wp_shortcode_block = $shortcode_block_matches[0][ $key ][0];
 
 			// Do all the custom conversions here, making changes to $content_updated.
-			$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_accordion( $wp_shortcode_block );
-			if ( $converted_shortcode_block ) {
+			$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run );
+			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
 				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
 			}
 		}
@@ -188,13 +187,40 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Retrieves all Reusable Blocks
+	 *
+	 * @param int $numberposts `numberposts` argument for \WP_Query::construct().
+	 *
+	 * @return array Array of Posts.
+	 */
+	private function get_reusable_blocks( $numberposts = -1 ) {
+		$posts                 = [];
+
+		$query_reusable_blocks = new \WP_Query( [
+			'numberposts' => $numberposts,
+			'post_type'   => 'wp_block',
+			'pust_status' => 'publish',
+		] );
+		if ( ! $query_reusable_blocks->have_posts() ) {
+			return $posts;
+		}
+
+		foreach ( $query_reusable_blocks->get_posts() as $post ) {
+			$posts[] = get_post( $post->ID );
+		}
+
+		return $posts;
+	}
+
+	/**
 	 * Converts a wp:shortcode block which contains an 'su_accordion' and an 'su_spoiler' shortcode into an wp:atomic-blocks/ab-accordion block.
 	 *
 	 * @param string $wp_shortcode_block
+	 * @param bool   $dry_run
 	 *
-	 * @return string|void
+	 * @return string|null
 	 */
-	private function convert_su_accordion_with_su_spoiler_to_accordion( $wp_shortcode_block ) {
+	private function convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run = false ) {
 
 		// Check whether the wp:shortcode block contains an 'su_accordion' and an 'su_spoiler' shortcode.
 		$shortcode_designations_matches = $this->match_all_shortcode_designations( $wp_shortcode_block );
@@ -218,13 +244,44 @@ class OnTheWightMigrator implements InterfaceMigrator {
 
 		$converted_block = <<<BLOCK
 <!-- wp:atomic-blocks/ab-accordion -->
-<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion"><details><summary class="ab-accordion-title">$title</summary><div class="ab-accordion-text"><!-- wp:html -->
+<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion"><details><summary class="ab-accordion-title">$title</summary><div class="ab-accordion-text">
+<!-- wp:html -->
 <p>$content</p>
 <!-- /wp:html --></div></details></div>
 <!-- /wp:atomic-blocks/ab-accordion -->
 BLOCK;
 
-		return $converted_block;
+		// Make this Accordion Block into a Reusable Block.
+		$reusable_blocks = $this->get_reusable_blocks();
+
+		// Check if this Reusable Block already exists.
+		$reusable_block_id = null;
+		if ( ! empty( $reusable_blocks ) && ! $dry_run ) {
+			foreach ( $reusable_blocks as $reusable_block ) {
+				if ( $converted_block == $reusable_block->post_content ) {
+					$reusable_block_id = $reusable_block->ID;
+					break;
+				}
+			}
+		}
+
+		// Create a Reusable Block if it doesn't exist.
+		if ( ! $reusable_block_id && ! $dry_run ) {
+			$reusable_block_id  = wp_insert_post( [
+				'post_title'   => $title,
+				'post_content' => $converted_block,
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+			] );
+			if ( ! $reusable_block_id ) {
+				WP_CLI::error( 'Could not save Reusable Block Post.' );
+			}
+		}
+
+		// Voilà, our reusable block.
+		$reusable_block_content = sprintf( '<!-- wp:block {"ref":%d} /-->', $reusable_block_id );
+
+		return $reusable_block_content;
 	}
 
 	/**
