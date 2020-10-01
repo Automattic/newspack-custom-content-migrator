@@ -205,9 +205,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			return $posts;
 		}
 
-		foreach ( $query_reusable_blocks->get_posts() as $post ) {
-			$posts[] = get_post( $post->ID );
-		}
+		$posts = $query_reusable_blocks->get_posts();
 
 		return $posts;
 	}
