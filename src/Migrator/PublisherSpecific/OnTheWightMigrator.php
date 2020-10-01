@@ -199,7 +199,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 		$query_reusable_blocks = new \WP_Query( [
 			'numberposts' => $numberposts,
 			'post_type'   => 'wp_block',
-			'pust_status' => 'publish',
+			'post_status' => 'publish',
 		] );
 		if ( ! $query_reusable_blocks->have_posts() ) {
 			return $posts;
