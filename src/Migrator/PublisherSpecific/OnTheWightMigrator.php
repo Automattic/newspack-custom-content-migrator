@@ -285,8 +285,6 @@ BLOCK;
 	/**
 	 * Extracts a shortcode attribute.
 	 *
-	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
-	 *
 	 * @param string $shortcode
 	 * @param string $attribute_name
 	 *
@@ -314,8 +312,6 @@ BLOCK;
 
 	/**
 	 * Gets a full shortcode element.
-	 *
-	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
 	 * @param string $shortcode_designation
 	 * @param string $html
@@ -360,8 +356,6 @@ BLOCK;
 
 	/**
 	 * Returns the content inside shortcodes.
-	 *
-	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
 	 * @param string      $shortcode Shortcode name.
 	 * @param null|string $tagnames  Optional array of shortcode names, as defined by the get_shortcode_contents() function.
@@ -455,8 +449,6 @@ BLOCK;
 
 	/**
 	 * Result of preg_match_all matching all shortcode designations.
-	 *
-	 * TODO: refactor this method to \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator.
 	 *
 	 * @param string $content
 	 *
