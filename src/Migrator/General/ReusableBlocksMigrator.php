@@ -159,7 +159,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		PostsMigrator::get_instance()->import_posts( $import_file );
 
-		$this->update_posts_reusable_blocks_ids();
+		$this->update_reusable_blocks_ids();
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -167,7 +167,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 	/**
 	 * Updates all the newly imported Reusable Blocks' IDs with their new IDs.
 	 */
-	private function update_posts_reusable_blocks_ids() {
+	private function update_reusable_blocks_ids() {
 		$blocks = $this->get_reusable_blocks();
 		if ( empty( $blocks ) ) {
 			// This shouldn't happen, but let's handle it anyways.
@@ -189,10 +189,10 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			return;
 		}
 
-		// Get Public posts.
+		// Get Public Posts and Pages.
 		$query_public_posts = new \WP_Query( [
 			'numberposts' => -1,
-			'post_type'   => 'post',
+			'post_type'   => [ 'post', 'page' ],
 			'post_status' => 'publish',
 		] );
 		if ( ! $query_public_posts->have_posts() ) {
@@ -203,7 +203,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			// Replace Block IDs.
 			$post_content_updated = $this->update_block_ids( $post->post_content, $blocks_id_changes );
 
-			// Save Post.
+			// Save the Post.
 			if ( $post->post_content != $post_content_updated ) {
 				$post->post_content = $post_content_updated;
 				wp_update_post( $post );
