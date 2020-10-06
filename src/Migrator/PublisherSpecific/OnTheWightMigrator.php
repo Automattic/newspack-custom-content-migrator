@@ -5,6 +5,9 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use PHPHtmlParser\Dom as Dom;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator as WpBlockManipulator;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator as SquareBracketsElementManipulator;
+use \NewspackCustomContentMigrator\Migrator\PublisherSpecific\Exceptions\Onthewight_No_Wpshortode_Blocks_Found_In_Post;
 
 /**
  * Custom migration scripts for On The Wight.
@@ -17,9 +20,21 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var WpBlockManipulator
+	 */
+	private $block_manipulator;
+
+	/**
+	 * @var SquareBracketsElementManipulator
+	 */
+	private $square_brackets_element_manipulator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->block_manipulator                   = new WpBlockManipulator;
+		$this->square_brackets_element_manipulator = new SquareBracketsElementManipulator;
 	}
 
 	/**
@@ -55,6 +70,400 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-helper-analyze-used-shortcodes',
+			[ $this, 'cmd_helper_analyze_used_shortcodes' ],
+			[
+				'shortdesc' => 'Helper command, scans all content for used shortcodes, outputs the shortcode designations with Post count or exact Post IDs where they were used.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-shortcodes-convert',
+			[ $this, 'cmd_shortcodes_convert' ],
+			[
+				'shortdesc' => 'Migrates On The Wight custom shortcodes to regular blocks.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => __('Perform a dry run, making no changes.'),
+						'optional'    => true,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator onthewight-shortcodes-convert`.
+	 */
+	public function cmd_shortcodes_convert( $args, $assoc_args ) {
+		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
+		}
+
+		global $wpdb;
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+
+		// Convert just one specific Post.
+		if ( $post_id ) {
+			$post = get_post( $post_id );
+			if ( ! $post ) {
+				WP_CLI::error( sprintf( 'Post with ID %d not found.', $post_id ) );
+			}
+
+			try {
+				$this->convert_post_custom_blocks( $post_id, $dry_run );
+			} catch ( Onthewight_No_Wpshortode_Blocks_Found_In_Post $e_no_shortcodes )  {
+				// Catch -- it might have been already converted, so it's not an error.
+				WP_CLI::line( sprintf( 'No shortcodes found for Post ID %d.', $post_id ) );
+			}
+
+			exit;
+		}
+
+		// Convert all Posts.
+		WP_CLI::line( 'Fetching Posts...' );
+		$results = $wpdb->get_results( $wpdb->prepare( sprintf ("SELECT ID FROM %s WHERE post_status = 'publish' and post_type = 'post';", $wpdb->prefix . 'posts' ) ) );
+		if ( ! $results ) {
+			WP_CLI::error( 'No public Posts found 🤭 Highly dubious!' );
+		}
+
+		foreach ( $results as $result ) {
+			$post_id = (int) $result->ID;
+			try {
+				$this->convert_post_custom_blocks( $post_id, $dry_run );
+			} catch ( Onthewight_No_Wpshortode_Blocks_Found_In_Post $e_no_shortcodes )  {
+				// Skip this post if no `wp:shortode`s found.
+				continue;
+			}
+		}
+	}
+
+	/**
+	 * Converts a single Post's custom blocks to standard blocks.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	private function convert_post_custom_blocks( $post_id, $dry_run = false ) {
+		$post    = get_post( $post_id );
+		$content = $post->post_content;
+
+		// Get WP Shortcode blocks.
+		$shortcode_block_matches = $this->block_manipulator->match_wp_block( 'wp:shortcode', $content );
+		if ( null === $shortcode_block_matches ) {
+			throw new Onthewight_No_Wpshortode_Blocks_Found_In_Post();
+		}
+
+		// Go through the preg_match_all results containing the wp:shortcode blocks matches.
+		$content_updated = $content;
+		foreach ( $shortcode_block_matches[0] as $key => $match ) {
+			$wp_shortcode_block = $shortcode_block_matches[0][ $key ][0];
+
+			// Do all the custom conversions here, making changes to $content_updated.
+			$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run );
+			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
+				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
+			}
+		}
+
+		// Save Post.
+		if ( $content_updated != $content ) {
+			WP_CLI::line( sprintf( '👉 converted blocks in Post ID %d', $post_id ) );
+
+			if ( ! $dry_run ) {
+				$post->post_content = $content_updated;
+				wp_update_post( $post );
+			}
+		}
+	}
+
+	/**
+	 * Retrieves all Reusable Blocks
+	 *
+	 * @param int $numberposts `numberposts` argument for \WP_Query::construct().
+	 *
+	 * @return array Array of Posts.
+	 */
+	private function get_reusable_blocks( $numberposts = -1 ) {
+		$posts                 = [];
+
+		$query_reusable_blocks = new \WP_Query( [
+			'numberposts' => $numberposts,
+			'post_type'   => 'wp_block',
+			'post_status' => 'publish',
+		] );
+		if ( ! $query_reusable_blocks->have_posts() ) {
+			return $posts;
+		}
+
+		$posts = $query_reusable_blocks->get_posts();
+
+		return $posts;
+	}
+
+	/**
+	 * Converts a wp:shortcode block which contains an 'su_accordion' and an 'su_spoiler' shortcode into an wp:atomic-blocks/ab-accordion block.
+	 *
+	 * @param string $wp_shortcode_block
+	 * @param bool   $dry_run
+	 *
+	 * @return string|null
+	 */
+	private function convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run = false ) {
+
+		// Check whether the wp:shortcode block contains an 'su_accordion' and an 'su_spoiler' shortcode.
+		$shortcode_designations_matches = $this->match_all_shortcode_designations( $wp_shortcode_block );
+		if ( ! isset( $shortcode_designations_matches[1] ) || $shortcode_designations_matches[1] !== [ 'su_accordion', 'su_spoiler' ] ) {
+			return null;
+		}
+
+		// Get su_spoiler `title` param.
+		$title = $this->get_shortcode_attribute(
+			html_entity_decode( $shortcode_designations_matches[0][1] ),
+			'title'
+		);
+		$title = $this->trim_all_quotes( $title );
+
+		// Get the whole su_spoiler shortcode element.
+		$su_spoiler_shortcode_element = $this->get_shortcode_element( 'su_spoiler', $wp_shortcode_block );
+
+		// Get su_spoiler content.
+		$content = $this->get_shortcode_contents( $su_spoiler_shortcode_element, [ 'su_spoiler' ] );
+		$content = html_entity_decode( $content );
+
+		$converted_block = <<<BLOCK
+<!-- wp:atomic-blocks/ab-accordion -->
+<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion"><details><summary class="ab-accordion-title">$title</summary><div class="ab-accordion-text">
+<!-- wp:html -->
+<p>$content</p>
+<!-- /wp:html --></div></details></div>
+<!-- /wp:atomic-blocks/ab-accordion -->
+BLOCK;
+
+		// Make this Accordion Block into a Reusable Block.
+		$reusable_blocks = $this->get_reusable_blocks();
+
+		// Check if this Reusable Block already exists.
+		$reusable_block_id = null;
+		if ( ! empty( $reusable_blocks ) && ! $dry_run ) {
+			foreach ( $reusable_blocks as $reusable_block ) {
+				if ( $converted_block == $reusable_block->post_content ) {
+					$reusable_block_id = $reusable_block->ID;
+					break;
+				}
+			}
+		}
+
+		// Create a Reusable Block if it doesn't exist.
+		if ( ! $reusable_block_id && ! $dry_run ) {
+			$reusable_block_id  = wp_insert_post( [
+				'post_title'   => $title,
+				'post_content' => $converted_block,
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+			] );
+			if ( ! $reusable_block_id ) {
+				WP_CLI::error( 'Could not save Reusable Block Post.' );
+			}
+		}
+
+		// Voilà, our reusable block.
+		$reusable_block_content = sprintf( '<!-- wp:block {"ref":%d} /-->', $reusable_block_id );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Extracts a shortcode attribute.
+	 *
+	 * @param string $shortcode
+	 * @param string $attribute_name
+	 *
+	 * @return string|null
+	 */
+	private function get_shortcode_attribute( $shortcode, $attribute_name ) {
+		$attributes_values = shortcode_parse_atts( $shortcode );
+		if ( empty( $attributes_values ) || ! $attributes_values ) {
+			return null;
+		}
+
+		// The WP's shortcode_parse_atts() explodes the attributes' values using spaces as delimiters, so let's combine the whole attribute values from the result.
+		$previous_key = null;
+		foreach ( $attributes_values as $key => $value ) {
+			if ( $previous_key && is_numeric( $key ) ) {
+				$attributes_values[ $previous_key ] .= ' ' . $value;
+				unset( $attributes_values[ $key ] );
+				continue;
+			}
+			$previous_key = $key;
+		}
+
+		return isset( $attributes_values[ $attribute_name ] ) ? $attributes_values[ $attribute_name ] : null;
+	}
+
+	/**
+	 * Gets a full shortcode element.
+	 *
+	 * @param string $shortcode_designation
+	 * @param string $html
+	 *
+	 * @return mixed|null
+	 */
+	private function get_shortcode_element( $shortcode_designation, $html ) {
+		$preg_all_match = $this->square_brackets_element_manipulator->match_elements_with_closing_tags(
+			$shortcode_designation,
+			$this->remove_line_breaks( $html )
+		);
+
+		return isset( $preg_all_match[0][0][0] ) ? $preg_all_match[0][0][0] : null;
+	}
+
+	/**
+	 * Removes line breaks from a string.
+	 *
+	 * @param string $string
+	 *
+	 * @return string
+	 */
+	private function remove_line_breaks( $string ) {
+		return str_replace( [ "\n\r", "\n", "\r" ], '', $string );
+	}
+
+	/**
+	 * Strips beginning and ending quotes from a string.
+	 *
+	 * @param string $string
+	 *
+	 * @return string string
+	 */
+	private function trim_all_quotes( $string ) {
+		$string = html_entity_decode( $string );
+		$string = trim( $string, '"' );
+		$string = trim( $string, '”' );
+		$string = trim( $string, '“' );
+		$string = trim( $string, "'" );
+		return $string;
+	}
+
+	/**
+	 * Returns the content inside shortcodes.
+	 *
+	 * @param string      $shortcode Shortcode name.
+	 * @param null|string $tagnames  Optional array of shortcode names, as defined by the get_shortcode_contents() function.
+	 *
+	 * @return string|null
+	 */
+	private function get_shortcode_contents( $shortcode, $tagnames = null ) {
+		$pattern = get_shortcode_regex( $tagnames );
+		$matches = [];
+		preg_match( "/$pattern/s", $shortcode, $matches );
+
+		return isset( $matches[5] ) ? $matches[5] : null;
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator onthewight-helper-analyze-used-shortcodes`.
+	 */
+	public function cmd_helper_analyze_used_shortcodes( $args, $assoc_args ) {
+		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
+		}
+
+		global $wpdb;
+		$shortcodes = [];
+
+		WP_CLI::line( 'Fetching Posts...' );
+		$results = $wpdb->get_results( $wpdb->prepare( sprintf ("SELECT ID FROM %s WHERE post_status = 'publish' and post_type = 'post';", $wpdb->prefix . 'posts' ) ) );
+		if ( ! $results ) {
+			WP_CLI::error( 'No public Posts found 🤭 Highly dubious!' );
+		}
+
+		foreach ( $results as $k => $result ) {
+
+			$post_id = (int) $result->ID;
+			$post    = get_post( $post_id );
+			$content = $post->post_content;
+
+			// Get WP Shortcode blocks.
+			$shortcode_block_matches = $this->block_manipulator->match_wp_block( 'wp:shortcode', $content );
+			if ( null === $shortcode_block_matches ) {
+				continue;
+			}
+
+			// Loop through the preg_match_all result with Shortcode Blocks matches.
+			foreach ( $shortcode_block_matches[0] as $key => $match ) {
+
+				$shortcode_block = $shortcode_block_matches[0][ $key ][0];
+
+				// Now get the Shortcodes inside this block.
+				$shortcode_designations_matches = $this->match_all_shortcode_designations( $shortcode_block );
+				if ( ! isset( $shortcode_designations_matches[1][0] ) || empty( $shortcode_designations_matches[1][0] ) ) {
+					continue;
+				}
+
+				// Check if this designation was saved to the $shortcodes before.
+				$key_existing = null;
+				foreach ( $shortcodes as $k => $shortcodes_found_element ) {
+					if ( $shortcode_designations_matches[1] === $shortcodes_found_element[ 'shortcode_matches' ] ) {
+						$key_existing = $k;
+						break;
+					}
+				}
+
+				// Add to list of shortcodes, and the Post ID too.
+				if ( ! is_null( $key_existing ) ) {
+					$shortcodes[ $key_existing ][ 'ids' ][] = $post_id;
+				} else {
+					$shortcodes[] = [
+						'shortcode_matches' => $shortcode_designations_matches[1],
+						'ids' => [ $post_id ]
+					];
+				}
+			}
+		}
+
+		// Output found shortcodes ordered ascending by number of Posts they're used in.
+		$results_shortcodes_by_usage = [];
+		foreach ( $shortcodes as $shortcode ) {
+			$results_shortcodes_by_usage[ count( $shortcode['ids'] ) ] .=
+				( isset( $results_shortcodes_by_usage[ count( $shortcode['ids'] ) ] ) ? "\n" : '' ) .
+				sprintf(
+					'👉 %s',
+					implode( $shortcode['shortcode_matches'], ' > ' )
+				) .
+				"\n" .
+				'total IDs ' . count( $shortcode['ids'] ) . ': ' . implode( $shortcode['ids'], ',' );
+		}
+		ksort( $results_shortcodes_by_usage );
+		WP_CLI::line( implode( "\n", $results_shortcodes_by_usage ) );
+	}
+
+	/**
+	 * Result of preg_match_all matching all shortcode designations.
+	 *
+	 * @param string $content
+	 *
+	 * @return mixed
+	 */
+	private function match_all_shortcode_designations( $content ) {
+		$pattern_shortcode_designation = '|
+			\[          # shortcode opening bracket
+			([^\s/\]]+) # match the shortcode designation string (which is anything except space, forward slash, and closing bracket)
+			[^\]]+      # zero or more of any char except closing bracket
+			\]          # closing bracket
+		|xim';
+		preg_match_all( $pattern_shortcode_designation, $content, $matches );
+
+		return $matches;
 	}
 
 	/**
