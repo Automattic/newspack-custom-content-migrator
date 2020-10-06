@@ -174,6 +174,8 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			return;
 		}
 
+		global $wpdb;
+
 		// Get a list of all ID changes for Reusable Block after import.
 		/**
 		 * @param array $blocks_id_changes An array containing old Post IDs for keys, and new Post IDs for values.
@@ -204,12 +206,18 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			// Replace Block IDs.
 			$post_content_updated = $this->update_block_ids( $post->post_content, $blocks_id_changes );
 
-			// Save the Post.
+			// Update the Post content.
 			if ( $post->post_content != $post_content_updated ) {
-				$post->post_content = $post_content_updated;
-				wp_update_post( $post );
+				$wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
 			}
 		}
+
+		// Let the $wpdb->update() sink in.
+		wp_cache_flush();
 	}
 
 	/**
