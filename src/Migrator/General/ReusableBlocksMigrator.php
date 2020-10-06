@@ -189,11 +189,12 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			return;
 		}
 
-		// Get Public Posts and Pages.
+		// Get Public Posts and Pages which contain Reusable Blocks.
 		$query_public_posts = new \WP_Query( [
 			'numberposts' => -1,
 			'post_type'   => [ 'post', 'page' ],
 			'post_status' => 'publish',
+			's'           => '<!-- wp:block'
 		] );
 		if ( ! $query_public_posts->have_posts() ) {
 			return;
