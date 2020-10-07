@@ -33,8 +33,8 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->block_manipulator                   = new WpBlockManipulator;
-		$this->square_brackets_element_manipulator = new SquareBracketsElementManipulator;
+		$this->block_manipulator                   = class_exists( WpBlockManipulator::class) ? new WpBlockManipulator : null;
+		$this->square_brackets_element_manipulator = class_exists( SquareBracketsElementManipulator::class) ? new SquareBracketsElementManipulator : null;
 	}
 
 	/**
@@ -102,10 +102,27 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Checks whether the Newspack Content Converter plugin is active and loaded.
+	 *
+	 * @return bool
+	 */
+	private function is_converter_plugin_active() {
+		if (
+			! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ||
+			! $this->block_manipulator ||
+			! $this->square_brackets_element_manipulator
+		) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
 	 * Callable for the `newspack-content-migrator onthewight-shortcodes-convert`.
 	 */
 	public function cmd_shortcodes_convert( $args, $assoc_args ) {
-		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+		if ( ! $this->is_converter_plugin_active() ) {
 			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
@@ -374,7 +391,7 @@ BLOCK;
 	 * Callable for the `newspack-content-migrator onthewight-helper-analyze-used-shortcodes`.
 	 */
 	public function cmd_helper_analyze_used_shortcodes( $args, $assoc_args ) {
-		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+		if ( ! $this->is_converter_plugin_active() ) {
 			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
