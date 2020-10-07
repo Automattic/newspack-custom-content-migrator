@@ -528,6 +528,10 @@ BLOCK;
 						WP_CLI::line( sprintf( '👍 creating Page from Tag %s', $tag->slug ) );
 						WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_tag', $tag->slug ) );
 					} else {
+						// Fix broken image URLs in the tag descriptions.
+						$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
+						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $string );
+
 						// Create a Page.
 						$post_details = array(
 							'post_title'   => $h1_node->text,
