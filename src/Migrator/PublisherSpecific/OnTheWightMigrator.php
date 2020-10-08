@@ -835,7 +835,7 @@ BLOCK;
 	private function generate_page_content( $description, $term, $taxonomy ) {
 
 		// Longer descriptions should get an accordion.
-		if ( strlen( $description ) > 280 ) {
+		if ( strlen( $description ) > 105 ) {
 			$description = sprintf(
 				'<!-- wp:atomic-blocks/ab-accordion -->
 		<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
