@@ -834,6 +834,23 @@ BLOCK;
 	 */
 	private function generate_page_content( $description, $term, $taxonomy ) {
 
+		// Longer descriptions should get an accordion.
+		if ( strlen( $description ) > 280 ) {
+			$description = sprintf(
+				'<!-- wp:atomic-blocks/ab-accordion -->
+		<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
+			<details>
+				<summary class="ab-accordion-title">See details</summary>
+				<div class="ab-accordion-text">
+					<!-- wp:freeform -->%1$s<!-- /wp:freeform -->
+				</div>
+			</details>
+		</div>
+		<!-- /wp:atomic-blocks/ab-accordion -->',
+			$description
+			);
+		}
+
 		// Construct the category/tag filter as required for the hompage posts block.
 		switch ( $taxonomy ) {
 			case 'category':
@@ -847,16 +864,7 @@ BLOCK;
 
 		// The template for the page content. The description goes into a
 		// Classic block in order to maintain the HTML.
-		$content = '<!-- wp:atomic-blocks/ab-accordion -->
-<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
-	<details>
-		<summary class="ab-accordion-title">See details</summary>
-		<div class="ab-accordion-text">
-			<!-- wp:freeform -->%1$s<!-- /wp:freeform -->
-		</div>
-	</details>
-</div>
-<!-- /wp:atomic-blocks/ab-accordion -->
+		$content = '%1$s
 
 <!-- wp:newspack-blocks/homepage-articles {"className":"is-style-default","showAvatar":false,"postsToShow":1,%2$s} /-->
 
