@@ -186,7 +186,13 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			$wp_shortcode_block = $shortcode_block_matches[0][ $key ][0];
 
 			// Do all the custom conversions here, making changes to $content_updated.
+
 			$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run );
+			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
+				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
+			}
+
+			$converted_shortcode_block = $this->convert_su_box_to_group_block( $wp_shortcode_block, $dry_run );
 			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
 				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
 			}
@@ -210,13 +216,16 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	 *
 	 * @return array Array of Posts.
 	 */
-	private function get_reusable_blocks( $numberposts = -1 ) {
+	private function get_reusable_blocks(
+		$numberposts = -1,
+		$post_status = [ 'publish', 'pending', 'draft', 'future', 'private', 'inherit', 'trash' ]
+	) {
 		$posts                 = [];
 
 		$query_reusable_blocks = new \WP_Query( [
 			'numberposts' => $numberposts,
 			'post_type'   => 'wp_block',
-			'post_status' => 'publish',
+			'post_status' => $post_status,
 		] );
 		if ( ! $query_reusable_blocks->have_posts() ) {
 			return $posts;
@@ -228,12 +237,13 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Converts a wp:shortcode block which contains an 'su_accordion' and an 'su_spoiler' shortcode into an wp:atomic-blocks/ab-accordion block.
+	 * Converts a wp:shortcode block which contains an 'su_accordion' and an 'su_spoiler' shortcode into a wp:atomic-blocks/ab-accordion block,
+	 * and then saves it as a Reusable Block.
 	 *
 	 * @param string $wp_shortcode_block
 	 * @param bool   $dry_run
 	 *
-	 * @return string|null
+	 * @return string|null Reusable Block content.
 	 */
 	private function convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run = false ) {
 
@@ -266,14 +276,77 @@ class OnTheWightMigrator implements InterfaceMigrator {
 <!-- /wp:atomic-blocks/ab-accordion -->
 BLOCK;
 
-		// Make this Accordion Block into a Reusable Block.
+		$reusable_block_content = $this->save_as_reusable_block( $converted_block, $title, $dry_run );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Converts a wp:shortcode block which contains an 'su_box' shortcode into a wp:group block, and then saves it as a Reusable Block.
+	 *
+	 * @param string $wp_shortcode_block
+	 * @param bool   $dry_run
+	 *
+	 * @return string|null Reusable Block content.
+	 */
+	private function convert_su_box_to_group_block( $wp_shortcode_block, $dry_run = false ) {
+
+		// Check whether the wp:shortcode block contains an 'su_box' shortcode.
+		$shortcode_designations_matches = $this->match_all_shortcode_designations( $wp_shortcode_block );
+		if ( ! isset( $shortcode_designations_matches[1] ) || $shortcode_designations_matches[1] !== [ 'su_box' ] ) {
+			return null;
+		}
+
+		// Get su_spoiler `title` param.
+		$title = $this->get_shortcode_attribute(
+			html_entity_decode( $shortcode_designations_matches[0][0] ),
+			'title'
+		);
+		$title = $this->trim_all_quotes( $title );
+
+		// Get the whole su_box shortcode element.
+		$su_spoiler_shortcode_element = $this->get_shortcode_element( 'su_box', $wp_shortcode_block );
+
+		// Get su_spoiler content.
+		$content = $this->get_shortcode_contents( $su_spoiler_shortcode_element, [ 'su_box' ] );
+		$content = html_entity_decode( $content );
+
+		$converted_block = <<<BLOCK
+<!-- wp:group {"backgroundColor":"light-gray"} -->
+<div class="wp-block-group has-light-gray-background-color has-background"><div class="wp-block-group__inner-container"><!-- wp:heading {"level":4,"textColor":"dark-gray"} -->
+<h4 class="has-dark-gray-color has-text-color"><strong>$title</strong></h4>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>$content</p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:group -->
+BLOCK;
+
+		$reusable_block_content = $this->save_as_reusable_block( $converted_block, $title, $dry_run );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Saves the $wp_block source as a Reusable Block, and returns the saved Reusable Block content.
+	 *
+	 * If a Reusable Block with this identical content already exists, it returns the existing Reusable Block's content.
+	 *
+	 * @param string $wp_block WP Block content.
+	 * @param string $title    Title for the Reusable Block.
+	 * @param book $dry_run    Dry run flag.
+	 *
+	 * @return string Saved Reusable Block content.
+	 */
+	private function save_as_reusable_block( $wp_block, $title, $dry_run ) {
 		$reusable_blocks = $this->get_reusable_blocks();
 
 		// Check if this Reusable Block already exists.
 		$reusable_block_id = null;
 		if ( ! empty( $reusable_blocks ) && ! $dry_run ) {
 			foreach ( $reusable_blocks as $reusable_block ) {
-				if ( $converted_block == $reusable_block->post_content ) {
+				if ( $wp_block == $reusable_block->post_content ) {
 					$reusable_block_id = $reusable_block->ID;
 					break;
 				}
@@ -284,7 +357,7 @@ BLOCK;
 		if ( ! $reusable_block_id && ! $dry_run ) {
 			$reusable_block_id  = wp_insert_post( [
 				'post_title'   => $title,
-				'post_content' => $converted_block,
+				'post_content' => $wp_block,
 				'post_type'    => 'wp_block',
 				'post_status'  => 'publish',
 			] );
@@ -298,6 +371,7 @@ BLOCK;
 
 		return $reusable_block_content;
 	}
+
 
 	/**
 	 * Extracts a shortcode attribute.
