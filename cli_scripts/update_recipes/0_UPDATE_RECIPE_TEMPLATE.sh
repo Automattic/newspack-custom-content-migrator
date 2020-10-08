@@ -115,6 +115,9 @@ export_staging_site_donation_products
 echo_ts "exporting Staging site campaigns..."
 export_staging_site_campaigns
 
+echo_ts "exporting Reusable blocks..."
+export_staging_site_reusable_blocks
+
 # --- import:
 
 echo_ts 'preparing Live site SQL dump for import...'
@@ -132,51 +135,42 @@ wp_cli plugin activate $THIS_PLUGINS_NAME
 if [[ 1 == $IS_EXPORTED_STAGING_PAGES ]]; then
   echo_ts 'importing all Pages from the Staging site and new pages from the Live site...'
   wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing Pages from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing Pages from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_STAGING_MENUS ]]; then
   echo_ts 'importing Menus from the Staging site...'
   wp_cli newspack-content-migrator import-menus --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing Menus from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing Menus from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_CUSTOM_CSS ]]; then
   echo_ts 'importing custom CSS from the Staging site...'
   wp_cli newspack-content-migrator import-custom-css-file --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing custom CSS from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing custom CSS from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_PAGES_SETTINGS ]]; then
   echo_ts 'importing pages settings from the Staging site...'
   wp_cli newspack-content-migrator import-pages-settings --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing pages settings from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing pages settings from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_PAGES_IDENTITY_SETTINGS ]]; then
   echo_ts 'importing identity settings from the Staging site...'
   wp_cli newspack-content-migrator import-customize-site-identity-settings --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing pages settings from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing pages settings from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_DONATION_PRODUCTS ]]; then
   echo_ts 'importing reader revenue products from the Staging site...'
   wp_cli newspack-content-migrator import-reader-revenue --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing reader revenue products from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing reader revenue products from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_CAMPAIGNS ]]; then
   echo_ts 'importing campaigns from the Staging site...'
   wp_cli newspack-content-migrator import-campaigns --input-dir=$TEMP_DIR_MIGRATOR
-else
-  echo_ts_yellow 'Skipping importing Newspack Campaigns from the Staging site.'
-fi
+else echo_ts_yellow 'Skipping importing Newspack Campaigns from the Staging site.'; fi
+
+if [[ 1 == $IS_EXPORTED_REUSABLE_BLOCKS ]]; then
+  echo_ts 'importing Reusable Blocks from the Staging site...'
+  wp_cli newspack-content-migrator import-reusable-blocks --input-dir=$TEMP_DIR_MIGRATOR
+else echo_ts_yellow 'Skipping importing Reusable Blocks from the Staging site.'; fi
 
 echo_ts 'importing Staging content previously converted to blocks...'
 import_blocks_content_from_staging_site
