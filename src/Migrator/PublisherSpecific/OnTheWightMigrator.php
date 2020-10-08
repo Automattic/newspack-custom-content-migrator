@@ -547,7 +547,7 @@ BLOCK;
 					// Create a Page.
 					$post_details = array(
 						'post_title'   => $h1_node->text,
-						'post_content' => $this->generate_page_content( $description_without_heading, $tag->ID, 'tag' ),
+						'post_content' => $this->generate_page_content( $description_without_heading, $tag->term_id, 'tag' ),
 						'post_parent'  => $parent_page->ID,
 						'post_name'    => $tag->slug,
 						'post_author'  => 1,
@@ -660,7 +660,7 @@ BLOCK;
 					// Create a Page.
 					$post_details = array(
 						'post_title'   => $h1_node->text,
-						'post_content' => $this->generate_page_content( $description_without_heading, $category->ID, 'category' ),
+						'post_content' => $this->generate_page_content( $description_without_heading, $category->term_id, 'category' ),
 						'post_name'    => $category->slug,
 						'post_author'  => 1,
 						'post_type'    => 'page',
@@ -854,10 +854,10 @@ BLOCK;
 		// Construct the category/tag filter as required for the hompage posts block.
 		switch ( $taxonomy ) {
 			case 'category':
-				$tax_filter = '"categories":["%d"]';
+				$tax_filter = '"categories":["%s"]';
 				break;
 			case 'tag':
-				$tax_filter = '"tags":["%d"]';
+				$tax_filter = '"tags":["%s"]';
 				break;
 		}
 		$tax_filter_string = sprintf( $tax_filter, $term );
