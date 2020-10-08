@@ -30,6 +30,13 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	private $square_brackets_element_manipulator;
 
 	/**
+	 * Retrieved su_fms_desc content. Stored as a private variable for caching puposes.
+	 *
+	 * @var string $su_fms_desc_content
+	 */
+	private $su_fms_desc_content;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -196,6 +203,11 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
 				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
 			}
+
+			$converted_shortcode_block = $this->convert_su_fms_desc_to_reusable_accordion_block( $wp_shortcode_block, $dry_run );
+			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
+				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
+			}
 		}
 
 		// Save Post.
@@ -280,6 +292,77 @@ BLOCK;
 
 		return $reusable_block_content;
 	}
+
+	/**
+	 * Converts a wp:shortcode block which contains an 'su_fms_desc' shortcode into a wp:atomic-blocks/ab-accordion block,
+	 * and then saves it as a Reusable Block.
+	 *
+	 * @param string $wp_shortcode_block
+	 * @param bool   $dry_run
+	 *
+	 * @return string|null Reusable Block content.
+	 */
+	private function convert_su_fms_desc_to_reusable_accordion_block( $wp_shortcode_block, $dry_run = false ) {
+
+		// Check whether the wp:shortcode block contains an 'su_accordion' and an 'su_spoiler' shortcode.
+		$shortcode_designations_matches = $this->match_all_shortcode_designations( $wp_shortcode_block );
+		if ( ! isset( $shortcode_designations_matches[0][0] ) || $shortcode_designations_matches[0][0] !== '[su_fms_desc]' ) {
+			return null;
+		}
+
+		// Get the `su_fms_desc` content.
+		$su_fms_desc_content = $this->get_fms_desc_content();
+		if ( ! $su_fms_desc_content ) {
+			return $wp_shortcode_block;
+		}
+
+		// It's expected for this block to contain a combo of nested `su_accordion > su_spoiler` shortcodes, so finally convert those to a Reusable Block.
+		$reusable_block_content = $this->convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $su_fms_desc_content, $dry_run );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Gets the `su_fms_desc` shortcode content stored in meta.
+	 *
+	 * @return string|false
+	 */
+	private function get_fms_desc_content() {
+		if ( isset( $this->su_fms_desc_content ) ) {
+			return $this->su_fms_desc_content;
+		}
+
+		$fms_desc_post_object = $this->get_su_shortcode_post_object( 'fms_desc' );
+
+		$content_encoded           = get_post_meta( $fms_desc_post_object->ID, 'sumk_code', true );
+		$this->su_fms_desc_content = base64_decode( $content_encoded );
+
+		return $this->su_fms_desc_content;
+	}
+
+	/**
+	 * Gets an `su_shortcode` Post object.
+	 *
+	 * @param string $sumk_slug The value of meta key 'sumk_slug`, which identifies the specific `su_*` Post.
+	 *
+	 * @return \WP_Post|null
+	 */
+	private function get_su_shortcode_post_object( $sumk_slug ) {
+		$query_post = new \WP_Query( [
+			'numberposts' => 1,
+			'post_type'   => [ 'shortcodesultimate' ],
+			'post_status' => 'publish',
+			'meta_query'  => [
+				[
+					'key'   => 'sumk_slug',
+					'value' => $sumk_slug
+				]
+			]
+		] );
+
+		return $query_post->have_posts() ? $query_post->get_posts()[0] : null;
+	}
+
 
 	/**
 	 * Converts a wp:shortcode block which contains an 'su_box' shortcode into a wp:group block, and then saves it as a Reusable Block.
