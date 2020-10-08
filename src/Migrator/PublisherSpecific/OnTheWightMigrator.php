@@ -624,7 +624,7 @@ BLOCK;
 		if ( ! $categories ) {
 			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
 		}
-$categories = [ get_category( 8 ) ];
+
 		if ( ! $dry_run ) {
 			// Update category Base URL and rewrite rules to use `/category/{category_slug}` URL schema for categories.
 			$this->update_wp_category_base_and_existing_rewrite_rules( 'topic/', 'category/' );
