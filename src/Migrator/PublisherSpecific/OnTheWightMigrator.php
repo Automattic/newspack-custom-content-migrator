@@ -30,11 +30,18 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	private $square_brackets_element_manipulator;
 
 	/**
+	 * Retrieved su_fms_desc content. Stored as a private variable for caching puposes.
+	 *
+	 * @var string $su_fms_desc_content
+	 */
+	private $su_fms_desc_content;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->block_manipulator                   = new WpBlockManipulator;
-		$this->square_brackets_element_manipulator = new SquareBracketsElementManipulator;
+		$this->block_manipulator                   = class_exists( WpBlockManipulator::class) ? new WpBlockManipulator : null;
+		$this->square_brackets_element_manipulator = class_exists( SquareBracketsElementManipulator::class) ? new SquareBracketsElementManipulator : null;
 	}
 
 	/**
@@ -117,10 +124,27 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Checks whether the Newspack Content Converter plugin is active and loaded.
+	 *
+	 * @return bool
+	 */
+	private function is_converter_plugin_active() {
+		if (
+			! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ||
+			! $this->block_manipulator ||
+			! $this->square_brackets_element_manipulator
+		) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
 	 * Callable for the `newspack-content-migrator onthewight-shortcodes-convert`.
 	 */
 	public function cmd_shortcodes_convert( $args, $assoc_args ) {
-		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+		if ( ! $this->is_converter_plugin_active() ) {
 			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
@@ -184,7 +208,18 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			$wp_shortcode_block = $shortcode_block_matches[0][ $key ][0];
 
 			// Do all the custom conversions here, making changes to $content_updated.
+
 			$converted_shortcode_block = $this->convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run );
+			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
+				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
+			}
+
+			$converted_shortcode_block = $this->convert_su_box_to_group_block( $wp_shortcode_block, $dry_run );
+			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
+				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
+			}
+
+			$converted_shortcode_block = $this->convert_su_fms_desc_to_reusable_accordion_block( $wp_shortcode_block, $dry_run );
 			if ( $converted_shortcode_block && $wp_shortcode_block != $converted_shortcode_block ) {
 				$content_updated = str_replace( $wp_shortcode_block, $converted_shortcode_block, $content_updated );
 			}
@@ -208,13 +243,16 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	 *
 	 * @return array Array of Posts.
 	 */
-	private function get_reusable_blocks( $numberposts = -1 ) {
+	private function get_reusable_blocks(
+		$numberposts = -1,
+		$post_status = [ 'publish', 'pending', 'draft', 'future', 'private', 'inherit', 'trash' ]
+	) {
 		$posts                 = [];
 
 		$query_reusable_blocks = new \WP_Query( [
 			'numberposts' => $numberposts,
 			'post_type'   => 'wp_block',
-			'post_status' => 'publish',
+			'post_status' => $post_status,
 		] );
 		if ( ! $query_reusable_blocks->have_posts() ) {
 			return $posts;
@@ -226,12 +264,13 @@ class OnTheWightMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Converts a wp:shortcode block which contains an 'su_accordion' and an 'su_spoiler' shortcode into an wp:atomic-blocks/ab-accordion block.
+	 * Converts a wp:shortcode block which contains an 'su_accordion' and an 'su_spoiler' shortcode into a wp:atomic-blocks/ab-accordion block,
+	 * and then saves it as a Reusable Block.
 	 *
 	 * @param string $wp_shortcode_block
 	 * @param bool   $dry_run
 	 *
-	 * @return string|null
+	 * @return string|null Reusable Block content.
 	 */
 	private function convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $wp_shortcode_block, $dry_run = false ) {
 
@@ -264,14 +303,148 @@ class OnTheWightMigrator implements InterfaceMigrator {
 <!-- /wp:atomic-blocks/ab-accordion -->
 BLOCK;
 
-		// Make this Accordion Block into a Reusable Block.
+		$reusable_block_content = $this->save_as_reusable_block( $converted_block, $title, $dry_run );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Converts a wp:shortcode block which contains an 'su_fms_desc' shortcode into a wp:atomic-blocks/ab-accordion block,
+	 * and then saves it as a Reusable Block.
+	 *
+	 * @param string $wp_shortcode_block
+	 * @param bool   $dry_run
+	 *
+	 * @return string|null Reusable Block content.
+	 */
+	private function convert_su_fms_desc_to_reusable_accordion_block( $wp_shortcode_block, $dry_run = false ) {
+
+		// Check whether the wp:shortcode block contains an 'su_accordion' and an 'su_spoiler' shortcode.
+		$shortcode_designations_matches = $this->match_all_shortcode_designations( $wp_shortcode_block );
+		if ( ! isset( $shortcode_designations_matches[0][0] ) || $shortcode_designations_matches[0][0] !== '[su_fms_desc]' ) {
+			return null;
+		}
+
+		// Get the `su_fms_desc` content.
+		$su_fms_desc_content = $this->get_fms_desc_content();
+		if ( ! $su_fms_desc_content ) {
+			return $wp_shortcode_block;
+		}
+
+		// It's expected for this block to contain a combo of nested `su_accordion > su_spoiler` shortcodes, so finally convert those to a Reusable Block.
+		$reusable_block_content = $this->convert_su_accordion_with_su_spoiler_to_reusable_accordion_block( $su_fms_desc_content, $dry_run );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Gets the `su_fms_desc` shortcode content stored in meta.
+	 *
+	 * @return string|false
+	 */
+	private function get_fms_desc_content() {
+		if ( isset( $this->su_fms_desc_content ) ) {
+			return $this->su_fms_desc_content;
+		}
+
+		$fms_desc_post_object = $this->get_su_shortcode_post_object( 'fms_desc' );
+
+		$content_encoded           = get_post_meta( $fms_desc_post_object->ID, 'sumk_code', true );
+		$this->su_fms_desc_content = base64_decode( $content_encoded );
+
+		return $this->su_fms_desc_content;
+	}
+
+	/**
+	 * Gets an `su_shortcode` Post object.
+	 *
+	 * @param string $sumk_slug The value of meta key 'sumk_slug`, which identifies the specific `su_*` Post.
+	 *
+	 * @return \WP_Post|null
+	 */
+	private function get_su_shortcode_post_object( $sumk_slug ) {
+		$query_post = new \WP_Query( [
+			'numberposts' => 1,
+			'post_type'   => [ 'shortcodesultimate' ],
+			'post_status' => 'publish',
+			'meta_query'  => [
+				[
+					'key'   => 'sumk_slug',
+					'value' => $sumk_slug
+				]
+			]
+		] );
+
+		return $query_post->have_posts() ? $query_post->get_posts()[0] : null;
+	}
+
+
+	/**
+	 * Converts a wp:shortcode block which contains an 'su_box' shortcode into a wp:group block, and then saves it as a Reusable Block.
+	 *
+	 * @param string $wp_shortcode_block
+	 * @param bool   $dry_run
+	 *
+	 * @return string|null Reusable Block content.
+	 */
+	private function convert_su_box_to_group_block( $wp_shortcode_block, $dry_run = false ) {
+
+		// Check whether the wp:shortcode block contains an 'su_box' shortcode.
+		$shortcode_designations_matches = $this->match_all_shortcode_designations( $wp_shortcode_block );
+		if ( ! isset( $shortcode_designations_matches[1] ) || $shortcode_designations_matches[1] !== [ 'su_box' ] ) {
+			return null;
+		}
+
+		// Get su_spoiler `title` param.
+		$title = $this->get_shortcode_attribute(
+			html_entity_decode( $shortcode_designations_matches[0][0] ),
+			'title'
+		);
+		$title = $this->trim_all_quotes( $title );
+
+		// Get the whole su_box shortcode element.
+		$su_spoiler_shortcode_element = $this->get_shortcode_element( 'su_box', $wp_shortcode_block );
+
+		// Get su_spoiler content.
+		$content = $this->get_shortcode_contents( $su_spoiler_shortcode_element, [ 'su_box' ] );
+		$content = html_entity_decode( $content );
+
+		$converted_block = <<<BLOCK
+<!-- wp:group {"backgroundColor":"light-gray"} -->
+<div class="wp-block-group has-light-gray-background-color has-background"><div class="wp-block-group__inner-container"><!-- wp:heading {"level":4,"textColor":"dark-gray"} -->
+<h4 class="has-dark-gray-color has-text-color"><strong>$title</strong></h4>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>$content</p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:group -->
+BLOCK;
+
+		$reusable_block_content = $this->save_as_reusable_block( $converted_block, $title, $dry_run );
+
+		return $reusable_block_content;
+	}
+
+	/**
+	 * Saves the $wp_block source as a Reusable Block, and returns the saved Reusable Block content.
+	 *
+	 * If a Reusable Block with this identical content already exists, it returns the existing Reusable Block's content.
+	 *
+	 * @param string $wp_block WP Block content.
+	 * @param string $title    Title for the Reusable Block.
+	 * @param book $dry_run    Dry run flag.
+	 *
+	 * @return string Saved Reusable Block content.
+	 */
+	private function save_as_reusable_block( $wp_block, $title, $dry_run ) {
 		$reusable_blocks = $this->get_reusable_blocks();
 
 		// Check if this Reusable Block already exists.
 		$reusable_block_id = null;
 		if ( ! empty( $reusable_blocks ) && ! $dry_run ) {
 			foreach ( $reusable_blocks as $reusable_block ) {
-				if ( $converted_block == $reusable_block->post_content ) {
+				if ( $wp_block == $reusable_block->post_content ) {
 					$reusable_block_id = $reusable_block->ID;
 					break;
 				}
@@ -282,7 +455,7 @@ BLOCK;
 		if ( ! $reusable_block_id && ! $dry_run ) {
 			$reusable_block_id  = wp_insert_post( [
 				'post_title'   => $title,
-				'post_content' => $converted_block,
+				'post_content' => $wp_block,
 				'post_type'    => 'wp_block',
 				'post_status'  => 'publish',
 			] );
@@ -296,6 +469,7 @@ BLOCK;
 
 		return $reusable_block_content;
 	}
+
 
 	/**
 	 * Extracts a shortcode attribute.
@@ -389,7 +563,7 @@ BLOCK;
 	 * Callable for the `newspack-content-migrator onthewight-helper-analyze-used-shortcodes`.
 	 */
 	public function cmd_helper_analyze_used_shortcodes( $args, $assoc_args ) {
-		if ( ! is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' ) ) {
+		if ( ! $this->is_converter_plugin_active() ) {
 			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
