@@ -659,13 +659,42 @@ BLOCK;
 
 					// Create a Page.
 					$post_details = array(
-						'post_title'   => $h1_node->text,
+						'post_title'   => ( isset( $heading_html ) ) ? $h1_node->text : $category->name,
 						'post_content' => $this->generate_page_content( $description_without_heading, $category->term_id, 'category' ),
 						'post_name'    => $category->slug,
 						'post_author'  => 1,
 						'post_type'    => 'page',
 						'post_status'  => 'publish',
 					);
+
+					// Check if the category has a parent.
+					if ( ! empty( $category->category_parent ) ) {
+						// Get the parent category deatils.
+						$parent_category = get_category( $category->category_parent );
+
+						// Get the page created for the parent category.
+						$parent_page = get_posts( [
+							'post_type'  => 'page',
+							'meta_query' => [ [
+								'key'   => '_migrated_from_category',
+								'value' => $parent_category->slug,
+							] ]
+						] );
+						if ( empty( $parent_page ) ) {
+							// Looks like there is no parent page. It might not have been created yet.
+							// Skip this category so we can come back to it later.
+							WP_CLI::warning( sprintf(
+								'Skipping converting category %d because it has a parent category (%d) that we can\'t find a page for.',
+								$category->term_id,
+								$category->category_parent
+							) );
+							continue;
+						}
+
+						// Set the parent page.
+						$post_details['post_parent'] = $parent_page[0]->ID;
+					}
+
 					$new_page_id  = wp_insert_post( $post_details );
 					if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
 						WP_CLI::error( sprintf(
