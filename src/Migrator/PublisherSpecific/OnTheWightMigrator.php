@@ -633,6 +633,9 @@ BLOCK;
 
 			$is_category_converted_to_page = false;
 
+			// Default category URL base, for top-level categories;
+			$category_base = '/category/';
+
 			// Don't create Pages for Categories without description.
 			if ( ! empty( $category->description ) ) {
 
@@ -665,6 +668,7 @@ BLOCK;
 						'post_author'  => 1,
 						'post_type'    => 'page',
 						'post_status'  => 'publish',
+						'post_parent'  => get_page_by_path('about')->ID,
 					);
 
 					// Check if the category has a parent.
@@ -693,6 +697,9 @@ BLOCK;
 
 						// Set the parent page.
 						$post_details['post_parent'] = $parent_page[0]->ID;
+
+						// Make sure we include the parent category in the redirect.
+						$category_base = '/category/' . $parent_category->slug . '/';
 					}
 
 					$new_page_id  = wp_insert_post( $post_details );
@@ -710,7 +717,7 @@ BLOCK;
 				}
 
 				// Create a redirect rule to redirect this Category's legacy URL to the new Page.
-				$url_from = '/category/' . $category->slug . '[/]?';
+				$url_from = $category_base . $category->slug . '[/]?';
 				if ( $dry_run ) {
 					WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
 				} else {
