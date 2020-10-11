@@ -121,6 +121,13 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-download-images-from-s3',
+			[ $this, 'cmd_download_images_from_s3' ],
+			[
+				'shortdesc' => 'Downloads all images hosted on the S3 and updates source references to the local file.',
+			]
+		);
 	}
 
 	/**
@@ -1051,5 +1058,111 @@ $categories = [ get_category( 8 ) ];
 		);
 
 		return $blocks;
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator onthewight-download-images-from-s3` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_download_images_from_s3( $args, $assoc_args ) {
+		if ( ! $this->is_converter_plugin_active() ) {
+			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
+		}
+
+		global $wpdb;
+		$host_s3 = 'otwstatgraf.s3.amazonaws.com';
+
+		// Loop through posts detecting images hosted in the AWS bucket.
+		$query_public_posts = new \WP_Query( [
+			'posts_per_page' => -1,
+			'post_type'      => [ 'post', 'page' ],
+			'post_status'    => 'publish',
+			's'              => sprintf( '://%s/', $host_s3 ),
+		] );
+		if ( ! $query_public_posts->have_posts() ) {
+			WP_CLI::line( 'No S3 hosted posts found.' );
+			exit;
+		}
+
+		WP_CLI::line( sprintf( 'Found S3 hosted images in %d posts.', $query_public_posts->post_count ) );
+
+		foreach ( $query_public_posts->get_posts() as $post ) {
+
+			// Match images with S3 sources.
+			$matches = $this->match_images_with_hostname( $post->post_content, $host_s3 );
+			if ( ! $matches ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '--- downloading %d image(s) from POST ID %d', count( $matches[1] ), $post->ID ) );
+
+			// Replace the image URL in content with the new WordPress URL
+			$errors               = [];
+			$post_content_updated = $post->post_content;
+			foreach ( $matches[1] as $key => $img_url_s3 ) {
+				$img_src_s3   = $matches[0][ $key ];
+				$img_url_this = media_sideload_image( $img_url_s3, $post->ID, null, $return = 'src' );
+				if ( is_wp_error( $img_url_this ) ) {
+					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s', $post->ID, $img_src_s3 );
+					$errors[]      = $error_message;
+					WP_CLI::warning( $error_message );
+				}
+				$img_src_this = sprintf( 'src="%s"', $img_url_this );
+
+				$post_content_updated = str_replace(
+					$img_src_s3,
+					$img_src_this,
+					$post_content_updated
+				);
+			}
+
+			// Update the Post content.
+			$wpdb->update(
+				$wpdb->prefix . 'posts',
+				[ 'post_content' => $post_content_updated ],
+				[ 'ID' => $post->ID ]
+			);
+		}
+
+		// Required for the $wpdb->update() sink in.
+		wp_cache_flush();
+
+		if ( count( $errors ) > 0 ) {
+			// Repeat error messages.
+			WP_CLI::warning(
+				sprintf( 'Finished with %d errors:', count( $errors ) )
+				. "\n"
+				. implode( "\n", $errors )
+			);
+		}
+	}
+
+	/**
+	 * Matches images with hostname by using preg_match_all().
+	 *
+	 * @param string $source   HTML/blocks source.
+	 * @param string $hostname Specific hostname the images contain
+	 *
+	 * @return array|null If matches found, returns $matches as set by the preg_match_all(), otherwise null.
+	 */
+	private function match_images_with_hostname( $source, $hostname ) {
+		$pattern = sprintf(
+			'|
+				src="       # src opening
+				(https?://  # start full image URL match with http or https
+				%s          # hostname
+				/.*?)       # end full image URL match
+				"           # src closing
+			|xims',
+			$hostname
+		);
+		$matches = [];
+		$preg_match_all_result = preg_match_all( $pattern, $source, $matches );
+
+		return ( 0 === $preg_match_all_result || false === $preg_match_all_result )
+			? null
+			: $matches;
 	}
 }
