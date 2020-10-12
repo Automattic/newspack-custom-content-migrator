@@ -1201,12 +1201,12 @@ $categories = [ get_category( 8 ) ];
 	/**
 	 * Gets filename from a URL or a path.
 	 *
-	 * @param string $img_src_s3 URL or path.
+	 * @param string $path URL or path.
 	 *
 	 * @return string|null Filename.
 	 */
-	private function get_filename_from_path( $img_src_s3 ) {
-		$pathinfo = pathinfo( $img_src_s3 );
+	private function get_filename_from_path( $path ) {
+		$pathinfo = pathinfo( $path );
 		return ( isset( $pathinfo[ 'filename' ] ) && isset( $pathinfo[ 'extension' ] ) )
 			? $pathinfo[ 'filename' ] . '.' . $pathinfo[ 'extension' ]
 			: null;
