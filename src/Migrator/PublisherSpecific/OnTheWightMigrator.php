@@ -639,17 +639,19 @@ BLOCK;
 			// Don't create Pages for Categories without description.
 			if ( ! empty( $category->description ) ) {
 
+				// Default content.
+				$heading                     = $category->name;
+				$description_without_heading = $category->description;
+
 				$dom_parser->loadStr( $category->description );
 				$h1_node = $dom_parser->find( 'h1', 0 );
 				if ( $h1_node ) {
 					// Get the rest of the description without the heading part.
-					$heading_html                = $h1_node->outerHtml();
+					$heading                     = $h1_node->outerHtml();
 					$description_without_heading = trim( substr(
 						$category->description,
 						strpos( $category->description, $heading_html ) + strlen( $heading_html )
 						) );
-				} else {
-					$description_without_heading = $category->description;
 				}
 
 				if ( $dry_run ) {
@@ -657,12 +659,12 @@ BLOCK;
 					WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_category', $category->slug ) );
 				} else {
 					// Fix broken image URLs in the category descriptions.
-					$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
+					$regex                       = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
 					$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
 
 					// Create a Page.
 					$post_details = array(
-						'post_title'   => ( isset( $heading_html ) ) ? $h1_node->text : $category->name,
+						'post_title'   => $heading,
 						'post_content' => $this->generate_page_content( $description_without_heading, $category->term_id, 'category' ),
 						'post_name'    => $category->slug,
 						'post_author'  => 1,
