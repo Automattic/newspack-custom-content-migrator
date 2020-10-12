@@ -125,7 +125,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			'newspack-content-migrator onthewight-download-images-from-s3',
 			[ $this, 'cmd_download_images_from_s3' ],
 			[
-				'shortdesc' => 'Downloads all images hosted on the S3 and updates source references to the local file.',
+				'shortdesc' => 'Imports to local all images hosted on the S3 and updates source references to the local file, but if an image already exists in a predefined local path, use this file instead of downloading it from the S3.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -1091,7 +1091,14 @@ $categories = [ get_category( 8 ) ];
 		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
 
 		global $wpdb;
-		$host_s3 = 'otwstatgraf.s3.amazonaws.com';
+
+		// OTW specific variabloes.
+		$host_s3              = 'otwstatgraf.s3.amazonaws.com';
+		$public_img_location  = 'wp-content/copy_images';
+		$path_existing_images = get_home_path() . $public_img_location;
+		if ( ! file_exists( $path_existing_images ) ) {
+			WP_CLI::error( sprintf( 'Path with existing S3 hosted images not found: %s', $path_existing_images ) );
+		}
 
 		// Get single Post or all Posts.
 		if ( $post_id ) {
@@ -1113,36 +1120,59 @@ $categories = [ get_category( 8 ) ];
 		}
 
 		WP_CLI::line( sprintf( 'Found S3 hosted images in %d posts.', $query_public_posts->post_count ) );
-
 		foreach ( $posts as $post ) {
 
-			// Match images with S3 sources.
+			// Match images with S3 sources in Post content.
 			$matches = $this->match_images_with_hostname( $post->post_content, $host_s3 );
 			if ( ! $matches ) {
 				continue;
 			}
 
-			WP_CLI::line( sprintf( '--- downloading %d image(s) from POST ID %d', count( $matches[1] ), $post->ID ) );
-
-			// Replace the image URL in content with the new WordPress URL
+			WP_CLI::line( sprintf( '--- updating %d image(s) in POST ID %d', count( $matches[1] ), $post->ID ) );
 			$errors               = [];
 			$post_content_updated = $post->post_content;
 			foreach ( $matches[1] as $key => $img_url_s3 ) {
-				$img_src_s3   = $matches[0][ $key ];
-				$img_url_this = ! $dry_run ? media_sideload_image( $img_url_s3, $post->ID, null, $return = 'src' ) : '...';
-				if ( is_wp_error( $img_url_this ) ) {
+
+				$img_src_s3     = $matches[0][ $key ];
+				$img_filename   = $this->get_filename_from_path( $img_url_s3 );
+				$img_local_path = $img_filename
+					? $path_existing_images . '/' . $img_filename
+					: null;
+
+				// If this image exists locally, use this file instead.
+				$img_local_url = ( $img_local_path && file_exists( $img_local_path ) )
+					? get_site_url() . '/' . $public_img_location . '/' . $img_filename
+					: null;
+				if ( $img_local_url ) {
+					WP_CLI::line( sprintf( 'Using local image %s', $img_local_path ) );
+					$img_import_url_from = $img_local_url;
+				} else {
+					WP_CLI::line( sprintf( 'Downloading from S3 %s', $img_url_s3 ) );
+					$img_import_url_from = $img_url_s3;
+				}
+
+				// Import image.
+				$img_url_new = ! $dry_run ? media_sideload_image( $img_import_url_from, $post->ID, null, $return = 'src' ) : '...';
+				if ( is_wp_error( $img_url_new ) ) {
 					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s', $post->ID, $img_src_s3 );
 					$errors[]      = $error_message;
 					WP_CLI::warning( $error_message );
 					continue;
 				}
-				$img_src_this = sprintf( 'src="%s"', $img_url_this );
 
 				$post_content_updated = str_replace(
 					$img_src_s3,
-					$img_src_this,
+					sprintf( 'src="%s"', $img_url_new ),
 					$post_content_updated
 				);
+
+				// Delete the local image file once it's been imported.
+				if ( $img_local_url ) {
+					WP_CLI::line( sprintf( 'Deleting imported local file %s', $img_local_path ) );
+					if ( ! $dry_run ) {
+						unlink( $img_local_path );
+					}
+				}
 			}
 
 			// Update the Post content.
@@ -1166,6 +1196,20 @@ $categories = [ get_category( 8 ) ];
 				. implode( "\n", $errors )
 			);
 		}
+	}
+
+	/**
+	 * Gets filename from a URL or a path.
+	 *
+	 * @param string $img_src_s3 URL or path.
+	 *
+	 * @return string|null Filename.
+	 */
+	private function get_filename_from_path( $img_src_s3 ) {
+		$pathinfo = pathinfo( $img_src_s3 );
+		return ( isset( $pathinfo[ 'filename' ] ) && isset( $pathinfo[ 'extension' ] ) )
+			? $pathinfo[ 'filename' ] . '.' . $pathinfo[ 'extension' ]
+			: null;
 	}
 
 	/**
