@@ -1120,6 +1120,10 @@ $categories = [ get_category( 8 ) ];
 		}
 
 		WP_CLI::line( sprintf( 'Found S3 hosted images in %d posts.', $query_public_posts->post_count ) );
+		if ( 0 == $query_public_posts->post_count ) {
+			return;
+		}
+
 		foreach ( $posts as $post ) {
 
 			// Match images with S3 sources in Post content.
