@@ -126,6 +126,22 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_download_images_from_s3' ],
 			[
 				'shortdesc' => 'Downloads all images hosted on the S3 and updates source references to the local file.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => __('Perform a dry run, making no changes.'),
+						'optional'    => true,
+					],
+				],
+
 			]
 		);
 	}
@@ -1071,24 +1087,34 @@ $categories = [ get_category( 8 ) ];
 			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+
 		global $wpdb;
 		$host_s3 = 'otwstatgraf.s3.amazonaws.com';
 
-		// Loop through posts detecting images hosted in the AWS bucket.
-		$query_public_posts = new \WP_Query( [
-			'posts_per_page' => -1,
-			'post_type'      => [ 'post', 'page' ],
-			'post_status'    => 'publish',
-			's'              => sprintf( '://%s/', $host_s3 ),
-		] );
-		if ( ! $query_public_posts->have_posts() ) {
-			WP_CLI::line( 'No S3 hosted posts found.' );
-			exit;
+		// Get single Post or all Posts.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			// Loop through posts detecting images hosted in the AWS bucket.
+			$query_public_posts = new \WP_Query( [
+				'posts_per_page' => -1,
+				'post_type'      => [ 'post', 'page' ],
+				'post_status'    => 'publish',
+				's'              => sprintf( '://%s/', $host_s3 ),
+			] );
+			if ( ! $query_public_posts->have_posts() ) {
+				WP_CLI::line( 'No Posts with S3 hosted images found.' );
+				exit;
+			}
+
+			$posts = $query_public_posts->get_posts();
 		}
 
 		WP_CLI::line( sprintf( 'Found S3 hosted images in %d posts.', $query_public_posts->post_count ) );
 
-		foreach ( $query_public_posts->get_posts() as $post ) {
+		foreach ( $posts as $post ) {
 
 			// Match images with S3 sources.
 			$matches = $this->match_images_with_hostname( $post->post_content, $host_s3 );
@@ -1103,7 +1129,7 @@ $categories = [ get_category( 8 ) ];
 			$post_content_updated = $post->post_content;
 			foreach ( $matches[1] as $key => $img_url_s3 ) {
 				$img_src_s3   = $matches[0][ $key ];
-				$img_url_this = media_sideload_image( $img_url_s3, $post->ID, null, $return = 'src' );
+				$img_url_this = ! $dry_run ? media_sideload_image( $img_url_s3, $post->ID, null, $return = 'src' ) : '...';
 				if ( is_wp_error( $img_url_this ) ) {
 					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s', $post->ID, $img_src_s3 );
 					$errors[]      = $error_message;
@@ -1120,7 +1146,7 @@ $categories = [ get_category( 8 ) ];
 			}
 
 			// Update the Post content.
-			if ( $post_content_updated != $post->post_content ) {
+			if ( ! $dry_run && $post_content_updated != $post->post_content ) {
 				$wpdb->update(
 					$wpdb->prefix . 'posts',
 					[ 'post_content' => $post_content_updated ],
