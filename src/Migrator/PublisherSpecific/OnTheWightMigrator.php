@@ -616,9 +616,19 @@ BLOCK;
 
 		WP_CLI::confirm( "❗ Warning/info ❗ Only run this command once since re-running it would create duplicate Pages and redirection rules. There's also the `--dry-run` flag you can use. Continue?" );
 
-		$categories = get_categories( [ 'hide_empty' => false, ] );
+		$categories = get_categories(
+			[
+				'hide_empty' => false,
+				'meta_query' => [
+					[
+						'key'     => '_otw_migrated_to_page',
+						'compare' => 'NOT EXISTS',
+					]
+				],
+			]
+		);
 		if ( ! $categories ) {
-			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
+			WP_CLI::error( 'No categories were found. Most unusual... 🤔' );
 		}
 
 		if ( ! $dry_run ) {
@@ -647,16 +657,17 @@ BLOCK;
 				$h1_node = $dom_parser->find( 'h1', 0 );
 				if ( $h1_node ) {
 					// Get the rest of the description without the heading part.
-					$heading                     = $h1_node->outerHtml();
+					$heading_html                = $h1_node->outerHtml();
+					$heading                     = $h1_node->text;
 					$description_without_heading = trim( substr(
 						$category->description,
 						strpos( $category->description, $heading_html ) + strlen( $heading_html )
-						) );
+					) );
 				}
 
 				if ( $dry_run ) {
 					WP_CLI::line( sprintf( '👍 creating Page from Category %s', $category->slug ) );
-					WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_category', $category->slug ) );
+					WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_otw_migrated_from_category', $category->slug ) );
 				} else {
 					// Fix broken image URLs in the category descriptions.
 					$regex                       = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
@@ -682,7 +693,7 @@ BLOCK;
 						$parent_page = get_posts( [
 							'post_type'  => 'page',
 							'meta_query' => [ [
-								'key'   => '_migrated_from_category',
+								'key'   => '_otw_migrated_from_category',
 								'value' => $parent_category->slug,
 							] ]
 						] );
@@ -713,7 +724,10 @@ BLOCK;
 					}
 
 					// Add meta to the new page to indicate which category it came from.
-					add_post_meta( $new_page_id, '_migrated_from_category', $category->slug );
+					add_post_meta( $new_page_id, '_otw_migrated_from_category', $category->slug );
+
+					// Add meta to the category so we can re-run without dupes.
+					add_term_meta( $category->term_id, '_otw_migrated_to_page', $new_page_id, true );
 
 					WP_CLI::line( sprintf( '👍 created Page ID %d from Category %s', $new_page_id, $category->slug ) );
 				}
