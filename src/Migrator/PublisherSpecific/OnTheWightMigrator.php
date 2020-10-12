@@ -1108,6 +1108,7 @@ $categories = [ get_category( 8 ) ];
 					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s', $post->ID, $img_src_s3 );
 					$errors[]      = $error_message;
 					WP_CLI::warning( $error_message );
+					continue;
 				}
 				$img_src_this = sprintf( 'src="%s"', $img_url_this );
 
@@ -1119,11 +1120,13 @@ $categories = [ get_category( 8 ) ];
 			}
 
 			// Update the Post content.
-			$wpdb->update(
-				$wpdb->prefix . 'posts',
-				[ 'post_content' => $post_content_updated ],
-				[ 'ID' => $post->ID ]
-			);
+			if ( $post_content_updated != $post->post_content ) {
+				$wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+			}
 		}
 
 		// Required for the $wpdb->update() sink in.
