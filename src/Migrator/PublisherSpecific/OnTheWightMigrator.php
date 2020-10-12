@@ -523,17 +523,20 @@ BLOCK;
 			// Don't create Pages for Tags without description.
 			if ( ! empty( $tag->description ) ) {
 
+				// Default content.
+				$heading                     = $tag->name;
+				$description_without_heading = $tag->description;
+
 				$dom_parser->loadStr( $tag->description );
 				$h1_node = $dom_parser->find( 'h1', 0 );
 				if ( $h1_node ) {
 					// Get the rest of the description without the heading part.
 					$heading_html                = $h1_node->outerHtml();
+					$heading                     = $h1_node->text;
 					$description_without_heading = trim( substr(
 						$tag->description,
 						strpos( $tag->description, $heading_html ) + strlen( $heading_html )
 						) );
-				} else {
-					$description_without_heading = $tag->description;
 				}
 
 				if ( $dry_run ) {
@@ -546,7 +549,7 @@ BLOCK;
 
 					// Create a Page.
 					$post_details = array(
-						'post_title'   => $h1_node->text,
+						'post_title'   => $heading,
 						'post_content' => $this->generate_page_content( $description_without_heading, $tag->term_id, 'tag' ),
 						'post_parent'  => $parent_page->ID,
 						'post_name'    => $tag->slug,
