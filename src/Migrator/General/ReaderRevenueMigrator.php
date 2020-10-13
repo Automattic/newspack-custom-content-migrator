@@ -164,8 +164,8 @@ class ReaderRevenueMigrator implements InterfaceMigrator {
 		wp_cache_flush();
 
 		$args = array(
-			'numberposts' => -1,
-			'post_type' => 'product',
+			'posts_per_page' => -1,
+			'post_type'      => 'product',
 		);
 		$query = new \WP_Query( $args );
 		if ( ! $query->have_posts() ) {

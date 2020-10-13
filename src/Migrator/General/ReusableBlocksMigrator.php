@@ -114,20 +114,20 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 	/**
 	 * Gets all Reusable Blocks.
 	 *
-	 * @param string[] $post_status `post_status` argument for \WP_Query::construct().
-	 * @param int      $numberposts `numberposts` argument for \WP_Query::construct().
+	 * @param string[] $post_status     `post_status` argument for \WP_Query::construct().
+	 * @param int      $posts_per_page  `posts_per_page` argument for \WP_Query::construct().
 	 *
 	 * @return array Array of Posts.
 	 */
 	private function get_reusable_blocks(
-		$post_status = [ 'publish', 'pending', 'draft', 'future', 'private', 'inherit', 'trash' ],
-		$numberposts = -1
+		$post_status    = [ 'publish', 'pending', 'draft', 'future', 'private', 'inherit', 'trash' ],
+		$posts_per_page = -1
 	) {
 		$posts                 = [];
 		$query_reusable_blocks = new \WP_Query( [
-			'numberposts' => $numberposts,
-			'post_type'   => 'wp_block',
-			'post_status' => $post_status,
+			'posts_per_page' => $posts_per_page,
+			'post_type'      => 'wp_block',
+			'post_status'    => $post_status,
 		] );
 		if ( ! $query_reusable_blocks->have_posts() ) {
 			return $posts;
@@ -193,10 +193,10 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		// Get Public Posts and Pages which contain Reusable Blocks.
 		$query_public_posts = new \WP_Query( [
-			'numberposts' => -1,
-			'post_type'   => [ 'post', 'page' ],
-			'post_status' => 'publish',
-			's'           => '<!-- wp:block'
+			'posts_per_page' => -1,
+			'post_type'      => [ 'post', 'page' ],
+			'post_status'    => 'publish',
+			's'              => '<!-- wp:block'
 		] );
 		if ( ! $query_public_posts->have_posts() ) {
 			return;

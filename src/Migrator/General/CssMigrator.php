@@ -156,8 +156,8 @@ class CssMigrator implements InterfaceMigrator {
 		wp_cache_flush();
 
 		$args = array(
-			'numberposts' => -1,
-			'post_type' => 'custom_css',
+			'posts_per_page' => -1,
+			'post_type'      => 'custom_css',
 		);
 		$query = new \WP_Query( $args );
 		if ( ! $query->have_posts() ) {
@@ -181,10 +181,10 @@ class CssMigrator implements InterfaceMigrator {
 
 		// All args in \WP_Query::parse_query.
 		$args = array(
-			'numberposts' => 1,
-			'post_type' => 'custom_css',
-			'post_status' => 'publish',
-			'meta_key' => PostsMigrator::META_KEY_ORIGINAL_ID,
+			'posts_per_page' => 1,
+			'post_type'      => 'custom_css',
+			'post_status'    => 'publish',
+			'meta_key'       => PostsMigrator::META_KEY_ORIGINAL_ID,
 
 		);
 		$query = new \WP_Query( $args );
