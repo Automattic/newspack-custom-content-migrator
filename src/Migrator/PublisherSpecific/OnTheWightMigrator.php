@@ -1158,7 +1158,7 @@ $categories = [ get_category( 8 ) ];
 				// Import image.
 				$img_url_new = ! $dry_run ? media_sideload_image( $img_import_url_from, $post->ID, null, $return = 'src' ) : '...';
 				if ( is_wp_error( $img_url_new ) ) {
-					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s', $post->ID, $img_src_s3 );
+					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s because: %s', $post->ID, $img_import_url_from, $img_url_new->get_error_message() );
 					$errors[]      = $error_message;
 					WP_CLI::warning( $error_message );
 					continue;
