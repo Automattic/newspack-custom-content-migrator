@@ -1095,7 +1095,7 @@ $categories = [ get_category( 8 ) ];
 		// OTW specific variabloes.
 		$host_s3              = 'otwstatgraf.s3.amazonaws.com';
 		$public_img_location  = 'wp-content/copy_images';
-		$path_existing_images = get_home_path() . $public_img_location;
+		$path_existing_images = $this->get_site_public_path() . '/' . $public_img_location;
 		if ( ! file_exists( $path_existing_images ) ) {
 			WP_CLI::error( sprintf( 'Path with existing S3 hosted images not found: %s', $path_existing_images ) );
 		}
@@ -1200,6 +1200,20 @@ $categories = [ get_category( 8 ) ];
 				. implode( "\n", $errors )
 			);
 		}
+	}
+
+	/**
+	 * Gets site's public folder path (htdocs), without trailing slash.
+	 * Considers Atomic setup variables first.
+	 *
+	 * @return string
+	 */
+	private function get_site_public_path() {
+		if ( defined ( 'WP_CONTENT_DIR' ) ) {
+			return realpath( WP_CONTENT_DIR . "/.." );
+		}
+
+		return rtrim( get_home_path(), '/' );
 	}
 
 	/**
