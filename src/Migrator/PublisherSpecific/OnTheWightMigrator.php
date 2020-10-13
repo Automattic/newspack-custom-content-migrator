@@ -125,7 +125,7 @@ class OnTheWightMigrator implements InterfaceMigrator {
 			'newspack-content-migrator onthewight-download-images-from-s3',
 			[ $this, 'cmd_download_images_from_s3' ],
 			[
-				'shortdesc' => 'Imports to local all images hosted on the S3 and updates source references to the local file, but if an image already exists in a predefined local path, use this file instead of downloading it from the S3.',
+				'shortdesc' => 'Imports to local all images hosted on the S3 and updates source references to the local file, but if an image already exists in a predefined local path, use the local file instead of downloading it from the S3.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -1143,7 +1143,7 @@ $categories = [ get_category( 8 ) ];
 					? $path_existing_images . '/' . $img_filename
 					: null;
 
-				// If this image exists locally, use this file instead.
+				// If this image exists locally, use the local file instead.
 				$img_local_url = ( $img_local_path && file_exists( $img_local_path ) )
 					? get_site_url() . '/' . $public_img_location . '/' . $img_filename
 					: null;
