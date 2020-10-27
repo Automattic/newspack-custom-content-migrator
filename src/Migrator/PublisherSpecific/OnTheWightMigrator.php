@@ -697,70 +697,69 @@ BLOCK;
 			// Don't create Pages for Tags without description.
 			if ( ! empty( $tag->description ) ) {
 
+				// Default content.
+				$heading                     = $tag->name;
+				$description_without_heading = $tag->description;
+
 				$dom_parser->loadStr( $tag->description );
 				$h1_node = $dom_parser->find( 'h1', 0 );
-				if ( ! $h1_node ) {
-					continue;
+				if ( $h1_node ) {
+					// Get the rest of the description without the heading part.
+					$heading_html                = $h1_node->outerHtml();
+					$heading                     = $h1_node->text;
+					$description_without_heading = trim( substr(
+						$tag->description,
+						strpos( $tag->description, $heading_html ) + strlen( $heading_html )
+						) );
 				}
 
-				// Get the rest of the description without the heading part.
-				$heading_html                = $h1_node->outerHtml();
-				$description_without_heading = trim( substr(
-					$tag->description,
-					strpos( $tag->description, $heading_html ) + strlen( $heading_html )
-				) );
+				if ( $dry_run ) {
+					WP_CLI::line( sprintf( '👍 creating Page from Tag %s', $tag->slug ) );
+					WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_tag', $tag->slug ) );
+				} else {
+					// Fix broken image URLs in the tag descriptions.
+					$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
+					$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
 
-				// If there's some more HTML in the description, create a Page for the Tag.
-				if ( $this->has_string_html( $description_without_heading ) ) {
-
-					if ( $dry_run ) {
-						WP_CLI::line( sprintf( '👍 creating Page from Tag %s', $tag->slug ) );
-						WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_tag', $tag->slug ) );
-					} else {
-						// Fix broken image URLs in the tag descriptions.
-						$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
-						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
-
-						// Create a Page.
-						$post_details = array(
-							'post_title'   => $h1_node->text,
-							'post_content' => $this->generate_page_content( $description_without_heading, $tag->ID, 'tag' ),
-							'post_parent'  => $parent_page->ID,
-							'post_name'    => $tag->slug,
-							'post_author'  => 1,
-							'post_type'    => 'page',
-							'post_status'  => 'publish',
-						);
-						$new_page_id  = wp_insert_post( $post_details );
-						if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
-							WP_CLI::error( sprintf(
-								"Something went wrong when trying to create a Page from Tag term_id = %d. 🥺 So sorry about that...",
-								$tag->term_id
-							) );
-						}
-
-						// Add meta to the new page to indicate which tag it came from.
-						add_post_meta( $new_page_id, '_migrated_from_tag', $tag->slug );
-
-						WP_CLI::line( sprintf( '👍 created Page ID %d from Tag %s', $new_page_id, $tag->slug ) );
+					// Create a Page.
+					$post_details = array(
+						'post_title'   => $heading,
+						'post_content' => $this->generate_page_content( $description_without_heading, $tag->term_id, 'tag' ),
+						'post_parent'  => $parent_page->ID,
+						'post_name'    => $tag->slug,
+						'post_author'  => 1,
+						'post_type'    => 'page',
+						'post_status'  => 'publish',
+					);
+					$new_page_id  = wp_insert_post( $post_details );
+					if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
+						WP_CLI::error( sprintf(
+							"Something went wrong when trying to create a Page from Tag term_id = %d. 🥺 So sorry about that...",
+							$tag->term_id
+						) );
 					}
 
-					// Create a redirect rule to redirect this Tag's legacy URL to the new Page.
-					$url_from = '/tag/' . $tag->slug . '[/]?';
-					if ( $dry_run ) {
-						WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
-					} else {
-						$this->create_redirection_rule(
-							'Archive Tag to Page -- ' . $tag->slug,
-							$url_from,
-							get_the_permalink( $new_page_id )
-						);
+					// Add meta to the new page to indicate which tag it came from.
+					add_post_meta( $new_page_id, '_migrated_from_tag', $tag->slug );
 
-						WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
-					}
-
-					$is_tag_converted_to_page = true;
+					WP_CLI::line( sprintf( '👍 created Page ID %d from Tag %s', $new_page_id, $tag->slug ) );
 				}
+
+				// Create a redirect rule to redirect this Tag's legacy URL to the new Page.
+				$url_from = '/tag/' . $tag->slug . '[/]?';
+				if ( $dry_run ) {
+					WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
+				} else {
+					$this->create_redirection_rule(
+						'Archive Tag to Page -- ' . $tag->slug,
+						$url_from,
+						get_the_permalink( $new_page_id )
+					);
+
+					WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
+				}
+
+				$is_tag_converted_to_page = true;
 			}
 
 			if ( ! $is_tag_converted_to_page ) {
@@ -794,11 +793,21 @@ BLOCK;
 
 		WP_CLI::confirm( "❗ Warning/info ❗ Only run this command once since re-running it would create duplicate Pages and redirection rules. There's also the `--dry-run` flag you can use. Continue?" );
 
-		$categories = get_categories( [ 'hide_empty' => false, ] );
+		$categories = get_categories(
+			[
+				'hide_empty' => false,
+				'meta_query' => [
+					[
+						'key'     => '_otw_migrated_to_page',
+						'compare' => 'NOT EXISTS',
+					]
+				],
+			]
+		);
 		if ( ! $categories ) {
-			WP_CLI::error( 'No tags were found. Most unusual... 🤔' );
+			WP_CLI::error( 'No categories were found. Most unusual... 🤔' );
 		}
-$categories = [ get_category( 8 ) ];
+
 		if ( ! $dry_run ) {
 			// Update category Base URL and rewrite rules to use `/category/{category_slug}` URL schema for categories.
 			$this->update_wp_category_base_and_existing_rewrite_rules( 'topic/', 'category/' );
@@ -811,72 +820,110 @@ $categories = [ get_category( 8 ) ];
 
 			$is_category_converted_to_page = false;
 
+			// Default category URL base, for top-level categories;
+			$category_base = '/category/';
+
 			// Don't create Pages for Categories without description.
 			if ( ! empty( $category->description ) ) {
 
+				// Default content.
+				$heading                     = $category->name;
+				$description_without_heading = $category->description;
+
 				$dom_parser->loadStr( $category->description );
 				$h1_node = $dom_parser->find( 'h1', 0 );
-				if ( ! $h1_node ) {
-					continue;
+				if ( $h1_node ) {
+					// Get the rest of the description without the heading part.
+					$heading_html                = $h1_node->outerHtml();
+					$heading                     = $h1_node->text;
+					$description_without_heading = trim( substr(
+						$category->description,
+						strpos( $category->description, $heading_html ) + strlen( $heading_html )
+					) );
 				}
 
-				// Get the rest of the description without the heading part.
-				$heading_html                = $h1_node->outerHtml();
-				$description_without_heading = trim( substr(
-					$category->description,
-					strpos( $category->description, $heading_html ) + strlen( $heading_html )
-				) );
+				if ( $dry_run ) {
+					WP_CLI::line( sprintf( '👍 creating Page from Category %s', $category->slug ) );
+					WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_otw_migrated_from_category', $category->slug ) );
+				} else {
+					// Fix broken image URLs in the category descriptions.
+					$regex                       = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
+					$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
 
-				// If there's some more HTML in the description, create a Page for the Tag.
-				if ( $this->has_string_html( $description_without_heading ) ) {
+					// Create a Page.
+					$post_details = array(
+						'post_title'   => $heading,
+						'post_content' => $this->generate_page_content( $description_without_heading, $category->term_id, 'category' ),
+						'post_name'    => $category->slug,
+						'post_author'  => 1,
+						'post_type'    => 'page',
+						'post_status'  => 'publish',
+						'post_parent'  => get_page_by_path('about')->ID,
+					);
 
-					if ( $dry_run ) {
-						WP_CLI::line( sprintf( '👍 creating Page from Category %s', $category->slug ) );
-						WP_CLI::line( sprintf( "-> adding post_meta to the new Page: '%s' = '%s'", '_migrated_from_category', $category->slug ) );
-					} else {
-						// Fix broken image URLs in the category descriptions.
-						$regex = '#wp-content\/([0-9]{4})\/([0-9]{2})\/#';
-						$description_without_heading = preg_replace( $regex, "wp-content/uploads/$1/$2/", $description_without_heading );
+					// Check if the category has a parent.
+					if ( ! empty( $category->category_parent ) ) {
+						// Get the parent category deatils.
+						$parent_category = get_category( $category->category_parent );
 
-						// Create a Page.
-						$post_details = array(
-							'post_title'   => $h1_node->text,
-							'post_content' => $this->generate_page_content( $description_without_heading, $category->ID, 'category' ),
-							'post_name'    => $category->slug,
-							'post_author'  => 1,
-							'post_type'    => 'page',
-							'post_status'  => 'publish',
-						);
-						$new_page_id  = wp_insert_post( $post_details );
-						if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
-							WP_CLI::error( sprintf(
-								"Something went wrong when trying to create a Page from Category id = %d. 🥺 So sorry about that...",
-								$category->term_id
+						// Get the page created for the parent category.
+						$parent_page = get_posts( [
+							'post_type'  => 'page',
+							'meta_query' => [ [
+								'key'   => '_otw_migrated_from_category',
+								'value' => $parent_category->slug,
+							] ]
+						] );
+						if ( empty( $parent_page ) ) {
+							// Looks like there is no parent page. It might not have been created yet.
+							// Skip this category so we can come back to it later.
+							WP_CLI::warning( sprintf(
+								'Skipping converting category %d because it has a parent category (%d) that we can\'t find a page for.',
+								$category->term_id,
+								$category->category_parent
 							) );
+							continue;
 						}
 
-						// Add meta to the new page to indicate which category it came from.
-						add_post_meta( $new_page_id, '_migrated_from_category', $category->slug );
+						// Set the parent page.
+						$post_details['post_parent'] = $parent_page[0]->ID;
 
-						WP_CLI::line( sprintf( '👍 created Page ID %d from Category %s', $new_page_id, $category->slug ) );
+						// Make sure we include the parent category in the redirect.
+						$category_base = '/category/' . $parent_category->slug . '/';
 					}
 
-					// Create a redirect rule to redirect this Category's legacy URL to the new Page.
-					$url_from = '/category/' . $category->slug . '[/]?';
-					if ( $dry_run ) {
-						WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
-					} else {
-						$this->create_redirection_rule(
-							'Archive Category to Page -- ' . $category->slug,
-							$url_from,
-							get_the_permalink( $new_page_id )
-						);
-
-						WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
+					$new_page_id  = wp_insert_post( $post_details );
+					if ( 0 === $new_page_id || is_wp_error( $new_page_id ) ) {
+						WP_CLI::error( sprintf(
+							"Something went wrong when trying to create a Page from Category id = %d. 🥺 So sorry about that...",
+							$category->term_id
+						) );
 					}
 
-					$is_category_converted_to_page = true;
+					// Add meta to the new page to indicate which category it came from.
+					add_post_meta( $new_page_id, '_otw_migrated_from_category', $category->slug );
+
+					// Add meta to the category so we can re-run without dupes.
+					add_term_meta( $category->term_id, '_otw_migrated_to_page', $new_page_id, true );
+
+					WP_CLI::line( sprintf( '👍 created Page ID %d from Category %s', $new_page_id, $category->slug ) );
 				}
+
+				// Create a redirect rule to redirect this Category's legacy URL to the new Page.
+				$url_from = $category_base . $category->slug . '[/]?';
+				if ( $dry_run ) {
+					WP_CLI::line( sprintf( '-> creating Redirect Rule from `%s` to the new Page', $url_from ) );
+				} else {
+					$this->create_redirection_rule(
+						'Archive Category to Page -- ' . $category->slug,
+						$url_from,
+						get_the_permalink( $new_page_id )
+					);
+
+					WP_CLI::line( sprintf( '-> created Redirect Rule from `%s` to %s', $url_from, get_the_permalink( $new_page_id ) ) );
+				}
+
+				$is_category_converted_to_page = true;
 			}
 
 			if ( ! $is_category_converted_to_page ) {
@@ -1016,29 +1063,37 @@ $categories = [ get_category( 8 ) ];
 	 */
 	private function generate_page_content( $description, $term, $taxonomy ) {
 
+		// Longer descriptions should get an accordion.
+		if ( strlen( $description ) > 105 ) {
+			$description = sprintf(
+				'<!-- wp:atomic-blocks/ab-accordion -->
+		<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
+			<details>
+				<summary class="ab-accordion-title">See details</summary>
+				<div class="ab-accordion-text">
+					<!-- wp:freeform -->%1$s<!-- /wp:freeform -->
+				</div>
+			</details>
+		</div>
+		<!-- /wp:atomic-blocks/ab-accordion -->',
+			$description
+			);
+		}
+
 		// Construct the category/tag filter as required for the hompage posts block.
 		switch ( $taxonomy ) {
 			case 'category':
-				$tax_filter = '"categories":["%d"]';
+				$tax_filter = '"categories":["%s"]';
 				break;
 			case 'tag':
-				$tax_filter = '"tags":["%d"]';
+				$tax_filter = '"tags":["%s"]';
 				break;
 		}
 		$tax_filter_string = sprintf( $tax_filter, $term );
 
 		// The template for the page content. The description goes into a
 		// Classic block in order to maintain the HTML.
-		$content = '<!-- wp:atomic-blocks/ab-accordion -->
-<div class="wp-block-atomic-blocks-ab-accordion ab-block-accordion">
-	<details>
-		<summary class="ab-accordion-title">See details</summary>
-		<div class="ab-accordion-text">
-			<!-- wp:freeform -->%1$s<!-- /wp:freeform -->
-		</div>
-	</details>
-</div>
-<!-- /wp:atomic-blocks/ab-accordion -->
+		$content = '%1$s
 
 <!-- wp:newspack-blocks/homepage-articles {"className":"is-style-default","showAvatar":false,"postsToShow":1,"typeScale":4,%2$s} /-->
 
