@@ -1040,9 +1040,9 @@ $categories = [ get_category( 8 ) ];
 </div>
 <!-- /wp:atomic-blocks/ab-accordion -->
 
-<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-default","showAvatar":false,"postsToShow":1,%2$s} /-->
+<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-default","showAvatar":false,"postsToShow":1,"typeScale":4,%2$s} /-->
 
-<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-borders","showExcerpt":false,"moreButton":true,"showAvatar":false,"postsToShow":15,"mediaPosition":"left",%2$s,"imageScale":1} /-->';
+<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-borders","showExcerpt":false,"moreButton":true,"showAvatar":false,"postsToShow":15,"typeScale":3,"mediaPosition":"left",%2$s,"imageScale":1} /-->';
 
 		$blocks = sprintf(
 			$content, // The content template.
