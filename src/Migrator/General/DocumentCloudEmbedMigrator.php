@@ -71,11 +71,13 @@ class DocumentCloudEmbedMigrator implements InterfaceMigrator {
 			$post_ids = \explode( ',', $post_ids );
 		}
 
-		WP_CLI::line( sprintf( 'Checking %d posts.', count( $post_ids ) ) );
+		WP_CLI::line( sprintf( 'Checking %d posts for DocumentCloud conversion.', count( $post_ids ) ) );
 
 		$started = time();
 
 		foreach ( $post_ids as $id ) {
+
+			WP_CLI::line( \sprintf( 'Checking post #%d', $id ) );
 
 			$content = get_post_field( 'post_content', $id );
 
@@ -86,29 +88,47 @@ class DocumentCloudEmbedMigrator implements InterfaceMigrator {
 				$regex        = '#\s*(<div id="DV-viewer.*documentcloud.*DV\.load.*<\/script>)#isU';
 				$regex_search = preg_match( $regex, $content, $matches );
 			}
-// WP_CLI::line(var_export($matches,true));
+			if ( 1 !== $regex_search ) {
+				// Try another different embed style.
+				$regex        = '#\s*(<!-- wp:html -->.*DC-embed.*documentcloud.*<!-- \/wp:html -->)#isU';
+				$regex_search = preg_match( $regex, $content, $matches );
+			}
+
 			// No matches in this post, and no more types of embed to look for.
 			if ( 1 !== $regex_search ) {
+				WP_CLI::line( '-- No legacy embeds found.' );
 				continue;
 			}
 
+			WP_CLI::line( '-- Legacy embeds found.' );
+
 			// Matches.
-			$file_url_regex  = '#https:\/\/assets\.documentcloud\.org\/documents\/([0-9]+)\/(.*)\.[a-z]{0,4}#isU';
+			$file_url_regex  = '#https:\/\/(assets|www)\.documentcloud\.org\/documents\/([0-9]+)(\/|-)(.*)\.[a-z]{0,4}#isU';
 			$file_url_search = preg_match( $file_url_regex, $matches[0], $file_url_matches );
 			if ( 1 !== $file_url_search ) {
 				// Try matching the HTML ID attribute.
 				$file_url_regex  = '#id="DV-Viewer-([0-9]+)-(.*)"#isU';
 				$file_url_search = preg_match( $file_url_regex, $matches[0], $file_url_matches );
 			}
-// WP_CLI::line(var_export($file_url_matches,true));
+
 			// No more embed formats to look for, so bail.
 			if ( 1 !== $file_url_search ) {
 				// Didn't find the document URL for some reason.
+				WP_CLI::line( '-- Couldn\'t detect document URL.' );
 				continue;
 			}
 
-			$document_id       = $file_url_matches[1];
-			$document_name     = $file_url_matches[2];
+			WP_CLI::line( '-- Document URL found.' );
+
+			// Sort out the ID and name.
+			if ( count( $file_url_matches ) > 3 ) {
+				$document_id       = $file_url_matches[2];
+				$document_name     = $file_url_matches[4];
+			} else {
+				$document_id       = $file_url_matches[1];
+				$document_name     = $file_url_matches[2];
+			}
+
 			$url_for_shortcode = \sprintf(
 				'https://www.documentcloud.org/documents/%s-%s.html',
 				$document_id,
@@ -121,6 +141,7 @@ class DocumentCloudEmbedMigrator implements InterfaceMigrator {
 
 			$replaced = str_replace( $matches[0], $shortcode, $content );
 			if ( $content != $replaced ) {
+				WP_CLI::line( '-- Updating content.' );
 				$updated = [
 					'ID'           => $id,
 					'post_content' => $replaced
@@ -136,9 +157,13 @@ class DocumentCloudEmbedMigrator implements InterfaceMigrator {
 					WP_CLI::success( sprintf( 'Updated #%d', $id ) );
 				}
 
+			} else {
+				WP_CLI::line( '-- Content unchanged.' );
 			}
 
 		}
+
+		wp_cache_flush();
 
 		WP_CLI::line( sprintf(
 			'Finished processing %d records in %d seconds',
