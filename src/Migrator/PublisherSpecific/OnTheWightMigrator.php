@@ -121,6 +121,52 @@ class OnTheWightMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-download-images-from-s3',
+			[ $this, 'cmd_download_images_from_s3' ],
+			[
+				'shortdesc' => 'Imports to local all images hosted on the S3 and updates source references to the local file, but if an image already exists in a predefined local path, use the local file instead of downloading it from the S3.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => __('Perform a dry run, making no changes.'),
+						'optional'    => true,
+					],
+				],
+
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator onthewight-download-audio-from-s3',
+			[ $this, 'cmd_download_audio_from_s3' ],
+			[
+				'shortdesc' => 'Imports to local all audio hosted on the S3 and updates source references to the local file.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => __('Perform a dry run, making no changes.'),
+						'optional'    => true,
+					],
+				],
+
+			]
+		);
 	}
 
 	/**
@@ -1106,5 +1152,321 @@ BLOCK;
 		);
 
 		return $blocks;
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator onthewight-download-images-from-s3` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_download_images_from_s3( $args, $assoc_args ) {
+		if ( ! $this->is_converter_plugin_active() ) {
+			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
+		}
+
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+
+		global $wpdb;
+
+		// OTW specific variabloes.
+		$host_s3              = 'otwstatgraf.s3.amazonaws.com';
+		$public_img_location  = 'wp-content/copy_images';
+		$path_existing_images = $this->get_site_public_path() . '/' . $public_img_location;
+		if ( ! file_exists( $path_existing_images ) ) {
+			WP_CLI::error( sprintf( 'Path with existing S3 hosted images not found: %s', $path_existing_images ) );
+		}
+
+		// Get single Post or all Posts.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			// Loop through posts detecting images hosted in the AWS bucket.
+			$query_public_posts = new \WP_Query( [
+				'posts_per_page' => -1,
+				'post_type'      => [ 'post', 'page' ],
+				'post_status'    => 'publish',
+				's'              => sprintf( '://%s/', $host_s3 ),
+			] );
+			if ( ! $query_public_posts->have_posts() ) {
+				WP_CLI::line( 'No Posts with S3 hosted images found.' );
+				exit;
+			}
+
+			$posts = $query_public_posts->get_posts();
+		}
+
+		WP_CLI::line( sprintf( 'Found S3 hosted images in %d posts.', count( $posts ) ) );
+		if ( 0 == count( $posts ) ) {
+			return;
+		}
+
+		foreach ( $posts as $post ) {
+
+			// Match images src attribute with S3 sources in Post content.
+			$matches = $this->match_attribute_with_hostname( 'src', $post->post_content, $host_s3 );
+			if ( ! $matches ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '--- updating %d image(s) in POST ID %d', count( $matches[1] ), $post->ID ) );
+			$errors               = [];
+			$post_content_updated = $post->post_content;
+			foreach ( $matches[1] as $key => $img_url_s3 ) {
+
+				$img_src_s3     = $matches[0][ $key ];
+				$img_filename   = $this->get_filename_from_path( $img_url_s3 );
+				$img_local_path = $img_filename
+					? $path_existing_images . '/' . $img_filename
+					: null;
+
+				// If this image exists locally, use the local file instead.
+				$img_local_url = ( $img_local_path && file_exists( $img_local_path ) )
+					? get_site_url() . '/' . $public_img_location . '/' . $img_filename
+					: null;
+				if ( $img_local_url ) {
+					WP_CLI::line( sprintf( 'Using local image %s', $img_local_path ) );
+					$img_import_url_from = $img_local_url;
+				} else {
+					WP_CLI::line( sprintf( 'Downloading from S3 %s', $img_url_s3 ) );
+					$img_import_url_from = $img_url_s3;
+				}
+
+				// Import image.
+				$img_url_new = ! $dry_run ? media_sideload_image( $img_import_url_from, $post->ID, null, $return = 'src' ) : '...';
+				if ( is_wp_error( $img_url_new ) ) {
+					$error_message = sprintf( 'ERROR could not save Post ID %s image URL %s because: %s', $post->ID, $img_import_url_from, $img_url_new->get_error_message() );
+					$errors[]      = $error_message;
+					WP_CLI::warning( $error_message );
+					continue;
+				}
+
+				$post_content_updated = str_replace(
+					$img_src_s3,
+					sprintf( 'src="%s"', $img_url_new ),
+					$post_content_updated
+				);
+
+				// Delete the local image file once it's been imported.
+				if ( $img_local_url ) {
+					WP_CLI::line( sprintf( 'Deleting imported local file %s', $img_local_path ) );
+					if ( ! $dry_run ) {
+						unlink( $img_local_path );
+					}
+				}
+			}
+
+			// Update the Post content.
+			if ( ! $dry_run && $post_content_updated != $post->post_content ) {
+				$wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				WP_CLI::line( '✓ updated image URLs in post content' );
+			}
+		}
+
+		// Required for the $wpdb->update() sink in.
+		wp_cache_flush();
+
+		if ( count( $errors ) > 0 ) {
+			// Repeat error messages.
+			WP_CLI::warning(
+				sprintf( 'Finished with %d errors:', count( $errors ) )
+				. "\n"
+				. implode( "\n", $errors )
+			);
+		}
+	}
+
+	/**
+	 * Gets site's public folder path (htdocs), without trailing slash.
+	 * Considers Atomic setup variables first.
+	 *
+	 * @return string
+	 */
+	private function get_site_public_path() {
+		if ( defined ( 'WP_CONTENT_DIR' ) ) {
+			return realpath( WP_CONTENT_DIR . "/.." );
+		}
+
+		return rtrim( get_home_path(), '/' );
+	}
+
+	/**
+	 * Gets filename from a URL or a path.
+	 *
+	 * @param string $path URL or path.
+	 *
+	 * @return string|null Filename.
+	 */
+	private function get_filename_from_path( $path ) {
+		$pathinfo = pathinfo( $path );
+		return ( isset( $pathinfo[ 'filename' ] ) && isset( $pathinfo[ 'extension' ] ) )
+			? $pathinfo[ 'filename' ] . '.' . $pathinfo[ 'extension' ]
+			: null;
+	}
+
+	/**
+	 * Matches an attribute, e.g. `src="https://hostname/file"` with a specified hostname by using preg_match_all().
+	 *
+	 * @param string $attribute Attribute, e.g. 'src' or 'href'.
+	 * @param string $source    HTML/blocks source.
+	 * @param string $hostname  Specific hostname the images contain
+	 *
+	 * @return array|null If matches found, returns $matches as set by the preg_match_all(), otherwise null.
+	 */
+	private function match_attribute_with_hostname( $attribute, $source, $hostname ) {
+		$pattern = sprintf(
+			'|
+				%s="        # attribute opening
+				(https?://  # start full image URL match with http or https
+				%s          # hostname
+				/.*?)       # end full image URL match
+				"           # attribute closing
+			|xims',
+			$attribute,
+			$hostname
+		);
+		$matches = [];
+		$preg_match_all_result = preg_match_all( $pattern, $source, $matches );
+
+		return ( 0 === $preg_match_all_result || false === $preg_match_all_result )
+			? null
+			: $matches;
+	}
+
+
+	/**
+	 * Callable for the `newspack-content-migrator onthewight-download-audio-from-s3` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_download_audio_from_s3( $args, $assoc_args ) {
+		if ( ! $this->is_converter_plugin_active() ) {
+			WP_CLI::error( '🤭 The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
+		}
+
+		$dry_run = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args[ 'post-id' ] : null;
+
+		global $wpdb;
+
+		// OTW specific variables.
+		$host_s3 = 'otw-audio.s3.amazonaws.com';
+
+		// Get single Post or all Posts.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			// Loop through posts detecting audio files hosted in the AWS bucket.
+			$query_public_posts = new \WP_Query( [
+				'posts_per_page' => -1,
+				'post_type'      => [ 'post', 'page' ],
+				'post_status'    => 'publish',
+				's'              => sprintf( '://%s/', $host_s3 ),
+			] );
+			if ( ! $query_public_posts->have_posts() ) {
+				WP_CLI::line( 'No Posts with S3 hosted audio files found.' );
+				exit;
+			}
+
+			$posts = $query_public_posts->get_posts();
+		}
+
+		WP_CLI::line( sprintf( 'Found S3 hosted audio files in %d posts.', count( $posts ) ) );
+		if ( 0 == count( $posts ) ) {
+			return;
+		}
+
+		foreach ( $posts as $post ) {
+
+			// Match audio files' href attribute with S3 sources in Post content.
+			$matches = $this->match_attribute_with_hostname( 'href', $post->post_content, $host_s3 );
+			if ( ! $matches ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '--- updating %d audio file(s) in POST ID %d', count( $matches[1] ), $post->ID ) );
+			$errors               = [];
+			$post_content_updated = $post->post_content;
+			foreach ( $matches[1] as $key => $file_url_s3 ) {
+
+				$file_href_s3 = $matches[0][ $key ];
+
+				WP_CLI::line( sprintf( 'Downloading from S3 %s', $file_url_s3 ) );
+
+				// Import audio file.
+				$attachment_id = ! $dry_run ? $this->import_file_to_attachment( $file_url_s3, $post->ID ) : '...';
+				if ( is_wp_error( $attachment_id ) ) {
+					$error_message = sprintf( 'ERROR could not save Post ID %s audio file URL %s because: %s', $post->ID, $file_url_s3, $attachment_id->get_error_message() );
+					$errors[]      = $error_message;
+					WP_CLI::warning( $error_message );
+					continue;
+				}
+
+				// Replace Post content with the imported file's URL.
+				$post_content_updated = str_replace(
+					$file_url_s3,
+					wp_get_attachment_url( $attachment_id ),
+					$post_content_updated
+				);
+			}
+
+			// Update the Post content.
+			if ( ! $dry_run && $post_content_updated != $post->post_content ) {
+				$wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				WP_CLI::line( '✓ updated audio URLs in post content' );
+			}
+		}
+
+		// Required for the $wpdb->update() sink in.
+		wp_cache_flush();
+
+		if ( count( $errors ) > 0 ) {
+			// Repeat error messages.
+			WP_CLI::warning(
+				sprintf( 'Finished with %d errors:', count( $errors ) )
+				. "\n"
+				. implode( "\n", $errors )
+			);
+		}
+	}
+
+	/**
+	 * Imports an externally hosted media file to a local attachment.
+	 *
+	 * @param string $file_url       File URL.
+	 * @param int    $parent_post_id Parent Post ID.
+	 *
+	 * @return int|\WP_Error Attachment ID or WP_Error.
+	 */
+	private function import_file_to_attachment( $file_url, $parent_post_id ) {
+
+		// Download file from URL.
+		$temp_file = download_url( $file_url );
+		if ( is_wp_error( $temp_file ) ) {
+			return $temp_file;
+		}
+
+		$file_array = [
+			'name'     => $this->get_filename_from_path( $file_url ),
+			'tmp_name' => $temp_file,
+		];
+		$attachment_id = media_handle_sideload( $file_array , $parent_post_id, null );
+
+		// Cleanup if import wasn't successful.
+		if ( is_wp_error( $attachment_id ) ) {
+			@unlink( $file_array[ 'tmp_name' ] );
+		}
+
+		return $attachment_id;
 	}
 }
