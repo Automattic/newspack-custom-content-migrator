@@ -1209,6 +1209,7 @@ $categories = [ get_category( 8 ) ];
 					[ 'post_content' => $post_content_updated ],
 					[ 'ID' => $post->ID ]
 				);
+				WP_CLI::line( '✓ updated image URLs in post content' );
 			}
 		}
 
@@ -1367,6 +1368,7 @@ $categories = [ get_category( 8 ) ];
 					[ 'post_content' => $post_content_updated ],
 					[ 'ID' => $post->ID ]
 				);
+				WP_CLI::line( '✓ updated audio URLs in post content' );
 			}
 		}
 
