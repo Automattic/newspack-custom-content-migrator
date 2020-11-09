@@ -1354,8 +1354,8 @@ $categories = [ get_category( 8 ) ];
 
 				// Replace Post content with the imported file's URL.
 				$post_content_updated = str_replace(
-					$file_href_s3,
-					sprintf( 'href="%s"', wp_get_attachment_url( $attachment_id ) ),
+					$file_url_s3,
+					wp_get_attachment_url( $attachment_id ),
 					$post_content_updated
 				);
 			}
