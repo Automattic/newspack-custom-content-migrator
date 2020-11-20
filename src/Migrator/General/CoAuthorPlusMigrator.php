@@ -43,7 +43,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 *
 	 * @return bool Is everything set up OK.
 	 */
-	private function validate_co_authors_plus_dependencies() {
+	public function validate_co_authors_plus_dependencies() {
 		if ( ( ! $this->coauthors_plus instanceof CoAuthors_Plus ) || ( ! $this->coauthors_guest_authors instanceof CoAuthors_Guest_Authors ) ) {
 			return false;
 		}
