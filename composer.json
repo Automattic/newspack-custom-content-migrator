@@ -1,4 +1,5 @@
 {
+  "name": "Automattic/newspack-custom-content-migrator",
   "autoload": {
     "psr-4": {
       "NewspackCustomContentMigrator\\": "src/"
