@@ -5,20 +5,21 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:	    0.4.0
+ * Version:	    0.5.0
  *
  * @package	 Newspack_Custom_Content_Migrator
  */
 
 namespace NewspackCustomContentMigrator;
 
+require __DIR__ . '/vendor/autoload.php';
+
 // Don't do anything outside WP CLI.
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
 }
 
-require 'vendor/autoload.php';
-require_once( ABSPATH . 'wp-settings.php' );
+require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators( array(
