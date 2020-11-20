@@ -1,9 +1,9 @@
 {
   "name": "automattic/newspack-custom-content-migrator",
   "autoload": {
-    "psr-4": {
-      "NewspackCustomContentMigrator\\": "src/"
-    }
+    "classmap": [
+      "src/"
+    ]
   },
   "require": {
     "paquettg/php-html-parser": "^2.2"
