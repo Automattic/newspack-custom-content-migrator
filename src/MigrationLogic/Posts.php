@@ -99,4 +99,51 @@ SQL;
 
 		return $names;
 	}
+
+	/**
+	 * Returns a list of all `post_type`s defined in the posts DB table.
+	 *
+	 * @return array Post types.
+	 */
+	public function get_all_post_types() {
+		global $wpdb;
+
+		$post_types = [];
+		$results = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
+		foreach ( $results as $result ) {
+			$post_types[] = $result->post_type;
+		}
+
+		return $post_types;
+	}
+
+	/**
+	 * Gets all post objects with taxonomy and term.
+	 * In order for this function to work, the Taxonomy must be registered on all post types, e.g. like this:
+	 * ```
+	 *      if ( ! taxonomy_exists( $taxonomy ) ) {
+	 *          register_taxonomy( $taxonomy, 'any' );
+	 *      }
+	 * ```
+	 *
+	 * @param array $post_types Post types.
+	 * @param string $taxonomy Taxonomy.
+	 * @param int $term_id term_id.
+	 *
+	 * @return \WP_Post[]
+	 */
+	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
+		return get_posts( [
+			'posts_per_page' => -1,
+			// Target all post_types.
+			'post_type'      => $post_types,
+			'tax_query'      => [
+				[
+					'taxonomy' => $taxonomy,
+					'field'    => 'term_id',
+					'terms'    => $term_id,
+				]
+			],
+		] );
+	}
 }

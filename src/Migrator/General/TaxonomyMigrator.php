@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts;
 use \WP_CLI;
 
 class TaxonomyMigrator implements InterfaceMigrator {
@@ -13,9 +14,15 @@ class TaxonomyMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var Posts $posts_logic
+	 */
+	private $posts_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->posts_logic = new Posts();
 	}
 
 	/**
@@ -111,7 +118,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			}
 		}
 
-		$all_post_types = $this->get_all_db_post_types();
+		$all_post_types = $this->posts_logic->get_all_post_types();
 
 		// Register the Taxonomy on all post types if it's not registered, otherwise Term functions won't work.
 		if ( ! taxonomy_exists( $taxonomy ) ) {
@@ -136,7 +143,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			}
 
 			// Get post objects.
-			$posts = $this->get_post_objects_with_taxonomy_and_term( $taxonomy, $term->term_id, $all_post_types );
+			$posts = $this->posts_logic->get_post_objects_with_taxonomy_and_term( $taxonomy, $term->term_id, $all_post_types );
 			if ( empty( $posts ) ) {
 				WP_CLI::line( sprintf( "No post objects found for term '%s'.", $term->slug ) );
 				continue;
@@ -175,7 +182,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( 'Converting Terms with Taxonomy %s to Tags...', $taxonomy ) );
 
-		$all_post_types = $this->get_all_db_post_types();
+		$all_post_types = $this->posts_logic->get_all_post_types();
 
 		// Register the Taxonomy on all post types if it's not registered, otherwise Term functions won't work.
 		if ( ! taxonomy_exists( $taxonomy ) ) {
@@ -200,7 +207,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			}
 
 			// Get post objects.
-			$posts = $this->get_post_objects_with_taxonomy_and_term( $taxonomy, $term->term_id, $all_post_types );
+			$posts = $this->posts_logic->get_post_objects_with_taxonomy_and_term( $taxonomy, $term->term_id, $all_post_types );
 			if ( empty( $posts ) ) {
 				WP_CLI::line( sprintf( "No post objects found for term '%s'.", $term->slug ) );
 				continue;
@@ -300,46 +307,5 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		$parent_category = get_category( $parent_category_term_id );
 
 		return $parent_category;
-	}
-
-	/**
-	 * Gets all post objects with taxonomy and term.
-	 *
-	 * @param array $post_types Post types.
-	 * @param string $taxonomy Taxonomy.
-	 * @param int $term_id term_id.
-	 *
-	 * @return \WP_Post[]
-	 */
-	private function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
-		return get_posts( [
-			'posts_per_page' => -1,
-			// Target all post_types.
-			'post_type'      => $post_types,
-			'tax_query'      => [
-				[
-					'taxonomy' => $taxonomy,
-					'field'    => 'term_id',
-					'terms'    => $term_id,
-				]
-			],
-		] );
-	}
-
-	/**
-	 * Returns a list of all distinct `post_type`s in the posts DB table.
-	 *
-	 * @return array Post types.
-	 */
-	private function get_all_db_post_types() {
-		global $wpdb;
-
-		$post_types = [];
-		$results = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
-		foreach ( $results as $result ) {
-			$post_types[] = $result->post_type;
-		}
-
-		return $post_types;
 	}
 }
