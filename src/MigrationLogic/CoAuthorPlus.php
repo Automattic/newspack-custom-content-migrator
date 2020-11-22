@@ -152,4 +152,15 @@ class CoAuthorPlus {
 	public function get_guest_author_by_id( $ga_id ) {
 		return $this->coauthors_guest_authors->get_guest_author_by( 'ID', $ga_id );
 	}
+
+	/**
+	 * Creates a Guest Author user from an existing WP user.
+	 *
+	 * @param int $user_id WP User ID.
+	 *
+	 * @return int|\WP_Error Guest Author ID.
+	 */
+	public function create_guest_author_from_wp_user( $user_id ) {
+		return $this->coauthors_guest_authors->create_guest_author_from_user_id( $user_id );
+	}
 }
