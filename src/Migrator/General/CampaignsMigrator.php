@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\Migrator\General\PostsMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Campaigns;
 use \WP_CLI;
 
 class CampaignsMigrator implements InterfaceMigrator {
@@ -14,19 +15,20 @@ class CampaignsMigrator implements InterfaceMigrator {
 	const CAMPAIGNS_EXPORT_FILE = 'newspack-campaigns.xml';
 
 	/**
-	 * @var string Campaign Post Type.
-	 */
-	const CAMPAIGNS_POST_TYPE = 'newspack_popups_cpt';
-
-	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
 	/**
+	 * @var Campaigns
+	 */
+	private $campaigns_logic = null;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->campaigns_logic = new Campaigns();
 	}
 
 	/**
@@ -109,7 +111,7 @@ class CampaignsMigrator implements InterfaceMigrator {
 	public function export_campaigns( $output_dir, $file_output_campaigns ) {
 		wp_cache_flush();
 
-		$posts = $this->get_all_campaigns();
+		$posts = $this->campaigns_logic->get_all_campaigns();
 		if ( empty( $posts ) ) {
 			WP_CLI::warning( sprintf( 'No Campaigns found.' ) );
 			return false;
@@ -162,7 +164,7 @@ class CampaignsMigrator implements InterfaceMigrator {
 		// will get double metas -- the default ones from the action, and the exported/imported ones from the file.
 		remove_action( 'save_post_newspack_popups_cpt', [ \Newspack_Popups::class, 'popup_default_fields' ], 10 );
 
-		register_post_type( self::CAMPAIGNS_POST_TYPE );
+		register_post_type( $this->campaigns_logic::CAMPAIGNS_POST_TYPE );
 
 		// The reason why we're not running the `wp import` command, but instead are programmatically importing the file like
 		// this, is that we need to remove the action above; if we ran a separate `wp import` command, we couldn't tap into its
@@ -206,7 +208,7 @@ class CampaignsMigrator implements InterfaceMigrator {
 	private function delete_all_existing_campaigns() {
 		wp_cache_flush();
 
-		$posts = $this->get_all_campaigns();
+		$posts = $this->campaigns_logic->get_all_campaigns();
 		if ( empty( $posts ) ) {
 			return;
 		}
@@ -214,18 +216,5 @@ class CampaignsMigrator implements InterfaceMigrator {
 		foreach ( $posts as $post ) {
 			wp_delete_post( $post->ID );
 		}
-	}
-
-	/**
-	 * Fetches all Campaigns.
-	 *
-	 * @return int[]|\WP_Post[]
-	 */
-	private function get_all_campaigns() {
-		return get_posts( [
-			'posts_per_page' => -1,
-			'post_type'      => [ self::CAMPAIGNS_POST_TYPE ],
-			'post_status'    => [ 'publish', 'draft' ]
-		] );
 	}
 }
