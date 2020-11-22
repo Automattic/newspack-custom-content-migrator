@@ -3,10 +3,9 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \WP_CLI;
 use \WP_Query;
-use \CoAuthors_Plus;
-use \CoAuthors_Guest_Authors;
 
 class CoAuthorPlusMigrator implements InterfaceMigrator {
 
@@ -18,41 +17,20 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	private $tag_author_prefix = 'author:';
 
 	/**
-	 * @var null|CoAuthors_Plus $coauthors_plus
-	 */
-	private $coauthors_plus;
-
-	/**
-	 * @var null|CoAuthors_Guest_Authors
-	 */
-	private $coauthors_guest_authors;
-
-	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
 	/**
+	 * @var CoAuthorPlus $coauthorsplus_logic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-	}
-
-	/**
-	 * Validates whether Co-Author Plus plugin's dependencies were successfully set.
-	 *
-	 * @return bool Is everything set up OK.
-	 */
-	public function validate_co_authors_plus_dependencies() {
-		if ( ( ! $this->coauthors_plus instanceof CoAuthors_Plus ) || ( ! $this->coauthors_guest_authors instanceof CoAuthors_Guest_Authors ) ) {
-			return false;
-		}
-
-		if ( false === $this->is_coauthors_active() ) {
-			return false;
-		}
-
-		return true;
+		$this->coauthorsplus_logic = new CoAuthorPlus();
 	}
 
 	/**
@@ -65,22 +43,6 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		if ( null === self::$instance ) {
 			self::$instance = new $class;
 
-			// Set Co-Authors Plus dependencies.
-			global $coauthors_plus;
-
-			$plugin_path = defined( 'WP_PLUGIN_DIR' ) ? WP_PLUGIN_DIR : ABSPATH . 'wp-content/plugins';
-
-			$file_1 = $plugin_path . '/co-authors-plus/co-authors-plus.php';
-			$file_2 = $plugin_path . '/co-authors-plus/php/class-coauthors-guest-authors.php';
-			$included_1 = is_file( $file_1 ) && include_once $file_1;
-			$included_2 = is_file( $file_2 ) && include_once $file_2;
-
-			if ( is_null( $coauthors_plus ) || ( false === $included_1 ) || ( false === $included_2 ) || ( ! $coauthors_plus instanceof CoAuthors_Plus ) ) {
-				return self::$instance;
-			}
-
-			self::$instance->coauthors_plus          = $coauthors_plus;
-			self::$instance->coauthors_guest_authors = new CoAuthors_Guest_Authors();
 		}
 
 		return self::$instance;
@@ -203,7 +165,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_tags_with_prefix_to_guest_authors( $args, $assoc_args ) {
-		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 			exit;
 		}
@@ -255,7 +217,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_tags_with_taxonomy_to_guest_authors( $args, $assoc_args ) {
-		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 			exit;
 		}
@@ -280,13 +242,13 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			$author_names     = $this->get_post_tags_with_taxonomy( $post_id, $tag_taxonomy );
 			foreach ( $author_names as $author_name ) {
 				try {
-					$guest_author_ids[] = $this->create_guest_author( [ 'display_name' => $author_name ] );
+					$guest_author_ids[] = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author_name ] );
 				} catch ( \Exception $e ) {
 					$errors[] = sprintf( "Error creating '%s', %s", $author_name, $e->getMessage() );
 				}
 			}
 
-			$this->assign_guest_authors_to_post( $guest_author_ids, $post_id );
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id );
 		}
 		$progress_bar->finish();
 
@@ -311,7 +273,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_cpt_to_guest_authors( $args, $assoc_args ) {
-		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 			exit;
 		}
@@ -368,7 +330,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 					continue;
 				}
 
-				$new_guest_author   = $this->create_guest_author( $args );
+				$new_guest_author   = $this->coauthorsplus_logic->create_guest_author( $args );
 				$guest_author_ids[] = $new_guest_author;
 
 				// Record the original post ID that we migrated from.
@@ -403,7 +365,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_link_ga_to_user( $args, $assoc_args ) {
-		if ( false === $this->validate_co_authors_plus_dependencies() ) {
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 			exit;
 		}
@@ -411,7 +373,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		$ga_id   = isset( $assoc_args[ 'ga_id' ] ) ? (int) $assoc_args[ 'ga_id' ] : null;
 		$user_id = isset( $assoc_args[ 'user_id' ] ) ? (int) $assoc_args[ 'user_id' ] : null;
 
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'ID', $ga_id );
+		$guest_author = $this->coauthorsplus_logic->get_guest_author_by( 'ID', $ga_id );
 		$user         = get_user_by( 'id', $user_id );
 		if (  ! $guest_author ) {
 			WP_CLI::error( sprintf( 'Guest Author by ID %d not found.', $ga_id ) );
@@ -422,14 +384,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( "Linking Guest Author '%s' (ID %d) to WP User '%s' (ID %d)", $guest_author->user_login, $ga_id, $user->user_login, $user_id ) );
 
-		// Since GAs and WP Users can't have the same login, update it if they're the same.
-		$cap_user_login = get_post_meta( $ga_id, 'cap-user_login', true );
-		if ( $cap_user_login == $user->user_nicename ) {
-			update_post_meta( $ga_id, 'cap-user_login', 'cap-' . $cap_user_login );
-		}
-
-		// WP User mapping.
-		update_post_meta( $ga_id, 'cap-linked_account', $user->user_login );
+		$this->coauthorsplus_logic->link_guest_author_to_wp_user( $ga_id, $user );
 	}
 
 	/**
@@ -456,22 +411,6 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		}
 
 		return $cpt->$get_value_from;
-	}
-
-	/**
-	 * Checks whether Co-authors Plus is installed and active.
-	 *
-	 * @return bool Is active.
-	 */
-	public function is_coauthors_active() {
-		$active = false;
-		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
-			if ( false !== strrpos( $plugin, 'co-authors-plus.php' ) ) {
-				$active = true;
-			}
-		}
-
-		return $active;
 	}
 
 	/**
@@ -572,13 +511,13 @@ SQL;
 		$errors           = [];
 		foreach ( $author_names as $author_name ) {
 			try {
-				$guest_author_ids[] = $this->create_guest_author( [ 'display_name' => $author_name ] );
+				$guest_author_ids[] = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author_name ] );
 			} catch ( \Exception $e ) {
 				$errors[] = sprintf( "Error creating '%s', %s", $author_name, $e->getMessage() );
 			}
 		}
 
-		$this->assign_guest_authors_to_post( $guest_author_ids, $post_id );
+		$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id );
 
 		if ( $unset_author_tags ) {
 			$new_tags      = $this->get_tags_diff( $all_tags, $author_tags );
@@ -624,59 +563,6 @@ SQL;
 		}
 
 		return $author_tags;
-	}
-
-	/**
-	 * Creates Guest Authors from their full names.
-	 *
-	 * Takes the same $args param as the \CoAuthors_Guest_Authors::create does, which is an array with the following keys:
-	 *      - 'display_name' -> this is the only required param
-	 *      - 'user_login'   -> this param is optional, because this function automatically creates it from the 'display_name'
-	 *      - 'first_name'
-	 *      - 'last_name'
-	 *      - 'user_email'
-	 *      - 'website'
-	 *      - 'description'
-	 *
-	 * @param array $args The $args param for the \CoAuthors_Guest_Authors::create method.
-	 *
-	 * @return array An array of Guest Author IDs.
-	 *
-	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
-	 */
-	public function create_guest_author( array $args ) {
-		if ( ! isset( $args[ 'display_name' ] ) ) {
-			throw new \UnexpectedValueException( 'The `display_name` param is mandatory for Guest Author creation.' );
-		}
-
-		// If not provided, automatically set `user_login` from display_name.
-		if ( ! isset( $args[ 'user_login' ] ) ) {
-			$args[ 'user_login' ] = sanitize_title( $args[ 'display_name' ] );
-		}
-
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args[ 'user_login' ] );
-		if ( false === $guest_author ) {
-			$coauthor_id = $this->coauthors_guest_authors->create( $args );
-		} else {
-			$coauthor_id = $guest_author->ID;
-		}
-
-		return $coauthor_id;
-	}
-
-	/**
-	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
-	 *
-	 * @param array $guest_author_ids Guest Author IDs.
-	 * @param int   $post_id          Post IDs.
-	 */
-	public function assign_guest_authors_to_post( array $guest_author_ids, $post_id ) {
-		$coauthors = [];
-		foreach ( $guest_author_ids as $guest_author_id ) {
-			$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
-			$coauthors[]  = $guest_author->user_nicename;
-		}
-		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users = false );
 	}
 
 	/**
