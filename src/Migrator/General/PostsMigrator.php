@@ -242,6 +242,7 @@ class PostsMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( 'Exporting all Staging site Pages to %s ...', $output_dir . '/' . self::STAGING_PAGES_EXPORT_FILE ) );
 
+		wp_reset_postdata();
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'page' );
 		$this->migrator_export_posts( $post_ids, $output_dir, self::STAGING_PAGES_EXPORT_FILE );
 
@@ -286,6 +287,7 @@ class PostsMigrator implements InterfaceMigrator {
 		$this->delete_duplicate_live_site_pages();
 
 		// Get IDs of the unique Live Pages which we are keeping.
+		wp_reset_postdata();
 		$pages_live_ids = $this->posts_logic->get_all_posts_ids( 'page' );
 
 		// Update the remaining Live Pages which we are keeping: save them as drafts, and change their permalinks and titles.

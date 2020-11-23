@@ -11,8 +11,6 @@ class Posts {
 	public function get_all_posts_ids( $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $nopaging = true ) {
 		$ids = array();
 
-		wp_reset_postdata();
-
 		// Arguments in \WP_Query::parse_query .
 		$args = array(
 			'nopaging' => $nopaging,
@@ -26,8 +24,6 @@ class Posts {
 				$ids[] = $post->ID;
 			}
 		}
-
-		wp_reset_postdata();
 
 		return $ids;
 	}
