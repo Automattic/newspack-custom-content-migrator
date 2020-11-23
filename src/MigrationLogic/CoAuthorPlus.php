@@ -75,16 +75,17 @@ class CoAuthorPlus {
 	/**
 	 * Creates Guest Authors from their full names.
 	 *
-	 * Takes the same $args param as the \CoAuthors_Guest_Authors::create does, which is an array with the following keys:
-	 *      - 'display_name' -> this is the only required param
-	 *      - 'user_login'   -> this param is optional, because this function automatically creates it from the 'display_name'
-	 *      - 'first_name'
-	 *      - 'last_name'
-	 *      - 'user_email'
-	 *      - 'website'
-	 *      - 'description'
+	 * @param array $args {
+	 *     The $args param for the \CoAuthors_Guest_Authors::create method.
 	 *
-	 * @param array $args The $args param for the \CoAuthors_Guest_Authors::create method.
+	 *     @type string $display_name This is the only required param.
+	 *     @type string $user_login   This param is optional, since this function automatically creates it from the $display_name.
+	 *     @type string $first_name
+	 *     @type string $last_name
+	 *     @type string $user_email
+	 *     @type string $website
+	 *     @type string $description
+	 * }
 	 *
 	 * @return array An array of Guest Author IDs.
 	 *
