@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts;
 use \WP_CLI;
 
 class PostsMigrator implements InterfaceMigrator {
@@ -23,9 +24,15 @@ class PostsMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var Posts.
+	 */
+	private $posts_logic = null;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->posts_logic = new Posts();
 	}
 
 	/**
@@ -222,20 +229,6 @@ class PostsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Imports a media object from file and returns the ID.
-	 *
-	 * @param string $file Media file full path.
-	 *
-	 * @return mixed ID of the imported media file.
-	 */
-	public function import_media_from_path( $file ) {
-		$options = [ 'return' => true, ];
-		$id      = WP_CLI::runcommand( "media import $file --title='favicon' --porcelain", $options );
-
-		return $id;
-	}
-
-	/**
 	 * Exports all Pages from the Staging site.
 	 *
 	 * @param $args
@@ -249,39 +242,11 @@ class PostsMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( 'Exporting all Staging site Pages to %s ...', $output_dir . '/' . self::STAGING_PAGES_EXPORT_FILE ) );
 
-		$post_ids = $this->get_all_pages();
+		wp_reset_postdata();
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'page' );
 		$this->migrator_export_posts( $post_ids, $output_dir, self::STAGING_PAGES_EXPORT_FILE );
 
 		WP_CLI::success( 'Done.' );
-	}
-
-	/**
-	 * Gets IDs of all the Pages.
-	 *
-	 * @return array Pages IDs.
-	 */
-	public function get_all_pages() {
-		$ids = array();
-
-		wp_reset_postdata();
-
-		// Arguments in \WP_Query::parse_query .
-		$args = array(
-			'nopaging' => true,
-			'post_type' => 'page',
-			'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
-		);
-		$query = new \WP_Query( $args );
-		$posts = $query->get_posts();
-		if ( ! empty( $posts ) ) {
-			foreach ( $posts as $post ) {
-				$ids[] = $post->ID;
-			}
-		}
-
-		wp_reset_postdata();
-
-		return $ids;
 	}
 
 	/**
@@ -322,7 +287,8 @@ class PostsMigrator implements InterfaceMigrator {
 		$this->delete_duplicate_live_site_pages();
 
 		// Get IDs of the unique Live Pages which we are keeping.
-		$pages_live_ids = $this->get_all_pages();
+		wp_reset_postdata();
+		$pages_live_ids = $this->posts_logic->get_all_posts_ids( 'page' );
 
 		// Update the remaining Live Pages which we are keeping: save them as drafts, and change their permalinks and titles.
 		if ( count( $pages_live_ids ) > 0 ) {

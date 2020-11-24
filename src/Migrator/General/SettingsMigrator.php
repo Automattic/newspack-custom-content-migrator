@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\Migrator\General\PostsMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments;
 use \WP_CLI;
 
 class SettingsMigrator implements InterfaceMigrator {
@@ -24,9 +25,15 @@ class SettingsMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var Attachments $attachments_logic
+	 */
+	private $attachments_logic = null;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->attachments_logic = new Attachments();
 	}
 
 	/**
@@ -188,7 +195,7 @@ class SettingsMigrator implements InterfaceMigrator {
 		if ( isset( $imported_mods_and_options['custom_logo_file'] ) && ! empty( $imported_mods_and_options['custom_logo_file'] ) ) {
 			$logo_file = $imported_mods_and_options['custom_logo_file'];
 			if ( file_exists( $logo_file ) ) {
-				$logo_id   = PostsMigrator::get_instance()->import_media_from_path( $logo_file );
+				$logo_id = $this->attachments_logic->import_media_from_path( $logo_file );
 			}
 		}
 
@@ -197,7 +204,7 @@ class SettingsMigrator implements InterfaceMigrator {
 		if ( isset( $imported_mods_and_options['newspack_footer_logo_file'] ) && ! empty( $imported_mods_and_options['newspack_footer_logo_file'] ) ) {
 			$footer_logo_file = $imported_mods_and_options['newspack_footer_logo_file'];
 			if ( file_exists( $footer_logo_file ) ) {
-				$footer_logo_id = PostsMigrator::get_instance()->import_media_from_path( $footer_logo_file );
+				$footer_logo_id = $this->attachments_logic->import_media_from_path( $footer_logo_file );
 			}
 		}
 
@@ -208,7 +215,7 @@ class SettingsMigrator implements InterfaceMigrator {
 		if ( isset( $imported_mods_and_options['site_icon_file'] ) && ! empty( $imported_mods_and_options['site_icon_file'] ) ) {
 			$icon_file = $imported_mods_and_options['site_icon_file'];
 			if ( file_exists( $icon_file ) ) {
-				$icon_id   = PostsMigrator::get_instance()->import_media_from_path( $icon_file );
+				$icon_id = $this->attachments_logic->import_media_from_path( $icon_file );
 				if ( is_numeric( $icon_id ) ) {
 					update_option( 'site_icon', $icon_id );
 				}
