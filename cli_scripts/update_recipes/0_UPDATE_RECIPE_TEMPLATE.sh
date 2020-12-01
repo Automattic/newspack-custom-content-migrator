@@ -175,8 +175,8 @@ else echo_ts_yellow 'Skipping importing Reusable Blocks from the Staging site.';
 echo_ts 'importing Staging content previously converted to blocks...'
 import_blocks_content_from_staging_site
 
-echo_ts 'updating WooComm pages IDs...'
-wp_cli newspack-content-migrator woocomm-update-pages
+echo_ts 'updating WooComm settings...'
+wp_cli newspack-content-migrator woocomm-setup
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
