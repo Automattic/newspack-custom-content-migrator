@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\Migrator\General\PostsMigrator;
 use \WP_CLI;
+use \WP_Error;
 
 class WooCommMigrator implements InterfaceMigrator {
 
@@ -37,20 +38,64 @@ class WooCommMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator woocomm-update-pages', array( $this, 'cmd_update_pages' ), [
-			'shortdesc' => 'Exports settings for default Site Pages.',
+		WP_CLI::add_command( 'newspack-content-migrator woocomm-setup', array( $this, 'cmd_setup' ), [
+			'shortdesc' => 'Updates all the WooCommerce settings.',
 		] );
 	}
 
 	/**
-	 * Callable for woocomm-update-pages command.
+	 * Callable for woocomm-setup command.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_update_pages( $args, $assoc_args ) {
+	public function cmd_setup( $args, $assoc_args ) {
+		WP_CLI::success( 'Updating WooComm Pages IDs...' );
 		$this->update_woocomm_pages_ids_after_import();
+
+		WP_CLI::success( 'Configuring WooComm for checkout without login...' );
+		$this->woocomm_enable_checkout_without_login();
+
+		WP_CLI::success( 'Disabling APM for Checkout page...' );
+		$this->disable_amp_for_woocomm_checkout_page();
+
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Enables checkout for non-logged in users.
+	 */
+	public function woocomm_enable_checkout_without_login() {
+		update_option( 'woocommerce_enable_guest_checkout', 'yes' );
+		update_option( 'woocommerce_enable_signup_and_login_from_checkout', 'yes' );
+	}
+
+	/**
+	 * Disables AMP for the WooCommerce Checkout page.
+	 */
+	public function disable_amp_for_woocomm_checkout_page() {
+		$checkout_page_id = get_option( 'woocommerce_checkout_page_id' );
+		if ( ! $checkout_page_id ) {
+			return;
+		}
+
+		$this->disable_amp_for_post( $checkout_page_id );
+	}
+
+	/**
+	 * Disables AMP for a specific page.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return null
+	 */
+	private function disable_amp_for_post( $post_id ) {
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return null;
+		}
+
+		update_post_meta( $post_id, 'amp_status', 'disabled' );
 	}
 
 	/**
