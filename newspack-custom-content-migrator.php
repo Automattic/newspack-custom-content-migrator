@@ -46,4 +46,5 @@ PluginSetup::register_migrators( array(
     // Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
      Migrator\PublisherSpecific\TRNNMigrator::class,
      Migrator\PublisherSpecific\OnTheWightMigrator::class,
+     Migrator\PublisherSpecific\EastMojoMigrator::class,
 ) );
