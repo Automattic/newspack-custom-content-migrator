@@ -315,7 +315,7 @@ function import_blocks_content_from_staging_site() {
 
 function clean_up_options() {
   mysql -h $DB_HOST_LOCAL -e "USE ${DB_NAME_LOCAL}; \
-      DELETE FROM ${TABLE_PREFIX}options WHERE option_name IN ( 'googlesitekit_search_console_property' ) ; "
+      DELETE FROM ${TABLE_PREFIX}options WHERE option_name LIKE '%googlesitekit%' ; "
 }
 
 function drop_temp_db_tables() {
