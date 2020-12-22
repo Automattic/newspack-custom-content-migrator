@@ -87,7 +87,7 @@ class CoAuthorPlus {
 	 *     @type string $description
 	 * }
 	 *
-	 * @return array An array of Guest Author IDs.
+	 * @return int|array Created Guest Author ID, or an array of created Guest Author IDs.
 	 *
 	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
 	 */
