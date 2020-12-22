@@ -32,7 +32,7 @@ class CoAuthorPlus {
 		$included_2 = is_file( $file_2 ) && include_once $file_2;
 
 		if ( is_null( $coauthors_plus ) || ( false === $included_1 ) || ( false === $included_2 ) || ( ! $coauthors_plus instanceof CoAuthors_Plus ) ) {
-			return self::$instance;
+			throw new \RuntimeException( sprintf( 'CoAuthors Plus dependencies not registered, can not load %s.', __CLASS__ ) );
 		}
 
 		$this->coauthors_plus          = $coauthors_plus;
