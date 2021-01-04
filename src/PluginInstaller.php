@@ -2,8 +2,6 @@
 
 namespace NewspackCustomContentMigrator;
 
-use \WP_CLI;
-
 /**
  * PluginInstaller class.
  */
