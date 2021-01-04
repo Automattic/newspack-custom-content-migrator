@@ -50,6 +50,30 @@ class SubtitleMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Convert all post excerpts into post subtitles.',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator migrate-custom-field-to-subtitle',
+			[ $this, 'cmd_migrate_custom_field_to_subtitle' ],
+			[
+				'shortdesc' => 'Migrate subtitle from a custom field to the Newspack field.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'meta_name',
+						'description' => 'The name of the custom field to convert.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -74,4 +98,61 @@ class SubtitleMigrator implements InterfaceMigrator {
 		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
 	}
+
+	/**
+	 * Migrate subtitle from a custom field to the Newspack field
+	 */
+	public function cmd_migrate_custom_field_to_subtitle( $args, $assoc_args ) {
+
+		// Get the meta key.
+		$meta_name = $args[0];
+
+		// Grab the post ID, if there is one.
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
+
+		// Grab the posts to convert then.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			$posts = get_posts( [
+				'posts_per_page' => -1,
+				'post_status'    => 'any',
+				'meta_query' => [
+					[
+						'key' => $meta_name,
+					]
+				],
+			] );
+		}
+
+		if ( empty( $posts ) ) {
+			WP_CLI::error( 'No posts found.' );
+		}
+
+		foreach ( $posts as $post ) {
+
+			// Skip if there is already an excerpt.
+			if ( ! empty( $post->post_excerpt ) ) {
+				continue;
+			}
+
+			// Already got a Newspack subtitle? Skip it!
+			if ( ! empy( get_post_meta( $post->ID, 'newspack_post_subtitle', true ) ) ) {
+				continue;
+			}
+
+			$subtitle = get_post_meta( $post->ID, $meta_name, true );
+			$newspack = udpate_post_meta( $post->ID, 'newspack_post_subtitle', $subtitle );
+
+			WP_CLI::success( sprintf(
+				'Migrated subtitle on post %d',
+				$post->ID
+			) );
+
+		}
+
+		wp_cache_flush();
+
+	}
+
 }
