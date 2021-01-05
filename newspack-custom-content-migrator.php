@@ -47,4 +47,5 @@ PluginSetup::register_migrators( array(
      Migrator\PublisherSpecific\TRNNMigrator::class,
      Migrator\PublisherSpecific\OnTheWightMigrator::class,
      Migrator\PublisherSpecific\EastMojoMigrator::class,
+     Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
 ) );
