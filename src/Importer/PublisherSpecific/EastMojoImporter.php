@@ -39,7 +39,28 @@ add_filter( 'newspack_rss_import_data', 'em_featured_image_data', 10, 2 );
 
 function em_featured_image_import( $post_id, $post ) {
 
-	
+	if ( ! isset( $post['featured_image_url'] ) ) {
+		return;
+	}
+
+	// Grab the image and add to the post.
+	$image_id = media_sideload_image( $post['featured_image_url'], $post_id, null, 'id' );
+	if ( is_wp_error( $image_id ) ) {
+		error_log( sprintf( 'ERROR could not save Post ID %s image URL %s because: %s', $post_id, $post['featured_image_url'], $image_id->get_error_message() ) );
+		return;
+	}
+
+	// Add the caption, if there is one.
+	if ( isset( $post['featured_image_caption'] ) ) {
+		$updated = wp_update_post( [
+			'ID' => $image_id,
+			'post_excerpt' => esc_html( $post['featured_image_caption'] ),
+			true, // Return WP_Error on failure.
+		] );
+		if ( is_wp_error( $updated ) ) {
+			error_log( sprintf( 'ERROR could not set image ID %s caption to "%s" because: %s', $image_id, $post['featured_image_caption'], $updated->get_error_message() ) );
+		}
+	}
 
 }
 add_action( 'newspack_rss_import_after_post_save', 'em_featured_image_import', 10, 2 );
@@ -81,3 +102,28 @@ function em_author_data( $data, $post ) {
 
 }
 add_filter( 'newspack_rss_import_data', 'em_author_data', 10, 2 );
+
+function em_author_import( $post_id, $post ) {
+
+	if ( ! isset( $post['author'] ) ) {
+		return;
+	}
+
+	// Find the already imported author, if we can.
+	$user = get_user_by( 'ID', $post['author'] );
+	if ( is_wp_error( $user ) ) {
+		error_log( sprintf( 'Failed to get user %d to add to post %d for some reason.', $post['author'], $post_id ) );
+	}
+
+	// Assign the post to the user.
+	$updated = wp_update_post( [
+		'ID' => $post_id,
+		'post_author' => $user->ID,
+		true, // Return WP_Error on failure.
+	] );
+	if ( is_wp_error( $updated ) ) {
+		error_log( sprintf( 'ERROR could not assign user ID %d to post %d because: %s', $post_id, $user->ID, $updated->get_error_message() ) );
+	}
+
+}
+add_action( 'newspack_rss_import_after_post_save', 'em_author_import', 10, 2 );
