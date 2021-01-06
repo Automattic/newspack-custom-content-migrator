@@ -67,7 +67,7 @@ class LaVozDeAlcalaMigrator implements InterfaceMigrator {
 		// Get active PrivateContent Users, convert them to WP Users, and assign the WC Membership Plan to them.
 		$users = $this->get_pc_active_users();
 		foreach ( $users as $k => $user ) {
-			$user_id = wc_create_new_customer( $user[ 'email' ], $user[ 'username' ], $password = '', [
+			$user_id = wc_create_new_customer( $user[ 'email' ], $user[ 'username' ], wp_generate_password(), [
 				'first_name' => $user[ 'name' ],
 				'last_name' => $user[ 'surname' ],
 				'user_registered' => $user[ 'insert_date' ],
