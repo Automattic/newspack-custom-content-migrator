@@ -70,10 +70,8 @@ function em_author_data( $data, $post ) {
 	// Is there even an author.
 	if ( preg_match( '|<atom:author>(.*?)</atom:author>|is', $post ) ) {
 
-		global $wpdb;
-
 		preg_match( '|<atom:uri>(.*?)</atom:uri>|is', $post, $author_id );
-		$author_id = str_replace( [ '/api/author/', '', $wpdb->escape( trim( $author_id[1] ) ) ] );
+		$author_id = str_replace( [ '/api/author/', '', esc_sql( trim( $author_id[1] ) ) ] );
 
 		// Check if the author has already been imported.
 		$users = get_users( [ 'meta_key' => '_imported_from_id', 'meta_value' => $author_id ] );
@@ -106,11 +104,11 @@ function em_author_data( $data, $post ) {
 add_filter( 'newspack_rss_import_data', __NAMESPACE__ . '\em_author_data', 10, 2 );
 
 function em_author_import( $post_id, $post ) {
-
+error_log(var_export($post,true));
 	if ( ! isset( $post['author'] ) ) {
 		return;
 	}
-
+error_log(var_export($post_id,true));
 	// Find the already imported author, if we can.
 	$user = get_user_by( 'ID', $post['author'] );
 	if ( ! $user ) {
