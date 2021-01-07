@@ -17,10 +17,6 @@ require __DIR__ . '/vendor/autoload.php';
 // Don't do anything outside WP CLI.
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
-	require_once 'src/Importer/PublisherSpecific/EastMojoImporter.php';
-
-} else {
-
 	require_once ABSPATH . 'wp-settings.php';
 
 	PluginSetup::setup_wordpress_importer();
@@ -50,5 +46,9 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 		Migrator\PublisherSpecific\OnTheWightMigrator::class,
 		Migrator\PublisherSpecific\EastMojoMigrator::class,
 	) );
-	
+
+} else {
+
+	require_once 'src/Importer/PublisherSpecific/EastMojoImporter.php';
+
 }

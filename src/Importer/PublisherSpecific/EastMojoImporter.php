@@ -35,7 +35,7 @@ function em_featured_image_data( $data, $post ) {
 	return $data;
 
 }
-add_filter( 'newspack_rss_import_data', 'em_featured_image_data', 10, 2 );
+add_filter( 'newspack_rss_import_data', __NAMESPACE__ . '\em_featured_image_data', 10, 2 );
 
 function em_featured_image_import( $post_id, $post ) {
 
@@ -63,12 +63,14 @@ function em_featured_image_import( $post_id, $post ) {
 	}
 
 }
-add_action( 'newspack_rss_import_after_post_save', 'em_featured_image_import', 10, 2 );
+add_action( 'newspack_rss_import_after_post_save', __NAMESPACE__ . '\em_featured_image_import', 10, 2 );
 
 function em_author_data( $data, $post ) {
 
 	// Is there even an author.
 	if ( preg_match( '|<atom:author>(.*?)</atom:author>|is', $post ) ) {
+
+		global $wpdb;
 
 		preg_match( '|<atom:uri>(.*?)</atom:uri>|is', $post, $author_id );
 		$author_id = str_replace( [ '/api/author/', '', $wpdb->escape( trim( $author_id[1] ) ) ] );
@@ -101,7 +103,7 @@ function em_author_data( $data, $post ) {
 	return $data;
 
 }
-add_filter( 'newspack_rss_import_data', 'em_author_data', 10, 2 );
+add_filter( 'newspack_rss_import_data', __NAMESPACE__ . '\em_author_data', 10, 2 );
 
 function em_author_import( $post_id, $post ) {
 
@@ -111,7 +113,7 @@ function em_author_import( $post_id, $post ) {
 
 	// Find the already imported author, if we can.
 	$user = get_user_by( 'ID', $post['author'] );
-	if ( is_wp_error( $user ) ) {
+	if ( ! $user ) {
 		error_log( sprintf( 'Failed to get user %d to add to post %d for some reason.', $post['author'], $post_id ) );
 	}
 
@@ -126,4 +128,4 @@ function em_author_import( $post_id, $post ) {
 	}
 
 }
-add_action( 'newspack_rss_import_after_post_save', 'em_author_import', 10, 2 );
+add_action( 'newspack_rss_import_after_post_save', __NAMESPACE__ . '\em_author_import', 10, 2 );
