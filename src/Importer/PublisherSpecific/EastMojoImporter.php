@@ -71,7 +71,7 @@ function em_author_data( $data, $post ) {
 	if ( preg_match( '|<atom:author>(.*?)</atom:author>|is', $post ) ) {
 
 		preg_match( '|<atom:uri>(.*?)</atom:uri>|is', $post, $author_id );
-		$author_id = str_replace( [ '/api/author/', '', esc_sql( trim( $author_id[1] ) ) ] );
+		$author_id = str_replace( '/api/author/', '', esc_sql( trim( $author_id[1] ) ) );
 
 		// Check if the author has already been imported.
 		$users = get_users( [ 'meta_key' => '_imported_from_id', 'meta_value' => $author_id ] );
