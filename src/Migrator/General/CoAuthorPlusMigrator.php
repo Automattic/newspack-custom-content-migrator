@@ -163,7 +163,56 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+		WP_CLI::add_command( 'newspack-content-migrator co-authors-create-guest-author', array( $this, 'cmd_cap_create_guest_author' ), [
+	      'shortdesc' => "Create a Co-Authors Plus Guest Author",
+	      'synopsis'  => array(
+	        'type'        => 'positional',
+	        'name'        => 'postID',
+	        'description' => 'Post ID to add guest author to.',
+	        'optional'    => false,
+	        'repeating'   => false,
+	      ),
+	    ] );
 	}
+
+	/**
+	   * Create a guest author and assign to a post.
+	   *
+	   * @param $args
+	   * @param $assoc_args
+	   */
+	  public function cmd_cap_create_guest_author( $args, $assoc_args ) {
+	    if ( false === $this->validate_co_authors_plus_dependencies() ) {
+	      WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+	      exit;
+	    }
+	    $post_id = $args[0];
+	    $email = isset( $assoc_args['email'] ) ? $assoc_args['email'] : null;
+	    $description = isset( $assoc_args['description'] ) ? $assoc_args['description'] : null;
+	    $full_name = $assoc_args['full_name'];
+	    $data = array(
+	      'display_name' => sanitize_text_field( $full_name ),
+	      'first_name' => sanitize_text_field( $assoc_args['first_name'] ),
+	      'last_name' => sanitize_text_field( $assoc_args['last_name'] ),
+	    );
+	    if ( $email ) {
+	      $data['user_email'] = sanitize_email( $email );
+	    }
+	    if ( $description ) {
+	      $data['description'] = wp_filter_post_kses( $description );
+	    }
+	    $user_login = sanitize_title( $full_name );
+	    $data['user_login'] = $user_login;
+	    $guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $user_login );
+	    if ( $guest_author ) {
+	      $author_id = $guest_author->ID;
+	    } else {
+	      $author_id = $this->coauthors_guest_authors->create( $data ) ;
+	      $guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'id', $author_id );
+	    }
+	    $this->coauthors_plus->add_coauthors( $post_id, [ $guest_author->user_nicename ], true );
+	    WP_CLI::success( 'Guest author successfully added.' );
+	  }
 
 	/**
 	 * Callable for the `newspack-content-migrator co-authors-tags-with-prefix-to-guest-authors` command.
