@@ -196,7 +196,8 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			'posts_per_page' => -1,
 			'post_type'      => [ 'post', 'page' ],
 			'post_status'    => 'publish',
-			's'              => '<!-- wp:block'
+			// The search param.doesn't work as expected, so commenting it out for now (it's just a small optimization, anyway).
+			// 's'              => '<!-- wp:block'
 		] );
 		if ( ! $query_public_posts->have_posts() ) {
 			return;
