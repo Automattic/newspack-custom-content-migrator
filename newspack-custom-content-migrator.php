@@ -37,6 +37,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\CPTMigrator::class,
 	Migrator\General\TaxonomyMigrator::class,
 	Migrator\General\ReusableBlocksMigrator::class,
+	Migrator\General\SportsPressMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,

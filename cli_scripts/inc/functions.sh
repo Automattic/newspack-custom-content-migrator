@@ -205,6 +205,11 @@ function export_staging_site_reusable_blocks() {
   set_var_by_previous_exit_code IS_EXPORTED_REUSABLE_BLOCKS
 }
 
+function export_staging_site_sportspress_plugin_contents() {
+  wp_cli newspack-content-migrator export-sportspress-content --output-dir=$TEMP_DIR_MIGRATOR
+  set_var_by_previous_exit_code IS_EXPORTED_SPORTSPRESS_PLUGIN_CONTENTS
+}
+
 function prepare_live_sql_dump_for_import() {
   echo_ts 'replacing hostnames in the Live SQL dump file...'
   replace_hostnames $LIVE_SQL_DUMP_FILE $LIVE_SQL_DUMP_FILE_REPLACED
