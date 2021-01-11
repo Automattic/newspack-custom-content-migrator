@@ -552,6 +552,15 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				}
 			}
 
+			// Check by username.
+			if ( ! $guest_author ) {
+				$author_username = sanitize_title( $byline_author );
+				$potential_author = $coauthors_plus->guest_authors->get_guest_author_by( 'user_login', $author_username, true );
+				if ( $potential_author ) {
+					$guest_author = $potential_author;
+				}
+			}
+
 			// Create co-author if not exists.
 			if ( ! $guest_author ) {
 				WP_CLI::warning( 'Creating guest author: ' . $byline_author );
@@ -567,7 +576,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 						$byline_author
 					) );
 				}
-				$guest_author = $coauthors_guest_authors->get_guest_author_by( 'id', $author_id );
+				$guest_author = $coauthors_guest_authors->get_guest_author_by( 'id', $author_id, true );
 			}
 
 			// Assign coauthor to post.
