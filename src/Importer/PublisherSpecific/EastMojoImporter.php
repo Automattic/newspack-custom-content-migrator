@@ -71,29 +71,29 @@ function em_author_data( $data, $post ) {
 	if ( preg_match( '|<atom:author>(.*?)</atom:author>|is', $post ) ) {
 
 		preg_match( '|<atom:uri>(.*?)</atom:uri>|is', $post, $author_id );
-		$author_id = str_replace( '/api/author/', '', esc_sql( trim( $author_id[1] ) ) );
+		$author_id = intval( str_replace( '/api/author/', '', esc_sql( trim( $author_id[1] ) ) ) );
 
 		// Check if the author has already been imported.
 		$users = get_users( [ 'meta_key' => '_imported_from_id', 'meta_value' => $author_id ] );
 		if ( ! empty( $users ) ) {
 			// Use the already imported user ID and move to the next post.
 			$data['author'] = $users[0]->ID;
-			return $data;
-		}
-
-		// Get the author name.
-		preg_match( '|<atom:name>(.*?)</atom:name>|is', $post, $author_name );
-
-		// Create a new user.
-		$user_id = wp_create_user(
-			sanitize_title( $author_name ),
-			wp_generate_password( 24 )
-		);
-		if ( ! $user_id ) {
-			// Failed for some reason but just proceed with import.
-			return $data;
 		} else {
-			$data['author'] = $user_id;
+
+			// Get the author name.
+			preg_match( '|<atom:name>(.*?)</atom:name>|is', $post, $author_name );
+
+			// Create a new user.
+			$user_id = wp_insert_user( [
+				'user_login'   => sanitize_title( $author_name[1] ),
+				'user_pass'    => wp_generate_password( 24 ),
+				'display_name' => $author_name[1],
+			] );
+			if ( ! is_wp_error( $user_id ) ) {
+				$data['author'] = $user_id;
+				add_user_meta( $user_id, '_imported_from_id', $author_id );
+			}
+
 		}
 
 	}
