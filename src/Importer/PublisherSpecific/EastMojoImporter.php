@@ -104,11 +104,11 @@ function em_author_data( $data, $post ) {
 add_filter( 'newspack_rss_import_data', __NAMESPACE__ . '\em_author_data', 10, 2 );
 
 function em_author_import( $post_id, $post ) {
-error_log(var_export($post,true));
+
 	if ( ! isset( $post['author'] ) ) {
 		return;
 	}
-error_log(var_export($post_id,true));
+
 	// Find the already imported author, if we can.
 	$user = get_user_by( 'ID', $post['author'] );
 	if ( ! $user ) {
