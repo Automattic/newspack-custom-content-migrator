@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Importer\PublisherSpecific;
 
+// @TODO: This needs to only run when needed, otherwise it stops this plugin working.
 $plugin_installer = \NewspackCustomContentMigrator\PluginInstaller::get_instance();
 $is_installed     = $plugin_installer->is_installed( 'newspack-rss-importer' );
 if ( ! $is_installed ) {
@@ -43,24 +44,17 @@ function em_featured_image_import( $post_id, $post ) {
 		return;
 	}
 
-	// Grab the image and add to the post.
-	$image_id = media_sideload_image( $post['featured_image_url'], $post_id, null, 'id' );
-	if ( is_wp_error( $image_id ) ) {
-		error_log( sprintf( 'ERROR could not save Post ID %s image URL %s because: %s', $post_id, $post['featured_image_url'], $image_id->get_error_message() ) );
-		return;
-	}
+	// Grab the image URL.
+	$data = [
+		'featured_image_url' => $post['featured_image_url'],
+	];
 
 	// Add the caption, if there is one.
 	if ( isset( $post['featured_image_caption'] ) ) {
-		$updated = wp_update_post( [
-			'ID' => $image_id,
-			'post_excerpt' => esc_html( $post['featured_image_caption'] ),
-			true, // Return WP_Error on failure.
-		] );
-		if ( is_wp_error( $updated ) ) {
-			error_log( sprintf( 'ERROR could not set image ID %s caption to "%s" because: %s', $image_id, $post['featured_image_caption'], $updated->get_error_message() ) );
-		}
+		$data['featured_image_caption'] = $post['featured_image_caption'];
 	}
+
+	add_post_meta( $post_id, 'em_featured_image_data', $data );
 
 }
 add_action( 'newspack_rss_import_after_post_save', __NAMESPACE__ . '\em_featured_image_import', 10, 2 );
@@ -70,31 +64,14 @@ function em_author_data( $data, $post ) {
 	// Is there even an author.
 	if ( preg_match( '|<atom:author>(.*?)</atom:author>|is', $post ) ) {
 
+		// Get the author ID.
 		preg_match( '|<atom:uri>(.*?)</atom:uri>|is', $post, $author_id );
-		$author_id = intval( str_replace( '/api/author/', '', esc_sql( trim( $author_id[1] ) ) ) );
+		$data['author_id'] = intval( str_replace( '/api/author/', '', esc_sql( trim( $author_id[1] ) ) ) );
 
-		// Check if the author has already been imported.
-		$users = get_users( [ 'meta_key' => '_imported_from_id', 'meta_value' => $author_id ] );
-		if ( ! empty( $users ) ) {
-			// Use the already imported user ID and move to the next post.
-			$data['author'] = $users[0]->ID;
-		} else {
-
-			// Get the author name.
-			preg_match( '|<atom:name>(.*?)</atom:name>|is', $post, $author_name );
-
-			// Create a new user.
-			$user_id = wp_insert_user( [
-				'user_login'   => sanitize_title( $author_name[1] ),
-				'user_pass'    => wp_generate_password( 24 ),
-				'display_name' => $author_name[1],
-			] );
-			if ( ! is_wp_error( $user_id ) ) {
-				$data['author'] = $user_id;
-				add_user_meta( $user_id, '_imported_from_id', $author_id );
-			}
-
-		}
+		// Get the author name.
+		preg_match( '|<atom:name>(.*?)</atom:name>|is', $post, $author_name );
+		$data['author_login']        = sanitize_title( $author_name[1] );
+		$data['author_display_name'] = esc_sql( $author_name[1] );
 
 	}
 
@@ -105,25 +82,19 @@ add_filter( 'newspack_rss_import_data', __NAMESPACE__ . '\em_author_data', 10, 2
 
 function em_author_import( $post_id, $post ) {
 
-	if ( ! isset( $post['author'] ) ) {
+	if ( ! isset( $post['author_id'] ) ) {
 		return;
 	}
 
-	// Find the already imported author, if we can.
-	$user = get_user_by( 'ID', $post['author'] );
-	if ( ! $user ) {
-		error_log( sprintf( 'Failed to get user %d to add to post %d for some reason.', $post['author'], $post_id ) );
-	}
-
-	// Assign the post to the user.
-	$updated = wp_update_post( [
-		'ID' => $post_id,
-		'post_author' => $user->ID,
-		true, // Return WP_Error on failure.
-	] );
-	if ( is_wp_error( $updated ) ) {
-		error_log( sprintf( 'ERROR could not assign user ID %d to post %d because: %s', $post_id, $user->ID, $updated->get_error_message() ) );
-	}
+	add_post_meta(
+		$post_id,
+		'em_author_data',
+		[
+			'author_id'           => $post['author_id'],
+			'author_login'        => $post['author_login'],
+			'author_display_name' => $post['author_display_name'],
+		]
+	);
 
 }
 add_action( 'newspack_rss_import_after_post_save', __NAMESPACE__ . '\em_author_import', 10, 2 );
