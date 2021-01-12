@@ -25,8 +25,8 @@ function em_featured_image_data( $data, $post ) {
 			$data['featured_image_url'] = $featured_image_url[1];
 		}
 
-		if ( preg_match( '|<media:title>(.*?)</media:title>|is', $post, $featured_image_caption ) ) {
-			$featured_image_caption = str_replace( [ '<![CDATA[', ']]>' ], '', $wpdb->escape( trim( $featured_image_caption[1] ) ) );
+		if ( preg_match( '|<media:title.*><!\[CDATA\[(.*?)\]\]><\/media:title>|is', $post, $featured_image_caption ) ) {
+			$featured_image_caption = str_replace( [ '<![CDATA[', ']]>' ], '', esc_sql( trim( $featured_image_caption[1] ) ) );
 			$data['featured_image_caption'] = $featured_image_caption;
 		}
 
