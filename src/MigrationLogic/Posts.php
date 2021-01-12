@@ -142,4 +142,66 @@ SQL;
 			],
 		] );
 	}
+
+	/**
+	 * Gets taxonomy with custom meta.
+	 *
+	 * @param        $meta_key
+	 * @param        $meta_value
+	 * @param string $taxonomy
+	 *
+	 * @return int|\WP_Error|\WP_Term[]
+	 */
+	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
+        return get_terms([
+            'hide_empty' => false,
+            'meta_query' => [
+                [
+                    'key'     => $meta_key,
+                    'value'   => $meta_value,
+                    'compare' => 'LIKE'
+                ],
+            ],
+            'taxonomy'  => $taxonomy,
+        ]);
+	}
+
+	/**
+	 * Returns IDs of all existing categories, both parents and children.
+	 *
+	 * @return array
+	 */
+	public function get_all_existing_categories() {
+        $cats_ids_all = [];
+        $cats_parents = get_categories( [ 'hide_empty' => false, ] );
+        foreach ( $cats_parents as $cat_parent ) {
+            $cats_ids_all[] = $cat_parent->term_id;
+            $cats_children  = get_categories( [ 'parent' => $cat_parent->term_id, 'hide_empty' => false, ] );
+            if ( empty( $cats_children ) ) {
+				continue;
+            }
+
+            foreach ( $cats_children as $cat_child ) {
+                $cats_ids_all[] = $cat_child->term_id;
+            }
+        }
+        $cats_ids_all = array_unique( $cats_ids_all );
+
+        return $cats_ids_all;
+	}
+
+	/**
+	 * Returns all posts' IDs.
+	 *
+	 * @return int[]|\WP_Post[]
+	 */
+	public function get_all_posts( $post_type = 'post', $post_status = [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ] ) {
+		return get_posts( [
+	        'posts_per_page' => -1,
+	        'post_type'      => $post_type,
+	        // `'post_status' => 'any'` doesn't work as expected.
+	        'post_status'    => $post_status,
+	        'fields'         => 'ids',
+		] );
+	}
 }
