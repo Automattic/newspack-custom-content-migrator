@@ -69,6 +69,29 @@ class EastMojoMigrator implements InterfaceMigrator {
 
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator eastmojo-import-authors',
+			[ $this, 'cmd_import_authors' ],
+			[
+				'shortdesc' => 'Scans all content for images, and tries to import them from a local folder.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Perform a dry run, making no changes.',
+						'optional'    => true,
+					],
+				],
+
+			]
+		);
 	}
 
 	/**
@@ -82,6 +105,98 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator eastmojo-import-authors` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_import_authors( $args, $assoc_args ) {
+
+		// Check our arguments.
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+
+		// Cater for checking specific posts.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+			if ( 0 == count( $posts ) ) {
+				WP_CLI::error( sprintf( 'Post %d not found.', $post_id ) );
+			}
+		} else {
+			// Aaaaallll the posts!
+			$posts = get_posts( [
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'meta_query'     => [
+					'key'     => 'em_author_data',
+					'compare' => 'EXISTS',
+				],
+			] );
+		}
+
+		// Start processing.
+		foreach ( $posts as $post ) {
+			// Get the original author data, adding during RSS import.
+			$author_data = get_post_meta( $post->ID, 'em_author_data', true );
+
+			// Check if the user has already been imported.
+			$user = $this->get_user_by(
+				'meta_value',
+				[
+					'key'   => 'em_migrated_author_from_id',
+					'value' => $author_data['author_id'],
+				]
+			);
+			if ( ! is_a( $user, 'WP_User' ) ) {
+				// No existing user, so create a new user.
+				$new_user = wp_insert_user( [
+					'user_login'   => $author_data['author_login'],
+					'user_pass'    => wp_generate_password(21),
+					'display_name' => $author_data['author_display_name'],
+					'role'         => 'contributor',
+				] );
+				if ( is_wp_error( $user ) ) {
+					// Oopsie.
+					WP_CLI::warning( sprintf(
+						'Failed to create user for author ID %d because %s',
+						$author_data['author_id'],
+						$user->get_error_message()
+					) );
+					continue;
+				}
+
+				// Make sure we can find the migrated user again.
+				add_user_meta( $new_user, 'em_migrated_author_from_id', $author_data['author_id'] );
+				$user = get_user_by( 'ID', $new_user );
+			}
+
+			// Assign the post to the new user.
+			$update = wp_update_post( [
+				'ID'          => $post->ID,
+				'post_author' => $user->ID,
+			] );
+			if ( is_wp_error( $update ) ) {
+				// Oopsie daisy.
+				WP_CLI::warning( sprintf(
+					'Failed to update post %d because %s',
+					$post->ID,
+					$update->get_error_message()
+				) );
+				continue;
+			}
+
+			// Hallelujah!
+			WP_CLI::success( sprintf(
+				'Updated post %d with author %d',
+				$post->ID,
+				$user->ID
+			) );
+		}
+
 	}
 
 	/**
@@ -279,5 +394,30 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		return rtrim( get_home_path(), '/' );
+	}
+
+	/**
+	 * Get a user by meta or something else.
+	 *
+	 * Extends core's own get_user_by() to allow getting users by meta.
+	 *
+	 * @param  string           $field The field to retrieve the user with. id | ID | slug | email | login | meta_value.
+	 * @param  int|string|array $value A value for $field. A user ID, slug, email address, login name, or array containing `key` and `value` for meta lookup.
+	 * @return WP_User|false           WP_User object on success, false on failure.
+	 */
+	private function get_user_by( $field, $value ){
+		if ( 'meta_value' === $field ) {
+			$users = get_users( [
+				'meta_key'   => $value['key'],
+				'meta_value' => $value['value'],
+			] );
+			if ( empty( $users ) ) {
+				return false;
+			}
+
+			return $users[0];
+		}
+
+		return get_user_by( $field, $value );
 	}
 }
