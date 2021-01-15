@@ -144,7 +144,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Returns the Guest Author object (as defined by the CAP plugin.
+	 * Returns the Guest Author object by ID (as defined by the CAP plugin).
 	 *
 	 * @param int $ga_id Guest Author ID.
 	 *
@@ -152,6 +152,17 @@ class CoAuthorPlus {
 	 */
 	public function get_guest_author_by_id( $ga_id ) {
 		return $this->coauthors_guest_authors->get_guest_author_by( 'ID', $ga_id );
+	}
+
+	/**
+	 * Gets the Guest Author object by `user_login` (as defined by the CAP plugin).
+	 *
+	 * @param int $ga_user_login Guest Author ID.
+	 *
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_user_login( $ga_user_login ) {
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $ga_user_login );
 	}
 
 	/**
