@@ -89,7 +89,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( 'Fetching posts...' );
 
-		// $posts = $this->posts_logic->get_all_posts();
+		$posts = $this->posts_logic->get_all_posts();
 
 // TEMP DEV debug, do a single post.
 // $posts = [ get_post( 99444 ) ];
@@ -102,12 +102,12 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 // }
 
 // TEMP DEV debug, do a specific number of posts.
-$posts = get_posts( [
-	'posts_per_page' => -1,
-	'post_type'      => 'post',
-	'post_status'    => [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ],
-	'posts_per_page' => 500,
-] );
+// $posts = get_posts( [
+// 	'posts_per_page' => -1,
+// 	'post_type'      => 'post',
+// 	'post_status'    => [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ],
+// 	'posts_per_page' => 500,
+// ] );
 
 		foreach ( $posts as $i => $post ) {
 			WP_CLI::line( sprintf( '- (%d/%d) ID %d ...', $i + 1, count( $posts ), $post->ID ) );
