@@ -201,7 +201,6 @@ SQL;
 	        'post_type'      => $post_type,
 	        // `'post_status' => 'any'` doesn't work as expected.
 	        'post_status'    => $post_status,
-	        'fields'         => 'ids',
 		] );
 	}
 }
