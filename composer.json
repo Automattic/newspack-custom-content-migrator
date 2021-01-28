@@ -6,6 +6,8 @@
     ]
   },
   "require": {
-    "paquettg/php-html-parser": "^3.1"
+    "paquettg/php-html-parser": "^3.1",
+    "symfony/dom-crawler": "^5.2",
+    "symfony/css-selector": "^5.2"
   }
 }

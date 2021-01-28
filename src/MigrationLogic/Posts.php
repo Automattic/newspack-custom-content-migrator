@@ -2,6 +2,8 @@
 
 namespace NewspackCustomContentMigrator\MigrationLogic;
 
+use WP_Query;
+
 class Posts {
 	/**
 	 * Gets IDs of all the Pages.
@@ -164,6 +166,46 @@ SQL;
             ],
             'taxonomy'  => $taxonomy,
         ]);
+	}
+
+	/**
+	 * Gets all Posts which has the meta key and value.
+	 *
+	 * @param string $meta_key
+	 * @param string $meta_value
+	 *
+	 * @return int|\WP_Error|\WP_Term[]
+	 */
+	public function get_posts_with_meta_key_and_value( $meta_key, $meta_value, $post_types = [ 'post', 'page' ] ) {
+		// run query ##
+		$posts = get_posts([
+			'meta_query' => [
+				[
+					'key'   => $meta_key,
+					'value' => $meta_value,
+				]
+			],
+			'post_type'         => $post_types,
+			'posts_per_page'    => '-1'
+		]);
+
+		return ( $posts && ! is_wp_error( $posts ) ) ? $posts : [];
+
+		// check results ##
+		if ( ! $posts || is_wp_error( $posts ) ) return false;
+
+		$query = new WP_Query([
+			'meta_key'   => 'custom-meta-key',
+	        'meta_query' => [
+				[
+					'key'     => $meta_key,
+					'value'   => $meta_value,
+					'compare' => '=',
+				]
+			]
+		]);
+
+		return $query->get_queried_object();
 	}
 
 	/**

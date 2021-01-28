@@ -6,7 +6,9 @@ use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use PHPHtmlParser\Dom;
 use PHPHtmlParser\Options;
+use Symfony\Component\DomCrawler\Crawler;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
  * Custom migration scripts for Michigan Daily.
@@ -18,9 +20,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	/**
 	 * Error log file names -- grouped by error types to make reviews easier.
 	 */
-	const LOG_FILE_ERR_META_ORIG_ID_NOT_FOUND    = 'michigandaily__metaorigid_not_found.log';
-	const LOG_FILE_ERR_FIELD_DATA_BODY_ROW_EMPTY = 'michigandaily__field_data_body_row_empty.log';
-	const LOG_FILE_ERR_POST_CONTENT_EMPTY        = 'michigandaily__postcontentempty.log';
+	const LOG_FILE_ERR_POST_CONTENT_EMPTY = 'michigandaily__postcontentempty.log';
+	const LOG_FILE_ERR_UID_NOT_FOUND      = 'michigandaily__uidnotfound.log';
+	const LOG_FILE_ERR                    = 'michigandaily__err.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -38,13 +40,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	private $posts_logic;
 
 	/**
+	 * @var CoAuthorPlusLogic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->dom = new Dom();
 		$this->dom->setOptions( ( new Options() )->setCleanupInput( false ) );
 
-		$this->posts_logic = new PostsLogic();
+		$this->posts_logic         = new PostsLogic();
+		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -69,125 +77,382 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			'newspack-content-migrator michigan-daily-fix-drupal-content-after-conversion',
 			[ $this, 'cmd_fix_drupal_content_after_conversion' ],
 			[
-				'shortdesc' => 'Fills in the gaps left by the Drupal importer, by getting and patching data right from the original Drupal DB tables.',
+				'shortdesc' => 'Imports Michigan Daily articles from original Drupal tables.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'reimport-all-posts',
+						'description' => 'If this flag is set, all the nodes/posts will be reimported, otherwise will just incrementally import new ones.',
+						'optional'    => true,
+					],
+				] ,
 			]
 		);
+	}
+
+	private function get_drupal_all_nodes_by_type( array $types ) {
+		if ( empty( $types ) ) {
+			return [];
+		}
+
+		global $wpdb;
+
+		$string_placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+		$query               = $wpdb->prepare( "SELECT * FROM node WHERE type IN ( $string_placeholders )", $types );
+
+		return $wpdb->get_results( $query, ARRAY_A );
+	}
+
+	/**
+	 * Array search function. Searches all $haystack's subarray elements, and matches whether they contain all the key=>value
+	 * pairs specified in the $needle_keys_and_values search param.
+	 *
+	 * @param array $haystack               Array being searched.
+	 * @param array $needle_keys_and_values Search paraeters, i.e. key-value pairs.
+	 *
+	 * @return array|null Matched $haystack[ $i ] element.
+	 */
+	private function search_array_by_key_and_value( array $haystack, array $needle_keys_and_values ) {
+		foreach ( $haystack as $haystack_element ) {
+			$found = true;
+
+			// Inspect the $haystack_element for all search criteria.
+			foreach ( $needle_keys_and_values as $needle_key => $needle_value ) {
+				if ( ! isset( $haystack_element[ $needle_key ] ) && $needle_value != $haystack_element[ $needle_key ] ) {
+					$found = false;
+				}
+			}
+
+			if ( $found ) {
+				return $haystack_element;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Searches for Drupal node's user's full name in all the known places.
+	 *
+	 * @param int   $uid
+	 * @param array $field_full_name_value_all_rows                     DB results from the `field_full_name_value` table.
+	 * @param array $field_data_field_first_name_and_last_name_all_rows DB results from the `field_data_field_first_name` and the
+	 *                                                                  `field_data_field_last_name` tables.
+	 * @param array $field_data_field_twitter_all_rows                  DB results from the `field_data_field_twitter` table.
+	 *
+	 * @return string|null
+	 */
+	private function get_drupal_user_full_name( $uid, $field_full_name_value_all_rows, $field_data_field_first_name_and_last_name_all_rows, $field_data_field_twitter_all_rows ){
+		$full_name = null;
+
+		// Get user name, option 1.) 219 uids are matched in `field_data_field_full_name`.
+		$full_name_option1 = $this->search_array_by_key_and_value( $field_full_name_value_all_rows, [ 'entity_id' => $uid ] );
+		$full_name = $full_name_option1[ 'field_full_name_value' ] ?? null;
+
+		// Get user name, option 2.) 7 more users not matched above are matched to field_data_field_last_name and field_data_field_first_name
+		if ( ! $full_name ) {
+			$full_name_option2 = $this->search_array_by_key_and_value( $field_data_field_first_name_and_last_name_all_rows, [ 'uid' => $uid ] );
+			$full_name = $full_name_option2[ 'full_name' ] ?? null;
+		}
+
+		// Get user name, option 3.) 5 found in field_data_field_twitter, with a twitter user designation field_twitter_value
+		if ( ! $full_name ) {
+			$full_name_option3 = $this->search_array_by_key_and_value( $field_data_field_twitter_all_rows, [ 'entity_id' => $uid ] );
+			$full_name = $full_name_option3[ 'field_twitter_value' ] ?? null;
+			// One Twitter designation begins with the full URL, so remove the prefix.
+			$full_name = ltrim( $full_name, 'https://twitter.com/' );
+			// Let's keep it `null` consitently where $full_name not found.
+			$full_name = empty( $full_name ) ? null : $full_name;
+		}
+
+		return $full_name;
 	}
 
 	/**
 	 * Callable for the `newspack-content-migrator michigan-daily-fix-drupal-content-after-conversion`.
 	 */
 	public function cmd_fix_drupal_content_after_conversion( $args, $assoc_args ) {
-		global $wpdb;
+		$reimport_all_posts = isset( $assoc_args['reimport-all-posts'] ) ? true : false;
 
+		global $wpdb;
 		$time_start = microtime( true );
 
-		// Clean up helper log files before this run.
-		@unlink( self::LOG_FILE_ERR_META_ORIG_ID_NOT_FOUND );
-		@unlink( self::LOG_FILE_ERR_FIELD_DATA_BODY_ROW_EMPTY );
+		// Flush the log files.
 		@unlink( self::LOG_FILE_ERR_POST_CONTENT_EMPTY );
+		@unlink( self::LOG_FILE_ERR_UID_NOT_FOUND );
+		@unlink( self::LOG_FILE_ERR );
 
-		WP_CLI::line( 'Fetching posts...' );
+		// Prefetch Drupal data for speed.
+		WP_CLI::line( 'Fetching data from Drupal tables...' );
+		$taxonomy_term_data_all_rows = $wpdb->get_results( "select * from taxonomy_term_data;", ARRAY_A );
+		$field_full_name_value_all_rows = $wpdb->get_results(
+			"select fn.entity_id, fn.field_full_name_value
+			from michigandaily.node n
+			join michigandaily.users u on u.uid = n.uid
+			join michigandaily.field_data_field_full_name fn on fn.entity_id = n.uid
+			where n.type in ( 'article', 'michigan_daily_article' )
+			group by fn.entity_id;",
+			ARRAY_A
+		);
+		$field_data_field_first_name_and_last_name_all_rows = $wpdb->get_results(
+			"select
+				n.uid,
+				concat( fn.field_first_name_value, ' ', ln.field_last_name_value ) as full_name
+			from michigandaily.node n
+			join michigandaily.users u on u.uid = n.uid
+			join michigandaily.field_data_field_last_name ln on ln.entity_id = n.uid
+			join michigandaily.field_data_field_first_name fn on fn.entity_id = n.uid
+			where n.type in ( 'article', 'michigan_daily_article' )
+			group by n.uid;",
+			ARRAY_A
+		);
+		$field_data_field_twitter_all_rows = $wpdb->get_results(
+			"select t.entity_id, t.field_twitter_value
+			from field_data_field_twitter t
+			join node n on n.uid = t.entity_id
+			where t.entity_type = 'user'
+			group by n.uid;",
+			ARRAY_A
+		);
 
-		$posts = $this->posts_logic->get_all_posts();
+		// `type` 'article' is legacy (they imported it over from a previous system to Drupal, and will not have Taxonomy here
+		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
+		$nodes = $this->get_drupal_all_nodes_by_type( [ 'article', 'michigan_daily_article' ] );
 
-// TEMP DEV debug, do a single post.
-// $posts = [ get_post( 99444 ) ];
+// $n=$n1=230536; // uid 422
+// $n=$n2=239437; // uid 356
+// $n=$n3=226880; // uid 124
+// $n=217246; // broken <a>
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = $n" ), ARRAY_A );
 
-// TEMP DEV debug, do specific IDs post.
-// $posts = [];
-// $ids = [ 97216, 2428, 98421, 3755, 2172, 3075, 3076, 96961, 4181, 98967, 75165, 2847, 2849, 81106, 81151, 98822, 98636, 99455, 80001, 4387, 98883, 81148, 2632, 80589, 81651, 80475, 106143, 106191, 106190, 106189, 106160, 106161, 106157, 106155, 106159, 106156, 106158, 106154, 106204, 106174, 106172, 106202, 106170, 106153, 106200, 106201, 106195, 106194, 106196, 106197, 106187, 106152, 106149, 106150, 106151, 106188, 106186, 106198, 106199, 106193, 106185, 106183, 106184, 106148, 106144, 106145, 106146, 106192, 106147, 88628, 88629, 106120, 88616, 88545, 88559, 88541, 88538, 88542, 88543, 88544, 88499, 88482, 88481, 15459, 78833, 95393, 105839, 88347, 78800, 95353, 88272, 15169, 95315, 15008, 95257, 78740, 78711, 78692, 78682, 95140, 105338, 14504, 95014, 105159, 105158, 94907, 87570, 94891, 87543, 94863, 104951, 104922, 13857, 87309, 13739, 13738, 13721, 94710, 87212, 87152, 87129, 94645, 87068, 78362, 78361, 13351, 13310, 13309, 87102, 13210, 13197, 86892, 13092, 94489, 12919, 12915, 86714, 104091, 104056, 12854, 12853, 12852, 12730, 12729, 12642, 94318, 78184, 86481, 86482, 86508, 94208, 12348, 86342, 86738, 86293, 103681, 12003, 12002, 86255, 11892, 103610, 103600, 86227, 77950, 11801, 93981, 93980, 93979, 11772, 77924, 86167, 86218, 11710, 93897, 86087, 103473, 93877, 11552, 77859, 77857, 11553, 11536, 86033, 86035, 86034, 103403, 85990, 11423, 11389, 11393, 93777, 78581, 93762, 93752, 85996, 85869, 11177, 77751, 85792, 93585, 93525, 93526, 102914, 85481, 85480, 102784, 77534, 102764, 85381, 77471, 102666, 102656, 102641, 102638, 102631, 102607, 77431, 102570, 102558, 102557, 102556, 94470, 102549, 102550, 102513, 102510, 93299, 102490, 102479, 85116, 85115, 85054, 93236, 77302, 102368, 77292, 93197, 93191, 102341, 84939, 84940, 77263, 93169, 84924, 77244, 9395, 77230, 84800, 102227, 84703, 102175, 102117, 102084, 93019, 102074, 102014, 92977, 8934, 77062, 84405, 84356, 84336, 8425, 84135, 84100, 8216, 76944, 7886, 76849, 83863, 76819, 7698, 7688, 101320, 76789, 101291, 76776, 101258, 101243, 101225, 101235, 101236, 101232, 101239, 101238, 101233, 76762, 83233, 76529, 76521, 100674, 92140, 99684, 91545, 99021, 91510, 81881, 99199, 81692, 97223, 82241, 96773, 96695, 1305, 75603, 79528, 96179, 96174, 75427, 96108, 96101, 79237, 95914, 95912, 79117, 75173 ];
-// foreach ( $ids as $id ) {
-// 	$posts[] = get_post( $id );
-// }
+		foreach ( $nodes as $i => $node ) {
 
-// TEMP DEV debug, do a specific number of posts.
-// $posts = get_posts( [
-// 	'posts_per_page' => -1,
-// 	'post_type'      => 'post',
-// 	'post_status'    => [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ],
-// 	'posts_per_page' => 500,
-// ] );
+			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
 
-		foreach ( $posts as $i => $post ) {
-			WP_CLI::line( sprintf( '- (%d/%d) ID %d ...', $i + 1, count( $posts ), $post->ID ) );
+			// Get the Post if it already exists.
+			$posts = $this->posts_logic->get_posts_with_meta_key_and_value( self::META_OLD_NODE_ID, $node['nid'] );
+			$post  = isset( $posts[0] ) ? $posts[0] : null;
 
-			$post_data = [];
-
-			// Get original Drupal node ID and node row from the DB.
-			$node_id = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
-			if ( ! $node_id || ! is_numeric( $node_id ) ) {
-				$this->log( self::LOG_FILE_ERR_META_ORIG_ID_NOT_FOUND, $post->ID );
+			// If not reimporting existing posts, continue.
+			if ( $post && ( false === $reimport_all_posts ) ) {
+				WP_CLI::line( sprintf( '✓ ID %d already imported, skpping.', $post->ID ) );
 				continue;
 			}
-			$node_id = (int) $node_id;
-			$drupal_node_row = $this->get_drupal_node_by_id( $node_id );
 
-			// Basic stuff: status, date, title.
-			$post_data[ 'post_status' ] = ( 1 == $drupal_node_row[ 'status' ] ) ? 'publish' : 'draft';
-			$post_data[ 'post_date' ]   = gmdate( 'Y-m-d H:i:s', $drupal_node_row[ 'created' ] );
-			$post_data[ 'post_title' ]  = $drupal_node_row[ 'title' ] ?? $post->post_title;
+			// Reset data in the loop.
+			$post_data = [
+				'post_type'    => 'post',
+				'post_status'  => 'publish',
+			];
 
-			// Get post content and excerpt.
-			$drupal_field_data_body_row = $this->get_drupal_field_data_body( $node_id );
-			if ( empty( $drupal_field_data_body_row ) && 'draft' === $post_data[ 'post_status' ] ) {
-				// If it's a draft with no content, just trash it, actually.
-				$post_data[ 'post_status' ] = 'trash';
-				continue;
-			}
-			if ( empty( $drupal_field_data_body_row ) )  {
-				// Update just the basic info, skip the rest.
-				$wpdb->update( $wpdb->prefix . 'posts', $post_data[ 'post_status' ], [ 'ID' => $post->ID ] );
-				$this->log( self::LOG_FILE_ERR_FIELD_DATA_BODY_ROW_EMPTY, sprintf( 'ID %d node_id %d.', $post->ID, $node_id ) );
-				continue;
-			}
-			$post_data[ 'post_content' ] = $this->get_post_content_from_node_body_raw( $drupal_field_data_body_row[ 'body_value' ] );
-			// If scraping the div.main from the body_value didn't work, and there's still some content in the `body_value`, use that.
-			if ( ! $post_data[ 'post_content' ] && ! empty( $drupal_field_data_body_row[ 'body_value' ] ) ) {
+			// Basic data -- status, date, title.
+			$post_data[ 'post_status' ] = ( 1 == $node[ 'status' ] ) ? 'publish' : 'draft';
+			$post_data[ 'post_date' ]   = gmdate( 'Y-m-d H:i:s', $node[ 'created' ] );
+			$post_data[ 'post_title' ]  = $node[ 'title' ] ?? ( $post->post_title ?? null );
+
+			// Get the Post content.
+			$drupal_field_data_body_row  = $this->get_drupal_field_data_body( $node['nid'] );
+			$post_data[ 'post_content' ] = $this->get_post_content_from_node_body_raw( $drupal_field_data_body_row[ 'body_value' ] ?? '' );
+			// If there was no content when scraping the 'div.main' from the `body_value` column , but there's still some content in the `body_value`, use that.
+			if ( ! $post_data[ 'post_content' ]
+				&& (
+					isset( $drupal_field_data_body_row[ 'body_value' ] )
+					&& ! empty( trim( $drupal_field_data_body_row[ 'body_value' ] ) )
+				)
+			) {
 				$post_data[ 'post_content' ] = $drupal_field_data_body_row[ 'body_value' ];
 			}
-			if ( ! $post_data[ 'post_content' ] ) {
-				$this->log( self::LOG_FILE_ERR_POST_CONTENT_EMPTY, sprintf( 'ID %d node_id %d.', $post->ID, $node_id ) );
-				$post_data[ 'post_content' ] = $post->post_content;
+
+			// If post_content is still empty, skip importing this Post, or trash it if it was already imported by the Drupal converter plugin.
+			if ( empty( trim ( $post_data[ 'post_content' ] ) ) ) {
+				if ( $post ) {
+					$wpdb->update( $wpdb->prefix . 'posts', [ 'post_status' => 'trash' ], [ 'ID' => $post->ID ] );
+				}
+				$this->log( self::LOG_FILE_ERR_POST_CONTENT_EMPTY, sprintf( 'node_id %d ID %d', $node['nid'], $post->ID ?? '/' ) );
+				continue;
 			}
-			$post_data[ 'post_excerpt' ] = $drupal_field_data_body_row[ 'body_summary' ];
-			if ( ! $post_data[ 'post_excerpt' ] ) {
-				$post_data[ 'post_excerpt' ] = $post->post_excerpt;
+
+			// Get the excerpt.
+			$post_data[ 'post_excerpt' ] = $drupal_field_data_body_row[ 'body_summary' ] ?? ( $post->post_excerpt ?? '' ) ;
+
+			// Convert Drupal Taxonomies into WP Categories.
+			$nodes_taxonomy_names      = $this->get_drupal_taxonomy_names_by_node_id( $node['nid'], $taxonomy_term_data_all_rows );
+			$post_data[ 'post_category' ] = [];
+			if ( ! empty( $nodes_taxonomy_names ) ) {
+				foreach ( $nodes_taxonomy_names as $nodes_taxonomy_name ) {
+					$category                       = $this->get_or_create_category( $nodes_taxonomy_name );
+					$post_data[ 'post_category' ][] = $category->term_id;
+				}
 			}
 
-			// // TODO, load or create Guest User.
-			// $drupal_user_id = $drupal_node_row[ 'uid' ];
-			// $drupal_user_row = $this->get_drupal_user_row( $drupal_user_id );
-			// $user_login = $drupal_user_row[ 'name' ];
-			// $user_full_name;
-			// $user_email;
+			/**
+			 * Skipped importing original URL slugs, because I believe complex slugs with extra path levels can't be imported,
+			 * e.g. a random node from their DB:
+			 *      nid: 225662
+			 *      original slug: 'section/film/magic-mike-xxl-gives-women-what-they-want'
+			 * However, I'm sharing and noting here how the original slugs can be fetched:
+			 * ```
+			 *      select url_alias.alias
+			 *      from url_alias
+			 *      join node
+			 *              on url_alias.source = concat( "node/", node.nid )
+			 *              and ( node.type = "article" or node.type = "michigan_daily_article" )
+			 *      where node.nid = 225662;
+			 * ```
+			 */
 
-			// TODO Tags
+			// Create a new post.
+			if ( ! $post ) {
+				$post_id  = wp_insert_post( $post_data );
+				if ( 0 === $post_id || is_wp_error( $post_id ) ) {
+					$msg = sprintf( "Could not save new Post from nid = %d", $node['nid'] );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_FILE_ERR, sprintf( 'node_id %d ID %d', $node['nid'], $post->ID ?? '/' ) );
 
-			// TODO Categories
+					continue;
+				}
 
-			// Refresh imported post data.
-			$wpdb->update(
-				$wpdb->prefix . 'posts',
-				$post_data,
-				[ 'ID' => $post->ID ]
+				// Set orig `nid` meta.
+				add_post_meta( $post_id, self::META_OLD_NODE_ID, $node['nid'] );
+
+				WP_CLI::line( sprintf( '✓ created new Post ID %d...', $post->ID ) );
+			} else {
+				// Or update this existing post.
+				$post_categories = isset( $post_data['post_category'] ) && ! empty( $post_data['post_category'] )
+					? $post_data['post_category']
+					: null;
+				unset( $post_data['post_category'] );
+
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					$post_data,
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					$msg = sprintf( 'Could not update existing post ID %d with $post_data: %s', $post->ID, json_encode( $post_data ) );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_FILE_ERR, $msg );
+
+					continue;
+				}
+
+				// Set categories.
+				if ( $post_categories ) {
+					wp_set_post_categories( $post->ID, $post_categories, false );
+				}
+
+				WP_CLI::line( sprintf( '✓ updated existing Post ID %d...', $post->ID ) );
+			}
+
+			// Assign Guest Author, to post.
+			$full_name = $this->get_drupal_user_full_name(
+				$node['uid'],
+				$field_full_name_value_all_rows,
+				$field_data_field_first_name_and_last_name_all_rows,
+				$field_data_field_twitter_all_rows
 			);
+			if ( $full_name ) {
+				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
+			} else {
+				WP_CLI::warning( 'Error when setting Guest Author.' );
+				$this->log( self::LOG_FILE_ERR_UID_NOT_FOUND, sprintf( 'uid %d, nid %d, ID %d', $node['uid'], $node['nid'], $post->ID ) );
+			}
 		}
+
 
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
 
-		WP_CLI::line( sprintf( 'Done in %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 
-		if ( file_exists( self::LOG_FILE_ERR_META_ORIG_ID_NOT_FOUND ) ||
-		     file_exists( self::LOG_FILE_ERR_FIELD_DATA_BODY_ROW_EMPTY ) ||
-		     file_exists( self::LOG_FILE_ERR_POST_CONTENT_EMPTY )
-		) {
-			WP_CLI::warning( sprintf( 'Some content exceptions occurred, please check the fresh `.log` files.' ) );
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		if ( file_exists( self::LOG_FILE_ERR_UID_NOT_FOUND ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_FILE_ERR_UID_NOT_FOUND  ) );
+		}
+		if ( file_exists( self::LOG_FILE_ERR_POST_CONTENT_EMPTY ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with empty content -- these nodes were not imported.', self::LOG_FILE_ERR_POST_CONTENT_EMPTY  ) );
+		}
+		if ( file_exists( self::LOG_FILE_ERR ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_FILE_ERR  ) );
 		}
 
-		// Now download images from content again.
+	}
 
+	private function get_or_create_category( $category_name ) {
+		$categories = get_categories([
+			'name'                     => $category_name,
+			'hide_empty'               => FALSE,
+			'hierarchical'             => 1,
+			'taxonomy'                 => 'category',
+		]);
+		if ( ! empty( $categories ) ) {
+			$category = $categories[0];
+WP_CLI::line('found');
+		} else {
+WP_CLI::line('creating');
+			$category_id = wp_insert_category( [
+				'cat_name' => $category_name,
+			] );
+			$category = get_category( $category_id );
+		}
+
+		return $category;
+	}
+
+	/**
+	 * Fetches Drupal Taxonomy names for nid.
+	 *
+	 * @param int   $node_id
+	 * @param array $taxonomy_term_data_all_rows All the `taxonomy_term_data` rows.
+	 *
+	 * @return array Array the associated Taxonomy names.
+	 */
+	private function get_drupal_taxonomy_names_by_node_id( $node_id, $taxonomy_term_data_all_rows ) {
+		$taxonomy_names = [];
+
+		global $wpdb;
+
+		// Get `tid`s associated to this `nid`.
+		$node_tids = [];
+		$drupal_taxonomy_entity_index_rows = $wpdb->get_results(
+			$wpdb->prepare( "select * from taxonomy_entity_index where entity_id = %d;", $node_id ),
+			ARRAY_A
+		);
+		foreach ( $drupal_taxonomy_entity_index_rows as $taxonomy_entity_index_row ) {
+			$node_tids[] = (int) $taxonomy_entity_index_row[ 'tid' ];
+		}
+		if ( empty( $node_tids ) ) {
+			return $taxonomy_names;
+		}
+
+		// Get taxonomy names.
+		$taxonomy_names = [];
+		foreach ( $node_tids as $node_tid ) {
+			$taxonomy_names[] = $this->filter_drupal_taxonomy_name_by_tid( $taxonomy_term_data_all_rows, $node_tid );
+		}
+
+		// Get unique ones, and prettify array keys if needed.
+		$taxonomy_names = array_values( array_unique( $taxonomy_names ) );
+
+		return $taxonomy_names;
+	}
+
+	/**
+	 * This super simple function filters through the imput `taxonomy_term_data` array, and returns the one which matches a given $tid.
+	 *
+	 * @param array $taxonomy_term_data_all_rows
+	 * @param int   $tid
+	 *
+	 * @return string|null
+	 */
+	private function filter_drupal_taxonomy_name_by_tid( $taxonomy_term_data_all_rows, $tid ) {
+		foreach ( $taxonomy_term_data_all_rows as $taxonomy_term_data_all_row ) {
+			if ( $tid == $taxonomy_term_data_all_row[ 'tid' ] ) {
+				return $taxonomy_term_data_all_row[ 'name' ];
+			}
+		}
+
+		return null;
 	}
 
 	private function get_drupal_node_by_id( $nid ) {
@@ -219,15 +484,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			return null;
 		}
 
-		$post_content = '';
+		// // The PHPHtmlParser\Dom is producing some seemingly broken HTML (nid 217246), so switching to \Symfony\Component\DomCrawler\Crawler instead.
+		// $this->dom->loadStr( $body_value );
+		// $collection = $this->dom->find( 'div.main');
+		// if ( ! $collection->count() ) {
+		// 	return null;
+		// }
+		// $post_content = $collection[0]->innerHtml;
 
-		$this->dom->loadStr( $body_value );
-		$collection = $this->dom->find( 'div.main');
-		if ( ! $collection->count() ) {
-			return $post_content;
+		$crawler = ( new Crawler( $body_value ) )->filter('div.main');
+		if ( 0 == $crawler->count() ) {
+			return null;
 		}
-
-		$post_content = $collection[0]->innerHtml;
+		$post_content = $crawler->html();
 
 		return $post_content;
 	}
