@@ -74,8 +74,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator michigan-daily-fix-drupal-content-after-conversion',
-			[ $this, 'cmd_fix_drupal_content_after_conversion' ],
+			'newspack-content-migrator michigan-daily-import-drupal-content',
+			[ $this, 'cmd_import_drupal_content' ],
 			[
 				'shortdesc' => 'Imports Michigan Daily articles from original Drupal tables.',
 				'synopsis'  => [
@@ -88,90 +88,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				] ,
 			]
 		);
-	}
-
-	private function get_drupal_all_nodes_by_type( array $types ) {
-		if ( empty( $types ) ) {
-			return [];
-		}
-
-		global $wpdb;
-
-		$string_placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
-		$query               = $wpdb->prepare( "SELECT * FROM node WHERE type IN ( $string_placeholders )", $types );
-
-		return $wpdb->get_results( $query, ARRAY_A );
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-delete-imported-custom-post-type',
+			[ $this, 'cmd_delete_imported_custom_post_type' ],
+			[
+				'shortdesc' => 'The Drupal importer plugin created `michigan_daily_artic` post types, and this command deletes those.',
+			]
+		);
 	}
 
 	/**
-	 * Array search function. Searches all $haystack's subarray elements, and matches whether they contain all the key=>value
-	 * pairs specified in the $needle_keys_and_values search param.
-	 *
-	 * @param array $haystack               Array being searched.
-	 * @param array $needle_keys_and_values Search paraeters, i.e. key-value pairs.
-	 *
-	 * @return array|null Matched $haystack[ $i ] element.
+	 * Callable for the `newspack-content-migrator michigan-daily-import-drupal-content`.
 	 */
-	private function search_array_by_key_and_value( array $haystack, array $needle_keys_and_values ) {
-		foreach ( $haystack as $haystack_element ) {
-			$found = true;
-
-			// Inspect the $haystack_element for all search criteria.
-			foreach ( $needle_keys_and_values as $needle_key => $needle_value ) {
-				if ( ! isset( $haystack_element[ $needle_key ] ) && $needle_value != $haystack_element[ $needle_key ] ) {
-					$found = false;
-				}
-			}
-
-			if ( $found ) {
-				return $haystack_element;
-			}
-		}
-
-		return null;
-	}
-
-	/**
-	 * Searches for Drupal node's user's full name in all the known places.
-	 *
-	 * @param int   $uid
-	 * @param array $field_full_name_value_all_rows                     DB results from the `field_full_name_value` table.
-	 * @param array $field_data_field_first_name_and_last_name_all_rows DB results from the `field_data_field_first_name` and the
-	 *                                                                  `field_data_field_last_name` tables.
-	 * @param array $field_data_field_twitter_all_rows                  DB results from the `field_data_field_twitter` table.
-	 *
-	 * @return string|null
-	 */
-	private function get_drupal_user_full_name( $uid, $field_full_name_value_all_rows, $field_data_field_first_name_and_last_name_all_rows, $field_data_field_twitter_all_rows ){
-		$full_name = null;
-
-		// Get user name, option 1.) 219 uids are matched in `field_data_field_full_name`.
-		$full_name_option1 = $this->search_array_by_key_and_value( $field_full_name_value_all_rows, [ 'entity_id' => $uid ] );
-		$full_name = $full_name_option1[ 'field_full_name_value' ] ?? null;
-
-		// Get user name, option 2.) 7 more users not matched above are matched to field_data_field_last_name and field_data_field_first_name
-		if ( ! $full_name ) {
-			$full_name_option2 = $this->search_array_by_key_and_value( $field_data_field_first_name_and_last_name_all_rows, [ 'uid' => $uid ] );
-			$full_name = $full_name_option2[ 'full_name' ] ?? null;
-		}
-
-		// Get user name, option 3.) 5 found in field_data_field_twitter, with a twitter user designation field_twitter_value
-		if ( ! $full_name ) {
-			$full_name_option3 = $this->search_array_by_key_and_value( $field_data_field_twitter_all_rows, [ 'entity_id' => $uid ] );
-			$full_name = $full_name_option3[ 'field_twitter_value' ] ?? null;
-			// One Twitter designation begins with the full URL, so remove the prefix.
-			$full_name = ltrim( $full_name, 'https://twitter.com/' );
-			// Let's keep it `null` consitently where $full_name not found.
-			$full_name = empty( $full_name ) ? null : $full_name;
-		}
-
-		return $full_name;
-	}
-
-	/**
-	 * Callable for the `newspack-content-migrator michigan-daily-fix-drupal-content-after-conversion`.
-	 */
-	public function cmd_fix_drupal_content_after_conversion( $args, $assoc_args ) {
+	public function cmd_import_drupal_content( $args, $assoc_args ) {
 		$reimport_all_posts = isset( $assoc_args['reimport-all-posts'] ) ? true : false;
 
 		global $wpdb;
@@ -219,11 +148,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'article', 'michigan_daily_article' ] );
 
-// $n=$n1=230536; // uid 422
-// $n=$n2=239437; // uid 356
-// $n=$n3=226880; // uid 124
-// $n=217246; // broken <a>
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = $n" ), ARRAY_A );
+		// TODO, DEV remove
+		// $n=217246; // broken <a>
+		// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = $n" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
 
@@ -235,7 +162,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 			// If not reimporting existing posts, continue.
 			if ( $post && ( false === $reimport_all_posts ) ) {
-				WP_CLI::line( sprintf( '✓ ID %d already imported, skpping.', $post->ID ) );
+				WP_CLI::line( sprintf( '✓ ID %d already imported, skipping.', $post->ID ) );
 				continue;
 			}
 
@@ -315,7 +242,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				// Set orig `nid` meta.
 				add_post_meta( $post_id, self::META_OLD_NODE_ID, $node['nid'] );
 
-				WP_CLI::line( sprintf( '✓ created new Post ID %d...', $post->ID ) );
+				WP_CLI::line( sprintf( '✓ created new Post ID %d...', $post_id ) );
 			} else {
 				// Or update this existing post.
 				$post_categories = isset( $post_data['post_category'] ) && ! empty( $post_data['post_category'] )
@@ -378,6 +305,124 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 	}
 
+	/**
+	 * Callable for `newspack-content-migrator michigan-daily-delete-imported-custom-post-type`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_delete_imported_custom_post_type($args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$post_type = 'michigan_daily_artic';
+
+		WP_CLI::line( 'Fetching posts...' );
+		$post_ids = $this->posts_logic->get_all_posts_ids( $post_type );
+		if ( empty( $post_ids ) ) {
+			WP_CLI::success( sprintf( 'No post types `%s` found.', $post_type ) );
+			exit;
+		}
+
+		foreach ( $post_ids as $i => $post_id ) {
+			WP_CLI::line( sprintf( '- (%d/%d) deleting ID %d...', $i + 1, count( $post_ids ), $post_id ) );
+			wp_delete_post( $post_id );
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Gets all `node` rows.
+	 *
+	 * @param array $types
+	 *
+	 * @return array|null
+	 */
+	private function get_drupal_all_nodes_by_type( array $types ) {
+		if ( empty( $types ) ) {
+			return [];
+		}
+
+		global $wpdb;
+
+		$string_placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+		$query               = $wpdb->prepare( "SELECT * FROM node WHERE type IN ( $string_placeholders ) order by nid desc", $types );
+
+		return $wpdb->get_results( $query, ARRAY_A );
+	}
+
+	/**
+	 * Array search function. Searches all $haystack's subarray elements, and matches whether they contain all the key=>value
+	 * pairs specified in the $needle_keys_and_values search param.
+	 *
+	 * @param array $haystack               Array being searched.
+	 * @param array $needle_keys_and_values Search paraeters, i.e. key-value pairs.
+	 *
+	 * @return array|null Matched $haystack[ $i ] element.
+	 */
+	private function search_array_by_key_and_value( array $haystack, array $needle_keys_and_values ) {
+		foreach ( $haystack as $haystack_element ) {
+			$found = true;
+
+			// Inspect the $haystack_element for all search criteria.
+			foreach ( $needle_keys_and_values as $needle_key => $needle_value ) {
+				if ( ! isset( $haystack_element[ $needle_key ] ) && $needle_value != $haystack_element[ $needle_key ] ) {
+					$found = false;
+				}
+			}
+
+			if ( $found ) {
+				return $haystack_element;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Searches for Drupal node's user's full name in all the known places.
+	 *
+	 * @param int   $uid
+	 * @param array $field_full_name_value_all_rows                     DB results from the `field_full_name_value` table.
+	 * @param array $field_data_field_first_name_and_last_name_all_rows DB results from the `field_data_field_first_name` and the
+	 *                                                                  `field_data_field_last_name` tables.
+	 * @param array $field_data_field_twitter_all_rows                  DB results from the `field_data_field_twitter` table.
+	 *
+	 * @return string|null
+	 */
+	private function get_drupal_user_full_name( $uid, $field_full_name_value_all_rows, $field_data_field_first_name_and_last_name_all_rows, $field_data_field_twitter_all_rows ){
+		$full_name = null;
+
+		// Get user name, option 1.) 219 uids are matched in `field_data_field_full_name`.
+		$full_name_option1 = $this->search_array_by_key_and_value( $field_full_name_value_all_rows, [ 'entity_id' => $uid ] );
+		$full_name = $full_name_option1[ 'field_full_name_value' ] ?? null;
+
+		// Get user name, option 2.) 7 more users not matched above are matched to field_data_field_last_name and field_data_field_first_name
+		if ( ! $full_name ) {
+			$full_name_option2 = $this->search_array_by_key_and_value( $field_data_field_first_name_and_last_name_all_rows, [ 'uid' => $uid ] );
+			$full_name = $full_name_option2[ 'full_name' ] ?? null;
+		}
+
+		// Get user name, option 3.) 5 found in field_data_field_twitter, with a twitter user designation field_twitter_value
+		if ( ! $full_name ) {
+			$full_name_option3 = $this->search_array_by_key_and_value( $field_data_field_twitter_all_rows, [ 'entity_id' => $uid ] );
+			$full_name = $full_name_option3[ 'field_twitter_value' ] ?? null;
+			// One Twitter designation begins with the full URL, so remove the prefix.
+			$full_name = ltrim( $full_name, 'https://twitter.com/' );
+			// Let's keep it `null` consitently where $full_name not found.
+			$full_name = empty( $full_name ) ? null : $full_name;
+		}
+
+		return $full_name;
+	}
+
+	/**
+	 * Fetches an existing or creates a new Category by name.
+	 *
+	 * @param string $category_name
+	 *
+	 * @return object|\WP_Error|null
+	 */
 	private function get_or_create_category( $category_name ) {
 		$categories = get_categories([
 			'name'                     => $category_name,
@@ -387,9 +432,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		]);
 		if ( ! empty( $categories ) ) {
 			$category = $categories[0];
-WP_CLI::line('found');
 		} else {
-WP_CLI::line('creating');
 			$category_id = wp_insert_category( [
 				'cat_name' => $category_name,
 			] );
@@ -455,22 +498,11 @@ WP_CLI::line('creating');
 		return null;
 	}
 
-	private function get_drupal_node_by_id( $nid ) {
-		global $wpdb;
-
-		return $wpdb->get_row(
-			$wpdb->prepare( 'SELECT * FROM node WHERE nid = %d', $nid ),
-			ARRAY_A
-		);
-	}
-	private function get_drupal_user_row( $uid ) {
-		global $wpdb;
-
-		return $wpdb->get_row(
-			$wpdb->prepare( 'select * from users where uid = %d', $uid ),
-			ARRAY_A
-		);
-	}
+	/**
+	 * @param int $entity_id
+	 *
+	 * @return array|null
+	 */
 	private function get_drupal_field_data_body( $entity_id ) {
 		global $wpdb;
 
@@ -479,6 +511,14 @@ WP_CLI::line('creating');
 			ARRAY_A
 		);
 	}
+
+	/**
+	 * Scrapes the 'div.main' content from the HTML $body_value.
+	 *
+	 * @param string $body_value
+	 *
+	 * @return string|null
+	 */
 	private function get_post_content_from_node_body_raw( $body_value ) {
 		if ( ! $body_value ) {
 			return null;
@@ -500,6 +540,13 @@ WP_CLI::line('creating');
 
 		return $post_content;
 	}
+
+	/**
+	 * Simple file logging.
+	 *
+	 * @param string $file    File name or path.
+	 * @param string $message Log message.
+	 */
 	private function log( $file, $message ) {
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
