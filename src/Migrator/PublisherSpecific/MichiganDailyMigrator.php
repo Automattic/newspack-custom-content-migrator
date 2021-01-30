@@ -146,11 +146,12 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		// `type` 'article' is legacy (they imported it over from a previous system to Drupal, and will not have Taxonomy here
 		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
-		$nodes = $this->get_drupal_all_nodes_by_type( [ 'article', 'michigan_daily_article' ] );
+		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
 
-		// TODO, DEV remove
-		// $n=217246; // broken <a>
-		// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = $n" ), ARRAY_A );
+// TODO, DEV remove
+// $n=217246; // broken <a>
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 253400" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 253400,253399,253398,253397,253395,253394,253393 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
 
@@ -229,6 +230,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			 */
 
 			// Create a new post.
+			$post_id = null;
 			if ( ! $post ) {
 				$post_id  = wp_insert_post( $post_data );
 				if ( 0 === $post_id || is_wp_error( $post_id ) ) {
@@ -269,6 +271,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				}
 
 				WP_CLI::line( sprintf( '✓ updated existing Post ID %d...', $post->ID ) );
+
+				$post_id = $post->ID;
 			}
 
 			// Assign Guest Author, to post.
@@ -280,9 +284,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			);
 			if ( $full_name ) {
 				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
 			} else {
-				WP_CLI::warning( 'Error when setting Guest Author.' );
 				$this->log( self::LOG_FILE_ERR_UID_NOT_FOUND, sprintf( 'uid %d, nid %d, ID %d', $node['uid'], $node['nid'], $post->ID ) );
 			}
 		}
@@ -362,16 +365,14 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 */
 	private function search_array_by_key_and_value( array $haystack, array $needle_keys_and_values ) {
 		foreach ( $haystack as $haystack_element ) {
-			$found = true;
-
-			// Inspect the $haystack_element for all search criteria.
+			$matched_criteria = 0;
 			foreach ( $needle_keys_and_values as $needle_key => $needle_value ) {
-				if ( ! isset( $haystack_element[ $needle_key ] ) && $needle_value != $haystack_element[ $needle_key ] ) {
-					$found = false;
+				if ( isset( $haystack_element[ $needle_key ] ) && $needle_value == $haystack_element[ $needle_key ] ) {
+					$matched_criteria++;
 				}
 			}
 
-			if ( $found ) {
+			if ( $matched_criteria == count( $needle_keys_and_values ) ) {
 				return $haystack_element;
 			}
 		}
@@ -395,7 +396,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		// Get user name, option 1.) 219 uids are matched in `field_data_field_full_name`.
 		$full_name_option1 = $this->search_array_by_key_and_value( $field_full_name_value_all_rows, [ 'entity_id' => $uid ] );
-		$full_name = $full_name_option1[ 'field_full_name_value' ] ?? null;
+		$full_name         = $full_name_option1[ 'field_full_name_value' ] ?? null;
 
 		// Get user name, option 2.) 7 more users not matched above are matched to field_data_field_last_name and field_data_field_first_name
 		if ( ! $full_name ) {
