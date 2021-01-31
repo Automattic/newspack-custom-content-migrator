@@ -174,38 +174,44 @@ SQL;
 	 * @param string $meta_key
 	 * @param string $meta_value
 	 *
-	 * @return int|\WP_Error|\WP_Term[]
+	 * @return array|null
 	 */
 	public function get_posts_with_meta_key_and_value( $meta_key, $meta_value, $post_types = [ 'post', 'page' ] ) {
-		// run query ##
-		$posts = get_posts([
-			'meta_query' => [
-				[
-					'key'   => $meta_key,
-					'value' => $meta_value,
-				]
-			],
-			'post_type'         => $post_types,
-			'posts_per_page'    => '-1'
-		]);
+		if ( empty( $meta_key ) || empty( $meta_value ) || empty( $post_types ) ) {
+			return null;
+		}
 
-		return ( $posts && ! is_wp_error( $posts ) ) ? $posts : [];
+		global $wpdb;
 
-		// check results ##
-		if ( ! $posts || is_wp_error( $posts ) ) return false;
+		$post_types_placeholders = implode( ",", array_fill( 0, count( $post_types ), '%s' ) );
 
-		$query = new WP_Query([
-			'meta_key'   => 'custom-meta-key',
-	        'meta_query' => [
-				[
-					'key'     => $meta_key,
-					'value'   => $meta_value,
-					'compare' => '=',
-				]
-			]
-		]);
+		$args_prepare = [];
+		array_push( $args_prepare, $meta_key, $meta_value );
+		foreach ( $post_types as $post_type ) {
+			array_push( $args_prepare, $post_type );
+		}
 
-		return $query->get_queried_object();
+		$results_meta_post_ids = $wpdb->get_results(
+			$wpdb->prepare(
+				"select post_id from {$wpdb->prefix}postmeta pm
+				join {$wpdb->prefix}posts p on p.id = pm.post_id
+				where pm.meta_key = %s and pm.meta_value = %s
+			    and p.post_type in ( $post_types_placeholders )",
+				$args_prepare
+			),
+			ARRAY_A
+		);
+
+		if ( empty( $results_meta_post_ids ) ) {
+			return [];
+		}
+
+		$post_ids = [];
+		foreach ( $results_meta_post_ids as $result_meta_post_id ) {
+			$post_ids[] = (int) $result_meta_post_id[ 'post_id' ];
+		}
+
+		return $post_ids;
 	}
 
 	/**
