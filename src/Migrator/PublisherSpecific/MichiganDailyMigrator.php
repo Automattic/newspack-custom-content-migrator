@@ -116,9 +116,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$taxonomy_term_data_all_rows = $wpdb->get_results( "select * from taxonomy_term_data;", ARRAY_A );
 		$field_full_name_value_all_rows = $wpdb->get_results(
 			"select fn.entity_id, fn.field_full_name_value
-			from michigandaily.node n
-			join michigandaily.users u on u.uid = n.uid
-			join michigandaily.field_data_field_full_name fn on fn.entity_id = n.uid
+			from node n
+			join users u on u.uid = n.uid
+			join field_data_field_full_name fn on fn.entity_id = n.uid
 			where n.type in ( 'article', 'michigan_daily_article' )
 			group by fn.entity_id;",
 			ARRAY_A
@@ -127,10 +127,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			"select
 				n.uid,
 				concat( fn.field_first_name_value, ' ', ln.field_last_name_value ) as full_name
-			from michigandaily.node n
-			join michigandaily.users u on u.uid = n.uid
-			join michigandaily.field_data_field_last_name ln on ln.entity_id = n.uid
-			join michigandaily.field_data_field_first_name fn on fn.entity_id = n.uid
+			from node n
+			join users u on u.uid = n.uid
+			join field_data_field_last_name ln on ln.entity_id = n.uid
+			join field_data_field_first_name fn on fn.entity_id = n.uid
 			where n.type in ( 'article', 'michigan_daily_article' )
 			group by n.uid;",
 			ARRAY_A
@@ -155,7 +155,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 // TODO, DEV remove
 // $n=217246; // broken <a>
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 241047" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 252886" ), ARRAY_A );
 // $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 231007, 234452 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
