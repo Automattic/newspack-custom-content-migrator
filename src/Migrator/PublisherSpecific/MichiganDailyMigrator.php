@@ -85,7 +85,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 						'description' => 'If this flag is set, all the nodes/posts will be reimported, otherwise will just incrementally import new ones.',
 						'optional'    => true,
 					],
-				] ,
+				],
 			]
 		);
 		WP_CLI::add_command(
@@ -150,16 +150,17 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 // TODO, DEV remove
 // $n=217246; // broken <a>
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 253400" ), ARRAY_A );
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 253400,253399,253398,253397,253395,253394,253393 )" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 241047" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 231007, 234452 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
 
 			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
 
 			// Get the Post if it already exists.
-			$posts = $this->posts_logic->get_posts_with_meta_key_and_value( self::META_OLD_NODE_ID, $node['nid'] );
-			$post  = isset( $posts[0] ) ? $posts[0] : null;
+			$post_ids = $this->posts_logic->get_posts_with_meta_key_and_value( self::META_OLD_NODE_ID, $node['nid'] );
+			$post_id  = isset( $post_ids[0] ) ? $post_ids[0] : null;
+			$post = get_post( $post_id );
 
 			// If not reimporting existing posts, continue.
 			if ( $post && ( false === $reimport_all_posts ) ) {
