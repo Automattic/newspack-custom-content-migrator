@@ -103,6 +103,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				'shortdesc' => 'The Drupal importer plugin created `michigan_daily_artic` post types, and this command deletes those.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-update-featured-image-for-posts-which-do-not-have-one',
+			[ $this, 'cmd_update_featured_image_for_posts_which_do_not_have_one' ],
+			[
+				'shortdesc' => 'Sets featured image to Posts which do not yet have a featured image.',
+			]
+		);
 	}
 
 	/**
@@ -418,6 +425,48 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		foreach ( $post_ids as $i => $post_id ) {
 			WP_CLI::line( sprintf( '- (%d/%d) deleting ID %d...', $i + 1, count( $post_ids ), $post_id ) );
 			wp_delete_post( $post_id );
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator michigan-daily-set-featured-image-in-posts-which-do-not-have-one`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_featured_image_for_posts_which_do_not_have_one($args, $assoc_args ) {
+		global $wpdb;
+
+		$time_start = microtime( true );
+
+		// Get all posts witout a featured image.
+		$results = $wpdb->get_results(
+			"select ID from {$wpdb->prefix}posts p
+			left join {$wpdb->prefix}postmeta pm on pm.post_id = p.ID and pm.meta_key = '_thumbnail_id'
+			where pm.post_id is null
+			and p.post_type = 'post';",
+			ARRAY_A
+		);
+		foreach ( $results as $i => $result ) {
+			$post_id = (int) $result[ 'ID' ];
+
+			// Get all post attachments.
+			$attachments = get_posts( [
+				'post_type'   => 'attachment',
+				'post_parent' => $post_id,
+				'fields'      => 'ids',
+			] );
+			if ( empty( $attachments ) ) {
+				WP_CLI::line( sprintf( '- (%d/%d) ID %d - no attachments found', $i + 1, count( $results ), $post_id ) );
+				continue;
+			}
+
+			// Set the featured image to the first uploaded attachment.
+			$featured_image_id = min( $attachments );
+			update_post_meta( $post_id, '_thumbnail_id', $featured_image_id );
+			WP_CLI::line( sprintf( '- (%d/%d) ID %d - updated featured image %d', $i + 1, count( $results ), $post_id, $featured_image_id ) );
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
