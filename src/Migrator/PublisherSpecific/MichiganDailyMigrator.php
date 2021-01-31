@@ -144,6 +144,11 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 
+		$post_ids_already_imported = [];
+		if ( ! $reimport_all_posts ) {
+			$post_ids_already_imported = $this->get_existing_nid_id_map();
+		}
+
 		// `type` 'article' is legacy (they imported it over from a previous system to Drupal, and will not have Taxonomy here
 		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
@@ -156,17 +161,16 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		foreach ( $nodes as $i => $node ) {
 
 			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
+			// If not reimporting existing posts, continue.
+			if ( ( false === $reimport_all_posts ) && isset( $post_ids_already_imported[ $node['nid'] ] ) ) {
+				WP_CLI::line( sprintf( '✓ ID %d already imported, skipping.', $post_id ) );
+				continue;
+			}
 
 			// Get the Post if it already exists.
 			$post_ids = $this->posts_logic->get_posts_with_meta_key_and_value( self::META_OLD_NODE_ID, $node['nid'] );
 			$post_id  = isset( $post_ids[0] ) ? $post_ids[0] : null;
-			$post = get_post( $post_id );
-
-			// If not reimporting existing posts, continue.
-			if ( $post && ( false === $reimport_all_posts ) ) {
-				WP_CLI::line( sprintf( '✓ ID %d already imported, skipping.', $post->ID ) );
-				continue;
-			}
+			$post     = get_post( $post_id );
 
 			// Reset data in the loop.
 			$post_data = [
@@ -353,6 +357,33 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$query               = $wpdb->prepare( "SELECT * FROM node WHERE type IN ( $string_placeholders ) order by nid desc", $types );
 
 		return $wpdb->get_results( $query, ARRAY_A );
+	}
+
+	/**
+	 * Gets an array map of already imported `nid`s.
+	 *
+	 * @return array `nid`s as keys, `ID` as values.
+	 */
+	private function get_existing_nid_id_map() {
+		global $wpdb;
+
+		$results = $wpdb->get_results(
+			$wpdb->prepare(
+				"select meta_value, post_id from {$wpdb->prefix}postmeta where meta_key = %s",
+				self::META_OLD_NODE_ID
+			),
+			ARRAY_A
+		);
+
+		if ( empty( $results ) ) {
+			return [];
+		}
+		$nids_ids = [];
+		foreach ( $results as $result ) {
+			$nids_ids[ $result[ 'meta_value' ] ] = $result[ 'post_id' ];
+		}
+
+		return $nids_ids;
 	}
 
 	/**
