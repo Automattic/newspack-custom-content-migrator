@@ -20,9 +20,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	/**
 	 * Error log file names -- grouped by error types to make reviews easier.
 	 */
-	const LOG_FILE_ERR_POST_CONTENT_EMPTY = 'michigandaily__postcontentempty.log';
-	const LOG_FILE_ERR_UID_NOT_FOUND      = 'michigandaily__uidnotfound.log';
-	const LOG_FILE_ERR                    = 'michigandaily__err.log';
+	const LOG_FILE_ERR_POST_CONTENT_EMPTY          = 'michigandaily__postcontentempty.log';
+	const LOG_FILE_ERR_UID_NOT_FOUND               = 'michigandaily__uidnotfound.log';
+	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND = 'michigandaily__cmdupdategas_uidnotfound.log';
+	const LOG_FILE_ERR                             = 'michigandaily__err.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -86,6 +87,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 						'optional'    => true,
 					],
 				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-update-posts-guest-authors',
+			[ $this, 'cmd_update_post_guest_authors' ],
+			[
+				'shortdesc' => 'Helper command, updates Guest Authors for existing posts.'
 			]
 		);
 		WP_CLI::add_command(
@@ -309,6 +317,82 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		}
 		if ( file_exists( self::LOG_FILE_ERR ) ) {
 			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_FILE_ERR  ) );
+		}
+
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator michigan-daily-update-posts-guest-authors`.
+	 */
+	public function cmd_update_post_guest_authors( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		// Flush the log files.
+		@unlink( self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND );
+
+		// Prefetch Drupal data for speed.
+		WP_CLI::line( 'Fetching data from Drupal tables...' );
+		$field_full_name_value_all_rows = $wpdb->get_results(
+			"select fn.entity_id, fn.field_full_name_value
+			from node n
+			join users u on u.uid = n.uid
+			join field_data_field_full_name fn on fn.entity_id = n.uid
+			where n.type in ( 'article', 'michigan_daily_article' )
+			group by fn.entity_id;",
+			ARRAY_A
+		);
+		$field_data_field_first_name_and_last_name_all_rows = $wpdb->get_results(
+			"select
+				n.uid,
+				concat( fn.field_first_name_value, ' ', ln.field_last_name_value ) as full_name
+			from node n
+			join users u on u.uid = n.uid
+			join field_data_field_last_name ln on ln.entity_id = n.uid
+			join field_data_field_first_name fn on fn.entity_id = n.uid
+			where n.type in ( 'article', 'michigan_daily_article' )
+			group by n.uid;",
+			ARRAY_A
+		);
+		$field_data_field_twitter_all_rows = $wpdb->get_results(
+			"select t.entity_id, t.field_twitter_value
+			from field_data_field_twitter t
+			join node n on n.uid = t.entity_id
+			where t.entity_type = 'user'
+			group by n.uid;",
+			ARRAY_A
+		);
+		$post_ids_already_imported = $this->get_existing_nid_id_map();
+		$nodes                     = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+
+		$i = 0;
+		foreach ( $post_ids_already_imported as $nid => $post_id ) {
+
+			WP_CLI::line( sprintf( '- (%d/%d) updating Guest Authors for nid %d ID %d ...', $i + 1, count( $post_ids_already_imported ), $nid, $post_id ) );
+			$node = $this->search_array_by_key_and_value( $nodes, [ 'nid' => $nid ] );
+
+			// Assign Guest Author, to post.
+			$full_name = $this->get_drupal_user_full_name(
+				$node['uid'],
+				$field_full_name_value_all_rows,
+				$field_data_field_first_name_and_last_name_all_rows,
+				$field_data_field_twitter_all_rows
+			);
+			if ( $full_name ) {
+				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
+			} else {
+				$this->log( self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND, sprintf( 'uid %d, nid %d, ID %d', $node['uid'], $node['nid'], $post_id ) );
+			}
+
+			$i++;
+		}
+
+		wp_cache_flush();
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		if ( file_exists( self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  ) );
 		}
 
 	}
