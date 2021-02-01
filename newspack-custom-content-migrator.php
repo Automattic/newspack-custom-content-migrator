@@ -49,4 +49,5 @@ PluginSetup::register_migrators( array(
      Migrator\PublisherSpecific\OnTheWightMigrator::class,
      Migrator\PublisherSpecific\EastMojoMigrator::class,
      Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
+     Migrator\PublisherSpecific\MichiganDailyMigrator::class,
 ) );
