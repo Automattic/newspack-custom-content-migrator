@@ -441,7 +441,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 
-		// Get all posts witout a featured image.
+		// Get all posts without a featured image.
 		$results = $wpdb->get_results(
 			"select ID from {$wpdb->prefix}posts p
 			left join {$wpdb->prefix}postmeta pm on pm.post_id = p.ID and pm.meta_key = '_thumbnail_id'
