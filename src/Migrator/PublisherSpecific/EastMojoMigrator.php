@@ -238,7 +238,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 				'posts_per_page' => -1,
 				'post_type'      => [ 'post', 'page' ],
 				'post_status'    => 'publish',
-				's'              => sprintf( '://%s/%s', $img_host, $img_path ),
+				// 's'              => sprintf( '://%s/%s', $img_host, $img_path ),
 			] );
 			if ( ! $query_public_posts->have_posts() ) {
 				WP_CLI::line( 'No Posts with images found.' );
@@ -250,8 +250,24 @@ class EastMojoMigrator implements InterfaceMigrator {
 
 		foreach ( $posts as $i => $post ) {
 
+			// Check if the RSS imported featured image data, and set it all up.
+			$has_featured_image = get_post_meta( $post_id, 'em_featured_image_data', true );
+			if ( ! empty( $has_featured_image ) ) {
+				$featured_image_url = $has_featured_image['featured_image_url'];
+				if ( isset( $has_featured_image['featured_image_caption'] ) ) {
+					$featured_image_caption = $has_featured_image['featured_image_caption'];
+				} else {
+					$featured_image_caption = false;
+				}
+
+				$has_featured_image = true;
+			} else {
+				$has_featured_image = false;
+			}
+
 			$matches = $this->match_attribute_with_hostname( 'src', $post->post_content, $img_host );
-			if ( ! $matches ) {
+			// There are no images in content and we have no featured image to import.
+			if ( ! $matches && ! $has_featured_image ) {
 				$error_message = sprintf( 'WARNING no img matches in Post ID %d', $post->ID );
 				$errors[]      = $error_message;
 				WP_CLI::warning( $error_message );
@@ -264,41 +280,32 @@ class EastMojoMigrator implements InterfaceMigrator {
 
 			foreach ( $matches[1] as $key => $img_url ) {
 
-				// Get path to the image from the URL, and strip the $img_path from the beginning.
-				$img_url_path = $this->get_path_from_url( $img_url );
-				$img_url_path = ltrim( $img_url_path, '/' . $img_path . '/' );
-
-				// Get the local file.
-				$img_filename   = $this->get_filename_from_path( $img_url );
-				$img_local_path = $img_filename
-					? $public_img_full_location . '/' . $img_url_path
-					: null;
-				if ( ! file_exists( $img_local_path ) ) {
-					$error_message = sprintf( 'ERROR file does not exist, Post ID %d image %s', $post->ID, $img_local_path );
-					$errors[]      = $error_message;
-					WP_CLI::warning( $error_message );
-					continue;
+				// Get the new image.
+				$new_image = $this->get_new_image( $img_url, $img_path, $public_img_full_location, $post );
+				if ( ! $new_image ) {
+					continue; // Failed to get a new image.
+				} else {
+					$att_id      = $new_image['att_id'];
+					$img_url_new = $new_image['img_url_new'];
 				}
-
-				// Import the attachment and get the new URL.
-				$att_id = ! $dry_run
-					? $this->attachments_logic->import_external_file( $img_local_path, null, null, null, null, $post->ID )
-					: null;
-				if ( is_wp_error( $att_id ) ) {
-					$error_message = sprintf( 'ERROR could not save image from Post ID %d with URL %s because: %s', $post->ID, $img_local_path, $att_id->get_error_message() );
-					$errors[]      = $error_message;
-					WP_CLI::warning( $error_message );
-					continue;
-				}
-				$img_url_new = ! $dry_run
-					? wp_get_attachment_url( $att_id )
-					: null;
 
 				// Replace the URL with the new one.
 				$post_content_updated = str_replace( $img_url, $img_url_new, $post_content_updated );
+
+				// Does the URL match the featured image URL?
+				if ( $has_featured_image && $img_url == $featured_image_url ) {
+					$featured_image_id = $att_id;
+				}
 			}
 
-			// Update the Post content.
+			// When there are no content images, but there is a featured image,
+			// make sure we grab and set the featured image.
+			if ( ! $att_id && $has_featured_image ) {
+				$new_image = $this->get_new_image( $featured_image_url, $img_path, $public_img_full_location, $post );
+				$featured_image_id = $new_image['att_id'];
+			}
+
+			// Update the Post content and featured image.
 			if ( ! $dry_run && $post_content_updated != $post->post_content ) {
 				$wpdb->update(
 					$wpdb->prefix . 'posts',
@@ -306,6 +313,22 @@ class EastMojoMigrator implements InterfaceMigrator {
 					[ 'ID' => $post->ID ]
 				);
 			}
+
+			// Set featured image.
+			if ( ! $dry_run && isset( $featured_image_id ) ) {
+				update_post_meta( $post->ID, '_thumbnail_id', $featured_image_id );
+				WP_CLI::success('Updated featured image.');
+
+				// If we have one, set the caption.
+				if ( $featured_image_caption ) {
+					$meta = wp_get_attachment_metadata( $featured_image_id );
+					$meta['image_meta']['caption'] = esc_sql( $featured_image_caption );
+					wp_update_attachment_metadata( $featured_image_id, $meta );
+					WP_CLI::success('Added caption to featured image.');
+				}
+
+			}
+
 		}
 
 		// Required for the $wpdb->update() sink in.
@@ -324,6 +347,43 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( sprintf( 'All done!  🙌  Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	private function get_new_image( $img_url, $img_path, $public_img_full_location, $post ) {
+
+		// Get path to the image from the URL, and strip the $img_path from the beginning.
+		$img_url_path = $this->get_path_from_url( $img_url );
+		$img_url_path = ltrim( $img_url_path, '/' . $img_path . '/' );
+
+		// Get the local file.
+		$img_filename   = $this->get_filename_from_path( $img_url );
+		$img_local_path = $img_filename
+			? $public_img_full_location . '/' . $img_url_path
+			: null;
+		if ( ! file_exists( $img_local_path ) ) {
+			$error_message = sprintf( 'ERROR file does not exist, Post ID %d image %s', $post->ID, $img_local_path );
+			$errors[]      = $error_message;
+			WP_CLI::warning( $error_message );
+		}
+
+		// Import the attachment and get the new URL.
+		$att_id = ! $dry_run
+			? $this->attachments_logic->import_external_file( $img_local_path, null, null, null, null, $post->ID )
+			: null;
+		if ( is_wp_error( $att_id ) ) {
+			$error_message = sprintf( 'ERROR could not save image from Post ID %d with URL %s because: %s', $post->ID, $img_local_path, $att_id->get_error_message() );
+			$errors[]      = $error_message;
+			WP_CLI::warning( $error_message );
+			return false;
+		}
+		$img_url_new = ! $dry_run
+			? wp_get_attachment_url( $att_id )
+			: null;
+
+		return [
+			'att_id'      => $att_id,
+			'img_url_new' => $img_url_new,
+		];
 	}
 
 	/**
