@@ -53,6 +53,12 @@ class LaVozDeAlcalaMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_lavozdealcala_members() {
 
+		// Disable emails before we do anything, otherwise bad things happen.
+		add_filter( 'wp_mail', function( $args ) {
+			unset( $args['to'] );
+			return $args;
+		}, 10, 1 );
+
 		// Get the WC Membership.
 		$membership_title = 'Socio';
 		$plan_posts = get_posts( [
