@@ -92,6 +92,29 @@ class EastMojoMigrator implements InterfaceMigrator {
 
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator eastmojo-update-featured-images',
+			[ $this, 'cmd_update_feat_images' ],
+			[
+				'shortdesc' => 'Updates featured images from data in post meta called em_featured_image_data.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'ID of a specific post to convert.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Perform a dry run, making no changes.',
+						'optional'    => true,
+					],
+				],
+
+			]
+		);
 	}
 
 	/**
@@ -200,6 +223,86 @@ class EastMojoMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Callable for the `newspack-content-migrator eastmojo-update-featured-images` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_feat_images( $args, $assoc_args ) {
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_id = isset( $assoc_args['post-id'] ) ? (int) $assoc_args['post-id'] : null;
+
+		// EM specific variables.
+		$img_host                 = 'gumlet.assettype.com';
+		$img_path                 = 'eastmojo';
+		$public_img_location      = 'wp-content/prod-qt-images';
+		$public_img_full_location = '/srv/www/eastmojo/public_html/wp-content/prod-qt-images';
+		$path_existing_images     = $this->get_site_public_path() . '/' . $public_img_location;
+		if ( ! file_exists( $path_existing_images ) ) {
+			WP_CLI::error( sprintf( 'Path with existing S3 hosted images not found: %s', $path_existing_images ) );
+		}
+
+		// Cater for checking specific posts.
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+			if ( 0 == count( $posts ) ) {
+				WP_CLI::error( sprintf( 'Post %d not found.', $post_id ) );
+			}
+		} else {
+			$query_public_posts = new \WP_Query( [
+				'posts_per_page' => -1,
+				'post_type'      => [ 'post', 'page' ],
+				'post_status'    => 'publish',
+			] );
+			if ( ! $query_public_posts->have_posts() ) {
+				WP_CLI::line( 'No Posts found.' );
+				exit;
+			}
+
+			$posts = $query_public_posts->get_posts();
+		}
+
+		// Start processing.
+		foreach ( $posts as $i => $post ) {
+			$em_featured_image_data = get_post_meta( $post->ID, 'em_featured_image_data' );
+			if ( ! $em_featured_image_data ) {
+				WP_CLI::line( sprintf( '- (%d/%d) no featured image meta', $i + 1, count( $posts ) ) );
+				continue;
+			}
+
+			$featured_image_url = $em_featured_image_data['featured_image_url'] ?? null;
+			$featured_image_caption = $em_featured_image_data['featured_image_caption'] ?? null;
+			if ( ! $featured_image_url ) {
+				WP_CLI::warning( sprintf( '- (%d/%d) featured image meta found, but not the featured_image_url data', $i + 1, count( $posts ) ) );
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '- (%d/%d) setting featured image', $i + 1, count( $posts ) ) );
+
+			// import image to attachment
+			$new_image = ! $dry_run
+				? $this->get_new_image( $featured_image_url, $img_path, $public_img_full_location, $post, $dry_run )
+				: null;
+			if ( ! isset( $new_image[ 'att_id' ] ) || ! isset( $new_image[ 'img_url_new' ] ) ) {
+				WP_CLI::warning( sprintf( 'Error importing featured image ' ) );
+				continue;
+			}
+			$att_id = $new_image[ 'att_id' ];
+			$img_url_new = $new_image[ 'img_url_new' ];
+
+			// set attachment caption
+			if ( $featured_image_caption ) {
+				$meta = wp_get_attachment_metadata( $att_id );
+				$meta[ 'image_meta' ][ 'caption' ] = esc_sql( $featured_image_caption );
+				wp_update_attachment_metadata( $att_id, $meta );
+			}
+
+			// set featured image to post
+			update_post_meta( $post->ID, '_thumbnail_id', $att_id );
+		}
+	}
+
+	/**
 	 * Callable for the `newspack-content-migrator eastmojo-import-images` command.
 	 *
 	 * @param $args
@@ -281,7 +384,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 			foreach ( $matches[1] as $key => $img_url ) {
 
 				// Get the new image.
-				$new_image = $this->get_new_image( $img_url, $img_path, $public_img_full_location, $post );
+				$new_image = $this->get_new_image( $img_url, $img_path, $public_img_full_location, $post, $dry_run );
 				if ( ! $new_image ) {
 					continue; // Failed to get a new image.
 				} else {
@@ -301,7 +404,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 			// When there are no content images, but there is a featured image,
 			// make sure we grab and set the featured image.
 			if ( ! $att_id && $has_featured_image ) {
-				$new_image = $this->get_new_image( $featured_image_url, $img_path, $public_img_full_location, $post );
+				$new_image = $this->get_new_image( $featured_image_url, $img_path, $public_img_full_location, $post, $dry_run );
 				$featured_image_id = $new_image['att_id'];
 			}
 
@@ -349,7 +452,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 		WP_CLI::line( sprintf( 'All done!  🙌  Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
-	private function get_new_image( $img_url, $img_path, $public_img_full_location, $post ) {
+	private function get_new_image( $img_url, $img_path, $public_img_full_location, $post, $dry_run ) {
 
 		// Get path to the image from the URL, and strip the $img_path from the beginning.
 		$img_url_path = $this->get_path_from_url( $img_url );
