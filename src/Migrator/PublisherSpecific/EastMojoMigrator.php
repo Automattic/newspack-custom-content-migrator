@@ -313,7 +313,6 @@ class EastMojoMigrator implements InterfaceMigrator {
 			WP_CLI::error( '🤭  The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
-		$r = function_exists( 'wp_handle_upload_error' );
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
 
