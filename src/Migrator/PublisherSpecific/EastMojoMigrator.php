@@ -54,8 +54,8 @@ class EastMojoMigrator implements InterfaceMigrator {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'post-id',
-						'description' => 'ID of a specific post to convert.',
+						'name'        => 'post-ids',
+						'description' => 'CSV of specific post IDs to process.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -77,8 +77,8 @@ class EastMojoMigrator implements InterfaceMigrator {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'post-id',
-						'description' => 'ID of a specific post to convert.',
+						'name'        => 'post-ids',
+						'description' => 'CSV of specific post IDs to process.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -100,8 +100,8 @@ class EastMojoMigrator implements InterfaceMigrator {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'post-id',
-						'description' => 'ID of a specific post to convert.',
+						'name'        => 'post-ids',
+						'description' => 'CSV of specific post IDs to process.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -140,13 +140,16 @@ class EastMojoMigrator implements InterfaceMigrator {
 
 		// Check our arguments.
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
-		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
 
 		// Cater for checking specific posts.
-		if ( $post_id ) {
-			$posts = [ get_post( $post_id ) ];
+		if ( $post_ids ) {
+			$posts = [];
+			foreach ( $post_ids as $post_id ) {
+				$posts[] = get_post( $post_id );
+			}
 			if ( 0 == count( $posts ) ) {
-				WP_CLI::error( sprintf( 'Post %d not found.', $post_id ) );
+				WP_CLI::error( 'Posts not found.' );
 			}
 		} else {
 			// Aaaaallll the posts!
@@ -230,7 +233,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_update_feat_images( $args, $assoc_args ) {
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
-		$post_id = isset( $assoc_args['post-id'] ) ? (int) $assoc_args['post-id'] : null;
+		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
 
 		// EM specific variables.
 		$img_host                 = 'gumlet.assettype.com';
@@ -243,10 +246,13 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		// Cater for checking specific posts.
-		if ( $post_id ) {
-			$posts = [ get_post( $post_id ) ];
+		if ( $post_ids ) {
+			$posts = [];
+			foreach ( $post_ids as $post_id ) {
+				$posts[] = get_post( $post_id );
+			}
 			if ( 0 == count( $posts ) ) {
-				WP_CLI::error( sprintf( 'Post %d not found.', $post_id ) );
+				WP_CLI::error( 'Posts not found.' );
 			}
 		} else {
 			$query_public_posts = new \WP_Query( [
@@ -314,7 +320,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
-		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
 
 		global $wpdb;
 		$time_start = microtime( true );
@@ -330,10 +336,13 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		// Get single Post or all Posts.
-		if ( $post_id ) {
-			$posts = [ get_post( $post_id ) ];
+		if ( $post_ids ) {
+			$posts = [];
+			foreach ( $post_ids as $post_id ) {
+				$posts[] = get_post( $post_id );
+			}
 			if ( 0 == count( $posts ) ) {
-				WP_CLI::error( sprintf( 'Post %d not found.', $post_id ) );
+				WP_CLI::error( 'Posts not found.' );
 			}
 		} else {
 			// Loop through posts detecting images hosted in the AWS bucket.
