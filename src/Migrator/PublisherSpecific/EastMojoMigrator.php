@@ -313,6 +313,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 			WP_CLI::error( '🤭  The Newspack Content Converter plugin is required for this command to work. Please install and activate it first.' );
 		}
 
+		$r = function_exists( 'wp_handle_upload_error' );
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
 
@@ -323,7 +324,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 		$img_host                 = 'gumlet.assettype.com';
 		$img_path                 = 'eastmojo';
 		$public_img_location      = 'wp-content/prod-qt-images';
-		$public_img_full_location = '/srv/www/eastmojo/public_html/wp-content/prod-qt-images';
+		$public_img_full_location = '/srv/www/eastmojo/public_html/wp-content/prod-qt-images_EMPTY';
 		$path_existing_images     = $this->get_site_public_path() . '/' . $public_img_location;
 		if ( ! file_exists( $path_existing_images ) ) {
 			WP_CLI::error( sprintf( 'Path with existing S3 hosted images not found: %s', $path_existing_images ) );
@@ -384,13 +385,14 @@ class EastMojoMigrator implements InterfaceMigrator {
 			foreach ( $matches[1] as $key => $img_url ) {
 
 				// Get the new image.
-				$new_image = $this->get_new_image( $img_url, $img_path, $public_img_full_location, $post, $dry_run );
-				if ( ! $new_image ) {
-					continue; // Failed to get a new image.
-				} else {
-					$att_id      = $new_image['att_id'];
-					$img_url_new = $new_image['img_url_new'];
+				$att_id = ! $dry_run
+					? $this->attachments_logic->import_external_file( $img_url, null, null, null, null, $post->ID )
+					: null;
+				if ( is_wp_error( $att_id ) )  {
+					WP_CLI::warning( sprintf( 'Error downloading %s: %s', $img_url, $att_id->get_error_message() ) );
+					continue;
 				}
+				$img_url_new = wp_get_attachment_image_url( $att_id );
 
 				// Replace the URL with the new one.
 				$post_content_updated = str_replace( $img_url, $img_url_new, $post_content_updated );
@@ -404,8 +406,9 @@ class EastMojoMigrator implements InterfaceMigrator {
 			// When there are no content images, but there is a featured image,
 			// make sure we grab and set the featured image.
 			if ( ! $att_id && $has_featured_image ) {
-				$new_image = $this->get_new_image( $featured_image_url, $img_path, $public_img_full_location, $post, $dry_run );
-				$featured_image_id = $new_image['att_id'];
+				$featured_image_id = ! $dry_run
+					? $this->attachments_logic->import_external_file( $featured_image_url, null, $featured_image_caption ?? null, null, null, $post->ID, [])
+					: null;
 			}
 
 			// Update the Post content and featured image.
@@ -421,15 +424,6 @@ class EastMojoMigrator implements InterfaceMigrator {
 			if ( ! $dry_run && isset( $featured_image_id ) ) {
 				update_post_meta( $post->ID, '_thumbnail_id', $featured_image_id );
 				WP_CLI::success('Updated featured image.');
-
-				// If we have one, set the caption.
-				if ( $featured_image_caption ) {
-					$meta = wp_get_attachment_metadata( $featured_image_id );
-					$meta['image_meta']['caption'] = esc_sql( $featured_image_caption );
-					wp_update_attachment_metadata( $featured_image_id, $meta );
-					WP_CLI::success('Added caption to featured image.');
-				}
-
 			}
 
 		}
