@@ -284,26 +284,14 @@ class EastMojoMigrator implements InterfaceMigrator {
 			}
 
 			WP_CLI::line( sprintf( '- (%d/%d) setting featured image', $i + 1, count( $posts ) ) );
-
-			// import image to attachment
-			$new_image = ! $dry_run
-				? $this->get_new_image( $featured_image_url, $img_path, $public_img_full_location, $post, $dry_run )
+			$att_id = ! $dry_run
+				? $this->attachments_logic->import_external_file( $featured_image_url, null, $featured_image_caption, null, null, $post->ID )
 				: null;
 			if ( ! isset( $new_image[ 'att_id' ] ) || ! isset( $new_image[ 'img_url_new' ] ) ) {
 				WP_CLI::warning( sprintf( 'Error importing featured image ' ) );
 				continue;
 			}
-			$att_id = $new_image[ 'att_id' ];
-			$img_url_new = $new_image[ 'img_url_new' ];
 
-			// set attachment caption
-			if ( $featured_image_caption ) {
-				$meta = wp_get_attachment_metadata( $att_id );
-				$meta[ 'image_meta' ][ 'caption' ] = esc_sql( $featured_image_caption );
-				wp_update_attachment_metadata( $att_id, $meta );
-			}
-
-			// set featured image to post
 			update_post_meta( $post->ID, '_thumbnail_id', $att_id );
 		}
 	}
