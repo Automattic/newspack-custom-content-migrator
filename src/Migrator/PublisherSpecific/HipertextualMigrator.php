@@ -47,9 +47,12 @@ class HipertextualMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		// Bit of a hack doing it this way but ¯\_(ツ)_/¯.
-// WP_CLI::line(implode('::', [ __FILE__, __FUNCTION__, __LINE__ ]));
+
 		// Convert Markdown headings.
 		add_filter( 'np_meta_to_content_value', [ $this, 'convert_markdown_headings' ], 10, 3 );
+
+		// Add missing headings to some sections.
+		add_filter( 'np_meta_to_content_value', [ $this, 'add_section_headings' ], 10, 3 );
 	}
 
 	/**
@@ -93,6 +96,35 @@ class HipertextualMigrator implements InterfaceMigrator {
 		}
 
 		return $value;
+	}
+
+	/**
+	 * Add section headings to some sections.
+	 *
+	 * @return string Converted content.
+	 */
+	public function add_section_headings( $value, $key, $post_id ) {
+
+		// Things
+		$headings = [
+			'conclusion' => '<h2>Conclusión</h2>',
+			'pros'       => '<h2 class="pros">Pros</h2>',
+			'contras'    => '<h2 class="contras">Contras</h2>'
+		];
+
+		if ( ! in_array( $key, array_keys( $headings ) ) ) {
+			return $value;
+		}
+
+		foreach ( $headings as $meta_key => $heading ) {
+			if ( $meta_key === $key ) {
+				// Append the relevant heading on to the content.
+				$value = $heading . $value;
+			}
+		}
+
+		return $value;
+
 	}
 
 }
