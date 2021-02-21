@@ -129,10 +129,11 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				 * to be modified before being added to post_content. This is useful
 				 * for dealing with special types of content.
 				 *
-				 * @param $value The value of the post meta being migrated.
-				 * @param $key   The meta key name for this value.
+				 * @param $value    The value of the post meta being migrated.
+				 * @param $key      The meta key name for this value.
+				 * @param $post_id  The ID of the post being migrated.
 				 */
-				$post_content .= apply_filters( 'np_meta_to_content_value', $value, $key );
+				$post_content .= apply_filters( 'np_meta_to_content_value', $value, $key, $post->ID );
 			}
 
 			$update = wp_update_post( [
