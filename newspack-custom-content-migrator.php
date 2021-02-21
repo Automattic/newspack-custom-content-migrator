@@ -24,6 +24,7 @@ require_once ABSPATH . 'wp-settings.php';
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators( array(
 	Migrator\General\PostsMigrator::class,
+	Migrator\General\MetaToContentMigrator::class,
 	Migrator\General\MenusMigrator::class,
 	Migrator\General\CssMigrator::class,
 	Migrator\General\ContentConverterPluginMigrator::class,
