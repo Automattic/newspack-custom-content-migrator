@@ -11,11 +11,6 @@ use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 class EastMojoImporter implements InterfaceMigrator {
 
 	/**
-	 * @var null|InterfaceMigrator Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
