@@ -235,16 +235,6 @@ class EastMojoMigrator implements InterfaceMigrator {
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
 
-		// EM specific variables.
-		$img_host                 = 'gumlet.assettype.com';
-		$img_path                 = 'eastmojo';
-		$public_img_location      = 'wp-content/prod-qt-images';
-		$public_img_full_location = '/srv/www/eastmojo/public_html/wp-content/prod-qt-images';
-		$path_existing_images     = $this->get_site_public_path() . '/' . $public_img_location;
-		if ( ! file_exists( $path_existing_images ) ) {
-			WP_CLI::error( sprintf( 'Path with existing S3 hosted images not found: %s', $path_existing_images ) );
-		}
-
 		// Cater for checking specific posts.
 		if ( $post_ids ) {
 			$posts = [];
@@ -269,30 +259,37 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		// Start processing.
+		$errors = [];
 		foreach ( $posts as $i => $post ) {
 			$em_featured_image_data = get_post_meta( $post->ID, 'em_featured_image_data' );
-			if ( ! $em_featured_image_data ) {
+			if ( empty( $em_featured_image_data ) ) {
 				WP_CLI::line( sprintf( '- (%d/%d) no featured image meta', $i + 1, count( $posts ) ) );
 				continue;
 			}
 
-			$featured_image_url = $em_featured_image_data['featured_image_url'] ?? null;
-			$featured_image_caption = $em_featured_image_data['featured_image_caption'] ?? null;
+			$featured_image_url = $em_featured_image_data[0]['featured_image_url'] ?? null;
+			$featured_image_caption = $em_featured_image_data[0]['featured_image_caption'] ?? null;
 			if ( ! $featured_image_url ) {
 				WP_CLI::warning( sprintf( '- (%d/%d) featured image meta found, but not the featured_image_url data', $i + 1, count( $posts ) ) );
 				continue;
 			}
 
-			WP_CLI::line( sprintf( '- (%d/%d) setting featured image', $i + 1, count( $posts ) ) );
-			$att_id = ! $dry_run
-				? $this->attachments_logic->import_external_file( $featured_image_url, null, $featured_image_caption, null, null, $post->ID )
-				: null;
-			if ( ! isset( $new_image[ 'att_id' ] ) || ! isset( $new_image[ 'img_url_new' ] ) ) {
-				WP_CLI::warning( sprintf( 'Error importing featured image ' ) );
-				continue;
-			}
+			WP_CLI::line( sprintf( '- (%d/%d) setting featured image %s with caption "%s"...', $i + 1, count( $posts ), $featured_image_url, $featured_image_caption ) );
+			if ( ! $dry_run ) {
+				$att_id = $this->attachments_logic->import_external_file( $featured_image_url, null, $featured_image_caption, null, null, $post->ID );
+				if ( is_wp_error( $att_id ) ) {
+					$msg = sprintf( 'Error importing featured image, post ID %d, img %s, error %s', $post->ID, $featured_image_url, $att_id->get_error_message() );
+					WP_CLI::warning( $msg );
+					$errors[] = $msg;
+					continue;
+				}
 
-			update_post_meta( $post->ID, '_thumbnail_id', $att_id );
+				update_post_meta( $post->ID, '_thumbnail_id', $att_id );
+			}
+		}
+
+		if ( ! empty( $errors ) ) {
+			WP_CLI::warning( "- " . implode( "\n-", $errors ) );
 		}
 	}
 
