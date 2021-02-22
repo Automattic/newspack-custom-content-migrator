@@ -351,7 +351,7 @@ class EastMojoMigrator implements InterfaceMigrator {
 		foreach ( $posts as $i => $post ) {
 
 			// Check if the RSS imported featured image data, and set it all up.
-			$has_featured_image = get_post_meta( $post_id, 'em_featured_image_data', true );
+			$has_featured_image = get_post_meta( $post->ID, 'em_featured_image_data', true );
 			if ( ! empty( $has_featured_image ) ) {
 				$featured_image_url = $has_featured_image['featured_image_url'];
 				if ( isset( $has_featured_image['featured_image_caption'] ) ) {
