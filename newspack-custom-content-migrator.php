@@ -45,6 +45,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 		Migrator\PublisherSpecific\TRNNMigrator::class,
 		Migrator\PublisherSpecific\OnTheWightMigrator::class,
 		Migrator\PublisherSpecific\EastMojoMigrator::class,
+		Migrator\PublisherSpecific\EastMojoImporter::class,
 	) );
 
 } else {
