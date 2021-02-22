@@ -14,33 +14,42 @@ namespace NewspackCustomContentMigrator;
 
 require __DIR__ . '/vendor/autoload.php';
 
-require_once ABSPATH . 'wp-settings.php';
+// Don't do anything outside WP CLI.
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
-PluginSetup::setup_wordpress_importer();
-PluginSetup::register_migrators( array(
-	Migrator\General\PostsMigrator::class,
-	Migrator\General\MenusMigrator::class,
-	Migrator\General\CssMigrator::class,
-	Migrator\General\ContentConverterPluginMigrator::class,
-	Migrator\General\SettingsMigrator::class,
-	Migrator\General\WooCommMigrator::class,
-	Migrator\General\ReaderRevenueMigrator::class,
-	Migrator\General\CampaignsMigrator::class,
-	Migrator\General\InlineFeaturedImageMigrator::class,
-	Migrator\General\SubtitleMigrator::class,
-	Migrator\General\CoAuthorPlusMigrator::class,
-	Migrator\General\CPTMigrator::class,
-	Migrator\General\TaxonomyMigrator::class,
-	Migrator\General\ReusableBlocksMigrator::class,
+	require_once ABSPATH . 'wp-settings.php';
 
-	// Migrator\PublisherSpecific\KawowoMigrator::class,
-	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
-	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
-	// Migrator\PublisherSpecific\HKFPMigrator::class,
-	// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-	// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
-	Migrator\PublisherSpecific\TRNNMigrator::class,
-	Migrator\PublisherSpecific\OnTheWightMigrator::class,
-	Migrator\PublisherSpecific\EastMojoMigrator::class,
-	Migrator\PublisherSpecific\EastMojoImporter::class,
-) );
+	PluginSetup::setup_wordpress_importer();
+	PluginSetup::register_migrators( array(
+		Migrator\General\PostsMigrator::class,
+		Migrator\General\MenusMigrator::class,
+		Migrator\General\CssMigrator::class,
+		Migrator\General\ContentConverterPluginMigrator::class,
+		Migrator\General\SettingsMigrator::class,
+		Migrator\General\WooCommMigrator::class,
+		Migrator\General\ReaderRevenueMigrator::class,
+		Migrator\General\CampaignsMigrator::class,
+		Migrator\General\InlineFeaturedImageMigrator::class,
+		Migrator\General\SubtitleMigrator::class,
+		Migrator\General\CoAuthorPlusMigrator::class,
+		Migrator\General\CPTMigrator::class,
+		Migrator\General\TaxonomyMigrator::class,
+		Migrator\General\ReusableBlocksMigrator::class,
+
+		// Migrator\PublisherSpecific\KawowoMigrator::class,
+		// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
+		// Migrator\PublisherSpecific\SahanJournalMigrator::class,
+		// Migrator\PublisherSpecific\HKFPMigrator::class,
+		// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
+		// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+		Migrator\PublisherSpecific\TRNNMigrator::class,
+		Migrator\PublisherSpecific\OnTheWightMigrator::class,
+		Migrator\PublisherSpecific\EastMojoMigrator::class,
+		Migrator\PublisherSpecific\EastMojoImporter::class,
+	) );
+
+} else {
+
+	require_once 'src/Importer/PublisherSpecific/EastMojoImporter.php';
+
+}
