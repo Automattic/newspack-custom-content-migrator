@@ -185,14 +185,20 @@ class EastMojoMigrator implements InterfaceMigrator {
 					'display_name' => $author_data['author_display_name'],
 					'role'         => 'contributor',
 				] );
-				if ( is_wp_error( $user ) ) {
-					// Oopsie.
-					WP_CLI::warning( sprintf(
-						'Failed to create user for author ID %d because %s',
-						$author_data['author_id'],
-						$user->get_error_message()
-					) );
-					continue;
+				if ( is_wp_error( $new_user ) ) {
+					// We already added this user so let's assign it.
+					if ( 'existing_user_login' == $new_user->get_error_code() ) {
+						$new_user = get_user_by( 'login', $author_data['author_login'] )->ID;
+					} else {
+						// Something else went wrong, so skip.
+						WP_CLI::warning( sprintf(
+							'Failed to create user for author ID %d because %s',
+							$author_data['author_id'],
+							$new_user->get_error_message()
+						) );
+
+						continue;
+					}
 				}
 
 				// Make sure we can find the migrated user again.
