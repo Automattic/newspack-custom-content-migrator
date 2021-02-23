@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \WP_CLI;
+use \WP_Error;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 
@@ -92,9 +93,34 @@ class EastMojoMigrator implements InterfaceMigrator {
 
 			]
 		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator eastmojo-update-featured-images',
 			[ $this, 'cmd_update_feat_images' ],
+			[
+				'shortdesc' => 'Updates featured images from data in post meta called em_featured_image_data.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'CSV of specific post IDs to process.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Perform a dry run, making no changes.',
+						'optional'    => true,
+					],
+				],
+
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator eastmojo-update-meta-data-from-api',
+			[ $this, 'cmd_update_meta_from_api' ],
 			[
 				'shortdesc' => 'Updates featured images from data in post meta called em_featured_image_data.',
 				'synopsis'  => [
@@ -443,6 +469,137 @@ class EastMojoMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( sprintf( 'All done!  🙌  Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	public function cmd_update_meta_from_api( $args, $assoc_args ) {
+
+		// Check our arguments.
+		$dry_run  = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
+
+		// Cater for checking specific posts.
+		if ( $post_ids ) {
+			$posts = [];
+			foreach ( $post_ids as $post_id ) {
+				$posts[] = get_post( $post_id );
+			}
+			if ( 0 == count( $posts ) ) {
+				WP_CLI::error( 'Posts not found.' );
+			}
+		} else {
+			// Aaaaallll the posts!
+			$posts = get_posts( [
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'meta_query'     => [
+					'key'     => 'em_meta_imported',
+					'compare' => 'NOT EXISTS',
+				],
+			] );
+		}
+
+		foreach ( $posts as $post ) {
+			$guid = str_replace( 'http://', '', $post->guid );
+			$json = $this->get_meta_data_from_api( $guid );
+			if ( is_wp_error( $json ) ) {
+				WP_CLI::warning( sprintf(
+					'Failed to get JSON for post %d with GUID %s because %s.',
+					$post->ID,
+					$post->guid,
+					$json->get_error_message()
+				) );
+				continue;
+			}
+
+			// Import story->summary to excerpt.
+			if ( isset( $json['story']['summary'] ) && empty( $post->post_excerpt ) ) {
+				$updated = wp_update_post( [
+					'ID'           => $post->ID,
+					'post_excerpt' => $json['story']['summary'],
+				] );
+				if ( ! is_wp_error( $updated ) ) {
+					WP_CLI::success( sprintf( 'Updated excerpt on post %d', $post->ID ) );
+				}
+			}
+
+			// Import the story sub-headline to subtitle.
+			if ( isset( $json['story']['subheadline'] ) ) {
+				$subtitle = get_post_meta( $post->ID, 'newspack_post_subtitle', true );
+				if ( empty( $subtitle ) ) {
+					// We don't already have a subtitle so import from JSON.
+					$updated = update_post_meta( $post->ID, 'newspack_post_subtitle', $json['story']['subheadline'] );
+					if ( $updated ) {
+						WP_CLI::success( sprintf( 'Updated subtitle on post %d', $post->ID ) );
+					}
+				}
+			}
+
+			// Make sure all the tags are present.
+			if ( ! empty( $json['story']['tags'] ) ) {
+				$tags = wp_list_pluck( $json['story']['tags'], 'name' );
+				$updated = wp_set_post_tags( $post->ID, $tags, true );
+				if ( ! is_wp_error( $updated ) || $updated ) {
+					WP_CLI::success( sprintf( 'Updated tags on post %d', $post->ID ) );
+				}
+			}
+
+			// Add the meta description.
+			if ( isset( $json['story']['seo']['meta-description'] ) ) {
+				$meta_desc = get_post_meta( $post->ID, '_yoast_wpseo_metadesc', true );
+				if ( empty( $meta_desc ) ) {
+					// We don't already have a meta description so import from JSON.
+					$updated = update_post_meta( $post->ID, '_yoast_wpseo_metadesc', $json['story']['seo']['meta-description'] );
+					if ( $updated ) {
+						WP_CLI::success( sprintf( 'Updated meta description on post %d', $post->ID ) );
+					}
+				}
+			}
+
+			// Update the featured image credit.
+			if ( isset( $json['story']['hero-image-attribution'] ) ) {
+				$featured_image_id = get_post_meta( $post->ID, '_thumbnail_id', true );
+				if ( ! empty( $featured_image_id ) ) {
+					$media_credit = get_post_meta( $featured_image_id, '_media_credit', true );
+					if ( empty( $media_credit ) ) {
+						// We don't already have a media credit so import from JSON.
+						$updated = update_post_meta( $featured_image_id, '_media_credit', $json['story']['hero-image-attribution'] );
+						if ( $updated ) {
+							WP_CLI::success( sprintf( 'Updated media credit on attachment %d for post %d', $featured_image_id, $post->ID ) );
+						}
+					}
+				}
+			}
+		}
+
+	}
+
+	private function get_meta_data_from_api( $guid ) {
+
+		// Check if we've grabbed the JSON from the API already first.
+		$local = \file_get_contents( sprintf( '/tmp/quintype-api-responses/%s.json', esc_attr( $guid ) ) );
+		if ( $local && \json_decode( $local, true ) ) {
+			return \json_decode( $local, true );
+		}
+
+		// Okay, let's go and request the JSON from the Quintype API.
+		$api_url = esc_url_raw( 'https://eastmojo.madrid.quintype.io/api/v1/stories/' . $guid );
+		$response = wp_remote_get( $api_url, [
+			'user-agent' => 'Newspack Migrator',
+		] );
+
+		// Not a good response.
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		$json = \json_decode( $response['body'], true );
+		if ( ! $json ) {
+			return new \WP_Error( 'invalid_json', 'Failed to decode the JSON in the response body.' );
+		}
+
+		// All good, return the decoded JSON.
+		return $json;
 	}
 
 	private function get_new_image( $img_url, $img_path, $public_img_full_location, $post, $dry_run ) {
