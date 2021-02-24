@@ -56,6 +56,13 @@ class MetaToContentMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run instead of making any actual changes.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -66,6 +73,9 @@ class MetaToContentMigrator implements InterfaceMigrator {
 	 * Migrate content from custom fields to post_content
 	 */
 	public function cmd_migrate_meta_to_content( $args, $assoc_args ) {
+
+		// Damage limitation.
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 
 		// Get the meta key(s).
 		$meta_keys = explode( ',', $args[0] );
