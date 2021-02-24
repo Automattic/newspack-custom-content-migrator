@@ -71,6 +71,13 @@ class SubtitleMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run instead of making any actual changes.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -104,6 +111,9 @@ class SubtitleMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_migrate_custom_field_to_subtitle( $args, $assoc_args ) {
 
+		// Damage limitation.
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
 		// Get the meta key.
 		$meta_key = $args[0];
 
@@ -126,7 +136,7 @@ class SubtitleMigrator implements InterfaceMigrator {
 					],
 					[
 						// Exclude posts that already have a subtitle.
-						'key'     => 'newspack_post_subtitle',
+						'key'     => 'np_subtitle_migration',
 						'compare' => 'NOT EXISTS',
 					],
 				],
@@ -140,20 +150,30 @@ class SubtitleMigrator implements InterfaceMigrator {
 		foreach ( $posts as $post ) {
 
 			$subtitle          = get_post_meta( $post->ID, esc_sql( $meta_key ), true );
-			$newspack_subtitle = update_post_meta( $post->ID, 'newspack_post_subtitle', esc_sql( $subtitle ) );
+			$newspack_subtitle = ( ! $dry_run ) ? update_post_meta( $post->ID, 'newspack_post_subtitle', esc_sql( $subtitle ) ) : true;
 
 			if ( ! $newspack_subtitle ) {
 				WP_CLI::warning( sprintf( 'Failed to update subtitle on %d', $post->ID ) );
 			} else {
-				WP_CLI::success( sprintf( 'Migrated subtitle on post %d', $post->ID ) );
-				add_post_meta( $post->ID, 'np_subtitle_migration', sprintf(
+				$log_message = sprintf(
 					'Migrated subtitle "%s" from meta key "%s" at %s.',
 					esc_sql( $subtitle ),
 					esc_sql( $meta_key ),
 					date('c')
-				) );
+				);
+
+				if ( ! $dry_run ) {
+					add_post_meta( $post->ID, 'np_subtitle_migration', $log_message );
+					WP_CLI::success( sprintf( 'Migrated subtitle on post %d', $post->ID ) );
+				} else {
+					WP_CLI::success( $log_message );
+				}
 			}
 
+		}
+
+		if ( $dry_run ) {
+			WP_CLI::warning( 'This was a DRY RUN ONLY! No changes were actually made.' );
 		}
 
 		wp_cache_flush();
