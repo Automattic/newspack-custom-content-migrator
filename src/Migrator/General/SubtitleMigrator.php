@@ -150,6 +150,10 @@ class SubtitleMigrator implements InterfaceMigrator {
 		foreach ( $posts as $post ) {
 
 			$subtitle          = get_post_meta( $post->ID, esc_sql( $meta_key ), true );
+			if ( empty( $subtitle ) ) {
+				WP_CLI::warning( sprintf( 'Existing subtitle on %d is empty. Skipping.', $post->ID ) );
+			}
+
 			$newspack_subtitle = ( ! $dry_run ) ? update_post_meta( $post->ID, 'newspack_post_subtitle', esc_sql( $subtitle ) ) : true;
 
 			if ( ! $newspack_subtitle ) {
