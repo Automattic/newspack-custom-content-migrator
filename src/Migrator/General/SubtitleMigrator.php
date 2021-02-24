@@ -160,7 +160,8 @@ class SubtitleMigrator implements InterfaceMigrator {
 				WP_CLI::warning( sprintf( 'Failed to update subtitle on %d', $post->ID ) );
 			} else {
 				$log_message = sprintf(
-					'Migrated subtitle "%s" from meta key "%s" at %s.',
+					'Migrated subtitle on post %d: "%s" from meta key "%s" at %s.',
+					$post->ID,
 					esc_sql( $subtitle ),
 					esc_sql( $meta_key ),
 					date('c')
