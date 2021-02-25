@@ -173,7 +173,7 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				}
 
 				if ( $dry_run ) {
-					WP_CLI::info( $updated_message );
+					WP_CLI::line( $updated_message );
 				} else {
 					add_post_meta( $post->ID, '_np_meta_migration', $updated_message );
 				}
