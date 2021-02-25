@@ -77,19 +77,19 @@ class HipertextualMigrator implements InterfaceMigrator {
 			'####'  => 'h4',
 			'###'   => 'h3',
 			'##'    => 'h2',
-			'#'     => 'h1',
 		];
 
-		foreach ( $matches[1] as $match ) {
+		foreach ( $matches[0] as $match ) {
 
 			// Loop through each markdown replacement needed.
 			foreach( $replacements as $search => $replace ) {
 				if ( false !== \strpos( $match, $search ) ) {
+
 					// Remove the markdown from the heading, leaving just the text.
 					$title = \str_replace( $search, '', $match );
 
 					// Wrap the heading with the relevant HTML tags.
-					$title = sprintf( '<%1$s>%2$s</%1$s>', $replace, $title );
+					$title = sprintf( '<%1$s>%2$s</%1$s>', $replace, trim( $title ) );
 
 					// Replace the original string in the meta value with our new HTML string.
 					$value = str_replace( $match, $title, $value );
