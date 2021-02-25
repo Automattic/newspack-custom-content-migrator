@@ -139,6 +139,9 @@ class MetaToContentMigrator implements InterfaceMigrator {
 			foreach ( $meta_keys as $key ) {
 
 				$value = get_post_meta( $post->ID, $key, true );
+				if ( empty( $value ) ) {
+					continue;
+				}
 
 				/**
 				 * Filter the value stored in post content.
