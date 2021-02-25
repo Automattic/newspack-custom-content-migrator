@@ -4,7 +4,6 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 
 /**
  * Custom migration scripts for Hipertextual.
@@ -24,9 +23,7 @@ class HipertextualMigrator implements InterfaceMigrator {
 	/**
 	 * Constructor.
 	 */
-	private function __construct() {
-		$this->attachments_logic = new AttachmentsLogic();
-	}
+	private function __construct() {}
 
 	/**
 	 * Singleton get_instance().
@@ -53,6 +50,12 @@ class HipertextualMigrator implements InterfaceMigrator {
 
 		// Add missing headings to some sections.
 		add_filter( 'np_meta_to_content_value', [ $this, 'add_section_headings' ], 10, 3 );
+
+		// Bulleted lists for Pros and Cons. Run before columns transformation.
+		add_filter( 'np_meta_to_content_value', [ $this, 'pros_cons_bullets' ], 9, 3 );
+
+		// Add columns for the Pros and Cons section.
+		add_filter( 'np_meta_to_content_value', [ $this, 'pros_cons_columns' ], 10, 3 );
 	}
 
 	/**
@@ -108,8 +111,6 @@ class HipertextualMigrator implements InterfaceMigrator {
 		// Things
 		$headings = [
 			'conclusion' => '<h2>Conclusión</h2>',
-			'pros'       => '<h2 class="pros">Pros</h2>',
-			'contras'    => '<h2 class="contras">Contras</h2>'
 		];
 
 		if ( ! in_array( $key, array_keys( $headings ) ) ) {
@@ -121,6 +122,65 @@ class HipertextualMigrator implements InterfaceMigrator {
 				// Append the relevant heading on to the content.
 				$value = $heading . $value;
 			}
+		}
+
+		return $value;
+
+	}
+
+	/**
+	 * Bulleted lists for Pros and Cons.
+	 *
+	 * @return string Modified content.
+	 */
+	public function pros_cons_bullets( $value, $key, $post_id ) {
+
+		if ( ! in_array( $key, [ 'pros', 'contras' ] ) ) {
+			return $value;
+		}
+
+		$items = explode( '-', $value );
+		$list = '';
+		foreach ( $items as $item ) {
+			if ( empty( $item ) ) continue;
+			$list .= sprintf( '<li>%s</li>', trim( $item ) );
+		}
+
+		$value = sprintf( '<ul>%s</ul>', $list );
+
+		return $value;
+
+	}
+
+	/**
+	 * Add columns for the Pros and Cons section.
+	 *
+	 * @return string Modified content.
+	 */
+	public function pros_cons_columns( $value, $key, $post_id ) {
+
+		if ( 'pros' == $key ) {
+			$value = sprintf(
+				'<!-- wp:columns -->
+<div class="wp-block-columns"><!-- wp:column -->
+<div class="wp-block-column"><!-- wp:heading -->
+<h2  class="pros">Pros</h2>
+<!-- /wp:heading --><!-- wp:paragraph -->%s<!-- /wp:paragraph --></div>
+<!-- /wp:column -->',
+				$value
+			);
+		}
+
+		if ( 'contras' == $key ) {
+			$value = sprintf(
+				'<!-- wp:column -->
+<div class="wp-block-column"><!-- wp:heading -->
+<h2 class="contras">Contras</h2>
+<!-- /wp:heading --><!-- wp:paragraph -->%s<!-- /wp:paragraph --></div>
+<!-- /wp:column --></div>
+<!-- /wp:columns -->',
+				$value
+			);
 		}
 
 		return $value;
