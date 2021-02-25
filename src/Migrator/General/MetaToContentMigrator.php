@@ -139,6 +139,9 @@ class MetaToContentMigrator implements InterfaceMigrator {
 			foreach ( $meta_keys as $key ) {
 
 				$value = get_post_meta( $post->ID, $key, true );
+				if ( empty( $value ) ) {
+					continue;
+				}
 
 				/**
 				 * Filter the value stored in post content.
@@ -154,10 +157,11 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				$post_content .= apply_filters( 'np_meta_to_content_value', $value, $key, $post->ID );
 			}
 
-			$update = ( $dry_run ) ? wp_update_post( [
+			// Update in a live run only.
+			$update = ( $dry_run ) ? true : wp_update_post( [
 				'ID'           => $post->ID,
 				'post_content' => $post_content,
-			] ) : true;
+			] );
 			if ( is_wp_error( $update ) ) {
 				WP_CLI::warning( sprintf( 'Post %d failed to update.', $post->ID ) );
 			} else {
@@ -172,7 +176,7 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				}
 
 				if ( $dry_run ) {
-					WP_CLI::info( $updated_message );
+					WP_CLI::line( $updated_message );
 				} else {
 					add_post_meta( $post->ID, '_np_meta_migration', $updated_message );
 				}
