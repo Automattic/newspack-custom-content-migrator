@@ -45,8 +45,10 @@ class HipertextualMigrator implements InterfaceMigrator {
 	public function register_commands() {
 		// Bit of a hack doing it this way but ¯\_(ツ)_/¯.
 
-		// Convert Markdown headings.
+		// Convert Markdown.
 		add_filter( 'np_meta_to_content_value', [ $this, 'convert_markdown_headings' ], 10, 3 );
+		add_filter( 'np_meta_to_content_value', [ $this, 'convert_markdown_bold' ], 10, 3 );
+		add_filter( 'np_meta_to_content_value', [ $this, 'convert_markdown_italics' ], 11, 3 ); // Do after bold.
 
 		// Add missing headings to some sections.
 		add_filter( 'np_meta_to_content_value', [ $this, 'add_section_headings' ], 10, 3 );
@@ -99,6 +101,52 @@ class HipertextualMigrator implements InterfaceMigrator {
 		}
 
 		return $value;
+	}
+
+	/**
+	 * Convert markdown bold
+	 *
+	 * @return string Converted content
+	 */
+	public function convert_markdown_bold( $value, $key, $post_id ) {
+
+		// Look for markdown bold, skip if there aren't any.
+		$find = \preg_match_all( '/\*\*[A-z0-9\sáéíóúñü]+\*\*/', $value, $matches );
+		if ( ! $find || 0 === $find ) {
+			return $value;
+		}
+
+		foreach ( $matches[0] as $match ) {
+			$new_text = \str_replace( '*', '', $match );
+			$new_text = sprintf( '<strong>%s</strong>', $new_text );
+			$value    = \str_replace( $match, $new_text, $value );
+		}
+
+		return $value;
+
+	}
+
+	/**
+	 * Convert markdown italics
+	 *
+	 * @return string Converted content
+	 */
+	public function convert_markdown_italics( $value, $key, $post_id ) {
+
+		// Look for markdown bold, skip if there aren't any.
+		$find = \preg_match_all( '/\*[A-z0-9\sáéíóúñü]+\*/', $value, $matches );
+		if ( ! $find || 0 === $find ) {
+			return $value;
+		}
+
+		foreach ( $matches[0] as $match ) {
+			$new_text = \str_replace( '*', '', $match );
+			$new_text = sprintf( '<em>%s</em>', $new_text );
+			$value    = \str_replace( $match, $new_text, $value );
+		}
+
+		return $value;
+
 	}
 
 	/**
