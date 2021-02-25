@@ -63,6 +63,13 @@ class MetaToContentMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'verbose',
+						'description' => 'Print/store the whole new content as well as reporting success.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -74,8 +81,9 @@ class MetaToContentMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_migrate_meta_to_content( $args, $assoc_args ) {
 
-		// Damage limitation.
+		// Damage limitation and openness.
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+		$verbose = isset( $assoc_args['verbose'] ) ? true : false;
 
 		// Get the meta key(s).
 		$meta_keys = explode( ',', $args[0] );
@@ -146,18 +154,28 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				$post_content .= apply_filters( 'np_meta_to_content_value', $value, $key, $post->ID );
 			}
 
-			$update = wp_update_post( [
+			$update = ( $dry_run ) ? wp_update_post( [
 				'ID'           => $post->ID,
 				'post_content' => $post_content,
-			] );
+			] ) : true;
 			if ( is_wp_error( $update ) ) {
 				WP_CLI::warning( sprintf( 'Post %d failed to update.', $post->ID ) );
 			} else {
-				add_post_meta( $post->ID, '_np_meta_migration', sprintf(
-					'Migrated meta keys "%s" in that order into post_content at %s.',
+				$updated_message = sprintf(
+					'Migrated post %d meta keys "%s" in that order into post_content at %s.',
+					$post->ID,
 					implode( ',', $meta_keys ),
 					date('c')
-				) );
+				);
+				if ( $verbose ) {
+					$updated_message .= " New content is: \n$post_content\n--------------------------------\n";
+				}
+
+				if ( $dry_run ) {
+					WP_CLI::info( $updated_message );
+				} else {
+					add_post_meta( $post->ID, '_np_meta_migration', $updated_message );
+				}
 				WP_CLI::success( sprintf( 'Successfully updated post %d', $post->ID ) );
 			}
 
