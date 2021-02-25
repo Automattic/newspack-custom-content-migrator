@@ -154,10 +154,11 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				$post_content .= apply_filters( 'np_meta_to_content_value', $value, $key, $post->ID );
 			}
 
-			$update = ( $dry_run ) ? wp_update_post( [
+			// Update in a live run only.
+			$update = ( $dry_run ) ? true : wp_update_post( [
 				'ID'           => $post->ID,
 				'post_content' => $post_content,
-			] ) : true;
+			] );
 			if ( is_wp_error( $update ) ) {
 				WP_CLI::warning( sprintf( 'Post %d failed to update.', $post->ID ) );
 			} else {
