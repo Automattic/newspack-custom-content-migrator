@@ -175,14 +175,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
  *
  * 150166 ( ! NOT 253393) 7   -- fb contents in block, has byline, has main
  *
- * 150265 ( ! NOT 253235) 163 -- missing images, has byline published but not author, has main ---- check main
+ * 150265 ( ! NOT 253235) 163 -- missing image -- has byline published but not author, has main ---- check main
+ *
+ * featured image not contained in HTML
  *      https://www.michigandaily.com/section/news/here-stay#:~:text=SCOPE%20seeks%20to%20support%20DACA,personal%20experiences%20at%20the%20meeting.
+ *          THESE AREN'T THE SAME POSTS. nid in met "was wrongly set" by the FG converter plugin (ot it might have not been "wrong" in absolute sense, just not applying to our current content).
+ *      https://michigandaily-newspack2.newspackstaging.com/2020/10/undocumented-dreamer-students-say-they-are-here-to-stay/
  */
 // $n=217246; // broken <a>
 // $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150166 )" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150188 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
-$nid = $node['nid'];
+			$nid = $node['nid'];
 
 			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
 			// If not reimporting existing posts, continue.
@@ -752,6 +757,8 @@ $nid = $node['nid'];
 		$date_text = $matches[1];
 		$datetime = \DateTime::createFromFormat ( 'F j, Y', $date_text );
 		$wp_date_format = $datetime->format( 'Y-m-j 00:00:00' );
+
+		return $wp_date_format;
 	}
 
 	/**
