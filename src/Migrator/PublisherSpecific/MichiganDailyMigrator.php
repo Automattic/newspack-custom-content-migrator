@@ -90,7 +90,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			'newspack-content-migrator michigan-daily-update-posts-guest-authors',
 			[ $this, 'cmd_update_post_guest_authors' ],
 			[
-				'shortdesc' => 'Helper command, updates Guest Authors for existing posts.'
+				'shortdesc' => 'Helper DEV command -- this logic is already a part of the `michigan-daily-import-drupal-content` command, where it is even more advanced than here. This updates Guest Authors for all existing posts and sets them from the known DB relations.'
 			]
 		);
 		WP_CLI::add_command(
@@ -101,10 +101,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator michigan-daily-update-featured-image-for-posts-which-do-not-have-one',
-			[ $this, 'cmd_update_featured_image_for_posts_which_do_not_have_one' ],
+			'newspack-content-migrator michigan-daily-update-featured-image-from-meta-for-posts-which-do-not-have-one',
+			[ $this, 'cmd_update_featured_image_for_posts_from_meta_which_do_not_have_one' ],
 			[
-				'shortdesc' => 'Sets featured image to Posts which do not yet have a featured image.',
+				'shortdesc' => 'Using the `_thumbnail_id` meta, sets featured image to Posts which do not yet have a featured image.',
 			]
 		);
 	}
@@ -463,7 +463,7 @@ $nid = $node['nid'];
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_update_featured_image_for_posts_which_do_not_have_one($args, $assoc_args ) {
+	public function cmd_update_featured_image_for_posts_from_meta_which_do_not_have_one($args, $assoc_args ) {
 		global $wpdb;
 
 		$time_start = microtime( true );
