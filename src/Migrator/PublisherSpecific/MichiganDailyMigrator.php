@@ -4,8 +4,6 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
-use PHPHtmlParser\Dom;
-use PHPHtmlParser\Options;
 use Symfony\Component\DomCrawler\Crawler;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
@@ -31,9 +29,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
-	 * @var Dom
+	 * @var Crawler
 	 */
-	private $dom;
+	private $dom_crawler;
 
 	/**
 	 * @var PostsLogic
@@ -49,8 +47,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->dom = new Dom();
-		$this->dom->setOptions( ( new Options() )->setCleanupInput( false ) );
+		$this->dom_crawler = new Crawler();
 
 		$this->posts_logic         = new PostsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
@@ -169,11 +166,23 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
 
 // TODO, DEV remove
+/**
+ * dev helper txt tmp -- testing cases for 7 remaining issues
+ * 150434 ( ! NOT 252991) 394 -- author and date wrong  ???: has byline, has main
+ *      https://www.michigandaily.com/section/womens-basketball/hillmon-uses-her-platform-change
+ *
+ * 150188 ( ! NOT 253357) 43  -- author and date wrong, has byline, has main
+ *
+ * 150166 ( ! NOT 253393) 7   -- fb contents in block, has byline, has main
+ *
+ * 150265 ( ! NOT 253235) 163 -- missing images, has byline published but not author, has main ---- check main
+ *      https://www.michigandaily.com/section/news/here-stay#:~:text=SCOPE%20seeks%20to%20support%20DACA,personal%20experiences%20at%20the%20meeting.
+ */
 // $n=217246; // broken <a>
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 252886" ), ARRAY_A );
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 231007, 234452 )" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150166 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
+$nid = $node['nid'];
 
 			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
 			// If not reimporting existing posts, continue.
@@ -195,12 +204,26 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 			// Basic data -- status, date, title.
 			$post_data[ 'post_status' ] = ( 1 == $node[ 'status' ] ) ? 'publish' : 'draft';
-			$post_data[ 'post_date' ]   = gmdate( 'Y-m-d H:i:s', $node[ 'created' ] );
 			$post_data[ 'post_title' ]  = $node[ 'title' ] ?? ( $post->post_title ?? null );
 
 			// Get the Post content.
 			$drupal_field_data_body_row  = $this->get_drupal_field_data_body( $node['nid'] );
 			$post_data[ 'post_content' ] = $this->get_post_content_from_node_body_raw( $drupal_field_data_body_row[ 'body_value' ] ?? '' );
+
+			// Get the p.info element and scrape author and date from it, if available.
+			$post_info_scraped = $this->get_post_p_info_contents( $drupal_field_data_body_row[ 'body_value' ] ?? '' );
+			$date_scraped      = null;
+			$author_scraped    = null;
+			if ( $post_info_scraped ) {
+				$date_scraped   = $this->extract_date_from_p_info( $post_info_scraped );
+				$author_scraped = $this->extract_author_from_p_info( $post_info_scraped );
+			}
+
+			// Set published date, first trying to use the scraped p.info contents, or use the node.created date.
+			$post_data[ 'post_date' ] = $date_scraped
+				? $date_scraped
+				: gmdate( 'Y-m-d H:i:s', $node[ 'created' ] );
+
 			// If there was no content when scraping the 'div.main' from the `body_value` column , but there's still some content in the `body_value`, use that.
 			if ( ! $post_data[ 'post_content' ]
 				&& (
@@ -295,13 +318,17 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				$post_id = $post->ID;
 			}
 
-			// Assign Guest Author, to post.
-			$full_name = $this->get_drupal_user_full_name(
-				$node['uid'],
-				$field_full_name_value_all_rows,
-				$field_data_field_first_name_and_last_name_all_rows,
-				$field_data_field_twitter_all_rows
-			);
+			// Use author name scraped from the p.info, or fetch it from one of the known DB relations.
+			$full_name = $author_scraped
+				? $author_scraped
+				: $this->get_drupal_user_full_name(
+					$node['uid'],
+					$field_full_name_value_all_rows,
+					$field_data_field_first_name_and_last_name_all_rows,
+					$field_data_field_twitter_all_rows
+				);
+
+			// Assign the Guest Author to the Post.
 			if ( $full_name ) {
 				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
@@ -679,30 +706,114 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Scrapes the 'p.info' content from the HTML $body_value.
+	 *
+	 * @param string $body_value
+	 *
+	 * @return string|null Contents of p.info, where available, or null.
+	 */
+	private function get_post_p_info_contents( $body_value ) {
+		if ( ! $body_value ) {
+			return null;
+		}
+
+		$this->dom_crawler->clear();
+		$this->dom_crawler->add( $body_value );
+		$sub_sitemaps = $this->dom_crawler->filter( 'p.info' );
+
+		// If $body_value does not contain the div.main, use the whole HTML.
+		if ( 0 == $sub_sitemaps->count() ) {
+			return null;
+		}
+
+		$post_content = $sub_sitemaps->html();
+
+		return $post_content;
+
+	}
+
+	/**
+	 * Extracts date from the p.info element in content.
+	 *
+	 * @param string $line Inner HTML of the p.info element.
+	 *
+	 * @return string|null Date string in 'Y-m-j' format.
+	 */
+	private function extract_date_from_p_info( $line ) {
+
+		// Match this: "Published May 28, 2015".
+		$pattern = '|Published\s((\w+)\s\d{1,2},\s\d{4})|';
+		$matches = [];
+		$matched = preg_match( $pattern, $line, $matches );
+		if ( 1 !== $matched ) {
+			return null;
+		}
+
+		$date_text = $matches[1];
+		$datetime = \DateTime::createFromFormat ( 'F j, Y', $date_text );
+		$wp_date_format = $datetime->format( 'Y-m-j 00:00:00' );
+	}
+
+	/**
+	 * Extracts autor name from the p.info element in content.
+	 *
+	 * @param string $line Inner HTML of the p.info element.
+	 *
+	 * @return string|null Author name or null.
+	 */
+	private function extract_author_from_p_info( $line ) {
+		// Search for author position starting with 'BY ' or 'By '.
+		$pos_by1 = strpos( $line, 'BY ' );
+		$pos_by2 = strpos( $line, 'By ' );
+		$pos_by = ( false !== $pos_by1 )
+			? $pos_by1
+			: (
+				( false !== $pos_by2 )
+					? $pos_by2
+					: false
+			);
+
+		if ( false === $pos_by ) {
+			return null;
+		}
+
+		// Author ends either with a `<br>` or a line end.
+		$author_scraped = '';
+		$pos_break = strpos( $line, '<br>', $pos_by + 3 );
+		if ( false !== $pos_break ) {
+			$author_scraped = substr( $line, $pos_by + 3, $pos_break - $pos_by - 3 );
+		} else {
+			$author_scraped = substr( $line, $pos_by + 3 );
+		}
+		// Strip all tags.
+		$author_scraped = wp_kses( $author_scraped, [] );
+		$author_scraped = trim( $author_scraped);
+
+		return $author_scraped;
+	}
+
+	/**
 	 * Scrapes the 'div.main' content from the HTML $body_value.
 	 *
 	 * @param string $body_value
 	 *
-	 * @return string|null
+	 * @return string Only contents of div.main, if available, or the entry HTML string.
 	 */
 	private function get_post_content_from_node_body_raw( $body_value ) {
 		if ( ! $body_value ) {
 			return null;
 		}
 
-		// // The PHPHtmlParser\Dom is producing some seemingly broken HTML (nid 217246), so switching to \Symfony\Component\DomCrawler\Crawler instead.
-		// $this->dom->loadStr( $body_value );
-		// $collection = $this->dom->find( 'div.main');
-		// if ( ! $collection->count() ) {
-		// 	return null;
-		// }
-		// $post_content = $collection[0]->innerHtml;
+		$this->dom_crawler->clear();
+		$this->dom_crawler->add( $body_value );
+		$sub_sitemaps = $this->dom_crawler->filter( 'div.main' );
 
-		$crawler = ( new Crawler( $body_value ) )->filter('div.main');
-		if ( 0 == $crawler->count() ) {
-			return null;
+		// If $body_value does not contain the div.main, use the whole HTML.
+		if ( 0 == $sub_sitemaps->count() ) {
+			return $body_value;
 		}
-		$post_content = $crawler->html();
+
+		$post_content = $sub_sitemaps->html();
 
 		return $post_content;
 	}
