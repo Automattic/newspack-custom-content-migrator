@@ -222,6 +222,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			if ( $post_info_scraped ) {
 				$date_scraped   = $this->extract_date_from_p_info( $post_info_scraped );
 				$author_scraped = $this->extract_author_from_p_info( $post_info_scraped );
+				// There are several invalid bylines (e.g. nid 204836), this takes care of those.
+				if ( strlen( $author_scraped ) < 4 ) {
+					$author_scraped = null;
+				}
 			}
 
 			// Set published date, first trying to use the scraped p.info contents, or use the node.created date.
