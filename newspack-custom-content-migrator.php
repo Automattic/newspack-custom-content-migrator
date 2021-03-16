@@ -35,6 +35,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\SubtitleMigrator::class,
 	Migrator\General\CoAuthorPlusMigrator::class,
 	Migrator\General\CPTMigrator::class,
+	Migrator\General\AdsMigrator::class,
 	Migrator\General\TaxonomyMigrator::class,
 	Migrator\General\ReusableBlocksMigrator::class,
 	Migrator\General\SportsPressMigrator::class,
