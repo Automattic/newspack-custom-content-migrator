@@ -200,6 +200,16 @@ function export_staging_site_campaigns() {
   set_var_by_previous_exit_code IS_EXPORTED_CAMPAIGNS
 }
 
+function export_staging_site_ads() {
+  wp_cli newspack-content-migrator export-ads --output-dir=$TEMP_DIR_MIGRATOR
+  set_var_by_previous_exit_code IS_EXPORTED_ADS
+}
+
+function export_staging_site_newsletters() {
+  wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRATOR
+  set_var_by_previous_exit_code IS_EXPORTED_NEWSLETTERS
+}
+
 function export_staging_site_reusable_blocks() {
   wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
   set_var_by_previous_exit_code IS_EXPORTED_REUSABLE_BLOCKS

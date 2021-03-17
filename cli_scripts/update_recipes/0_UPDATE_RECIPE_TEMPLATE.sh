@@ -115,6 +115,12 @@ export_staging_site_donation_products
 echo_ts "exporting Staging site campaigns..."
 export_staging_site_campaigns
 
+echo_ts "exporting Staging site ads..."
+export_staging_site_ads
+
+echo_ts "exporting Staging site newsletters..."
+export_staging_site_newsletters
+
 echo_ts "exporting Reusable blocks..."
 export_staging_site_reusable_blocks
 
@@ -166,6 +172,16 @@ if [[ 1 == $IS_EXPORTED_CAMPAIGNS ]]; then
   echo_ts 'importing campaigns from the Staging site...'
   wp_cli newspack-content-migrator import-campaigns --input-dir=$TEMP_DIR_MIGRATOR
 else echo_ts_yellow 'Skipping importing Newspack Campaigns from the Staging site.'; fi
+
+if [[ 1 == $IS_EXPORTED_ADS ]]; then
+  echo_ts 'importing ads from the Staging site...'
+  wp_cli newspack-content-migrator import-ads --input-dir=$TEMP_DIR_MIGRATOR
+else echo_ts_yellow 'Skipping importing Ads from the Staging site.'; fi
+
+if [[ 1 == $IS_EXPORTED_NEWSLETTERS ]]; then
+  echo_ts 'importing newsletters from the Staging site...'
+  wp_cli newspack-content-migrator import-newsletters --input-dir=$TEMP_DIR_MIGRATOR
+else echo_ts_yellow 'Skipping importing Newsletters from the Staging site.'; fi
 
 if [[ 1 == $IS_EXPORTED_REUSABLE_BLOCKS ]]; then
   echo_ts 'importing Reusable Blocks from the Staging site...'
