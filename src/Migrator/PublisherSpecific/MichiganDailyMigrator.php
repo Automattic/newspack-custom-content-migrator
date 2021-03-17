@@ -13,16 +13,20 @@ use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLog
  */
 class MichiganDailyMigrator implements InterfaceMigrator {
 
-	const META_OLD_NODE_ID = '_fgd2wp_old_node_id';
+	const META_OLD_NODE_ID            = '_fgd2wp_old_node_id';
+	/**
+	 * If this meta is set, means that the Drupal article header was already set on this Post.
+	 */
+	const META_ARTICLE_HEADER_UPDATED = '_article_header_updated';
 
 	/**
 	 * Error log file names -- grouped by error types to make reviews easier.
 	 */
-	const LOG_FILE_ERR_POST_CONTENT_EMPTY          = 'michigandaily__postcontentempty.log';
-	const LOG_FILE_ERR_UID_NOT_FOUND               = 'michigandaily__uidnotfound.log';
-	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND = 'michigandaily__cmdupdategas_uidnotfound.log';
-	const LOG_FILE_ERR                             = 'michigandaily__err.log';
-	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND         = 'michigandaily__header_update_nid_not_found.log';
+	const LOG_FILE_ERR_POST_CONTENT_EMPTY           = 'michigandaily__postcontentempty.log';
+	const LOG_FILE_ERR_UID_NOT_FOUND                = 'michigandaily__uidnotfound.log';
+	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  = 'michigandaily__cmdupdategas_uidnotfound.log';
+	const LOG_FILE_ERR                              = 'michigandaily__err.log';
+	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND = 'michigandaily__header_update_nid_not_found.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -184,6 +188,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
 		// Get the node headers.
 		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
+		$article_headers_rows_for_update = [];
 
 // TODO, DEV remove
 /**
@@ -364,10 +369,17 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			} else {
 				$this->log( self::LOG_FILE_ERR_UID_NOT_FOUND, sprintf( 'uid %d, nid %d, ID %d', $node['uid'], $node['nid'], $post->ID ) );
 			}
+
+			$header_for_this_article = $this->search_array_by_key_and_value( $field_data_field_article_header_all_rows, [ 'entity_id' => $node['nid'] ] );
+			if ( null !== $header_for_this_article ) {
+				$article_headers_rows_for_update[] = $header_for_this_article;
+			}
 		}
 
-		// Additionally prepend Drupal article headers to Post content.
-		$this->update_posts_with_drupal_node_header_contents( $field_data_field_article_header_all_rows );
+		// Additionally prepend Drupal article headers to Post content for those posts/nids which were just now updated.
+		if ( ! empty( $article_headers_rows_for_update ) ) {
+			$this->update_posts_with_drupal_node_header_contents( $article_headers_rows_for_update );
+		}
 
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
@@ -510,6 +522,12 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				continue;
 			}
 
+			$meta_header_already_updated = get_post_meta( $post->ID, self::META_ARTICLE_HEADER_UPDATED, true );
+			if ( $meta_header_already_updated ) {
+				WP_CLI::warning( sprintf( '- (%d/%d) skipping -- headers already updated for post ID %d (nid %d)', $k + 1, count( $field_data_field_article_header_all_rows ), (int) $post->ID, (int) $nid ) );
+				continue;
+			}
+
 			WP_CLI::line( sprintf( '- (%d/%d) updating headers for post ID %d (nid %d) ...', $k + 1, count( $field_data_field_article_header_all_rows ), (int) $post->ID, (int) $nid ) );
 
 			$post_content_with_header = $header . "<br><!-- _end_header_prepend -->" . $post->post_content;
@@ -522,6 +540,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				WP_CLI::warning( sprintf( 'Could not update existing post ID %d , node nid %d', (int) $post->ID, (int) $nid ) );
 				continue;
 			}
+
+			update_post_meta( $post_id, self::META_ARTICLE_HEADER_UPDATED, $nid );
 		}
 
 		// Let the $wpdb->update() sink in.
