@@ -22,6 +22,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	const LOG_FILE_ERR_UID_NOT_FOUND               = 'michigandaily__uidnotfound.log';
 	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND = 'michigandaily__cmdupdategas_uidnotfound.log';
 	const LOG_FILE_ERR                             = 'michigandaily__err.log';
+	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND         = 'michigandaily__header_update_nid_not_found.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -44,6 +45,11 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var SquareBracketsElementManipulator
+	 */
+	private $square_brackets_element_manipulator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -51,6 +57,11 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		$this->posts_logic         = new PostsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
+
+		if ( ! class_exists( \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator::class ) ) {
+			WP_CLI::error( 'This command requires the Newspack Content Converter plugin to be installed and activated.');
+		}
+		$this->square_brackets_element_manipulator = new \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator();
 	}
 
 	/**
@@ -84,6 +95,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 						'optional'    => true,
 					],
 				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-update-drupal-node-header-content',
+			[ $this, 'cmd_update_drupal_node_header_content' ],
+			[
+				'shortdesc' => 'Reads through node header HTML, gets featured images from those and assigns them to posts.'
 			]
 		);
 		WP_CLI::add_command(
@@ -164,6 +182,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// `type` 'article' is legacy (they imported it over from a previous system to Drupal, and will not have Taxonomy here
 		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+		// Get the node headers.
+		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
 
 // TODO, DEV remove
 /**
@@ -184,7 +204,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
  */
 // $n=217246; // broken <a>
 // $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150166 )" ), ARRAY_A );
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150188 )" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150176 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
 			$nid = $node['nid'];
@@ -346,6 +366,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			}
 		}
 
+		// Additionally prepend Drupal article headers to Post content.
+		$this->update_posts_with_drupal_node_header_contents( $field_data_field_article_header_all_rows );
 
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
@@ -362,6 +384,152 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_FILE_ERR  ) );
 		}
 
+		WP_CLI::warning( 'Be sure to run the Image Downloader Plugin, because this process might have brought in some new images, too.' );
+	}
+
+	/**
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
+	public function cmd_update_drupal_node_header_content( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		WP_CLI::line( '' );
+		WP_CLI::confirm( 'This command should not be run more than once, and it already gets run at the end of the `michigan-daily-import-drupal-content` command. Are you sure you want to proceed?' );
+
+		// Prefetch Drupal data for speed.
+		WP_CLI::line( 'Fetching data from Drupal tables...' );
+		// Get all the nodes.
+		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+		// Get the node headers.
+		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
+
+		$this->update_posts_with_drupal_node_header_contents( $field_data_field_article_header_all_rows );
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Gets `field_data_field_article_header` rows for given nodes. Does some cleanup on the header values.
+	 *
+	 * @param array $nodes
+	 *
+	 * @return array|null Array with 'entity_id' and 'field_article_header_value' keys and values.
+	 */
+	private function get_article_header_rows( $nodes ) {
+		global $wpdb;
+
+		$nids = [];
+		foreach ( $nodes as $node ) {
+			$nids[] = $node['nid'];
+		}
+		$nid_placeholders = implode( ',', array_fill( 0, count( $nids ), '%d' ) );
+		$field_data_field_article_header_all_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"select entity_id, field_article_header_value
+				from field_data_field_article_header
+				where entity_id IN ( $nid_placeholders ) ;",
+				$nids
+			),
+			ARRAY_A
+		);
+
+		// Clean up node headers.
+		foreach ( $field_data_field_article_header_all_rows as $k => $field_data_field_article_header_row ) {
+			$header = $field_data_field_article_header_row['field_article_header_value'];
+
+			// Remove some known blanks.
+			$blanks = [
+				'<p>&nbsp;</p><div>&nbsp;</div>',
+				'<p>&nbsp;</p><p>&nbsp;</p>',
+				'<br />',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p><br /><br /><br />&nbsp;</p>',
+				'<div class="lf-quote-float-left"><div class="quote">&nbsp;</div></div>',
+				'<p dir="ltr" style="line-height:1.656;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p><font face="Times New Roman"><span style="font-size: 14.666666984558105px; white-space: pre-wrap;">&nbsp;</span></font></p>',
+				'<blockquote><p>&nbsp;</p></blockquote>',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><p><br />&nbsp;</p>',
+				'<p>dfasdfasdf</p>',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p><strong>&nbsp;</strong></p>',
+				'',
+			];
+			foreach ( $blanks as $blank ) {
+				if ( $blank == $header ) {
+					unset( $field_data_field_article_header_all_rows[ $k ] );
+					continue;
+				}
+			}
+
+			// Remove inline CSS.
+			$css_opening = '<style type="text/css">';
+			$css_closing = '</style>';
+			$pos_css_opening = strpos( $header, $css_opening );
+			$pos_css_closing = strpos( $header, $css_closing );
+			if ( ( false !== $pos_css_opening ) && ( false !== $pos_css_closing ) ) {
+				$header = substr( $header, 0, $pos_css_opening ) . substr( $header, $pos_css_closing + strlen( $css_closing ) );
+			}
+
+			// One final blank check.
+			$header = trim( $header );
+			if ( empty( $header ) ) {
+				unset( $field_data_field_article_header_all_rows[ $k ] );
+				continue;
+			}
+		}
+
+		return $field_data_field_article_header_all_rows;
+	}
+
+	/**
+	 * Gets the `field_data_field_article_header` HTML and prepends it to the post content. Also cleans up the HTML a bit.
+	 *
+	 * @param array $field_data_field_article_header_all_rows
+	 */
+	public function update_posts_with_drupal_node_header_contents( $field_data_field_article_header_all_rows ) {
+		global $wpdb;
+
+		// Flush the log files.
+		@unlink( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND );
+
+		// Clean up node headers.
+		foreach ( $field_data_field_article_header_all_rows as $k => $field_data_field_article_header_row ) {
+			$nid    = $field_data_field_article_header_row['entity_id'];
+			$header = $field_data_field_article_header_row['field_article_header_value'];
+
+			// Update the post content, and prepend the header to it.
+			$post_ids = $this->posts_logic->get_posts_with_meta_key_and_value( self::META_OLD_NODE_ID, $nid );
+			$post_id  = isset( $post_ids[0] ) ? $post_ids[0] : null;
+			$post     = get_post( $post_id );
+			if ( ! $post ) {
+				WP_CLI::warning( sprintf( 'Post with nid %s not found.', (int) $nid ) );
+				$this->log( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND, $nid );
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '- (%d/%d) updating headers for post ID %d (nid %d) ...', $k + 1, count( $field_data_field_article_header_all_rows ), (int) $post->ID, (int) $nid ) );
+
+			$post_content_with_header = $header . "<br><!-- _end_header_prepend -->" . $post->post_content;
+			$res = $wpdb->update(
+				$wpdb->prefix . 'posts',
+				[ 'post_content' => $post_content_with_header ],
+				[ 'ID' => $post->ID ]
+			);
+			if ( false === $res ) {
+				WP_CLI::warning( sprintf( 'Could not update existing post ID %d , node nid %d', (int) $post->ID, (int) $nid ) );
+				continue;
+			}
+		}
+
+		// Let the $wpdb->update() sink in.
+		wp_cache_flush();
+
+		if ( file_exists( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND  ) );
+		}
 	}
 
 	/**
