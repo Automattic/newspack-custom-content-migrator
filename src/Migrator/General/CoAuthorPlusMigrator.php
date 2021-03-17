@@ -208,6 +208,13 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 					'optional'    => true,
 					'repeating'   => false,
 				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'avatar',
+					'description' => 'Guest author\' avatar ID.',
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			],
 		] );
 	}
@@ -229,6 +236,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		$description        = isset( $assoc_args['description'] ) ? $assoc_args['description'] : null;
 		$full_name          = $assoc_args['full_name'];
 		$user_login         = sanitize_title( $full_name );
+		$avatar             = isset( $assoc_args['avatar'] ) ? $assoc_args['avatar'] : null;
 		$data['user_login'] = $user_login;
 		$data               = [
 			'display_name' => sanitize_text_field( $full_name ),
@@ -239,7 +247,10 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			$data['user_email'] = sanitize_email( $email );
 		}
 		if ( $description ) {
-		$data['description'] = wp_filter_post_kses( $description );
+			$data['description'] = wp_filter_post_kses( $description );
+		}
+		if ( $avatar ) {
+			$data['avatar'] = absint( $avatar );
 		}
 
 		$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
