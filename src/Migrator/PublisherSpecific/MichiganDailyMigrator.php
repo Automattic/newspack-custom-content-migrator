@@ -6,6 +6,7 @@ use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use Symfony\Component\DomCrawler\Crawler;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
@@ -27,6 +28,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  = 'michigandaily__cmdupdategas_uidnotfound.log';
 	const LOG_FILE_ERR                              = 'michigandaily__err.log';
 	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND = 'michigandaily__header_update_nid_not_found.log';
+	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND = 'michigandaily__header_update_nid_not_found.log';
+	const LOG_GALLERY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__gallery_image_download_failed.log';
+	const LOG_GALLERY_IMAGE_NO_URI                  = 'michigandaily__gallery_image_no_uri.log';
+	const LOG_GALLERY_ERR                           = 'michigandaily__gallery_err.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -42,6 +47,11 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * @var PostsLogic
 	 */
 	private $posts_logic;
+
+	/**
+	 * @var AttachmentsLogic
+	 */
+	private $attachments_logic;
 
 	/**
 	 * @var CoAuthorPlusLogic
@@ -60,6 +70,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$this->dom_crawler = new Crawler();
 
 		$this->posts_logic         = new PostsLogic();
+		$this->attachments_logic   = new AttachmentsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 
 		if ( ! class_exists( \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator::class ) ) {
@@ -99,6 +110,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 						'optional'    => true,
 					],
 				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-convert-drupal-shortcodes',
+			[ $this, 'cmd_update_drupal_convert_shortcodes' ],
+			[
+				'shortdesc' => 'Converts shortcodes found in posts.'
 			]
 		);
 		WP_CLI::add_command(
@@ -403,6 +421,124 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
+	public function cmd_update_drupal_convert_shortcodes( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		@unlink( self::LOG_GALLERY_ERR );
+		@unlink( self::LOG_GALLERY_IMAGE_NO_URI );
+		@unlink( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED );
+
+		// Convert [gallery].
+		// --- get all the posts with [gallery] shortcodes (possible multiple).
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[gallery:',
+		] );
+		$drupal_gallery_images = [];
+		foreach ( $posts as $post ) {
+			// --- match the [gallery] shortcode, match the drupal gallery id.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'gallery', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+			$gallery_shortcode = $matches_display[0][0];
+			$pos_colon = strpos( $gallery_shortcode, ':' );
+			$pos_closing_bracket = strpos( $gallery_shortcode, ']' );
+			$gallery_id = substr( $gallery_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+			if ( false === is_numeric( $gallery_id ) ) {
+				$msg = sprintf( 'Could not get [gallery] id in Post ID %d.', (int) $post->ID );
+				WP_CLI::warning( $msg );
+				$this->log( self::LOG_GALLERY_ERR, $msg );
+				continue;
+			}
+			$gallery_id = (int) $gallery_id;
+
+			// --- get drupal images from gallery, their URLs and captions.
+			$drupal_gallery_images = $this->get_drupal_gallery_images( $gallery_id );
+			$attachment_ids = [];
+			foreach ( $drupal_gallery_images as $gallery_image ) {
+				// --- download the images and import them as attachments, set their captions, get the new attachment ids.
+				if ( ! $gallery_image['uri_public'] ) {
+					$msg = sprintf( 'Could not Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_GALLERY_IMAGE_NO_URI, $msg );
+					continue;
+				}
+				$att_id = $this->attachments_logic->import_external_file( $gallery_image['uri_public'], null, $gallery_image['caption'], null, $gallery_image['caption'], $post->ID );
+				if ( is_wp_error( $att_id ) ) {
+					$msg = sprintf( 'Could not download image URL %s, fid %d in Post ID %d.', $gallery_image['uri_public'], (int) $gallery_image['fid'], (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED, $msg );
+					continue;
+				}
+
+				$attachment_ids[] = $att_id;
+			}
+
+			$post_content_updated = $post->post_content;
+			if ( ! empty( $attachment_ids ) ) {
+				// --- generate the gutenberg gallery block.
+				$gallery_block_html = $this->render_gallery_block( $attachment_ids );
+
+				// --- substitute the drupal shortcode with the generated gallery.
+				$post_content_updated = str_replace( $gallery_shortcode, "\n\n" . $gallery_block_html . "\n\n", $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+		}
+
+		// Let the $wpdb->update() sink in.
+		wp_cache_flush();
+
+
+		// Convert [display].
+		// --- get all the posts with [display] shortcodes.
+		// --- match the [display] shortcode, match the drupal image id.
+		// --- get drupal image, its URL and caption.
+		// --- download the image and import as attachment, set the caption, get the new attachment id.
+		// --- substitute the drupal shortcode with the image html.
+
+
+		// Convert [video].
+		// --- get all the posts with [video] shortcodes.
+		// --- match the [video] shortcode, match the video URL.
+		// --- substitute the drupal shortcode with the video block (or iframe?).
+
+
+		// Convert [magnify].
+		// --- get all the posts with [magnify] shortcodes.
+		// --- if magnify,donate, remove. else...
+		// --- match the [magnify] shortcode, match the video URL.
+		// --- substitute the drupal shortcode with the iframe.
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+
+		if ( file_exists( self::LOG_GALLERY_ERR ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_GALLERY_ERR ) );
+		}
+		if ( file_exists( self::LOG_GALLERY_IMAGE_NO_URI ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_GALLERY_IMAGE_NO_URI ) );
+		}
+		if ( file_exists( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) );
+		}
+	}
+
+	/**
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
 	public function cmd_update_drupal_node_header_content( $args, $assoc_args ) {
 		global $wpdb;
 		$time_start = microtime( true );
@@ -494,6 +630,60 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		}
 
 		return $field_data_field_article_header_all_rows;
+	}
+
+	/**
+	 * @param int $gallery_id Drupal gallery ID.
+	 *
+	 * @return array , each element with the follokeys '',`` and `.
+	 * @return array {
+	 *      Drupal gallery images in gallery.
+	 *
+	 *      @type array {
+	 *          @type string fid        Drupal image file id.
+	 *          @type string uri        URI found in the table, e.g. "public://galleryies/5.30.20_BLMrally.0655-2.jpg".
+	 *          @type string uri_public Actual publicly available URL with the actual hostname.
+	 *          @type string caption    Image caption.
+	 *      }
+	 * }
+	 */
+	private function get_drupal_gallery_images( $gallery_id ) {
+		$images = [];
+
+		global $wpdb;
+
+		// Joins 3 Drupal tables:
+		//      field_data_field_images -- with list of image files in a gallery
+		//      field_data_field_photo_credit -- with image captions
+		//      file_managed -- with file names and their URLs
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"select fim.field_images_fid fid, credit.field_photo_credit_value credit, fileman.uri uri
+				from field_data_field_images fim
+				left join field_data_field_photo_credit credit on credit.entity_id = fim.field_images_fid
+				left join file_managed fileman on fileman.fid = fim.field_images_fid
+				-- gallery id:
+				where fim.entity_id = %d
+				and fim.bundle = 'photo_gallery';",
+				$gallery_id
+			),
+			ARRAY_A
+		);
+
+		// Custom return array.
+		foreach ( $rows as $row ) {
+			$uri_public = ! empty( $row['uri'] )
+				? str_replace( 'public://', 'https://www.michigandaily.com/sites/default/files/styles/gallery/public/', $row['uri'] )
+				: null;
+			$images[] = [
+				'fid' => $row['fid'],
+				'uri' => $row['uri'],
+				'uri_public' => $uri_public,
+				'caption' => $row['caption'],
+			];
+		}
+
+		return $images;
 	}
 
 	/**
@@ -1015,6 +1205,67 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$post_content = $sub_sitemaps->html();
 
 		return $post_content;
+	}
+
+	/**
+	 * Fully renders a Core Gallery Block from attachment IDs.
+	 * Presently hard-coded attributes use ampCarousel and ampLightbox.
+	 *
+	 * @param array $ids
+	 *
+	 * @return string Gallery block HTML.
+	 */
+	public function render_gallery_block( $ids ) {
+		// Using four or less columns.
+		$no_columns = count( $ids ) < 4 ? count( $ids ) : 4;
+
+		// Compose the HTML with all the <li><figure><img/></figure></li> image pieces.
+		$images_li_html = '';
+		foreach ( $ids as $id ) {
+			$img_url = wp_get_attachment_url( $id );
+			$img_alt = wp_get_attachment_caption( $id );
+			$img_data_link = $img_url;
+			$img_element = sprintf(
+				'<img src="%s" alt="%s" data-id="%d" data-full-url="%s" data-link="%s" class="%s"/>',
+				$img_url,
+				$img_alt,
+				$id,
+				$img_url,
+				$img_data_link,
+				'wp-image-' . $id
+			);
+			$images_li_html .= '<li class="blocks-gallery-item">'
+				. '<figure>'
+				. $img_element
+				. '</figure>'
+				. '</li>';
+		}
+
+		// The inner HTML of the gallery block.
+		$inner_html = '<figure class="wp-block-gallery columns-' . $no_columns . ' is-cropped">'
+			. '<ul class="blocks-gallery-grid">'
+			. $images_li_html
+			. '</ul>'
+			. '</figure>';
+		$block_gallery = [
+			'blockName' => 'core/gallery',
+			'attrs' => [
+				'ids' => $ids,
+				'linkTo' => 'none',
+				'ampCarousel' => true,
+				'ampLightbox' => true,
+			],
+			'innerBlocks' => [],
+			'innerHTML' => $inner_html,
+			'innerContent' => [ $inner_html ],
+		];
+
+		// Fully rendered gallery block.
+		$block_gallery_rendered = '<!-- wp:gallery {"ids":[' . implode( ',', $ids ) . '],"linkTo":"none","ampCarousel":true,"ampLightbox":true} -->'
+			. render_block( $block_gallery )
+			. '<!-- /wp:gallery -->';
+
+		return $block_gallery_rendered;
 	}
 
 	/**
