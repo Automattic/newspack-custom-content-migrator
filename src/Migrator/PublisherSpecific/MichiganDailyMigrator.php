@@ -31,6 +31,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	const LOG_GALLERY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__gallery_image_download_failed.log';
 	const LOG_GALLERY_IMAGE_NO_URI                  = 'michigandaily__gallery_image_no_uri.log';
 	const LOG_GALLERY_ERR                           = 'michigandaily__gallery_err.log';
+	const LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__display_image_download_failed.log';
+	const LOG_DISPLAY_IMAGE_NO_URI                  = 'michigandaily__display_image_no_uri.log';
+	const LOG_DISPLAY_ERR                           = 'michigandaily__display_err.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -427,6 +430,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		@unlink( self::LOG_GALLERY_ERR );
 		@unlink( self::LOG_GALLERY_IMAGE_NO_URI );
 		@unlink( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED );
+		@unlink( self::LOG_DISPLAY_ERR );
+		@unlink( self::LOG_DISPLAY_IMAGE_NO_URI );
+		@unlink( self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED );
 
 
 		// Convert [gallery].
@@ -462,7 +468,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			foreach ( $drupal_gallery_images as $i => $gallery_image ) {
 				// --- download the images and import them as attachments, set their captions, get the new attachment ids.
 				if ( ! $gallery_image['uri_public'] ) {
-					$msg = sprintf( '❗ Could not Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
+					$msg = sprintf( '❗ No Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
 					WP_CLI::warning( $msg );
 					$this->log( self::LOG_GALLERY_IMAGE_NO_URI, $msg );
 					continue;
@@ -510,10 +516,74 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		// Convert [display].
 		// --- get all the posts with [display] shortcodes.
-		// --- match the [display] shortcode, match the drupal image id.
-		// --- get drupal image, its URL and caption.
-		// --- download the image and import as attachment, set the caption, get the new attachment id.
-		// --- substitute the drupal shortcode with the image html.
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[display:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) downloading [display] images for post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [display] shortcodes and the drupal image files' ids.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'display', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+			foreach ( $matches_display[0] as $i => $display_shortcode ) {
+				$pos_colon = strpos( $display_shortcode, ':' );
+				$pos_closing_bracket = strpos( $display_shortcode, ']' );
+				$image_file_id = substr( $display_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				if ( false === is_numeric( $image_file_id ) ) {
+					$msg = sprintf( '❗ Could not get [display] id in Post ID %d.', (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_DISPLAY_ERR, $msg );
+					continue;
+				}
+				$image_file_id = (int) $image_file_id;
+
+				// --- get drupal image, its URL and caption.
+				$drupal_image = $this->get_drupal_image( $image_file_id );
+
+				// --- download the image and import as attachment, set the caption, get the new attachment id.
+				if ( ! $drupal_image['uri_public'] ) {
+					$msg = sprintf( '❗ No Drupal image URI for img fid %d in Post ID %d.', (int) $drupal_image['fid'], (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_DISPLAY_IMAGE_NO_URI, $msg );
+					continue;
+				}
+
+				WP_CLI::line( sprintf( '- (%d/%d) image %s ...', $i + 1, count( $matches_display[0] ), $drupal_image['uri_public'] ) );
+				$att_id = $this->attachments_logic->import_external_file( $drupal_image['uri_public'], null, $drupal_image['caption'], null, $drupal_image['caption'], $post->ID );
+				if ( is_wp_error( $att_id ) ) {
+					$msg = sprintf( '❗ Could not download image URL %s, fid %d in Post ID %d.', $drupal_image['uri_public'], (int) $drupal_image['fid'], (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED, $msg );
+					continue;
+				}
+
+				// --- generate the new image html.
+				$image_html = $this->render_image_html_element( $att_id );
+
+				// --- substitute the drupal shortcode with the image.
+				$post_content_updated = $post->post_content;
+				$post_content_updated = str_replace( $display_shortcode, $image_html, $post_content_updated );
+
+				if ( $post->post_content != $post_content_updated ) {
+					$res = $wpdb->update(
+						$wpdb->prefix . 'posts',
+						[ 'post_content' => $post_content_updated ],
+						[ 'ID' => $post->ID ]
+					);
+					if ( false === $res ) {
+						WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+						continue;
+					}
+				}
+
+				WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+			}
+		}
+
+		wp_cache_flush();
 
 
 		// Convert [video].
@@ -529,16 +599,32 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// --- substitute the drupal shortcode with the iframe.
 
 
+		// Clean up blank lines.
+		$blank_lines = [
+			'<p></p>',
+			'<p></p>' . "\n",
+		];
+
+
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 
 		if ( file_exists( self::LOG_GALLERY_ERR ) ) {
-			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_GALLERY_ERR ) );
+			WP_CLI::warning( sprintf( 'Check `%s` for gallery shortcode mixed errors.', self::LOG_GALLERY_ERR ) );
 		}
 		if ( file_exists( self::LOG_GALLERY_IMAGE_NO_URI ) ) {
-			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_GALLERY_IMAGE_NO_URI ) );
+			WP_CLI::warning( sprintf( 'Check `%s` for gallery shortcode images without valid URIs.', self::LOG_GALLERY_IMAGE_NO_URI ) );
 		}
 		if ( file_exists( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) ) {
-			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) );
+			WP_CLI::warning( sprintf( 'Check `%s` for gallery shortcode download fails.', self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) );
+		}
+		if ( file_exists( self::LOG_DISPLAY_ERR ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` display shortcode for mixed errors.', self::LOG_DISPLAY_ERR ) );
+		}
+		if ( file_exists( self::LOG_DISPLAY_IMAGE_NO_URI ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` display shortcode images without valid URIs..', self::LOG_DISPLAY_IMAGE_NO_URI ) );
+		}
+		if ( file_exists( self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` display shortcode download fails.', self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED ) );
 		}
 	}
 
@@ -642,7 +728,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	/**
 	 * @param int $gallery_id Drupal gallery ID.
 	 *
-	 * @return array , each element with the follokeys '',`` and `.
 	 * @return array {
 	 *      Drupal gallery images in gallery.
 	 *
@@ -691,6 +776,57 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		}
 
 		return $images;
+	}
+
+	/**
+	 * @param int $fid Drupal image file ID.
+	 *
+	 * @return array {
+	 *      Drupal image data.
+	 *
+	 *      @type array {
+	 *          @type string fid        Drupal image file id.
+	 *          @type string uri        URI found in the table, e.g. "public://galleryies/5.30.20_BLMrally.0655-2.jpg".
+	 *          @type string uri_public Actual publicly available URL with the actual hostname.
+	 *          @type string caption    Image caption.
+	 *      }
+	 * }
+	 */
+	private function get_drupal_image( $fid ) {
+		$images = [];
+
+		global $wpdb;
+
+		// Joins 3 Drupal tables:
+		//      field_data_field_images -- with list of image files in a gallery
+		//      field_data_field_photo_credit -- with image captions
+		//      file_managed -- with file names and their URLs
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"select fileman.fid fid, credit.field_photo_credit_value credit, fileman.uri uri
+				from file_managed fileman
+				left join field_data_field_photo_credit credit on credit.entity_id = fileman.fid
+				where fileman.fid = %d
+				and fileman.filemime like 'image/%';",
+				$fid
+			),
+			ARRAY_A
+		);
+
+		// Custom return array.
+		foreach ( $rows as $row ) {
+			$uri_public = ! empty( $row['uri'] )
+				? str_replace( 'public://', 'https://www.michigandaily.com/sites/default/files/styles/large/public/', $row['uri'] )
+				: null;
+			$images[] = [
+				'fid' => $row['fid'],
+				'uri' => $row['uri'],
+				'uri_public' => $uri_public,
+				'caption' => $row['caption'],
+			];
+		}
+
+		return $images[0];
 	}
 
 	/**
@@ -1218,7 +1354,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * Fully renders a Core Gallery Block from attachment IDs.
 	 * Presently hard-coded attributes use ampCarousel and ampLightbox.
 	 *
-	 * @param array $ids
+	 * @param array $ids Attachment IDs.
 	 *
 	 * @return string Gallery block HTML.
 	 */
@@ -1277,6 +1413,36 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			. '<!-- /wp:gallery -->';
 
 		return $block_gallery_rendered;
+	}
+
+	/**
+	 * @param int $id Attachment ID
+	 *
+	 * @return string Image HTML element.
+	 */
+	public function render_image_html_element( $id ) {
+		$img_url       = wp_get_attachment_url( $id );
+		$img_caption   = wp_get_attachment_caption( $id );
+		$img_alt       = get_post_meta( $id, '_wp_attachment_image_alt', true );
+		$img_data_link = $img_url;
+		$img_element   = sprintf(
+			'<img src="%s" alt="%s" data-id="%d" data-full-url="%s" data-link="%s" class="%s"/>',
+			$img_url,
+			$img_alt,
+			$id,
+			$img_url,
+			$img_data_link,
+			'wp-image-' . $id
+		);
+
+		if ( $img_caption ) {
+			$img_element = '<figure>'
+				. $img_element
+				. '<figcaption>' . esc_html( $img_caption ) . '</figcaption>'
+			    .'</figure>';
+		}
+
+		return $img_element;
 	}
 
 	/**
