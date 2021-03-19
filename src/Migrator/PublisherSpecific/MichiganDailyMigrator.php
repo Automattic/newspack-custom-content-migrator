@@ -28,7 +28,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  = 'michigandaily__cmdupdategas_uidnotfound.log';
 	const LOG_FILE_ERR                              = 'michigandaily__err.log';
 	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND = 'michigandaily__header_update_nid_not_found.log';
-	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND = 'michigandaily__header_update_nid_not_found.log';
 	const LOG_GALLERY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__gallery_image_download_failed.log';
 	const LOG_GALLERY_IMAGE_NO_URI                  = 'michigandaily__gallery_image_no_uri.log';
 	const LOG_GALLERY_ERR                           = 'michigandaily__gallery_err.log';
@@ -429,6 +428,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		@unlink( self::LOG_GALLERY_IMAGE_NO_URI );
 		@unlink( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED );
 
+
 		// Convert [gallery].
 		// --- get all the posts with [gallery] shortcodes (possible multiple).
 		$posts = get_posts( [
@@ -436,18 +436,20 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			's' => '[gallery:',
 		] );
 		$drupal_gallery_images = [];
-		foreach ( $posts as $post ) {
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) downloading galleries for post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
 			// --- match the [gallery] shortcode, match the drupal gallery id.
-			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'gallery', $post->post_content );
-			if ( empty( $matches_display[0] ) ) {
+			$matches_gallery = $this->square_brackets_element_manipulator->match_shortcode_designations( 'gallery', $post->post_content );
+			if ( empty( $matches_gallery[0] ) ) {
 				continue;
 			}
-			$gallery_shortcode = $matches_display[0][0];
+			$gallery_shortcode = $matches_gallery[0][0];
 			$pos_colon = strpos( $gallery_shortcode, ':' );
 			$pos_closing_bracket = strpos( $gallery_shortcode, ']' );
 			$gallery_id = substr( $gallery_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
 			if ( false === is_numeric( $gallery_id ) ) {
-				$msg = sprintf( 'Could not get [gallery] id in Post ID %d.', (int) $post->ID );
+				$msg = sprintf( '❗ Could not get [gallery] id in Post ID %d.', (int) $post->ID );
 				WP_CLI::warning( $msg );
 				$this->log( self::LOG_GALLERY_ERR, $msg );
 				continue;
@@ -457,17 +459,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			// --- get drupal images from gallery, their URLs and captions.
 			$drupal_gallery_images = $this->get_drupal_gallery_images( $gallery_id );
 			$attachment_ids = [];
-			foreach ( $drupal_gallery_images as $gallery_image ) {
+			foreach ( $drupal_gallery_images as $i => $gallery_image ) {
 				// --- download the images and import them as attachments, set their captions, get the new attachment ids.
 				if ( ! $gallery_image['uri_public'] ) {
-					$msg = sprintf( 'Could not Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
+					$msg = sprintf( '❗ Could not Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
 					WP_CLI::warning( $msg );
 					$this->log( self::LOG_GALLERY_IMAGE_NO_URI, $msg );
 					continue;
 				}
+
+				WP_CLI::line( sprintf( '- (%d/%d) downloading %s ...', $i + 1, count( $drupal_gallery_images ),$gallery_image['uri_public'] ) );
 				$att_id = $this->attachments_logic->import_external_file( $gallery_image['uri_public'], null, $gallery_image['caption'], null, $gallery_image['caption'], $post->ID );
 				if ( is_wp_error( $att_id ) ) {
-					$msg = sprintf( 'Could not download image URL %s, fid %d in Post ID %d.', $gallery_image['uri_public'], (int) $gallery_image['fid'], (int) $post->ID );
+					$msg = sprintf( '❗ Could not download image URL %s, fid %d in Post ID %d.', $gallery_image['uri_public'], (int) $gallery_image['fid'], (int) $post->ID );
 					WP_CLI::warning( $msg );
 					$this->log( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED, $msg );
 					continue;
@@ -496,6 +500,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 					continue;
 				}
 			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
 		}
 
 		// Let the $wpdb->update() sink in.
@@ -521,6 +527,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// --- if magnify,donate, remove. else...
 		// --- match the [magnify] shortcode, match the video URL.
 		// --- substitute the drupal shortcode with the iframe.
+
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 
@@ -1216,14 +1223,12 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * @return string Gallery block HTML.
 	 */
 	public function render_gallery_block( $ids ) {
-		// Using four or less columns.
-		$no_columns = count( $ids ) < 4 ? count( $ids ) : 4;
-
 		// Compose the HTML with all the <li><figure><img/></figure></li> image pieces.
 		$images_li_html = '';
 		foreach ( $ids as $id ) {
 			$img_url = wp_get_attachment_url( $id );
-			$img_alt = wp_get_attachment_caption( $id );
+			$img_caption = wp_get_attachment_caption( $id );
+			$img_alt = get_post_meta( $id, '_wp_attachment_image_alt', true );
 			$img_data_link = $img_url;
 			$img_element = sprintf(
 				'<img src="%s" alt="%s" data-id="%d" data-full-url="%s" data-link="%s" class="%s"/>',
@@ -1234,15 +1239,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				$img_data_link,
 				'wp-image-' . $id
 			);
+			$figcaption_element = ! empty( $img_caption )
+				? sprintf( '<figcaption class="blocks-gallery-item__caption">%s</figcaption>', esc_attr( $img_caption ) )
+				: '';
 			$images_li_html .= '<li class="blocks-gallery-item">'
 				. '<figure>'
 				. $img_element
+				. $figcaption_element
 				. '</figure>'
 				. '</li>';
 		}
 
 		// The inner HTML of the gallery block.
-		$inner_html = '<figure class="wp-block-gallery columns-' . $no_columns . ' is-cropped">'
+		$inner_html = '<figure class="wp-block-gallery columns-3 is-cropped">'
 			. '<ul class="blocks-gallery-grid">'
 			. $images_li_html
 			. '</ul>'
@@ -1261,8 +1270,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		];
 
 		// Fully rendered gallery block.
-		$block_gallery_rendered = '<!-- wp:gallery {"ids":[' . implode( ',', $ids ) . '],"linkTo":"none","ampCarousel":true,"ampLightbox":true} -->'
+		$block_gallery_rendered = '<!-- wp:gallery {"ids":[' . esc_attr( implode( ',', $ids ) ) . '],"linkTo":"none","ampCarousel":true,"ampLightbox":true} -->'
+            . "\n"
 			. render_block( $block_gallery )
+            . "\n"
 			. '<!-- /wp:gallery -->';
 
 		return $block_gallery_rendered;
