@@ -401,6 +401,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			$this->update_posts_with_drupal_node_header_contents( $article_headers_rows_for_update );
 		}
 
+		// Run the command which substitutes Drupal shortcodes.
+		$this->cmd_update_drupal_convert_shortcodes();
+
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
 
@@ -441,58 +444,62 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			'posts_per_page' => -1,
 			's' => '[gallery:',
 		] );
-		$drupal_gallery_images = [];
 		foreach ( $posts as $k => $post ) {
 			WP_CLI::line( sprintf( '👉 (%d/%d) downloading galleries for post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
 
-			// --- match the [gallery] shortcode, match the drupal gallery id.
+			// --- match the [gallery] shortcode.
 			$matches_gallery = $this->square_brackets_element_manipulator->match_shortcode_designations( 'gallery', $post->post_content );
 			if ( empty( $matches_gallery[0] ) ) {
 				continue;
 			}
-			$gallery_shortcode = $matches_gallery[0][0];
-			$pos_colon = strpos( $gallery_shortcode, ':' );
-			$pos_closing_bracket = strpos( $gallery_shortcode, ']' );
-			$gallery_id = substr( $gallery_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
-			if ( false === is_numeric( $gallery_id ) ) {
-				$msg = sprintf( '❗ Could not get [gallery] id in Post ID %d.', (int) $post->ID );
-				WP_CLI::warning( $msg );
-				$this->log( self::LOG_GALLERY_ERR, $msg );
-				continue;
-			}
-			$gallery_id = (int) $gallery_id;
-
-			// --- get drupal images from gallery, their URLs and captions.
-			$drupal_gallery_images = $this->get_drupal_gallery_images( $gallery_id );
-			$attachment_ids = [];
-			foreach ( $drupal_gallery_images as $i => $gallery_image ) {
-				// --- download the images and import them as attachments, set their captions, get the new attachment ids.
-				if ( ! $gallery_image['uri_public'] ) {
-					$msg = sprintf( '❗ No Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
-					WP_CLI::warning( $msg );
-					$this->log( self::LOG_GALLERY_IMAGE_NO_URI, $msg );
-					continue;
-				}
-
-				WP_CLI::line( sprintf( '- (%d/%d) downloading %s ...', $i + 1, count( $drupal_gallery_images ),$gallery_image['uri_public'] ) );
-				$att_id = $this->attachments_logic->import_external_file( $gallery_image['uri_public'], null, $gallery_image['caption'], null, $gallery_image['caption'], $post->ID );
-				if ( is_wp_error( $att_id ) ) {
-					$msg = sprintf( '❗ Could not download image URL %s, fid %d in Post ID %d.', $gallery_image['uri_public'], (int) $gallery_image['fid'], (int) $post->ID );
-					WP_CLI::warning( $msg );
-					$this->log( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED, $msg );
-					continue;
-				}
-
-				$attachment_ids[] = $att_id;
-			}
 
 			$post_content_updated = $post->post_content;
-			if ( ! empty( $attachment_ids ) ) {
-				// --- generate the gutenberg gallery block.
-				$gallery_block_html = $this->render_gallery_block( $attachment_ids );
 
-				// --- substitute the drupal shortcode with the generated gallery.
-				$post_content_updated = str_replace( $gallery_shortcode, "\n\n" . $gallery_block_html . "\n\n", $post_content_updated );
+			foreach ( $matches_gallery[0] as $gallery_shortcode ) {
+
+				// --- match the drupal gallery id.
+				$pos_colon = strpos( $gallery_shortcode, ':' );
+				$pos_closing_bracket = strpos( $gallery_shortcode, ']' );
+				$gallery_id = substr( $gallery_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				if ( false === is_numeric( $gallery_id ) ) {
+					$msg = sprintf( '❗ Could not get [gallery] id in Post ID %d.', (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_GALLERY_ERR, $msg );
+					continue;
+				}
+				$gallery_id = (int) $gallery_id;
+
+				// --- get drupal images from gallery, their URLs and captions.
+				$drupal_gallery_images = $this->get_drupal_gallery_images( $gallery_id );
+				$attachment_ids = [];
+				foreach ( $drupal_gallery_images as $i => $gallery_image ) {
+					// --- download the images and import them as attachments, set their captions, get the new attachment ids.
+					if ( ! $gallery_image['uri_public'] ) {
+						$msg = sprintf( '❗ No Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
+						WP_CLI::warning( $msg );
+						$this->log( self::LOG_GALLERY_IMAGE_NO_URI, $msg );
+						continue;
+					}
+
+					WP_CLI::line( sprintf( '- (%d/%d) downloading %s ...', $i + 1, count( $drupal_gallery_images ),$gallery_image['uri_public'] ) );
+					$att_id = $this->attachments_logic->import_external_file( $gallery_image['uri_public'], null, $gallery_image['caption'], null, $gallery_image['caption'], $post->ID );
+					if ( is_wp_error( $att_id ) ) {
+						$msg = sprintf( '❗ Could not download image URL %s, fid %d in Post ID %d.', $gallery_image['uri_public'], (int) $gallery_image['fid'], (int) $post->ID );
+						WP_CLI::warning( $msg );
+						$this->log( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED, $msg );
+						continue;
+					}
+
+					$attachment_ids[] = $att_id;
+				}
+
+				if ( ! empty( $attachment_ids ) ) {
+					// --- generate the gutenberg gallery block.
+					$gallery_block_html = $this->render_gallery_block( $attachment_ids );
+
+					// --- substitute the drupal shortcode with the generated gallery.
+					$post_content_updated = str_replace( $gallery_shortcode, "\n\n" . $gallery_block_html . "\n\n", $post_content_updated );
+				}
 			}
 
 			if ( $post->post_content != $post_content_updated ) {
@@ -528,6 +535,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			if ( empty( $matches_display[0] ) ) {
 				continue;
 			}
+
+			$post_content_updated = $post->post_content;
+
 			foreach ( $matches_display[0] as $i => $display_shortcode ) {
 				$pos_colon = strpos( $display_shortcode, ':' );
 				$pos_closing_bracket = strpos( $display_shortcode, ']' );
@@ -564,23 +574,22 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				$image_html = $this->render_image_html_element( $att_id );
 
 				// --- substitute the drupal shortcode with the image.
-				$post_content_updated = $post->post_content;
 				$post_content_updated = str_replace( $display_shortcode, $image_html, $post_content_updated );
-
-				if ( $post->post_content != $post_content_updated ) {
-					$res = $wpdb->update(
-						$wpdb->prefix . 'posts',
-						[ 'post_content' => $post_content_updated ],
-						[ 'ID' => $post->ID ]
-					);
-					if ( false === $res ) {
-						WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
-						continue;
-					}
-				}
-
-				WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
 			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
 		}
 
 		wp_cache_flush();
@@ -588,8 +597,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		// Convert [video].
 		// --- get all the posts with [video] shortcodes.
-		// --- match the [video] shortcode, match the video URL.
-		// --- substitute the drupal shortcode with the video block (or iframe?).
 		$posts = get_posts( [
 			'posts_per_page' => -1,
 			's' => '[video:',
@@ -597,13 +604,14 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		foreach ( $posts as $k => $post ) {
 			WP_CLI::line( sprintf( '👉 (%d/%d) replacing [video] shortcodes post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
 
-			$post_content_updated = $post->post_content;
-
-			// --- match the [video] shortcodes and the drupal image files' ids.
+			// --- match the [video] shortcode, match the video URL.
 			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'video', $post->post_content );
 			if ( empty( $matches_display[0] ) ) {
 				continue;
 			}
+
+			$post_content_updated = $post->post_content;
+
 			foreach ( $matches_display[0] as $i => $video_shortcode ) {
 
 				// Clean up the shortcodes -- these can contain single or multiple or incomplete (no opening or no closing tag),
@@ -674,18 +682,67 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		// Convert [magnify].
 		// --- get all the posts with [magnify] shortcodes.
-		// --- if magnify,donate, remove. else...
-		// --- match the [magnify] shortcode, match the video URL.
-		// --- substitute the drupal shortcode with the iframe.
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[magnify:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) replacing [magnify] shortcodes in post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [magnify] shortcode.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'magnify', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			foreach ( $matches_display[0] as $i => $magnify_shortcode ) {
+
+				// --- if `[magnify:donate,...`, remove.
+				if ( 0 === strpos( $magnify_shortcode, '[magnify:donate,' ) ) {
+					$post_content_updated = str_replace( $magnify_shortcode, '', $post_content_updated );
+					continue;
+				}
+
+				// Magnify is an iframe linking to http://magnify.michigandaily.us/ followed by the first part.
+				// The second part is the height element on the iframe.
+				// Examples     [magnify:fec_2019_rankings,730]
+				//              [magnify:highway_to_hail,330]
+				//              [magnify:kennedy_front_page,500]
+
+				// --- get the shortcode params
+				$pos_colon = strpos( $magnify_shortcode, ':' );
+				$pos_closing_bracket = strpos( $magnify_shortcode, ']' );
+				$magnify_params = substr( $magnify_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				$magnify_params = trim( $magnify_params );
+				$magnify_params_arr = explode( ',', $magnify_params );
+				$url_path = $magnify_params_arr[0];
+				$iframe_height = $magnify_params_arr[1];
+
+				// --- generate the new iframe html.
+				$magnify_html = $this->render_magnify_iframe( $url_path, $iframe_height );
+
+				// --- substitute the drupal shortcode with the iframe.
+				$post_content_updated = str_replace( $magnify_shortcode, $magnify_html, $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
 
 		wp_cache_flush();
-
-
-		// Clean up any empty `<p>`s from posts after substitutions.
-		$blank_lines = [
-			'<p></p>',
-			'<p></p>' . "\n",
-		];
 
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
@@ -1568,6 +1625,18 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		}
 
 		return $video_block;
+	}
+
+	/**
+	 * @param string $url_path      Custom path to the TMD's Magnify shortcode's public source.
+	 * @param int    $iframe_height iframe height attr.
+	 *
+	 * @return string HTML.
+	 */
+	public function render_magnify_iframe( $url_path, $iframe_height ) {
+		$html = '<div class="magnify"><iframe src="https://magnify.michigandaily.us/' . $url_path . '" frameborder="0" width="100%" height="' . $iframe_height . 'px"></iframe></div>"';
+
+		return $html;
 	}
 
 	/**
