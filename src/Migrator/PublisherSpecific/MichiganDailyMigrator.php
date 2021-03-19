@@ -590,6 +590,86 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// --- get all the posts with [video] shortcodes.
 		// --- match the [video] shortcode, match the video URL.
 		// --- substitute the drupal shortcode with the video block (or iframe?).
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[video:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) replacing [video] shortcodes post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			$post_content_updated = $post->post_content;
+
+			// --- match the [video] shortcodes and the drupal image files' ids.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'video', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+			foreach ( $matches_display[0] as $i => $video_shortcode ) {
+
+				// Clean up the shortcodes -- these can contain single or multiple or incomplete (no opening or no closing tag),
+				//      e.g. `<span>`, and/or `</span>`, and/or `<span ...>`, and/or `</font>`, ...
+				// And the shortcode itself is case insensitive.
+				$stuff_to_clean = true;
+				while ( $stuff_to_clean ) {
+					// Check if angle brackets exist.
+					$pos_angle_open = strpos( $video_shortcode, '<' );
+					$pos_angle_close = false !== $pos_angle_open
+						? strpos( $video_shortcode, '>', $pos_angle_open )
+						: false;
+
+					if ( ( false === $pos_angle_open ) || ( false === $pos_angle_close ) ) {
+						$stuff_to_clean = false;
+					} else {
+						$video_shortcode = substr( $video_shortcode, 0, $pos_angle_open ) . substr( $video_shortcode, $pos_angle_close + 1 );
+					}
+				}
+
+				// More clean up; removing spaces and blanks.
+				$more_things_to_remove = [
+					'&nbsp;',
+					' ',
+				];
+				foreach ( $more_things_to_remove as $thing ) {
+					$video_shortcode = str_replace( $thing, '', $video_shortcode );
+				}
+
+				// Get the URL.
+				$pos_colon = strpos( $video_shortcode, ':' );
+				$pos_closing_bracket = strpos( $video_shortcode, ']' );
+				$video_url = substr( $video_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				$video_url = trim( $video_url );
+
+				// Clean up the URL.
+				// -- doesn't include protocol.
+				if ( 0 === strpos( $video_url, 'www.' ) ) {
+					$video_url = 'https://' . $video_url;
+				}
+				// -- url starts with "YouTubehttps://"
+				$video_shortcode = str_replace( "YouTubehttps://", 'https://', $video_shortcode );
+
+				// --- generate the new video block.
+				$video_block = $this->render_video_block( $video_url );
+
+				// --- substitute the drupal shortcode with the video block.
+				$post_content_updated = str_replace( $video_shortcode, $video_block, $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
+
+		wp_cache_flush();
 
 
 		// Convert [magnify].
@@ -598,8 +678,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// --- match the [magnify] shortcode, match the video URL.
 		// --- substitute the drupal shortcode with the iframe.
 
+		wp_cache_flush();
 
-		// Clean up blank lines.
+
+		// Clean up any empty `<p>`s from posts after substitutions.
 		$blank_lines = [
 			'<p></p>',
 			'<p></p>' . "\n",
@@ -1443,6 +1525,49 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		}
 
 		return $img_element;
+	}
+
+	/**
+	 * @param string $url Video URL
+	 *
+	 * @return string Video block.
+	 */
+	public function render_video_block( $url ) {
+		$video_block = '';
+
+		if (
+			( false !== strpos( $url, 'youtube.com' ) )
+		     || ( false !== strpos( $url, 'youtu.be' ) )
+		) {
+			$video_block = sprintf(
+				'<!-- wp:embed {"url":"%s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-4-3 wp-has-aspect-ratio"} -->'
+				. "\n" . '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-4-3 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">'
+				. "\n" . '%s'
+				. "\n" . '</div></figure>'
+				. "\n" . '<!-- /wp:embed -->',
+				$url,
+				$url
+			);
+		} else if ( strpos( $url, 'vimeo.com' ) ) {
+			$video_block = sprintf(
+				'<!-- wp:embed {"url":"%s","type":"video","providerNameSlug":"vimeo","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->'
+				. "\n" . '<figure class="wp-block-embed is-type-video is-provider-vimeo wp-block-embed-vimeo wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">'
+				. "\n" . '%s'
+				. "\n" . '</div></figure>'
+				. "\n" . '<!-- /wp:embed -->',
+				$url,
+				$url
+			);
+		} else {
+			$video_block = sprintf(
+				'<!-- wp:video -->'
+				. "\n" . '<figure class="wp-block-video"><video controls src="%s"></video></figure>'
+				. "\n" . '<!-- /wp:video -->',
+				$url
+			);
+		}
+
+		return $video_block;
 	}
 
 	/**
