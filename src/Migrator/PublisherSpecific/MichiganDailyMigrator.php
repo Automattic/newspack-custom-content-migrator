@@ -1034,7 +1034,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		foreach ( $posts as $k => $post ) {
 			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
 			if ( ! $original_nid ) {
-				WP_CLI::warning( sprintf( '- (%d/%d) skipping ID %d -- no original nid', $k + 1, count( $posts ), $post->id ) );
+				WP_CLI::warning( sprintf( '- (%d/%d) skipping ID %d -- no original nid', $k + 1, count( $posts ), $post->ID ) );
 				continue;
 			}
 
@@ -1067,7 +1067,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 			// Stop if already scraped.
 			if ( true !== $should_update_author ) {
-				WP_CLI::line( sprintf( '- (%d/%d) skipping ID %d -- author and date already scraped', $k + 1, count( $posts ), $post->id ) );
+				WP_CLI::line( sprintf( '- (%d/%d) skipping ID %d -- author and date already scraped', $k + 1, count( $posts ), $post->ID ) );
 				continue;
 			}
 
@@ -1089,7 +1089,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				$data_update[ 'post_date_gmt' ] = $date_wp_formatted;
 			}
 
-			WP_CLI::line( sprintf( '- (%d/%d) updating ID %d :', $k + 1, count( $posts ), $post->id ) );
+			WP_CLI::line( sprintf( '- (%d/%d) updating ID %d ...', $k + 1, count( $posts ), $post->ID ) );
 
 			// Update the post date.
 			if ( ! empty( $data_update ) ) {
