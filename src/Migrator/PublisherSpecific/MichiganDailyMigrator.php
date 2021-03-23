@@ -1025,12 +1025,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
 // TODO -- remove temp DEV:
-// $posts = [
+$posts = [
 // 	get_post( 459 ), // nid 252962
-// 	get_post( 103 ), // nid 253323
-// 	get_post( 65 ),  // nid 253354
-// 	get_post( 62 ),  // nid 253357
-// ];
+// 	get_post( 2266 ), // invalid byline full name with value "."
+];
 		foreach ( $posts as $k => $post ) {
 			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
 			if ( ! $original_nid ) {
@@ -1103,8 +1101,12 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			// Update the post author.
 			if ( $full_name ) {
 				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
-				WP_CLI::success( '+ updated author' );
+				if ( ! is_wp_error( $guest_author_id ) ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
+					WP_CLI::success( '+ updated author' );
+				} else {
+					WP_CLI::warning( sprintf( '- error updating author with full name `%s`', $full_name ) );
+				}
 			}
 		}
 
