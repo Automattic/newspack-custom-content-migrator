@@ -128,11 +128,19 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Reads through node header HTML, gets featured images from those and assigns them to posts.'
 			]
 		);
+		// This logic is now outdated -- use carefully.
+		// WP_CLI::add_command(
+		// 	'newspack-content-migrator michigan-daily-update-posts-guest-authors',
+		// 	[ $this, 'cmd_update_post_guest_authors' ],
+		// 	[
+		// 		'shortdesc' => 'Helper DEV command -- this logic is already a part of the `michigan-daily-import-drupal-content` command, where it is even more advanced than here. This updates Guest Authors for all existing posts and sets them from the known DB relations.'
+		// 	]
+		// );
 		WP_CLI::add_command(
-			'newspack-content-migrator michigan-daily-update-posts-guest-authors',
-			[ $this, 'cmd_update_post_guest_authors' ],
+			'newspack-content-migrator michigan-daily-update-authors-and-dates-from-field-data-field-byline',
+			[ $this, 'cmd_update_authors_from_field_data_field_byline' ],
 			[
-				'shortdesc' => 'Helper DEV command -- this logic is already a part of the `michigan-daily-import-drupal-content` command, where it is even more advanced than here. This updates Guest Authors for all existing posts and sets them from the known DB relations.'
+				'shortdesc' => 'Helper DEV command -- additional alternative formatting of how bylines and dates are stored handled here.'
 			]
 		);
 		WP_CLI::add_command(
@@ -168,6 +176,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// Prefetch Drupal data for speed.
 		WP_CLI::line( 'Fetching data from Drupal tables...' );
 		$taxonomy_term_data_all_rows = $wpdb->get_results( "select * from taxonomy_term_data;", ARRAY_A );
+		$field_data_field_byline_all_rows = $wpdb->get_results( "select entity_id, field_byline_value from field_data_field_byline where entity_type = 'node';" );
 		$field_full_name_value_all_rows = $wpdb->get_results(
 			"select fn.entity_id, fn.field_full_name_value
 			from node n
@@ -211,24 +220,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$article_headers_rows_for_update = [];
 
 // TODO, DEV remove
-/**
- * dev helper txt tmp -- testing cases for 7 remaining issues
- * 150434 ( ! NOT 252991) 394 -- author and date wrong  ???: has byline, has main
- *      https://www.michigandaily.com/section/womens-basketball/hillmon-uses-her-platform-change
- *
- * 150188 ( ! NOT 253357) 43  -- author and date wrong, has byline, has main
- *
- * 150166 ( ! NOT 253393) 7   -- fb contents in block, has byline, has main
- *
- * 150265 ( ! NOT 253235) 163 -- missing image -- has byline published but not author, has main ---- check main
- *
- * featured image not contained in HTML
- *      https://www.michigandaily.com/section/news/here-stay#:~:text=SCOPE%20seeks%20to%20support%20DACA,personal%20experiences%20at%20the%20meeting.
- *          THESE AREN'T THE SAME POSTS. nid in met "was wrongly set" by the FG converter plugin (ot it might have not been "wrong" in absolute sense, just not applying to our current content).
- *      https://michigandaily-newspack2.newspackstaging.com/2020/10/undocumented-dreamer-students-say-they-are-here-to-stay/
- */
-// $n=217246; // broken <a>
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150166 )" ), ARRAY_A );
 // $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150176 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
@@ -400,6 +391,14 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		if ( ! empty( $article_headers_rows_for_update ) ) {
 			$this->update_posts_with_drupal_node_header_contents( $article_headers_rows_for_update );
 		}
+
+		// Additionally update some more authors and dates coming from a different kind of formatted node HTML output.
+		$this->update_authors_from_field_data_field_byline(
+			$nodes,
+			$field_data_field_article_header_all_rows,
+			$field_data_field_byline_all_rows,
+			$field_full_name_value_all_rows
+		);
 
 		// Run the command which substitutes Drupal shortcodes.
 		$this->cmd_update_drupal_convert_shortcodes();
@@ -966,6 +965,150 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		}
 
 		return $images[0];
+	}
+
+	/**
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
+	public function cmd_update_authors_from_field_data_field_byline( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		// Get Drupal data.
+		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
+		$field_data_field_byline_all_rows = $wpdb->get_results(
+			"select entity_id, field_byline_value from field_data_field_byline where entity_type = 'node';",
+			ARRAY_A
+		);
+		$field_data_field_full_name_all_rows = $wpdb->get_results(
+			"select entity_id, field_full_name_value from field_data_field_full_name;",
+			ARRAY_A
+		);
+
+		$this->update_authors_from_field_data_field_byline(
+			$nodes,
+			$field_data_field_article_header_all_rows,
+			$field_data_field_byline_all_rows,
+			$field_data_field_full_name_all_rows
+		);
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		// if ( file_exists( self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND ) ) {
+		// 	WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  ) );
+		// }
+	}
+
+	/**
+	 * Authors are very tricky on this site in general, since they're kept in different sources, and output differently.
+	 * This handles authors for nodes such as:
+	 *      https://www.michigandaily.com/section/sports/sources-baseball-gymnastics-practices-partially-shut-down-covid-19-cases
+	 *      https://www.michigandaily.com/section/multimedia/thats-hot-rise-influencer
+	 *      https://www.michigandaily.com/section/arts/and-coming-teen-drama-you-haven%E2%80%99t-heard-about-yet
+	 *      ...
+	 *
+	 * Loops through all the posts, and if author and date were not already scraped from the matching node headers, looks for
+	 * the author data in `field_data_field_byline`.
+	 *
+	 * @param $field_data_field_article_header_all_rows
+	 * @param $field_data_field_byline_all_rows
+	 * @param $field_data_field_full_name_all_rows
+	 */
+	private function update_authors_from_field_data_field_byline(
+		$nodes,
+		$field_data_field_article_header_all_rows,
+		$field_data_field_byline_all_rows,
+		$field_data_field_full_name_all_rows
+	) {
+		global $wpdb;
+
+		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
+// TODO -- remove temp DEV:
+// $posts = [
+// 	get_post( 459 ), // nid 252962
+// 	get_post( 103 ), // nid 253323
+// 	get_post( 65 ),  // nid 253354
+// 	get_post( 62 ),  // nid 253357
+// ];
+		foreach ( $posts as $k => $post ) {
+			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
+			if ( ! $original_nid ) {
+				WP_CLI::warning( sprintf( '- (%d/%d) skipping ID %d -- no original nid', $k + 1, count( $posts ), $post->id ) );
+				continue;
+			}
+
+			$data_update = [];
+
+			// Check if author & date were already scraped from the node HTML, which is the fist source we should try.
+			$should_update_author = false;
+			$field_data_field_article_header_row = $this->search_array_by_key_and_value( $field_data_field_article_header_all_rows, [ 'entity_id' => $original_nid ] );
+			$date_scraped = $author_scraped = null;
+			if ( ! $field_data_field_article_header_row ) {
+				// Some nodes don't have headers, so authors weren't set by scraping the names for those.
+				$should_update_author = true;
+			} else {
+				// Check if author and date info was already scraped.
+				$drupal_field_data_body_row  = $this->get_drupal_field_data_body( $original_nid );
+				$post_info_scraped = $this->get_post_p_info_contents( $drupal_field_data_body_row[ 'body_value' ] ?? null );
+				if ( $post_info_scraped ) {
+					$date_scraped   = $this->extract_date_from_p_info( $post_info_scraped );
+					$author_scraped = $this->extract_author_from_p_info( $post_info_scraped );
+					// There are several invalid bylines (e.g. nid 204836), this takes care of those.
+					if ( strlen( $author_scraped ) < 4 ) {
+						$author_scraped = null;
+					}
+				}
+				// Not scraped yet, so let's update this one.
+				if ( null === $date_scraped  || null === $author_scraped ) {
+					$should_update_author = true;
+				}
+			}
+
+			// Stop if already scraped.
+			if ( true !== $should_update_author ) {
+				WP_CLI::line( sprintf( '- (%d/%d) skipping ID %d -- author and date already scraped', $k + 1, count( $posts ), $post->id ) );
+				continue;
+			}
+
+			// Get the author's full name.
+			$field_data_field_byline_row = $this->search_array_by_key_and_value( $field_data_field_byline_all_rows, [ 'entity_id' => $original_nid ] );
+			if ( ! $field_data_field_byline_row ) {
+				continue;
+			}
+			// The author's full name.
+			$field_full_name_id = $field_data_field_byline_row[ 'field_byline_value' ];
+			$field_data_field_full_name_row = $this->search_array_by_key_and_value( $field_data_field_full_name_all_rows, [ 'entity_id' => $field_full_name_id ] );
+			$full_name = $field_data_field_full_name_row[ 'field_full_name_value' ] ?? null;
+
+			// Get the date.
+			$node_row = $this->search_array_by_key_and_value( $nodes, [ 'nid' => $original_nid ] );
+			$date_wp_formatted = gmdate( 'Y-m-d H:i:s', $node_row[ 'created' ] );
+			if ( $date_wp_formatted ) {
+				$data_update[ 'post_date' ] = $date_wp_formatted;
+				$data_update[ 'post_date_gmt' ] = $date_wp_formatted;
+			}
+
+			WP_CLI::line( sprintf( '- (%d/%d) updating ID %d :', $k + 1, count( $posts ), $post->id ) );
+
+			// Update the post date.
+			if ( ! empty( $data_update ) ) {
+				$wpdb->update( $wpdb->prefix . 'posts',
+					$data_update,
+					[ 'ID' => $post->ID ]
+				);
+				WP_CLI::success( '+ updated date' );
+			}
+
+			// Update the post author.
+			if ( $full_name ) {
+				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
+				WP_CLI::success( '+ updated author' );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
