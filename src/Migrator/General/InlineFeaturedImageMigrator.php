@@ -3,7 +3,10 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use \WP_CLI;
+use \WP_Query;
+use Symfony\Component\DomCrawler\Crawler as Crawler;
 
 class InlineFeaturedImageMigrator implements InterfaceMigrator {
 
@@ -37,7 +40,7 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command( 'newspack-content-migrator de-dupe-featured-images', array( $this, 'cmd_de_dupe_featured_images' ), [
-			'shortdesc' => 'Moves featured images from the top of content to only the featured image meta.',
+			'shortdesc' => "Goes through all the Posts, and removes the first image from Post content if that image is already used as the Featured image too.",
 			'synopsis'  => [
 				[
 					'type'        => 'assoc',
@@ -48,6 +51,86 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+		WP_CLI::add_command(
+			'newspack-content-migrator set-first-image-from-content-as-featured-image',
+			[ $this, 'cmd_set_first_image_from_content_as_featured_image' ],
+			[
+				'shortdesc' => "Runs through all the Posts, and in case it doesn't have a featured image, finds the first <img> element in Post content and sets it as featured image.",
+			]
+		);
+	}
+
+	/**
+	 * Callable for the set-first-image-from-content-as-featured-image command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_set_first_image_from_content_as_featured_image( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$posts_wo_featured_img_query = new WP_Query([
+			'meta_query' => [
+				[
+					'key' => '_thumbnail_id',
+					'value' => '?',
+					'compare' => 'NOT EXISTS'
+				]
+			]
+		]);
+		$posts_wo_featured_img = $posts_wo_featured_img_query->get_posts();
+		if ( empty( $posts_wo_featured_img ) ) {
+			WP_CLI::line( 'No posts without featured image found.' );
+		}
+
+		$crawler = new Crawler();
+		$attachment_logic = new AttachmentsLogic();
+		foreach ( $posts_wo_featured_img as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) ID %d ...', $k + 1, count( $posts_wo_featured_img ), $post->ID ) );
+
+			// Find the first <img>.
+			$crawler->clear();
+			$crawler->add( $post->post_content );
+			$img_data =  $crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
+			$img_src   = $img_data[0][0] ?? null;
+			$img_title = $img_data[0][1] ?? null;
+			$img_alt   = $img_data[0][2] ?? null;
+			if ( ! $img_src ) {
+				WP_CLI::line( '× no images found in Post.' );
+				continue;
+			}
+
+			// Check if there's already an attachment with this image.
+			$is_src_fully_qualified = ( 0 == strpos( $img_src, 'http' ) );
+			if ( ! $is_src_fully_qualified ) {
+				WP_CLI::line( sprintf( '× skipping, img src `%s` not fully qualified URL', $img_src ) );
+				continue;
+			}
+
+			// Import attachment if it doesn't exist.
+			$att_id = attachment_url_to_postid( $img_src );
+			$attachment = get_post( $att_id );
+			if ( $attachment ) {
+				WP_CLI::line( sprintf( '✓ found img %s as att. ID %d', $img_src, $att_id ) );
+			} else {
+				WP_CLI::line( sprintf( '- importing img `%s`...', $img_src ) );
+				$att_id = $attachment_logic->import_external_file( $img_src, $img_title, $img_alt, $description = null, $img_alt, $post->ID );
+				if ( is_wp_error( $att_id ) ) {
+					WP_CLI::warning( sprintf( '❗ error importing img `%s` : %s', $img_src, $att_id->get_error_message() ) );
+					continue;
+				}
+			}
+
+			// Set attachment as featured image.
+			$result_featured_set = set_post_thumbnail( $post, $att_id );
+			if ( ! $result_featured_set ) {
+				WP_CLI::warning( sprintf( '❗ could not set att.ID %s as featured image', $att_id ) );
+			} else {
+				WP_CLI::line( sprintf( '👍 set att.ID %s as featured image', $att_id ) );
+			}
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
@@ -94,7 +177,7 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 				$replaced = preg_replace( $src_regex, '', $content, 1 );
 			}
 
-			// If still no luck, see if we can use the attachment page.		
+			// If still no luck, see if we can use the attachment page.
 			if ( $content === $replaced ) {
 				$image_page = get_permalink( $thumbnail_id );
 				if ( ! $image_page ) {
