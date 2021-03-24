@@ -4,10 +4,9 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
-use PHPHtmlParser\Dom;
-use PHPHtmlParser\Options;
 use Symfony\Component\DomCrawler\Crawler;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
@@ -15,15 +14,26 @@ use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLog
  */
 class MichiganDailyMigrator implements InterfaceMigrator {
 
-	const META_OLD_NODE_ID = '_fgd2wp_old_node_id';
+	const META_OLD_NODE_ID            = '_fgd2wp_old_node_id';
+	/**
+	 * If this meta is set, means that the Drupal article header was already set on this Post.
+	 */
+	const META_ARTICLE_HEADER_UPDATED = '_article_header_updated';
 
 	/**
 	 * Error log file names -- grouped by error types to make reviews easier.
 	 */
-	const LOG_FILE_ERR_POST_CONTENT_EMPTY          = 'michigandaily__postcontentempty.log';
-	const LOG_FILE_ERR_UID_NOT_FOUND               = 'michigandaily__uidnotfound.log';
-	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND = 'michigandaily__cmdupdategas_uidnotfound.log';
-	const LOG_FILE_ERR                             = 'michigandaily__err.log';
+	const LOG_FILE_ERR_POST_CONTENT_EMPTY           = 'michigandaily__postcontentempty.log';
+	const LOG_FILE_ERR_UID_NOT_FOUND                = 'michigandaily__uidnotfound.log';
+	const LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  = 'michigandaily__cmdupdategas_uidnotfound.log';
+	const LOG_FILE_ERR                              = 'michigandaily__err.log';
+	const LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND = 'michigandaily__header_update_nid_not_found.log';
+	const LOG_GALLERY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__gallery_image_download_failed.log';
+	const LOG_GALLERY_IMAGE_NO_URI                  = 'michigandaily__gallery_image_no_uri.log';
+	const LOG_GALLERY_ERR                           = 'michigandaily__gallery_err.log';
+	const LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__display_image_download_failed.log';
+	const LOG_DISPLAY_IMAGE_NO_URI                  = 'michigandaily__display_image_no_uri.log';
+	const LOG_DISPLAY_ERR                           = 'michigandaily__display_err.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -31,9 +41,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
-	 * @var Dom
+	 * @var Crawler
 	 */
-	private $dom;
+	private $dom_crawler;
 
 	/**
 	 * @var PostsLogic
@@ -41,19 +51,34 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	private $posts_logic;
 
 	/**
+	 * @var AttachmentsLogic
+	 */
+	private $attachments_logic;
+
+	/**
 	 * @var CoAuthorPlusLogic
 	 */
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var SquareBracketsElementManipulator
+	 */
+	private $square_brackets_element_manipulator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->dom = new Dom();
-		$this->dom->setOptions( ( new Options() )->setCleanupInput( false ) );
+		$this->dom_crawler = new Crawler();
 
 		$this->posts_logic         = new PostsLogic();
+		$this->attachments_logic   = new AttachmentsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
+
+		if ( ! class_exists( \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator::class ) ) {
+			WP_CLI::error( 'This command requires the Newspack Content Converter plugin to be installed and activated.');
+		}
+		$this->square_brackets_element_manipulator = new \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator();
 	}
 
 	/**
@@ -90,10 +115,32 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator michigan-daily-update-posts-guest-authors',
-			[ $this, 'cmd_update_post_guest_authors' ],
+			'newspack-content-migrator michigan-daily-convert-drupal-shortcodes',
+			[ $this, 'cmd_update_drupal_convert_shortcodes' ],
 			[
-				'shortdesc' => 'Helper command, updates Guest Authors for existing posts.'
+				'shortdesc' => 'Converts shortcodes found in posts.'
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-update-drupal-node-header-content',
+			[ $this, 'cmd_update_drupal_node_header_content' ],
+			[
+				'shortdesc' => 'Reads through node header HTML, gets featured images from those and assigns them to posts.'
+			]
+		);
+		// This logic is now outdated -- use carefully.
+		// WP_CLI::add_command(
+		// 	'newspack-content-migrator michigan-daily-update-posts-guest-authors',
+		// 	[ $this, 'cmd_update_post_guest_authors' ],
+		// 	[
+		// 		'shortdesc' => 'Helper DEV command -- this logic is already a part of the `michigan-daily-import-drupal-content` command, where it is even more advanced than here. This updates Guest Authors for all existing posts and sets them from the known DB relations.'
+		// 	]
+		// );
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-update-authors-and-dates-from-field-data-field-byline',
+			[ $this, 'cmd_update_authors_from_field_data_field_byline' ],
+			[
+				'shortdesc' => 'Helper DEV command -- additional alternative formatting of how bylines and dates are stored handled here.'
 			]
 		);
 		WP_CLI::add_command(
@@ -104,10 +151,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator michigan-daily-update-featured-image-for-posts-which-do-not-have-one',
-			[ $this, 'cmd_update_featured_image_for_posts_which_do_not_have_one' ],
+			'newspack-content-migrator michigan-daily-update-featured-image-from-meta-for-posts-which-do-not-have-one',
+			[ $this, 'cmd_update_featured_image_for_posts_from_meta_which_do_not_have_one' ],
 			[
-				'shortdesc' => 'Sets featured image to Posts which do not yet have a featured image.',
+				'shortdesc' => 'Using the `_thumbnail_id` meta, sets featured image to Posts which do not yet have a featured image.',
 			]
 		);
 	}
@@ -129,6 +176,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// Prefetch Drupal data for speed.
 		WP_CLI::line( 'Fetching data from Drupal tables...' );
 		$taxonomy_term_data_all_rows = $wpdb->get_results( "select * from taxonomy_term_data;", ARRAY_A );
+		$field_data_field_byline_all_rows = $wpdb->get_results( "select entity_id, field_byline_value from field_data_field_byline where entity_type = 'node';" );
 		$field_full_name_value_all_rows = $wpdb->get_results(
 			"select fn.entity_id, fn.field_full_name_value
 			from node n
@@ -167,13 +215,15 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// `type` 'article' is legacy (they imported it over from a previous system to Drupal, and will not have Taxonomy here
 		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+		// Get the node headers.
+		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
+		$article_headers_rows_for_update = [];
 
 // TODO, DEV remove
-// $n=217246; // broken <a>
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid = 252886" ), ARRAY_A );
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 231007, 234452 )" ), ARRAY_A );
+// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150176 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
+			$nid = $node['nid'];
 
 			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
 			// If not reimporting existing posts, continue.
@@ -195,12 +245,30 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 			// Basic data -- status, date, title.
 			$post_data[ 'post_status' ] = ( 1 == $node[ 'status' ] ) ? 'publish' : 'draft';
-			$post_data[ 'post_date' ]   = gmdate( 'Y-m-d H:i:s', $node[ 'created' ] );
 			$post_data[ 'post_title' ]  = $node[ 'title' ] ?? ( $post->post_title ?? null );
 
 			// Get the Post content.
 			$drupal_field_data_body_row  = $this->get_drupal_field_data_body( $node['nid'] );
 			$post_data[ 'post_content' ] = $this->get_post_content_from_node_body_raw( $drupal_field_data_body_row[ 'body_value' ] ?? '' );
+
+			// Get the p.info element and scrape author and date from it, if available.
+			$post_info_scraped = $this->get_post_p_info_contents( $drupal_field_data_body_row[ 'body_value' ] ?? '' );
+			$date_scraped      = null;
+			$author_scraped    = null;
+			if ( $post_info_scraped ) {
+				$date_scraped   = $this->extract_date_from_p_info( $post_info_scraped );
+				$author_scraped = $this->extract_author_from_p_info( $post_info_scraped );
+				// There are several invalid bylines (e.g. nid 204836), this takes care of those.
+				if ( strlen( $author_scraped ) < 4 ) {
+					$author_scraped = null;
+				}
+			}
+
+			// Set published date, first trying to use the scraped p.info contents, or use the node.created date.
+			$post_data[ 'post_date' ] = $date_scraped
+				? $date_scraped
+				: gmdate( 'Y-m-d H:i:s', $node[ 'created' ] );
+
 			// If there was no content when scraping the 'div.main' from the `body_value` column , but there's still some content in the `body_value`, use that.
 			if ( ! $post_data[ 'post_content' ]
 				&& (
@@ -295,21 +363,45 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				$post_id = $post->ID;
 			}
 
-			// Assign Guest Author, to post.
-			$full_name = $this->get_drupal_user_full_name(
-				$node['uid'],
-				$field_full_name_value_all_rows,
-				$field_data_field_first_name_and_last_name_all_rows,
-				$field_data_field_twitter_all_rows
-			);
+			// Use author name scraped from the p.info, or fetch it from one of the known DB relations.
+			$full_name = $author_scraped
+				? $author_scraped
+				: $this->get_drupal_user_full_name(
+					$node['uid'],
+					$field_full_name_value_all_rows,
+					$field_data_field_first_name_and_last_name_all_rows,
+					$field_data_field_twitter_all_rows
+				);
+
+			// Assign the Guest Author to the Post.
 			if ( $full_name ) {
 				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
 			} else {
 				$this->log( self::LOG_FILE_ERR_UID_NOT_FOUND, sprintf( 'uid %d, nid %d, ID %d', $node['uid'], $node['nid'], $post->ID ) );
 			}
+
+			$header_for_this_article = $this->search_array_by_key_and_value( $field_data_field_article_header_all_rows, [ 'entity_id' => $node['nid'] ] );
+			if ( null !== $header_for_this_article ) {
+				$article_headers_rows_for_update[] = $header_for_this_article;
+			}
 		}
 
+		// Additionally prepend Drupal article headers to Post content for those posts/nids which were just now updated.
+		if ( ! empty( $article_headers_rows_for_update ) ) {
+			$this->update_posts_with_drupal_node_header_contents( $article_headers_rows_for_update );
+		}
+
+		// Additionally update some more authors and dates coming from a different kind of formatted node HTML output.
+		$this->update_authors_from_field_data_field_byline(
+			$nodes,
+			$field_data_field_article_header_all_rows,
+			$field_data_field_byline_all_rows,
+			$field_full_name_value_all_rows
+		);
+
+		// Run the command which substitutes Drupal shortcodes.
+		$this->cmd_update_drupal_convert_shortcodes();
 
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
@@ -326,6 +418,755 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			WP_CLI::warning( sprintf( 'Check `%s` for mixed errors.', self::LOG_FILE_ERR  ) );
 		}
 
+		WP_CLI::warning( 'Be sure to run the Image Downloader Plugin, because this process might have brought in some new images, too.' );
+	}
+
+	/**
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
+	public function cmd_update_drupal_convert_shortcodes( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		@unlink( self::LOG_GALLERY_ERR );
+		@unlink( self::LOG_GALLERY_IMAGE_NO_URI );
+		@unlink( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED );
+		@unlink( self::LOG_DISPLAY_ERR );
+		@unlink( self::LOG_DISPLAY_IMAGE_NO_URI );
+		@unlink( self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED );
+
+
+		// Convert [gallery].
+		// --- get all the posts with [gallery] shortcodes (possible multiple).
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[gallery:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) downloading galleries for post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [gallery] shortcode.
+			$matches_gallery = $this->square_brackets_element_manipulator->match_shortcode_designations( 'gallery', $post->post_content );
+			if ( empty( $matches_gallery[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			foreach ( $matches_gallery[0] as $gallery_shortcode ) {
+
+				// --- match the drupal gallery id.
+				$pos_colon = strpos( $gallery_shortcode, ':' );
+				$pos_closing_bracket = strpos( $gallery_shortcode, ']' );
+				$gallery_id = substr( $gallery_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				if ( false === is_numeric( $gallery_id ) ) {
+					$msg = sprintf( '❗ Could not get [gallery] id in Post ID %d.', (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_GALLERY_ERR, $msg );
+					continue;
+				}
+				$gallery_id = (int) $gallery_id;
+
+				// --- get drupal images from gallery, their URLs and captions.
+				$drupal_gallery_images = $this->get_drupal_gallery_images( $gallery_id );
+				$attachment_ids = [];
+				foreach ( $drupal_gallery_images as $i => $gallery_image ) {
+					// --- download the images and import them as attachments, set their captions, get the new attachment ids.
+					if ( ! $gallery_image['uri_public'] ) {
+						$msg = sprintf( '❗ No Drupal image URI for img fid %d in Post ID %d.', (int) $gallery_image['fid'], (int) $post->ID );
+						WP_CLI::warning( $msg );
+						$this->log( self::LOG_GALLERY_IMAGE_NO_URI, $msg );
+						continue;
+					}
+
+					WP_CLI::line( sprintf( '- (%d/%d) downloading %s ...', $i + 1, count( $drupal_gallery_images ),$gallery_image['uri_public'] ) );
+					$att_id = $this->attachments_logic->import_external_file( $gallery_image['uri_public'], null, $gallery_image['caption'], null, $gallery_image['caption'], $post->ID );
+					if ( is_wp_error( $att_id ) ) {
+						$msg = sprintf( '❗ Could not download image URL %s, fid %d in Post ID %d.', $gallery_image['uri_public'], (int) $gallery_image['fid'], (int) $post->ID );
+						WP_CLI::warning( $msg );
+						$this->log( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED, $msg );
+						continue;
+					}
+
+					$attachment_ids[] = $att_id;
+				}
+
+				if ( ! empty( $attachment_ids ) ) {
+					// --- generate the gutenberg gallery block.
+					$gallery_block_html = $this->render_gallery_block( $attachment_ids );
+
+					// --- substitute the drupal shortcode with the generated gallery.
+					$post_content_updated = str_replace( $gallery_shortcode, "\n\n" . $gallery_block_html . "\n\n", $post_content_updated );
+				}
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
+
+		// Let the $wpdb->update() sink in.
+		wp_cache_flush();
+
+
+		// Convert [display].
+		// --- get all the posts with [display] shortcodes.
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[display:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) downloading [display] images for post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [display] shortcodes and the drupal image files' ids.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'display', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			foreach ( $matches_display[0] as $i => $display_shortcode ) {
+				$pos_colon = strpos( $display_shortcode, ':' );
+				$pos_closing_bracket = strpos( $display_shortcode, ']' );
+				$image_file_id = substr( $display_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				if ( false === is_numeric( $image_file_id ) ) {
+					$msg = sprintf( '❗ Could not get [display] id in Post ID %d.', (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_DISPLAY_ERR, $msg );
+					continue;
+				}
+				$image_file_id = (int) $image_file_id;
+
+				// --- get drupal image, its URL and caption.
+				$drupal_image = $this->get_drupal_image( $image_file_id );
+
+				// --- download the image and import as attachment, set the caption, get the new attachment id.
+				if ( ! $drupal_image['uri_public'] ) {
+					$msg = sprintf( '❗ No Drupal image URI for img fid %d in Post ID %d.', (int) $drupal_image['fid'], (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_DISPLAY_IMAGE_NO_URI, $msg );
+					continue;
+				}
+
+				WP_CLI::line( sprintf( '- (%d/%d) image %s ...', $i + 1, count( $matches_display[0] ), $drupal_image['uri_public'] ) );
+				$att_id = $this->attachments_logic->import_external_file( $drupal_image['uri_public'], null, $drupal_image['caption'], null, $drupal_image['caption'], $post->ID );
+				if ( is_wp_error( $att_id ) ) {
+					$msg = sprintf( '❗ Could not download image URL %s, fid %d in Post ID %d.', $drupal_image['uri_public'], (int) $drupal_image['fid'], (int) $post->ID );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED, $msg );
+					continue;
+				}
+
+				// --- generate the new image html.
+				$image_html = $this->render_image_html_element( $att_id );
+
+				// --- substitute the drupal shortcode with the image.
+				$post_content_updated = str_replace( $display_shortcode, $image_html, $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
+
+		wp_cache_flush();
+
+
+		// Convert [video].
+		// --- get all the posts with [video] shortcodes.
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[video:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) replacing [video] shortcodes post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [video] shortcode, match the video URL.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'video', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			foreach ( $matches_display[0] as $i => $video_shortcode ) {
+
+				// Clean up the shortcodes -- these can contain single or multiple or incomplete (no opening or no closing tag),
+				//      e.g. `<span>`, and/or `</span>`, and/or `<span ...>`, and/or `</font>`, ...
+				// And the shortcode itself is case insensitive.
+				$stuff_to_clean = true;
+				while ( $stuff_to_clean ) {
+					// Check if angle brackets exist.
+					$pos_angle_open = strpos( $video_shortcode, '<' );
+					$pos_angle_close = false !== $pos_angle_open
+						? strpos( $video_shortcode, '>', $pos_angle_open )
+						: false;
+
+					if ( ( false === $pos_angle_open ) || ( false === $pos_angle_close ) ) {
+						$stuff_to_clean = false;
+					} else {
+						$video_shortcode = substr( $video_shortcode, 0, $pos_angle_open ) . substr( $video_shortcode, $pos_angle_close + 1 );
+					}
+				}
+
+				// More clean up; removing spaces and blanks.
+				$more_things_to_remove = [
+					'&nbsp;',
+					' ',
+				];
+				foreach ( $more_things_to_remove as $thing ) {
+					$video_shortcode = str_replace( $thing, '', $video_shortcode );
+				}
+
+				// Get the URL.
+				$pos_colon = strpos( $video_shortcode, ':' );
+				$pos_closing_bracket = strpos( $video_shortcode, ']' );
+				$video_url = substr( $video_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				$video_url = trim( $video_url );
+
+				// Clean up the URL.
+				// -- doesn't include protocol.
+				if ( 0 === strpos( $video_url, 'www.' ) ) {
+					$video_url = 'https://' . $video_url;
+				}
+				// -- url starts with "YouTubehttps://"
+				$video_shortcode = str_replace( "YouTubehttps://", 'https://', $video_shortcode );
+
+				// --- generate the new video block.
+				$video_block = $this->render_video_block( $video_url );
+
+				// --- substitute the drupal shortcode with the video block.
+				$post_content_updated = str_replace( $video_shortcode, $video_block, $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
+
+		wp_cache_flush();
+
+
+		// Convert [magnify].
+		// --- get all the posts with [magnify] shortcodes.
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[magnify:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) replacing [magnify] shortcodes in post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [magnify] shortcode.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'magnify', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			foreach ( $matches_display[0] as $i => $magnify_shortcode ) {
+
+				// --- if `[magnify:donate,...`, remove.
+				if ( 0 === strpos( $magnify_shortcode, '[magnify:donate,' ) ) {
+					$post_content_updated = str_replace( $magnify_shortcode, '', $post_content_updated );
+					continue;
+				}
+
+				// Magnify is an iframe linking to http://magnify.michigandaily.us/ followed by the first part.
+				// The second part is the height element on the iframe.
+				// Examples     [magnify:fec_2019_rankings,730]
+				//              [magnify:highway_to_hail,330]
+				//              [magnify:kennedy_front_page,500]
+
+				// --- get the shortcode params
+				$pos_colon = strpos( $magnify_shortcode, ':' );
+				$pos_closing_bracket = strpos( $magnify_shortcode, ']' );
+				$magnify_params = substr( $magnify_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+				$magnify_params = trim( $magnify_params );
+				$magnify_params_arr = explode( ',', $magnify_params );
+				$url_path = $magnify_params_arr[0];
+				$iframe_height = $magnify_params_arr[1];
+
+				// --- generate the new iframe html.
+				$magnify_html = $this->render_magnify_iframe( $url_path, $iframe_height );
+
+				// --- substitute the drupal shortcode with the iframe.
+				$post_content_updated = str_replace( $magnify_shortcode, $magnify_html, $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
+
+		wp_cache_flush();
+
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+
+		if ( file_exists( self::LOG_GALLERY_ERR ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for gallery shortcode mixed errors.', self::LOG_GALLERY_ERR ) );
+		}
+		if ( file_exists( self::LOG_GALLERY_IMAGE_NO_URI ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for gallery shortcode images without valid URIs.', self::LOG_GALLERY_IMAGE_NO_URI ) );
+		}
+		if ( file_exists( self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for gallery shortcode download fails.', self::LOG_GALLERY_IMAGE_DOWNLOAD_FAILED ) );
+		}
+		if ( file_exists( self::LOG_DISPLAY_ERR ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` display shortcode for mixed errors.', self::LOG_DISPLAY_ERR ) );
+		}
+		if ( file_exists( self::LOG_DISPLAY_IMAGE_NO_URI ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` display shortcode images without valid URIs..', self::LOG_DISPLAY_IMAGE_NO_URI ) );
+		}
+		if ( file_exists( self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` display shortcode download fails.', self::LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED ) );
+		}
+	}
+
+	/**
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
+	public function cmd_update_drupal_node_header_content( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		WP_CLI::line( '' );
+		WP_CLI::confirm( 'This command should not be run more than once, and it already gets run at the end of the `michigan-daily-import-drupal-content` command. Are you sure you want to proceed?' );
+
+		// Prefetch Drupal data for speed.
+		WP_CLI::line( 'Fetching data from Drupal tables...' );
+		// Get all the nodes.
+		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+		// Get the node headers.
+		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
+
+		$this->update_posts_with_drupal_node_header_contents( $field_data_field_article_header_all_rows );
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Gets `field_data_field_article_header` rows for given nodes. Does some cleanup on the header values.
+	 *
+	 * @param array $nodes
+	 *
+	 * @return array|null Array with 'entity_id' and 'field_article_header_value' keys and values.
+	 */
+	private function get_article_header_rows( $nodes ) {
+		global $wpdb;
+
+		$nids = [];
+		foreach ( $nodes as $node ) {
+			$nids[] = $node['nid'];
+		}
+		$nid_placeholders = implode( ',', array_fill( 0, count( $nids ), '%d' ) );
+		$field_data_field_article_header_all_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"select entity_id, field_article_header_value
+				from field_data_field_article_header
+				where entity_id IN ( $nid_placeholders ) ;",
+				$nids
+			),
+			ARRAY_A
+		);
+
+		// Clean up node headers.
+		foreach ( $field_data_field_article_header_all_rows as $k => $field_data_field_article_header_row ) {
+			$header = $field_data_field_article_header_row['field_article_header_value'];
+
+			// Remove some known blanks.
+			$blanks = [
+				'<p>&nbsp;</p><div>&nbsp;</div>',
+				'<p>&nbsp;</p><p>&nbsp;</p>',
+				'<br />',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p><br /><br /><br />&nbsp;</p>',
+				'<div class="lf-quote-float-left"><div class="quote">&nbsp;</div></div>',
+				'<p dir="ltr" style="line-height:1.656;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p><font face="Times New Roman"><span style="font-size: 14.666666984558105px; white-space: pre-wrap;">&nbsp;</span></font></p>',
+				'<blockquote><p>&nbsp;</p></blockquote>',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><p><br />&nbsp;</p>',
+				'<p>dfasdfasdf</p>',
+				'<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;">&nbsp;</p><div>&nbsp;</div>',
+				'<p><strong>&nbsp;</strong></p>',
+				'',
+			];
+			foreach ( $blanks as $blank ) {
+				if ( $blank == $header ) {
+					unset( $field_data_field_article_header_all_rows[ $k ] );
+					continue;
+				}
+			}
+
+			// Remove inline CSS.
+			$css_opening = '<style type="text/css">';
+			$css_closing = '</style>';
+			$pos_css_opening = strpos( $header, $css_opening );
+			$pos_css_closing = strpos( $header, $css_closing );
+			if ( ( false !== $pos_css_opening ) && ( false !== $pos_css_closing ) ) {
+				$header = substr( $header, 0, $pos_css_opening ) . substr( $header, $pos_css_closing + strlen( $css_closing ) );
+			}
+
+			// One final blank check.
+			$header = trim( $header );
+			if ( empty( $header ) ) {
+				unset( $field_data_field_article_header_all_rows[ $k ] );
+				continue;
+			}
+		}
+
+		return $field_data_field_article_header_all_rows;
+	}
+
+	/**
+	 * @param int $gallery_id Drupal gallery ID.
+	 *
+	 * @return array {
+	 *      Drupal gallery images in gallery.
+	 *
+	 *      @type array {
+	 *          @type string fid        Drupal image file id.
+	 *          @type string uri        URI found in the table, e.g. "public://galleryies/5.30.20_BLMrally.0655-2.jpg".
+	 *          @type string uri_public Actual publicly available URL with the actual hostname.
+	 *          @type string caption    Image caption.
+	 *      }
+	 * }
+	 */
+	private function get_drupal_gallery_images( $gallery_id ) {
+		$images = [];
+
+		global $wpdb;
+
+		// Joins 3 Drupal tables:
+		//      field_data_field_images -- with list of image files in a gallery
+		//      field_data_field_photo_credit -- with image captions
+		//      file_managed -- with file names and their URLs
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"select fim.field_images_fid fid, credit.field_photo_credit_value credit, fileman.uri uri
+				from field_data_field_images fim
+				left join field_data_field_photo_credit credit on credit.entity_id = fim.field_images_fid
+				left join file_managed fileman on fileman.fid = fim.field_images_fid
+				-- gallery id:
+				where fim.entity_id = %d
+				and fim.bundle = 'photo_gallery';",
+				$gallery_id
+			),
+			ARRAY_A
+		);
+
+		// Custom return array.
+		foreach ( $rows as $row ) {
+			$uri_public = ! empty( $row['uri'] )
+				? str_replace( 'public://', 'https://www.michigandaily.com/sites/default/files/styles/gallery/public/', $row['uri'] )
+				: null;
+			$images[] = [
+				'fid' => $row['fid'],
+				'uri' => $row['uri'],
+				'uri_public' => $uri_public,
+				'caption' => $row['caption'],
+			];
+		}
+
+		return $images;
+	}
+
+	/**
+	 * @param int $fid Drupal image file ID.
+	 *
+	 * @return array {
+	 *      Drupal image data.
+	 *
+	 *      @type array {
+	 *          @type string fid        Drupal image file id.
+	 *          @type string uri        URI found in the table, e.g. "public://galleryies/5.30.20_BLMrally.0655-2.jpg".
+	 *          @type string uri_public Actual publicly available URL with the actual hostname.
+	 *          @type string caption    Image caption.
+	 *      }
+	 * }
+	 */
+	private function get_drupal_image( $fid ) {
+		$images = [];
+
+		global $wpdb;
+
+		// Joins 3 Drupal tables:
+		//      field_data_field_images -- with list of image files in a gallery
+		//      field_data_field_photo_credit -- with image captions
+		//      file_managed -- with file names and their URLs
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"select fileman.fid fid, credit.field_photo_credit_value credit, fileman.uri uri
+				from file_managed fileman
+				left join field_data_field_photo_credit credit on credit.entity_id = fileman.fid
+				where fileman.fid = %d
+				and fileman.filemime like 'image/%';",
+				$fid
+			),
+			ARRAY_A
+		);
+
+		// Custom return array.
+		foreach ( $rows as $row ) {
+			$uri_public = ! empty( $row['uri'] )
+				? str_replace( 'public://', 'https://www.michigandaily.com/sites/default/files/styles/large/public/', $row['uri'] )
+				: null;
+			$images[] = [
+				'fid' => $row['fid'],
+				'uri' => $row['uri'],
+				'uri_public' => $uri_public,
+				'caption' => $row['caption'],
+			];
+		}
+
+		return $images[0];
+	}
+
+	/**
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
+	public function cmd_update_authors_from_field_data_field_byline( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		// Get Drupal data.
+		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
+		$field_data_field_byline_all_rows = $wpdb->get_results(
+			"select entity_id, field_byline_value from field_data_field_byline where entity_type = 'node';",
+			ARRAY_A
+		);
+		$field_data_field_full_name_all_rows = $wpdb->get_results(
+			"select entity_id, field_full_name_value from field_data_field_full_name;",
+			ARRAY_A
+		);
+
+		$this->update_authors_from_field_data_field_byline(
+			$nodes,
+			$field_data_field_article_header_all_rows,
+			$field_data_field_byline_all_rows,
+			$field_data_field_full_name_all_rows
+		);
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		// if ( file_exists( self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND ) ) {
+		// 	WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_FILE_ERR_CMD_UPDATEGAS_UID_NOT_FOUND  ) );
+		// }
+	}
+
+	/**
+	 * Authors are very tricky on this site in general, since they're kept in different sources, and output differently.
+	 * This handles authors for nodes such as:
+	 *      https://www.michigandaily.com/section/sports/sources-baseball-gymnastics-practices-partially-shut-down-covid-19-cases
+	 *      https://www.michigandaily.com/section/multimedia/thats-hot-rise-influencer
+	 *      https://www.michigandaily.com/section/arts/and-coming-teen-drama-you-haven%E2%80%99t-heard-about-yet
+	 *      ...
+	 *
+	 * Loops through all the posts, and if author and date were not already scraped from the matching node headers, looks for
+	 * the author data in `field_data_field_byline`.
+	 *
+	 * @param $field_data_field_article_header_all_rows
+	 * @param $field_data_field_byline_all_rows
+	 * @param $field_data_field_full_name_all_rows
+	 */
+	private function update_authors_from_field_data_field_byline(
+		$nodes,
+		$field_data_field_article_header_all_rows,
+		$field_data_field_byline_all_rows,
+		$field_data_field_full_name_all_rows
+	) {
+		global $wpdb;
+
+		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
+// TODO -- remove temp DEV:
+$posts = [
+// 	get_post( 459 ), // nid 252962
+// 	get_post( 2266 ), // invalid byline full name with value "."
+];
+		foreach ( $posts as $k => $post ) {
+			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
+			if ( ! $original_nid ) {
+				WP_CLI::warning( sprintf( '- (%d/%d) skipping ID %d -- no original nid', $k + 1, count( $posts ), $post->ID ) );
+				continue;
+			}
+
+			$data_update = [];
+
+			// Check if author & date were already scraped from the node HTML, which is the fist source we should try.
+			$should_update_author = false;
+			$field_data_field_article_header_row = $this->search_array_by_key_and_value( $field_data_field_article_header_all_rows, [ 'entity_id' => $original_nid ] );
+			$date_scraped = $author_scraped = null;
+			if ( ! $field_data_field_article_header_row ) {
+				// Some nodes don't have headers, so authors weren't set by scraping the names for those.
+				$should_update_author = true;
+			} else {
+				// Check if author and date info was already scraped.
+				$drupal_field_data_body_row  = $this->get_drupal_field_data_body( $original_nid );
+				$post_info_scraped = $this->get_post_p_info_contents( $drupal_field_data_body_row[ 'body_value' ] ?? null );
+				if ( $post_info_scraped ) {
+					$date_scraped   = $this->extract_date_from_p_info( $post_info_scraped );
+					$author_scraped = $this->extract_author_from_p_info( $post_info_scraped );
+					// There are several invalid bylines (e.g. nid 204836), this takes care of those.
+					if ( strlen( $author_scraped ) < 4 ) {
+						$author_scraped = null;
+					}
+				}
+				// Not scraped yet, so let's update this one.
+				if ( null === $date_scraped  || null === $author_scraped ) {
+					$should_update_author = true;
+				}
+			}
+
+			// Stop if already scraped.
+			if ( true !== $should_update_author ) {
+				WP_CLI::line( sprintf( '- (%d/%d) skipping ID %d -- author and date already scraped', $k + 1, count( $posts ), $post->ID ) );
+				continue;
+			}
+
+			// Get the author's full name.
+			$field_data_field_byline_row = $this->search_array_by_key_and_value( $field_data_field_byline_all_rows, [ 'entity_id' => $original_nid ] );
+			if ( ! $field_data_field_byline_row ) {
+				continue;
+			}
+			// The author's full name.
+			$field_full_name_id = $field_data_field_byline_row[ 'field_byline_value' ];
+			$field_data_field_full_name_row = $this->search_array_by_key_and_value( $field_data_field_full_name_all_rows, [ 'entity_id' => $field_full_name_id ] );
+			$full_name = $field_data_field_full_name_row[ 'field_full_name_value' ] ?? null;
+
+			// Get the date.
+			$node_row = $this->search_array_by_key_and_value( $nodes, [ 'nid' => $original_nid ] );
+			$date_wp_formatted = gmdate( 'Y-m-d H:i:s', $node_row[ 'created' ] );
+			if ( $date_wp_formatted ) {
+				$data_update[ 'post_date' ] = $date_wp_formatted;
+				$data_update[ 'post_date_gmt' ] = $date_wp_formatted;
+			}
+
+			WP_CLI::line( sprintf( '- (%d/%d) updating ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// Update the post date.
+			if ( ! empty( $data_update ) ) {
+				$wpdb->update( $wpdb->prefix . 'posts',
+					$data_update,
+					[ 'ID' => $post->ID ]
+				);
+				WP_CLI::success( '+ updated date' );
+			}
+
+			// Update the post author.
+			if ( $full_name ) {
+				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $full_name ] );
+				if ( ! is_wp_error( $guest_author_id ) ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
+					WP_CLI::success( '+ updated author' );
+				} else {
+					WP_CLI::warning( sprintf( '- error updating author with full name `%s`', $full_name ) );
+				}
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Gets the `field_data_field_article_header` HTML and prepends it to the post content. Also cleans up the HTML a bit.
+	 *
+	 * @param array $field_data_field_article_header_all_rows
+	 */
+	public function update_posts_with_drupal_node_header_contents( $field_data_field_article_header_all_rows ) {
+		global $wpdb;
+
+		// Flush the log files.
+		@unlink( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND );
+
+		// Clean up node headers.
+		foreach ( $field_data_field_article_header_all_rows as $k => $field_data_field_article_header_row ) {
+			$nid    = $field_data_field_article_header_row['entity_id'];
+			$header = $field_data_field_article_header_row['field_article_header_value'];
+
+			// Update the post content, and prepend the header to it.
+			$post_ids = $this->posts_logic->get_posts_with_meta_key_and_value( self::META_OLD_NODE_ID, $nid );
+			$post_id  = isset( $post_ids[0] ) ? $post_ids[0] : null;
+			$post     = get_post( $post_id );
+			if ( ! $post ) {
+				WP_CLI::warning( sprintf( 'Post with nid %s not found.', (int) $nid ) );
+				$this->log( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND, $nid );
+				continue;
+			}
+
+			$meta_header_already_updated = get_post_meta( $post->ID, self::META_ARTICLE_HEADER_UPDATED, true );
+			if ( $meta_header_already_updated ) {
+				WP_CLI::warning( sprintf( '- (%d/%d) skipping -- headers already updated for post ID %d (nid %d)', $k + 1, count( $field_data_field_article_header_all_rows ), (int) $post->ID, (int) $nid ) );
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '- (%d/%d) updating headers for post ID %d (nid %d) ...', $k + 1, count( $field_data_field_article_header_all_rows ), (int) $post->ID, (int) $nid ) );
+
+			$post_content_with_header = $header . "<br><!-- _end_header_prepend -->" . $post->post_content;
+			$res = $wpdb->update(
+				$wpdb->prefix . 'posts',
+				[ 'post_content' => $post_content_with_header ],
+				[ 'ID' => $post->ID ]
+			);
+			if ( false === $res ) {
+				WP_CLI::warning( sprintf( 'Could not update existing post ID %d , node nid %d', (int) $post->ID, (int) $nid ) );
+				continue;
+			}
+
+			update_post_meta( $post_id, self::META_ARTICLE_HEADER_UPDATED, $nid );
+		}
+
+		// Let the $wpdb->update() sink in.
+		wp_cache_flush();
+
+		if ( file_exists( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND  ) );
+		}
 	}
 
 	/**
@@ -436,7 +1277,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_update_featured_image_for_posts_which_do_not_have_one($args, $assoc_args ) {
+	public function cmd_update_featured_image_for_posts_from_meta_which_do_not_have_one($args, $assoc_args ) {
 		global $wpdb;
 
 		$time_start = microtime( true );
@@ -679,32 +1520,268 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Scrapes the 'p.info' content from the HTML $body_value.
+	 *
+	 * @param string $body_value
+	 *
+	 * @return string|null Contents of p.info, where available, or null.
+	 */
+	private function get_post_p_info_contents( $body_value ) {
+		if ( ! $body_value ) {
+			return null;
+		}
+
+		$this->dom_crawler->clear();
+		$this->dom_crawler->add( $body_value );
+		$sub_sitemaps = $this->dom_crawler->filter( 'p.info' );
+
+		// If $body_value does not contain the div.main, use the whole HTML.
+		if ( 0 == $sub_sitemaps->count() ) {
+			return null;
+		}
+
+		$post_content = $sub_sitemaps->html();
+
+		return $post_content;
+
+	}
+
+	/**
+	 * Extracts date from the p.info element in content.
+	 *
+	 * @param string $line Inner HTML of the p.info element.
+	 *
+	 * @return string|null Date string in 'Y-m-j' format.
+	 */
+	private function extract_date_from_p_info( $line ) {
+
+		// Match this: "Published May 28, 2015".
+		$pattern = '|Published\s((\w+)\s\d{1,2},\s\d{4})|';
+		$matches = [];
+		$matched = preg_match( $pattern, $line, $matches );
+		if ( 1 !== $matched ) {
+			return null;
+		}
+
+		$date_text = $matches[1];
+		$datetime = \DateTime::createFromFormat ( 'F j, Y', $date_text );
+		$wp_date_format = $datetime->format( 'Y-m-j 00:00:00' );
+
+		return $wp_date_format;
+	}
+
+	/**
+	 * Extracts autor name from the p.info element in content.
+	 *
+	 * @param string $line Inner HTML of the p.info element.
+	 *
+	 * @return string|null Author name or null.
+	 */
+	private function extract_author_from_p_info( $line ) {
+		// Search for author position starting with 'BY ' or 'By '.
+		$pos_by1 = strpos( $line, 'BY ' );
+		$pos_by2 = strpos( $line, 'By ' );
+		$pos_by = ( false !== $pos_by1 )
+			? $pos_by1
+			: (
+				( false !== $pos_by2 )
+					? $pos_by2
+					: false
+			);
+
+		if ( false === $pos_by ) {
+			return null;
+		}
+
+		// Author ends either with a `<br>` or a line end.
+		$author_scraped = '';
+		$pos_break = strpos( $line, '<br>', $pos_by + 3 );
+		if ( false !== $pos_break ) {
+			$author_scraped = substr( $line, $pos_by + 3, $pos_break - $pos_by - 3 );
+		} else {
+			$author_scraped = substr( $line, $pos_by + 3 );
+		}
+		// Strip all tags.
+		$author_scraped = wp_kses( $author_scraped, [] );
+		$author_scraped = trim( $author_scraped);
+
+		return $author_scraped;
+	}
+
+	/**
 	 * Scrapes the 'div.main' content from the HTML $body_value.
 	 *
 	 * @param string $body_value
 	 *
-	 * @return string|null
+	 * @return string Only contents of div.main, if available, or the entry HTML string.
 	 */
 	private function get_post_content_from_node_body_raw( $body_value ) {
 		if ( ! $body_value ) {
 			return null;
 		}
 
-		// // The PHPHtmlParser\Dom is producing some seemingly broken HTML (nid 217246), so switching to \Symfony\Component\DomCrawler\Crawler instead.
-		// $this->dom->loadStr( $body_value );
-		// $collection = $this->dom->find( 'div.main');
-		// if ( ! $collection->count() ) {
-		// 	return null;
-		// }
-		// $post_content = $collection[0]->innerHtml;
+		$this->dom_crawler->clear();
+		$this->dom_crawler->add( $body_value );
+		$sub_sitemaps = $this->dom_crawler->filter( 'div.main' );
 
-		$crawler = ( new Crawler( $body_value ) )->filter('div.main');
-		if ( 0 == $crawler->count() ) {
-			return null;
+		// If $body_value does not contain the div.main, use the whole HTML.
+		if ( 0 == $sub_sitemaps->count() ) {
+			return $body_value;
 		}
-		$post_content = $crawler->html();
+
+		$post_content = $sub_sitemaps->html();
 
 		return $post_content;
+	}
+
+	/**
+	 * Fully renders a Core Gallery Block from attachment IDs.
+	 * Presently hard-coded attributes use ampCarousel and ampLightbox.
+	 *
+	 * @param array $ids Attachment IDs.
+	 *
+	 * @return string Gallery block HTML.
+	 */
+	public function render_gallery_block( $ids ) {
+		// Compose the HTML with all the <li><figure><img/></figure></li> image pieces.
+		$images_li_html = '';
+		foreach ( $ids as $id ) {
+			$img_url = wp_get_attachment_url( $id );
+			$img_caption = wp_get_attachment_caption( $id );
+			$img_alt = get_post_meta( $id, '_wp_attachment_image_alt', true );
+			$img_data_link = $img_url;
+			$img_element = sprintf(
+				'<img src="%s" alt="%s" data-id="%d" data-full-url="%s" data-link="%s" class="%s"/>',
+				$img_url,
+				$img_alt,
+				$id,
+				$img_url,
+				$img_data_link,
+				'wp-image-' . $id
+			);
+			$figcaption_element = ! empty( $img_caption )
+				? sprintf( '<figcaption class="blocks-gallery-item__caption">%s</figcaption>', esc_attr( $img_caption ) )
+				: '';
+			$images_li_html .= '<li class="blocks-gallery-item">'
+				. '<figure>'
+				. $img_element
+				. $figcaption_element
+				. '</figure>'
+				. '</li>';
+		}
+
+		// The inner HTML of the gallery block.
+		$inner_html = '<figure class="wp-block-gallery columns-3 is-cropped">'
+			. '<ul class="blocks-gallery-grid">'
+			. $images_li_html
+			. '</ul>'
+			. '</figure>';
+		$block_gallery = [
+			'blockName' => 'core/gallery',
+			'attrs' => [
+				'ids' => $ids,
+				'linkTo' => 'none',
+				'ampCarousel' => true,
+				'ampLightbox' => true,
+			],
+			'innerBlocks' => [],
+			'innerHTML' => $inner_html,
+			'innerContent' => [ $inner_html ],
+		];
+
+		// Fully rendered gallery block.
+		$block_gallery_rendered = '<!-- wp:gallery {"ids":[' . esc_attr( implode( ',', $ids ) ) . '],"linkTo":"none","ampCarousel":true,"ampLightbox":true} -->'
+            . "\n"
+			. render_block( $block_gallery )
+            . "\n"
+			. '<!-- /wp:gallery -->';
+
+		return $block_gallery_rendered;
+	}
+
+	/**
+	 * @param int $id Attachment ID
+	 *
+	 * @return string Image HTML element.
+	 */
+	public function render_image_html_element( $id ) {
+		$img_url       = wp_get_attachment_url( $id );
+		$img_caption   = wp_get_attachment_caption( $id );
+		$img_alt       = get_post_meta( $id, '_wp_attachment_image_alt', true );
+		$img_data_link = $img_url;
+		$img_element   = sprintf(
+			'<img src="%s" alt="%s" data-id="%d" data-full-url="%s" data-link="%s" class="%s"/>',
+			$img_url,
+			$img_alt,
+			$id,
+			$img_url,
+			$img_data_link,
+			'wp-image-' . $id
+		);
+
+		if ( $img_caption ) {
+			$img_element = '<figure>'
+				. $img_element
+				. '<figcaption>' . esc_html( $img_caption ) . '</figcaption>'
+			    .'</figure>';
+		}
+
+		return $img_element;
+	}
+
+	/**
+	 * @param string $url Video URL
+	 *
+	 * @return string Video block.
+	 */
+	public function render_video_block( $url ) {
+		$video_block = '';
+
+		if (
+			( false !== strpos( $url, 'youtube.com' ) )
+		     || ( false !== strpos( $url, 'youtu.be' ) )
+		) {
+			$video_block = sprintf(
+				'<!-- wp:embed {"url":"%s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-4-3 wp-has-aspect-ratio"} -->'
+				. "\n" . '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-4-3 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">'
+				. "\n" . '%s'
+				. "\n" . '</div></figure>'
+				. "\n" . '<!-- /wp:embed -->',
+				$url,
+				$url
+			);
+		} else if ( strpos( $url, 'vimeo.com' ) ) {
+			$video_block = sprintf(
+				'<!-- wp:embed {"url":"%s","type":"video","providerNameSlug":"vimeo","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->'
+				. "\n" . '<figure class="wp-block-embed is-type-video is-provider-vimeo wp-block-embed-vimeo wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">'
+				. "\n" . '%s'
+				. "\n" . '</div></figure>'
+				. "\n" . '<!-- /wp:embed -->',
+				$url,
+				$url
+			);
+		} else {
+			$video_block = sprintf(
+				'<!-- wp:video -->'
+				. "\n" . '<figure class="wp-block-video"><video controls src="%s"></video></figure>'
+				. "\n" . '<!-- /wp:video -->',
+				$url
+			);
+		}
+
+		return $video_block;
+	}
+
+	/**
+	 * @param string $url_path      Custom path to the TMD's Magnify shortcode's public source.
+	 * @param int    $iframe_height iframe height attr.
+	 *
+	 * @return string HTML.
+	 */
+	public function render_magnify_iframe( $url_path, $iframe_height ) {
+		$html = '<div class="magnify"><iframe src="https://magnify.michigandaily.us/' . $url_path . '" frameborder="0" width="100%" height="' . $iframe_height . 'px"></iframe></div>"';
+
+		return $html;
 	}
 
 	/**
