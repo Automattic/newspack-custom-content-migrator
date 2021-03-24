@@ -81,6 +81,7 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 		$posts_wo_featured_img = $posts_wo_featured_img_query->get_posts();
 		if ( empty( $posts_wo_featured_img ) ) {
 			WP_CLI::line( 'No posts without featured image found.' );
+			exit;
 		}
 
 		$crawler = new Crawler();
