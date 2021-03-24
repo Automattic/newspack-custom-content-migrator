@@ -76,7 +76,8 @@ class InlineFeaturedImageMigrator implements InterfaceMigrator {
 					'value' => '?',
 					'compare' => 'NOT EXISTS'
 				]
-			]
+			],
+			'posts_per_page' => -1,
 		]);
 		$posts_wo_featured_img = $posts_wo_featured_img_query->get_posts();
 		if ( empty( $posts_wo_featured_img ) ) {
