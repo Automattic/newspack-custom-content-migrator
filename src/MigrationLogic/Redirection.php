@@ -9,10 +9,13 @@ class Redirection {
 	 *
 	 * Arguments documented at https://redirection.me/developer/rest-api/
 	 *
-	 * @param string $title    Title for this redirect rule.
-	 * @param string $url_from A regex flavored URL, param such as is used by Red_Item::create().
-	 * @param string $url_to   An absolute URL to redirect to.
-	 * @param string $regex    Explicitly use regex type rule; not necessary in later versions because "Url options / Regex" is the default rule type.
+	 * @param string $title
+	 * @param string $url_from
+	 * @param string $url_to
+	 * @param false  $match_data_source_flag_regex
+	 * @param bool   $match_data_source_flag_trailing
+	 * @param string $match_data_source_flag_query
+	 * @param false  $match_data_source_flag_case
 	 */
 	public function create_redirection_rule( $title, $url_from, $url_to, $match_data_source_flag_regex = false,
 		$match_data_source_flag_trailing = true, $match_data_source_flag_query = 'exact', $match_data_source_flag_case = false
