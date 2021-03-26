@@ -3,11 +3,12 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Redirection as RedirectionLogic;
 use \WP_CLI;
 use Symfony\Component\DomCrawler\Crawler;
-use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
-use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
  * Custom migration scripts for Michigan Daily.
@@ -18,7 +19,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	/**
 	 * If this meta is set, means that the Drupal article header was already set on this Post.
 	 */
-	const META_ARTICLE_HEADER_UPDATED = '_article_header_updated';
+	const META_ARTICLE_HEADER_UPDATED       = '_article_header_updated';
+	/**
+	 * If one of these two metas is set, means that the Drupal URL alias was already set up for this Post (either by updating the
+	 * post_name, or by creating a Redirection rule).
+	 */
+	const META_SLUG_UPDATED_TO_DRUPAL_ALIAS            = '_slug_updated_to_drupal_alias';
+	const META_SLUG_REDIRECTION_RULE_FROM_DRUPAL_ALIAS = '_slug_redirection_rule_from_drupal_alias';
 
 	/**
 	 * Error log file names -- grouped by error types to make reviews easier.
@@ -61,6 +68,11 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var RedirectionLogic
+	 */
+	private $redirection_logic;
+
+	/**
 	 * @var SquareBracketsElementManipulator
 	 */
 	private $square_brackets_element_manipulator;
@@ -74,6 +86,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$this->posts_logic         = new PostsLogic();
 		$this->attachments_logic   = new AttachmentsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
+		$this->redirection_logic   = new RedirectionLogic();
 
 		if ( ! class_exists( \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator::class ) ) {
 			WP_CLI::error( 'This command requires the Newspack Content Converter plugin to be installed and activated.');
@@ -144,6 +157,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-update-drupal-post-slugs',
+			[ $this, 'cmd_update_drupal_post_slugs' ],
+			[
+				'shortdesc' => 'Helper DEV command -- updates Drupal posts slugs.'
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator michigan-daily-delete-imported-custom-post-type',
 			[ $this, 'cmd_delete_imported_custom_post_type' ],
 			[
@@ -206,6 +226,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			group by n.uid;",
 			ARRAY_A
 		);
+		$url_alias_all_rows = $wpdb->get_results( "select source, alias from url_alias;", ARRAY_A );
 
 		$post_ids_already_imported = [];
 		if ( ! $reimport_all_posts ) {
@@ -215,6 +236,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// `type` 'article' is legacy (they imported it over from a previous system to Drupal, and will not have Taxonomy here
 		// in Drupal), and `type` 'michigan_daily_article' is their regular Post node type.
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+
 		// Get the node headers.
 		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
 		$article_headers_rows_for_update = [];
@@ -228,7 +250,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			WP_CLI::line( sprintf( '- (%d/%d) importing nid %d ...', $i + 1, count( $nodes ), $node['nid'] ) );
 			// If not reimporting existing posts, continue.
 			if ( ( false === $reimport_all_posts ) && isset( $post_ids_already_imported[ $node['nid'] ] ) ) {
-				WP_CLI::line( sprintf( '✓ ID %d already imported, skipping.', $post_id ) );
+				WP_CLI::line( '✓ post already imported, skipping.' );
 				continue;
 			}
 
@@ -402,6 +424,9 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		// Run the command which substitutes Drupal shortcodes.
 		$this->cmd_update_drupal_convert_shortcodes();
+
+		// Update Posts' slugs.
+		$this->update_post_slugs_with_drupal_url_alias( $url_alias_all_rows );
 
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
@@ -781,6 +806,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		WP_CLI::line( 'Fetching data from Drupal tables...' );
 		// Get all the nodes.
 		$nodes = $this->get_drupal_all_nodes_by_type( [ 'michigan_daily_article', 'article' ] );
+
 		// Get the node headers.
 		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
 
@@ -971,6 +997,122 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
+	public function cmd_update_drupal_post_slugs( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		// Get Drupal data.
+		$url_alias_all_rows = $wpdb->get_results( "select source, alias from url_alias;", ARRAY_A );
+
+		$this->update_post_slugs_with_drupal_url_alias( $url_alias_all_rows );
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Updates existing posts' URL slugs to old Drupal URL aliases.
+	 *
+	 * @param $url_alias_all_rows
+	 */
+	private function update_post_slugs_with_drupal_url_alias( $url_alias_all_rows ) {
+		if ( ! class_exists( \Red_Item::class ) ) {
+			WP_CLI::error( sprintf( 'Class %s not found.', \Red_Item::class ) );
+		}
+
+		global $wpdb;
+		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
+// TODO DEV REMOVE:
+// $posts = [
+// 	// get_post( 32 ),
+// 	// get_post( 35 ),
+// 	// get_post( 39 ),
+// ];
+
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '- (%d/%d) post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
+			if ( ! $original_nid ) {
+				WP_CLI::warning( 'x skipping, original nid not found' );
+				continue;
+			}
+
+			// Skip if already done.
+			$slug_updated             = get_post_meta( $post->ID, self::META_SLUG_UPDATED_TO_DRUPAL_ALIAS, true );
+			$redirection_rule_created = get_post_meta( $post->ID, self::META_SLUG_REDIRECTION_RULE_FROM_DRUPAL_ALIAS, true );
+			if ( ! empty( $slug_updated ) || ! empty( $redirection_rule_created ) ) {
+				WP_CLI::warning( 'x skipping, URL already updated' );
+				continue;
+			}
+
+			// Get Drupal URL alias.
+			$alias_found = false;
+			foreach ( $url_alias_all_rows as $url_alias_row ) {
+				if ( 'node/' . $original_nid == $url_alias_row[ 'source' ] ) {
+					$alias_found = true;
+					break;
+				}
+			}
+			if ( true !== $alias_found ) {
+				WP_CLI::warning( 'x skipping, Drupal URL alias not found' );
+				$this->log( 'url_updates.log', sprintf( "skipped ; %d ; %s ; %s", $post->ID, $original_nid, 'Drupal URL alias not found' ) );
+				continue;
+			}
+
+			// Get post slug.
+			$url_alias_exploded = explode( '/', $url_alias_row[ 'alias' ] );
+			if ( count( $url_alias_exploded ) < 1 ) {
+				WP_CLI::warning( sptintf( 'x skipping, alias `%s` does not contain multiple segments', $url_alias_row[ 'alias' ] ) );
+				$this->log( 'url_updates.log', sprintf( "skipped ; %d ; %s ; %s", $post->ID, $original_nid, sprintf( 'alias `%s` does not contain multiple segments', $url_alias_row[ 'alias' ] ) ) );
+				continue;
+			}
+
+			// Update post name/slug.
+			$previous_post_slug = $post->post_name;
+			$new_post_slug = $url_alias_exploded[ count( $url_alias_exploded ) - 1 ];
+
+			// Test if the new slug is valid (contains valid characters) and can be used as the new slug.
+			$is_new_post_slug_valid = filter_var( 'https://test-host.com/' . $new_post_slug, FILTER_VALIDATE_URL );
+
+			// Try and update slug to the new one.
+			$new_slug_updated = (bool) $is_new_post_slug_valid
+				? $wpdb->update( $wpdb->prefix . 'posts', [ 'post_name' => $new_post_slug ], [ 'ID' => $post->ID ] )
+				: false;
+
+			if ( $new_slug_updated ) {
+				// Save old post name.
+				update_post_meta( $post->ID, self::META_SLUG_UPDATED_TO_DRUPAL_ALIAS, $previous_post_slug );
+
+				$this->log( 'url_updates.log', sprintf( "slug_update ; %d ; %s ; %s ; %s", $post->ID, $original_nid, $previous_post_slug, $new_post_slug ) );
+				WP_CLI::line( sprintf( '+ slug updated from `%s` to `%s`', $previous_post_slug, $new_post_slug ) );
+			} else {
+				$rule_title = $post->ID . ' - ' . $post->post_title;
+				$redirect_from = '/' . $url_alias_row[ 'alias' ];
+
+				// Remove /section URL prefix from Drupal's original alias, because we already have a redirection rule for that.
+				$section_prefix = '/section';
+				if ( 0 === strpos( $redirect_from, $section_prefix . '/' ) ) {
+					$redirect_from = substr( $redirect_from, strlen( $section_prefix ) );
+				}
+
+				$redirect_to = get_permalink( $post->ID );
+				$this->redirection_logic->create_redirection_rule(
+					$rule_title,
+					$redirect_from,
+					$redirect_to
+				);
+
+				// Save rule title.
+				update_post_meta( $post->ID, self::META_SLUG_REDIRECTION_RULE_FROM_DRUPAL_ALIAS, $rule_title );
+
+				$this->log( 'url_updates.log', sprintf( "redirection_rule ; %d ; %s ; %s ; %s", $post->ID, $original_nid, $redirect_from, $redirect_to ) );
+				WP_CLI::line( sprintf( '+ redirection created from `%s` to `%s`', $redirect_from, $redirect_to ) );
+			}
+		}
+
+		wp_cache_flush();
+	}
+
 	public function cmd_update_authors_from_field_data_field_byline( $args, $assoc_args ) {
 		global $wpdb;
 		$time_start = microtime( true );
@@ -1023,12 +1165,15 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	) {
 		global $wpdb;
 
-		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
+		// $posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
+$posts = get_posts([  ]);
+
 // TODO -- remove temp DEV:
 $posts = [
 // 	get_post( 459 ), // nid 252962
 // 	get_post( 2266 ), // invalid byline full name with value "."
 ];
+$posts = get_posts([ 'posts_per_page' => -1, 'post__in' => [ ] ]);
 		foreach ( $posts as $k => $post ) {
 			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
 			if ( ! $original_nid ) {
