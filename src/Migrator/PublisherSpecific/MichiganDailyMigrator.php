@@ -241,7 +241,7 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
 		$article_headers_rows_for_update = [];
 
-// TODO, DEV remove
+// TODO -- remove temp DEV:
 // $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150176 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
@@ -1165,15 +1165,15 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	) {
 		global $wpdb;
 
-		// $posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
-$posts = get_posts([  ]);
+		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
 
 // TODO -- remove temp DEV:
-$posts = [
-// 	get_post( 459 ), // nid 252962
-// 	get_post( 2266 ), // invalid byline full name with value "."
-];
-$posts = get_posts([ 'posts_per_page' => -1, 'post__in' => [ ] ]);
+// $posts = [
+// // 	get_post( 459 ), // nid 252962
+// // 	get_post( 2266 ), // invalid byline full name with value "."
+// ];
+// $posts = get_posts([ 'posts_per_page' => -1, 'post__in' => [ ] ]);
+
 		foreach ( $posts as $k => $post ) {
 			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
 			if ( ! $original_nid ) {
