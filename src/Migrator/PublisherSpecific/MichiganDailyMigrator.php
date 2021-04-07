@@ -766,6 +766,54 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
 		}
 
+
+		// Convert [twitter].
+		// --- get all the posts with [twitter] shortcodes.
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			's' => '[twitter:',
+		] );
+		foreach ( $posts as $k => $post ) {
+			WP_CLI::line( sprintf( '👉 (%d/%d) replacing [twitter] shortcodes in post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
+
+			// --- match the [magnify] shortcode.
+			$matches_display = $this->square_brackets_element_manipulator->match_shortcode_designations( 'twitter', $post->post_content );
+			if ( empty( $matches_display[0] ) ) {
+				WP_CLI::line( sprintf( 'x skipping, no [twitter] shortcodes found ...', $k + 1, count( $posts ), $post->ID ) );
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			foreach ( $matches_display[0] as $i => $twitter_shortcode ) {
+
+				// --- get the URL
+				$pos_colon = strpos( $twitter_shortcode, ':' );
+				$pos_closing_bracket = strpos( $twitter_shortcode, ']' );
+				$tweet_url = substr( $twitter_shortcode, $pos_colon + 1, $pos_closing_bracket - $pos_colon - 1 );
+
+				// --- generate the twitter block.
+				$twitter_html = "\n" . $this->render_twitter_block( $tweet_url ) . "\n";
+
+				// --- substitute the drupal shortcode with the iframe.
+				$post_content_updated = str_replace( $twitter_shortcode, $twitter_html, $post_content_updated );
+			}
+
+			if ( $post->post_content != $post_content_updated ) {
+				$res = $wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post->ID ]
+				);
+				if ( false === $res ) {
+					WP_CLI::warning( sprintf( 'Could not post ID %d.', (int) $post->ID ) );
+					continue;
+				}
+			}
+
+			WP_CLI::line( sprintf( '✓ post ID %d', $post->ID ) );
+		}
+
 		wp_cache_flush();
 
 
@@ -1925,6 +1973,23 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	 */
 	public function render_magnify_iframe( $url_path, $iframe_height ) {
 		$html = '<div class="magnify"><iframe src="https://magnify.michigandaily.us/' . $url_path . '" frameborder="0" width="100%" height="' . $iframe_height . 'px"></iframe></div>"';
+
+		return $html;
+	}
+
+	/**
+	 * @param string $tweet_url URL.
+	 *
+	 * @return string HTML.
+	 */
+	public function render_twitter_block( $tweet_url ) {
+		$html = <<<HTML
+<!-- wp:embed {"url":"$tweet_url","type":"rich","providerNameSlug":"twitter","responsive":true,"className":""} -->
+<figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper">
+$tweet_url
+</div></figure>
+<!-- /wp:embed -->
+HTML;
 
 		return $html;
 	}
