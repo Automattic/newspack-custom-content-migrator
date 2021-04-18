@@ -195,6 +195,11 @@ function export_staging_site_donation_products() {
   set_var_by_previous_exit_code IS_EXPORTED_DONATION_PRODUCTS
 }
 
+function export_staging_site_listings() {
+  wp_cli newspack-content-migrator export-listings --output-dir=$TEMP_DIR_MIGRATOR
+  set_var_by_previous_exit_code IS_EXPORTED_LISTINGS
+}
+
 function export_staging_site_campaigns() {
   wp_cli newspack-content-migrator export-campaigns --output-dir=$TEMP_DIR_MIGRATOR
   set_var_by_previous_exit_code IS_EXPORTED_CAMPAIGNS
