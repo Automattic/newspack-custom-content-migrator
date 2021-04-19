@@ -273,9 +273,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
 		$article_headers_rows_for_update = [];
 
-// TODO -- remove temp DEV:
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150176 )" ), ARRAY_A );
-
 		foreach ( $nodes as $i => $node ) {
 			$nid = $node['nid'];
 
@@ -1101,12 +1098,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		global $wpdb;
 		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
-// TODO DEV REMOVE:
-// $posts = [
-// 	// get_post( 32 ),
-// 	// get_post( 35 ),
-// 	// get_post( 39 ),
-// ];
 
 		foreach ( $posts as $k => $post ) {
 			WP_CLI::line( sprintf( '- (%d/%d) post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
@@ -1246,14 +1237,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		global $wpdb;
 
 		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
-
-// TODO -- remove temp DEV:
-// $posts = [
-// // 	get_post( 459 ), // nid 252962
-// // 	get_post( 2266 ), // invalid byline full name with value "."
-// ];
-// $posts = get_posts([ 'posts_per_page' => -1, 'post__in' => [ ] ]);
-
 		foreach ( $posts as $k => $post ) {
 			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
 			if ( ! $original_nid ) {
@@ -1412,29 +1395,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			'post_status' => [ 'publish', 'draft' ],
 			'posts_per_page' => -1,
 		] );
-// // TODO -- remove temp DEV test cases:
-// $posts = [
-// 	// get_post( 24584 ),
-// 	// get_post( 24578 ),
-// 	// get_post( 24576 ),
-// 	// get_post( 24490 ),
-// 	// get_post( 24420 ),
-//
-// 	// get_post( 163259 ),
-// 	// get_post( 175198 ),
-//
-// 	// GA 114738 MEN'S BASKETBALL BEAT
-// 	get_post( 162327 ),
-// 	get_post( 162175 ),
-//
-// 	// GA 160132 "Sierra Élise Hansen"
-// 	get_post( 173634 ),
-// 	get_post( 173071 ),
-//
-// 	// GA 160573 "Jim Wilson "
-// 	get_post( 1756 ),
-// 	get_post( 1790 ),
-// ];
 		foreach ( $posts as $i => $post ) {
 
 			WP_CLI::line( sprintf( '- (%d/%d) updating Author for post ID %d...', $i + 1, count( $posts ), $post->ID ) );
