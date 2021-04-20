@@ -1406,57 +1406,50 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 				continue;
 			}
 
-			$wp_user_author_assigned = false;
-			foreach ( $guest_authors as $guest_author ) {
-				// - get or create a WP User with that Guest Author's name
-				$guest_author_display_name = trim( $guest_author->display_name );
-				$wp_user = $this->get_wp_user_by_full_name( $guest_author_display_name );
+			// - create a WP User from the first Guest Author, and assign it as the Post Author.
+			$guest_author = $guest_authors[0];
+			$guest_author_display_name = trim( $guest_author->display_name );
+			$wp_user = $this->get_wp_user_by_full_name( $guest_author_display_name );
 
-				// Create a User wo/ an email.
-				if ( ! $wp_user ) {
-					$username = trim( sanitize_user( $guest_author_display_name ) );
+			// Create a User wo/ an email.
+			if ( ! $wp_user ) {
+				$username = trim( sanitize_user( $guest_author_display_name ) );
+				$wp_user_id = wp_create_user( $username, wp_generate_password() );
+
+				if ( is_wp_error( $wp_user_id ) && (
+					isset( $wp_user_id->errors[ 'existing_user_login' ] ) ||
+					isset( $wp_user_id->errors[ 'user_login_too_long' ] )
+				) ) {
+					// Some existing Users have different names, but keep the same username,
+					// e.g. "Justin OBeirne" vs "Justin O’Beirne".
+					// Repeat user creation with a unique login.
+					$username = $this->get_unique_username( $username );
 					$wp_user_id = wp_create_user( $username, wp_generate_password() );
-
-					if ( is_wp_error( $wp_user_id ) && (
-						isset( $wp_user_id->errors[ 'existing_user_login' ] ) ||
-						isset( $wp_user_id->errors[ 'user_login_too_long' ] )
-					) ) {
-						// Some existing Users have different names, but keep the same username,
-						// e.g. "Justin OBeirne" vs "Justin O’Beirne".
-						// Repeat user creation with a unique login.
-						$username = $this->get_unique_username( $username );
-						$wp_user_id = wp_create_user( $username, wp_generate_password() );
-					} else if ( is_wp_error( $wp_user_id ) ) {
-						$msg = sprintf( 'Error creating User from GA ID %d and display_name %s for post ID %d: %s', $guest_author->ID, $guest_author_display_name, $post->ID, $wp_user_id->get_error_message() );
-						WP_CLI::warning( $msg );
-						$this->log( self::LOG_USER_CREATE_ERR, $msg );
-						continue;
-					}
-
-					$wp_user = get_user_by( 'id', $wp_user_id );
-					WP_CLI::line( sprintf( ' + created User ID %d from GA ID %d - %s ...', $wp_user_id, $guest_author->ID, $guest_author_display_name ) );
-					$this->log( self::LOG_USER_CREATED, sprintf( 'post ID %d, GA ID %d, GA %s, WP User ID %d', $post->ID, $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
-				}
-
-				// - map the new WP User to the Guest Author
-				$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $wp_user );
-				$this->log( self::LOG_USERS_LINKED_GA_TO_WP_USER, sprintf( 'GA ID %d, GA %s, WP User ID %d', $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
-
-				// - assign the WP User as the Post's author
-				if ( true === $wp_user_author_assigned ) {
-					WP_CLI::line( ' x skipping, author already assigned.' );
+				} else if ( is_wp_error( $wp_user_id ) ) {
+					$msg = sprintf( 'Error creating User from GA ID %d and display_name %s for post ID %d: %s', $guest_author->ID, $guest_author_display_name, $post->ID, $wp_user_id->get_error_message() );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_USER_CREATE_ERR, $msg );
 					continue;
 				}
-				wp_update_post( [
-					'ID' => $post->ID,
-					'post_author' => $wp_user->ID,
-				] );
-				update_post_meta( $post->ID, self::META_AUTHOR_WP_USER_SET_FROM_GUEST_AUTHOR, $guest_author->ID );
-				WP_CLI::line( sprintf( ' + Assigned User %d to post.', $wp_user->ID ) );
-				$this->log( self::LOG_USERS_POST_AUTHOR_UPDATED, sprintf( 'Post ID %d, Author WP User ID %d', $post->ID, $wp_user->ID ) );
 
-				$wp_user_author_assigned = true;
+				$wp_user = get_user_by( 'id', $wp_user_id );
+				WP_CLI::line( sprintf( ' + created User ID %d from GA ID %d - %s ...', $wp_user_id, $guest_author->ID, $guest_author_display_name ) );
+				$this->log( self::LOG_USER_CREATED, sprintf( 'post ID %d, GA ID %d, GA %s, WP User ID %d', $post->ID, $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
 			}
+
+			// - map the new WP User to the Guest Author
+			$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $wp_user );
+			$this->log( self::LOG_USERS_LINKED_GA_TO_WP_USER, sprintf( 'GA ID %d, GA %s, WP User ID %d', $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
+
+			// - assign the WP User as the Post's author
+			wp_update_post( [
+				'ID' => $post->ID,
+				'post_author' => $wp_user->ID,
+			] );
+			update_post_meta( $post->ID, self::META_AUTHOR_WP_USER_SET_FROM_GUEST_AUTHOR, $guest_author->ID );
+
+			WP_CLI::line( sprintf( ' + Assigned User %d to post.', $wp_user->ID ) );
+			$this->log( self::LOG_USERS_POST_AUTHOR_UPDATED, sprintf( 'Post ID %d, Author WP User ID %d', $post->ID, $wp_user->ID ) );
 		}
 
 		WP_CLI::success( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
