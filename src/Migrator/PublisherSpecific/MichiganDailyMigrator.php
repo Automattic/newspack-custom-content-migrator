@@ -28,6 +28,13 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	const META_SLUG_REDIRECTION_RULE_FROM_DRUPAL_ALIAS = '_slug_redirection_rule_from_drupal_alias';
 
 	/**
+	 * Used by the `newspack-content-migrator michigan-daily-set-wp-user-authors-from-guest-authors` commands, set on Posts which
+	 * we've updated by assigning their author to be a new WP User created from Guest Authors. It's complicated, we're aware, but
+	 * this whole migration was :)
+	 */
+	const META_AUTHOR_WP_USER_SET_FROM_GUEST_AUTHOR = '_newspack-wp_user_set_from_ga';
+
+	/**
 	 * Error log file names -- grouped by error types to make reviews easier.
 	 */
 	const LOG_FILE_ERR_POST_CONTENT_EMPTY           = 'michigandaily__postcontentempty.log';
@@ -41,6 +48,10 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 	const LOG_DISPLAY_IMAGE_DOWNLOAD_FAILED         = 'michigandaily__display_image_download_failed.log';
 	const LOG_DISPLAY_IMAGE_NO_URI                  = 'michigandaily__display_image_no_uri.log';
 	const LOG_DISPLAY_ERR                           = 'michigandaily__display_err.log';
+	const LOG_USER_CREATE_ERR                       = 'michigandaily__user_create_err.log';
+	const LOG_USER_CREATED                          = 'michigandaily__user_create.log';
+	const LOG_USERS_LINKED_GA_TO_WP_USER            = 'michigandaily__user_linked.log';
+	const LOG_USERS_POST_AUTHOR_UPDATED             = 'michigandaily__post_author_update.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -150,6 +161,27 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// 	]
 		// );
 		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-set-wp-user-authors-from-guest-authors',
+			[ $this, 'cmd_set_wp_user_authors_from_guest_authors' ],
+			[
+				'shortdesc' => 'Goes through all the Posts which have author ID 0, gets their Guest Author, converts it to a WP User and links the new User to the GA, then assigns the WP User as the Post author too.'
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-unset-wp-user-authors-assigned-from-guest-authors',
+			[ $this, 'cmd_unset_wp_user_authors_assigned_from_guest_authors' ],
+			[
+				'shortdesc' => 'Undos the `newspack-content-migrator michigan-daily-set-wp-user-authors-from-guest-authors` command, and sets the those Posts\' authors to 0.'
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator michigan-daily-unset-wp-user-authors-where-guest-authors-exist',
+			[ $this, 'cmd_unset_wp_user_authors_where_guest_authors_exist' ],
+			[
+				'shortdesc' => 'Sets posts\' author to 0 for all the posts which gave Guest Authors and also have the Post WP User Author assigned too.'
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator michigan-daily-update-authors-and-dates-from-field-data-field-byline',
 			[ $this, 'cmd_update_authors_from_field_data_field_byline' ],
 			[
@@ -240,9 +272,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		// Get the node headers.
 		$field_data_field_article_header_all_rows = $this->get_article_header_rows( $nodes );
 		$article_headers_rows_for_update = [];
-
-// TODO -- remove temp DEV:
-// $nodes = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM node WHERE nid IN ( 150434, 150188, 150176 )" ), ARRAY_A );
 
 		foreach ( $nodes as $i => $node ) {
 			$nid = $node['nid'];
@@ -1069,12 +1098,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 
 		global $wpdb;
 		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
-// TODO DEV REMOVE:
-// $posts = [
-// 	// get_post( 32 ),
-// 	// get_post( 35 ),
-// 	// get_post( 39 ),
-// ];
 
 		foreach ( $posts as $k => $post ) {
 			WP_CLI::line( sprintf( '- (%d/%d) post ID %d ...', $k + 1, count( $posts ), $post->ID ) );
@@ -1214,14 +1237,6 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		global $wpdb;
 
 		$posts = $this->posts_logic->get_all_posts( [ 'post' ], [ 'publish' ] );
-
-// TODO -- remove temp DEV:
-// $posts = [
-// // 	get_post( 459 ), // nid 252962
-// // 	get_post( 2266 ), // invalid byline full name with value "."
-// ];
-// $posts = get_posts([ 'posts_per_page' => -1, 'post__in' => [ ] ]);
-
 		foreach ( $posts as $k => $post ) {
 			$original_nid = get_post_meta( $post->ID, self::META_OLD_NODE_ID, true );
 			if ( ! $original_nid ) {
@@ -1360,6 +1375,203 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 		if ( file_exists( self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND ) ) {
 			WP_CLI::warning( sprintf( 'Check `%s` for `nid`s with no matched `uid`s -- default WP user was used as author for these.', self::LOG_HEADER_UPDATE_POST_WITH_NID_NOT_FOUND  ) );
 		}
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator michigan-daily-set-wp-user-authors-from-guest-authors`.
+	 */
+	public function cmd_set_wp_user_authors_from_guest_authors( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		@unlink( self::LOG_USER_CREATE_ERR );
+		@unlink( self::LOG_USER_CREATED );
+		@unlink( self::LOG_USERS_LINKED_GA_TO_WP_USER );
+		@unlink( self::LOG_USERS_POST_AUTHOR_UPDATED );
+
+		// - get all the existing posts with an author of 0
+		$posts = get_posts( [
+			'author' =>  0,
+			'post_type' => 'post',
+			'post_status' => [ 'publish', 'draft' ],
+			'posts_per_page' => -1,
+		] );
+		foreach ( $posts as $i => $post ) {
+
+			WP_CLI::line( sprintf( '- (%d/%d) updating Author for post ID %d...', $i + 1, count( $posts ), $post->ID ) );
+
+			// - get the Post's Guest Author
+			$guest_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post->ID );
+			if ( ! $guest_authors ) {
+				WP_CLI::line( ' x skipping, no GAs.' );
+				continue;
+			}
+
+			// - create a WP User from the first Guest Author, and assign it as the Post Author.
+			$guest_author = $guest_authors[0];
+			$guest_author_display_name = trim( $guest_author->display_name );
+			$wp_user = $this->get_wp_user_by_full_name( $guest_author_display_name );
+
+			// Create a User wo/ an email.
+			if ( ! $wp_user ) {
+				$username = trim( sanitize_user( $guest_author_display_name ) );
+				$wp_user_id = wp_create_user( $username, wp_generate_password() );
+
+				if ( is_wp_error( $wp_user_id ) && (
+					isset( $wp_user_id->errors[ 'existing_user_login' ] ) ||
+					isset( $wp_user_id->errors[ 'user_login_too_long' ] )
+				) ) {
+					// Some existing Users have different names, but keep the same username,
+					// e.g. "Justin OBeirne" vs "Justin O’Beirne".
+					// Repeat user creation with a unique login.
+					$username = $this->get_unique_username( $username );
+					$wp_user_id = wp_create_user( $username, wp_generate_password() );
+				} else if ( is_wp_error( $wp_user_id ) ) {
+					$msg = sprintf( 'Error creating User from GA ID %d and display_name %s for post ID %d: %s', $guest_author->ID, $guest_author_display_name, $post->ID, $wp_user_id->get_error_message() );
+					WP_CLI::warning( $msg );
+					$this->log( self::LOG_USER_CREATE_ERR, $msg );
+					continue;
+				}
+
+				$wp_user = get_user_by( 'id', $wp_user_id );
+				WP_CLI::line( sprintf( ' + created User ID %d from GA ID %d - %s ...', $wp_user_id, $guest_author->ID, $guest_author_display_name ) );
+				$this->log( self::LOG_USER_CREATED, sprintf( 'post ID %d, GA ID %d, GA %s, WP User ID %d', $post->ID, $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
+			}
+
+			// - map the new WP User to the Guest Author
+			$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $wp_user );
+			$this->log( self::LOG_USERS_LINKED_GA_TO_WP_USER, sprintf( 'GA ID %d, GA %s, WP User ID %d', $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
+
+			// - assign the WP User as the Post's author
+			wp_update_post( [
+				'ID' => $post->ID,
+				'post_author' => $wp_user->ID,
+			] );
+			update_post_meta( $post->ID, self::META_AUTHOR_WP_USER_SET_FROM_GUEST_AUTHOR, $guest_author->ID );
+
+			WP_CLI::line( sprintf( ' + Assigned User %d to post.', $wp_user->ID ) );
+			$this->log( self::LOG_USERS_POST_AUTHOR_UPDATED, sprintf( 'Post ID %d, Author WP User ID %d', $post->ID, $wp_user->ID ) );
+		}
+
+		WP_CLI::success( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		if ( file_exists( self::LOG_USER_CREATE_ERR ) ) {
+			WP_CLI::warning( sprintf( 'Check `%s` for errors.', self::LOG_USER_CREATE_ERR ) );
+		}
+		if ( file_exists( self::LOG_USER_CREATED ) ) {
+			WP_CLI::warning( sprintf( 'Log available %s.', self::LOG_USER_CREATED ) );
+		}
+		if ( file_exists( self::LOG_USERS_LINKED_GA_TO_WP_USER ) ) {
+			WP_CLI::warning( sprintf( 'Log available %s.', self::LOG_USERS_LINKED_GA_TO_WP_USER ) );
+		}
+		if ( file_exists( self::LOG_USERS_POST_AUTHOR_UPDATED ) ) {
+			WP_CLI::warning( sprintf( 'Log available %s.', self::LOG_USERS_POST_AUTHOR_UPDATED ) );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator michigan-daily-unset-wp-user-authors-assigned-from-guest-authors`.
+	 */
+	public function cmd_unset_wp_user_authors_assigned_from_guest_authors( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		$posts = get_posts( [
+			'meta_key'       => self::META_AUTHOR_WP_USER_SET_FROM_GUEST_AUTHOR,
+			'post_status'    => 'any',
+			'posts_per_page' => -1
+		] );
+		WP_CLI::line( sprintf( 'Setting post_author=0 for %d posts...', count( $posts ) ) );
+		foreach ( $posts as $post ) {
+			$wpdb->update( $wpdb->posts, [ 'post_author' => 0 ], [ 'ID' => $post->ID ] );
+		}
+
+		WP_CLI::success( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator michigan-daily-unset-wp-user-authors-where-guest-authors-exist`.
+	 */
+	public function cmd_unset_wp_user_authors_where_guest_authors_exist( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+
+		WP_CLI::line( 'Fetching all Posts with `post_author` != 0 ...' );
+		$results = $wpdb->get_results(
+			"select ID, post_author
+			from {$wpdb->posts}
+			where post_author <> 0
+			and post_type = 'post'
+			and post_status in ( 'publish', 'draft', 'trash' );",
+			ARRAY_A
+		);
+		foreach ( $results as $i => $result ) {
+			WP_CLI::line( sprintf( '(%d/%d) ID %d ...', $i + 1, count( $results ), $result[ 'ID' ] ) );
+			$post = get_post( $result[ 'ID' ] );
+
+			// - get the Post's Guest Author
+			$guest_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post->ID );
+			if ( ! $guest_authors ) {
+				WP_CLI::line( ' x skipping, no GAs.' );
+				continue;
+			}
+
+			$wpdb->update( $wpdb->posts, [ 'post_author' => 0 ], [ 'ID' => $post->ID ] );
+			WP_CLI::line( ' +++ `post_author` set to 0' );
+		}
+
+		WP_CLI::success( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+
+		wp_cache_flush();
+	}
+
+		/**
+	 * Creates an unique username by appending uniqid(), and minds the max length 60 chars.
+	 *
+	 * @param string $username Username.
+	 *
+	 * @return string Unique username.
+	 */
+	private function get_unique_username( $username ) {
+		// Max username length is 60, so abbreviate it if it's too long.
+		$strlen_max_username = 60;
+		$strlen_uniqid       = 13;
+		$strlen_username     = strlen( $username );
+		if ( $strlen_username > ( $strlen_max_username - $strlen_uniqid ) ) {
+			$username = substr( $username, 0, $strlen_max_username - $strlen_uniqid );
+		}
+		$username = substr( $username . '_' . uniqid(), 0, 60 );
+
+		return $username;
+	}
+
+	/**
+	 * Gets an existing WP user by their display_name or user_login.
+	 *
+	 * @param string $full_name User full name.
+	 *
+	 * @return mixed|null User object or null.
+	 */
+	public function get_wp_user_by_full_name( $full_name ) {
+		// Check both strictly sanitized ana not strictly sanitized login.
+		$display_name_sanitized_strict     = sanitize_user( $full_name, true );
+		$display_name_sanitized_not_strict = sanitize_user( $full_name, false );
+
+		$users = get_users();
+		foreach ( $users as $user ) {
+			if (
+				( $display_name_sanitized_strict == $user->data->display_name )
+				|| ( $display_name_sanitized_strict == $user->data->user_login )
+				|| ( $display_name_sanitized_not_strict == $user->data->display_name )
+				|| ( $display_name_sanitized_not_strict == $user->data->user_login )
+			) {
+				return $user;
+			}
+		}
+
+		return null;
 	}
 
 	/**

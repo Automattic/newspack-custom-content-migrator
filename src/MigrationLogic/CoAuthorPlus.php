@@ -166,6 +166,17 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets Post's Guest Authors.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return mixed|void
+	 */
+	public function get_guest_authors_for_post( $post_id ) {
+		return get_coauthors( $post_id );
+	}
+
+	/**
 	 * Creates a Guest Author user from an existing WP user.
 	 *
 	 * @param int $user_id WP User ID.
