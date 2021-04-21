@@ -100,24 +100,21 @@ class MetaToContentMigrator implements InterfaceMigrator {
 		} else {
 			// Build an OR meta query so we get posts with at least one of the keys.
 			$meta_query = [
-				'relation' => 'AND',
-				[
-					// This part checks for the existence of at least one meta key.
-					'relation' => 'OR',
-					// This is where the foreach below will insert the given meta keys.
-				],
+				'relation' => 'OR',
+				// This is where the foreach below will insert the given meta keys.
 			];
 
 			// Add each of the meta keys to the 'OR' part of the query.
 			foreach( $meta_keys as $key ) {
-				$meta_query[0][] = [ 'key' => $key, 'compare' => 'EXISTS' ];
+				$meta_query[] = [ 'key' => $key, 'compare' => 'EXISTS' ];
 			}
 
 			// Get all the posts.
 			$posts = get_posts( [
 				'posts_per_page' => -1,
-				'post_status'    => 'any',
-				'meta_query'     => $meta_query,
+				'post_status'    => 'publish',
+				'post_type'      => 'post',
+				// 'meta_query'     => $meta_query,
 			] );
 		}
 
@@ -129,7 +126,7 @@ class MetaToContentMigrator implements InterfaceMigrator {
 
 			// Already got content? Skip it!
 			if ( ! empty( get_post_field( 'post_content', $post->ID ) ) ) {
-				WP_CLI::info( sprintf( 'Skipping %d because it has post_content already.', $post->ID ) );
+				WP_CLI::line( sprintf( 'Skipping %d because it has post_content already.', $post->ID ) );
 			}
 
 			// Set up our new post content.
@@ -157,6 +154,11 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				$post_content .= apply_filters( 'np_meta_to_content_value', $value, $key, $post->ID );
 			}
 
+			// Safety check: don't blank the content out by accident like an idiot.
+			if ( empty( $post_content ) ) {
+				continue;
+			}
+
 			// Update in a live run only.
 			$update = ( $dry_run ) ? true : wp_update_post( [
 				'ID'           => $post->ID,
@@ -180,7 +182,7 @@ class MetaToContentMigrator implements InterfaceMigrator {
 				} else {
 					add_post_meta( $post->ID, '_np_meta_migration', $updated_message );
 				}
-				WP_CLI::success( sprintf( 'Successfully updated post %d', $post->ID ) );
+				WP_CLI::success( sprintf( 'Successfully processed post %d', $post->ID ) );
 			}
 
 		}
