@@ -67,7 +67,6 @@ class NewNaratifMigrator implements InterfaceMigrator {
 	 * Callable for `newspack-content-migrator newnaratif-members`.
 	 */
 	public function cmd_newnaratif_contributors() {
-
 		$dry_run  = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
 		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? $assoc_args[ 'post-ids' ] : null;
 
@@ -85,7 +84,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				],
 			],
 		];
-		if ( $post_ids ) ) {
+		if ( $post_ids ) {
 			$get_posts_args['include'] = explode( ',', $post_ids );
 		}
 
@@ -149,7 +148,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				$contributor_content .= sprintf(
 					$contributor_template,
 					$contributor['label'],
-					$user->display_name,
+					$user->display_name
 				);
 			}
 
@@ -159,10 +158,10 @@ class NewNaratifMigrator implements InterfaceMigrator {
 			WP_CLI::line( '-- Updating content...' );
 
 			// Update the post with the new content.
-			$update = ( $dry_run ) ? true : wp_update_post(
+			$update = ( $dry_run ) ? true : wp_update_post( [
 				'ID'           => $post->ID,
 				'post_content' => $new_content . $post->post_content,
-			);
+			] );
 			if ( is_wp_error( $update ) ) {
 				WP_CLI::warning( sprintf( '-- Failed to update post %d because %s.', $post->ID, $update->get_error_message() ) );
 			} else {
