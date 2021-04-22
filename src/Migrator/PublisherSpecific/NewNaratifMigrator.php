@@ -114,15 +114,11 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				$contributor_label = get_post_meta( $post->ID, "additional_authors_{$i}_label", true );
 
 				if ( ! empty( $contributor_user ) ) {
-					$contributors[ $i ] = [
-						'user' => $contributor_user,
-					];
+					$contributors[ $i ]['user'] = $contributor_user;
 				}
 
 				if ( ! empty( $contributor_label ) && isset( $contributors[ $i ] ) ) {
-					$contributors[ $i ] = [
-						'label' => $contributor_label,
-					];
+					$contributors[ $i ]['label'] = $contributor_label;
 				}
 			}
 
