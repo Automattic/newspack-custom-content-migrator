@@ -66,7 +66,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 	/**
 	 * Callable for `newspack-content-migrator newnaratif-members`.
 	 */
-	public function cmd_newnaratif_contributors() {
+	public function cmd_newnaratif_contributors( $args, $assoc_args ) {
 		$dry_run  = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
 		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? $assoc_args[ 'post-ids' ] : null;
 
