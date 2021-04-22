@@ -75,6 +75,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 			'posts_per_page' => -1,
 			'post_type'      => 'post',
 			'post_status'    => 'publish',
+			// Exclude all posts in the "Announcements" category.
 			'tax_query'      => [
 				[
 					'taxonomy' => 'category',
@@ -82,6 +83,14 @@ class NewNaratifMigrator implements InterfaceMigrator {
 					'terms'    => 'announcements',
 					'operator' => 'NOT IN',
 				],
+			],
+			// Don't process posts more than once.
+			'meta_query' => [
+				[
+					'key' => '_newspack_contributors_migrated',
+					'value' => '?',
+					'compare' => 'NOT EXISTS'
+				]
 			],
 		];
 		if ( $post_ids ) {
@@ -162,6 +171,11 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				WP_CLI::warning( sprintf( '-- Failed to update post %d because %s.', $post->ID, $update->get_error_message() ) );
 			} else {
 				WP_CLI::line( '-- Successfully updated!' );
+			}
+
+			// Leave an audit trail behind.
+			if ( ! $dry_run ) {
+				add_post_meta( $post->ID, '_newspack_contributors_migrated', 1 );
 			}
 
 		}
