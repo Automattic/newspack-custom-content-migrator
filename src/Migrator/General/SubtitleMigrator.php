@@ -64,7 +64,7 @@ class SubtitleMigrator implements InterfaceMigrator {
 	/**
 	 * Migrate all post excerpts into the subtitle field.
 	 */
-	public function cmd_migrate_excerpt_to_subtitle() {
+	public function cmd_migrate_excerpt_to_subtitle( $args, $assoc_args ) {
 		global $wpdb;
 
 		$copy = isset( $assoc_args[ 'copy' ] ) ? true : false;
