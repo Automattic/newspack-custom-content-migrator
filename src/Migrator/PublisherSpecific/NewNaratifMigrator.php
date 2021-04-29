@@ -84,6 +84,29 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newnaratif-video-podcast-widths',
+			[ $this, 'cmd_newnaratif_video_podcast_widths' ],
+			[
+				'shortdesc' => 'Fixes the width of migrated video and podcast embeds.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'CSV post/page IDs to process.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually make any changes.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -213,7 +236,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 		$dry_run  = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
 		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? $assoc_args[ 'post-ids' ] : null;
 
-		//  Set up the query args.
+		// Set up the query args.
 		$get_posts_args = [
 			'posts_per_page' => -1,
 			'post_type'      => 'post',
@@ -297,6 +320,141 @@ class NewNaratifMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( sprintf( 'Processed %d posts and made %d updates.', count( $posts ), $updates ) );
+
+	}
+
+	public function cmd_newnaratif_video_podcast_widths( $args, $assoc_args ) {
+		$dry_run  = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
+		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? $assoc_args[ 'post-ids' ] : null;
+
+		// Set up the query args.
+		$get_posts_args = [
+			'posts_per_page' => -1,
+			'post_type'      => 'post',
+			'post_status'    => 'publish',
+			// Don't process posts more than once.
+			'meta_query' => [
+				[
+					'key' => '_newspack_podcasts_width_fixed',
+					'value' => '?',
+					'compare' => 'NOT EXISTS'
+				]
+			],
+		];
+		if ( $post_ids ) {
+			$get_posts_args['include'] = explode( ',', $post_ids );
+		}
+
+		// Grab all the posts.
+		$posts = get_posts( $get_posts_args );
+		if ( empty( $posts ) ) {
+			WP_CLI::error( 'No posts to process.' ); // Exits.
+		}
+
+		WP_CLI::line( sprintf( 'Processing %d posts.', count( $posts ) ) );
+		$updates = 0; // Let's keep count.
+
+		foreach ( $posts as $post ) {
+
+			WP_CLI::line( sprintf( 'Checking post %d', $post->ID ) );
+
+			$replacements_youtube = $this->get_youtube_replacements( $post->post_content );
+			$replacements_podcast = $this->get_podcast_replacements( $post->post_content );
+
+			$searches     = \array_merge( $replacements_youtube[0], $replacements_podcast[0] );
+			$replacements = \array_merge( $replacements_youtube[1], $replacements_podcast[1] );
+
+			WP_CLI::line( sprintf( '-- Performing %d replacements', count( $replacements ) ) );
+			if ( empty( $searches ) ) {
+				if ( ! $dry_run ) add_post_meta( $post->ID, '_newspack_podcasts_width_fixed', 1 );
+				continue; // Don't attempt no replacements.
+			}
+
+			$new_content = str_replace( $searches, $replacements, $post->post_content );
+
+			if ( ( $new_content === $post->post_content ) || empty( $new_content ) ) {
+				WP_CLI::warning( 'New content is identical or empty. Skipping.' );
+				continue;
+			}
+
+			$updated = ( $dry_run ) ? true : wp_update_post( [
+				'ID'           => $post->ID,
+				'post_content' => $new_content,
+			] );
+			if ( is_wp_error( $updated ) ) {
+				WP_CLI::warning( sprintf(
+					'Failed to update post %d because "%s".',
+					$post->ID,
+					$updated->get_error_message()
+				) );
+				continue;
+			}
+
+			if ( ! $dry_run ) add_post_meta( $post->ID, '_newspack_podcasts_width_fixed', 1 );
+			WP_CLI::success( 'Updated!' );
+
+		}
+
+		wp_cache_flush();
+
+	}
+
+	private function get_youtube_replacements( $post_content ) {
+		$find   = '/<!-- wp:html -->
+<figure><iframe src="(.*)" width="\d+" height="\d+" frameborder="0" allowfullscreen="allowfullscreen"><\/iframe><\/figure>
+<!-- \/wp:html -->/';
+		$search = \preg_match_all( $find, $post_content, $matches, PREG_PATTERN_ORDER );
+
+		WP_CLI::line( sprintf( '-- Found %d YouTube videos', count( $matches[1] ) ) );
+		if ( empty( count( $matches[1] ) ) ) {
+			return [ [], [] ]; // Return an empty array so array_merge does nothing.
+		}
+
+		for ( $i = 0; $i < count( $matches[1] ); $i++ ) {
+			$yt_url = $matches[1][ $i ];
+			$matches[1][ $i ] = sprintf(
+				'<!-- wp:embed {"url":"%1$s","type":"rich","providerNameSlug":"embed-handler","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+%1$s
+</div></figure>
+<!-- /wp:embed -->',
+				$yt_url
+			);
+		}
+
+		return $matches;
+	}
+
+	private function get_podcast_replacements( $post_content ) {
+		$find   = '/<!-- wp:html -->
+<figure><iframe src="(.*)" width="(\d+px)" height="\d+px" frameborder="0" scrolling="no"><\/iframe><\/figure>
+<!-- \/wp:html -->/';
+		$search = \preg_match_all( $find, $post_content, $matches, PREG_PATTERN_ORDER );
+
+		WP_CLI::line( sprintf( '-- Found %d podcasts', count( $matches[1] ) ) );
+		if ( empty( count( $matches[1] ) ) ) {
+			return [ [], [] ]; // Return an empty array so array_merge does nothing.
+		}
+
+		$replacements = [];
+
+		for ( $i = 0; $i < count( $matches[0] ); $i++ ) {
+
+			// Build our replacement string.
+			$replacement = $matches[0][ $i ];
+
+			// Replace the pixel width with 100%.
+			$replacement = str_replace( $matches[2][ $i ], '100%', $replacement );
+
+			// Remove the figure element.
+			$replacement = str_replace( '<figure>', '', $replacement );
+			$replacement = str_replace( '</figure>', '', $replacement );
+
+			$replacements[0][ $i ] = $matches[0][ $i ]; // Original.
+			$replacements[1][ $i ] = $replacement;      // Replacement.
+		}
+
+		return $replacements;
 
 	}
 
