@@ -61,6 +61,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator newnaratif-research-styling',
 			[ $this, 'cmd_newnaratif_research_styling' ],
@@ -84,6 +85,7 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator newnaratif-video-podcast-widths',
 			[ $this, 'cmd_newnaratif_video_podcast_widths' ],
@@ -107,6 +109,15 @@ class NewNaratifMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator newnaratif-import-ip-addresses',
+			[ $this, 'cmd_newnaratif_import_ip_addresses' ],
+			[
+				'shortdesc' => 'Imports the list of orgnisations and IP addresses to get content access.',
+			]
+		);
+
 	}
 
 	/**
@@ -396,6 +407,63 @@ class NewNaratifMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+
+	}
+
+	public function cmd_newnaratif_import_ip_addresses( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Probably unnecessary but what the hey.
+		$dry_run  = isset( $assoc_args[ 'dry-run' ] ) ? true : false;
+
+		// Collect all the data.
+		$ips_and_orgs = [];
+
+		// Get all the options from the old DB then deal with them.
+		$results = $wpdb->get_results( "SELECT * FROM `live_wp_options` WHERE `option_name` LIKE '%allowed_ip_addresses_%'" );
+		foreach ( $results as $result ) {
+
+			// Keys starting with an underscore are just ACF's field references, so ignore them.
+			if ( 0 === strpos( $result->option_name, '_' ) ) {
+				continue;
+			}
+
+			// This will put the integer in index 4 and label/ip in 5, like so:
+			// array (
+			// 		0 => 'options',
+			// 		1 => 'allowed',
+			// 		2 => 'ip',
+			// 		3 => 'addresses',
+			// 		4 => '0',
+			// 		5 => 'label||ip',
+			// 		{6 => 'address',}
+			// )
+			$key_parts = explode( '_', $result->option_name );
+			if ( ! is_numeric( $key_parts[4] ) ) { // ...or not.
+				continue;
+			}
+
+			// Set up the data store for this IP if it doesn't already exist.
+			if ( ! \array_key_exists( $key_parts[4], $ips_and_orgs ) ) {
+				$ips_and_orgs[ $key_parts[4] ] = [
+					'label'        => '',
+					'ip_addresses' => '',
+				];
+			}
+
+			// Add the data we're dealing with.
+			switch ( count( $key_parts ) ) {
+				case 6: // Label.
+					$ips_and_orgs[ $key_parts[4] ]['label'] = $result->option_value;
+					break;
+				case 7: // IP address.
+					$ips_and_orgs[ $key_parts[4] ]['ip_addresses'] = $result->option_value;
+			}
+
+		}
+
+		// Now we have a complete set of data, add it to the DB.
+		add_option( 'nn_all_allowed_ips', $ips_and_orgs );
 
 	}
 
