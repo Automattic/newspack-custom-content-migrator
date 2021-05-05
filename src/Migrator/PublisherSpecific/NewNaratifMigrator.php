@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use \WP_CLI;
 
 /**
@@ -115,6 +116,30 @@ class NewNaratifMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_newnaratif_import_ip_addresses' ],
 			[
 				'shortdesc' => 'Imports the list of orgnisations and IP addresses to get content access.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator newnaratif-add-missing-coauthors',
+			[ $this, 'cmd_newnaratif_add_missing_coauthors' ],
+			[
+				'shortdesc' => 'Fixes the width of migrated video and podcast embeds.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'CSV post/page IDs to process.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually make any changes.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 
@@ -464,6 +489,97 @@ class NewNaratifMigrator implements InterfaceMigrator {
 
 		// Now we have a complete set of data, add it to the DB.
 		add_option( 'nn_all_allowed_ips', $ips_and_orgs );
+
+	}
+
+	/**
+	 * cmd_newnaratif_add_missing_coauthors
+	 *
+	 * Make sure that the additional authors stored by ACF in the old site are all
+	 * added as co-authors in the new site.
+	 *
+	 * @param array $args       Arguments.
+	 * @param array $assoc_args Associated argument.
+	 */
+	public function cmd_newnaratif_add_missing_coauthors( $args, $assoc_args ) {
+		$post_ids = isset( $assoc_args[ 'post-ids' ] ) ? $assoc_args[ 'post-ids' ] : null;
+
+		// Set up the query args.
+		$get_posts_args = [
+			'posts_per_page' => -1,
+			'post_type'      => 'post',
+			'post_status'    => 'publish',
+			// Don't process posts more than once.
+			'meta_query' => [
+				[
+					'key' => '_newspack_contributors_migrated',
+					'compare' => 'EXISTS'
+				]
+			],
+		];
+		if ( $post_ids ) {
+			$get_posts_args['include'] = explode( ',', $post_ids );
+			unset( $get_posts_args['meta_query'] );
+		}
+
+		// Grab all the posts.
+		$posts = get_posts( $get_posts_args );
+		if ( empty( $posts ) ) {
+			WP_CLI::error( 'No posts to process.' ); // Exits.
+		}
+
+		$coauthorsplus_logic = new CoAuthorPlusLogic();
+
+		WP_CLI::line( sprintf( 'Processing %d posts.', count( $posts ) ) );
+		$updates = 0; // Let's keep count.
+
+		foreach ( $posts as $post ) {
+
+			WP_CLI::line( sprintf( 'Checking post %d', $post->ID ) );
+
+			// Get the co-authors for this post.
+			$coauthors = $coauthorsplus_logic->get_guest_authors_for_post( $post->ID );
+			if ( ! empty( $coauthors ) ) {
+				// Grab just the IDs.
+				$coauthors = \wp_list_pluck( $coauthors, 'ID' );
+			}
+
+			// Get each contributor (there are no more than 4).
+			$contributors = [];
+			for ( $i = 0; $i <= 4; $i++ ) {
+				// Get the user ID for each contributor.
+				$contributor_user = get_post_meta( $post->ID, "additional_authors_{$i}_user", true );
+				if ( ! empty( $contributor_user ) ) {
+					$contributors[] = $contributor_user;
+				}
+
+			}
+
+			// Skip posts with no contributors.
+			if ( empty( $contributors ) ) {
+				WP_CLI::warning( sprintf( '-- No contributors found for post %d. Skipping.', $post->ID ) );
+				continue;
+			}
+
+			// Make sure there is a co-author for each contributor user, and get their IDs.
+			$coauthor_ids = [];
+			foreach ( $contributors as $contributor ) {
+				WP_CLI::line( sprintf( 'Creating new coauthor for user %d', $contributor ) );
+				$coauthor_ids[] = $coauthorsplus_logic->create_guest_author_from_wp_user( $contributor );
+			}
+
+			// Now make sure each contributor is also a co-author on the post.
+			$coauthorsplus_logic->assign_guest_authors_to_post( $coauthor_ids, $post->ID );
+			WP_CLI::success( \sprintf(
+				'Added %d contributors to post %d with ids %s',
+				count( $contributors ),
+				$post->ID,
+				implode( ',', $contributors )
+			) );
+
+		}
+
+		wp_cache_flush();
 
 	}
 
