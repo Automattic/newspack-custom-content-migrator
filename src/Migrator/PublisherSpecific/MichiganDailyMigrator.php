@@ -1438,8 +1438,8 @@ class MichiganDailyMigrator implements InterfaceMigrator {
 			}
 
 			// - map the new WP User to the Guest Author
-			// $this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $wp_user );
-			// $this->log( self::LOG_USERS_LINKED_GA_TO_WP_USER, sprintf( 'GA ID %d, GA %s, WP User ID %d', $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
+			$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $wp_user );
+			$this->log( self::LOG_USERS_LINKED_GA_TO_WP_USER, sprintf( 'GA ID %d, GA %s, WP User ID %d', $guest_author->ID, $guest_author_display_name, $wp_user->ID ) );
 
 			// - assign the WP User as the Post's author
 			wp_update_post( [

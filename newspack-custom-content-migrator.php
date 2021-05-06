@@ -24,7 +24,6 @@ require_once ABSPATH . 'wp-settings.php';
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators( array(
 	Migrator\General\PostsMigrator::class,
-	Migrator\General\MetaToContentMigrator::class,
 	Migrator\General\MenusMigrator::class,
 	Migrator\General\CssMigrator::class,
 	Migrator\General\ContentConverterPluginMigrator::class,
@@ -47,12 +46,12 @@ PluginSetup::register_migrators( array(
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
 	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
 	// Migrator\PublisherSpecific\HKFPMigrator::class,
-	// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-	// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
-	// Migrator\PublisherSpecific\TRNNMigrator::class,
-	// Migrator\PublisherSpecific\OnTheWightMigrator::class,
-	// Migrator\PublisherSpecific\EastMojoMigrator::class,
-	// Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
-	// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
-	Migrator\PublisherSpecific\HipertextualMigrator::class,
+    // Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
+    // Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+     Migrator\PublisherSpecific\TRNNMigrator::class,
+     Migrator\PublisherSpecific\OnTheWightMigrator::class,
+     Migrator\PublisherSpecific\EastMojoMigrator::class,
+     Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
+     Migrator\PublisherSpecific\MichiganDailyMigrator::class,
+     Migrator\PublisherSpecific\NewNaratifMigrator::class,
 ) );

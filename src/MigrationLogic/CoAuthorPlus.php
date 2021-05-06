@@ -173,21 +173,7 @@ class CoAuthorPlus {
 	 * @return mixed|void
 	 */
 	public function get_guest_authors_for_post( $post_id ) {
-		$guest_authors = [];
-
-		$coauthors = get_coauthors( $post_id );
-
-		// Sometimes get_coauthors() returns the WP_User/Author, too; this could have been a lapse on some end, but just in case,
-		// let's filter out the \WP_User objects.
-		foreach ( $coauthors as $coauthor ) {
-			if ( $coauthor instanceof \WP_User ) {
-				continue;
-			}
-
-			$guest_authors[] = $coauthor;
-		}
-
-		return $guest_authors;
+		return get_coauthors( $post_id );
 	}
 
 	/**
