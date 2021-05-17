@@ -168,10 +168,11 @@ class PluginInstaller {
 
 		$result = $upgrader->install_package(
 			[
-				'source'        => $working_dir,
-				'destination'   => WP_PLUGIN_DIR,
-				'clear_working' => true,
-				'hook_extra'    => [
+				'source'                      => $working_dir,
+				'destination'                 => WP_PLUGIN_DIR,
+				'clear_working'               => true,
+				'abort_if_destination_exists' => false,
+				'hook_extra'                  => [
 					'type'   => 'plugin',
 					'action' => 'install',
 				],
