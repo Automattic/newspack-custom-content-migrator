@@ -50,7 +50,7 @@ class QuePasaMigrator implements InterfaceMigrator {
 			'newspack-content-migrator quepasa-set-featured-images-post-launch',
 			[ $this, 'cmd_set_feat_images_post_launch' ],
 			[
-				'shortdesc' => 'Sets additionally idendified missing Featured images; the origin DB was a bit faulty, so we are updating these manually.',
+				'shortdesc' => 'Sets additionally identified missing Featured images; the origin DB was a bit faulty, which is why these are updated individually.',
 			]
 		);
 	}
