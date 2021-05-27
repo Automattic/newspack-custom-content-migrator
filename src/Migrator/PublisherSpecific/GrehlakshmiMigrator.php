@@ -45,44 +45,39 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			'newspack-content-migrator grehlakshmi-import-xmls',
 			[ $this, 'cmd_import_xmls' ],
 			[
-				'shortdesc' => 'Imports Grehlakshmi custom XML conten.',
+				'shortdesc' => 'Imports Grehlakshmi custom XML content.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator grehlakshmi-update-imported-posts',
+			[ $this, 'cmd_update_imported_posts' ],
+			[
+				'shortdesc' => 'Updates all imported Post\' Tags, Categories, and properly sets all their info from metas.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator grehlakshmi-update-imported-posts',
+			[ $this, 'cmd_delete_all_kreatio_post_meta' ],
+			[
+				'shortdesc' => 'Deletes all the Post metas with imported Kreatio post data.',
 				'synopsis'  => [],
 			]
 		);
 	}
 
-	private function get_empty_data_array( $dir = __DIR__ ) {
-		return [
-			'site_title'  => "Grehlakshmi - The Hindi Women's Fashion, Beauty ...",
-			'site_url'    => 'https://www.grehlakshmi.com',
-			'export_file' => $this->get_export_file( $dir ),
-			'posts'       => [],
-		];
-	}
-
-	private function get_export_file( $dir = __DIR__ ) {
-		$number = 0;
-		do {
-			$full_path = $dir . '/' . sprintf( self::EXPORT_FILE_NAME, ++$number );
-		} while( file_exists( $full_path ) );
-
-		return $full_path;
-	}
-
-	/**
-	 * Callable for `newspack-content-migrator grehlakshmi-import-xmls`
-	 */
 	public function cmd_import_xmls( $args, $assoc_args ) {
 		// $xml_file = isset( $assoc_args[ 'xml-file' ] ) ? true : false;
 
 		$time_start = microtime( true );
 
 // $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export_test.xml';
-$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/export.xml';
 // $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export.xml';
-
-// 		$lines_total = $this->count_file_lines( $xml_file );
-		$lines_total = 3957891;
+// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/export.xml';
+		// $lines_total = 3957891;
+$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/custom_converter_test_export.xml';
+		$lines_total = $this->count_file_lines( $xml_file );
 
 		$line_number = 0;
 		$progress    = \WP_CLI\Utils\make_progress_bar( 'XML processed', $lines_total );
@@ -105,11 +100,11 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 // 	$break=1;
 // }
 
-				if ( $line == "<wp:article>\n" ) {
+				if ( 0 === strpos( $line, '<wp:article>' ) ) {
 					$i++;
 					$wp_article_xml = '';
 					$wp_article_xml .= $line;
-				} else if ( $line == "</wp:article>\n" ) {
+				} else if ( 0 === strpos( $line, '</wp:article>' ) ) {
 					$wp_article_xml .= $line;
 
 					// Remove the undefined XML namespace and load the \SimpleXMLElement object.
@@ -211,16 +206,6 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 				case 'article_is_draft':
 					if ( 'true' == $xml_v_tostring ) {
 						$data[ 'status' ] = 'draft';
-					}
-					break;
-				case 'article_audio':
-					if ( 'true' == $xml_v_tostring ) {
-						$data[ 'meta' ][ '_kreatio_audio' ] = $xml_v_tostring;
-					}
-					break;
-				case 'article_video':
-					if ( 'true' == $xml_v_tostring ) {
-						$data[ 'meta' ][ '_kreatio_video' ] = $xml_v_tostring;
 					}
 					break;
 				case 'article_premium':
@@ -331,22 +316,25 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 
 				// Categories.
 				case 'article_taxonomies':
+
+					$categories_meta = [];
 					foreach ( $xml_v as $article_taxonomy_k => $article_taxonomy_v ) {
 
-						$categories_meta = [];
 						foreach ( $article_taxonomy_v as $k => $v ) {
 
-							if ( 'category' == (string) $article_taxonomy_v->{'article_taxonomy_label'} ) {
+							$current_kreatio_article_taxonomy_label = (string) $article_taxonomy_v->{'article_taxonomy_label'};
+							if ( 'category' == $current_kreatio_article_taxonomy_label ) {
 
 								// Here just save all categories info as meta. Cats need to be built up in WP first, with proper
 								// hierarchy.
 								$current_category_meta = [];
-								foreach ( $v as $k => $v ) {
+								foreach ( $article_taxonomy_v as $article_taxonomy_category_k => $article_taxonomy_category_v ) {
+								// foreach ( $v as $article_taxonomy_category_k => $article_taxonomy_category_v ) {
 
 									// \SimpleXMLElement::__toString().
-									$v_tostring = (string) $v;
+									$v_tostring = (string) $article_taxonomy_category_v;
 
-									switch ( $k ) {
+									switch ( $article_taxonomy_category_k ) {
 										case 'article_taxonomy_id':
 											$current_category_meta[ 'article_taxonomy_id' ] = $v_tostring;
 											break;
@@ -363,32 +351,51 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 												$current_category_meta[ 'article_taxonomy_full_alias_name' ] = $v_tostring;
 											}
 											break;
-										case 'article_taxonomy_properties_full_name':
-											if ( ! empty( $v_tostring ) ) {
-												$current_category_meta[ 'article_taxonomy_properties_full_name' ] = $v_tostring;
+
+										case 'article_taxonomy_properties':
+
+											// Iterate over Kreatio-Taxonomy-Category-properties nodes.
+											foreach ( $article_taxonomy_category_v as $article_taxonomy_category_property_k => $article_taxonomy_category_property_v ) {
+
+												// \SimpleXMLElement::__toString().
+												$v_property_tostring = (string) $article_taxonomy_category_property_v;
+
+												switch ( $article_taxonomy_category_property_k ) {
+													case 'article_taxonomy_properties_full_name':
+														if ( ! empty( $v_property_tostring ) ) {
+															$current_category_meta['article_taxonomy_properties_full_name'] = $v_property_tostring;
+														}
+														break;
+													case 'article_taxonomy_properties_alias_name':
+														if ( ! empty( $v_property_tostring ) ) {
+															$current_category_meta['article_taxonomy_properties_alias_name'] = $v_property_tostring;
+														}
+														break;
+												}
+
 											}
 											break;
-										case 'article_taxonomy_properties_alias_name':
-											if ( ! empty( $v_tostring ) ) {
-												$current_category_meta[ 'article_taxonomy_properties_alias_name' ] = $v_tostring;
-											}
-											break;
+
 									}
 								}
 
-							} else if ( 'section' == (string) $article_taxonomy_v->{'article_taxonomy_label'} ) {
-								// Nothing.
-							} else if ( 'source' == (string) $article_taxonomy_v->{'article_taxonomy_label'} ) {
-								// Nothing.
-							}
+								// Add this category infor to the $categories_meta.
+								$current_category_key = $current_category_meta[ 'article_taxonomy_id' ] ?? count( $categories_meta );
+								if ( ! empty( $current_category_meta ) ) {
+									$categories_meta[ $current_category_key ] = $current_category_meta;
+								}
 
-							// Add this category infor to the $categories_meta.
-							$current_category_key = $current_category_meta[ 'article_taxonomy_id' ] ?? count( $categories_meta );
-							$categories_meta[ $current_category_key ] = $current_category_meta;
+							} else if ( 'section' == $current_kreatio_article_taxonomy_label ) {
+								// Nothing.
+								$b=1;
+							} else if ( 'source' == $current_kreatio_article_taxonomy_label ) {
+								// Nothing.
+								$b=1;
+							}
 						}
 					}
 
-					// Set all categories info as JSON encoded meta.
+					// Set all categories as JSON encoded meta.
 					if ( ! empty( $categories_meta) ) {
 						$data[ 'meta' ][ '_kreatio_categories' ] = json_encode( $categories_meta );
 					}
@@ -411,7 +418,7 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 
 		// Add all the $authors_meta info as meta.
 		if ( ! empty( $authors_meta) ) {
-			$data[ 'meta' ][ 'authors_meta' ] = json_encode( $authors_meta );
+			$data[ 'meta' ][ '_kreatio_authors_meta' ] = json_encode( $authors_meta );
 		}
 
 		// Use one out of the two available date fields as published date.
@@ -437,6 +444,38 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 	}
 
 	/**
+	 * Gets an initialized, empty aray for the wxr-exporter.
+	 *
+	 * @param string $dir
+	 *
+	 * @return array
+	 */
+	private function get_empty_data_array( $dir = __DIR__ ) {
+		return [
+			'site_title'  => "Grehlakshmi - The Hindi Women's Fashion, Beauty ...",
+			'site_url'    => 'https://www.grehlakshmi.com',
+			'export_file' => $this->get_export_file( $dir ),
+			'posts'       => [],
+		];
+	}
+
+	/**
+	 * Returns the next export file name by increasing the numeric suffix to the file name.
+	 *
+	 * @param string $dir
+	 *
+	 * @return string
+	 */
+	private function get_export_file( $dir = __DIR__ ) {
+		$number = 0;
+		do {
+			$full_path = $dir . '/' . sprintf( self::EXPORT_FILE_NAME, ++$number );
+		} while( file_exists( $full_path ) );
+
+		return $full_path;
+	}
+
+	/**
 	 * Count number of lines in a file.
 	 *
 	 * @param string $file File full path.
@@ -449,5 +488,19 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/exp
 		$lines_total = $file->key() + 1;
 
 		return $lines_total;
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator update-imported-posts`
+	 */
+	public function cmd_update_imported_posts( $args, $assoc_args ) {
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator delete-all-kreatio-post-metas`
+	 */
+	public function cmd_delete_all_kreatio_post_meta( $args, $assoc_args ) {
+
 	}
 }
