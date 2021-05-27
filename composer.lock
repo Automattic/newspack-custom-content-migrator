@@ -4,8 +4,25 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "58b9f12a708f8bf9eefb206a8cf672ce",
+    "content-hash": "6790d29096248768ad4656eb35e5023e",
     "packages": [
+        {
+            "name": "automattic/newspack-cms-importers",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/Automattic/newspack-cms-importers.git",
+                "reference": "0ea0b2c215280ab6dad6fb87f1e1cea3f3469e52"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "newspack-scraper-migrator/lib/class-newspack-wxr-exporter.php"
+                ]
+            },
+            "time": "2021-05-17T12:16:02+00:00"
+        },
         {
             "name": "guzzlehttp/guzzle",
             "version": "7.2.0",
@@ -925,7 +942,9 @@
     "packages-dev": [],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": [],
+    "stability-flags": {
+        "automattic/newspack-cms-importers": 20
+    },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": [],
