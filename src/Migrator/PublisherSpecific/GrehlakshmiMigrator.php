@@ -13,6 +13,9 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	const EXPORT_FILE_NAME = 'grehlakshmi_export_%d.xml';
 	const EXPORT_BATCH = 100;
 
+	const LOG_PARSED  = 'grehlakshmi__parsed.log';
+	const LOG_SKIPPED = 'grehlakshmi__skipped.log';
+
 	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
@@ -72,20 +75,23 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 
-// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export_test.xml';
-// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export.xml';
-// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/export.xml';
+		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/custom_converter_test_export.xml';
+		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export_test.xml';
+
+		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export.xml';
+		$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/export.xml';
 		// $lines_total = 3957891;
-$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/custom_converter_test_export.xml';
 		$lines_total = $this->count_file_lines( $xml_file );
 
-		$line_number = 0;
-		$progress    = \WP_CLI\Utils\make_progress_bar( 'XML processed', $lines_total );
+		$articles_exported = 0;
+		$xmls_created      = [];
+		$line_number       = 0;
 
 		// Parse one '<wp:article>' at a time.
 		if ( $handle = fopen( $xml_file, 'r' ) ) {
-			$i = 0;
-			$data = $this->get_empty_data_array();
+
+			$progress = \WP_CLI\Utils\make_progress_bar( 'XML processed', $lines_total );
+			$data     = $this->get_empty_data_array();
 			while ( ( $line = fgets( $handle ) ) !== false ) {
 
 				// Line progress.
@@ -93,26 +99,42 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 				$line_number++;
 
 				if ( 0 === strpos( $line, '<wp:article>' ) ) {
-					$i++;
 					$wp_article_xml = '';
 					$wp_article_xml .= $line;
 				} else if ( 0 === strpos( $line, '</wp:article>' ) ) {
+					$this_article_data = [];
+
+					$articles_exported++;
 					$wp_article_xml .= $line;
 
-					// Remove the undefined XML namespace and load the \SimpleXMLElement object.
+					// Remove the undefined XML namespace and load up the \SimpleXMLElement object.
 					$article_xml = str_replace( '<wp:', '<', $wp_article_xml );
 					$article_xml = str_replace( '</wp:', '</', $article_xml );
 					$xml         = simplexml_load_string( $article_xml );
 
-					// Parse this article's data.
-					$data[ 'posts' ][] = $this->parse_xml_article( $xml, $xml_file );
-					
-					// TODO check if '_kreatio_article_id' meta already exists as postmeta before exporting this article.
+					// Parse article.
+					$this_article_data[ 'posts' ][] = $this->parse_xml_article( $xml, $xml_file );
+
+					// Export this article only if the '_kreatio_article_id' postmeta doesn't exist already.
+					$_kreatio_article_id = $this_article_data[ 'posts' ][0][ 'meta'][ '_kreatio_article_id' ] ?? null;
+					if ( $_kreatio_article_id && ! $this->meta_exists( '_kreatio_article_id', $_kreatio_article_id ) ) {
+						$data = array_merge_recursive( $data, $this_article_data );
+
+						// Mute, too much info on screen. It's logged anyways.
+						// WP_CLI::line( sprintf( '+ (%d) article_id %s', $articles_exported, $_kreatio_article_id ) );
+
+						$this->log( self::LOG_PARSED, $_kreatio_article_id );
+					} else {
+						WP_CLI::warning( sprintf( 'x (%d) article_id %s exists, skipping.', $articles_exported, $_kreatio_article_id ) );
+						$this->log( self::LOG_SKIPPED, $_kreatio_article_id );
+					}
 
 					// Export batches of articles to WXR.
-					if ( count( $data ) >= self::EXPORT_BATCH ) {
-						WP_CLI::line( sprintf( 'Exporting to file %s ...', $data[ 'export_file' ] ) );
+					if ( count( $data[ 'posts' ] ) >= self::EXPORT_BATCH ) {
 						\Newspack_WXR_Exporter::generate_export( $data );
+
+						$xmls_created[] = $data[ 'export_file' ];
+						WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
 						$data = $this->get_empty_data_array();
 					}
 
@@ -123,9 +145,10 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 			}
 
 			// Export the remaining articles to WXR.
-			if ( count( $data ) >= 0 ) {
-				WP_CLI::line( sprintf( 'Exporting to file %s ...', $data[ 'export_file' ] ) );
+			if ( count( $data[ 'posts' ] ) >= 0 ) {
 				\Newspack_WXR_Exporter::generate_export( $data );
+				$xmls_created[] = $data[ 'export_file' ];
+				WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
 			}
 
 			fclose( $handle );
@@ -136,8 +159,13 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
-		WP_CLI::line( sprintf( '--- Total %d articles', $i ) );
-		WP_CLI::line( sprintf( '--- Total %d WXR files created', 0 ) );
+		WP_CLI::line( sprintf( '--- Total %d articles', $articles_exported ) );
+		WP_CLI::line( sprintf(
+			'--- Total %d WXR files created -- from %s to %s',
+			count( $xmls_created ),
+			$xmls_created[0] ?? '',
+			$xmls_created[ count( $xmls_created ) - 1 ] ?? ''
+		) );
 	}
 
 	/**
@@ -198,11 +226,11 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 					}
 					break;
 				case 'article_url_part':
-					$data[ 'meta' ][ '_kreatio_article_url_part' ] = $xml_v_tostring;
+					$data[ 'url' ] = $xml_v_tostring;
 					break;
 				case 'article_is_draft':
 					if ( 'true' == $xml_v_tostring ) {
-						$data[ 'status' ] = 'draft';
+						$data[ 'meta' ][ '_kreatio_article_is_draft' ] = $xml_v_tostring;
 					}
 					break;
 				case 'article_premium':
@@ -216,8 +244,8 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 					}
 					break;
 				case 'article_status':
-					if ( ! empty( $xml_v_tostring ) ) {
-						$data[ 'meta' ][ '_kreatio_article_status' ] = $xml_v_tostring;
+					if ( ! empty( $xml_v_tostring ) && 'published' == $xml_v_tostring ) {
+						$data[ 'status' ] = 'publish';
 					}
 					break;
 				case 'article_title_image_url':
@@ -290,7 +318,7 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 				case 'article_tags':
 					foreach ( $xml_v as $article_tag_k => $article_tag_v ) {
 
-						$data_tag_index = count( $data[ 'tags' ] );
+						$data_tag_index = isset( $data[ 'tags' ] ) ? count( $data[ 'tags' ] ) : 0;
 
 						foreach ( $article_tag_v as $k => $v ) {
 
@@ -502,5 +530,36 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 	 */
 	public function cmd_delete_all_kreatio_post_meta( $args, $assoc_args ) {
 
+	}
+
+	/**
+	 * @param string $meta_key
+	 * @param mixed  $meta_value
+	 */
+	private function meta_exists( $meta_key, $meta_value ) {
+		global $wpdb;
+
+		// Do a direct SQL call for speed (> 700k posts expected).
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key = %s and meta_value = %s ;",
+				$meta_key,
+				$meta_value
+			),
+			ARRAY_A
+		);
+
+		return ! empty( $row );
+	}
+
+	/**
+	 * Simple file logging.
+	 *
+	 * @param string $file    File name or path.
+	 * @param string $message Log message.
+	 */
+	private function log( $file, $message ) {
+		$message .= "\n";
+		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
