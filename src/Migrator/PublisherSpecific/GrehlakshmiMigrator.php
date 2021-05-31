@@ -106,10 +106,12 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 
 					// Parse this article's data.
 					$data[ 'posts' ][] = $this->parse_xml_article( $xml, $xml_file );
+					
+					// TODO check if '_kreatio_article_id' meta already exists as postmeta before exporting this article.
 
 					// Export batches of articles to WXR.
 					if ( count( $data ) >= self::EXPORT_BATCH ) {
-						WP_CLI::line( sprintf( 'About to export batch to file %s ...', $data[ 'export_file' ] ) );
+						WP_CLI::line( sprintf( 'Exporting to file %s ...', $data[ 'export_file' ] ) );
 						\Newspack_WXR_Exporter::generate_export( $data );
 						$data = $this->get_empty_data_array();
 					}
@@ -122,7 +124,7 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 
 			// Export the remaining articles to WXR.
 			if ( count( $data ) >= 0 ) {
-				WP_CLI::line( sprintf( 'About to export batch to file %s ...', $data[ 'export_file' ] ) );
+				WP_CLI::line( sprintf( 'Exporting to file %s ...', $data[ 'export_file' ] ) );
 				\Newspack_WXR_Exporter::generate_export( $data );
 			}
 
