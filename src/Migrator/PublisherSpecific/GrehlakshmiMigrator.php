@@ -75,17 +75,17 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 
+		// TEMP DEV tests.
 		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/custom_converter_test_export.xml';
 		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export_test.xml';
-
-		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export.xml';
+		// Live exports.
 		$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/export.xml';
-		// $lines_total = 3957891;
-		$lines_total = $this->count_file_lines( $xml_file );
+		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export.xml';
 
-		$articles_exported = 0;
-		$xmls_created      = [];
 		$line_number       = 0;
+		$lines_total       = $this->count_file_lines( $xml_file );
+		$articles_exported = 0;
+		$xml_files_created = [];
 
 		// Parse one '<wp:article>' at a time.
 		if ( $handle = fopen( $xml_file, 'r' ) ) {
@@ -133,7 +133,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 					if ( count( $data[ 'posts' ] ) >= self::EXPORT_BATCH ) {
 						\Newspack_WXR_Exporter::generate_export( $data );
 
-						$xmls_created[] = $data[ 'export_file' ];
+						$xml_files_created[] = $data[ 'export_file' ];
 						WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
 						$data = $this->get_empty_data_array();
 					}
@@ -147,7 +147,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			// Export the remaining articles to WXR.
 			if ( count( $data[ 'posts' ] ) >= 0 ) {
 				\Newspack_WXR_Exporter::generate_export( $data );
-				$xmls_created[] = $data[ 'export_file' ];
+				$xml_files_created[] = $data[ 'export_file' ];
 				WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
 			}
 
@@ -162,9 +162,9 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 		WP_CLI::line( sprintf( '--- Total %d articles', $articles_exported ) );
 		WP_CLI::line( sprintf(
 			'--- Total %d WXR files created -- from %s to %s',
-			count( $xmls_created ),
-			$xmls_created[0] ?? '',
-			$xmls_created[ count( $xmls_created ) - 1 ] ?? ''
+			count( $xml_files_created ),
+			$xml_files_created[0] ?? '',
+			$xml_files_created[ count( $xml_files_created ) - 1 ] ?? ''
 		) );
 	}
 
