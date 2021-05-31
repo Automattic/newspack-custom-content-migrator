@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use \CoAuthors_Plus;
 use \CoAuthors_Guest_Authors;
+use \WP_CLI;
 
 class CoAuthorPlus {
 
@@ -32,7 +33,8 @@ class CoAuthorPlus {
 		$included_2 = is_file( $file_2 ) && include_once $file_2;
 
 		if ( is_null( $coauthors_plus ) || ( false === $included_1 ) || ( false === $included_2 ) || ( ! $coauthors_plus instanceof CoAuthors_Plus ) ) {
-			throw new \RuntimeException( sprintf( 'CoAuthors Plus dependencies not registered, can not load %s.', __CLASS__ ) );
+			// CoAuthors Plus is a dependency, and will have to be installed before the public functions/commands can be used.
+			return;
 		}
 
 		$this->coauthors_plus          = $coauthors_plus;

@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts;
+use \NewspackCustomContentMigrator\PluginSetup;
 use \WP_CLI;
 use \WP_Query;
 
@@ -213,16 +214,28 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Installs the CAP plugin, and reinitializes the \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus dependency.
+	 */
+	public function require_cap_plugin() {
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+
+			// Install and activate the CAP plugin.
+			PluginSetup::setup_coauthors_plus();
+
+			// reinitialize the CAP dependency.
+			$this->coauthorsplus_logic = new CoAuthorPlus();
+		}
+	}
+
+	/**
 	 * Create a guest author and assign to a post.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
 	public function cmd_cap_create_guest_author_and_add_to_post( $args, $assoc_args ) {
-		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit;
-		}
+		$this->require_cap_plugin();
 
 		$post_id            = $args[0];
 		$email              = isset( $assoc_args['email'] ) ? $assoc_args['email'] : null;
@@ -261,10 +274,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_tags_with_prefix_to_guest_authors( $args, $assoc_args ) {
-		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit;
-		}
+		$this->require_cap_plugin();
 
 		// Associative parameter.
 		$unset_author_tags = isset( $assoc_args[ 'unset-author-tags' ] ) ? true : false;
@@ -313,10 +323,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_tags_with_taxonomy_to_guest_authors( $args, $assoc_args ) {
-		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit;
-		}
+		$this->require_cap_plugin();
 
 		// Positional parameter.
 		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
@@ -369,10 +376,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_cpt_to_guest_authors( $args, $assoc_args ) {
-		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit;
-		}
+		$this->require_cap_plugin();
 
 		// Get input args.
 		$cpt_from = isset( $args[0] ) ? $args[0] : null;
@@ -461,10 +465,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_link_ga_to_user( $args, $assoc_args ) {
-		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit;
-		}
+		$this->require_cap_plugin();
 
 		$ga_id   = isset( $assoc_args[ 'ga_id' ] ) ? (int) $assoc_args[ 'ga_id' ] : null;
 		$user_id = isset( $assoc_args[ 'user_id' ] ) ? (int) $assoc_args[ 'user_id' ] : null;
@@ -518,6 +519,8 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	 * @return array Descriptive error messages, if any errors occurred.
 	 */
 	public function convert_tags_to_guest_authors( $post_id, $unset_author_tags = true ) {
+		$this->require_cap_plugin();
+
 		$all_tags = get_the_tags( $post_id );
 		if ( false === $all_tags ) {
 			return;
