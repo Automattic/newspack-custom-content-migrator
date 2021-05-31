@@ -92,14 +92,6 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 				$progress->tick();
 				$line_number++;
 
-// // Find a specific line
-// audio true -- 5 कारण जिनकी वजह से आप के लिए फार्टिंग बहुत आवश्यक है
-// if ( false !== strpos( $line, '<wp:article_audio>' )
-// 	&& ( false === strpos( $line, '<wp:article_audio>false</wp:article_audio>' ) )
-// ) {
-// 	$break=1;
-// }
-
 				if ( 0 === strpos( $line, '<wp:article>' ) ) {
 					$i++;
 					$wp_article_xml = '';
