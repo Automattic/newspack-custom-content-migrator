@@ -115,21 +115,24 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 					// Parse this article's data.
 					$data[ 'posts' ][] = $this->parse_xml_article( $xml, $xml_file );
 
-// // Export Posts in batches.
-// if ( count( $data ) >= self::EXPORT_BATCH ) {
-// \Newspack_WXR_Exporter::generate_export( $data );
-// $data = $this->get_empty_data_array();
-// }
+					// Export batches of articles to WXR.
+					if ( count( $data ) >= self::EXPORT_BATCH ) {
+						WP_CLI::line( sprintf( 'About to export batch to file %s ...', $data[ 'export_file' ] ) );
+						\Newspack_WXR_Exporter::generate_export( $data );
+						$data = $this->get_empty_data_array();
+					}
+
 				} else {
 					$wp_article_xml .= $line;
 				}
 
 			}
 
-// // Export the remaining Posts.
-// if ( count( $data ) >= 0 ) {
-// 	\Newspack_WXR_Exporter::generate_export( $data );
-// }
+			// Export the remaining articles to WXR.
+			if ( count( $data ) >= 0 ) {
+				WP_CLI::line( sprintf( 'About to export batch to file %s ...', $data[ 'export_file' ] ) );
+				\Newspack_WXR_Exporter::generate_export( $data );
+			}
 
 			fclose( $handle );
 			$progress->finish();
@@ -446,11 +449,14 @@ $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/cus
 	/**
 	 * Gets an initialized, empty aray for the wxr-exporter.
 	 *
-	 * @param string $dir
+	 * @param string $dir If null, getcwd() will be used.
 	 *
 	 * @return array
 	 */
-	private function get_empty_data_array( $dir = __DIR__ ) {
+	private function get_empty_data_array( $dir = null ) {
+
+		$dir = $dir ?? getcwd();
+
 		return [
 			'site_title'  => "Grehlakshmi - The Hindi Women's Fashion, Beauty ...",
 			'site_url'    => 'https://www.grehlakshmi.com',
