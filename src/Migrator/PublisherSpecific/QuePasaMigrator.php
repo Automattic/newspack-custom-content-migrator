@@ -126,15 +126,16 @@ class QuePasaMigrator implements InterfaceMigrator {
 	public function cmd_fix_missing_images( $args, $assoc_args ) {
 		global $wpdb;
 
+		$time_start = microtime( true );
 		$file_with_images = '/srv/www/0_data_no_backup/0_quepasa/4_bens_missing_images/ben_newspack_article_body_images_urls.txt';
 		$images = explode( "\n", file_get_contents( $file_with_images ) );
 
-		// Loading all post_content to memory makes the search much, much quicker.
-		$post_contents = $this->get_post_contents();
+		// Loading all post_contents to memory makes the searches much faster. But, requires too much memory (!)...
+		// $post_contents = $this->get_post_contents();
 
 		// Go through all the images and search for their uses in existing Posts.
 		foreach ( $images as $key_image => $image ) {
-			WP_CLI::line( sprinf( '(%d/%d) %s', $key_image + 1, count( $images), $image ) );
+			WP_CLI::line( sprintf( '(%d/%d) %s', $key_image + 1, count( $images), $image ) );
 
 			/**
 			 * @param string $image_url e.g. 'https://newspack.quepasamedia.com/wp-content/uploads/2015/04/0011410793.jpg'.
@@ -153,39 +154,43 @@ class QuePasaMigrator implements InterfaceMigrator {
 			 */
 			$image_s3 = str_replace( 'wp-content/uploads/', 'https://qpwebsite.s3.amazonaws.com/uploads/', $image_no_host );
 
-$ids = array (
-	0 => '86550',
-);
-			// $ids = $this->get_post_ids_with_image_DBver( $image_no_host );
-			$ids = $this->get_ids_with_content( $post_contents, $image_no_host );
+			// $ids = $this->get_ids_with_content( $post_contents, $image_no_host );
+			WP_CLI::line( ' ... querying DB...' );
+			$ids = $this->get_post_ids_with_image_query_DB( $image_no_host );
 			if ( empty( $ids ) ) {
+				WP_CLI::warning( 'image not found in any Post.' );
 				$this->log( 'missingimgs_imgNotFoundInPosts.log', $image_url );
 				continue;
 			}
 
 			foreach ( $ids as $key_ids => $id ) {
-				WP_CLI::line( sprintf( '   ... img found in ID %d', $id ) );
+				WP_CLI::line( sprintf( '   - img found in ID %d', $id ) );
 
 				$post = get_post( $id );
 
-				// Make sure we're covering all the `src` occurrences -- all forms of URLs, absolute and relative.
-				if ( false === $this->doublecheck_if_img_src_is_relative( $post, $image_no_host ) ) {
+				// Double check we're covering all the `src` occurrences -- all forms of URLs, absolute and relative.
+				if ( false === $this->check_if_only_relative_src_found( $post, $image_no_host ) ) {
+					WP_CLI::warning( 'Found URLs different than relative with starting `/`!' );
 					$this->log( 'missingimgs_imgNotRelative.log', sprintf( '%d %s', $post->ID, $image_no_host ) );
 				}
 
 				if ( $this->does_image_exist_on_s3( $image_s3 ) ) {
+					WP_CLI::success( sprintf( '   + exists on S3' ) );
+
 					// If image exists in the S3 bucket, update the relative URLs to the fully qualified S3 URLs.
 					$post_content_updated = $post->post_content;
 					$post_content_updated = str_replace( $image_no_host_with_beginning_slash, $image_s3, $post_content_updated );
 
 					if ( $post_content_updated != $post->post_content ) {
 						$wpdb->update( $wpdb->prefix . 'posts', array( 'post_content' => $post_content_updated ), array( 'ID' => $post->ID ) );
-						WP_CLI::success( sprintf( sprintf( 'Replaced %s with %s', $image_no_host_with_beginning_slash, $image_s3) ) );
+						WP_CLI::success( sprintf( sprintf( '   + Replaced %s with %s', $image_no_host_with_beginning_slash, $image_s3) ) );
 						$this->log( 'missingimgs_replacedWithS3Url.log', sprintf( '%d %s %s', $post->ID, $image_no_host_with_beginning_slash, $image_s3) );
 					} else {
 						$this->log( 'missingimgs_noReplacementsMade_s3.log', sprintf( '%d %s', $post->ID, $image_no_host ) );
 					}
 				} else {
+					WP_CLI::success( sprintf( '   + does not exist on S3, now downloading' ) );
+
 					// Or else download the image from the original `newspack.quepasamedia.com` host, and update the `src`s.
 					$attachment_id = $this->attachments_logic->import_external_file( $image_url );
 					if ( is_wp_error( $attachment_id ) ) {
@@ -199,7 +204,7 @@ $ids = array (
 					$post_content_updated = str_replace( $image_no_host_with_beginning_slash, $image_url_new, $post_content_updated );
 					if ( $post_content_updated != $post->post_content ) {
 						$wpdb->update( $wpdb->prefix . 'posts', array( 'post_content' => $post_content_updated ), array( 'ID' => $post->ID ) );
-						WP_CLI::success( sprintf( sprintf( 'Replaced %s with %s', $image_no_host_with_beginning_slash, $image_s3) ) );
+						WP_CLI::success( sprintf( sprintf( '   + Replaced %s with %s', $image_no_host_with_beginning_slash, $image_s3) ) );
 						$this->log( 'missingimgs_replacedWithNewlyDownloaded.log', sprintf( '%d %s %s', $post->ID, $image_no_host_with_beginning_slash, $image_s3) );
 					} else {
 						$this->log( 'missingimgs_noReplacementsMade_download.log', sprintf( '%d %s', $post->ID, $image_no_host ) );
@@ -211,7 +216,7 @@ $ids = array (
 		// Required for the $wpdb->update() to sink in.
 		wp_cache_flush();
 
-		return;
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
@@ -223,16 +228,17 @@ $ids = array (
 	 *
 	 * @return bool True if img src is relative beginning with '/', false if not.
 	 */
-	private function doublecheck_if_img_src_is_relative( $post, $img_src_no_host ) {
+	private function check_if_only_relative_src_found( $post, $img_src_no_host ) {
 		$this->crawler->clear();
-		$this->add( $post->post_content );
+		$this->crawler->add( $post->post_content );
 		$srcs = $this->crawler->filterXpath( '//img' )->extract( [ 'src' ] );
 
 		foreach ( $srcs as $src ) {
 			$pos_img_no_host = strpos( $src, $img_src_no_host );
+			$pos_img_no_host_beginning_with_slash = strpos( $src, '/' . $img_src_no_host );
 
 			// If src URL is matched, but does not begin with '/'.
-			if ( false !== $pos_img_no_host && 0 !== '/' . $pos_img_no_host ) {
+			if ( false !== $pos_img_no_host && 0 !== $pos_img_no_host_beginning_with_slash ) {
 				return false;
 			}
 		}
@@ -312,7 +318,7 @@ $ids = array (
 	 *
 	 * @return array IDs.
 	 */
-	private function get_post_ids_with_image_DBver( $subject ) {
+	private function get_post_ids_with_image_query_DB( $subject ) {
 		global $wpdb;
 
 		$sql = $wpdb->prepare(
