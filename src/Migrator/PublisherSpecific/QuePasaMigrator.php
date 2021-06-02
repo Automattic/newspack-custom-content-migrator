@@ -195,7 +195,7 @@ class QuePasaMigrator implements InterfaceMigrator {
 					$attachment_id = $this->attachments_logic->import_external_file( $image_url );
 					if ( is_wp_error( $attachment_id ) ) {
 						WP_CLI::warning( sprintf( 'Error downloading URL %s : %s', $image_url, $attachment_id->get_error_message() ) );
-						$this->log( 'missingimgs_downloadFailed.log', $image_url );
+						$this->log( 'missingimgs_downloadFailed.log', sprintf( '%s %s', $image_url, $attachment_id->get_error_message() ) );
 						continue;
 					}
 					$image_url_new = wp_get_attachment_url( $attachment_id );
