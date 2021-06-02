@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
+use \Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 
 /**
@@ -22,10 +23,16 @@ class QuePasaMigrator implements InterfaceMigrator {
 	private $attachments_logic;
 
 	/**
+	 * @var Crawler.
+	 */
+	private $crawler;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->attachments_logic = new AttachmentsLogic();
+		$this->crawler           = new Crawler();
 	}
 
 	/**
@@ -51,6 +58,13 @@ class QuePasaMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_set_feat_images_post_launch' ],
 			[
 				'shortdesc' => 'Sets additionally identified missing Featured images; the origin DB was a bit faulty, which is why these are updated individually.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator quepasa-fix-missing-images',
+			[ $this, 'cmd_fix_missing_images' ],
+			[
+				'shortdesc' => 'Goes through a list of predefined images pulled out by Ben from Que Pasa, and fixes their use.',
 			]
 		);
 	}
@@ -104,6 +118,219 @@ class QuePasaMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( 'Done.' );
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator quepasa-fix-missing-images`.
+	 */
+	public function cmd_fix_missing_images( $args, $assoc_args ) {
+		global $wpdb;
+
+		$file_with_images = '/srv/www/0_data_no_backup/0_quepasa/4_bens_missing_images/ben_newspack_article_body_images_urls.txt';
+		$images = explode( "\n", file_get_contents( $file_with_images ) );
+
+		// Loading all post_content to memory makes the search much, much quicker.
+		$post_contents = $this->get_post_contents();
+
+		// Go through all the images and search for their uses in existing Posts.
+		foreach ( $images as $key_image => $image ) {
+			WP_CLI::line( sprinf( '(%d/%d) %s', $key_image + 1, count( $images), $image ) );
+
+			/**
+			 * @param string $image_url e.g. 'https://newspack.quepasamedia.com/wp-content/uploads/2015/04/0011410793.jpg'.
+			 */
+			$image_url = trim( $image );
+			/**
+			 * @param string $image_no_host e.g. 'wp-content/uploads/2015/04/0011410793.jpg'.
+			 */
+			$image_no_host = str_replace( 'https://newspack.quepasamedia.com/', '', $image_url );
+			/**
+			 * @param string $image_no_host_ending_slash e.g. '/wp-content/uploads/2015/04/0011410793.jpg'.
+			 */
+			$image_no_host_with_beginning_slash = '/' . $image_no_host;
+			/**
+			 * @param string $image_s3 e.g. 'https://qpwebsite.s3.amazonaws.com/uploads/2021/05/157537120_3883791018310121_5726006756605356791_n.jpeg'.
+			 */
+			$image_s3 = str_replace( 'wp-content/uploads/', 'https://qpwebsite.s3.amazonaws.com/uploads/', $image_no_host );
+
+$ids = array (
+	0 => '86550',
+);
+			// $ids = $this->get_post_ids_with_image_DBver( $image_no_host );
+			$ids = $this->get_ids_with_content( $post_contents, $image_no_host );
+			if ( empty( $ids ) ) {
+				$this->log( 'missingimgs_imgNotFoundInPosts.log', $image_url );
+				continue;
+			}
+
+			foreach ( $ids as $key_ids => $id ) {
+				WP_CLI::line( sprintf( '   ... img found in ID %d', $id ) );
+
+				$post = get_post( $id );
+
+				// Make sure we're covering all the `src` occurrences -- all forms of URLs, absolute and relative.
+				if ( false === $this->doublecheck_if_img_src_is_relative( $post, $image_no_host ) ) {
+					$this->log( 'missingimgs_imgNotRelative.log', sprintf( '%d %s', $post->ID, $image_no_host ) );
+				}
+
+				if ( $this->does_image_exist_on_s3( $image_s3 ) ) {
+					// If image exists in the S3 bucket, update the relative URLs to the fully qualified S3 URLs.
+					$post_content_updated = $post->post_content;
+					$post_content_updated = str_replace( $image_no_host_with_beginning_slash, $image_s3, $post_content_updated );
+
+					if ( $post_content_updated != $post->post_content ) {
+						$wpdb->update( $wpdb->prefix . 'posts', array( 'post_content' => $post_content_updated ), array( 'ID' => $post->ID ) );
+						WP_CLI::success( sprintf( sprintf( 'Replaced %s with %s', $image_no_host_with_beginning_slash, $image_s3) ) );
+						$this->log( 'missingimgs_replacedWithS3Url.log', sprintf( '%d %s %s', $post->ID, $image_no_host_with_beginning_slash, $image_s3) );
+					} else {
+						$this->log( 'missingimgs_noReplacementsMade_s3.log', sprintf( '%d %s', $post->ID, $image_no_host ) );
+					}
+				} else {
+					// Or else download the image from the original `newspack.quepasamedia.com` host, and update the `src`s.
+					$attachment_id = $this->attachments_logic->import_external_file( $image_url );
+					if ( is_wp_error( $attachment_id ) ) {
+						WP_CLI::warning( sprintf( 'Error downloading URL %s : %s', $image_url, $attachment_id->get_error_message() ) );
+						$this->log( 'missingimgs_downloadFailed.log', $image_url );
+						continue;
+					}
+					$image_url_new = wp_get_attachment_url( $attachment_id );
+
+					$post_content_updated = $post->post_content;
+					$post_content_updated = str_replace( $image_no_host_with_beginning_slash, $image_url_new, $post_content_updated );
+					if ( $post_content_updated != $post->post_content ) {
+						$wpdb->update( $wpdb->prefix . 'posts', array( 'post_content' => $post_content_updated ), array( 'ID' => $post->ID ) );
+						WP_CLI::success( sprintf( sprintf( 'Replaced %s with %s', $image_no_host_with_beginning_slash, $image_s3) ) );
+						$this->log( 'missingimgs_replacedWithNewlyDownloaded.log', sprintf( '%d %s %s', $post->ID, $image_no_host_with_beginning_slash, $image_s3) );
+					} else {
+						$this->log( 'missingimgs_noReplacementsMade_download.log', sprintf( '%d %s', $post->ID, $image_no_host ) );
+					}
+				}
+			}
+		}
+
+		// Required for the $wpdb->update() to sink in.
+		wp_cache_flush();
+
+		return;
+	}
+
+	/**
+	 * Just an extra check for the image URL. I'm assuming all the srcs are relative URLs beginning with the '/',
+	 * but we're going to check all the `src` for whether this image appeared in a different formats.
+	 *
+	 * @param WP_Post $post            Post.
+	 * @param string  $img_src_no_host Image URL without host and without the beginning '/'.
+	 *
+	 * @return bool True if img src is relative beginning with '/', false if not.
+	 */
+	private function doublecheck_if_img_src_is_relative( $post, $img_src_no_host ) {
+		$this->crawler->clear();
+		$this->add( $post->post_content );
+		$srcs = $this->crawler->filterXpath( '//img' )->extract( [ 'src' ] );
+
+		foreach ( $srcs as $src ) {
+			$pos_img_no_host = strpos( $src, $img_src_no_host );
+
+			// If src URL is matched, but does not begin with '/'.
+			if ( false !== $pos_img_no_host && 0 !== '/' . $pos_img_no_host ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Checks if the image is available at the S3 URL.
+	 *
+	 * @param string $url S3 image URL.
+	 *
+	 * @return bool
+	 */
+	private function does_image_exist_on_s3( $url ) {
+		return false !== strpos( $this->get_response_code( $url ), '200 OK' );
+	}
+
+	/**
+	 * Makes a request and returns the response code with the status.
+	 *
+	 * @param string $url URL.
+	 *
+	 * @return false|string|null The numeric response code + status part of the get_geaders().
+	 */
+	private function get_response_code( $url ) {
+		// $headers = get_headers( $url, 1 );
+		$headers = get_headers( $url );
+		if ( is_array( $headers ) ) {
+			$status = substr( $headers[0], 9 );
+		}
+
+		return $status ?? null;
+	}
+
+	/**
+	 * Fetches all posts' post_contents.
+	 *
+	 * @return array Keys are Post IDs, values are post_content.
+	 */
+	private function get_post_contents() {
+		global $wpdb;
+		$posts_contents = [];
+
+		$results = $wpdb->get_results( "SELECT ID, post_content FROM `{$wpdb->posts}` WHERE post_type='post';" );
+		foreach ( $results as $result ) {
+			$posts_contents[ $result->ID ] = $result->post_content;
+		}
+
+		return $posts_contents;
+	}
+
+	/**
+	 * Searches the $posts_contents and returns the IDs which contain the $needle.
+	 *
+	 * @param array  $posts_contents Results of the self::get_post_contents().
+	 * @param string $needle         String to search for in post_content.
+	 *
+	 * @return array IDs which contain the needle.
+	 */
+	private function get_ids_with_content( $posts_contents, $needle ) {
+		$ids = [];
+		foreach ( $posts_contents as $id => $post_content ) {
+			$found = false !== strpos( $post_content, $needle );
+			if ( $found ) {
+				$ids[] = $id;
+			}
+		}
+
+		return $ids;
+	}
+
+	/**
+	 * Gets IDs of Posts which contain the search string.
+	 *
+	 * @param string $subject Search subject.
+	 *
+	 * @return array IDs.
+	 */
+	private function get_post_ids_with_image_DBver( $subject ) {
+		global $wpdb;
+
+		$sql = $wpdb->prepare(
+			"SELECT ID FROM `{$wpdb->posts}` WHERE post_type='post' AND post_content LIKE %s;",
+			'%'. $wpdb->esc_like( $subject ) . '%'
+		);
+
+		$results = $wpdb->get_results( $sql, ARRAY_N );
+		if ( empty( $results ) ) {
+			return [];
+		}
+
+		$ids = [];
+		foreach ( $results as $result ) {
+			$ids[] = $result[0];
+		}
+
+		return $ids;
 	}
 
 	/**
