@@ -98,6 +98,9 @@ class SportsPressMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args
 	 */
 	public function cmd_export_sportspress_contents( $args, $assoc_args ) {
+
+		WP_CLI::error( 'The SportsPressMigrator commands presently do not migrate over all the Plugin data; more work is needed on these commands.' );
+
 		$output_dir        = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -153,6 +156,9 @@ class SportsPressMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args
 	 */
 	public function cmd_import_sportspress_content( $args, $assoc_args ) {
+
+		WP_CLI::error( 'The SportsPressMigrator commands presently do not migrate over all the Plugin data; more work is needed on these commands.' );
+
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! file_exists( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
