@@ -3,6 +3,9 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use \WP_CLI;
 
 /**
@@ -16,6 +19,27 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	const LOG_PARSED  = 'grehlakshmi__parsed.log';
 	const LOG_SKIPPED = 'grehlakshmi__skipped.log';
 
+	const LOG_CATS_ASSIGNED = 'grehlakshmi__catsAssigned.log';
+	const LOG_GA_ASSIGNED   = 'grehlakshmi__guestAuthorsAssigned.log';
+	const LOG_GA_ERR        = 'grehlakshmi__guestAuthorsErrors.log';
+	const LOG_FEATUREDIMG_SET = 'grehlakshmi__featuredImageSet.log';
+	const LOG_FEATUREDIMG_ERR = 'grehlakshmi__featuredImageErr.log';
+
+	/**
+	 * @var PostsLogic.
+	 */
+	private static $posts_logic;
+
+	/**
+	 * @var CoAuthorPlusLogic.
+	 */
+	private static $coauthorsplus_logic;
+
+	/**
+	 * @var AttachmentsLogic.
+	 */
+	private static $attachments_logic;
+
 	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
@@ -24,7 +48,11 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	/**
 	 * Constructor.
 	 */
-	private function __construct() {}
+	private function __construct() {
+		$this->posts_logic = new PostsLogic();
+		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
+		$this->attachments_logic = new AttachmentsLogic();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -53,15 +81,15 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator grehlakshmi-update-imported-posts',
-			[ $this, 'cmd_update_imported_posts' ],
+			'newspack-content-migrator grehlakshmi-update-imported-posts-meta',
+			[ $this, 'cmd_update_imported_posts_meta' ],
 			[
 				'shortdesc' => 'Updates all imported Post\' Tags, Categories, and properly sets all their info from metas.',
 				'synopsis'  => [],
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator grehlakshmi-update-imported-posts',
+			'newspack-content-migrator grehlakshmi-delete-all-kreatio-meta',
 			[ $this, 'cmd_delete_all_kreatio_post_meta' ],
 			[
 				'shortdesc' => 'Deletes all the Post metas with imported Kreatio post data.',
@@ -78,9 +106,10 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 		// TEMP DEV tests.
 		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/custom_converter_test_export.xml';
 		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export_test.xml';
+		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/1/Kreatio_export/XML_data/export_runtest.xml';
 		// Live exports.
-		$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/export.xml';
-		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/Kreatio_export/XML_data/delta_export.xml';
+		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/1/Kreatio_export/XML_data/delta_export.xml';
+		$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/1/Kreatio_export/XML_data/export.xml';
 
 		$line_number       = 0;
 		$lines_total       = $this->count_file_lines( $xml_file );
@@ -117,7 +146,9 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 
 					// Export this article only if the '_kreatio_article_id' postmeta doesn't exist already.
 					$_kreatio_article_id = $this_article_data[ 'posts' ][0][ 'meta'][ '_kreatio_article_id' ] ?? null;
-					if ( $_kreatio_article_id && ! $this->meta_exists( '_kreatio_article_id', $_kreatio_article_id ) ) {
+					$this_article_kreatio_id_meta = $this->get_meta( '_kreatio_article_id', $_kreatio_article_id );
+					$this_meta_exists = ! empty( $this_article_kreatio_id_meta );
+					if ( $_kreatio_article_id && ! $this_meta_exists ) {
 						$data = array_merge_recursive( $data, $this_article_data );
 
 						// Mute, too much info on screen. It's logged anyways.
@@ -145,7 +176,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			}
 
 			// Export the remaining articles to WXR.
-			if ( count( $data[ 'posts' ] ) >= 0 ) {
+			if ( count( $data[ 'posts' ] ) > 0 ) {
 				\Newspack_WXR_Exporter::generate_export( $data );
 				$xml_files_created[] = $data[ 'export_file' ];
 				WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
@@ -166,6 +197,135 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			$xml_files_created[0] ?? '',
 			$xml_files_created[ count( $xml_files_created ) - 1 ] ?? ''
 		) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator update-imported-posts`
+	 */
+	public function cmd_update_imported_posts_meta( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$posts = $this->posts_logic->get_all_posts( 'post', [ 'publish', 'pending', 'draft' ] );
+		foreach ( $posts as $key_posts => $post ) {
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
+
+			// Set Categories.
+	 		$categories_meta = get_post_meta( $post->ID, '_kreatio_categories' );
+	 		if ( ! empty( $categories_meta ) ) {
+				$categories_meta_decoded = json_decode( $categories_meta[0], true );
+
+		        $all_categories = [];
+		        foreach ( $categories_meta_decoded as $category_meta ) {
+
+		            // Create the Category tree.
+		            $category_breadcrumbs = $category_meta[ 'article_taxonomy_properties_full_name' ];
+		            $breadcrumbs = str_replace( 'Category >> ', '', $category_breadcrumbs );
+		            $kreatio_categories = explode( ' >> ', $breadcrumbs );
+				    $category_id = null;
+		            foreach ( $kreatio_categories as $key_kreatio_categories => $kreatio_category ) {
+		                $parent_id = ( 0 == $key_kreatio_categories ) ? 0 : $category_id;
+		                $category_id = wp_create_category( $kreatio_category, $parent_id );
+			        }
+
+		            // Use the last child Category.
+		            if ( $category_id ) {
+				        $all_categories[ $category_id ] = $kreatio_category;
+			        }
+			    }
+
+		        // Set Categories.
+		        if ( ! empty( $all_categories ) ) {
+	                wp_set_post_categories( $post->ID, array_keys( $all_categories ) );
+	                $this->log( self::LOG_CATS_ASSIGNED, sprintf(
+	                    '%d %s %s',
+		                $post->ID,
+		                implode( ',', array_keys( $all_categories ) ),
+		                implode( ',', array_values( $all_categories ) )
+	                ) );
+			    }
+		    }
+
+
+			// Set Guest Authors.
+			$authors_meta = get_post_meta( $post->ID, '_kreatio_authors_meta' );
+			if ( ! empty( $authors_meta ) ) {
+				$authors_meta_decoded = json_decode( $authors_meta[0], true );
+
+				$all_guest_authors = [];
+				foreach ( $authors_meta_decoded as $author_id => $author_meta ) {
+					$author_email    = $author_meta[ 'article_author_email' ] ?? null;
+					$author_fullname = $author_meta[ 'article_author_fullname' ] ?? null;
+
+					// Create the GAs.
+					try {
+						$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [
+							'display_name' => $author_fullname,
+							'user_email' => $author_email,
+						] );
+						if ( is_wp_error( $guest_author_id ) ) {
+							throw new \RuntimeException( $guest_author_id->get_error_message() );
+						}
+
+						$all_guest_authors[] = $guest_author_id;
+
+					} catch ( \Exception $e ) {
+						WP_CLI::warning( sprintf( "   - could not create GA full name '%s' and email %s", $author_fullname, $author_email ) );
+					    $this->log( self::LOG_GA_ERR, sprintf(
+					        '%d %s %s',
+					        $post->ID,
+						    $author_fullname,
+						    $author_email
+					    ) );
+					}
+				}
+
+				// Assign the Authors.
+				if ( ! empty( $all_guest_authors ) ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( $all_guest_authors, $post->ID );
+					$this->log( self::LOG_GA_ASSIGNED, sprintf(
+						'%d %s',
+						$post->ID,
+						implode( ',', $all_guest_authors )
+					) );
+					WP_CLI::success( sprintf( "   + assigned GA IDs %s", implode( ',', $all_guest_authors ) ) );
+				}
+			}
+
+
+			// Set the Featured image.
+			$kreatio_thumbnail_image_meta = get_post_meta( $post->ID, '_kreatio_article_thumbnail_image_url' );
+			if ( ! empty( $kreatio_thumbnail_image_meta ) ) {
+				$thumbnail_image_url = $kreatio_thumbnail_image_meta[0];
+				$featured_image_id = $this->attachments_logic->import_external_file( $thumbnail_image_url );
+				if ( is_wp_error( $featured_image_id ) ) {
+					$this->log( self::LOG_FEATUREDIMG_ERR, sprintf(
+						'%d %s %s',
+						$post->ID,
+						$thumbnail_image_url,
+						$featured_image_id->get_error_message()
+					) );
+				} else {
+				    update_post_meta( $post->ID, '_thumbnail_id', $featured_image_id );
+					WP_CLI::success( sprintf( "   + set Featured Image %d from  %s", $featured_image_id, $thumbnail_image_url ) );
+					$this->log( self::LOG_FEATUREDIMG_SET, sprintf(
+						'%d %s %s',
+						$post->ID,
+						$featured_image_id,
+						$thumbnail_image_url
+					) );
+				}
+			}
+
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator delete-all-kreatio-post-metas`
+	 */
+	public function cmd_delete_all_kreatio_post_meta( $args, $assoc_args ) {
+		WP_CLI::error( 'TODO -- command not yet available.' );
 	}
 
 	/**
@@ -519,37 +679,25 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator update-imported-posts`
-	 */
-	public function cmd_update_imported_posts( $args, $assoc_args ) {
-
-	}
-
-	/**
-	 * Callable for `newspack-content-migrator delete-all-kreatio-post-metas`
-	 */
-	public function cmd_delete_all_kreatio_post_meta( $args, $assoc_args ) {
-
-	}
-
-	/**
+	 * Returns the first meta row with given key and value.
+	 *
 	 * @param string $meta_key
 	 * @param mixed  $meta_value
 	 */
-	private function meta_exists( $meta_key, $meta_value ) {
+	private function get_meta( $meta_key, $meta_value ) {
 		global $wpdb;
 
 		// Do a direct SQL call for speed (> 700k posts expected).
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key = %s and meta_value = %s ;",
+				"SELECT * FROM {$wpdb->postmeta} WHERE meta_key = %s and meta_value = %s ;",
 				$meta_key,
 				$meta_value
 			),
 			ARRAY_A
 		);
 
-		return ! empty( $row );
+		return $row;
 	}
 
 	/**
