@@ -28,17 +28,17 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	/**
 	 * @var PostsLogic.
 	 */
-	private static $posts_logic;
+	private $posts_logic;
 
 	/**
 	 * @var CoAuthorPlusLogic.
 	 */
-	private static $coauthorsplus_logic;
+	private $coauthorsplus_logic;
 
 	/**
 	 * @var AttachmentsLogic.
 	 */
-	private static $attachments_logic;
+	private $attachments_logic;
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
