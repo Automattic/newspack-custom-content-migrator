@@ -103,6 +103,7 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		$site_url = 'https://www.thepavlovictoday.com';
 
 		// DEV TEST POSTS:
+		// author -- https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
 
 		// cats
 		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
@@ -115,10 +116,8 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		// featured image
 		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
 
-		// $b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;" );
-
-// author -- https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
-$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' and barbarianpage_id = 13032 ;", ARRAY_A );
+		$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;", ARRAY_A );
+// $b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' and barbarianpage_id = 13032 ;", ARRAY_A );
 		$b_users = $wpdb->get_results( "select * from barbarian_panel ;", ARRAY_A );
 		$b_cats = $wpdb->get_results( "select * from barbarian_category ;", ARRAY_A );
 
@@ -144,10 +143,8 @@ $b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage
 				continue;
 			}
 
-			$post_data = [];
-			$post_meta = [];
-
 			// Basic content.
+			$post_meta = [];
 			$post_data = [
 				'post_type' => 'post',
 				'post_title' => $b_page[ 'barbarianpage_title' ],
@@ -174,150 +171,181 @@ $b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage
 			WP_CLI::success( sprintf( '   + created Post ID %d', $post_id ) );
 			$this->log( self::LOG_POST_INSERTED, $post_id );
 
-			// Guest Author.
-			$author = $this->filter_array( $b_users, 'id', $b_page[ 'barbarianpage_author' ] );
-			if ( null !== $author ) {
-				try {
-					$ga_data = [
-						'display_name' => $author[ 'barbarian_name' ],
-						'user_login' => $author[ 'barbarian_username' ],
-						'user_email' => $author[ 'barbarianuser_email' ],
-						'website' => $author[ 'barbarianuser_url' ],
-						'description' => $author[ 'barbarianuser_desc' ],
-					];
+			$this->set_guest_author( $site_url, $b_users, $b_page, $post_id );
 
-					if ( $author[ 'barbarianuser_image' ] ) {
-						$avatar_attachment_id = $this->attachments_logic->import_external_file( $site_url . $author[ 'barbarianuser_image' ] );
-						if ( is_wp_error( $avatar_attachment_id) ) {
-							$this->log( self::LOG_GUEST_AUTHOR_AVATAR_ERROR, sprintf( '%s %s %s', $author[ 'barbarian_name' ], $author[ 'barbarianuser_image' ], $avatar_attachment_id->get_error_message() ) );
-							WP_CLI::warning( sprintf( '   - error setting GA avatar %s', $avatar_attachment_id->get_error_message() ) );
+			$this->set_categories( $b_cats, $post_id, $b_page );
 
-							continue;
-						}
+			$this->set_tags( $post_id, $b_page );
 
-						$ga_data[ 'avatar' ] = $avatar_attachment_id;
-					}
+			$this->set_featured_image( $site_url, $post_id, $b_page );
 
-					$guest_author_id = $this->coauthorsplus_logic->create_guest_author( $ga_data );
-					$this->log( self::LOG_GUEST_AUTHOR_CREATED, sprintf( '%d %s', $guest_author_id, json_encode( $ga_data ) ) );
-					WP_CLI::success( sprintf( '   + created GA %d', $guest_author_id ) );
-
-					$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
-					$this->log( self::LOG_GUEST_AUTHOR_ASSIGNED, sprintf( '%d %d', $post_id, $guest_author_id ) );
-					WP_CLI::success( sprintf( '   + assigned GA %d', $guest_author_id ) );
-				} catch ( \Exception $e ) {
-					$this->log( self::LOG_GUEST_AUTHOR_HANDLING_ERROR, sprintf( '%S %s', $e->getMessage(), json_encode( $ga_data ) ) );
-				}
-			}
-
-			// Categories.
-			if ( ! empty( $b_page[ 'barbarianpage_navigation_kat' ] ) ) {
-				$post_cats = [];
-
-				$b_cat = $this->filter_array( $b_cats, 'barbariancategory_id', $b_page[ 'barbarianpage_navigation_kat' ] );
-				if ( null === $b_cat ) {
-					continue;
-				}
-
-				$term_insert_result = wp_insert_term( $b_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_cat[ 'barbariancategory_link' ], ] );
-				if ( is_wp_error( $term_insert_result ) ) {
-					$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
-					WP_CLI::warning( sprintf( '   - error creating category %s -- %s', $b_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
-
-					continue;
-				}
-
-				$cat_id = $term_insert_result[ 'term_id' ];
-				WP_CLI::success( sprintf( '   + created Cat %d %s', $cat_id, $b_cat[ 'barbariancategory_name' ] ) );
-				$this->log( self::LOG_CAT_CREATED, $cat_id, $b_cat[ 'barbariancategory_name' ] );
-
-				$post_cats[] = $cat_id;
-
-				if ( ! empty( $b_page[ 'barbarianpage_navigation_sub' ] ) ) {
-					$b_sub_cat = $this->filter_array( $b_cats, 'barbariancategory_id', $b_page[ 'barbarianpage_navigation_sub' ] );
-					if ( null === $b_sub_cat ) {
-						continue;
-					}
-
-					$term_insert_result = wp_insert_term( $b_sub_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_sub_cat[ 'barbariancategory_link' ], ] );
-					if ( is_wp_error( $term_insert_result ) ) {
-						$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_sub_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
-						WP_CLI::warning( sprintf( '   - error creating Subcategory %s -- %s', $b_sub_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
-
-						continue;
-					}
-
-					$sub_cat_id = $term_insert_result[ 'term_id' ];
-					WP_CLI::success( sprintf( '   + created Subcat %d %s', $cat_id, $b_sub_cat[ 'barbariancategory_name' ] ) );
-					$this->log( self::LOG_CAT_CREATED, $cat_id, $b_sub_cat[ 'barbariancategory_name' ] );
-
-					$post_cats[] = $sub_cat_id;
-				}
-
-				$cats_set = wp_set_post_categories( $post_id, $post_cats, true );
-				if ( is_wp_error( $cats_set ) ) {
-					$this->log( self::LOG_CAT_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $cats_set ), $cats_set->get_error_message() ) );
-					WP_CLI::warning( sprintf( '   - error setting categories %s -- %s', json_encode( $cats_set ), $cats_set->get_error_message() ) );
-
-					continue;
-				}
-
-				WP_CLI::success( sprintf( '   + assigned cats %s', implode( ',', $cats_set ) ) );
-				$this->log( self::LOG_CAT_ASSIGNED, $post_id, implode( ',', $cats_set ) );
-			}
-
-			// Tags.
-			if ( ! empty( $b_page[ 'barbarianpage_metakeywords' ] ) ) {
-				$b_tags = explode( ',', $b_page[ 'barbarianpage_metakeywords' ] );
-				if ( ! empty( $b_tags ) ) {
-					$tags_set_result = wp_set_post_tags( $post_id, $b_tags );
-					if ( is_wp_error( $tags_set_result ) ) {
-						$this->log( self::LOG_TAG_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $tags_set_result ), $tags_set_result->get_error_message() ) );
-						WP_CLI::warning( sprintf( '   - error setting tags %s -- %s', json_encode( $tags_set_result ), $tags_set_result->get_error_message() ) );
-
-						continue;
-					}
-
-					WP_CLI::success( sprintf( '   + assigned tags %s', implode( ',', $tags_set_result ) ) );
-					$this->log( self::LOG_TAG_ASSIGNED, $post_id, implode( ',', $tags_set_result ) );
-				}
-			}
-
-			// Featured Image.
-			if ( ! empty( $b_page[ 'barbarianpage_img' ] ) ) {
-				$fetured_image_id = $this->attachments_logic->import_external_file(
-					$site_url . $b_page[ 'barbarianpage_img' ],
-					$b_page[ 'barbarianpage_imgsignature' ] ?? null
-				);
-				if ( is_wp_error( $fetured_image_id ) ) {
-					$this->log( self::LOG_FEATURED_IMAGE_IMPORT_ERROR, sprintf( '%d %s %s', $post_id, $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id->get_error_message() ) );
-					WP_CLI::warning( sprintf( '   - error importing featured image %s -- %s', $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id->get_error_message() ) );
-
-					continue;
-				}
-
-				$featured_image_set = set_post_thumbnail( $post_id, $fetured_image_id );
-				if ( false == $featured_image_set ) {
-					$this->log( self::LOG_ERR_FEATURED_IMAGE_SET, sprintf( '%d %s %s', $post_id, $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id ) );
-					WP_CLI::warning( sprintf( '   - error setting featured image %s -- %s', $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id ) );
-
-					continue;
-				}
-				$this->log( self::LOG_FEATURED_IMAGE_SET, sprintf( '%d %d', $post_id, $fetured_image_id ) );
-				WP_CLI::success( sprintf( '   + set featured image %d', $fetured_image_id ) );
-			}
-
-			// Save Meta.
 			$post_meta[ 'barbarianpage_id' ] = $b_page[ 'barbarianpage_id' ];
-			foreach ( $post_meta as $meta_key => $meta_value ) {
-				update_post_meta( $post_id, $meta_key, $meta_value);
-			}
+			$this->set_post_meta( $post_id, $post_meta );
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 		WP_CLI::warning( 'Remember to:' );
 		WP_CLI::warning( '- create the redirect from https://www.thepavlovictoday.com/en/* to https://www.thepavlovictoday.com/*' );
 		WP_CLI::warning( '- run the image downloader' );
+	}
+
+	private function set_post_meta( $post_id, $post_meta ) {
+		foreach ( $post_meta as $meta_key => $meta_value ) {
+			update_post_meta( $post_id, $meta_key, $meta_value);
+		}
+	}
+
+	private function set_featured_image( $site_url, $post_id, $b_page ) {
+		if ( ! empty( $b_page[ 'barbarianpage_img' ] ) ) {
+			$fetured_image_id = $this->attachments_logic->import_external_file(
+				$site_url . $b_page[ 'barbarianpage_img' ],
+				$b_page[ 'barbarianpage_imgsignature' ] ?? null
+			);
+			if ( is_wp_error( $fetured_image_id ) ) {
+				$this->log( self::LOG_FEATURED_IMAGE_IMPORT_ERROR, sprintf( '%d %s %s', $post_id, $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id->get_error_message() ) );
+				WP_CLI::warning( sprintf( '   - error importing featured image %s -- %s', $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id->get_error_message() ) );
+
+				return;
+			}
+
+			$featured_image_set = set_post_thumbnail( $post_id, $fetured_image_id );
+			if ( false == $featured_image_set ) {
+				$this->log( self::LOG_ERR_FEATURED_IMAGE_SET, sprintf( '%d %s %s', $post_id, $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id ) );
+				WP_CLI::warning( sprintf( '   - error setting featured image %s -- %s', $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id ) );
+
+				return;
+			}
+			$this->log( self::LOG_FEATURED_IMAGE_SET, sprintf( '%d %d', $post_id, $fetured_image_id ) );
+			WP_CLI::success( sprintf( '   + set featured image %d', $fetured_image_id ) );
+		}
+	}
+
+	private function set_tags( $post_id, $b_page ) {
+		if ( ! empty( $b_page[ 'barbarianpage_metakeywords' ] ) ) {
+			$b_tags = explode( ',', $b_page[ 'barbarianpage_metakeywords' ] );
+			if ( ! empty( $b_tags ) ) {
+				$tags_set_result = wp_set_post_tags( $post_id, $b_tags );
+				if ( is_wp_error( $tags_set_result ) ) {
+					$this->log( self::LOG_TAG_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $tags_set_result ), $tags_set_result->get_error_message() ) );
+					WP_CLI::warning( sprintf( '   - error setting tags %s -- %s', json_encode( $tags_set_result ), $tags_set_result->get_error_message() ) );
+
+					return;
+				}
+
+				WP_CLI::success( sprintf( '   + assigned tags %s', implode( ',', $tags_set_result ) ) );
+				$this->log( self::LOG_TAG_ASSIGNED, $post_id, implode( ',', $tags_set_result ) );
+			}
+		}
+	}
+
+	private function set_categories( $b_cats, $post_id, $b_page ) {
+
+		if ( ! empty( $b_page[ 'barbarianpage_navigation_kat' ] ) ) {
+			$post_cats = [];
+
+			// Parent Category.
+			$b_cat = $this->filter_array( $b_cats, 'barbariancategory_id', $b_page[ 'barbarianpage_navigation_kat' ] );
+			if ( null === $b_cat ) {
+				return;
+			}
+
+			$cat = get_category_by_slug( $b_cat[ 'barbariancategory_link' ] );
+			if ( ! $cat ) {
+				$insert_term_result = wp_insert_term( $b_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_cat[ 'barbariancategory_link' ], ] );
+				if ( is_wp_error( $insert_term_result ) ) {
+					$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_cat[ 'barbariancategory_name' ], $insert_term_result->get_error_message() ) );
+					WP_CLI::warning( sprintf( '   - error creating Subcategory %s -- %s', $b_cat[ 'barbariancategory_name' ], $insert_term_result->get_error_message() ) );
+
+					return;
+				}
+				$cat_id = $insert_term_result[ 'term_id' ];
+			} else {
+				$cat_id = $cat->term_id;
+			}
+
+			WP_CLI::success( sprintf( '   + created Cat %d %s', $cat_id, $b_cat[ 'barbariancategory_name' ] ) );
+			$this->log( self::LOG_CAT_CREATED, $cat_id, $b_cat[ 'barbariancategory_name' ] );
+
+			$post_cats[] = $cat_id;
+
+			// Subcategory.
+			if ( ! empty( $b_page[ 'barbarianpage_navigation_sub' ] ) ) {
+				$b_sub_cat = $this->filter_array( $b_cats, 'barbariancategory_id', $b_page[ 'barbarianpage_navigation_sub' ] );
+				if ( null === $b_sub_cat ) {
+					return;
+				}
+
+				$subcat = get_category_by_slug( $b_sub_cat[ 'barbariancategory_link' ] );
+				if ( ! $subcat ) {
+					$insert_term_result = wp_insert_term( $b_sub_cat[ 'barbariancategory_name' ], 'category', [ 'parent' => $cat_id, 'slug' => $b_sub_cat[ 'barbariancategory_link' ], ] );
+					if ( is_wp_error( $insert_term_result ) ) {
+						$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_sub_cat[ 'barbariancategory_name' ], $insert_term_result->get_error_message() ) );
+						WP_CLI::warning( sprintf( '   - error creating Subcategory %s -- %s', $b_sub_cat[ 'barbariancategory_name' ], $insert_term_result->get_error_message() ) );
+
+						return;
+					}
+					$sub_cat_id = $insert_term_result[ 'term_id' ];
+				} else {
+					$sub_cat_id = $cat->term_id;
+				}
+
+				WP_CLI::success( sprintf( '   + created Subcat %d %s', $sub_cat_id, $b_sub_cat[ 'barbariancategory_name' ] ) );
+				$this->log( self::LOG_CAT_CREATED, $sub_cat_id, $b_sub_cat[ 'barbariancategory_name' ] );
+
+				$post_cats[] = $sub_cat_id;
+			}
+
+			$cats_set = wp_set_post_categories( $post_id, $post_cats, true );
+			if ( is_wp_error( $cats_set ) ) {
+				$this->log( self::LOG_CAT_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $cats_set ), $cats_set->get_error_message() ) );
+				WP_CLI::warning( sprintf( '   - error setting categories %s -- %s', json_encode( $cats_set ), $cats_set->get_error_message() ) );
+
+				return;
+			}
+
+			WP_CLI::success( sprintf( '   + assigned cats %s', implode( ',', $cats_set ) ) );
+			$this->log( self::LOG_CAT_ASSIGNED, $post_id, implode( ',', $cats_set ) );
+		}
+	}
+
+	private function set_guest_author( $site_url, $b_users, $b_page, $post_id ) {
+		$author = $this->filter_array( $b_users, 'id', $b_page[ 'barbarianpage_author' ] );
+		if ( null !== $author ) {
+			try {
+				$ga_data = [
+					'display_name' => $author[ 'barbarian_name' ],
+					'user_login' => $author[ 'barbarian_username' ],
+					'user_email' => $author[ 'barbarianuser_email' ],
+					'website' => $author[ 'barbarianuser_url' ],
+					'description' => $author[ 'barbarianuser_desc' ],
+				];
+
+				if ( $author[ 'barbarianuser_image' ] ) {
+					$avatar_attachment_id = $this->attachments_logic->import_external_file( $site_url . $author[ 'barbarianuser_image' ] );
+					if ( is_wp_error( $avatar_attachment_id) ) {
+						$this->log( self::LOG_GUEST_AUTHOR_AVATAR_ERROR, sprintf( '%s %s %s', $author[ 'barbarian_name' ], $author[ 'barbarianuser_image' ], $avatar_attachment_id->get_error_message() ) );
+						WP_CLI::warning( sprintf( '   - error setting GA avatar %s', $avatar_attachment_id->get_error_message() ) );
+
+						return;
+					}
+
+					$ga_data[ 'avatar' ] = $avatar_attachment_id;
+				}
+
+				$guest_author_id = $this->coauthorsplus_logic->create_guest_author( $ga_data );
+				$this->log( self::LOG_GUEST_AUTHOR_CREATED, sprintf( '%d %s', $guest_author_id, json_encode( $ga_data ) ) );
+				WP_CLI::success( sprintf( '   + created GA %d', $guest_author_id ) );
+
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
+				$this->log( self::LOG_GUEST_AUTHOR_ASSIGNED, sprintf( '%d %d', $post_id, $guest_author_id ) );
+				WP_CLI::success( sprintf( '   + assigned GA %d', $guest_author_id ) );
+			} catch ( \Exception $e ) {
+				$this->log( self::LOG_GUEST_AUTHOR_HANDLING_ERROR, sprintf( '%s %s', $e->getMessage(), json_encode( $ga_data ) ) );
+				WP_CLI::warning( sprintf( '%s %s', $e->getMessage(), json_encode( $ga_data ) ) );
+
+				return;
+			}
+		}
 	}
 
 	/**
