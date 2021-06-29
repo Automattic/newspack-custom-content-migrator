@@ -117,7 +117,6 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
 
 		$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;", ARRAY_A );
-// $b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' and barbarianpage_id = 13032 ;", ARRAY_A );
 		$b_users = $wpdb->get_results( "select * from barbarian_panel ;", ARRAY_A );
 		$b_cats = $wpdb->get_results( "select * from barbarian_category ;", ARRAY_A );
 
@@ -312,9 +311,16 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		$author = $this->filter_array( $b_users, 'id', $b_page[ 'barbarianpage_author' ] );
 		if ( null !== $author ) {
 			try {
+				// Some usernames are invalid in WP, and for these create new usernames from full names.
+				if ( '0' == $author[ 'barbarian_username' ] ) {
+					$user_login = sanitize_user( strtolower( str_replace( ' ', '_', $author[ 'barbarian_name' ] ) ) );
+				} else {
+					$user_login = $author[ 'barbarian_username' ];
+				}
+
 				$ga_data = [
 					'display_name' => $author[ 'barbarian_name' ],
-					'user_login' => $author[ 'barbarian_username' ],
+					'user_login' => $user_login,
 					'user_email' => $author[ 'barbarianuser_email' ],
 					'website' => $author[ 'barbarianuser_url' ],
 					'description' => $author[ 'barbarianuser_desc' ],
