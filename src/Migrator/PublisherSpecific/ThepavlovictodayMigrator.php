@@ -15,15 +15,21 @@ use \WP_Query;
 class ThepavlovictodayMigrator implements InterfaceMigrator {
 
 	// Logs.
-	const LOG_POST_SKIPPED = 'TPT_skipped.log';
+	const LOG_POST_INSERTED = 'TPT_postInserted.log';
+	const LOG_POST_SKIPPED = 'TPT_postSkipped.log';
 	const LOG_INSERT_POST_ERROR = 'TPT_ERRInsertPost.log';
 	const LOG_GUEST_AUTHOR_CREATED = 'TPT_authorCreated.log';
 	const LOG_GUEST_AUTHOR_HANDLING_ERROR = 'TPT_ERRAuthorHandling.log';
 	const LOG_GUEST_AUTHOR_AVATAR_ERROR = 'TPT_ERRAuthorAvatar.log';
 	const LOG_GUEST_AUTHOR_ASSIGNED = 'TPT_authorAssigned.log';
+	const LOG_CAT_CREATED = 'TPT_catCreated.log';
+	const LOG_CAT_ASSIGNED = 'TPT_catAssigned.log';
 	const LOG_CAT_CREATE_ERROR = 'TPT_ERRCatsCreate.log';
 	const LOG_CAT_SET_ERROR = 'TPT_ERRCatsSet.log';
+	const LOG_TAG_SET_ERROR = 'TPT_ERRTagsSet.log';
+	const LOG_TAG_ASSIGNED = 'TPT_tagsAssigned.log';
 	const LOG_FEATURED_IMAGE_IMPORT_ERROR = 'TPT_ERRFeaturedImageImport.log';
+	const LOG_ERR_FEATURED_IMAGE_SET = 'TPT_ERRFeaturedImageSet.log';
 	const LOG_FEATURED_IMAGE_SET = 'TPT_FeaturedImageSet.log';
 
 	/**
@@ -97,8 +103,6 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		$site_url = 'https://www.thepavlovictoday.com';
 
 		// DEV TEST POSTS:
-		
-		// author -- https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
 
 		// cats
 		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
@@ -111,11 +115,17 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		// featured image
 		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
 
-		$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;" );
-		$b_users = $wpdb->get_results( "select * from barbarian_panel ;" );
-		$b_cats = $wpdb->get_results( "select * from barbarian_category ;" );
+		// $b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;" );
 
-		foreach ( $b_pages as $b_page ) {
+// author -- https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
+$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' and barbarianpage_id = 13032 ;", ARRAY_A );
+		$b_users = $wpdb->get_results( "select * from barbarian_panel ;", ARRAY_A );
+		$b_cats = $wpdb->get_results( "select * from barbarian_category ;", ARRAY_A );
+
+		foreach ( $b_pages as $b_page_key => $b_page ) {
+
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $b_page_key + 1, count( $b_pages ), $b_page[ 'barbarianpage_id' ] ) );
+
 			// Skip if post exists.
 			$query = new WP_Query( [
 				'meta_key' => 'custom-meta-key',
@@ -161,9 +171,11 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 				continue;
 			}
 
+			WP_CLI::success( sprintf( '   + created Post ID %d', $post_id ) );
+			$this->log( self::LOG_POST_INSERTED, $post_id );
 
 			// Guest Author.
-			$author = $this->filter_array( $b_users, 'barbarianpage_author', $b_page[ 'barbarianpage_author' ] );
+			$author = $this->filter_array( $b_users, 'id', $b_page[ 'barbarianpage_author' ] );
 			if ( null !== $author ) {
 				try {
 					$ga_data = [
@@ -179,6 +191,8 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 						if ( is_wp_error( $avatar_attachment_id) ) {
 							$this->log( self::LOG_GUEST_AUTHOR_AVATAR_ERROR, sprintf( '%s %s %s', $author[ 'barbarian_name' ], $author[ 'barbarianuser_image' ], $avatar_attachment_id->get_error_message() ) );
 							WP_CLI::warning( sprintf( '   - error setting GA avatar %s', $avatar_attachment_id->get_error_message() ) );
+
+							continue;
 						}
 
 						$ga_data[ 'avatar' ] = $avatar_attachment_id;
@@ -201,49 +215,71 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 				$post_cats = [];
 
 				$b_cat = $this->filter_array( $b_cats, 'barbariancategory_id', $b_page[ 'barbarianpage_navigation_kat' ] );
-				if ( ! $b_cat ) {
+				if ( null === $b_cat ) {
 					continue;
 				}
 
-				$cat_id = wp_insert_term( $b_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_cat[ 'barbariancategory_link' ], ] );
-				if ( is_wp_error( $cat_id ) ) {
-					$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_cat[ 'barbariancategory_name' ], $cat_id->get_error_message() ) );
-					WP_CLI::warning( sprintf( '   - error creating category %s -- %s', $b_cat[ 'barbariancategory_name' ], $cat_id->get_error_message() ) );
+				$term_insert_result = wp_insert_term( $b_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_cat[ 'barbariancategory_link' ], ] );
+				if ( is_wp_error( $term_insert_result ) ) {
+					$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
+					WP_CLI::warning( sprintf( '   - error creating category %s -- %s', $b_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
 
 					continue;
 				}
+
+				$cat_id = $term_insert_result[ 'term_id' ];
+				WP_CLI::success( sprintf( '   + created Cat %d %s', $cat_id, $b_cat[ 'barbariancategory_name' ] ) );
+				$this->log( self::LOG_CAT_CREATED, $cat_id, $b_cat[ 'barbariancategory_name' ] );
 
 				$post_cats[] = $cat_id;
 
 				if ( ! empty( $b_page[ 'barbarianpage_navigation_sub' ] ) ) {
 					$b_sub_cat = $this->filter_array( $b_cats, 'barbariancategory_id', $b_page[ 'barbarianpage_navigation_sub' ] );
-					if ( ! $b_sub_cat ) {
+					if ( null === $b_sub_cat ) {
 						continue;
 					}
 
-					$sub_cat_id = wp_insert_term( $b_sub_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_sub_cat[ 'barbariancategory_link' ], ] );
-					if ( is_wp_error( $sub_cat_id ) ) {
-						$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_sub_cat[ 'barbariancategory_name' ], $sub_cat_id->get_error_message() ) );
-						WP_CLI::warning( sprintf( '   - error creating sub category %s -- %s', $b_sub_cat[ 'barbariancategory_name' ], $sub_cat_id->get_error_message() ) );
+					$term_insert_result = wp_insert_term( $b_sub_cat[ 'barbariancategory_name' ], 'category', [ 'slug' => $b_sub_cat[ 'barbariancategory_link' ], ] );
+					if ( is_wp_error( $term_insert_result ) ) {
+						$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $b_sub_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
+						WP_CLI::warning( sprintf( '   - error creating Subcategory %s -- %s', $b_sub_cat[ 'barbariancategory_name' ], $term_insert_result->get_error_message() ) );
 
 						continue;
 					}
+
+					$sub_cat_id = $term_insert_result[ 'term_id' ];
+					WP_CLI::success( sprintf( '   + created Subcat %d %s', $cat_id, $b_sub_cat[ 'barbariancategory_name' ] ) );
+					$this->log( self::LOG_CAT_CREATED, $cat_id, $b_sub_cat[ 'barbariancategory_name' ] );
 
 					$post_cats[] = $sub_cat_id;
 				}
 
-				$cats_set = wp_set_post_categories( $post_id, $post_cats, false );
+				$cats_set = wp_set_post_categories( $post_id, $post_cats, true );
 				if ( is_wp_error( $cats_set ) ) {
 					$this->log( self::LOG_CAT_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $cats_set ), $cats_set->get_error_message() ) );
 					WP_CLI::warning( sprintf( '   - error setting categories %s -- %s', json_encode( $cats_set ), $cats_set->get_error_message() ) );
+
+					continue;
 				}
+
+				WP_CLI::success( sprintf( '   + assigned cats %s', implode( ',', $cats_set ) ) );
+				$this->log( self::LOG_CAT_ASSIGNED, $post_id, implode( ',', $cats_set ) );
 			}
 
 			// Tags.
 			if ( ! empty( $b_page[ 'barbarianpage_metakeywords' ] ) ) {
 				$b_tags = explode( ',', $b_page[ 'barbarianpage_metakeywords' ] );
 				if ( ! empty( $b_tags ) ) {
-					wp_set_post_tags( $post_id, $b_tags );
+					$tags_set_result = wp_set_post_tags( $post_id, $b_tags );
+					if ( is_wp_error( $tags_set_result ) ) {
+						$this->log( self::LOG_TAG_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $tags_set_result ), $tags_set_result->get_error_message() ) );
+						WP_CLI::warning( sprintf( '   - error setting tags %s -- %s', json_encode( $tags_set_result ), $tags_set_result->get_error_message() ) );
+
+						continue;
+					}
+
+					WP_CLI::success( sprintf( '   + assigned tags %s', implode( ',', $tags_set_result ) ) );
+					$this->log( self::LOG_TAG_ASSIGNED, $post_id, implode( ',', $tags_set_result ) );
 				}
 			}
 
@@ -260,7 +296,13 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 					continue;
 				}
 
-				set_post_thumbnail( $post_id, $fetured_image_id );
+				$featured_image_set = set_post_thumbnail( $post_id, $fetured_image_id );
+				if ( false == $featured_image_set ) {
+					$this->log( self::LOG_ERR_FEATURED_IMAGE_SET, sprintf( '%d %s %s', $post_id, $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id ) );
+					WP_CLI::warning( sprintf( '   - error setting featured image %s -- %s', $site_url . $b_page[ 'barbarianpage_img' ], $fetured_image_id ) );
+
+					continue;
+				}
 				$this->log( self::LOG_FEATURED_IMAGE_SET, sprintf( '%d %d', $post_id, $fetured_image_id ) );
 				WP_CLI::success( sprintf( '   + set featured image %d', $fetured_image_id ) );
 			}
@@ -272,13 +314,10 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 			}
 		}
 
-
-		// TODO GA $ga_data[ 'avatar' ]
-
-		// TODO create redirect from https://www.thepavlovictoday.com/en/five-lessons-in-forgiveness to https://www.thepavlovictoday.com/five-lessons-in-forgiveness
-
-
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		WP_CLI::warning( 'Remember to:' );
+		WP_CLI::warning( '- create the redirect from https://www.thepavlovictoday.com/en/* to https://www.thepavlovictoday.com/*' );
+		WP_CLI::warning( '- run the image downloader' );
 	}
 
 	/**

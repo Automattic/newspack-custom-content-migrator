@@ -87,6 +87,7 @@ class CoAuthorPlus {
 	 *     @type string $user_email
 	 *     @type string $website
 	 *     @type string $description
+	 *     @type int    $avatar       Attachment ID for the Avatar image.
 	 * }
 	 *
 	 * @return int|array Created Guest Author ID, or an array of created Guest Author IDs.
