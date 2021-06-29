@@ -54,7 +54,8 @@ PluginSetup::register_migrators( array(
 	// Migrator\PublisherSpecific\EastMojoMigrator::class,
 	// Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
 	// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
-	Migrator\PublisherSpecific\HipertextualMigrator::class,
+	// Migrator\PublisherSpecific\HipertextualMigrator::class,
+	// Migrator\PublisherSpecific\QuePasaMigrator::class,
 	Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
-	Migrator\PublisherSpecific\QuePasaMigrator::class,
+	Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
 ) );
