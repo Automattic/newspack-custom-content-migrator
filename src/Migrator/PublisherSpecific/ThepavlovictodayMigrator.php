@@ -87,6 +87,14 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thepavlovictoday-remove-uncategorized-cat',
+			[ $this, 'cmd_remove_uncategorized' ],
+			[
+				'shortdesc' => 'Removes Uncategorized Category from Posts where another Category is set.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -186,6 +194,32 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		WP_CLI::warning( 'Remember to:' );
 		WP_CLI::warning( '- create the redirect from https://www.thepavlovictoday.com/en/* to https://www.thepavlovictoday.com/*' );
 		WP_CLI::warning( '- run the image downloader' );
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator thepavlovictoday-remove-uncategorized-cat` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_remove_uncategorized( $args, $assoc_args ) {
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		$cat_uncategorized = get_category_by_slug( 'uncategorized' );
+		foreach ( $post_ids as $kety_post_ids => $post_id ) {
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $kety_post_ids + 1, count( $post_ids ), $post_id ) );
+
+			$cat_ids = wp_get_post_categories( $post_id );
+			$cat_ids_updated = $cat_ids;
+			foreach ( $cat_ids_updated as $key_cat => $cat_id ) {
+				if ( $cat_uncategorized->term_id == $cat_id ) {
+					unset( $cat_ids_updated[ $key_cat ] );
+				}
+			}
+			if ( $cat_ids_updated != $cat_ids && ! empty( $cat_ids_updated ) ) {
+				$cat_ids_updated = array_values( $cat_ids_updated );
+				wp_set_post_categories( $post_id, $cat_ids_updated, false );
+			}
+		}
 	}
 
 	private function set_post_meta( $post_id, $post_meta ) {
