@@ -95,6 +95,14 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thepavlovictoday-fix-attachments-set-titles-to-captions',
+			[ $this, 'cmd_attachments_set_titles_to_captions' ],
+			[
+				'shortdesc' => 'Fixes existing featured images captions.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -222,6 +230,34 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * Callable for the `newspack-content-migrator thepavlovictoday-fix-attachments-set-titles-to-captions` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_attachments_set_titles_to_captions( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$query_images = new WP_Query( [
+			'post_type'      => 'attachment',
+			'post_mime_type' => 'image',
+			'post_status'    => 'inherit',
+			'posts_per_page' => - 1,
+		] );
+
+		foreach ( $query_images->posts as $key_images => $image ) {
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_images + 1, count( $query_images->posts ), $image->ID ) );
+
+			if ( empty( $image->post_excerpt ) && ! empty( $image->post_title ) ) {
+				$image->post_excerpt = $image->post_title;
+				wp_update_post( $image );
+			}
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
 	private function set_post_meta( $post_id, $post_meta ) {
 		foreach ( $post_meta as $meta_key => $meta_value ) {
 			update_post_meta( $post_id, $meta_key, $meta_value);
@@ -232,6 +268,7 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		if ( ! empty( $b_page[ 'barbarianpage_img' ] ) ) {
 			$fetured_image_id = $this->attachments_logic->import_external_file(
 				$site_url . $b_page[ 'barbarianpage_img' ],
+				$b_page[ 'barbarianpage_imgsignature' ] ?? null,
 				$b_page[ 'barbarianpage_imgsignature' ] ?? null
 			);
 			if ( is_wp_error( $fetured_image_id ) ) {
