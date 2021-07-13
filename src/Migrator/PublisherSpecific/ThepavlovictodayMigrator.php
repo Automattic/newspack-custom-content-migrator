@@ -6,6 +6,7 @@ use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
+use Symfony\Component\DomCrawler\Crawler as Crawler;
 use \WP_CLI;
 use \WP_Query;
 
@@ -48,6 +49,11 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 	private $attachments_logic;
 
 	/**
+	 * @var Crawler.
+	 */
+	private $crawler;
+
+	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -59,6 +65,7 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		$this->posts_logic = new PostsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 		$this->attachments_logic = new AttachmentsLogic();
+		$this->crawler = new Crawler();
 	}
 
 	/**
@@ -100,6 +107,14 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_attachments_set_titles_to_captions' ],
 			[
 				'shortdesc' => 'Fixes existing featured images captions.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thepavlovictoday-helper-list-iframes',
+			[ $this, 'cmd_helper_list_iframes' ],
+			[
+				'shortdesc' => 'Lists srcs found in iframes in Posts.',
 				'synopsis'  => [],
 			]
 		);
@@ -256,6 +271,59 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator thepavlovictoday-helper-list-iframes` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_helper_list_iframes( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$log_iframe_not_located = 'tpt_iframeNotLocated.log';
+		$log_iframe_updated = 'tpt_iframeUpdated.log';
+
+		WP_CLI::line( 'Fetching posts...' );
+		$posts = $this->posts_logic->get_all_posts();
+		foreach ( $posts as $key_posts => $post ) {
+
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
+
+			$content = $post->post_content;
+			$content_decoded = html_entity_decode( $content );
+
+			$this->crawler->clear();
+			$this->crawler->add( $content_decoded );
+			$iframes = $this->crawler->filter( 'iframe' );
+			if ( $iframes->count() < 1 ) {
+				continue;
+			}
+
+			foreach ( $iframes->getIterator() as $iframe ) {
+				// This variable is not used because this returns a formatted HTML, not the original node HTML, but here's how one can get a node's HTML using the DOMCrawler.
+				// $iframe_html = $iframe->ownerDocument->saveHTML( $iframe );
+
+				$pos_start = strpos( $content_decoded, '<iframe' );
+				$pos_end = strpos( $content_decoded, '</iframe>' );
+				$iframe_html_unformatted = substr( $content_decoded, $pos_start, $pos_end + strlen( '</iframe>' ) - $pos_start );
+				$src = $iframe->getAttribute( 'src' );
+				$this->log( 'TPD_srcs.log', $src . "\n" . $post->ID );
+			}
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	private function get_block_embed( $src ) {
+		return <<<BLOCK
+<!-- wp:embed {"url":"$src","type":"rich","providerNameSlug":"embed-handler","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+$src
+</div></figure>
+<!-- /wp:embed -->
+BLOCK;
 	}
 
 	private function set_post_meta( $post_id, $post_meta ) {
