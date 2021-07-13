@@ -133,20 +133,6 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 
 		$site_url = 'https://www.thepavlovictoday.com';
 
-		// DEV TEST POSTS:
-		// author -- https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
-
-		// cats
-		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
-		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13034
-		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13036
-
-		// tags
-		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
-
-		// featured image
-		// https://www.thepavlovictoday.com/barbarian/index.php?control=101&place=article&action=inc_clanak_edit&id=13032
-
 		$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;", ARRAY_A );
 		$b_users = $wpdb->get_results( "select * from barbarian_panel ;", ARRAY_A );
 		$b_cats = $wpdb->get_results( "select * from barbarian_category ;", ARRAY_A );
@@ -264,8 +250,26 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 		foreach ( $query_images->posts as $key_images => $image ) {
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_images + 1, count( $query_images->posts ), $image->ID ) );
 
-			if ( empty( $image->post_excerpt ) && ! empty( $image->post_title ) ) {
-				$image->post_excerpt = $image->post_title;
+			/**
+			 * Reminder:
+			 *  image title -- $image->post_title
+			 *  image caption -- $image->post_excerpt
+			 *  image description -- $image->post_content
+			 *  image alt -- $image's meta '_wp_attachment_image_alt'
+			 */
+
+			// If alt is set, and caption is the same as title, update the caption to alt's value.
+			$image_title = $image->post_title;
+			$image_alt = get_post_meta( $image->ID, '_wp_attachment_image_alt', TRUE );
+			$image_caption = $image->post_excerpt;
+			if ( ! empty( $image_alt ) && ( $image_caption == $image_title ) ) {
+				$image->post_excerpt = $image_alt;
+				wp_update_post( $image );
+			}
+
+			// If caption is set but title is empty, update title to caption's value.
+			if ( empty( $image_caption ) && ! empty( $image_title ) ) {
+				$image->post_excerpt = $image_title;
 				wp_update_post( $image );
 			}
 		}
