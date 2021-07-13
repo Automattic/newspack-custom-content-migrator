@@ -111,6 +111,14 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator thepavlovictoday-prepend-excerpt-to-content',
+			[ $this, 'cmd_prepend_excerpt_to_content' ],
+			[
+				'shortdesc' => 'Prepends Post excerpts to content.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator thepavlovictoday-helper-list-iframes',
 			[ $this, 'cmd_helper_list_iframes' ],
 			[
@@ -229,6 +237,30 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 				wp_set_post_categories( $post_id, $cat_ids_updated, false );
 			}
 		}
+	}
+
+
+	/**
+	 * Callable for the `newspack-content-migrator thepavlovictoday-prepend-excerpt-to-content` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_prepend_excerpt_to_content( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_ids => $post_id ) {
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_post_ids + 1, count( $post_ids ), $post_id ) );
+			$post = get_post( $post_id );
+			if ( ! empty( $post->post_excerpt ) && ( 0 !== strpos( $post->post_content, $post->post_excerpt ) ) ) {
+				$post->post_content = $post->post_excerpt . "\n" . $post->post_content;
+				wp_update_post( $post );
+				WP_CLI::success( '   + updated' );
+			}
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
