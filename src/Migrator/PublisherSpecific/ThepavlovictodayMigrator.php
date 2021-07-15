@@ -141,7 +141,7 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 
 		$site_url = 'https://www.thepavlovictoday.com';
 
-		$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode = 'common' ;", ARRAY_A );
+		$b_pages = $wpdb->get_results( "select * from barbarian_page where barbarianpage_pagecode IN ( 'common', 'video' );", ARRAY_A );
 		$b_users = $wpdb->get_results( "select * from barbarian_panel ;", ARRAY_A );
 		$b_cats = $wpdb->get_results( "select * from barbarian_category ;", ARRAY_A );
 
@@ -150,17 +150,12 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $b_page_key + 1, count( $b_pages ), $b_page[ 'barbarianpage_id' ] ) );
 
 			// Skip if post exists.
-			$query = new WP_Query( [
-				'meta_key' => 'custom-meta-key',
-				'meta_query' => [
-					[
-						'value' => $b_page[ 'barbarianpage_id' ],
-						'key' => 'barbarianpage_id',
-						'compare' => '=',
-					]
-				]
-			] );
-			if ( $query->have_posts() ) {
+			$result_meta = $wpdb->get_row( $wpdb->prepare(
+				"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %d ;",
+				'barbarianpage_id',
+				$b_page[ 'barbarianpage_id' ]
+			));
+			if ( isset( $result_meta->post_id ) ) {
 				WP_CLI::warning( $b_page[ 'barbarianpage_id' ] . ' already imported. Skipping.' );
 				$this->log( self::LOG_POST_SKIPPED, $b_page[ 'barbarianpage_id' ] . ' already imported. Skipping.' );
 
@@ -169,10 +164,17 @@ class ThepavlovictodayMigrator implements InterfaceMigrator {
 
 			// Basic content.
 			$post_meta = [];
+
+			if ( 'video' == $b_page[ 'barbarianpage_pagecode' ] ) {
+				$post_content = $b_page[ 'barbarianpage_subtopic' ] . "\n" . $b_page[ 'barbarianpage_video' ] . "\n" . $b_page[ 'barbarianpage_text' ];
+			} else {
+				$post_content = $b_page[ 'barbarianpage_subtopic' ] . "\n" . $b_page[ 'barbarianpage_video' ];
+			}
+
 			$post_data = [
 				'post_type' => 'post',
 				'post_title' => $b_page[ 'barbarianpage_title' ],
-				'post_content' => $b_page[ 'barbarianpage_text' ],
+				'post_content' => $post_content,
 				'post_excerpt' => $b_page[ 'barbarianpage_subtopic' ],
 				'post_status' => ( 1 == $b_page[ 'barbarianpage_vrstaunosa' ] ? 'publish' : 'draft' ),
 				'post_date' => $b_page[ 'barbarianpage_date'],
