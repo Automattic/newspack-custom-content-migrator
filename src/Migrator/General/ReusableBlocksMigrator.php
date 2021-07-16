@@ -214,7 +214,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		$posts = $query_public_posts->get_posts();
 		foreach ( $posts as $key_posts => $post ) {
-			WP_CLI::line( sprintf( '(%d%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
 
 			// Replace Block IDs.
 			$post_content_updated = $this->update_block_ids( $post->post_content, $blocks_id_changes );
