@@ -79,6 +79,26 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+
+		WP_CLI::add_command( 'newspack-content-migrator update-reusable-blocks-id', array( $this, 'cmd_update_reusable_blocks_id' ), [
+			'shortdesc' => 'Updates a Reusable Block ID in content.',
+			'synopsis'  => [
+				[
+					'type'        => 'assoc',
+					'name'        => 'id-old',
+					'description' => 'Old ID.',
+					'optional'    => false,
+					'repeating'   => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'id-new',
+					'description' => 'New ID.',
+					'optional'    => false,
+					'repeating'   => false,
+				],
+			],
+		] );
 	}
 
 	/**
@@ -162,6 +182,51 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 		$this->update_reusable_blocks_ids();
 
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for update-reusable-blocks-id command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_reusable_blocks_id( $args, $assoc_args ) {
+		$id_old = $assoc_args[ 'id-old' ] ?? null;
+		$id_new = $assoc_args[ 'id-new' ] ?? null;
+		if ( is_null( $id_old ) || ! is_null( $id_new ) ) {
+			WP_CLI::error( 'Params --id-old and --id-new are required.' );
+		}
+
+		global $wpdb;
+		$blocks_id_changes[ $id_old ] = $id_new;
+
+		// Get Public Posts and Pages which contain Reusable Blocks.
+		$query_public_posts = new \WP_Query( [
+			'posts_per_page' => -1,
+			'post_type'      => [ 'post', 'page' ],
+			'post_status'    => 'publish',
+			// The search param.doesn't work as expected, so commenting it out for now (it's just a small optimization, anyway).
+			// 's'              => '<!-- wp:block'
+		] );
+		if ( ! $query_public_posts->have_posts() ) {
+			return;
+		}
+
+		$posts = $query_public_posts->get_posts();
+		foreach ( $posts as $key_posts => $post ) {
+			WP_CLI::line( sprintf( '(%d%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
+
+			// Replace Block IDs.
+			$post_content_updated = $this->update_block_ids( $post->post_content, $blocks_id_changes );
+
+			// Update the Post content.
+			if ( $post->post_content != $post_content_updated ) {
+				$wpdb->update( $wpdb->prefix . 'posts', [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
+			}
+		}
+
+		// Let the $wpdb->update() sink in.
+		wp_cache_flush();
 	}
 
 	/**
