@@ -222,6 +222,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			// Update the Post content.
 			if ( $post->post_content != $post_content_updated ) {
 				$wpdb->update( $wpdb->prefix . 'posts', [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
+				WP_CLI::success( 'Updated ID.' );
 			}
 		}
 
