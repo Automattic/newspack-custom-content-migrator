@@ -563,6 +563,32 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		return $errors;
 	}
 
+
+    /**
+     * https://gist.github.com/sepehr/3371339
+     *
+     * @param int $length
+     * @return string
+     */
+	private function readable_random_string( int $length = 8 )
+    {
+        $string = '';
+        $vowels = array("a","e","i","o","u");
+        $consonants = array(
+            'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm',
+            'n', 'p', 'r', 's', 't', 'v', 'w', 'x', 'y', 'z'
+        );
+
+        $max = $length / 2;
+        for ($i = 1; $i <= $max; $i++)
+        {
+            $string .= $consonants[rand(0,19)];
+            $string .= $vowels[rand(0,4)];
+        }
+
+        return $string;
+    }
+
 	/**
 	 * Takes an array of tags, and returns those which begin with the $this->tag_author_prefix prefix, stripping the result
 	 * of this prefix before returning.
