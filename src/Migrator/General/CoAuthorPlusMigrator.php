@@ -567,16 +567,14 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		return $errors;
 	}
 
-    public function cmd_cap_fix_non_unique_guest_slugs()
-    {
+    public function cmd_cap_fix_non_unique_guest_slugs() {
 
-        // @TODO could possibly be improved with use of $wpdb instead of WP_User_Query
-        $authors = (new WP_User_Query(array(
-            'who' => 'authors',
-            'fields' => array(
-                'user_nicename'
-            )
-        )))->get_results();
+        $authors = ( new WP_User_Query( array(
+            'who'       => 'authors',
+            'fields'    => array(
+                    'user_nicename',
+                ),
+        ) ) )->get_results();
 
         /*
          * Convert from stdClass to indexed array. Also take advantage of loop
@@ -606,13 +604,13 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
                 WHERE meta_key = 'cap-user_login'
                 AND meta_value IN ({$author_slugs_string})";
 
-        $non_unique_guest_authors = $wpdb->get_col($sql);
+        $non_unique_guest_authors = $wpdb->get_col( $sql );
 
         $updated_slugs = array();
         $unable_to_make_unique = array();
 
-        $progress = WP_CLI\Utils\make_progress_bar('Updating Guest Author Slugs', count($non_unique_guest_authors));
-        foreach ($non_unique_guest_authors as $guest_author) {
+        $progress = WP_CLI\Utils\make_progress_bar( 'Updating Guest Author Slugs', count( $non_unique_guest_authors ) );
+        foreach ( $non_unique_guest_authors as $guest_author ) {
             $attempts = 3;
 
             $progress->tick();
@@ -620,7 +618,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
             do {
                 $new_guest_author_slug = "{$guest_author}_{$this->readable_random_string()}";
 
-                if (array_key_exists($new_guest_author_slug, $authors)) {
+                if ( array_key_exists( $new_guest_author_slug, $authors ) ) {
                     $attempts--;
                 } else {
                     $wpdb->update(
@@ -650,14 +648,14 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
         }
         $progress->finish();
 
-        if (! empty($unable_to_make_unique)) {
-            array_unshift($unable_to_make_unique, "Unable to make the following Guest Author Slugs unique...");
-            WP_CLI::error_multi_line($unable_to_make_unique);
+        if ( ! empty($unable_to_make_unique) ) {
+            array_unshift( $unable_to_make_unique, "Unable to make the following Guest Author Slugs unique..." );
+            WP_CLI::error_multi_line( $unable_to_make_unique );
         }
 
-        WP_CLI::success("Done!");
-        foreach ($updated_slugs as $slug) {
-            WP_CLI::line($slug);
+        WP_CLI::success( "Done!" );
+        foreach ( $updated_slugs as $slug ) {
+            WP_CLI::line( $slug );
         }
 	}
 
@@ -667,18 +665,40 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
      * @param int $length
      * @return string
      */
-	private function readable_random_string( int $length = 8 )
-    {
+	private function readable_random_string( int $length = 8 ) {
         $string = '';
-        $vowels = array("a","e","i","o","u");
+        $vowels = array(
+            'a',
+            'e',
+            'i',
+            'o',
+            'u',
+        );
         $consonants = array(
-            'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm',
-            'n', 'p', 'r', 's', 't', 'v', 'w', 'x', 'y', 'z'
+            'b',
+            'c',
+            'd',
+            'f',
+            'g',
+            'h',
+            'j',
+            'k',
+            'l',
+            'm',
+            'n',
+            'p',
+            'r',
+            's',
+            't',
+            'v',
+            'w',
+            'x',
+            'y',
+            'z',
         );
 
         $max = $length / 2;
-        for ($i = 1; $i <= $max; $i++)
-        {
+        for ( $i = 1; $i <= $max; $i++ ) {
             $string .= $consonants[rand(0,19)];
             $string .= $vowels[rand(0,4)];
         }

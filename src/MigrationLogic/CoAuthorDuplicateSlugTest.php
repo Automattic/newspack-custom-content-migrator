@@ -6,7 +6,7 @@ use \CoAuthors_Guest_Authors;
 use \WP_CLI;
 use WP_User;
 
-class CoAuthorDuplicateSlugTest extends CoAuthorPlus{
+class CoAuthorDuplicateSlugTest extends CoAuthorPlus {
 
 	protected $authorsWithoutUniqueSlugs = array(
 		array(
@@ -100,11 +100,10 @@ class CoAuthorDuplicateSlugTest extends CoAuthorPlus{
     /**
      * @return void
      */
-    public function run()
-    {
-        WP_CLI::line("Co-Author Duplicate Slug Test - Checking CAP Dependency\n");
+    public function run() {
+        WP_CLI::line( "Co-Author Duplicate Slug Test - Checking CAP Dependency\n" );
         if ( $this->validate_co_authors_plus_dependencies() ) {
-            WP_CLI::line("Setting up test data\n");
+            WP_CLI::line( "Setting up test data\n" );
             $this->setup_test_data();
         }
 	}
@@ -122,48 +121,47 @@ class CoAuthorDuplicateSlugTest extends CoAuthorPlus{
      *
      * @return void
      */
-	protected function setup_test_data()
-    {
-        foreach ($this->authorsWithUniqueSlugs as $author) {
-            WP_CLI::line("Creating author! u:{$author['username']} e:{$author['email']}");
+	protected function setup_test_data() {
+        foreach ( $this->authorsWithUniqueSlugs as $author ) {
+            WP_CLI::line( "Creating author! u:{$author['username']} e:{$author['email']}" );
 
-            $authorId = wp_create_user($author['username'], $author['password'], $author['email']);
-            WP_CLI::line("User ID: {$authorId}");
-            WP_CLI::line("Setting Author Role.");
-            (new WP_User($authorId))->set_role('author');
+            $authorId = wp_create_user( $author['username'], $author['password'], $author['email'] );
+            WP_CLI::line( "User ID: {$authorId}" );
+            WP_CLI::line( "Setting Author Role." );
+            ( new WP_User($authorId) )->set_role( 'author' );
         }
 
-		foreach ($this->authorsWithoutUniqueSlugs as $author) {
-		    WP_CLI::line("Creating author! u:{$author['username']} e:{$author['email']}");
+		foreach ( $this->authorsWithoutUniqueSlugs as $author ) {
+		    WP_CLI::line( "Creating author! u:{$author['username']} e:{$author['email']}" );
 
-		    $authorId = wp_create_user($author['username'], $author['password'], $author['email']);
-            WP_CLI::line("User ID: {$authorId}");
-            WP_CLI::line("Setting Author Role.");
-			(new WP_User($authorId))->set_role('author');
+		    $authorId = wp_create_user( $author['username'], $author['password'], $author['email'] );
+            WP_CLI::line( "User ID: {$authorId}" );
+            WP_CLI::line( "Setting Author Role." );
+			( new WP_User($authorId) )->set_role( 'author' );
 
-			$this->create_guest_author_for_test(array(
-			    'display_name' => $author['username'],
-			    'user_email' => $author['email'],
-            ));
+			$this->create_guest_author_for_test( array(
+			    'display_name'  => $author['username'],
+			    'user_email'    => $author['email'],
+            ) );
 		}
 
-        foreach ($this->usersWithUniqueSlugs as $user) {
-            WP_CLI::line("Creating user! u:{$user['username']} e:{$user['email']}");
+        foreach ( $this->usersWithUniqueSlugs as $user ) {
+            WP_CLI::line( "Creating user! u:{$user['username']} e:{$user['email']}" );
 
-            $userId = wp_create_user($user['username'], $user['password'], $user['email']);
-            WP_CLI::line("User ID: {$userId}");
+            $userId = wp_create_user( $user['username'], $user['password'], $user['email'] );
+            WP_CLI::line( "User ID: {$userId}" );
         }
 
-		foreach ($this->usersWithoutUniqueSlugs as $user) {
-            WP_CLI::line("Creating user! u:{$user['username']} e:{$user['email']}");
+		foreach ( $this->usersWithoutUniqueSlugs as $user ) {
+            WP_CLI::line( "Creating user! u:{$user['username']} e:{$user['email']}" );
 
-            $userId = wp_create_user($user['username'], $user['password'], $user['email']);
-            WP_CLI::line("User ID: {$userId}");
+            $userId = wp_create_user( $user['username'], $user['password'], $user['email'] );
+            WP_CLI::line( "User ID: {$userId}" );
 
-            $this->create_guest_author_for_test(array(
-                'display_name' => $user['username'],
-                'user_email' => $user['email'],
-            ));
+            $this->create_guest_author_for_test( array(
+                'display_name'  => $user['username'],
+                'user_email'    => $user['email'],
+            ) );
         }
 
 	}
@@ -179,25 +177,24 @@ class CoAuthorDuplicateSlugTest extends CoAuthorPlus{
      *
      * @return void
      */
-    protected function create_guest_author_for_test(array $args)
-    {
+    protected function create_guest_author_for_test(array $args) {
         WP_CLI::line("Creating Guest Author Record for {$args['user_email']}");
         // First Create Post
-        $postId = wp_insert_post(array(
-            'post_date' => date('Y-m-d H:i:s', time()),
-            'post_title' => $args['display_name'],
-            'post_status' => 'publish',
-            'comment_status' => 'closed',
-            'ping_status' => 'closed',
-            'post_name' => "cap-test-" . sanitize_title($args['display_name']),
-            'post_modified' => date('Y-m-d H:i:s', time()),
-            'post_type' => 'guest-author'
-        ));
+        $postId = wp_insert_post( array(
+            'post_date'         => date( 'Y-m-d H:i:s', time() ),
+            'post_title'        => $args['display_name'],
+            'post_status'       => 'publish',
+            'comment_status'    => 'closed',
+            'ping_status'       => 'closed',
+            'post_name'         => "cap-test-" . sanitize_title( $args['display_name'] ),
+            'post_modified'     => date( 'Y-m-d H:i:s', time() ),
+            'post_type'         => 'guest-author'
+        ) );
 
         // Then Create PostMeta
-        add_post_meta($postId, 'cap-user_login', sanitize_title($args['display_name']));
-        add_post_meta($postId, 'cap-display_name', $args['display_name']);
+        add_post_meta( $postId, 'cap-user_login', sanitize_title( $args['display_name'] ));
+        add_post_meta( $postId, 'cap-display_name', $args['display_name'] );
 	}
 }
 
-(new CoAuthorDuplicateSlugTest())->run();
+( new CoAuthorDuplicateSlugTest() )->run();
