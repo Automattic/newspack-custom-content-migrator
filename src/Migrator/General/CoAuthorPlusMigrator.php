@@ -212,9 +212,9 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
-		WP_CLI::add_command('newspack-content-migrator co-authors-fix-non-unique-guest-slugs', array( $this, 'cmd_cap_fix_non_unique_guest_slugs'), [
+		WP_CLI::add_command( 'newspack-content-migrator co-authors-fix-non-unique-guest-slugs', array( $this, 'cmd_cap_fix_non_unique_guest_slugs'), [
 		    'shortdesc' => "Make unique any Guest Author Slug which matches a User's slug."
-        ]);
+        ] );
 	}
 
 	/**
