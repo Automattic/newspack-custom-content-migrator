@@ -576,24 +576,15 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
                 ),
         ) ) )->get_results();
 
+        $author_slugs_string = "'" . implode( "', '", wp_list_pluck( $authors, 'user_nicename' ) ) . "'";
+
         /*
-         * Convert from stdClass to indexed array. Also take advantage of loop
-         * and build up list of values for WHERE IN query below.
+         * Convert from stdClass to indexed array.
          * */
 
-        $full_author_list_count = count($authors);
-        $author_slugs_string = '';
-
-        foreach ($authors as $key => $author) {
-            $authors[$author->user_nicename] = $key;
-            unset($authors[$key]);
-
-            // Append comma, up until last author in list.
-            if ($key + 1 < $full_author_list_count) {
-                $author_slugs_string .= "'{$author->user_nicename}',";
-            } else {
-                $author_slugs_string .= "'{$author->user_nicename}'";
-            }
+        foreach ( $authors as $key => $author ) {
+            $authors[ $author->user_nicename ] = $key;
+            unset( $authors[ $key ] );
         }
 
         global $wpdb;
