@@ -442,7 +442,8 @@ BLOCK;
 			WP_CLI::success( sprintf( '   + created Cat %d %s', $cat_id, $b_cat[ 'barbariancategory_name' ] ) );
 			$this->log( self::LOG_CAT_CREATED, $cat_id, $b_cat[ 'barbariancategory_name' ] );
 
-			$post_cats[] = $cat_id;
+			// Let's not set the parent cat, after all.
+			// $post_cats[] = $cat_id;
 
 			// Subcategory.
 			if ( ! empty( $b_page[ 'barbarianpage_navigation_sub' ] ) ) {
@@ -462,7 +463,7 @@ BLOCK;
 					}
 					$sub_cat_id = $insert_term_result[ 'term_id' ];
 				} else {
-					$sub_cat_id = $cat->term_id;
+					$sub_cat_id = $subcat->term_id;
 				}
 
 				WP_CLI::success( sprintf( '   + created Subcat %d %s', $sub_cat_id, $b_sub_cat[ 'barbariancategory_name' ] ) );
