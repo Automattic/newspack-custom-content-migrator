@@ -1,6 +1,6 @@
 # Newspack Custom Content Migrator
 
-This plugin is a set of WP CLI commands (**Migrator classes**), and scripts scripts (**Recipes**) used during Newspack sites Live Launches and/or Content Updates.
+This plugin is a set of WP CLI commands (**Migrator classes**), and scripts (**Recipes**) used during Newspack sites Live Launches and/or Content Updates.
 
 ## TOC
 
@@ -64,6 +64,8 @@ Migrator classes implement the [`InterfaceMigrator`](https://github.com/Automatt
 ### Register the New Migrator
 
 The new Migrator should be registered in the [`newspack-custom-content-migrator.php`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/newspack-custom-content-migrator.php).
+
+After creating a new Migrator, run `composer update` to update the autoloading files.
 
 ## Creating a Recipe
 
