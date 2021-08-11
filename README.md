@@ -65,7 +65,7 @@ Migrator classes implement the [`InterfaceMigrator`](https://github.com/Automatt
 
 The new Migrator should be registered in the [`newspack-custom-content-migrator.php`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/newspack-custom-content-migrator.php).
 
-After creating a new Migrator, run `composer update` to update the autoloading files.
+After creating a new Migrator, run `composer dump-autoload` to update the autoloading files.
 
 ## Creating a Recipe
 
