@@ -207,7 +207,7 @@ class GadisMigrator implements InterfaceMigrator {
 			$featured_image_id = $this->attachments_logic->import_external_file( $url );
 			if ( is_wp_error( $featured_image_id ) ) {
 				$this->log( self::LOG_FEATURED_IMAGE_IMPORT_ERROR, sprintf( '%d %s %s', $post_id, $url, $featured_image_id->get_error_message() ) );
-				WP_CLI::warning( sprintf( '   - error importing featured image %s -- %s', $url, $featured_image_id->get_error_message() ) );
+				WP_CLI::warning( sprintf( 'Error importing featured image %s -- %s', $url, $featured_image_id->get_error_message() ) );
 				return;
 			}
 
@@ -215,7 +215,7 @@ class GadisMigrator implements InterfaceMigrator {
 			$featured_image_set = set_post_thumbnail( $post_id, $featured_image_id );
 			if ( false == $featured_image_set ) {
 				$this->log( self::LOG_ERR_FEATURED_IMAGE_SET, sprintf( '%d %s %s', $post_id, $url, $featured_image_id ) );
-				WP_CLI::warning( sprintf( '   - error setting featured image %s -- %s', $url, $featured_image_id ) );
+				WP_CLI::warning( sprintf( 'Error setting featured image %s -- %s', $url, $featured_image_id ) );
 				return;
 			}
 		}
@@ -236,7 +236,7 @@ class GadisMigrator implements InterfaceMigrator {
 			);
 			if ( is_wp_error( $insert_term_res ) ) {
 				$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $article['category'], $insert_term_res->get_error_message() ) );
-				WP_CLI::warning( sprintf( '   - error creating Subcategory %s -- %s', $article['category'], $insert_term_res->get_error_message() ) );
+				WP_CLI::warning( sprintf( 'Error creating category %s -- %s', $article['category'], $insert_term_res->get_error_message() ) );
 				return;
 			}
 			$term_id = $insert_term_res['term_id'];
@@ -268,7 +268,7 @@ class GadisMigrator implements InterfaceMigrator {
 				);
 				if ( is_wp_error( $term_id ) ) {
 					$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( '%d %s %s', $post_id, $subcategory[0]['name'], $insert_term_res->get_error_message() ) );
-					WP_CLI::warning( sprintf( '   - error creating Subcategory %s -- %s', $subcategory[0]['name'], $insert_term_res->get_error_message() ) );
+					WP_CLI::warning( sprintf( 'Error creating subcategory %s -- %s', $subcategory[0]['name'], $insert_term_res->get_error_message() ) );
 					return;
 				}
 				$subcategory_term_id = $insert_term_res['term_id'];
@@ -281,7 +281,7 @@ class GadisMigrator implements InterfaceMigrator {
 		$result = wp_set_post_categories( $post_id, $post_cats, true );
 		if ( is_wp_error( $result ) ) {
 			$this->log( self::LOG_CAT_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $result ), $result->get_error_message() ) );
-			WP_CLI::warning( sprintf( '   - error setting categories %s -- %s', json_encode( $result ), $result->get_error_message() ) );
+			WP_CLI::warning( sprintf( 'Error setting post categories %s -- %s', json_encode( $result ), $result->get_error_message() ) );
 			return;
 		}
 	}
@@ -307,7 +307,7 @@ class GadisMigrator implements InterfaceMigrator {
 			);
 			if ( is_wp_error( $result ) ) {
 				$this->log( self::LOG_TAG_SET_ERROR, sprintf( '%d %s %s', $post_id, json_encode( $result ), $result->get_error_message() ) );
-				WP_CLI::warning( sprintf( '   - error setting tags %s -- %s', json_encode( $result ), $result->get_error_message() ) );
+				WP_CLI::warning( sprintf( 'Error setting post tags %s -- %s', json_encode( $result ), $result->get_error_message() ) );
 				return;
 			}
 		}
