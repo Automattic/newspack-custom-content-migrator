@@ -92,12 +92,12 @@ class AdsMigrator implements InterfaceMigrator {
 
 		$result = $this->export_ads( $output_dir, self::AD_UNITS_EXPORT_FILE );
 		if ( true === $result ) {
+			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
+			WP_CLI::warning( 'Done.' );
 			exit(1);
 		}
-
-		WP_CLI::success( 'Done.' );
 	}
 
 	/**
@@ -139,7 +139,7 @@ class AdsMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::AD_UNITS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::error( sprintf( 'Ads file not found %s.', $import_file ) );
 		}
 
 		WP_CLI::line( 'Importing Newspack Ads...' );

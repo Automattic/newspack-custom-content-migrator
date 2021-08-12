@@ -92,12 +92,12 @@ class NewslettersMigrator implements InterfaceMigrator {
 
 		$result = $this->export_newsletters( $output_dir, self::NEWSLETTERS_EXPORT_FILE );
 		if ( true === $result ) {
+			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
+			WP_CLI::warning( 'Done.' );
 			exit(1);
 		}
-
-		WP_CLI::success( 'Done.' );
 	}
 
 	/**
@@ -139,7 +139,7 @@ class NewslettersMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::NEWSLETTERS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::error( sprintf( 'Newsletters file not found %s.', $import_file ) );
 		}
 
 		WP_CLI::line( 'Importing Newsletters...' );

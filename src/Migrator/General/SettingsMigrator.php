@@ -131,6 +131,7 @@ class SettingsMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
+			WP_CLI::warning( 'Done.' );
 			exit(1);
 		}
 	}
@@ -182,7 +183,7 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$options_import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
 		if ( ! is_file( $options_import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $options_import_file ) );
+			WP_CLI::error( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
 		}
 
 		WP_CLI::line( 'Importing site identity settings...' );
@@ -290,7 +291,7 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::PAGES_SETTINGS_FILENAME;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::error( sprintf( 'Pages settings file not found %s.', $import_file ) );
 		}
 
 		WP_CLI::line( 'Importing default pages settings...' );

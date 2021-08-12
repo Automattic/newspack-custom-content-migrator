@@ -85,12 +85,12 @@ class CssMigrator implements InterfaceMigrator {
 
 		$result = $this->export_current_theme_custom_css( $output_dir, self::CSS_CURRENT_THEME_EXPORT_FILE );
 		if ( true === $result ) {
+			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
+			WP_CLI::warning( 'Done.' );
 			exit(1);
 		}
-
-		WP_CLI::success( 'Done.' );
 	}
 
 	/**
@@ -127,7 +127,7 @@ class CssMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::CSS_CURRENT_THEME_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::error( sprintf( 'CSS file not found %s.', $import_file ) );
 		}
 
 		WP_CLI::line( 'Importing custom CSS...' );
