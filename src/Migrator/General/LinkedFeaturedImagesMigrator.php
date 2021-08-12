@@ -49,7 +49,13 @@ class FeaturedImagesMigrator implements InterfaceMigrator {
 
 		global $wpdb;
 		$image_attachments_with_parents = $wpdb->get_results(
-			"SELECT ID,post_parent FROM {$wpdb->posts} WHERE post_type = 'attachment' AND post_mime_type LIKE 'image/%' post_parent IS NOT NULL ORDER BY ID"
+			"SELECT wp.ID, wp.post_parent
+			FROM {$wpdb->posts} wp
+			JOIN {$wpdb->posts} wp2
+			ON wp2.ID = wp.post_parent AND wp2.post_type = 'post'
+			WHERE wp.post_type = 'attachment'
+			AND wp.post_mime_type LIKE 'image%'
+			GROUP BY wp.post_parent;"
 		);
 		WP_CLI::line( sprintf( 'Found %s attachment images with parent posts set.', count( $image_attachments_with_parents ) ) );
 		foreach ( $image_attachments_with_parents as $key_image_attachments_with_parents => $attachment ) {
