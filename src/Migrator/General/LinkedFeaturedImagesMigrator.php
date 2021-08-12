@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
-class LinkedFeaturedImagesMigrator implements InterfaceMigrator {
+class FeaturedImagesMigrator implements InterfaceMigrator {
 	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
@@ -35,29 +35,37 @@ class LinkedFeaturedImagesMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator set-featured-images-from-linked', array( $this, 'cmd_set_featured_images_from_linked' ) );
+		WP_CLI::add_command( 'newspack-content-migrator set-featured-images-from-first-image', array( $this, 'cmd_set_featured_images_from_first_image' ) );
 	}
 
 	/**
-	 * Callable for attachments_logicset-featured-images-from-linked command.
+	 * Callable for newspack-content-migrator set-featured-images-from-first-image command.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_set_featured_images_from_linked( $args, $assoc_args ) {
-		WP_CLI::line( sprintf( 'Setting featured images from linked attachments...' ) );
+	public function cmd_set_featured_images_from_first_image( $args, $assoc_args ) {
+		WP_CLI::line( sprintf( "Setting Posts' featured images from first image attachment..." ) );
 
 		global $wpdb;
-		$attachments_with_parents = $wpdb->get_results(
-			$wpdb->prepare( "SELECT ID,post_parent FROM $wpdb->posts WHERE post_type = %s AND post_parent IS NOT NULL", 'attachment' ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$image_attachments_with_parents = $wpdb->get_results(
+			"SELECT wp.ID, wp.post_parent
+			FROM {$wpdb->posts} wp
+			JOIN {$wpdb->posts} wp2
+			ON wp2.ID = wp.post_parent AND wp2.post_type = 'post'
+			WHERE wp.post_type = 'attachment'
+			AND wp.post_mime_type LIKE 'image/%'
+			GROUP BY wp.post_parent;"
 		);
-		WP_CLI::line( sprintf( 'Found %s attachments with parent posts set.', count( $attachments_with_parents ) ) );
-		foreach ( $attachments_with_parents as $attachment ) {
+		WP_CLI::line( sprintf( 'Found %s attachment images with parent posts set.', count( $image_attachments_with_parents ) ) );
+		foreach ( $image_attachments_with_parents as $key_image_attachments_with_parents => $attachment ) {
 			$parent_id     = $attachment->post_parent;
 			$attachment_id = $attachment->ID;
 			if ( ! has_post_thumbnail( $parent_id ) ) {
 				set_post_thumbnail( $parent_id, $attachment_id );
-				WP_CLI::line( sprintf( 'Set featured image on post %s from attachment %s.', $parent_id, $attachment_id ) );
+				WP_CLI::line( sprintf( '(%d/%d) Set featured image on post %s from attachment %s.', $key_image_attachments_with_parents + 1, count( $image_attachments_with_parents ), $parent_id, $attachment_id ) );
+			} else {
+				WP_CLI::line( sprintf( '(%d/%d) Skipping, Post %d already has a featured image %d.', $key_image_attachments_with_parents + 1, count( $image_attachments_with_parents ), $parent_id, $attachment_id ) );
 			}
 		}
 	}
