@@ -25,7 +25,7 @@ class GadisMigrator implements InterfaceMigrator {
 	const LOG_ERR_FEATURED_IMAGE_SET      = 'GADIS_ERRFeaturedImageSet.log';
 
 	// CDN URI.
-	const CDN_URI = 'http://cdn.gadis.co.id/bucket_gadis_production';
+	const CDN_URI = 'https://cdn.gadis.co.id/bucket-gadis-production';
 	
 	// Categories map.
 	const CATEGORIES_MAP = [
