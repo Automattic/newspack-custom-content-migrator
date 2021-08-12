@@ -61,24 +61,39 @@ function download_vip_search_replace() {
 }
 
 # Sets config variables which can be automatically set.
-function set_auto_config_variables() {
-  set_db_name
-  set_jetpack_table_prefix
-}
+function set_config_variables() {
+  THIS_PLUGINS_NAME='newspack-custom-content-migrator'
+  # Tables to import fully from the Live Site, given here without the table prefix.
+  declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
+  # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as the Atomic sites' convention.
+  DB_NAME_LOCAL=""
+  # Atomic DB host.
+  DB_HOST_LOCAL=127.0.0.1
+  # Path to the public folder. No ending slash.
+  HTDOCS_PATH=/srv/htdocs
+  # Atomic WP CLI params.
+  WP_CLI_BIN=/usr/local/bin/wp-cli
+  WP_CLI_PATH=/srv/htdocs/__wp__/
+  # If this var is left empty, the VIP's search-replace tool will be downloaded from
+  # https://github.com/Automattic/go-search-replace, otherwise full path to binary.
+  SEARCH_REPLACE=""
 
-# If a specific value is given to the JETPACK_TABLE_PREFIX var, means that the Jetpack Rewind
-# archive contains a different table prefix than the Staging/Launch site. But if it's not set,
-# use TABLE_PREFIX value everywhere.
-function set_jetpack_table_prefix() {
-  if [ "" = "$JETPACK_TABLE_PREFIX" ]; then
-    JETPACK_TABLE_PREFIX=$TABLE_PREFIX
-  fi
-}
+  # Migrators' output dir.
+  TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
+  # Jetpack Rewind temp dir.
+  TEMP_DIR_JETPACK=$TEMP_DIR/jetpack_archive
+  # Another Jetpack temp dir, where the archive initially gets extracted to.
+  TEMP_DIR_JETPACK_UNZIP=$TEMP_DIR_JETPACK/unzip
+  # Name of the Live SQL dump file to save after the hostname replacements are made.
+  LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
 
-# Checks the DB_NAME_LOCAL, an if it is empty, it fetches it from the Atomic user name.
-function set_db_name() {
+  # If DB name not provided sets it from the Atomic user name.
   if [ "" = "$DB_NAME_LOCAL" ]; then
     DB_NAME_LOCAL=$( whoami )
+  fi
+  # If not specified otherwise, Jetpack table prefix is the same as local WP DB prefix.
+  if [ "" = "$JETPACK_TABLE_PREFIX" ]; then
+    JETPACK_TABLE_PREFIX=$TABLE_PREFIX
   fi
 }
 

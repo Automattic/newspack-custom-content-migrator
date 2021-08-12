@@ -1,74 +1,28 @@
 #!/bin/bash
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# This file contains the most recent curated update recipe. Copy it to this same dir  #
-# and give it the Publisher's name. Commit these individual recipe files to master.   #
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
 # ---------- USER SET VARIABLES:
-# Local DB table prefix. In a rare case when the Jetpack Rewind SQL dump uses a different
-# table prefix than the local DB one, you may set it in the JETPACK_TABLE_PREFIX var.
+# Local WP DB table prefix.
 TABLE_PREFIX=wp_
-# The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
+# The --default-character-set param for mysql commands: utf8, utf8mb4, latin1.
 DB_DEFAULT_CHARSET=utf8mb4
-# To provide content for import from the Live site,
-#   1. either set path to Jetpack Rewind archive in LIVE_JETPACK_ARCHIVE
-#   2. or set both LIVE_FILES and LIVE_SQL_DUMP_FILE and leave
-#      LIVE_JETPACK_ARCHIVE as an empty string ( LIVE_JETPACK_ARCHIVE="" ).
+# To provide content from the Live site:
+#   1. either set location of LIVE_JETPACK_ARCHIVE
+#   2. or set both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE, and leave LIVE_JETPACK_ARCHIVE empty
 LIVE_JETPACK_ARCHIVE=/tmp/live_export/jetpack_rewind_backup.tar.gz
-# Hostname replacements to perform on the Live DB dump before importing it.
-# Associative array with REPLACE_HOST_FROM -> REPLACE_HOST_TO as key-value pairs.
-# Pure host names, no pre- or post-slashes. One replacement per domain or subdomain.
-# It's recommended to also replace the origin Staging site's hostname before cloning.
+LIVE_HTDOCS_FILES=""
+LIVE_SQL_DUMP_FILE=""
+# Hostname replacements to perform on the Live DB dump before importing it. Keys are live hostname, values are this site's hostname:
 declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
-  # Here are three example entries. Edit and uncomment these, and enter at least one:
   # [publisher.com]=publisher-launch.newspackstaging.com
   # [www.publisher.com]=publisher-launch.newspackstaging.com
-  # [publisher-newspack.newspackstaging.com]=publisher-launch.newspackstaging.com
 )
-
-# ---------- AUTOMATICALLY SET AND DEFAULT VARIABLES, no need to change these:
-THIS_PLUGINS_NAME='newspack-custom-content-migrator'
-# Temp folder for script's resources. No ending slash. Will be purged.
+# Temp folder for this script -- will be completely deleted and purged!
 TEMP_DIR=/tmp/launch/tmp_update
-# If LIVE_JETPACK_ARCHIVE is given, this var will be set automatically. Otherwise,
-# set path to the folder containing Live files, no ending slash. Should contain wp-content.
-LIVE_HTDOCS_FILES=""
-# If LIVE_JETPACK_ARCHIVE is given, this var will be set automatically. Otherwise,
-# set path to Live SQL dump file. This dump should contain only tables from IMPORT_TABLES.
-LIVE_SQL_DUMP_FILE=""
-# Set the JETPACK_TABLE_PREFIX if the Jetpack Rewind SQL dump has a different prefix than
-# the local Staging/Launch DB.
+# In rare cases that the Live site used a different prefix than this local site, set the Live prefix here, or leave empty.
 JETPACK_TABLE_PREFIX=""
-# Tables to import fully from the Live Site, given here without the table prefix.
-declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
-# If left empty, the DB_NAME_LOCAL will be fetched from the user name, as a convention on
-# Atomic environment. But if a DB schema name is given, it will be used.
-DB_NAME_LOCAL=""
-# Atomic DB host.
-DB_HOST_LOCAL=127.0.0.1
-# Path to the public folder. No ending slash.
-HTDOCS_PATH=/srv/htdocs
-# Atomic WP CLI params.
-WP_CLI_BIN=/usr/local/bin/wp-cli
-WP_CLI_PATH=/srv/htdocs/__wp__/
-# If this var is left empty, the VIP's search-replace tool will be downloaded from
-# https://github.com/Automattic/go-search-replace, otherwise full path to binary.
-SEARCH_REPLACE=""
 
-# ---------- SCRIPT VARIABLES, do not change these:
-# Migration Plugin's output dir (the Plugin uses hard-coded file names).
-TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
-# Jetpack Rewind export temp dir, where the SQL dump and files get extracted to.
-TEMP_DIR_JETPACK=$TEMP_DIR/jetpack_archive
-# Another Jetpack temp dir, where the archive initially gets extracted to.
-TEMP_DIR_JETPACK_UNZIP=$TEMP_DIR_JETPACK/unzip
-# Name of file where to save the Live SQL dump after hostname replacements are made.
-LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
 
 # START -----------------------------------------------------------------------------
-
-# --- init:
 
 TIME_START=`date +%s`
 . ./../inc/functions.sh
@@ -76,7 +30,7 @@ TIME_START=`date +%s`
 echo_ts 'purging temp folder...'
 prepare_temp_folders
 
-set_auto_config_variables
+set_config_variables
 validate_all_config_params
 
 # --- prepare:
