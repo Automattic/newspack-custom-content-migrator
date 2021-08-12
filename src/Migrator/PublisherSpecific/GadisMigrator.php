@@ -326,7 +326,7 @@ class GadisMigrator implements InterfaceMigrator {
 	 *
 	 * @param array $articles Gadis articles.
 	 */
-	private function import_articles( $articles ) {
+	private function import_articles( $articles, $force_import = false ) {
 
 		global $wpdb;
 
@@ -341,15 +341,17 @@ class GadisMigrator implements InterfaceMigrator {
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
 
 			// Skip if post exists.
-			$result_meta = $wpdb->get_row( $wpdb->prepare(
-				"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %d ;",
-				'gadis_id',
-				$gadis_id
-			) );
-			if ( isset( $result_meta->post_id ) ) {
-				WP_CLI::warning( $gadis_id . ' already imported. Skipping.' );
-				$this->log( self::LOG_POST_SKIPPED, $gadis_id . ' already imported. Skipping.' );
-				continue;
+			if ( true === $force_import ) {
+				$result_meta = $wpdb->get_row( $wpdb->prepare(
+					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %d ;",
+					'gadis_id',
+					$gadis_id
+				) );
+				if ( isset( $result_meta->post_id ) ) {
+					WP_CLI::warning( $gadis_id . ' already imported. Skipping.' );
+					$this->log( self::LOG_POST_SKIPPED, $gadis_id . ' already imported. Skipping.' );
+					continue;
+				}
 			}
 
 			$pages = array_values(
