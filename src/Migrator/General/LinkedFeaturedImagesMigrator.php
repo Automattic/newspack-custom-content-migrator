@@ -54,7 +54,7 @@ class FeaturedImagesMigrator implements InterfaceMigrator {
 			JOIN {$wpdb->posts} wp2
 			ON wp2.ID = wp.post_parent AND wp2.post_type = 'post'
 			WHERE wp.post_type = 'attachment'
-			AND wp.post_mime_type LIKE 'image%'
+			AND wp.post_mime_type LIKE 'image/%'
 			GROUP BY wp.post_parent;"
 		);
 		WP_CLI::line( sprintf( 'Found %s attachment images with parent posts set.', count( $image_attachments_with_parents ) ) );
