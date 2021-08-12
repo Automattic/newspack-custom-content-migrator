@@ -148,9 +148,8 @@ wp_cli newspack-content-migrator update-seo-settings
 echo_ts 'setting file permissions to public content...'
 set_public_content_file_permissions
 
-# # Recommended to keep these tables for a short while after the launch, for easier problem fixing
-# echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'
-# drop_temp_db_tables
+echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'
+drop_temp_db_tables
 
 echo_ts 'flushing WP cache...'
 wp_cli cache flush
