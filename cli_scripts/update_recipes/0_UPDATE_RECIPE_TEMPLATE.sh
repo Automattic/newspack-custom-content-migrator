@@ -35,7 +35,7 @@ validate_all_config_params
 
 # --- prepare:
 
-download_vip_search_replace
+get_vip_search_replace
 
 echo_ts 'starting to unpack the Jetpack Rewind archive and prepare contents for import...'
 unpack_jetpack_archive

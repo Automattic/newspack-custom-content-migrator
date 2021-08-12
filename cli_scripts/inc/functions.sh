@@ -36,27 +36,27 @@ function update_plugin_status() {
   fi
 }
 
-# Checks if SEARCH_REPLACE is set, an if it isn't it downloads the search-replace
-# tool and sets its path.
-function download_vip_search_replace() {
-  # If it's set, use it
-  if [ "" != "$SEARCH_REPLACE" ]; then
-    chmod 755 $SEARCH_REPLACE
-    return
-  fi
-
-  echo_ts 'downloading the search-replace bin...'
-  local ARCHIVE="$TEMP_DIR/search-replace.gz"
+# If the SEARCH_REPLACE file exists it will be used, or else will be downloaded it from GH.
+function get_vip_search_replace() {
+  # Location of search-replace binary.
   SEARCH_REPLACE=$TEMP_DIR/search-replace
-  rm -f $ARCHIVE
-  curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
-    -o "$ARCHIVE" && \
-  gzip -f -d $ARCHIVE && \
-  chmod 755 $SEARCH_REPLACE
 
-  if [ ! -f $SEARCH_REPLACE ]; then
-    echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and set it in the SEARCH_REPLACE var.'
-    exit
+  if [ -f $SEARCH_REPLACE ]; then
+    chmod 755 $SEARCH_REPLACE
+    echo_ts "VIP search-replace file found at $SEARCH_REPLACE so it will be used."
+    return
+  else
+    echo_ts 'downloading the search-replace bin...'
+    local ARCHIVE="$TEMP_DIR/search-replace.gz"
+    rm -f $ARCHIVE
+    curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
+      -o "$ARCHIVE" && \
+    gzip -f -d $ARCHIVE && \
+    chmod 755 $SEARCH_REPLACE
+    if [ ! -f $SEARCH_REPLACE ]; then
+      echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and save it to $SEARCH_REPLACE'
+      exit
+    fi
   fi
 }
 
@@ -74,9 +74,6 @@ function set_config_variables() {
   # Atomic WP CLI params.
   WP_CLI_BIN=/usr/local/bin/wp-cli
   WP_CLI_PATH=/srv/htdocs/__wp__/
-  # If this var is left empty, the VIP's search-replace tool will be downloaded from
-  # https://github.com/Automattic/go-search-replace, otherwise full path to binary.
-  SEARCH_REPLACE=""
 
   # Migrators' output dir.
   TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
