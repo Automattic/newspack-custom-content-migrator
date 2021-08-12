@@ -341,7 +341,7 @@ class GadisMigrator implements InterfaceMigrator {
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
 
 			// Skip if post exists.
-			if ( true === $force_import ) {
+			if ( false === $force_import ) {
 				$result_meta = $wpdb->get_row( $wpdb->prepare(
 					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %d ;",
 					'gadis_id',
