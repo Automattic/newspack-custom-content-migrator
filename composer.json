@@ -16,5 +16,12 @@
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
     "automattic/newspack-cms-importers": "dev-master"
+  },
+  "require-dev": {
+    "automattic/vipwpcs": "^2.0",
+    "wp-coding-standards/wpcs": "^2.1",
+    "phpcompatibility/phpcompatibility-wp": "^2.1",
+    "composer/installers": "^1.7",
+    "dealerdirect/phpcodesniffer-composer-installer": "^0.7.0"
   }
 }
