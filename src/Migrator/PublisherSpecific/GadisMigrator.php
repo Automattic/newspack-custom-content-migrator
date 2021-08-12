@@ -88,6 +88,14 @@ class GadisMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator gadis-test-gallery',
+			[ $this, 'cmd_test_gallery' ],
+			[
+				'shortdesc' => 'Test gallery import',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator gadis-remove-uncategorized-cat',
 			[ $this, 'cmd_remove_uncategorized' ],
 			[
@@ -314,17 +322,14 @@ class GadisMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Callable for the `newspack-content-migrator gadis-import-posts` command.
+	 * Import Gadis articles.
 	 *
-	 * @param array $args       CLI arguments.
-	 * @param array $assoc_args CLI associative arguments.
+	 * @param array $articles Gadis articles.
 	 */
-	public function cmd_import_posts( $args, $assoc_args ) {
-		$time_start = microtime( true );
+	private function import_articles( $articles ) {
 
 		global $wpdb;
 
-		$articles       = $wpdb->get_results( "SELECT * FROM articles;", ARRAY_A );
 		$article_pages  = $wpdb->get_results( "SELECT * FROM article_pages;", ARRAY_A );
 		$tags           = $wpdb->get_results( "SELECT * FROM article_tags WHERE tag != '';", ARRAY_A );
 		$galleries      = $wpdb->get_results( "SELECT * FROM article_galleries;", ARRAY_A );
@@ -418,6 +423,35 @@ class GadisMigrator implements InterfaceMigrator {
 			$this->set_categories( $sub_categories, $post_id, $article );
 			$this->set_tags( $tags, $post_id, $gadis_id );
 		}
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator gadis-import-posts` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_import_posts( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start = microtime( true );
+		$articles   = $wpdb->get_results( "SELECT * FROM articles;", ARRAY_A );
+		$this->import_articles( $articles );
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator gadis-test-gallery` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_test_gallery( $args, $assoc_args ) {
+		global $wpdb;
+		$time_start         = microtime( true );
+		$ids_with_galleries = $wpdb->get_results( "SELECT DISTINCT article_id FROM article_galleries LIMIT 10;", ARRAY_A );
+		$where              = "WHERE id IN (" . implode( ',', array_map( 'intval', array_column( $ids_with_galleries, 'article_id' ) ) ) . ")";
+		$articles           = $wpdb->get_results( "SELECT * FROM articles $where;", ARRAY_A );
+		$this->import_articles( $articles );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
