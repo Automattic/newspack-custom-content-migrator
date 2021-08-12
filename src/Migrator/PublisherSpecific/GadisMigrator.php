@@ -201,6 +201,7 @@ class GadisMigrator implements InterfaceMigrator {
 					WP_CLI::warning( sprintf( 'Error importing gallery image %s -- %s', $url, $image_id->get_error_message() ) );
 					return;
 				}
+				$ids[] = $image_id;
 			}
 			$content .= $this->render_gallery_block( $ids );
 		}
@@ -453,7 +454,7 @@ class GadisMigrator implements InterfaceMigrator {
 		$ids_with_galleries = $wpdb->get_results( "SELECT DISTINCT article_id FROM article_galleries LIMIT 10;", ARRAY_A );
 		$where              = "WHERE id IN (" . implode( ',', array_map( 'intval', array_column( $ids_with_galleries, 'article_id' ) ) ) . ")";
 		$articles           = $wpdb->get_results( "SELECT * FROM articles $where;", ARRAY_A );
-		$this->import_articles( $articles );
+		$this->import_articles( $articles, true );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
