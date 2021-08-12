@@ -167,57 +167,46 @@ function back_up_staging_site_db() {
 
 function export_staging_site_pages() {
   wp_cli newspack-content-migrator export-all-staging-pages --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_STAGING_PAGES
 }
 
 function export_staging_site_menus() {
   wp_cli newspack-content-migrator export-menus --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_STAGING_MENUS
 }
 
 function export_staging_site_custom_css() {
   wp_cli newspack-content-migrator export-current-theme-custom-css --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_CUSTOM_CSS
 }
 
 function export_staging_site_page_settings() {
   wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_PAGES_SETTINGS
 }
 
 function export_staging_site_identity_settings() {
   wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_PAGES_IDENTITY_SETTINGS
 }
 
 function export_staging_site_donation_products() {
   wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_DONATION_PRODUCTS
 }
 
 function export_staging_site_listings() {
   wp_cli newspack-content-migrator export-listings --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_LISTINGS
 }
 
 function export_staging_site_campaigns() {
   wp_cli newspack-content-migrator export-campaigns --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_CAMPAIGNS
 }
 
 function export_staging_site_ads() {
   wp_cli newspack-content-migrator export-ads --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_ADS
 }
 
 function export_staging_site_newsletters() {
   wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_NEWSLETTERS
 }
 
 function export_staging_site_reusable_blocks() {
   wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_REUSABLE_BLOCKS
 }
 
 function export_staging_site_sportspress_plugin_contents() {
