@@ -13,10 +13,10 @@ use \WP_CLI;
 class GadisMigrator implements InterfaceMigrator {
 
 	// Logs.
-	const LOG_POST_INSERTED               = 'GADIS_postInserted.log';
 	const LOG_POST_SKIPPED                = 'GADIS_postSkipped.log';
 	const LOG_POST_NO_CONTENT             = 'GADIS_postNoContent.log';
 	const LOG_INSERT_POST_ERROR           = 'GADIS_insertPostError.log';
+	const LOG_USER_ERROR                  = 'GADIS_userError.log';
 	const LOG_CAT_CREATE_ERROR            = 'GADIS_ERRCatsCreate.log';
 	const LOG_CAT_SET_ERROR               = 'GADIS_ERRCatsSet.log';
 	const LOG_TAG_SET_ERROR               = 'GADIS_ERRTagsSet.log';
@@ -164,9 +164,9 @@ class GadisMigrator implements InterfaceMigrator {
 
 		// Fully rendered gallery block.
 		$block_gallery_rendered = '<!-- wp:gallery {"ids":[' . esc_attr( implode( ',', $ids ) ) . '],"linkTo":"none","ampCarousel":true,"ampLightbox":true} -->'
-            . "\n"
+			. "\n"
 			. render_block( $block_gallery )
-            . "\n"
+			. "\n"
 			. '<!-- /wp:gallery -->';
 
 		return $block_gallery_rendered;
@@ -322,6 +322,110 @@ class GadisMigrator implements InterfaceMigrator {
 		}
 	}
 
+	private function upsert_user( $users, $gadis_id, $update = false ) {
+		global $wpdb;
+
+		$user = array_values(
+			array_filter(
+				$users,
+				function( $user ) use ( $gadis_id ) {
+					return $user['id'] === $gadis_id;
+				}
+			)
+		);
+
+		if ( empty( $user ) ) {
+			$this->log( self::LOG_USER_ERROR, sprintf( '%d user not found', $gadis_id ) );
+			WP_CLI::warning( sprintf( '%d user not found', $gadis_id ) );
+			return;
+		}
+
+		$user = $user[0];
+
+		$profile = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM user_profiles WHERE user_id = %d;",
+				(int) $gadis_id
+			),
+			ARRAY_A
+		);
+
+		$role_map = [
+			1 => 'administrator',
+			4 => 'editor',
+			6 => 'administrator',
+			8 => 'subscriber',
+		];
+
+		$meta_keys = [
+			'born_date',
+			'gender',
+			'school',
+			'class',
+			'country',
+			'province',
+			'city',
+			'address',
+			'twitter',
+			'instagram',
+			'facebook',
+			'youtube',
+			'pinterest',
+			'line',
+		];
+
+		$user_data = [
+			'user_login'    => $profile['username'] ?? $user['email'],
+			'user_nicename' => sanitize_title( $user['fullname'] ), // Force a nicename so it doesn't expose user's email.
+			'user_email'    => $user['email'],
+			'description'   => $profile['biography'],
+			'nickname'      => $user['fullname'],
+			'display_name'  => $user['fullname'],
+			'role'          => $role_map[ $user['role_id'] ],
+		];
+		$user_meta = [
+			'gadis_id' => $gadis_id,
+			'phone'    => $user['phone'] ?? '',
+		];
+		foreach ( $meta_keys as $key ) {
+			if ( ! empty ( $profile[$key] ) ) {
+				$user_meta[$key] = $profile[$key];
+			}
+		}
+
+		$result_meta = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = %s and meta_value = %d;",
+				'gadis_id',
+				(int) $gadis_id
+			),
+			ARRAY_A
+		);
+
+		if ( isset( $result_meta['user_id'] ) ) {
+			$user_id = $result_meta['user_id'];
+			if ( true === $update ) {
+				$user_id = wp_update_user( $user_data );
+				if ( is_wp_error( $user_id ) ) {
+					$this->log( self::LOG_USER_ERROR, sprintf( '%d %s', $gadis_id, $user_id->get_error_message() ) );
+					WP_CLI::warning( sprintf( 'Error updating user %d -- %s', $gadis_id, $user_id->get_error_message() ) );
+					return;
+				}
+			}
+		} else {
+			$user_id = wp_insert_user( $user_data );
+			if ( is_wp_error( $user_id ) ) {
+				$this->log( self::LOG_USER_ERROR, sprintf( '%d %s', $gadis_id, $user_id->get_error_message() ) );
+				WP_CLI::warning( sprintf( 'Error creating user %d -- %s', $gadis_id, $user_id->get_error_message() ) );
+				return;
+			}
+		}
+		foreach ( $user_meta as $meta_key => $meta_value ) {
+			update_user_meta( $user_id, $meta_key, $meta_value );
+		}
+		return $user_id;
+	}
+
 	/**
 	 * Import Gadis articles.
 	 *
@@ -335,24 +439,29 @@ class GadisMigrator implements InterfaceMigrator {
 		$tags           = $wpdb->get_results( "SELECT * FROM article_tags WHERE tag != '';", ARRAY_A );
 		$galleries      = $wpdb->get_results( "SELECT * FROM article_galleries;", ARRAY_A );
 		$sub_categories = $wpdb->get_results( "SELECT * FROM sub_categories;", ARRAY_A );
+		$users          = $wpdb->get_results( "SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id WHERE r.role_id IN (1, 4, 6);", ARRAY_A );
 
 		foreach( $articles as $article_key => $article ) {
 			$gadis_id = $article['id'];
 
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
 
-			// Skip if post exists.
-			if ( false === $force_import ) {
-				$result_meta = $wpdb->get_row( $wpdb->prepare(
-					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %d ;",
+			$ID = null;
+			$result_meta = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;",
 					'gadis_id',
-					$gadis_id
-				) );
-				if ( isset( $result_meta->post_id ) ) {
+					(int) $gadis_id
+				),
+				ARRAY_A
+			);
+			if ( isset( $result_meta['post_id'] ) ) {
+				if ( false === $force_import ) {
 					WP_CLI::warning( $gadis_id . ' already imported. Skipping.' );
 					$this->log( self::LOG_POST_SKIPPED, $gadis_id . ' already imported. Skipping.' );
 					continue;
 				}
+				$ID = $result_meta['post_id'];
 			}
 
 			$pages = array_values(
@@ -379,14 +488,17 @@ class GadisMigrator implements InterfaceMigrator {
 				)
 			);
 
+			$user_id      = $this->upsert_user( $users, $article['user_id'] );
 			$post_content = $this->get_post_content( $pages, $gallery );
 
 			$post_data = [
+				'ID'            => $ID,
 				'post_type'     => 'post',
 				'post_title'    => $article['title'],
 				'post_content'  => $post_content,
 				'post_excerpt'  => $article['description'] ? $article['description'] : '',
 				'post_status'   => 1 === (int) $article[ 'is_publish' ] ? 'publish' : 'draft',
+				'post_author'   => $user_id,
 				'post_date'     => $pages[0]['created_at'],
 				'post_modified' => $pages[0]['updated_at'],
 				'post_name'     => $article['slug'],
