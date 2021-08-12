@@ -161,54 +161,6 @@ function jetpack_archive_prepare_files_for_sync() {
   rm -rf $TEMP_DIR_JETPACK_UNZIP
 }
 
-function back_up_staging_site_db() {
-  dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql
-}
-
-function export_staging_site_pages() {
-  wp_cli newspack-content-migrator export-all-staging-pages --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_menus() {
-  wp_cli newspack-content-migrator export-menus --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_custom_css() {
-  wp_cli newspack-content-migrator export-current-theme-custom-css --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_page_settings() {
-  wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_identity_settings() {
-  wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_donation_products() {
-  wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_listings() {
-  wp_cli newspack-content-migrator export-listings --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_campaigns() {
-  wp_cli newspack-content-migrator export-campaigns --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_ads() {
-  wp_cli newspack-content-migrator export-ads --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_newsletters() {
-  wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRATOR
-}
-
-function export_staging_site_reusable_blocks() {
-  wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
-}
-
 function export_staging_site_sportspress_plugin_contents() {
   wp_cli newspack-content-migrator export-sportspress-content --output-dir=$TEMP_DIR_MIGRATOR
   set_var_by_previous_exit_code IS_EXPORTED_SPORTSPRESS_PLUGIN_CONTENTS
