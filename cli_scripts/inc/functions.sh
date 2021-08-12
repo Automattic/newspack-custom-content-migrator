@@ -63,15 +63,15 @@ function download_vip_search_replace() {
 # Sets config variables which can be automatically set.
 function set_auto_config_variables() {
   set_db_name
-  set_vaultpress_table_prefix
+  set_jetpack_table_prefix
 }
 
-# If a specific value is given to the VAULTPRESS_TABLE_PREFIX var, means that the VaultPress
+# If a specific value is given to the JETPACK_TABLE_PREFIX var, means that the Jetpack Rewind
 # archive contains a different table prefix than the Staging/Launch site. But if it's not set,
 # use TABLE_PREFIX value everywhere.
-function set_vaultpress_table_prefix() {
-  if [ "" = "$VAULTPRESS_TABLE_PREFIX" ]; then
-    VAULTPRESS_TABLE_PREFIX=$TABLE_PREFIX
+function set_jetpack_table_prefix() {
+  if [ "" = "$JETPACK_TABLE_PREFIX" ]; then
+    JETPACK_TABLE_PREFIX=$TABLE_PREFIX
   fi
 }
 
@@ -94,52 +94,52 @@ function prepare_temp_folders() {
   rm -rf $TEMP_DIR || true
   mkdir -p $TEMP_DIR
   mkdir -p $TEMP_DIR_MIGRATOR
-  mkdir -p $TEMP_DIR_VAULTPRESS
-  mkdir -p $TEMP_DIR_VAULTPRESS_UNZIP
+  mkdir -p $TEMP_DIR_JETPACK
+  mkdir -p $TEMP_DIR_JETPACK_UNZIP
 }
 
-# Extracts the VP archive, and prepares its contents for import.
-function unpack_vaultpress_archive() {
-  if [ "" = "$LIVE_VAULTPRESS_ARCHIVE" ]; then
+# Extracts the Jetpack archive, and prepares its contents for import.
+function unpack_jetpack_archive() {
+  if [ "" = "$LIVE_JETPACK_ARCHIVE" ]; then
     return
   fi
 
-  echo_ts 'unpacking the VaultPress archive and prepare contents for import...'
+  echo_ts 'unpacking the Jetpack Rewind archive and prepare contents for import...'
 
-  echo_ts 'extracting the VaultPress Live site archive...'
-  vaultpress_archive_extract
+  echo_ts 'extracting the Jetpack Rewind Live site archive...'
+  jetpack_archive_extract
 
-  echo_ts "preparing Live SQL dump from the VP export..."
-  vaultpress_archive_prepare_live_sql_dump
+  echo_ts "preparing Live SQL dump from the Jetpack export..."
+  jetpack_archive_prepare_live_sql_dump
   echo_ts "created $LIVE_SQL_DUMP_FILE"
 
-  echo_ts 'preparing the VaultPress export files, leaving only uploads to be synced...'
-  vaultpress_archive_prepare_files_for_sync
+  echo_ts 'preparing the Jetpack Rewind export files, leaving only uploads to be synced...'
+  jetpack_archive_prepare_files_for_sync
   echo_ts "stored files for syncing in $LIVE_HTDOCS_FILES"
 }
 
-function vaultpress_archive_extract() {
-  mkdir -p $TEMP_DIR_VAULTPRESS_UNZIP
-  eval "tar xzf $LIVE_VAULTPRESS_ARCHIVE -C $TEMP_DIR_VAULTPRESS_UNZIP > /dev/null 2>&1"
+function jetpack_archive_extract() {
+  mkdir -p $TEMP_DIR_JETPACK_UNZIP
+  eval "tar xzf $LIVE_JETPACK_ARCHIVE -C $TEMP_DIR_JETPACK_UNZIP > /dev/null 2>&1"
   if [ 0 -ne $? ]; then
-    echo_ts_red "error extracting VaultPress archive $LIVE_VAULTPRESS_ARCHIVE."
+    echo_ts_red "error extracting Jetpack Rewind archive $LIVE_JETPACK_ARCHIVE."
     exit
   fi
 }
 
-# Prepares the live SQL dump from the VP export, sets its location to LIVE_SQL_DUMP_FILE
-function vaultpress_archive_prepare_live_sql_dump() {
-  LIVE_SQL_DUMP_FILE=$TEMP_DIR_VAULTPRESS/sql/live.sql
+# Prepares the live SQL dump from the Jetpack export, sets its location to LIVE_SQL_DUMP_FILE
+function jetpack_archive_prepare_live_sql_dump() {
+  LIVE_SQL_DUMP_FILE=$TEMP_DIR_JETPACK/sql/live.sql
 
-  # First get the list of all individual SQL table dump files from the VP SQL export.
+  # First get the list of all individual SQL table dump files from the Jetpack SQL export.
   local LIST_OF_TABLENAMES=""
   for KEY in "${!IMPORT_TABLES[@]}"; do
-    # Using the VAULTPRESS_TABLE_PREFIX var here enables a differet table prefix for the
-    # VP dumps and the Staging/Launch site tables.
-    local TABLE_FILE_FULL_PATH=$TEMP_DIR_VAULTPRESS_UNZIP/sql/$VAULTPRESS_TABLE_PREFIX${IMPORT_TABLES[KEY]}.sql
+    # Using the JETPACK_TABLE_PREFIX var here enables a different table prefix for the
+    # Jetpack dumps and the Staging/Launch site tables.
+    local TABLE_FILE_FULL_PATH=$TEMP_DIR_JETPACK_UNZIP/sql/$JETPACK_TABLE_PREFIX${IMPORT_TABLES[KEY]}.sql
     LIST_OF_TABLENAMES="$LIST_OF_TABLENAMES $TABLE_FILE_FULL_PATH"
 
-    # Also check if table dump exists in the VP export.
+    # Also check if table dump exists in the Jetpack export.
     if [ ! -f $TABLE_FILE_FULL_PATH ]; then
       echo_ts_red "ERROR: Not found table SQL dump $TABLE_FILE_FULL_PATH."
       exit
@@ -147,18 +147,18 @@ function vaultpress_archive_prepare_live_sql_dump() {
   done
 
   # Export all table dumps into the LIVE_SQL_DUMP_FILE file
-  mkdir -p $TEMP_DIR_VAULTPRESS/sql
+  mkdir -p $TEMP_DIR_JETPACK/sql
   cat $LIST_OF_TABLENAMES > $LIVE_SQL_DUMP_FILE
 }
 
-# Prepares files for import from the VP export, sets their location to LIVE_HTDOCS_FILES
-function vaultpress_archive_prepare_files_for_sync() {
-  LIVE_HTDOCS_FILES=$TEMP_DIR_VAULTPRESS/files
+# Prepares files for import from the Jetpack export, sets their location to LIVE_HTDOCS_FILES
+function jetpack_archive_prepare_files_for_sync() {
+  LIVE_HTDOCS_FILES=$TEMP_DIR_JETPACK/files
 
   # Only sync wp-content/uploads, from the LIVE_HTDOCS_FILES
   mkdir -p $LIVE_HTDOCS_FILES/wp-content
-  mv $TEMP_DIR_VAULTPRESS_UNZIP/wp-content/uploads $LIVE_HTDOCS_FILES/wp-content
-  rm -rf $TEMP_DIR_VAULTPRESS_UNZIP
+  mv $TEMP_DIR_JETPACK_UNZIP/wp-content/uploads $LIVE_HTDOCS_FILES/wp-content
+  rm -rf $TEMP_DIR_JETPACK_UNZIP
 }
 
 function back_up_staging_site_db() {
@@ -230,7 +230,7 @@ function prepare_live_sql_dump_for_import() {
   replace_hostnames $LIVE_SQL_DUMP_FILE $LIVE_SQL_DUMP_FILE_REPLACED
 
   echo_ts 'setting `live_` table prefix to all the tables in the Live site SQL dump ...'
-  sed -i "s/\`$VAULTPRESS_TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
+  sed -i "s/\`$JETPACK_TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
 # Replace multiple hostnames in a file using the VIP's search-replace tool.
@@ -385,16 +385,16 @@ function validate_table_prefix() {
   fi
 }
 
-# Either LIVE_VAULTPRESS_ARCHIVE must be provided, or both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE.
+# Either LIVE_JETPACK_ARCHIVE must be provided, or both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE.
 function validate_live_site_export_variables() {
-  if [ "" != "$LIVE_VAULTPRESS_ARCHIVE" ]; then
-    if [ ! -f $LIVE_VAULTPRESS_ARCHIVE ]; then
-      echo_ts_red "live VaultPress archive not found at location $LIVE_VAULTPRESS_ARCHIVE."
+  if [ "" != "$LIVE_JETPACK_ARCHIVE" ]; then
+    if [ ! -f $LIVE_JETPACK_ARCHIVE ]; then
+      echo_ts_red "live Jetpack Rewind archive not found at location $LIVE_JETPACK_ARCHIVE."
       exit
     fi
   else
     if [ "" = "$LIVE_HTDOCS_FILES" ] && [ "" = "$LIVE_SQL_DUMP_FILE" ]; then
-      echo_ts_red "if LIVE_VAULTPRESS_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be."
+      echo_ts_red "if LIVE_JETPACK_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be."
       exit
     else
       validate_live_files

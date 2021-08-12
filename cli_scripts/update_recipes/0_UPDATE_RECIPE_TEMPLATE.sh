@@ -6,16 +6,16 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 # ---------- USER SET VARIABLES:
-# Local DB table prefix. In a rare case when the VaultPress SQL dump uses a different
-# table prefix than the local DB one, you may set it in the VAULTPRESS_TABLE_PREFIX var.
+# Local DB table prefix. In a rare case when the Jetpack Rewind SQL dump uses a different
+# table prefix than the local DB one, you may set it in the JETPACK_TABLE_PREFIX var.
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
 DB_DEFAULT_CHARSET=utf8mb4
 # To provide content for import from the Live site,
-#   1. either set path to VaultPress archive in LIVE_VAULTPRESS_ARCHIVE
+#   1. either set path to Jetpack Rewind archive in LIVE_JETPACK_ARCHIVE
 #   2. or set both LIVE_FILES and LIVE_SQL_DUMP_FILE and leave
-#      LIVE_VAULTPRESS_ARCHIVE as an empty string ( LIVE_VAULTPRESS_ARCHIVE="" ).
-LIVE_VAULTPRESS_ARCHIVE=/tmp/live_export/vaultpress.tar.gz
+#      LIVE_JETPACK_ARCHIVE as an empty string ( LIVE_JETPACK_ARCHIVE="" ).
+LIVE_JETPACK_ARCHIVE=/tmp/live_export/jetpack_rewind_backup.tar.gz
 # Hostname replacements to perform on the Live DB dump before importing it.
 # Associative array with REPLACE_HOST_FROM -> REPLACE_HOST_TO as key-value pairs.
 # Pure host names, no pre- or post-slashes. One replacement per domain or subdomain.
@@ -31,15 +31,15 @@ declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
 THIS_PLUGINS_NAME='newspack-custom-content-migrator'
 # Temp folder for script's resources. No ending slash. Will be purged.
 TEMP_DIR=/tmp/launch/tmp_update
-# If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
+# If LIVE_JETPACK_ARCHIVE is given, this var will be set automatically. Otherwise,
 # set path to the folder containing Live files, no ending slash. Should contain wp-content.
 LIVE_HTDOCS_FILES=""
-# If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
+# If LIVE_JETPACK_ARCHIVE is given, this var will be set automatically. Otherwise,
 # set path to Live SQL dump file. This dump should contain only tables from IMPORT_TABLES.
 LIVE_SQL_DUMP_FILE=""
-# Set the VAULTPRESS_TABLE_PREFIX if the VaultPress SQL dump has a different prefix than
+# Set the JETPACK_TABLE_PREFIX if the Jetpack Rewind SQL dump has a different prefix than
 # the local Staging/Launch DB.
-VAULTPRESS_TABLE_PREFIX=""
+JETPACK_TABLE_PREFIX=""
 # Tables to import fully from the Live Site, given here without the table prefix.
 declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
 # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as a convention on
@@ -59,10 +59,10 @@ SEARCH_REPLACE=""
 # ---------- SCRIPT VARIABLES, do not change these:
 # Migration Plugin's output dir (the Plugin uses hard-coded file names).
 TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
-# VaultPress export temp dir, where the SQL dump and files get extracted to.
-TEMP_DIR_VAULTPRESS=$TEMP_DIR/vaultpress_archive
-# Another VP temp dir, where the archive initially gets extracted to.
-TEMP_DIR_VAULTPRESS_UNZIP=$TEMP_DIR_VAULTPRESS/unzip
+# Jetpack Rewind export temp dir, where the SQL dump and files get extracted to.
+TEMP_DIR_JETPACK=$TEMP_DIR/jetpack_archive
+# Another Jetpack temp dir, where the archive initially gets extracted to.
+TEMP_DIR_JETPACK_UNZIP=$TEMP_DIR_JETPACK/unzip
 # Name of file where to save the Live SQL dump after hostname replacements are made.
 LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
 
@@ -83,8 +83,8 @@ validate_all_config_params
 
 download_vip_search_replace
 
-echo_ts 'starting to unpack the VaultPress archive and prepare contents for import...'
-unpack_vaultpress_archive
+echo_ts 'starting to unpack the Jetpack Rewind archive and prepare contents for import...'
+unpack_jetpack_archive
 
 echo_ts "checking $THIS_PLUGINS_NAME plugin's status..."
 update_plugin_status
