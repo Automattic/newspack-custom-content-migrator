@@ -43,10 +43,10 @@ function get_vip_search_replace() {
 
   if [ -f $SEARCH_REPLACE ]; then
     chmod 755 $SEARCH_REPLACE
-    echo_ts "VIP search-replace file found at $SEARCH_REPLACE so it will be used."
+    echo_ts "VIP search-replace found at $SEARCH_REPLACE and will be used"
     return
   else
-    echo_ts 'downloading the search-replace bin...'
+    echo_ts 'downloading VIP search-replace bin...'
     local ARCHIVE="$TEMP_DIR/search-replace.gz"
     rm -f $ARCHIVE
     curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
@@ -61,10 +61,10 @@ function get_vip_search_replace() {
 }
 
 # Sets config variables which can be automatically set.
-function set_config_variables() {
+function set_config() {
   THIS_PLUGINS_NAME='newspack-custom-content-migrator'
   # Tables to import fully from the Live Site, given here without the table prefix.
-  declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
+  IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
   # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as the Atomic sites' convention.
   DB_NAME_LOCAL=""
   # Atomic DB host.
@@ -94,7 +94,7 @@ function set_config_variables() {
   fi
 }
 
-function validate_all_config_params() {
+function validate_all_params() {
   validate_db_connection
   validate_db_default_charset
   validate_table_prefix
@@ -102,7 +102,7 @@ function validate_all_config_params() {
   validate_live_db_hostname_replacements
 }
 
-function prepare_temp_folders() {
+function purge_temp_folders() {
   rm -rf $TEMP_DIR || true
   mkdir -p $TEMP_DIR
   mkdir -p $TEMP_DIR_MIGRATOR
@@ -113,19 +113,20 @@ function prepare_temp_folders() {
 # Extracts the Jetpack archive, and prepares its contents for import.
 function unpack_jetpack_archive() {
   if [ "" = "$LIVE_JETPACK_ARCHIVE" ]; then
+    echo_ts "using live SQL dump from file $LIVE_SQL_DUMP_FILE and files from $LIVE_HTDOCS_FILES..."
     return
   fi
 
-  echo_ts 'unpacking the Jetpack Rewind archive and prepare contents for import...'
+  echo_ts 'unpacking the Jetpack Rewind backup and preparing contents for import...'
 
-  echo_ts 'extracting the Jetpack Rewind Live site archive...'
+  echo_ts 'extracting the backup archive...'
   jetpack_archive_extract
 
-  echo_ts "preparing Live SQL dump from the Jetpack export..."
+  echo_ts "preparing Live SQL dump..."
   jetpack_archive_prepare_live_sql_dump
   echo_ts "created $LIVE_SQL_DUMP_FILE"
 
-  echo_ts 'preparing the Jetpack Rewind export files, leaving only uploads to be synced...'
+  echo_ts 'preparing the files...'
   jetpack_archive_prepare_files_for_sync
   echo_ts "stored files for syncing in $LIVE_HTDOCS_FILES"
 }
@@ -296,8 +297,9 @@ function drop_temp_db_tables() {
   local SQL_SELECT_TABLES_TO_DROP="SELECT GROUP_CONCAT(table_name) AS statement \
     FROM information_schema.tables \
     WHERE table_schema = '$DB_NAME_LOCAL' \
-    AND table_name LIKE 'live_%' \
-    AND table_name LIKE 'staging_%' ; "
+    AND ( table_name LIKE 'live_%' \
+        OR table_name LIKE 'staging_%' \
+    ) ; "
   local CMD_GET_TABLES_TO_DROP="mysql -h $DB_HOST_LOCAL -sN -e \"$SQL_SELECT_TABLES_TO_DROP\""
   eval TABLES_TO_DROP_CSV=\$\($CMD_GET_TABLES_TO_DROP\)
   # Drop all these temporary Live tables.

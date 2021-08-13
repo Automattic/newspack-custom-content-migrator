@@ -6,9 +6,10 @@ TABLE_PREFIX=wp_
 # The --default-character-set param for mysql commands: utf8, utf8mb4, latin1.
 DB_DEFAULT_CHARSET=utf8mb4
 # To provide content from the Live site:
-#   1. either set location of LIVE_JETPACK_ARCHIVE
-#   2. or set both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE, and leave LIVE_JETPACK_ARCHIVE empty
-LIVE_JETPACK_ARCHIVE=/tmp/live_export/jetpack_rewind_backup.tar.gz
+#   1. either set location of LIVE_JETPACK_ARCHIVE,
+#   2. or set both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE, and leave LIVE_JETPACK_ARCHIVE empty,
+#      and comment out `purge_temp_folders`.
+LIVE_JETPACK_ARCHIVE=/tmp/launch/jetpack_rewind_backup.tar.gz
 LIVE_HTDOCS_FILES=""
 LIVE_SQL_DUMP_FILE=""
 # Hostname replacements to perform on the Live DB dump before importing it. Keys are live hostname, values are this site's hostname:
@@ -16,10 +17,10 @@ declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
   # [publisher.com]=publisher-launch.newspackstaging.com
   # [www.publisher.com]=publisher-launch.newspackstaging.com
 )
-# Temp folder for this script -- will be completely deleted and purged!
-TEMP_DIR=/tmp/launch/tmp_update
 # In rare cases that the Live site used a different prefix than this local site, set the Live prefix here, or leave empty.
 JETPACK_TABLE_PREFIX=""
+# Temp folder for this script to run -- ! WARNING ! this folder will be deleted and completely purged.
+TEMP_DIR=/tmp/launch/temp
 
 
 # START -----------------------------------------------------------------------------
@@ -27,11 +28,11 @@ JETPACK_TABLE_PREFIX=""
 TIME_START=`date +%s`
 . ./../inc/functions.sh
 
-echo_ts 'purging temp folder...'
-prepare_temp_folders
+set_config
+validate_all_params
 
-set_config_variables
-validate_all_config_params
+echo_ts 'purging temp folder...'
+purge_temp_folders
 
 # --- prepare:
 
@@ -63,7 +64,7 @@ wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MI
 echo_ts "exporting Staging site identity settings..."
 wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Staging site donation products..."
+echo_ts "exporting Staging site reader revenue and donation products..."
 wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
 
 echo_ts "exporting Staging site Listings..."
@@ -81,7 +82,7 @@ wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRA
 echo_ts "exporting Reusable blocks..."
 wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
 
-# --- import:
+# --- import DB:
 
 echo_ts 'preparing Live site SQL dump for import...'
 prepare_live_sql_dump_for_import
@@ -92,8 +93,7 @@ import_live_sql_dump
 echo_ts 'switching Staging site tables with Live site tables...'
 replace_staging_tables_with_live_tables
 
-echo_ts 'activating this plugin after the table switch...'
-wp_cli plugin activate $THIS_PLUGINS_NAME
+# --- import Staging site data:
 
 echo_ts 'importing all Pages from the Staging site and new pages from the Live site...'
 wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
@@ -128,11 +128,11 @@ wp_cli newspack-content-migrator import-newsletters --input-dir=$TEMP_DIR_MIGRAT
 echo_ts 'importing Reusable Blocks from the Staging site...'
 wp_cli newspack-content-migrator import-reusable-blocks --input-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts 'importing Staging content previously converted to blocks...'
-import_blocks_content_from_staging_site
-
 echo_ts 'updating WooComm settings...'
 wp_cli newspack-content-migrator woocomm-setup
+
+echo_ts 'importing Staging content previously converted to blocks...'
+import_blocks_content_from_staging_site
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
@@ -145,7 +145,7 @@ clean_up_options
 echo_ts 'updating seo settings...'
 wp_cli newspack-content-migrator update-seo-settings
 
-echo_ts 'setting file permissions to public content...'
+echo_ts 'setting file permissions to public content (some warnings are expected)...'
 set_public_content_file_permissions
 
 echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'
