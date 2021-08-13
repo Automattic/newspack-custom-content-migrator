@@ -139,7 +139,8 @@ class CampaignsMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::CAMPAIGNS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Campaigns file not found %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Campaigns file not found %s.', $import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing Newspack Campaigns from ' . $import_file . ' ...' );

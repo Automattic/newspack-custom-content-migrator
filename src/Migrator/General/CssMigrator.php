@@ -127,7 +127,8 @@ class CssMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::CSS_CURRENT_THEME_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'CSS file not found %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'CSS file not found %s.', $import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing custom CSS from ' . $import_file . ' ...' );

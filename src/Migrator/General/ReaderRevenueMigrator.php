@@ -136,7 +136,8 @@ class ReaderRevenueMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::READER_REVENUE_PRODUCTS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Reader Revenue file not found %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Reader Revenue file not found %s.', $import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing Reader Revenue Products from ' . $import_file . ' ...' );

@@ -139,7 +139,8 @@ class NewslettersMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::NEWSLETTERS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Newsletters file not found %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Newsletters file not found %s.', $import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing Newsletters from ' . $import_file . ' ...' );

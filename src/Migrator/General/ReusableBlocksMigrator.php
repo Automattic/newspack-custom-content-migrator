@@ -172,7 +172,8 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::REUSABLE_BLOCKS_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Reusable blocks file not found %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Reusable blocks file not found %s.', $import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing Reusable Blocks from ' . $import_file . ' ...' );

@@ -139,7 +139,8 @@ class AdsMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::AD_UNITS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Ads file not found %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Ads file not found %s.', $import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing Newspack Ads from ' . $import_file . ' ...' );

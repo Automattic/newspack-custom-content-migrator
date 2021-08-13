@@ -190,7 +190,8 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$options_import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
 		if ( ! is_file( $options_import_file ) ) {
-			WP_CLI::error( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
+			WP_CLI::warning( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( 'Importing site identity settings from ' . $options_import_file . ' ...' );

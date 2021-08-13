@@ -155,7 +155,8 @@ class MenusMigrator implements InterfaceMigrator {
 		$directory = rtrim( $directory, '/' );
 		$menu_file = $directory . '/' . self::MENU_EXPORT_FILE;
 		if ( ! is_file( $menu_file ) ) {
-			WP_CLI::error( sprintf( 'Menus file not found in input-dir %s', $menu_file ) );
+			WP_CLI::warning( sprintf( 'Menus file not found in input-dir %s', $menu_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( sprintf( 'Importing menus from ' . $menu_file . '...' ) );
