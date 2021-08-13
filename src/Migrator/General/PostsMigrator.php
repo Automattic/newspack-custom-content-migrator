@@ -299,8 +299,9 @@ class PostsMigrator implements InterfaceMigrator {
 		}
 
 		// Import Pages from Staging site.
-		WP_CLI::line( 'Importing Pages from the Staging site (uses `wp import` and might take a bit longer) ...' );
-		$this->import_posts( $input_dir . '/' . self::STAGING_PAGES_EXPORT_FILE );
+		$file = $input_dir . '/' . self::STAGING_PAGES_EXPORT_FILE;
+		WP_CLI::line( 'Importing Staging site Pages from  ' . $file . ' (uses `wp import` and might take a bit longer) ...' );
+		$this->import_posts( $file );
 
 		wp_cache_flush();
 

@@ -88,7 +88,7 @@ class ReaderRevenueMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
-			WP_CLI::warning( 'Done.' );
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -110,7 +110,7 @@ class ReaderRevenueMigrator implements InterfaceMigrator {
 			'post_type'      => [ 'product' ],
 		] );
 		if ( empty( $posts ) ) {
-			WP_CLI::line( sprintf( 'No Donation Products found.' ) );
+			WP_CLI::warning( sprintf( 'No Donation Products found.' ) );
 			return false;
 		}
 
@@ -139,7 +139,7 @@ class ReaderRevenueMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Reader Revenue file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing Reader Revenue Products...' );
+		WP_CLI::line( 'Importing Reader Revenue Products from ' . $import_file . ' ...' );
 
 		$this->delete_all_existing_products();
 		PostsMigrator::get_instance()->import_posts( $import_file );

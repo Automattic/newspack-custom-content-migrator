@@ -95,7 +95,7 @@ class NewslettersMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
-			WP_CLI::warning( 'Done.' );
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -142,7 +142,7 @@ class NewslettersMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Newsletters file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing Newsletters...' );
+		WP_CLI::line( 'Importing Newsletters from ' . $import_file . ' ...' );
 
 		$this->import_newsletterss( $import_file );
 

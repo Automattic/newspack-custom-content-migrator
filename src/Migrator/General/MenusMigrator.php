@@ -140,7 +140,7 @@ class MenusMigrator implements InterfaceMigrator {
 		fclose( $open_menu_file );
 
 		// WP_CLI::line( $output );
-		WP_CLI::line( 'Completed menu export: ' . $menu_file );
+		WP_CLI::line( 'Writing to file ' . $menu_file );
 	}
 
 	/**
@@ -290,7 +290,5 @@ class MenusMigrator implements InterfaceMigrator {
 				set_theme_mod( 'nav_menu_locations', $set_menus );
 			}
 		}
-
-		WP_CLI::line( 'Done.' );
 	}
 }

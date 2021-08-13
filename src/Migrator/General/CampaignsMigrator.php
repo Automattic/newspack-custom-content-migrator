@@ -95,7 +95,7 @@ class CampaignsMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
-			WP_CLI::warning( 'Done.' );
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -142,7 +142,7 @@ class CampaignsMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Campaigns file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing Newspack Campaigns...' );
+		WP_CLI::line( 'Importing Newspack Campaigns from ' . $import_file . ' ...' );
 
 		$this->import_campaigns( $import_file );
 

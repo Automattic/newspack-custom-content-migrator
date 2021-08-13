@@ -88,7 +88,7 @@ class CssMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
-			WP_CLI::warning( 'Done.' );
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -130,7 +130,7 @@ class CssMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'CSS file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing custom CSS...' );
+		WP_CLI::line( 'Importing custom CSS from ' . $import_file . ' ...' );
 
 		$this->delete_all_custom_css();
 		PostsMigrator::get_instance()->import_posts( $import_file );

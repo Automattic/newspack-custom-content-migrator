@@ -95,7 +95,7 @@ class AdsMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
-			WP_CLI::warning( 'Done.' );
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -142,7 +142,7 @@ class AdsMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Ads file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing Newspack Ads...' );
+		WP_CLI::line( 'Importing Newspack Ads from ' . $import_file . ' ...' );
 
 		$this->import_ads( $import_file );
 

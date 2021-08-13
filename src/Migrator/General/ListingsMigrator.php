@@ -104,7 +104,7 @@ class ListingsMigrator implements InterfaceMigrator {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
-			WP_CLI::warning( 'Done.' );
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -126,7 +126,7 @@ class ListingsMigrator implements InterfaceMigrator {
 			'post_status'    => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 		] );
 		if ( empty( $posts ) ) {
-			WP_CLI::line( sprintf( 'No Listings found.' ) );
+			WP_CLI::warning( sprintf( 'No Listings found.' ) );
 			return false;
 		}
 
@@ -155,7 +155,7 @@ class ListingsMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Listings file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing Listings...' );
+		WP_CLI::line( 'Importing Listings from ' . $import_file . ' ...' );
 
 		$this->delete_all_existing_listings();
 		PostsMigrator::get_instance()->import_posts( $import_file );

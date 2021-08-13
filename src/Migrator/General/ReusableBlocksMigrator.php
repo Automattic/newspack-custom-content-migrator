@@ -115,7 +115,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		$posts = $this->get_reusable_blocks();
 		if ( empty( $posts ) ) {
-			WP_CLI::line( 'No Reusable Blocks found.' );
+			WP_CLI::warning( 'No Reusable Blocks found.' );
 			exit(1);
 		}
 
@@ -175,7 +175,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprintf( 'Reusable blocks file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing Reusable Blocks...' );
+		WP_CLI::line( 'Importing Reusable Blocks from ' . $import_file . ' ...' );
 
 		PostsMigrator::get_instance()->import_posts( $import_file );
 
