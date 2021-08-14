@@ -264,9 +264,13 @@ function replace_staging_tables_with_live_tables() {
   done
 }
 
-# Imports previously converted blocks contents from the `staging_ncc_wp_posts_backup`
-# table.
+# Imports previously converted blocks contents from the `staging_wp_posts` table.
 function import_blocks_content_from_staging_site() {
+  if [ "" = "$STAGING_SITE_HOSTNAME" ]; then
+    echo_ts_yellow "Param STAGING_SITE_HOSTNAME not provided, skipping."
+    exit
+  fi
+
   echo_ts "deleting the Newspack Content Converter plugin..."
   wp_cli plugin deactivate newspack-content-converter
   wp_cli plugin delete newspack-content-converter
