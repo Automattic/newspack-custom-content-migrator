@@ -13,11 +13,13 @@ LIVE_JETPACK_ARCHIVE=/tmp/launch/jetpack_rewind_backup.tar.gz
 LIVE_HTDOCS_FILES=""
 LIVE_SQL_DUMP_FILE=""
 # Hostname replacements to perform on the Live DB dump before importing it. Keys are live hostname, values are this site's hostname:
-declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
+LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
   # [publisher.com]=publisher-launch.newspackstaging.com
   # [www.publisher.com]=publisher-launch.newspackstaging.com
 )
-# In rare cases that the Live site used a different prefix than this local site, set the Live prefix here, or leave empty.
+# Staging's hostname -- site from which this site was cloned, e.g. "publisher-staging.newspackstaging.com".
+STAGING_SITE_HOSTNAME=""
+# Leave this empty in most case. In rare cases where the Live site uses a different table prefix than this local site, set the Live prefix here.
 JETPACK_TABLE_PREFIX=""
 # Temp folder for this script to run -- ! WARNING ! this folder will be deleted and completely purged.
 TEMP_DIR=/tmp/launch/temp

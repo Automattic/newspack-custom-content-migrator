@@ -284,7 +284,7 @@ function import_blocks_content_from_staging_site() {
   wp_cli plugin activate newspack-content-converter
 
   echo_ts "importing block contents from the Staging site..."
-  wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX
+  wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX --staging-hostname=$STAGING_SITE_HOSTNAME
 }
 
 function clean_up_options() {
