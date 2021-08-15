@@ -27,11 +27,11 @@ function update_plugin_status() {
     return
   fi
 
-  echo_ts 'plugin inactive, activating now...'
+  echo_ts 'plugin inactive, now activating...'
   wp_cli plugin activate $THIS_PLUGINS_NAME
   PLUGIN_STATUS=$(wp_cli plugin list | grep "$THIS_PLUGINS_NAME" | awk '{print $2}')
   if [[ 'active' != $PLUGIN_STATUS ]]; then
-    echo_ts_red "ERROR: could not activate $THIS_PLUGINS_NAME Plugin. Make sure it's actvated then try again."
+    echo_ts_red "ERROR: could not activate $THIS_PLUGINS_NAME Plugin. Make sure it's active then try again."
     exit
   fi
 }
@@ -46,7 +46,7 @@ function get_vip_search_replace() {
     echo_ts "VIP search-replace found at $SEARCH_REPLACE and will be used"
     return
   else
-    echo_ts 'downloading VIP search-replace bin...'
+    echo_ts 'downloading VIP search-replace...'
     local ARCHIVE="$TEMP_DIR/search-replace.gz"
     rm -f $ARCHIVE
     curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
@@ -54,7 +54,7 @@ function get_vip_search_replace() {
     gzip -f -d $ARCHIVE && \
     chmod 755 $SEARCH_REPLACE
     if [ ! -f $SEARCH_REPLACE ]; then
-      echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and save it to $SEARCH_REPLACE'
+      echo_ts_red "ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and save it as $SEARCH_REPLACE"
       exit
     fi
   fi
@@ -113,29 +113,28 @@ function purge_temp_folders() {
 # Extracts the Jetpack archive, and prepares its contents for import.
 function unpack_jetpack_archive() {
   if [ "" = "$LIVE_JETPACK_ARCHIVE" ]; then
-    echo_ts "using live SQL dump from file $LIVE_SQL_DUMP_FILE and files from $LIVE_HTDOCS_FILES..."
+    echo_ts "using live SQL dump from $LIVE_SQL_DUMP_FILE and files from $LIVE_HTDOCS_FILES ..."
     return
   fi
 
-  echo_ts 'unpacking the Jetpack Rewind backup and preparing contents for import...'
-
-  echo_ts 'extracting the backup archive...'
+  echo_ts 'extracting archive...'
   jetpack_archive_extract
 
-  echo_ts "preparing Live SQL dump..."
+  echo_ts "preparing the SQL dump..."
   jetpack_archive_prepare_live_sql_dump
   echo_ts "created $LIVE_SQL_DUMP_FILE"
 
   echo_ts 'preparing the files...'
   jetpack_archive_prepare_files_for_sync
-  echo_ts "stored files for syncing in $LIVE_HTDOCS_FILES"
+
+  echo_ts "files for syncing stored to $LIVE_HTDOCS_FILES"
 }
 
 function jetpack_archive_extract() {
   mkdir -p $TEMP_DIR_JETPACK_UNZIP
   eval "tar xzf $LIVE_JETPACK_ARCHIVE -C $TEMP_DIR_JETPACK_UNZIP > /dev/null 2>&1"
   if [ 0 -ne $? ]; then
-    echo_ts_red "error extracting Jetpack Rewind archive $LIVE_JETPACK_ARCHIVE."
+    echo_ts_red "error extracting Jetpack Rewind archive $LIVE_JETPACK_ARCHIVE"
     exit
   fi
 }
@@ -154,7 +153,7 @@ function jetpack_archive_prepare_live_sql_dump() {
 
     # Also check if table dump exists in the Jetpack export.
     if [ ! -f $TABLE_FILE_FULL_PATH ]; then
-      echo_ts_red "ERROR: Not found table SQL dump $TABLE_FILE_FULL_PATH."
+      echo_ts_red "ERROR: table SQL dump not found $TABLE_FILE_FULL_PATH."
       exit
     fi
   done
@@ -180,10 +179,10 @@ function export_staging_site_sportspress_plugin_contents() {
 }
 
 function prepare_live_sql_dump_for_import() {
-  echo_ts 'replacing hostnames in the Live SQL dump file...'
+  echo_ts 'replacing hostnames in Live SQL dump file...'
   replace_hostnames $LIVE_SQL_DUMP_FILE $LIVE_SQL_DUMP_FILE_REPLACED
 
-  echo_ts 'setting `live_` table prefix to all the tables in the Live site SQL dump ...'
+  echo_ts 'setting `live_` table prefix to tables in Live site SQL dump...'
   sed -i "s/\`$JETPACK_TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
@@ -209,7 +208,7 @@ function replace_hostnames() {
     fi
     TMP_OUT_FILE=$TEMP_DIR/live_replaced_$i.sql
 
-    echo_ts "- replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
+    echo_ts "- replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO ..."
     cat $TMP_IN_FILE | $SEARCH_REPLACE //$HOSTNAME_FROM //$HOSTNAME_TO > $TMP_OUT_FILE
 
     # Remove previous temp TMP_IN_FILE.
@@ -254,7 +253,7 @@ function dump_db() {
 # `live_` table name prefix).
 function replace_staging_tables_with_live_tables() {
   for TABLE in "${IMPORT_TABLES[@]}"; do
-      echo "- switching $TABLE..."
+      echo "- switching $TABLE ..."
       # Add prefix `staging_` to current table.
       mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DROP TABLE IF EXISTS staging_$TABLE_PREFIX$TABLE;"
       mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
@@ -287,7 +286,7 @@ function import_blocks_content_from_staging_site() {
   wp_cli plugin install --force https://github.com/Automattic/newspack-content-converter/releases/latest/download/newspack-content-converter.zip
   wp_cli plugin activate newspack-content-converter
 
-  echo_ts "importing block contents from the Staging site..."
+  echo_ts "importing contents already converted to blocks from Staging site..."
   wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX --staging-hostname=$STAGING_SITE_HOSTNAME
 }
 
@@ -348,12 +347,12 @@ function validate_table_prefix() {
 function validate_live_site_export_variables() {
   if [ "" != "$LIVE_JETPACK_ARCHIVE" ]; then
     if [ ! -f $LIVE_JETPACK_ARCHIVE ]; then
-      echo_ts_red "live Jetpack Rewind archive not found at location $LIVE_JETPACK_ARCHIVE."
+      echo_ts_red "Jetpack Rewind archive not found at location $LIVE_JETPACK_ARCHIVE."
       exit
     fi
   else
     if [ "" = "$LIVE_HTDOCS_FILES" ] && [ "" = "$LIVE_SQL_DUMP_FILE" ]; then
-      echo_ts_red "if LIVE_JETPACK_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be."
+      echo_ts_red "if LIVE_JETPACK_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be set."
       exit
     else
       validate_live_files
@@ -371,7 +370,7 @@ function validate_live_files() {
 
 function validate_live_sql_dump_file() {
   if [ ! -f $LIVE_SQL_DUMP_FILE ]; then
-    echo_ts_red "ERROR: Live SQL DUMP file not found at $LIVE_SQL_DUMP_FILE. Check LIVE_SQL_DUMP_FILE param."
+    echo_ts_red "ERROR: Live SQL DUMP file not found at $LIVE_SQL_DUMP_FILE. Check the LIVE_SQL_DUMP_FILE param."
     exit
   fi
 }
