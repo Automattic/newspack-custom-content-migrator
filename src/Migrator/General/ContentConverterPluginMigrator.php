@@ -121,19 +121,18 @@ class ContentConverterPluginMigrator implements InterfaceMigrator {
 
 
 		// Now update hostnames, too.
+		WP_CLI::line( sprintf( 'Updating hostnames in content brought over from Staging from %s to %s ...', $staging_host, $this_host ) );
 		$posts_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $posts_ids as $key_posts_ids => $post_id ) {
 			$post                 = get_post( $post_id );
-			$post_content         = $post->post_content;
-			$post_excerpt         = $post->post_excerpt;
 			$post_content_updated = str_replace( $staging_host, $this_host, $post->post_content );
 			$post_excerpt_updated = str_replace( $staging_host, $this_host, $post->post_excerpt );
-			if ( $post_content != $post_content_updated || $post_excerpt != $post_excerpt_updated ) {
+			if ( $post->post_content != $post_content_updated || $post->post_excerpt != $post_excerpt_updated ) {
 				$wpdb->update(
 					$wpdb->prefix . 'posts',
 					[
 						'post_content'  => $post_content_updated,
-						'$post_excerpt' => $post_excerpt_updated,
+						'post_excerpt' => $post_excerpt_updated,
 					],
 					[ 'ID' => $post->ID ]
 				);
