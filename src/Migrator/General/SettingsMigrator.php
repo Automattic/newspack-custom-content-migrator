@@ -127,7 +127,7 @@ class SettingsMigrator implements InterfaceMigrator {
 		WP_CLI::line( sprintf( 'Exporting site identity settings...' ) );
 
 		$result = $this->export_current_theme_site_identity( $output_dir );
-		if ( true === $result ) {
+		if ( false !== $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
