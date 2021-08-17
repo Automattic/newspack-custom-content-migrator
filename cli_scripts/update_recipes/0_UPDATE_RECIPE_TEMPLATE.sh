@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ---------- USER SET VARIABLES:
+# ---------- VARIABLES CAN EITHER BE SET HERE MANUALLY ... :
 # Local WP DB table prefix.
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql commands: utf8, utf8mb4, latin1.
@@ -12,17 +12,33 @@ DB_DEFAULT_CHARSET=utf8mb4
 LIVE_JETPACK_ARCHIVE=/tmp/launch/jetpack_rewind_backup.tar.gz
 LIVE_HTDOCS_FILES=""
 LIVE_SQL_DUMP_FILE=""
-# Hostname replacements to perform on the Live DB dump before importing it. Keys are live hostname, values are this site's hostname:
-LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
-  # [publisher.com]=publisher-launch.newspackstaging.com
-  # [www.publisher.com]=publisher-launch.newspackstaging.com
-)
-# Staging site hostname -- site from which this site was cloned, e.g. "publisher-staging.newspackstaging.com"
+# Live site hostname without the www. prefix, e.g. publisher.com.
+LIVE_SITE_HOSTNAME=""
+# Staging site hostname -- site from which this site was cloned, e.g. "publisher-staging.newspackstaging.com".
 STAGING_SITE_HOSTNAME=""
 # Leave this empty in most case. In rare cases where the Live site uses a different table prefix than this local site, set the Live prefix here.
 JETPACK_TABLE_PREFIX=""
 # Temp folder for this script to run -- ! WARNING ! this folder will be deleted and completely purged.
 TEMP_DIR=/tmp/launch/temp
+
+
+# ---------- ... OR PROVIDED BY CLI PARAMETERS, WHICH THEN OVERRIDE THE ASSIGNMENTS ABOVE :
+while true; do
+  case "$1" in
+    --staging-hostname ) STAGING_SITE_HOSTNAME="$2"; shift 2 ;;
+    --live-hostname ) LIVE_SITE_HOSTNAME="$2"; shift 2 ;;
+    --live-jp-archive ) LIVE_JETPACK_ARCHIVE="$2"; shift 2 ;;
+    --table-prefix ) TABLE_PREFIX="$2"; shift 2 ;;
+    --db-charset ) DB_DEFAULT_CHARSET="$2"; shift 2 ;;
+    --temp-dir ) TEMP_DIR="$2"; shift 2 ;;
+    * ) break ;;
+  esac
+done
+
+echo "TABLE_PREFIX: $TABLE_PREFIX"
+echo "DB_DEFAULT_CHARSET: $DB_DEFAULT_CHARSET ."
+exit;
+
 
 
 # START -----------------------------------------------------------------------------

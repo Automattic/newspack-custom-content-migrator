@@ -92,6 +92,11 @@ function set_config() {
   if [ "" = "$JETPACK_TABLE_PREFIX" ]; then
     JETPACK_TABLE_PREFIX=$TABLE_PREFIX
   fi
+
+  # Set array with hostname replacements for live SQL dump file before importing it into local.
+  declare -gA LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS
+  LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS[$LIVE_SITE_HOSTNAME]=$STAGING_SITE_HOSTNAME
+  LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS['www.'$LIVE_SITE_HOSTNAME]=$STAGING_SITE_HOSTNAME
 }
 
 function validate_all_params() {
