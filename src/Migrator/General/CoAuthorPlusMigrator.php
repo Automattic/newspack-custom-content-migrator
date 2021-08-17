@@ -8,6 +8,7 @@ use \NewspackCustomContentMigrator\MigrationLogic\Posts;
 use \NewspackCustomContentMigrator\PluginSetup;
 use \WP_CLI;
 use \WP_Query;
+use WP_User_Query;
 
 class CoAuthorPlusMigrator implements InterfaceMigrator {
 
@@ -211,6 +212,9 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+		WP_CLI::add_command( 'newspack-content-migrator co-authors-fix-non-unique-guest-slugs', array( $this, 'cmd_cap_fix_non_unique_guest_slugs'), [
+		    'shortdesc' => "Make unique any Guest Author Slug which matches a User's slug."
+        ] );
 	}
 
 	/**
@@ -562,6 +566,136 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 
 		return $errors;
 	}
+
+    public function cmd_cap_fix_non_unique_guest_slugs() {
+
+        $authors = ( new WP_User_Query( array(
+            'who'       => 'authors',
+            'fields'    => array(
+                    'user_nicename',
+                ),
+        ) ) )->get_results();
+
+        $author_slugs_string = "'" . implode( "', '", wp_list_pluck( $authors, 'user_nicename' ) ) . "'";
+
+        /*
+         * Convert from stdClass to indexed array.
+         * */
+
+        foreach ( $authors as $key => $author ) {
+            $authors[ $author->user_nicename ] = $key;
+            unset( $authors[ $key ] );
+        }
+
+        global $wpdb;
+
+        $post_meta_table = "{$wpdb->prefix}postmeta";
+
+        $sql = "SELECT meta_value FROM {$post_meta_table} 
+                WHERE meta_key = 'cap-user_login'
+                AND meta_value IN ({$author_slugs_string})";
+
+        $non_unique_guest_authors = $wpdb->get_col( $sql );
+
+        $updated_slugs = array();
+        $unable_to_make_unique = array();
+
+        $progress = WP_CLI\Utils\make_progress_bar( 'Updating Guest Author Slugs', count( $non_unique_guest_authors ) );
+        foreach ( $non_unique_guest_authors as $guest_author ) {
+            $attempts = 3;
+
+            $progress->tick();
+
+            do {
+                $new_guest_author_slug = "{$guest_author}_{$this->readable_random_string()}";
+
+                if ( array_key_exists( $new_guest_author_slug, $authors ) ) {
+                    $attempts--;
+                } else {
+                    $wpdb->update(
+                        $post_meta_table,
+                        array(
+                            'meta_value' => $new_guest_author_slug,
+                        ),
+                        array(
+                            'meta_key' => 'cap-user_login',
+                            'meta_value' => $guest_author,
+                        )
+                    );
+
+                    $updated_slugs[] = "Updated: `{$guest_author}` -> `{$new_guest_author_slug}`";
+
+                    /*
+                     * Break out of do-while and go to next for-each iteration
+                     * */
+                    continue 2;
+                }
+            } while ($attempts > 0);
+
+            /*
+             * 3 Attempts failed to generate unique slug. Will report back to console.
+             * */
+            $unable_to_make_unique[] = $guest_author;
+        }
+        $progress->finish();
+
+        if ( ! empty($unable_to_make_unique) ) {
+            array_unshift( $unable_to_make_unique, "Unable to make the following Guest Author Slugs unique..." );
+            WP_CLI::error_multi_line( $unable_to_make_unique );
+        }
+
+        WP_CLI::success( "Done!" );
+        foreach ( $updated_slugs as $slug ) {
+            WP_CLI::line( $slug );
+        }
+	}
+
+    /**
+     * https://gist.github.com/sepehr/3371339
+     *
+     * @param int $length
+     * @return string
+     */
+	private function readable_random_string( int $length = 8 ) {
+        $string = '';
+        $vowels = array(
+            'a',
+            'e',
+            'i',
+            'o',
+            'u',
+        );
+        $consonants = array(
+            'b',
+            'c',
+            'd',
+            'f',
+            'g',
+            'h',
+            'j',
+            'k',
+            'l',
+            'm',
+            'n',
+            'p',
+            'r',
+            's',
+            't',
+            'v',
+            'w',
+            'x',
+            'y',
+            'z',
+        );
+
+        $max = $length / 2;
+        for ( $i = 1; $i <= $max; $i++ ) {
+            $string .= $consonants[rand(0,19)];
+            $string .= $vowels[rand(0,4)];
+        }
+
+        return $string;
+    }
 
 	/**
 	 * Takes an array of tags, and returns those which begin with the $this->tag_author_prefix prefix, stripping the result
