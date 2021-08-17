@@ -172,6 +172,12 @@ class GadisMigrator implements InterfaceMigrator {
 		return $block_gallery_rendered;
 	}
 
+	/**
+	 * Set multiple post meta from array.
+	 *
+	 * @param int   $post_id   Post ID.
+	 * @param array $post_meta Post meta.
+	 */
 	private function set_post_meta( $post_id, $post_meta ) {
 		foreach ( $post_meta as $meta_key => $meta_value ) {
 			if ( ! empty( $meta_value ) ) {
@@ -180,6 +186,14 @@ class GadisMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * Get post content from Gadis articles pages and gallery images.
+	 * 
+	 * @param array $pages   Articles pages.
+	 * @param array $gallery Gallery images.
+	 * 
+	 * @return string Post content.
+	 */
 	private function get_post_content( $pages, $gallery ) {
 		$content = '';
 		$page_count = count( $pages );
@@ -208,6 +222,12 @@ class GadisMigrator implements InterfaceMigrator {
 		return $content;
 	}
 
+	/**
+	 * Set post featured image from Gadis article "cover".
+	 *
+	 * @param int   $post_id Post ID.
+	 * @param array $article Gadis article object.
+	 */
 	private function set_featured_image( $post_id, $article ) {
 		if ( ! empty( $article['cover'] ) ) {
 			$url = self::CDN_URI . '/' . $article['cover'];
@@ -230,6 +250,13 @@ class GadisMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * Set post categories from Gadis article "categories" and "subcategories".
+	 * 
+	 * @param array $sub_categories List of existing subcategories.
+	 * @param int   $post_id        Post ID.
+	 * @param array $article        Gadis article object.
+	 */
 	private function set_categories( $sub_categories, $post_id, $article ) {
 		if ( empty ( $article['category'] ) ) {
 			return;
@@ -295,6 +322,13 @@ class GadisMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * Set post tags from article "tags".
+	 *
+	 * @param array $tags     List of existing tags.
+	 * @param int   $post_id  Post ID.
+	 * @param int   $gadis_id Gadis article ID.
+	 */
 	private function set_tags( $tags, $post_id, $gadis_id ) {
 		$post_tags = array_values(
 			array_filter(
@@ -322,6 +356,15 @@ class GadisMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * Upsert user from Gadis user ID.
+	 *
+	 * @param array   $users    List of existing users.
+	 * @param int     $gadis_id Gadis user ID.
+	 * @param boolean $update   Whether to update existing user.
+	 * 
+	 * @return int|null User ID.
+	 */
 	private function upsert_user( $users, $gadis_id, $update = false ) {
 		global $wpdb;
 
@@ -429,7 +472,8 @@ class GadisMigrator implements InterfaceMigrator {
 	/**
 	 * Import Gadis articles.
 	 *
-	 * @param array $articles Gadis articles.
+	 * @param array    $articles    Gadis articles.
+	 * @param boolean $force_import Whether to update already imported articles.
 	 */
 	private function import_articles( $articles, $force_import = false ) {
 
