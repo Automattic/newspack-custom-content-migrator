@@ -4,7 +4,7 @@
 # Local WP DB table prefix.
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql commands: utf8, utf8mb4, latin1.
-DB_DEFAULT_CHARSET=utf8mb4
+DB_CHARSET=utf8mb4
 # To provide content from the Live site:
 #   1. either set location of LIVE_JETPACK_ARCHIVE,
 #   2. or set both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE, and leave LIVE_JETPACK_ARCHIVE empty,
@@ -16,11 +16,10 @@ LIVE_SQL_DUMP_FILE=""
 LIVE_SITE_HOSTNAME=""
 # Staging site hostname -- site from which this site was cloned, e.g. "publisher-staging.newspackstaging.com".
 STAGING_SITE_HOSTNAME=""
-# Leave this empty in most case. In rare cases where the Live site uses a different table prefix than this local site, set the Live prefix here.
-JETPACK_TABLE_PREFIX=""
 # Temp folder for this script to run -- ! WARNING ! this folder will be deleted and completely purged.
 TEMP_DIR=/tmp/launch/temp
-
+# Leave this empty in most cases. In rare cases where the Live site uses a different table prefix than this local site, set the Live prefix here.
+JETPACK_TABLE_PREFIX=""
 
 # ---------- ... OR PROVIDED BY CLI PARAMETERS, WHICH THEN OVERRIDE THE ASSIGNMENTS ABOVE :
 while true; do
@@ -29,16 +28,11 @@ while true; do
     --live-hostname ) LIVE_SITE_HOSTNAME="$2"; shift 2 ;;
     --live-jp-archive ) LIVE_JETPACK_ARCHIVE="$2"; shift 2 ;;
     --table-prefix ) TABLE_PREFIX="$2"; shift 2 ;;
-    --db-charset ) DB_DEFAULT_CHARSET="$2"; shift 2 ;;
+    --db-charset ) DB_CHARSET="$2"; shift 2 ;;
     --temp-dir ) TEMP_DIR="$2"; shift 2 ;;
     * ) break ;;
   esac
 done
-
-echo "TABLE_PREFIX: $TABLE_PREFIX"
-echo "DB_DEFAULT_CHARSET: $DB_DEFAULT_CHARSET ."
-exit;
-
 
 
 # START -----------------------------------------------------------------------------
@@ -62,8 +56,8 @@ unpack_jetpack_archive
 echo_ts "checking $THIS_PLUGINS_NAME plugin status..."
 update_plugin_status
 
-echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
-dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql
+echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql..."
+dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql
 
 # --- export:
 

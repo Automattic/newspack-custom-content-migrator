@@ -101,7 +101,7 @@ function set_config() {
 
 function validate_all_params() {
   validate_db_connection
-  validate_db_default_charset
+  validate_db_charset
   validate_table_prefix
   validate_live_site_export_variables
   validate_live_db_hostname_replacements
@@ -227,7 +227,7 @@ function replace_hostnames() {
 }
 
 function import_live_sql_dump() {
-  mysql -h $DB_HOST_LOCAL --default-character-set=$DB_DEFAULT_CHARSET ${DB_NAME_LOCAL} < $LIVE_SQL_DUMP_FILE_REPLACED
+  mysql -h $DB_HOST_LOCAL --default-character-set=$DB_CHARSET ${DB_NAME_LOCAL} < $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
 # Syncs files from the live archive.
@@ -249,7 +249,7 @@ function update_files_from_live_site() {
 #	- arg1: output file (full path)
 function dump_db() {
   mysqldump -h $DB_HOST_LOCAL --max_allowed_packet=512M \
-    --default-character-set=$DB_DEFAULT_CHARSET \
+    --default-character-set=$DB_CHARSET \
     $DB_NAME_LOCAL \
     > $1
 }
@@ -326,9 +326,9 @@ function validate_db_connection() {
   fi
 }
 
-function validate_db_default_charset() {
-  if [ 'utf8mb4' != $DB_DEFAULT_CHARSET ] && [ 'utf8' != $DB_DEFAULT_CHARSET ] && [ 'latin1' != $DB_DEFAULT_CHARSET ]; then
-    echo_ts_red 'ERROR: DB_DEFAULT_CHARSET does not have a correct value.'
+function validate_db_charset() {
+  if [ 'utf8mb4' != $DB_CHARSET ] && [ 'utf8' != $DB_CHARSET ] && [ 'latin1' != $DB_CHARSET ]; then
+    echo_ts_red 'ERROR: DB_CHARSET does not have a correct value.'
     exit
   fi
 }
@@ -390,23 +390,23 @@ function validate_live_db_hostname_replacements() {
 # Echoes a green string with a timestamp.
 # - arg1: echo string
 function echo_ts() {
-  GREEN=`tput setaf 2; tput setab 0`
-  RESET_COLOR=`tput sgr0`
+  GREEN=`tput -T xterm-256color setaf 2; tput -T xterm-256color setab 0`
+  RESET_COLOR=`tput -T xterm-256color sgr0`
   echo -e "${GREEN}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }
 
 # Same like echo_ts, only uses red color.
 # - arg1: echo string
 function echo_ts_red() {
-  RED=`tput setaf 1; tput setab 0`
-  RESET_COLOR=`tput sgr0`
+  RED=`tput -T xterm-256color setaf 1; tput -T xterm-256color setab 0`
+  RESET_COLOR=`tput -T xterm-256color sgr0`
   echo -e "${RED}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }
 
 # Same like echo_ts, only uses color yellow.
 # - arg1: echo string
 function echo_ts_yellow() {
-  YELLOW=`tput setaf 3; tput setab 0`
-  RESET_COLOR=`tput sgr0`
+  YELLOW=`tput -T xterm-256color setaf 3; tput -T xterm-256color setab 0`
+  RESET_COLOR=`tput -T xterm-256color sgr0`
   echo -e "${YELLOW}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }
