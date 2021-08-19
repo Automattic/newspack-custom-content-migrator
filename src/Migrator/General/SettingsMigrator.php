@@ -127,10 +127,11 @@ class SettingsMigrator implements InterfaceMigrator {
 		WP_CLI::line( sprintf( 'Exporting site identity settings...' ) );
 
 		$result = $this->export_current_theme_site_identity( $output_dir );
-		if ( true === $result ) {
+		if ( false !== $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
 	}
@@ -164,8 +165,15 @@ class SettingsMigrator implements InterfaceMigrator {
 			$json_data[ 'site_icon_file' ] = get_attached_file( $site_icon_id );
 		}
 
-		// Write JSON file for reference to what was exported.
-		return file_put_contents( $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME, json_encode( $json_data ) );
+		if ( empty( $json_data ) ) {
+			return false;
+		}
+
+		// Write JSON file.
+		$file = $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
+		WP_CLI::line( 'Writing to file ' . $file );
+
+		return file_put_contents( $file, json_encode( $json_data ) );
 	}
 
 	/**
@@ -182,10 +190,11 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$options_import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
 		if ( ! is_file( $options_import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $options_import_file ) );
+			WP_CLI::warning( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
+			exit(1);
 		}
 
-		WP_CLI::line( 'Importing site identity settings...' );
+		WP_CLI::line( 'Importing site identity settings from ' . $options_import_file . ' ...' );
 
 		// Update current Theme mods.
 		$imported_mods_and_options = json_decode( file_get_contents( $options_import_file ), true );
@@ -272,6 +281,7 @@ class SettingsMigrator implements InterfaceMigrator {
 			exit(1);
 		}
 
+		WP_CLI::line( 'Writing to file ' . $file );
 		WP_CLI::success( 'Done.' );
 		exit(0);
 	}
@@ -290,10 +300,10 @@ class SettingsMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::PAGES_SETTINGS_FILENAME;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::error( sprintf( 'Pages settings file not found %s.', $import_file ) );
 		}
 
-		WP_CLI::line( 'Importing default pages settings...' );
+		WP_CLI::line( 'Importing default pages settings from ' . $import_file . ' ...'  );
 
 		$contents = file_get_contents( $import_file );
 		if ( false === $contents ) {

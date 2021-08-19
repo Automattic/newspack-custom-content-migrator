@@ -115,7 +115,7 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		$posts = $this->get_reusable_blocks();
 		if ( empty( $posts ) ) {
-			WP_CLI::line( 'No Reusable Blocks found.' );
+			WP_CLI::warning( 'No Reusable Blocks found.' );
 			exit(1);
 		}
 
@@ -172,10 +172,11 @@ class ReusableBlocksMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::REUSABLE_BLOCKS_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Reusable blocks file not found %s.', $import_file ) );
+			exit(1);
 		}
 
-		WP_CLI::line( 'Importing Reusable Blocks...' );
+		WP_CLI::line( 'Importing Reusable Blocks from ' . $import_file . ' ...' );
 
 		PostsMigrator::get_instance()->import_posts( $import_file );
 

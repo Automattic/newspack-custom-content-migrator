@@ -27,197 +27,155 @@ function update_plugin_status() {
     return
   fi
 
-  echo_ts 'plugin inactive, activating now...'
+  echo_ts 'plugin inactive, now activating...'
   wp_cli plugin activate $THIS_PLUGINS_NAME
   PLUGIN_STATUS=$(wp_cli plugin list | grep "$THIS_PLUGINS_NAME" | awk '{print $2}')
   if [[ 'active' != $PLUGIN_STATUS ]]; then
-    echo_ts_red "ERROR: could not activate $THIS_PLUGINS_NAME Plugin. Make sure it's actvated then try again."
+    echo_ts_red "ERROR: could not activate $THIS_PLUGINS_NAME Plugin. Make sure it's active then try again."
     exit
   fi
 }
 
-# Checks if SEARCH_REPLACE is set, an if it isn't it downloads the search-replace
-# tool and sets its path.
-function download_vip_search_replace() {
-  # If it's set, use it
-  if [ "" != "$SEARCH_REPLACE" ]; then
-    chmod 755 $SEARCH_REPLACE
-    return
-  fi
-
-  echo_ts 'downloading the search-replace bin...'
-  local ARCHIVE="$TEMP_DIR/search-replace.gz"
+# If the SEARCH_REPLACE file exists it will be used, or else will be downloaded it from GH.
+function get_vip_search_replace() {
+  # Location of search-replace binary.
   SEARCH_REPLACE=$TEMP_DIR/search-replace
-  rm -f $ARCHIVE
-  curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
-    -o "$ARCHIVE" && \
-  gzip -f -d $ARCHIVE && \
-  chmod 755 $SEARCH_REPLACE
 
-  if [ ! -f $SEARCH_REPLACE ]; then
-    echo_ts_red 'ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and set it in the SEARCH_REPLACE var.'
-    exit
+  if [ -f $SEARCH_REPLACE ]; then
+    chmod 755 $SEARCH_REPLACE
+    echo_ts "VIP search-replace found at $SEARCH_REPLACE and will be used"
+    return
+  else
+    echo_ts 'downloading VIP search-replace...'
+    local ARCHIVE="$TEMP_DIR/search-replace.gz"
+    rm -f $ARCHIVE
+    curl -Ls https://github.com/Automattic/go-search-replace/releases/download/0.0.5/go-search-replace_linux_amd64.gz \
+      -o "$ARCHIVE" && \
+    gzip -f -d $ARCHIVE && \
+    chmod 755 $SEARCH_REPLACE
+    if [ ! -f $SEARCH_REPLACE ]; then
+      echo_ts_red "ERROR: search-replace bin could not be downloaded. You can provide the bin yourself and save it as $SEARCH_REPLACE"
+      exit
+    fi
   fi
 }
 
 # Sets config variables which can be automatically set.
-function set_auto_config_variables() {
-  set_db_name
-  set_vaultpress_table_prefix
-}
+function set_config() {
+  THIS_PLUGINS_NAME='newspack-custom-content-migrator'
+  # Tables to import fully from the Live Site, given here without the table prefix.
+  IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
+  # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as the Atomic sites' convention.
+  DB_NAME_LOCAL=""
+  # Atomic DB host.
+  DB_HOST_LOCAL=127.0.0.1
+  # Path to the public folder. No ending slash.
+  HTDOCS_PATH=/srv/htdocs
+  # Atomic WP CLI params.
+  WP_CLI_BIN=/usr/local/bin/wp-cli
+  WP_CLI_PATH=/srv/htdocs/__wp__/
 
-# If a specific value is given to the VAULTPRESS_TABLE_PREFIX var, means that the VaultPress
-# archive contains a different table prefix than the Staging/Launch site. But if it's not set,
-# use TABLE_PREFIX value everywhere.
-function set_vaultpress_table_prefix() {
-  if [ "" = "$VAULTPRESS_TABLE_PREFIX" ]; then
-    VAULTPRESS_TABLE_PREFIX=$TABLE_PREFIX
-  fi
-}
+  # Migrators' output dir.
+  TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
+  # Jetpack Rewind temp dir.
+  TEMP_DIR_JETPACK=$TEMP_DIR/jetpack_archive
+  # Another Jetpack temp dir, where the archive initially gets extracted to.
+  TEMP_DIR_JETPACK_UNZIP=$TEMP_DIR_JETPACK/unzip
+  # Name of the Live SQL dump file to save after the hostname replacements are made.
+  LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
 
-# Checks the DB_NAME_LOCAL, an if it is empty, it fetches it from the Atomic user name.
-function set_db_name() {
+  # If DB name not provided sets it from the Atomic user name.
   if [ "" = "$DB_NAME_LOCAL" ]; then
     DB_NAME_LOCAL=$( whoami )
   fi
+  # If not specified otherwise, Jetpack table prefix is the same as local WP DB prefix.
+  if [ "" = "$JETPACK_TABLE_PREFIX" ]; then
+    JETPACK_TABLE_PREFIX=$TABLE_PREFIX
+  fi
+
+  # Set array with hostname replacements for live SQL dump file before importing it into local.
+  declare -gA LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS
+  LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS[$LIVE_SITE_HOSTNAME]=$STAGING_SITE_HOSTNAME
+  LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS['www.'$LIVE_SITE_HOSTNAME]=$STAGING_SITE_HOSTNAME
 }
 
-function validate_all_config_params() {
+function validate_all_params() {
   validate_db_connection
-  validate_db_default_charset
+  validate_db_charset
   validate_table_prefix
   validate_live_site_export_variables
   validate_live_db_hostname_replacements
 }
 
-function prepare_temp_folders() {
+function purge_temp_folders() {
   rm -rf $TEMP_DIR || true
   mkdir -p $TEMP_DIR
   mkdir -p $TEMP_DIR_MIGRATOR
-  mkdir -p $TEMP_DIR_VAULTPRESS
-  mkdir -p $TEMP_DIR_VAULTPRESS_UNZIP
+  mkdir -p $TEMP_DIR_JETPACK
+  mkdir -p $TEMP_DIR_JETPACK_UNZIP
 }
 
-# Extracts the VP archive, and prepares its contents for import.
-function unpack_vaultpress_archive() {
-  if [ "" = "$LIVE_VAULTPRESS_ARCHIVE" ]; then
+# Extracts the Jetpack archive, and prepares its contents for import.
+function unpack_jetpack_archive() {
+  if [ "" = "$LIVE_JETPACK_ARCHIVE" ]; then
+    echo_ts "using live SQL dump from $LIVE_SQL_DUMP_FILE and files from $LIVE_HTDOCS_FILES ..."
     return
   fi
 
-  echo_ts 'unpacking the VaultPress archive and prepare contents for import...'
+  echo_ts 'extracting archive...'
+  jetpack_archive_extract
 
-  echo_ts 'extracting the VaultPress Live site archive...'
-  vaultpress_archive_extract
-
-  echo_ts "preparing Live SQL dump from the VP export..."
-  vaultpress_archive_prepare_live_sql_dump
+  echo_ts "preparing the SQL dump..."
+  jetpack_archive_prepare_live_sql_dump
   echo_ts "created $LIVE_SQL_DUMP_FILE"
 
-  echo_ts 'preparing the VaultPress export files, leaving only uploads to be synced...'
-  vaultpress_archive_prepare_files_for_sync
-  echo_ts "stored files for syncing in $LIVE_HTDOCS_FILES"
+  echo_ts 'preparing the files...'
+  jetpack_archive_prepare_files_for_sync
+
+  echo_ts "files for syncing stored to $LIVE_HTDOCS_FILES"
 }
 
-function vaultpress_archive_extract() {
-  mkdir -p $TEMP_DIR_VAULTPRESS_UNZIP
-  eval "tar xzf $LIVE_VAULTPRESS_ARCHIVE -C $TEMP_DIR_VAULTPRESS_UNZIP > /dev/null 2>&1"
+function jetpack_archive_extract() {
+  mkdir -p $TEMP_DIR_JETPACK_UNZIP
+  eval "tar xzf $LIVE_JETPACK_ARCHIVE -C $TEMP_DIR_JETPACK_UNZIP > /dev/null 2>&1"
   if [ 0 -ne $? ]; then
-    echo_ts_red "error extracting VaultPress archive $LIVE_VAULTPRESS_ARCHIVE."
+    echo_ts_red "error extracting Jetpack Rewind archive $LIVE_JETPACK_ARCHIVE"
     exit
   fi
 }
 
-# Prepares the live SQL dump from the VP export, sets its location to LIVE_SQL_DUMP_FILE
-function vaultpress_archive_prepare_live_sql_dump() {
-  LIVE_SQL_DUMP_FILE=$TEMP_DIR_VAULTPRESS/sql/live.sql
+# Prepares the live SQL dump from the Jetpack export, sets its location to LIVE_SQL_DUMP_FILE
+function jetpack_archive_prepare_live_sql_dump() {
+  LIVE_SQL_DUMP_FILE=$TEMP_DIR_JETPACK/sql/live.sql
 
-  # First get the list of all individual SQL table dump files from the VP SQL export.
+  # First get the list of all individual SQL table dump files from the Jetpack SQL export.
   local LIST_OF_TABLENAMES=""
   for KEY in "${!IMPORT_TABLES[@]}"; do
-    # Using the VAULTPRESS_TABLE_PREFIX var here enables a differet table prefix for the
-    # VP dumps and the Staging/Launch site tables.
-    local TABLE_FILE_FULL_PATH=$TEMP_DIR_VAULTPRESS_UNZIP/sql/$VAULTPRESS_TABLE_PREFIX${IMPORT_TABLES[KEY]}.sql
+    # Using the JETPACK_TABLE_PREFIX var here enables a different table prefix for the
+    # Jetpack dumps and the Staging/Launch site tables.
+    local TABLE_FILE_FULL_PATH=$TEMP_DIR_JETPACK_UNZIP/sql/$JETPACK_TABLE_PREFIX${IMPORT_TABLES[KEY]}.sql
     LIST_OF_TABLENAMES="$LIST_OF_TABLENAMES $TABLE_FILE_FULL_PATH"
 
-    # Also check if table dump exists in the VP export.
+    # Also check if table dump exists in the Jetpack export.
     if [ ! -f $TABLE_FILE_FULL_PATH ]; then
-      echo_ts_red "ERROR: Not found table SQL dump $TABLE_FILE_FULL_PATH."
+      echo_ts_red "ERROR: table SQL dump not found $TABLE_FILE_FULL_PATH."
       exit
     fi
   done
 
   # Export all table dumps into the LIVE_SQL_DUMP_FILE file
-  mkdir -p $TEMP_DIR_VAULTPRESS/sql
+  mkdir -p $TEMP_DIR_JETPACK/sql
   cat $LIST_OF_TABLENAMES > $LIVE_SQL_DUMP_FILE
 }
 
-# Prepares files for import from the VP export, sets their location to LIVE_HTDOCS_FILES
-function vaultpress_archive_prepare_files_for_sync() {
-  LIVE_HTDOCS_FILES=$TEMP_DIR_VAULTPRESS/files
+# Prepares files for import from the Jetpack export, sets their location to LIVE_HTDOCS_FILES
+function jetpack_archive_prepare_files_for_sync() {
+  LIVE_HTDOCS_FILES=$TEMP_DIR_JETPACK/files
 
   # Only sync wp-content/uploads, from the LIVE_HTDOCS_FILES
   mkdir -p $LIVE_HTDOCS_FILES/wp-content
-  mv $TEMP_DIR_VAULTPRESS_UNZIP/wp-content/uploads $LIVE_HTDOCS_FILES/wp-content
-  rm -rf $TEMP_DIR_VAULTPRESS_UNZIP
-}
-
-function back_up_staging_site_db() {
-  dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql
-}
-
-function export_staging_site_pages() {
-  wp_cli newspack-content-migrator export-all-staging-pages --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_STAGING_PAGES
-}
-
-function export_staging_site_menus() {
-  wp_cli newspack-content-migrator export-menus --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_STAGING_MENUS
-}
-
-function export_staging_site_custom_css() {
-  wp_cli newspack-content-migrator export-current-theme-custom-css --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_CUSTOM_CSS
-}
-
-function export_staging_site_page_settings() {
-  wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_PAGES_SETTINGS
-}
-
-function export_staging_site_identity_settings() {
-  wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_PAGES_IDENTITY_SETTINGS
-}
-
-function export_staging_site_donation_products() {
-  wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_DONATION_PRODUCTS
-}
-
-function export_staging_site_listings() {
-  wp_cli newspack-content-migrator export-listings --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_LISTINGS
-}
-
-function export_staging_site_campaigns() {
-  wp_cli newspack-content-migrator export-campaigns --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_CAMPAIGNS
-}
-
-function export_staging_site_ads() {
-  wp_cli newspack-content-migrator export-ads --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_ADS
-}
-
-function export_staging_site_newsletters() {
-  wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_NEWSLETTERS
-}
-
-function export_staging_site_reusable_blocks() {
-  wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_REUSABLE_BLOCKS
+  mv $TEMP_DIR_JETPACK_UNZIP/wp-content/uploads $LIVE_HTDOCS_FILES/wp-content
+  rm -rf $TEMP_DIR_JETPACK_UNZIP
 }
 
 function export_staging_site_sportspress_plugin_contents() {
@@ -226,11 +184,11 @@ function export_staging_site_sportspress_plugin_contents() {
 }
 
 function prepare_live_sql_dump_for_import() {
-  echo_ts 'replacing hostnames in the Live SQL dump file...'
+  echo_ts 'replacing hostnames in Live SQL dump file...'
   replace_hostnames $LIVE_SQL_DUMP_FILE $LIVE_SQL_DUMP_FILE_REPLACED
 
-  echo_ts 'setting `live_` table prefix to all the tables in the Live site SQL dump ...'
-  sed -i "s/\`$VAULTPRESS_TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
+  echo_ts 'setting `live_` table prefix to tables in Live site SQL dump...'
+  sed -i "s/\`$JETPACK_TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
 # Replace multiple hostnames in a file using the VIP's search-replace tool.
@@ -255,7 +213,7 @@ function replace_hostnames() {
     fi
     TMP_OUT_FILE=$TEMP_DIR/live_replaced_$i.sql
 
-    echo_ts "- replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO..."
+    echo_ts "- replacing //$HOSTNAME_FROM -> //$HOSTNAME_TO ..."
     cat $TMP_IN_FILE | $SEARCH_REPLACE //$HOSTNAME_FROM //$HOSTNAME_TO > $TMP_OUT_FILE
 
     # Remove previous temp TMP_IN_FILE.
@@ -269,7 +227,7 @@ function replace_hostnames() {
 }
 
 function import_live_sql_dump() {
-  mysql -h $DB_HOST_LOCAL --default-character-set=$DB_DEFAULT_CHARSET ${DB_NAME_LOCAL} < $LIVE_SQL_DUMP_FILE_REPLACED
+  mysql -h $DB_HOST_LOCAL --default-character-set=$DB_CHARSET ${DB_NAME_LOCAL} < $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
 # Syncs files from the live archive.
@@ -291,7 +249,7 @@ function update_files_from_live_site() {
 #	- arg1: output file (full path)
 function dump_db() {
   mysqldump -h $DB_HOST_LOCAL --max_allowed_packet=512M \
-    --default-character-set=$DB_DEFAULT_CHARSET \
+    --default-character-set=$DB_CHARSET \
     $DB_NAME_LOCAL \
     > $1
 }
@@ -300,7 +258,7 @@ function dump_db() {
 # `live_` table name prefix).
 function replace_staging_tables_with_live_tables() {
   for TABLE in "${IMPORT_TABLES[@]}"; do
-      echo "- switching $TABLE..."
+      echo "- switching $TABLE ..."
       # Add prefix `staging_` to current table.
       mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DROP TABLE IF EXISTS staging_$TABLE_PREFIX$TABLE;"
       mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
@@ -310,9 +268,13 @@ function replace_staging_tables_with_live_tables() {
   done
 }
 
-# Imports previously converted blocks contents from the `staging_ncc_wp_posts_backup`
-# table.
+# Imports previously converted blocks contents from the `staging_wp_posts` table.
 function import_blocks_content_from_staging_site() {
+  if [ "" = "$STAGING_SITE_HOSTNAME" ]; then
+    echo_ts_yellow "Param STAGING_SITE_HOSTNAME not provided, skipping."
+    exit
+  fi
+
   echo_ts "deleting the Newspack Content Converter plugin..."
   wp_cli plugin deactivate newspack-content-converter
   wp_cli plugin delete newspack-content-converter
@@ -329,8 +291,8 @@ function import_blocks_content_from_staging_site() {
   wp_cli plugin install --force https://github.com/Automattic/newspack-content-converter/releases/latest/download/newspack-content-converter.zip
   wp_cli plugin activate newspack-content-converter
 
-  echo_ts "importing block contents from the Staging site..."
-  wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX
+  echo_ts "importing contents already converted to blocks from Staging site..."
+  wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX --staging-hostname=$STAGING_SITE_HOSTNAME
 }
 
 function clean_up_options() {
@@ -343,8 +305,9 @@ function drop_temp_db_tables() {
   local SQL_SELECT_TABLES_TO_DROP="SELECT GROUP_CONCAT(table_name) AS statement \
     FROM information_schema.tables \
     WHERE table_schema = '$DB_NAME_LOCAL' \
-    AND table_name LIKE 'live_%' \
-    AND table_name LIKE 'staging_%' ; "
+    AND ( table_name LIKE 'live_%' \
+        OR table_name LIKE 'staging_%' \
+    ) ; "
   local CMD_GET_TABLES_TO_DROP="mysql -h $DB_HOST_LOCAL -sN -e \"$SQL_SELECT_TABLES_TO_DROP\""
   eval TABLES_TO_DROP_CSV=\$\($CMD_GET_TABLES_TO_DROP\)
   # Drop all these temporary Live tables.
@@ -363,9 +326,9 @@ function validate_db_connection() {
   fi
 }
 
-function validate_db_default_charset() {
-  if [ 'utf8mb4' != $DB_DEFAULT_CHARSET ] && [ 'utf8' != $DB_DEFAULT_CHARSET ] && [ 'latin1' != $DB_DEFAULT_CHARSET ]; then
-    echo_ts_red 'ERROR: DB_DEFAULT_CHARSET does not have a correct value.'
+function validate_db_charset() {
+  if [ 'utf8mb4' != $DB_CHARSET ] && [ 'utf8' != $DB_CHARSET ] && [ 'latin1' != $DB_CHARSET ]; then
+    echo_ts_red 'ERROR: DB_CHARSET does not have a correct value.'
     exit
   fi
 }
@@ -385,16 +348,16 @@ function validate_table_prefix() {
   fi
 }
 
-# Either LIVE_VAULTPRESS_ARCHIVE must be provided, or both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE.
+# Either LIVE_JETPACK_ARCHIVE must be provided, or both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE.
 function validate_live_site_export_variables() {
-  if [ "" != "$LIVE_VAULTPRESS_ARCHIVE" ]; then
-    if [ ! -f $LIVE_VAULTPRESS_ARCHIVE ]; then
-      echo_ts_red "live VaultPress archive not found at location $LIVE_VAULTPRESS_ARCHIVE."
+  if [ "" != "$LIVE_JETPACK_ARCHIVE" ]; then
+    if [ ! -f $LIVE_JETPACK_ARCHIVE ]; then
+      echo_ts_red "Jetpack Rewind archive not found at location $LIVE_JETPACK_ARCHIVE."
       exit
     fi
   else
     if [ "" = "$LIVE_HTDOCS_FILES" ] && [ "" = "$LIVE_SQL_DUMP_FILE" ]; then
-      echo_ts_red "if LIVE_VAULTPRESS_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be."
+      echo_ts_red "if LIVE_JETPACK_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be set."
       exit
     else
       validate_live_files
@@ -412,7 +375,7 @@ function validate_live_files() {
 
 function validate_live_sql_dump_file() {
   if [ ! -f $LIVE_SQL_DUMP_FILE ]; then
-    echo_ts_red "ERROR: Live SQL DUMP file not found at $LIVE_SQL_DUMP_FILE. Check LIVE_SQL_DUMP_FILE param."
+    echo_ts_red "ERROR: Live SQL DUMP file not found at $LIVE_SQL_DUMP_FILE. Check the LIVE_SQL_DUMP_FILE param."
     exit
   fi
 }
@@ -427,23 +390,23 @@ function validate_live_db_hostname_replacements() {
 # Echoes a green string with a timestamp.
 # - arg1: echo string
 function echo_ts() {
-  GREEN=`tput setaf 2; tput setab 0`
-  RESET_COLOR=`tput sgr0`
+  GREEN=`tput -T xterm-256color setaf 2; tput -T xterm-256color setab 0`
+  RESET_COLOR=`tput -T xterm-256color sgr0`
   echo -e "${GREEN}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }
 
 # Same like echo_ts, only uses red color.
 # - arg1: echo string
 function echo_ts_red() {
-  RED=`tput setaf 1; tput setab 0`
-  RESET_COLOR=`tput sgr0`
+  RED=`tput -T xterm-256color setaf 1; tput -T xterm-256color setab 0`
+  RESET_COLOR=`tput -T xterm-256color sgr0`
   echo -e "${RED}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }
 
 # Same like echo_ts, only uses color yellow.
 # - arg1: echo string
 function echo_ts_yellow() {
-  YELLOW=`tput setaf 3; tput setab 0`
-  RESET_COLOR=`tput sgr0`
+  YELLOW=`tput -T xterm-256color setaf 3; tput -T xterm-256color setab 0`
+  RESET_COLOR=`tput -T xterm-256color sgr0`
   echo -e "${YELLOW}- [`date +%H:%M:%S`] $@ ${RESET_COLOR}"
 }

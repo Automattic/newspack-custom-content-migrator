@@ -1,224 +1,167 @@
 #!/bin/bash
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# This file contains the most recent curated update recipe. Copy it to this same dir  #
-# and give it the Publisher's name. Commit these individual recipe files to master.   #
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-# ---------- USER SET VARIABLES:
-# Local DB table prefix. In a rare case when the VaultPress SQL dump uses a different
-# table prefix than the local DB one, you may set it in the VAULTPRESS_TABLE_PREFIX var.
+# ---------- VARIABLES CAN EITHER BE SET HERE MANUALLY ... :
+# Local WP DB table prefix.
 TABLE_PREFIX=wp_
-# The --default-character-set param for mysql(dump) commands; utf8, utf8mb4, latin1.
-DB_DEFAULT_CHARSET=utf8mb4
-# To provide content for import from the Live site,
-#   1. either set path to VaultPress archive in LIVE_VAULTPRESS_ARCHIVE
-#   2. or set both LIVE_FILES and LIVE_SQL_DUMP_FILE and leave
-#      LIVE_VAULTPRESS_ARCHIVE as an empty string ( LIVE_VAULTPRESS_ARCHIVE="" ).
-LIVE_VAULTPRESS_ARCHIVE=/tmp/live_export/vaultpress.tar.gz
-# Hostname replacements to perform on the Live DB dump before importing it.
-# Associative array with REPLACE_HOST_FROM -> REPLACE_HOST_TO as key-value pairs.
-# Pure host names, no pre- or post-slashes. One replacement per domain or subdomain.
-# It's recommended to also replace the origin Staging site's hostname before cloning.
-declare -A LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS=(
-  # Here are three example entries. Edit and uncomment these, and enter at least one:
-  # [publisher.com]=publisher-launch.newspackstaging.com
-  # [www.publisher.com]=publisher-launch.newspackstaging.com
-  # [publisher-newspack.newspackstaging.com]=publisher-launch.newspackstaging.com
-)
-
-# ---------- AUTOMATICALLY SET AND DEFAULT VARIABLES, no need to change these:
-THIS_PLUGINS_NAME='newspack-custom-content-migrator'
-# Temp folder for script's resources. No ending slash. Will be purged.
-TEMP_DIR=/tmp/launch/tmp_update
-# If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
-# set path to the folder containing Live files, no ending slash. Should contain wp-content.
+# The --default-character-set param for mysql commands: utf8, utf8mb4, latin1.
+DB_CHARSET=utf8mb4
+# To provide content from the Live site:
+#   1. either set location of LIVE_JETPACK_ARCHIVE,
+#   2. or set both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE, and leave LIVE_JETPACK_ARCHIVE empty,
+#      and comment out `purge_temp_folders`.
+LIVE_JETPACK_ARCHIVE=/tmp/launch/jetpack_rewind_backup.tar.gz
 LIVE_HTDOCS_FILES=""
-# If LIVE_VAULTPRESS_ARCHIVE is given, this var will be set automatically. Otherwise,
-# set path to Live SQL dump file. This dump should contain only tables from IMPORT_TABLES.
 LIVE_SQL_DUMP_FILE=""
-# Set the VAULTPRESS_TABLE_PREFIX if the VaultPress SQL dump has a different prefix than
-# the local Staging/Launch DB.
-VAULTPRESS_TABLE_PREFIX=""
-# Tables to import fully from the Live Site, given here without the table prefix.
-declare -a IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
-# If left empty, the DB_NAME_LOCAL will be fetched from the user name, as a convention on
-# Atomic environment. But if a DB schema name is given, it will be used.
-DB_NAME_LOCAL=""
-# Atomic DB host.
-DB_HOST_LOCAL=127.0.0.1
-# Path to the public folder. No ending slash.
-HTDOCS_PATH=/srv/htdocs
-# Atomic WP CLI params.
-WP_CLI_BIN=/usr/local/bin/wp-cli
-WP_CLI_PATH=/srv/htdocs/__wp__/
-# If this var is left empty, the VIP's search-replace tool will be downloaded from
-# https://github.com/Automattic/go-search-replace, otherwise full path to binary.
-SEARCH_REPLACE=""
+# Live site hostname without the www. prefix, e.g. publisher.com.
+LIVE_SITE_HOSTNAME=""
+# Staging site hostname -- site from which this site was cloned, e.g. "publisher-staging.newspackstaging.com".
+STAGING_SITE_HOSTNAME=""
+# Temp folder for this script to run -- ! WARNING ! this folder will be deleted and completely purged.
+TEMP_DIR=/tmp/launch/temp
+# Leave this empty in most cases. In rare cases where the Live site uses a different table prefix than this local site, set the Live prefix here.
+JETPACK_TABLE_PREFIX=""
 
-# ---------- SCRIPT VARIABLES, do not change these:
-# Migration Plugin's output dir (the Plugin uses hard-coded file names).
-TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
-# VaultPress export temp dir, where the SQL dump and files get extracted to.
-TEMP_DIR_VAULTPRESS=$TEMP_DIR/vaultpress_archive
-# Another VP temp dir, where the archive initially gets extracted to.
-TEMP_DIR_VAULTPRESS_UNZIP=$TEMP_DIR_VAULTPRESS/unzip
-# Name of file where to save the Live SQL dump after hostname replacements are made.
-LIVE_SQL_DUMP_FILE_REPLACED=$TEMP_DIR/live_db_hostnames_replaced.sql
+# ---------- ... OR PROVIDED BY CLI PARAMETERS, WHICH THEN OVERRIDE THE ASSIGNMENTS ABOVE :
+while true; do
+  case "$1" in
+    --staging-hostname ) STAGING_SITE_HOSTNAME="$2"; shift 2 ;;
+    --live-hostname ) LIVE_SITE_HOSTNAME="$2"; shift 2 ;;
+    --live-jp-archive ) LIVE_JETPACK_ARCHIVE="$2"; shift 2 ;;
+    --table-prefix ) TABLE_PREFIX="$2"; shift 2 ;;
+    --db-charset ) DB_CHARSET="$2"; shift 2 ;;
+    --temp-dir ) TEMP_DIR="$2"; shift 2 ;;
+    * ) break ;;
+  esac
+done
+
 
 # START -----------------------------------------------------------------------------
-
-# --- init:
 
 TIME_START=`date +%s`
 . ./../inc/functions.sh
 
-echo_ts 'purging temp folder...'
-prepare_temp_folders
+set_config
+validate_all_params
 
-set_auto_config_variables
-validate_all_config_params
+echo_ts "purging temp dir $TEMP_DIR ..."
+purge_temp_folders
 
 # --- prepare:
 
-download_vip_search_replace
+get_vip_search_replace
 
-echo_ts 'starting to unpack the VaultPress archive and prepare contents for import...'
-unpack_vaultpress_archive
+echo_ts 'unpacking Jetpack Rewind backup archive and preparing contents for import...'
+unpack_jetpack_archive
 
-echo_ts "checking $THIS_PLUGINS_NAME plugin's status..."
+echo_ts "checking $THIS_PLUGINS_NAME plugin status..."
 update_plugin_status
 
-echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_DEFAULT_CHARSET}.sql..."
-back_up_staging_site_db
+echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql..."
+dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql
 
 # --- export:
 
-echo_ts 'exporting Staging site pages...'
-export_staging_site_pages
+echo_ts 'exporting Staging site Pages...'
+wp_cli newspack-content-migrator export-all-staging-pages --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts 'exporting Staging site menus...'
-export_staging_site_menus
+echo_ts 'exporting Staging site Menus...'
+wp_cli newspack-content-migrator export-menus --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Staging site active theme custom CSS..."
-export_staging_site_custom_css
+echo_ts "exporting Staging site custom CSS..."
+wp_cli newspack-content-migrator export-current-theme-custom-css --output-dir=$TEMP_DIR_MIGRATOR
 
 echo_ts "exporting Staging pages settings..."
-export_staging_site_page_settings
+wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MIGRATOR
 
 echo_ts "exporting Staging site identity settings..."
-export_staging_site_identity_settings
+wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Staging site donation products..."
-export_staging_site_donation_products
+echo_ts "exporting Staging site Reader Revenue and Donation products..."
+wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
 
 echo_ts "exporting Staging site Listings..."
-export_staging_site_listings
+wp_cli newspack-content-migrator export-listings --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Staging site campaigns..."
-export_staging_site_campaigns
+echo_ts "exporting Staging site Campaigns..."
+wp_cli newspack-content-migrator export-campaigns --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Staging site ads..."
-export_staging_site_ads
+echo_ts "exporting Staging site Ad units..."
+wp_cli newspack-content-migrator export-ads --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Staging site newsletters..."
-export_staging_site_newsletters
+echo_ts "exporting Staging site Newsletters..."
+wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRATOR
 
-echo_ts "exporting Reusable blocks..."
-export_staging_site_reusable_blocks
+echo_ts "exporting Reusable Blocks..."
+wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
 
-# --- import:
+# --- import DB:
 
-echo_ts 'preparing Live site SQL dump for import...'
+echo_ts 'preparing Live SQL dump for import...'
 prepare_live_sql_dump_for_import
 
 echo_ts 'importing Live DB tables...'
 import_live_sql_dump
 
-echo_ts 'switching Staging site tables with Live site tables...'
+echo_ts 'switching Staging tables with Live tables...'
 replace_staging_tables_with_live_tables
 
-echo_ts 'activating this plugin after the table switch...'
-wp_cli plugin activate $THIS_PLUGINS_NAME
+# --- import Staging site data:
 
-if [[ 1 == $IS_EXPORTED_STAGING_PAGES ]]; then
-  echo_ts 'importing all Pages from the Staging site and new pages from the Live site...'
-  wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing Pages from the Staging site.'; fi
+echo_ts 'importing Pages from Staging and Live...'
+wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_STAGING_MENUS ]]; then
-  echo_ts 'importing Menus from the Staging site...'
-  wp_cli newspack-content-migrator import-menus --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing Menus from the Staging site.'; fi
+echo_ts 'importing Menus from Staging...'
+wp_cli newspack-content-migrator import-menus --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_CUSTOM_CSS ]]; then
-  echo_ts 'importing custom CSS from the Staging site...'
-  wp_cli newspack-content-migrator import-custom-css-file --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing custom CSS from the Staging site.'; fi
+echo_ts 'importing custom CSS from Staging...'
+wp_cli newspack-content-migrator import-custom-css-file --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_PAGES_SETTINGS ]]; then
-  echo_ts 'importing pages settings from the Staging site...'
-  wp_cli newspack-content-migrator import-pages-settings --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing pages settings from the Staging site.'; fi
+echo_ts 'importing Pages settings from Staging...'
+wp_cli newspack-content-migrator import-pages-settings --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_PAGES_IDENTITY_SETTINGS ]]; then
-  echo_ts 'importing identity settings from the Staging site...'
-  wp_cli newspack-content-migrator import-customize-site-identity-settings --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing pages settings from the Staging site.'; fi
+echo_ts 'importing identity settings from Staging...'
+wp_cli newspack-content-migrator import-customize-site-identity-settings --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_DONATION_PRODUCTS ]]; then
-  echo_ts 'importing reader revenue products from the Staging site...'
-  wp_cli newspack-content-migrator import-reader-revenue --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing reader revenue products from the Staging site.'; fi
+echo_ts 'importing Reader Revenue products from Staging...'
+wp_cli newspack-content-migrator import-reader-revenue --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_LISTINGS ]]; then
-  echo_ts 'importing listings from the Staging site...'
-  wp_cli newspack-content-migrator import-listings --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing listings from the Staging site.'; fi
+echo_ts 'importing Listings from Staging...'
+wp_cli newspack-content-migrator import-listings --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_CAMPAIGNS ]]; then
-  echo_ts 'importing campaigns from the Staging site...'
-  wp_cli newspack-content-migrator import-campaigns --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing Newspack Campaigns from the Staging site.'; fi
+echo_ts 'importing Campaigns from Staging...'
+wp_cli newspack-content-migrator import-campaigns --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_ADS ]]; then
-  echo_ts 'importing ads from the Staging site...'
-  wp_cli newspack-content-migrator import-ads --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing Ads from the Staging site.'; fi
+echo_ts 'importing Ads from Staging...'
+wp_cli newspack-content-migrator import-ads --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_NEWSLETTERS ]]; then
-  echo_ts 'importing newsletters from the Staging site...'
-  wp_cli newspack-content-migrator import-newsletters --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing Newsletters from the Staging site.'; fi
+echo_ts 'importing Newsletters from Staging...'
+wp_cli newspack-content-migrator import-newsletters --input-dir=$TEMP_DIR_MIGRATOR
 
-if [[ 1 == $IS_EXPORTED_REUSABLE_BLOCKS ]]; then
-  echo_ts 'importing Reusable Blocks from the Staging site...'
-  wp_cli newspack-content-migrator import-reusable-blocks --input-dir=$TEMP_DIR_MIGRATOR
-else echo_ts_yellow 'Skipping importing Reusable Blocks from the Staging site.'; fi
-
-echo_ts 'importing Staging content previously converted to blocks...'
-import_blocks_content_from_staging_site
+echo_ts 'importing Reusable Blocks from Staging...'
+wp_cli newspack-content-migrator import-reusable-blocks --input-dir=$TEMP_DIR_MIGRATOR
 
 echo_ts 'updating WooComm settings...'
 wp_cli newspack-content-migrator woocomm-setup
+
+echo_ts 'importing content previously converted to blocks from Staging...'
+import_blocks_content_from_staging_site
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
 
 # --- finish:
 
-echo_ts 'cleaning up options...'
+echo_ts 'cleaning up some options...'
 clean_up_options
 
 echo_ts 'updating seo settings...'
 wp_cli newspack-content-migrator update-seo-settings
 
-echo_ts 'setting file permissions to public content...'
+echo_ts 'setting file permissions to public content (some warnings are expected)...'
 set_public_content_file_permissions
 
-# # Recommended to keep these tables for a short while after the launch, for easier problem fixing
-# echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'
-# drop_temp_db_tables
+echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'
+drop_temp_db_tables
 
 echo_ts 'flushing WP cache...'
 wp_cli cache flush

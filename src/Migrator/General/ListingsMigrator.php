@@ -101,12 +101,12 @@ class ListingsMigrator implements InterfaceMigrator {
 
 		$result = $this->export_listings( $output_dir, self::LISTINGS_EXPORT_FILE );
 		if ( true === $result ) {
+			WP_CLI::success( 'Done.' );
 			exit(0);
 		} else {
+			WP_CLI::warning( 'Done with warnings.' );
 			exit(1);
 		}
-
-		WP_CLI::success( 'Done.' );
 	}
 
 	/**
@@ -126,7 +126,7 @@ class ListingsMigrator implements InterfaceMigrator {
 			'post_status'    => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 		] );
 		if ( empty( $posts ) ) {
-			WP_CLI::line( sprintf( 'No Listings found.' ) );
+			WP_CLI::warning( sprintf( 'No Listings found.' ) );
 			return false;
 		}
 
@@ -152,10 +152,11 @@ class ListingsMigrator implements InterfaceMigrator {
 
 		$import_file = $input_dir . '/' . self::LISTINGS_EXPORT_FILE;
 		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Can not find %s.', $import_file ) );
+			WP_CLI::warning( sprintf( 'Listings file not found %s.', $import_file ) );
+			exit(1);
 		}
 
-		WP_CLI::line( 'Importing Listings...' );
+		WP_CLI::line( 'Importing Listings from ' . $import_file . ' ...' );
 
 		$this->delete_all_existing_listings();
 		PostsMigrator::get_instance()->import_posts( $import_file );

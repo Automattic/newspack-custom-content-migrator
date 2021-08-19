@@ -140,7 +140,7 @@ class MenusMigrator implements InterfaceMigrator {
 		fclose( $open_menu_file );
 
 		// WP_CLI::line( $output );
-		WP_CLI::line( 'Completed menu export: ' . $menu_file );
+		WP_CLI::line( 'Writing to file ' . $menu_file );
 	}
 
 	/**
@@ -155,7 +155,8 @@ class MenusMigrator implements InterfaceMigrator {
 		$directory = rtrim( $directory, '/' );
 		$menu_file = $directory . '/' . self::MENU_EXPORT_FILE;
 		if ( ! is_file( $menu_file ) ) {
-			WP_CLI::error( sprintf( 'File not found in input-dir %s', $menu_file ) );
+			WP_CLI::warning( sprintf( 'Menus file not found in input-dir %s', $menu_file ) );
+			exit(1);
 		}
 
 		WP_CLI::line( sprintf( 'Importing menus from ' . $menu_file . '...' ) );
@@ -290,7 +291,5 @@ class MenusMigrator implements InterfaceMigrator {
 				set_theme_mod( 'nav_menu_locations', $set_menus );
 			}
 		}
-
-		WP_CLI::line( 'Done.' );
 	}
 }
