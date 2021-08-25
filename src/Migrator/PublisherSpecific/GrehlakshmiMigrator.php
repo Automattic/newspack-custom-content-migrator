@@ -359,7 +359,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			$destination_cat_child_name = trim( $cat_remapping[ 'destination_cat_child' ] );
 			$destination_cat_parent_id = wp_create_category( $destination_cat_parent_name );
 			$destination_cat_id = $destination_cat_parent_id;
-			if ( ! is_null( $destination_cat_child_name ) ) {
+			if ( ! empty( $destination_cat_child_name ) ) {
 				$destination_cat_child_id = wp_create_category( $destination_cat_child_name, $destination_cat_parent_id );
 				$destination_cat_id = $destination_cat_child_id;
 			}
@@ -434,7 +434,11 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 				$destination_cat = get_category( $destination_parent_cat_id );
 			} else {
 				// If this is a child, create or get the cat with the same name.
-				$destination_cat_id = wp_create_category( get_category( $ancestor_id )->name, $destination_cat->term_id );
+				$this_category_name = trim( get_category( $ancestor_id )->name );
+				$this_category_parent = $destination_cat->term_id;
+				// \wpdb::process_fields is returning false for [`slug`]['value'] in a \wp_insert_term's call due to a charset check mismatch. E.g.:
+				//      "https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8>>>खाना खज़ाना>रेसिपी",
+				$destination_cat_id = wp_create_category( $this_category_name, $this_category_parent );
 				$destination_cat = get_category( $destination_cat_id );
 			}
 		}
