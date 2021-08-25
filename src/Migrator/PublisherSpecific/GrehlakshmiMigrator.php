@@ -201,6 +201,8 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			$xml_files_created[0] ?? '',
 			$xml_files_created[ count( $xml_files_created ) - 1 ] ?? ''
 		) );
+
+		WP_CLI::warning( 'After importing these XMLs, remember to run `newspack-content-migrator grehlakshmi-update-imported-posts-meta` to create remaining data objects from Kreatio metas.' );
 	}
 
 	/**
