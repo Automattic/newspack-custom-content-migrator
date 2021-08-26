@@ -412,7 +412,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 
 			// Now that source and destination Cats have been loaded and created, relocate content from one to the other.
 			$msg = sprintf(
-				'Moving content from "%s" (source_cat_slug %s source_cat_id %d) to => "%s%s" (destination_cat_id %d) ...',
+				'Moving content from `%s` (source_cat_slug %s source_cat_id %d) to => `%s%s` (destination_cat_id %d) ...',
 				$cat_remapping[ 'source_cat_urlslugs' ],
 				$source_cat_slug,
 				$source_cat_id,
@@ -430,6 +430,8 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			$this->log( 'g_restructure_detailed.log', "\n" );
 			$this->log( 'g_restructure_simpleForPublisher.log', "\n" );
 		}
+
+		wp_cache_flush();
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
@@ -462,13 +464,13 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	 * source Category to the destination Category.
 	 */
 	private function relocate_category_tree_with_content( $source_cat_id, $destination_cat_id ) {
-		$msg = sprintf( '><><>< Starting recursive category creation and content relocation $source_cat_id %d $destination_cat_id %d ...', $source_cat_id, $destination_cat_id );
+		$msg = sprintf( '><><>< Entering recursion relocate_category_tree_with_content($source_cat_id %d, $destination_cat_id %d) ...', $source_cat_id, $destination_cat_id );
 		WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 
 		$source_lineage_stack = [];
 		$this->recusive_category_dive( $source_lineage_stack, $source_cat_id, $destination_cat_id );
 
-		$msg = '><><>< Finished recursion.';
+		$msg = '><><>< Out of recursion.';
 		WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 	}
 
@@ -557,19 +559,38 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 		// Last remaining $destination_cat is our destination Cat.
 		$destination_cat_id = $destination_cat->term_id;
 
+		// Get full hierarchical source and destination Cats' URL slugs, for logging convenience.
+		$source_url_hieararchical = '';
+		$destination_url_hieararchical = '';
+		foreach ( $source_lineage_stack as $key_source_lineage_stack => $source_id ) {
+			// Source slug.
+			$source_url_hieararchical .= ( ! empty( $source_url_hieararchical ) ? '/' : '' ) . get_category( $source_id )->name;
+			// Destination slug.
+			if ( 0 == $key_source_lineage_stack ) {
+				$destination_url_hieararchical = get_category( $destination_parent_cat_id )->name;
+			} else {
+				$destination_url_hieararchical .= '/' . get_category( $source_id )->name;
+			}
+		}
+
 		// Move Posts from the source to the destination category.
 		$posts = get_posts( [
-			'numberposts' => 0,
+			'numberposts' => -1,
 			'category'    => $source_cat_id,
 			'post_status' => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 		] );
-		$msg = sprintf( 'Moving %d Posts from source_cat_id %d to destination_cat_id %d ...', count( $posts ), $source_cat_id, $destination_cat_id );
+		$msg = sprintf( '- moving %d Posts from subcategory source Cat `%s` (ID %d) to destination (sub-)Cat `%s` (ID %d) ...', count( $posts ), $source_url_hieararchical, $source_cat_id, $destination_url_hieararchical, $destination_cat_id );
 		WP_CLI::line( $msg );
 		$this->log( 'g_restructure_detailed.log', $msg );
 		$this->log( 'g_restructure_simpleForPublisher.log', $msg );
 
 		foreach ( $posts as $post ) {
-			wp_set_post_categories( $post->ID, $destination_cat_id );
+			$result = wp_set_post_categories( $post->ID, $destination_cat_id );
+			if ( is_wp_error( $result ) || false === $result ) {
+				$msg = sprintf( 'ERROR moving Post ID %d to destination Category ID %d', $post->ID, $destination_cat_id );
+				WP_CLI::warning( $msg );
+				$this->log( 'g_restructure_detailed.log', $msg );
+			}
 		}
 
 		// Remove this cat from the parent stack when exiting this recursion.
