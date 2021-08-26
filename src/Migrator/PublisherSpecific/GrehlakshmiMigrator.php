@@ -343,48 +343,107 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 		$cat_remappings = $this->get_cat_remappings();
 		foreach ( $cat_remappings as $key_cat_remapping => $cat_remapping ) {
 
-			WP_CLI::line( sprintf( '(%d/%d)', $key_cat_remapping + 1, count( $cat_remappings) ) );
+			$msg = sprintf( '--- (%d/%d) Start cat_remapping %s ', $key_cat_remapping + 1, count( $cat_remappings), json_encode( $cat_remapping ) );
+			WP_CLI::success( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 
 			// Get the source category from the category URL segment (containing `/`-separated slugs from parent to final child).
 			$exploded_source_slugs = explode( '/', $cat_remapping[ 'source_cat_urlslugs' ] );
 			$source_cat_slug = trim( $exploded_source_slugs[ count( $exploded_source_slugs ) - 1 ] );
+			$msg = sprintf( '... reading source_cat_slug %s', $source_cat_slug );
+			WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+
 			$source_cat = get_category_by_slug( $source_cat_slug );
 			$source_cat_id = $source_cat->term_id ?? null;
 			if ( null === $source_cat_id ) {
-				WP_CLI::warning( sprintf( 'Err Source Cat not found -- %s , %s', $source_cat_slug, $cat_remapping[ 'source_cat_urlslugs' ] ) );
-				$this->log( 'g_restructure_ErrSourceCatNotFound.log', sprintf( '%s ; %s', $source_cat_slug, $cat_remapping[ 'source_cat_urlslugs' ] ) );
+				$msg = 'Error! Skipping, source Cat not found.';
+				WP_CLI::warning( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 				continue;
 			}
+			$msg = sprintf( '+++ loaded source_cat_id %d', $source_cat_id );
+			WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 
-			// Get the destination category, either by picking the parent, or the child.
-			$destination_cat_parent_name = trim( $cat_remapping[ 'destination_cat_parent' ] );
+			// Get the destination category parent and/or child (if child is provided).
 			$destination_cat_child_name = trim( $cat_remapping[ 'destination_cat_child' ] );
+			$destination_cat_parent_name = trim( $cat_remapping[ 'destination_cat_parent' ] );
+
+			// Fix incorrect Hindi characters rejected by \wpdb::strip_invalid_text.
+			// $destination_cat_parent_name = $this->fix_broken_hindi_characters( $destination_cat_parent_name );
+			// $destination_cat_child_name = $this->fix_broken_hindi_characters( $destination_cat_child_name );
+
+			// First get the parent destination Cat...
+			$msg = sprintf( '... reading destination_cat_parent_name %s', $destination_cat_parent_name );
+			WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 			$destination_cat_parent_id = wp_create_category( $destination_cat_parent_name );
+			if ( 0 == $destination_cat_parent_id ) {
+				$msg = 'Error, destination parent Cat not created/loaded.';
+				WP_CLI::error( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+				continue;
+			}
 			$destination_cat_id = $destination_cat_parent_id;
+			$msg = sprintf( '+++ created/Loaded destination_cat_parent_id %d', $destination_cat_parent_id );
+			WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+
+			// ... then the child destination Cat, if provided.
 			if ( ! empty( $destination_cat_child_name ) ) {
+				WP_CLI::line( sprintf( '... also reading destination_cat_child_name %s', $destination_cat_child_name ) );
 				$destination_cat_child_id = wp_create_category( $destination_cat_child_name, $destination_cat_parent_id );
 				$destination_cat_id = $destination_cat_child_id;
+				if ( 0 == $destination_cat_parent_id ) {
+					$msg = 'Error, destination child Cat not created/loaded.';
+					WP_CLI::error( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+					continue;
+				}
+				$msg = sprintf( '... created/loaded destination_cat_child_id %d', $destination_cat_child_name, $destination_cat_child_id );
+				WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+			} else {
+				$msg = '   ( no destination_cat_child_name provided )';
+				WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 			}
 
+			// Now that source and destination Cats have been loaded and created, relocate content from one to the other.
 			$msg = sprintf(
-				'Moving content from "%s" (catID %d) to => "%s%s" (catID %d) ...',
+				'==> Moving content from "%s" (source_cat_slug %s source_cat_id %d) to => "%s%s" (destination_cat_id %d) ...',
 				$cat_remapping[ 'source_cat_urlslugs' ],
+				$source_cat_slug,
 				$source_cat_id,
 				$destination_cat_parent_name,
 				( ! empty( $destination_cat_child_name ) ? '/' . $destination_cat_child_name : '' ),
-				$destination_cat_id
+				$destination_cat_id,
 			);
-			WP_CLI::line( $msg );
-			$this->log( 'g_restructure_.log', sprintf( '(%d/%d)', $key_cat_remapping + 1, count( $cat_remappings) ) . ' ' . $msg );
+			WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+			$this->log( 'g_restructure_simpleForPublisher.log', sprintf( '(%d/%d)', $key_cat_remapping + 1, count( $cat_remappings) ) . ' ' . $msg );
 
 			// Move all categories and their content (Posts, Subcategories with their Posts) from the source Category to the destination Category.
 			$this->relocate_category_tree_with_content( $source_cat_id, $destination_cat_id );
 
 			// Just another spacer.
-			$this->log( 'g_restructure_.log', "\n" );
+			$this->log( 'g_restructure_detailed.log', "\n" );
+			$this->log( 'g_restructure_simpleForPublisher.log', "\n" );
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Replaces all faulty/illegal Hindi characters in the string with correct, legal versions of the characters.
+	 *
+	 * \wpdb::process_fields is returning false for [`slug`]['value'] in a \wp_insert_term's call due to a charset check mismatch. E.g.:
+	 *   "https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8>>>खाना खज़ाना>रेसिपी",
+	 * Some of these Hindi characters are faulty. They won't go into the DB like this and must be cleaned up.
+	 *
+	 * @param string $str Input string.
+	 *
+	 * @return string Cleaned up string.
+	 */
+	private function fix_broken_hindi_characters( $str ) {
+		$replacements = [
+			'ज़ा' => 'ज़ा',
+		];
+		foreach ( $replacements as $search => $replace ) {
+			$str = str_replace( $search, $replace, $str );
+		}
+
+		return $str;
 	}
 
 	/**
@@ -392,8 +451,14 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	 * source Category to the destination Category.
 	 */
 	private function relocate_category_tree_with_content( $source_cat_id, $destination_cat_id ) {
+		$msg = sprintf( '><><>< Starting recursive category creation and content relocation $source_cat_id %d $destination_cat_id %d ...', $source_cat_id, $destination_cat_id );
+		WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+
 		$source_lineage_stack = [];
 		$this->recusive_category_dive( $source_lineage_stack, $source_cat_id, $destination_cat_id );
+
+		$msg = '><><>< Finished recursion.';
+		WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 	}
 
 	/**
@@ -438,24 +503,31 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 				// If this is a child, create or get the cat with the same name.
 				$this_category_name = trim( get_category( $ancestor_id )->name );
 				$this_category_parent = $destination_cat->term_id;
-				// \wpdb::process_fields is returning false for [`slug`]['value'] in a \wp_insert_term's call due to a charset check mismatch. E.g.:
-				//      "https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8>>>खाना खज़ाना>रेसिपी",
 				$destination_cat_id = wp_create_category( $this_category_name, $this_category_parent );
+				if ( 0 == $destination_cat_id ) {
+					$msg = sprintf( '~~~ ERROR wp_create_category( $this_category_name : %s, $this_category_parent : %s )', $this_category_name, $this_category_parent );
+					WP_CLI::error( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+				}
 				$destination_cat = get_category( $destination_cat_id );
 			}
 		}
 
-		// Last remaining $current_lineage_cat is our destination.
+		// Last remaining $ancestor_id is our source Cat.
 		$source_cat_id = $ancestor_id;
+		// Last remaining $destination_cat is our destination Cat.
 		$destination_cat_id = $destination_cat->term_id;
 
-		// Move content from this source category to the destination category.
+		// Move Posts from the source to the destination category.
 		$posts = get_posts( [
 			'numberposts' => 0,
 			'category'    => $source_cat_id,
 			'post_status' => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 		] );
-		$this->log( 'g_restructure_.log', sprintf( '- moving %d Posts from CatID %d to CatID %d', count( $posts ), $source_cat_id, $destination_cat_id ) );
+		$msg = sprintf( '---> Moving %d Posts from source_cat_id %d to destination_cat_id %d ...', count( $posts ), $source_cat_id, $destination_cat_id );
+		WP_CLI::line( $msg );
+		$this->log( 'g_restructure_detailed.log', $msg );
+		$this->log( 'g_restructure_simpleForPublisher.log', $msg );
+
 		foreach ( $posts as $post ) {
 			wp_set_post_categories( $post->ID, $destination_cat_id );
 		}
@@ -484,7 +556,10 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			"https://www.grehlakshmi.com/category/%E0%A4%AC%E0%A5%8D%E0%A4%AF%E0%A5%82%E0%A4%9F%E0%A5%80/%E0%A4%AE%E0%A5%87%E0%A4%95%E0%A4%93%E0%A4%B5%E0%A4%B0>>>ब्यूटी>मेकअप",
 			"https://www.grehlakshmi.com/category/%E0%A4%AC%E0%A5%8D%E0%A4%AF%E0%A5%82%E0%A4%9F%E0%A5%80/%E0%A4%B8%E0%A5%8D%E0%A4%B5%E0%A4%AF%E0%A4%82-%E0%A4%95%E0%A4%B0%E0%A5%87%E0%A4%82>>>ब्यूटी ",
 			"https://www.grehlakshmi.com/category/%E0%A4%AC%E0%A5%8D%E0%A4%AF%E0%A5%82%E0%A4%9F%E0%A5%80/%E0%A4%B5%E0%A5%80%E0%A4%A1%E0%A4%BF%E0%A4%AF%E0%A5%8B>>>ब्यूटी ",
+			// e.g. WRONG
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80>>>खाना खज़ाना>रेसिपी",
+			// e.g. FIXED
+			// "https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80>>>खाना खज़ाना>रेसिपी",
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8>>>खाना खज़ाना>रेसिपी",
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8/%E0%A4%9A%E0%A4%BE%E0%A4%87%E0%A4%A8%E0%A5%80%E0%A4%B8>>>खाना खज़ाना>चाइनीस",
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8/%E0%A4%A8%E0%A4%BE%E0%A4%B0%E0%A5%8D%E0%A4%A5-%E0%A4%87%E0%A4%82%E0%A4%A1%E0%A4%BF%E0%A4%AF%E0%A4%A8>>>खाना खज़ाना>नार्थ इंडियन",
@@ -1037,7 +1112,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	 * @param string $file    File name or path.
 	 * @param string $message Log message.
 	 */
-	private function log( $file, $message ) {
+	public function log( $file, $message ) {
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
 	}
