@@ -343,7 +343,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 		$cat_remappings = $this->get_cat_remappings();
 		foreach ( $cat_remappings as $key_cat_remapping => $cat_remapping ) {
 
-			$msg = sprintf( '--- (%d/%d) Start cat_remapping %s ', $key_cat_remapping + 1, count( $cat_remappings), json_encode( $cat_remapping ) );
+			$msg = sprintf( '--- (%d/%d) Start cat_remapping %s ', $key_cat_remapping + 1, count( $cat_remappings), print_r( $cat_remapping, true ) );
 			WP_CLI::success( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 
 			// Get the source category from the category URL segment (containing `/`-separated slugs from parent to final child).
@@ -367,8 +367,18 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			$destination_cat_parent_name = trim( $cat_remapping[ 'destination_cat_parent' ] );
 
 			// Fix incorrect Hindi characters rejected by \wpdb::strip_invalid_text.
-			// $destination_cat_parent_name = $this->fix_broken_hindi_characters( $destination_cat_parent_name );
-			// $destination_cat_child_name = $this->fix_broken_hindi_characters( $destination_cat_child_name );
+			$destination_cat_parent_name_original = $destination_cat_parent_name;
+			$destination_cat_parent_name = $this->fix_illegal_hindi_characters( $destination_cat_parent_name );
+			if ( $destination_cat_parent_name_original !== $destination_cat_parent_name ) {
+				$msg = sprintf( '~~~ fixed chars in destination_cat_parent_name %s to %s', $destination_cat_parent_name_original, $destination_cat_parent_name );
+				WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+			}
+			$destination_cat_child_name_original = $destination_cat_child_name;
+			$destination_cat_child_name = $this->fix_illegal_hindi_characters( $destination_cat_child_name );
+			if ( $destination_cat_child_name_original !== $destination_cat_child_name ) {
+				$msg = sprintf( '~~~ fixed chars in destination_cat_child_name %s to %s', $destination_cat_child_name_original, $destination_cat_child_name );
+				WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+			}
 
 			// First get the parent destination Cat...
 			$msg = sprintf( '... reading destination_cat_parent_name %s', $destination_cat_parent_name );
@@ -376,8 +386,8 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			$destination_cat_parent_id = wp_create_category( $destination_cat_parent_name );
 			if ( 0 == $destination_cat_parent_id ) {
 				$msg = 'Error, destination parent Cat not created/loaded.';
-				WP_CLI::error( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
-				continue;
+				$this->log( 'g_restructure_detailed.log', $msg );
+				WP_CLI::error( $msg );
 			}
 			$destination_cat_id = $destination_cat_parent_id;
 			$msg = sprintf( '+++ created/Loaded destination_cat_parent_id %d', $destination_cat_parent_id );
@@ -390,10 +400,10 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 				$destination_cat_id = $destination_cat_child_id;
 				if ( 0 == $destination_cat_parent_id ) {
 					$msg = 'Error, destination child Cat not created/loaded.';
-					WP_CLI::error( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
-					continue;
+					$this->log( 'g_restructure_detailed.log', $msg );
+					WP_CLI::error( $msg );
 				}
-				$msg = sprintf( '... created/loaded destination_cat_child_id %d', $destination_cat_child_name, $destination_cat_child_id );
+				$msg = sprintf( '+++ created/loaded destination_cat_child_name %s destination_cat_child_id %d', $destination_cat_child_name, $destination_cat_child_id );
 				WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
 			} else {
 				$msg = '   ( no destination_cat_child_name provided )';
@@ -402,7 +412,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 
 			// Now that source and destination Cats have been loaded and created, relocate content from one to the other.
 			$msg = sprintf(
-				'==> Moving content from "%s" (source_cat_slug %s source_cat_id %d) to => "%s%s" (destination_cat_id %d) ...',
+				'Moving content from "%s" (source_cat_slug %s source_cat_id %d) to => "%s%s" (destination_cat_id %d) ...',
 				$cat_remapping[ 'source_cat_urlslugs' ],
 				$source_cat_slug,
 				$source_cat_id,
@@ -416,7 +426,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			// Move all categories and their content (Posts, Subcategories with their Posts) from the source Category to the destination Category.
 			$this->relocate_category_tree_with_content( $source_cat_id, $destination_cat_id );
 
-			// Just another spacer.
+			// An extra spacer.
 			$this->log( 'g_restructure_detailed.log', "\n" );
 			$this->log( 'g_restructure_simpleForPublisher.log', "\n" );
 		}
@@ -435,12 +445,13 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	 *
 	 * @return string Cleaned up string.
 	 */
-	private function fix_broken_hindi_characters( $str ) {
+	private function fix_illegal_hindi_characters( $str ) {
+		// Key is illegal character, value is legal.
 		$replacements = [
 			'ज़ा' => 'ज़ा',
 		];
 		foreach ( $replacements as $search => $replace ) {
-			$str = str_replace( $search, $replace, $str );
+			$str = preg_replace( "/$search/", $replace, $str );
 		}
 
 		return $str;
@@ -501,12 +512,41 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 				$destination_cat = get_category( $destination_parent_cat_id );
 			} else {
 				// If this is a child, create or get the cat with the same name.
-				$this_category_name = trim( get_category( $ancestor_id )->name );
+				$this_category_name_original = $this_category_name = trim( get_category( $ancestor_id )->name );
+				$this_category_name = $this->fix_illegal_hindi_characters( $this_category_name );
+				if ( $this_category_name_original !== $this_category_name ) {
+					$msg = sprintf( '~~~ fixed chars in this_category_name %s to %s', $this_category_name_original, $this_category_name );
+					WP_CLI::line( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+				}
 				$this_category_parent = $destination_cat->term_id;
 				$destination_cat_id = wp_create_category( $this_category_name, $this_category_parent );
+				// For an unknown reason, certain Categories won't get created just under certain parents. This happens even after
+				// replacing some illegal characters. A workaround here is to try and rename the category temporarily while
+				// creating it (adding a temp `-hi` or `-hi2` suffix), then renaming back to the original name.
+				if ( 0 == $destination_cat_id ) {
+					$this_category_name_temp = $this_category_name . '-hi';
+					$destination_cat_id = wp_create_category( $this_category_name_temp, $this_category_parent );
+					if ( 0 == $destination_cat_id ) {
+						$this_category_name_temp = $this_category_name . '-hi2';
+						$destination_cat_id = wp_create_category( $this_category_name_temp, $this_category_parent );
+					}
+					// Rename back.
+					if ( 0 != $destination_cat_id ) {
+						$res = wp_update_term( $destination_cat_id, 'category', [ 'name' => $this_category_name, ] );
+						// Check result.
+						$res_term_id = $res[ 'term_id' ] ?? null;
+						if ( $res_term_id != $destination_cat_id ) {
+							$msg = sprintf( '~~~ WARNING temporarily renaming category from %s to %s did not work.', $this_category_name, $this_category_name_temp );
+							WP_CLI::warning( $msg );
+							$this->log( 'g_restructure_detailed.log', $msg );
+						}
+					}
+				}
 				if ( 0 == $destination_cat_id ) {
 					$msg = sprintf( '~~~ ERROR wp_create_category( $this_category_name : %s, $this_category_parent : %s )', $this_category_name, $this_category_parent );
-					WP_CLI::error( $msg ); $this->log( 'g_restructure_detailed.log', $msg );
+					$msg .= "\n" . sprintf( '~~~ $source_lineage_stack %s $key_ancestor %d $ancestor_id %d', print_r( $source_lineage_stack, true ), $key_ancestor, $ancestor_id );
+					$this->log( 'g_restructure_detailed.log', $msg );
+					WP_CLI::error( $msg );
 				}
 				$destination_cat = get_category( $destination_cat_id );
 			}
@@ -523,7 +563,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			'category'    => $source_cat_id,
 			'post_status' => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 		] );
-		$msg = sprintf( '---> Moving %d Posts from source_cat_id %d to destination_cat_id %d ...', count( $posts ), $source_cat_id, $destination_cat_id );
+		$msg = sprintf( 'Moving %d Posts from source_cat_id %d to destination_cat_id %d ...', count( $posts ), $source_cat_id, $destination_cat_id );
 		WP_CLI::line( $msg );
 		$this->log( 'g_restructure_detailed.log', $msg );
 		$this->log( 'g_restructure_simpleForPublisher.log', $msg );
@@ -556,10 +596,7 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			"https://www.grehlakshmi.com/category/%E0%A4%AC%E0%A5%8D%E0%A4%AF%E0%A5%82%E0%A4%9F%E0%A5%80/%E0%A4%AE%E0%A5%87%E0%A4%95%E0%A4%93%E0%A4%B5%E0%A4%B0>>>ब्यूटी>मेकअप",
 			"https://www.grehlakshmi.com/category/%E0%A4%AC%E0%A5%8D%E0%A4%AF%E0%A5%82%E0%A4%9F%E0%A5%80/%E0%A4%B8%E0%A5%8D%E0%A4%B5%E0%A4%AF%E0%A4%82-%E0%A4%95%E0%A4%B0%E0%A5%87%E0%A4%82>>>ब्यूटी ",
 			"https://www.grehlakshmi.com/category/%E0%A4%AC%E0%A5%8D%E0%A4%AF%E0%A5%82%E0%A4%9F%E0%A5%80/%E0%A4%B5%E0%A5%80%E0%A4%A1%E0%A4%BF%E0%A4%AF%E0%A5%8B>>>ब्यूटी ",
-			// e.g. WRONG
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80>>>खाना खज़ाना>रेसिपी",
-			// e.g. FIXED
-			// "https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80>>>खाना खज़ाना>रेसिपी",
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8>>>खाना खज़ाना>रेसिपी",
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8/%E0%A4%9A%E0%A4%BE%E0%A4%87%E0%A4%A8%E0%A5%80%E0%A4%B8>>>खाना खज़ाना>चाइनीस",
 			"https://www.grehlakshmi.com/category/%E0%A4%95%E0%A5%81%E0%A4%95%E0%A4%B0%E0%A5%80/%E0%A4%B0%E0%A5%87%E0%A4%B8%E0%A4%BF%E0%A4%AA%E0%A5%80/%E0%A4%95%E0%A5%81%E0%A4%9C%E0%A5%80%E0%A4%A8/%E0%A4%A8%E0%A4%BE%E0%A4%B0%E0%A5%8D%E0%A4%A5-%E0%A4%87%E0%A4%82%E0%A4%A1%E0%A4%BF%E0%A4%AF%E0%A4%A8>>>खाना खज़ाना>नार्थ इंडियन",
