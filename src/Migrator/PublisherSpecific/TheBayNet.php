@@ -141,6 +141,16 @@ class TheBayNetMigrator implements InterfaceMigrator {
 				wp_set_post_categories( $post->ID, $category_new_id, true );
 			}
 			$progress->finish();
+
+			// Delete cat, or log if posts still found there.
+			$posts = $this->get_all_posts_in_category( $category_old_id );
+			if ( empty( $posts ) ) {
+				wp_delete_category( $category_old_id );
+				WP_CLI::success( sprintf( 'Cat %d `%s` deleted.', $category_old_id, $cat_name_old ) );
+			} else {
+				WP_CLI::warning( sprintf( 'Cat %d `%s` not emptied out successfully', $category_old_id, $cat_name_old ) );
+				$this->log( 'tbn__convert_entertainment_cat__catNotEmpty.log', sprintf( "%d %s", $category_old_id, $cat_name_old ) );
+			}
 		}
 
 
