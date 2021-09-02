@@ -62,4 +62,5 @@ PluginSetup::register_migrators( array(
 	Migrator\PublisherSpecific\RafushimpoMigrator::class,
 	Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 	Migrator\PublisherSpecific\GadisMigrator::class,
+	Migrator\PublisherSpecific\TheBayNetMigrator::class,
 ) );
