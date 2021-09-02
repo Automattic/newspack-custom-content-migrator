@@ -51,7 +51,6 @@ class TheBayNetMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 
-
 		WP_CLI::line( '1/4 Converting Categories to Tags.' );
 		$this->convert_categories_to_tags( [
 			"Anne Arundel County" => "Anne Arundel County",
@@ -114,31 +113,38 @@ class TheBayNetMigrator implements InterfaceMigrator {
 		$cat_name_old = 'Entertainment Spotlight';
 		$category_old_id = get_cat_ID( $cat_name_old );
 		if ( 0 === $category_old_id ) {
-			WP_CLI::warning( 'convert_categories_to_tags -- Old Cat %s not found', $cat_name_old );
-			$this->log( 'tbn__relocate_categories__oldCatNotFound', sprintf( "%s", $cat_name_old ) );
+			WP_CLI::warning( sprintf( 'Old Cat %s not found', $cat_name_old ) );
+			$this->log( 'tbn__relocate_categories__oldCatNotFound.log', sprintf( "%s", $cat_name_old ) );
 		}
 		// Get destination Cat.
 		$cat_new_parent_name = 'My Town';
 		$cat_new_name = 'Entertainment';
-		$category_new_parent_id = wp_create_category( $cat_new_parent_name );
+		$category_new_parent_id = get_cat_ID( $cat_new_parent_name );
 		if ( $category_new_parent_id ) {
 			$category_new_id = wp_create_category( $cat_new_name, $category_new_parent_id );
 		}
 		if ( ! isset( $category_new_id ) || ! $category_new_id || is_wp_error( $category_new_id ) ) {
-			WP_CLI::warning( 'convert_categories_to_tags -- Could not create/fetch new Cat %s', $cat_new_name );
-			$this->log( 'tbn__rename_categories__newCatNotCreated', sprintf( "%s", $cat_new_name ) );
+			WP_CLI::warning( sprintf( 'Could not create/fetch new Cat %s', $cat_new_name ) );
+			$this->log( 'tbn__rename_categories__newCatNotCreated.log', sprintf( "%s", $cat_new_name ) );
 		}
 		if ( 0 != $category_old_id && 0 != $category_new_id ) {
+			WP_CLI::line( sprintf( 'Fetching Posts in Cat %d `%s`...', $category_old_id, $cat_name_old ) );
 			$posts = $this->get_all_posts_in_category( $category_old_id );
-			WP_CLI::line( sprintf( 'Moving %d Posts from CatID %d to CatID %d', count( $posts ), $category_old_id, $category_new_id ) );
+			$progress = \WP_CLI\Utils\make_progress_bar( 'Working', count( $posts ) );
+
+			WP_CLI::line( sprintf( 'Moving %d Posts from CatID %d `%s` to CatID %d `%s`', count( $posts ), $category_old_id, $cat_name_old, $category_new_id, $cat_new_name ) );
 			foreach ( $posts as $post ) {
+				$progress->tick();
 				// Remove old Cat.
 				wp_remove_object_terms( $post->ID, $category_old_id, 'category' );
 				// Set new Cat.
 				wp_set_post_categories( $post->ID, $category_new_id, true );
 			}
+			$progress->finish();
 		}
 
+
+		wp_cache_flush();
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 
@@ -152,25 +158,34 @@ class TheBayNetMigrator implements InterfaceMigrator {
 	private function convert_categories_to_tags( $mapping ) {
 		foreach ( $mapping as $cat_name => $tag_name ) {
 			$category_id = get_cat_ID( $cat_name );
-			$posts = $this->get_all_posts_in_category( $category_id );
-
-			// Remove Cat.
-			WP_CLI::line( sprintf( 'Converting Category %s to Tag %s for %d Posts', $cat_name, $tag_name, count( $posts ) ) );
-			foreach ( $posts as $post ) {
-				wp_remove_object_terms( $post->ID, $category_id, 'category' );
+			if ( 0 == $category_id ) {
+				WP_CLI::warning( sprintf( 'Cat %s not found', $cat_name ) );
+				$this->log( 'tbn__convert_categories_to_tags__catNotFound.log', sprintf( "%s", $cat_name ) );
+				continue;
 			}
 
-			// Set Tags.
-			wp_set_post_tags( $post->ID, $tag_name, true );
+			WP_CLI::line( sprintf( 'Fetching Posts in Cat %d `%s`...', $category_id, $cat_name ) );
+			$posts = $this->get_all_posts_in_category( $category_id );
+
+			WP_CLI::line( sprintf( 'Converting Category `%s` to Tag `%s` for %d Posts...', $cat_name, $tag_name, count( $posts ) ) );
+			$progress = \WP_CLI\Utils\make_progress_bar( 'Working', count( $posts ) );
+			foreach ( $posts as $post ) {
+				$progress->tick();
+				// Remove Cat.
+				wp_remove_object_terms( $post->ID, $category_id, 'category' );
+				// Set Tags.
+				wp_set_post_tags( $post->ID, $tag_name, true );
+			}
+			$progress->finish();
 
 			// Delete cat, or log if posts still found there.
 			$posts = $this->get_all_posts_in_category( $category_id );
 			if ( empty( $posts ) ) {
 				wp_delete_category( $category_id );
-				WP_CLI::success( sprintf( 'Cat %d %s converted to Tag %s and deleted.', $category_id, $cat_name, $tag_name ) );
+				WP_CLI::success( sprintf( 'Cat %d `%s` converted to Tag `%s` and deleted.', $category_id, $cat_name, $tag_name ) );
 			} else {
-				WP_CLI::warning( 'convert_categories_to_tags -- Cat %d %s not emptied out successfully', $category_id, $cat_name );
-				$this->log( 'tbn__convert_categories_to_tags__catNotEmpty', sprintf( "%d %s", $category_id, $cat_name ) );
+				WP_CLI::warning( sprintf( 'Cat %d %s not emptied out successfully', $category_id, $cat_name ) );
+				$this->log( 'tbn__convert_categories_to_tags__catNotEmpty.log', sprintf( "%d %s", $category_id, $cat_name ) );
 			}
 		}
 	}
@@ -185,26 +200,40 @@ class TheBayNetMigrator implements InterfaceMigrator {
 		foreach ( $mapping as $cat_name_old => $cat_name_new ) {
 			$category_old_id = get_cat_ID( $cat_name_old );
 			if ( 0 === $category_old_id ) {
-				WP_CLI::warning( 'convert_categories_to_tags -- Old Cat %s not found', $cat_name_old );
-				$this->log( 'tbn__rename_categories__oldCatNotFound', sprintf( "%s", $cat_name_old ) );
+				WP_CLI::warning( sprintf( 'Old Cat %s not found', $cat_name_old ) );
+				$this->log( 'tbn__rename_categories__oldCatNotFound.log', sprintf( "%s", $cat_name_old ) );
 				continue;
 			}
 
 			$category_new_id = wp_create_category( $cat_name_new );
 			if ( ! $category_new_id || is_wp_error( $category_new_id ) ) {
-				WP_CLI::warning( 'convert_categories_to_tags -- Could not create/fetch new Cat %s', $cat_name_new );
-				$this->log( 'tbn__rename_categories__newCatNotCreated', sprintf( "%s", $cat_name_new ) );
+				WP_CLI::warning( sprintf( 'Could not create/fetch new Cat `%s`', $cat_name_new ) );
+				$this->log( 'tbn__rename_categories__newCatNotCreated.log', sprintf( "%s", $cat_name_new ) );
 				continue;
 			}
 
+			WP_CLI::line( sprintf( 'Fetching Posts in Cat %d `%s`...', $category_old_id, $cat_name_old ) );
 			$posts = $this->get_all_posts_in_category( $category_old_id );
+			$progress = \WP_CLI\Utils\make_progress_bar( 'Working', count( $posts ) );
 
-			WP_CLI::line( sprintf( 'Renaming Category %s to %s for %d Posts', $cat_name_old, $cat_name_new, count( $posts ) ) );
+			WP_CLI::line( sprintf( 'Renaming Category `%s` to `%s` for %d Posts', $cat_name_old, $cat_name_new, count( $posts ) ) );
 			foreach ( $posts as $post ) {
+				$progress->tick();
 				// Remove old Cat.
 				wp_remove_object_terms( $post->ID, $category_old_id, 'category' );
 				// Set new Cat.
 				wp_set_post_categories( $post->ID, $category_new_id, true );
+			}
+			$progress->finish();
+
+			// Delete cat, or log if posts still found there.
+			$posts = $this->get_all_posts_in_category( $category_old_id );
+			if ( empty( $posts ) ) {
+				wp_delete_category( $category_old_id );
+				WP_CLI::success( sprintf( 'Cat %d `%s` converted to Cat %d `%s` and deleted.', $category_old_id, $cat_name_old, $category_new_id, $cat_name_new ) );
+			} else {
+				WP_CLI::warning( sprintf( 'Cat %d %s not emptied out successfully', $category_old_id, $cat_name_old ) );
+				$this->log( 'tbn__rename_categories__catNotEmpty.log', sprintf( "%d %s", $category_old_id, $cat_name_old ) );
 			}
 		}
 	}
@@ -217,11 +246,31 @@ class TheBayNetMigrator implements InterfaceMigrator {
 	private function remove_categories( $categories ) {
 		foreach ( $categories as $category_name ) {
 			$category_id = get_cat_ID( $category_name );
-			$posts = $this->get_all_posts_in_category( $category_id );
+			if ( 0 === $category_id ) {
+				WP_CLI::warning( sprintf( 'Cat %s not found', $category_name ) );
+				$this->log( 'tbn__remove_categories__CatNotFound.log', sprintf( "%s", $category_name ) );
+				continue;
+			}
 
-			WP_CLI::line( sprintf( 'Rmoving Category %s for %d Posts', $category_name, count( $posts ) ) );
+			WP_CLI::line( sprintf( 'Fetching Posts in Cat %d `%s`...', $category_id, $category_name ) );
+			$posts = $this->get_all_posts_in_category( $category_id );
+			$progress = \WP_CLI\Utils\make_progress_bar( 'Working', count( $posts ) );
+
+			WP_CLI::line( sprintf( 'Removing Category `%s` from %d Posts', $category_name, count( $posts ) ) );
 			foreach ( $posts as $post ) {
+				$progress->tick();
 				wp_remove_object_terms( $post->ID, $category_id, 'category' );
+			}
+			$progress->finish();
+
+			// Delete cat, or log if posts still found there.
+			$posts = $this->get_all_posts_in_category( $category_id );
+			if ( empty( $posts ) ) {
+				wp_delete_category( $category_id );
+				WP_CLI::success( sprintf( 'Cat %d `%s` deleted.', $category_id, $category_name ) );
+			} else {
+				WP_CLI::warning( sprintf( 'Cat %d `%s` not emptied out successfully', $category_id, $category_name ) );
+				$this->log( 'tbn__remove_categories__catNotEmpty.log', sprintf( "%d %s", $category_id, $category_name ) );
 			}
 		}
 	}
