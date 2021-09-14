@@ -63,4 +63,5 @@ PluginSetup::register_migrators( array(
 	Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 	Migrator\PublisherSpecific\GadisMigrator::class,
 	Migrator\PublisherSpecific\TheBayNetMigrator::class,
+	Migrator\PublisherSpecific\CharlestonCityPaperMigrator::class,
 ) );
