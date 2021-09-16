@@ -105,20 +105,20 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 
 		WP_CLI::warning( "Please make sure Order Products have the same IDs, or improve this script to import Products, too." );
 
-		// foreach ( $source_order_ids as $key_source_order_ids => $source_order_id ) {
-		// 	$msg = sprintf( '(%d/%d) Getting order ID %d', $key_source_order_ids + 1, count($source_order_ids), $source_order_id );
-		// 	WP_CLI::success( $msg );
-		// 	$this->log( self::GENERAL_LOG, $msg );
-		//
-		// 	try {
-		// 		$this->migrate_order_or_subscription( $source_order_id, null, $table_prefix_source, $table_prefix_destination );
-		// 	} catch ( \Exception $e ) {
-		// 		if ( self::EXCEPTION_CODE_SKIP_IMPORTING == $e->getCode() ) {
-		// 			// Continue with the next ID.
-		// 			continue;
-		// 		}
-		// 	}
-		// }
+		foreach ( $source_order_ids as $key_source_order_ids => $source_order_id ) {
+			$msg = sprintf( '(%d/%d) Getting order ID %d', $key_source_order_ids + 1, count($source_order_ids), $source_order_id );
+			WP_CLI::success( $msg );
+			$this->log( self::GENERAL_LOG, $msg );
+
+			try {
+				$this->migrate_order_or_subscription( $source_order_id, null, $table_prefix_source, $table_prefix_destination );
+			} catch ( \Exception $e ) {
+				if ( self::EXCEPTION_CODE_SKIP_IMPORTING == $e->getCode() ) {
+					// Continue with the next ID.
+					continue;
+				}
+			}
+		}
 
 		foreach ( $source_subscription_ids as $key_source_subscription_ids => $source_subscription_id ) {
 			$msg = sprintf( '(%d/%d) Getting subscription ID %d', $key_source_subscription_ids + 1, count( $source_subscription_ids ), $source_subscription_id );
