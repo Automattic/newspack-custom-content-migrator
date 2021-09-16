@@ -140,6 +140,9 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 	/**
 	 * Migrates either a WC Order or a WC Subscription from one set of DB tables to another.
 	 *
+	 * The code is far from great; it was first done for Order migration, then reused to handle Subscriptions, because these two
+	 * objects use the same data structure.
+	 *
 	 * @param int|null $source_order_id
 	 * @param int|null $source_subscription_id
 	 * @param string   $table_prefix_source
