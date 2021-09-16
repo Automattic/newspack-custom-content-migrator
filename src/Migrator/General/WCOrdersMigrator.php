@@ -95,10 +95,10 @@ class WCOrdersMigrator implements InterfaceMigrator {
 
 		global $wpdb;
 		// 	Get shop orders.
-		foreach ( $source_order_ids as $source_order_id ) {
+		foreach ( $source_order_ids as $key_source_order_ids => $source_order_id ) {
 
-			$msg = sprintf( 'Getting order ID %d', $source_order_id );
-			WP_CLI::line( $msg );
+			$msg = sprintf( '(%d/%d) Getting order ID %d', $key_source_order_ids + 1, count($source_order_ids), $source_order_id );
+			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 
 			$order_row = $wpdb->get_row(
@@ -243,114 +243,120 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				),
 				ARRAY_A
 			);
+			$order_user_meta = [];
+			$order_customer_lookup_row = [];
 			if ( empty( $order_user ) ) {
-				$msg = sprintf( "ERROR: could not find WP User for order ID %d. Skipping.", $source_order_id );
+				$msg = sprintf( "WARNING: could not find WP User for order ID %d.", $source_order_id );
 				WP_CLI::warning( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
-				continue;
 			} else {
 				$msg = sprintf( 'Found Order WP User ID %s', $order_user[ 'ID' ] );
 				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
-			}
-			$order_user_meta = $wpdb->get_results(
-				$wpdb->prepare(
-					"select wum.* from {$table_prefix_source}usermeta wum
+
+				$order_user_meta = $wpdb->get_results(
+					$wpdb->prepare(
+						"select wum.* from {$table_prefix_source}usermeta wum
 					where wum.user_id = %d;",
-					$order_user[ 'ID' ]
-				),
-				ARRAY_A
-			);
-			if ( empty( $order_user_meta ) ) {
-				$msg = sprintf( "ERROR: could not find WP User Meta for order ID %d. Skipping.", $source_order_id );
-				WP_CLI::warning( $msg );
-				$this->log( self::GENERAL_LOG, $msg );
-				continue;
-			} else {
-				$msg = sprintf( 'Found Order WP User meta' );
+						$order_user[ 'ID' ]
+					),
+					ARRAY_A
+				);
+				if ( empty( $order_user_meta ) ) {
+					$msg = sprintf( "WARNING: could not find WP User Meta for order ID %d. Skipping.", $source_order_id );
+					WP_CLI::warning( $msg );
+					$this->log( self::GENERAL_LOG, $msg );
+				} else {
+					$msg = sprintf( 'Found Order WP User meta' );
+					WP_CLI::success( $msg );
+					$this->log( self::GENERAL_LOG, $msg );
+				}
+
+				$order_customer_lookup_row = $wpdb->get_row(
+					$wpdb->prepare(
+						"select wccl.* from {$table_prefix_source}wc_customer_lookup wccl
+					where wccl.user_id = %d;",
+						$order_user[ 'ID' ]
+					),
+					ARRAY_A
+				);
+				if ( empty( $order_customer_lookup_row ) ) {
+					$msg = sprintf( "ERROR: could not find customer lookup records for order ID %d. Skipping.", $source_order_id );
+					WP_CLI::warning( $msg );
+					$this->log( self::GENERAL_LOG, $msg );
+					continue;
+				}
+				$msg = sprintf( 'Found Order WC Customer lookup ID %s', $order_customer_lookup_row[ 'customer_id' ] );
 				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			}
-
-			$order_customer_lookup_row = $wpdb->get_row(
-				$wpdb->prepare(
-					"select wccl.* from {$table_prefix_source}wc_customer_lookup wccl
-					where wccl.user_id = %d;",
-					$order_user[ 'ID' ]
-				),
-				ARRAY_A
-			);
-			if ( empty( $order_customer_lookup_row ) ) {
-				$msg = sprintf( "ERROR: could not find customer lookup records for order ID %d. Skipping.", $source_order_id );
-				WP_CLI::warning( $msg );
-				$this->log( self::GENERAL_LOG, $msg );
-				continue;
-			}
-			$msg = sprintf( 'Found Order WC Customer lookup ID %s', $order_customer_lookup_row[ 'customer_id' ] );
-			WP_CLI::success( $msg );
-			$this->log( self::GENERAL_LOG, $msg );
-
 
 
 			// Import WP User.
-			$order_existing_user = $wpdb->get_row(
-				$wpdb->prepare(
-					"select wu.* from {$table_prefix_destination}users wu
+			if ( ! empty( $order_user ) ) {
+				$order_existing_user = $wpdb->get_row(
+					$wpdb->prepare(
+						"select wu.* from {$table_prefix_destination}users wu
 					where wu.user_login = %s;",
-					$order_user[ 'user_login' ]
-				),
-				ARRAY_A
-			);
-			$user_already_exists = ! empty( $order_existing_user );
-			if ( $user_already_exists ) {
-				$user_id = $order_existing_user[ 'ID' ];
-				$msg = sprintf( 'Importing WP User, existing user found, ID %d', $user_id );
-				$this->log( self::GENERAL_LOG, $msg );
-				WP_CLI::success( $msg );
-			} else {
-				$query = $wpdb->prepare(
-					"insert into {$table_prefix_destination}users
+						$order_user[ 'user_login' ]
+					),
+					ARRAY_A
+				);
+				$user_already_exists = ! empty( $order_existing_user );
+				if ( $user_already_exists ) {
+					$user_id = $order_existing_user[ 'ID' ];
+					$msg = sprintf( 'Importing WP User, existing user found, ID %d', $user_id );
+					$this->log( self::GENERAL_LOG, $msg );
+					WP_CLI::success( $msg );
+				} else {
+					$query = $wpdb->prepare(
+						"insert into {$table_prefix_destination}users
 					(user_login,user_pass,user_nicename,user_email,user_url,user_registered,user_activation_key,user_status,display_name)
 					values (%s,%s,%s,%s,%s,%s,%s,%s,%s); ",
-					$order_user[ 'user_login' ],
-					$order_user[ 'user_pass' ],
-					$order_user[ 'user_nicename' ],
-					$order_user[ 'user_email' ],
-					$order_user[ 'user_url' ],
-					$order_user[ 'user_registered' ],
-					$order_user[ 'user_activation_key' ],
-					$order_user[ 'user_status' ],
-					$order_user[ 'display_name' ],
-				);
-				$res = $wpdb->query( $query );
-				if ( 1 != $res ) {
-					$msg = sprintf( 'ERROR: WP User insert error, user_login %s', $order_user[ 'user_login' ] );
-					$this->log( self::GENERAL_LOG, $msg );
-					WP_CLI::warning( $msg );
-				}
-				$user_id = $wpdb->insert_id;
-				$msg = sprintf( 'Imported WP User ID %d', $user_id );
-				$this->log( self::GENERAL_LOG, $msg );
-				WP_CLI::success( $msg );
-
-				foreach ( $order_user_meta as $order_user_meta_row ) {
-					$query = $wpdb->prepare(
-						"insert into {$table_prefix_destination}usermeta
-						(user_id,meta_key,meta_value)
-						values (%s,%s,%s); ",
-						$user_id,
-						$order_user_meta_row[ 'meta_key' ],
-						$order_user_meta_row[ 'meta_value' ],
+						$order_user[ 'user_login' ],
+						$order_user[ 'user_pass' ],
+						$order_user[ 'user_nicename' ],
+						$order_user[ 'user_email' ],
+						$order_user[ 'user_url' ],
+						$order_user[ 'user_registered' ],
+						$order_user[ 'user_activation_key' ],
+						$order_user[ 'user_status' ],
+						$order_user[ 'display_name' ],
 					);
 					$res = $wpdb->query( $query );
 					if ( 1 != $res ) {
-						$msg = sprintf( 'ERROR: WP User meta insert error, source meta ID %d', $order_user_meta_row[ 'umeta_id' ] );
+						$msg = sprintf( 'ERROR: WP User insert error, user_login %s', $order_user[ 'user_login' ] );
 						$this->log( self::GENERAL_LOG, $msg );
 						WP_CLI::warning( $msg );
 					}
-					$last_inserted_id = $wpdb->insert_id;
+					$user_id = $wpdb->insert_id;
+					$msg = sprintf( 'Imported WP User ID %d', $user_id );
+					$this->log( self::GENERAL_LOG, $msg );
+					WP_CLI::success( $msg );
+
+					foreach ( $order_user_meta as $order_user_meta_row ) {
+						$query = $wpdb->prepare(
+							"insert into {$table_prefix_destination}usermeta
+						(user_id,meta_key,meta_value)
+						values (%s,%s,%s); ",
+							$user_id,
+							$order_user_meta_row[ 'meta_key' ],
+							$order_user_meta_row[ 'meta_value' ],
+						);
+						$res = $wpdb->query( $query );
+						if ( 1 != $res ) {
+							$msg = sprintf( 'ERROR: WP User meta insert error, source meta ID %d', $order_user_meta_row[ 'umeta_id' ] );
+							$this->log( self::GENERAL_LOG, $msg );
+							WP_CLI::warning( $msg );
+						}
+						$last_inserted_id = $wpdb->insert_id;
+					}
+					$msg = 'Imported WP User Meta.';
+					$this->log( self::GENERAL_LOG, $msg );
+					WP_CLI::success( $msg );
 				}
-				$msg = 'Imported WP User Meta.';
+			} else {
+				$msg = 'Importing Order user is skipped.';
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::success( $msg );
 			}
