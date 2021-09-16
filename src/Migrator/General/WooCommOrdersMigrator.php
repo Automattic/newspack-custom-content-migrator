@@ -135,6 +135,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			}
 		}
 
+		wp_cache_flush();
 	}
 
 	/**
