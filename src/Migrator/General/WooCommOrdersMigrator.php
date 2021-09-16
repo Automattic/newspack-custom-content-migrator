@@ -177,12 +177,12 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 		if ( empty( $order_row ) ) {
-			$msg = sprintf( "ERROR: could not find order ID %d. Skipping.", $source_object_id );
+			$msg = sprintf( "ERROR: could not find %s ID %d. Skipping.", $object_name, $source_object_id );
 			WP_CLI::warning( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 			throw new \RuntimeException( $msg, self::EXCEPTION_CODE_SKIP_IMPORTING );
 		} else {
-			$msg = sprintf( 'Found Order ID %s', $source_object_id );
+			$msg = sprintf( 'Found %s ID %s', $object_name, $source_object_id );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -196,12 +196,12 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 		if ( empty( $order_meta_rows ) ) {
-			$msg = sprintf( "ERROR: could not find meta for order ID %d. Skipping.", $source_object_id );
+			$msg = sprintf( "ERROR: could not find meta for %s ID %d. Skipping.", $object_name, $source_object_id );
 			WP_CLI::warning( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 			throw new \RuntimeException( $msg, self::EXCEPTION_CODE_SKIP_IMPORTING );
 		} else {
-			$msg = sprintf( 'Found order meta', $source_object_id );
+			$msg = sprintf( 'Found %s meta', $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -215,11 +215,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 		if ( empty( $order_comments_rows ) ) {
-			$msg = sprintf( "No Order comments found" );
+			$msg = sprintf( "No %s comments found", $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		} else {
-			$msg = sprintf( 'Found Order Comments' );
+			$msg = sprintf( 'Found %s Comments', $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -233,11 +233,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 		if ( empty( $order_stats_rows ) ) {
-			$msg = sprintf( "WARNING: could not find order stats" );
+			$msg = sprintf( "WARNING: could not find %s stats", $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		} else {
-			$msg = sprintf( 'Found Order order stats' );
+			$msg = sprintf( 'Found %s stats', $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -251,13 +251,13 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 		if ( empty( $order_items_rows ) ) {
-			$msg = sprintf( "WARNING: could not find order items.", $source_object_id );
+			$msg = sprintf( "WARNING: could not find %s items.", $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 
 			$order_items_metas = [];
 		} else {
-			$msg = 'Found Order items';
+			$msg = sprintf( 'Found %s items', $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 
@@ -275,7 +275,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 				);
 
 			}
-			$msg = 'Found Order items meta';
+			$msg = sprintf( 'Found %s items meta', $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -289,11 +289,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			ARRAY_A
 		);
 		if ( empty( $order_product_lookup_rows ) ) {
-			$msg = sprintf( "WARNING: could not find order product lookup records.", $source_object_id );
+			$msg = sprintf( "WARNING: could not find %s product lookup records.", $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		} else {
-			$msg = 'Found Order Product Lookup records';
+			$msg = sprintf( 'Found %s Product Lookup records', $object_name );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -311,11 +311,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 		$order_user_meta = [];
 		$order_customer_lookup_row = [];
 		if ( empty( $order_user ) ) {
-			$msg = sprintf( "WARNING: could not find WP User for order ID %d.", $source_object_id );
+			$msg = sprintf( "WARNING: could not find WP User for %s ID %d.", $object_name, $source_object_id );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		} else {
-			$msg = sprintf( 'Found Order WP User ID %s', $order_user[ 'ID' ] );
+			$msg = sprintf( 'Found %s WP User ID %s', $object_name, $order_user[ 'ID' ] );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 
@@ -328,11 +328,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 				ARRAY_A
 			);
 			if ( empty( $order_user_meta ) ) {
-				$msg = sprintf( "WARNING: could not find WP User Meta for order ID %d.", $source_object_id );
+				$msg = sprintf( "WARNING: could not find WP User Meta for %s ID %d.", $object_name, $source_object_id );
 				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			} else {
-				$msg = sprintf( 'Found Order WP User meta' );
+				$msg = sprintf( 'Found %s WP User meta', $object_name );
 				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			}
@@ -346,11 +346,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 				ARRAY_A
 			);
 			if ( empty( $order_customer_lookup_row ) ) {
-				$msg = sprintf( "WARNING: could not find customer lookup records for order ID %d. Skipping.", $source_object_id );
+				$msg = sprintf( "WARNING: could not find customer lookup records for %s ID %d. Skipping.", $object_name, $source_object_id );
 				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			}
-			$msg = sprintf( 'Found Order WC Customer lookup ID %s', $order_customer_lookup_row[ 'customer_id' ] );
+			$msg = sprintf( 'Found %s WC Customer lookup ID %s', $object_name, $order_customer_lookup_row[ 'customer_id' ] );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 		}
@@ -420,7 +420,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 				WP_CLI::success( $msg );
 			}
 		} else {
-			$msg = 'Importing Order user is skipped.';
+			$msg = sprintf( 'Importing %s user is skipped.', $object_name );
 			$this->log( self::GENERAL_LOG, $msg );
 			WP_CLI::success( $msg );
 		}
@@ -471,7 +471,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			WP_CLI::success( $msg );
 		}
 
-		// Import Order.
+		// Import Order or Subscription.
 		$query = $wpdb->prepare(
 			"insert into {$table_prefix_destination}posts
 				(post_author,post_date,post_date_gmt,post_content,post_title,post_excerpt,post_status,comment_status,ping_status,post_password,post_name,to_ping,pinged,post_modified,post_modified_gmt,post_content_filtered,post_parent,guid,menu_order,post_type,post_mime_type,comment_count)
@@ -502,12 +502,12 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 		$res = $wpdb->query( $query );
 		$order_id = $wpdb->insert_id;
 		if ( 1 != $res ) {
-			$msg = sprintf( 'ERROR: order insert error, source order ID %d', $source_object_id );
+			$msg = sprintf( 'ERROR: %s insert error, source ID %d', $object_name, $source_object_id );
 			$this->log( self::GENERAL_LOG, $msg );
 			WP_CLI::warning( $msg );
 			throw new \RuntimeException( $msg, self::EXCEPTION_CODE_SKIPP_IMPORTING );
 		}
-		$msg = sprintf( 'Importing Order ID %d', $order_id );
+		$msg = sprintf( 'Importing %s ID %d', $object_name, $order_id );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 
@@ -527,17 +527,17 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			);
 			$res = $wpdb->query( $query );
 			if ( 1 != $res ) {
-				$msg = sprintf( 'ERROR: order post meta insert error, source meta ID %d', $order_meta_row[ 'meta_id' ] );
+				$msg = sprintf( 'ERROR: %s post meta insert error, source meta ID %d', $object_name, $order_meta_row[ 'meta_id' ] );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::warning( $msg );
 			}
 			$last_inserted_id = $wpdb->insert_id;
 		}
-		$msg = 'Imporing Order Post Meta done.';
+		$msg = sprintf( 'Importing %s Post Meta done.', $object_name );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 
-		// Import Order Comments.
+		// Import Order or Subscription Comments.
 		foreach ( $order_comments_rows as $order_comments_row ) {
 			$query = $wpdb->prepare(
 				"insert into {$table_prefix_destination}comments
@@ -560,17 +560,17 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			);
 			$res = $wpdb->query( $query );
 			if ( 1 != $res ) {
-				$msg = sprintf( 'ERROR: order comment insert error, source comment_ID %d', $order_comments_row[ 'comment_ID' ] );
+				$msg = sprintf( 'ERROR: %s comment insert error, source comment_ID %d', $object_name, $order_comments_row[ 'comment_ID' ] );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::warning( $msg );
 			}
 			$last_inserted_id = $wpdb->insert_id;
 		}
-		$msg = 'Importing Order Comments done.';
+		$msg = sprintf( 'Importing %s Comments done.', $object_name );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 
-		// Import Order Stats.
+		// Import Order or Subscription Stats.
 		foreach ( $order_stats_rows as $order_stats_row ) {
 			$query = $wpdb->prepare(
 				"insert into {$table_prefix_destination}wc_order_stats
@@ -591,17 +591,17 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			);
 			$res = $wpdb->query( $query );
 			if ( 1 != $res ) {
-				$msg = sprintf( 'ERROR: order stats insert error, source order_id ID %d', $order_id );
+				$msg = sprintf( 'ERROR: %s stats insert error, source order_id ID %d', $object_name, $order_id );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::warning( $msg );
 			}
 			$last_inserted_id = $wpdb->insert_id;
 		}
-		$msg = 'Importing Order Stats done.';
+		$msg = sprintf( 'Importing %s Stats done.', $object_name );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 
-		// Import Order items.
+		// Import Order or Subscription items.
 		foreach ( $order_items_rows as $order_items_row ) {
 			$query = $wpdb->prepare(
 				"insert into {$table_prefix_destination}woocommerce_order_items
@@ -613,7 +613,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			);
 			$res = $wpdb->query( $query );
 			if ( 1 != $res ) {
-				$msg = sprintf( 'ERROR: order item insert error, source order_item_id ID %d', $order_items_row[ 'order_item_id' ] );
+				$msg = sprintf( 'ERROR: %s item insert error, source order_item_id ID %d', $object_name, $order_items_row[ 'order_item_id' ] );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::warning( $msg );
 				continue;
@@ -634,7 +634,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 						);
 						$res = $wpdb->query( $query );
 						if ( 1 != $res ) {
-							$msg = sprintf( 'ERROR: order item meta insert error, source order_item_id ID %d', $source_order_item_id );
+							$msg = sprintf( 'ERROR: %s item meta insert error, source order_item_id ID %d', $object_name, $source_order_item_id );
 							$this->log( self::GENERAL_LOG, $msg );
 							WP_CLI::warning( $msg );
 						}
@@ -642,11 +642,11 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 				}
 			}
 		}
-		$msg = 'Importing Order Items and order item meta done.';
+		$msg = sprintf( 'Importing %s Items and their meta done.', $object_name );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 
-		// Import Order Product Lookup records.
+		// Import Order or Subscription Product Lookup records.
 		foreach ( $order_product_lookup_rows as $order_product_lookup_row ) {
 			$query = $wpdb->prepare(
 				"insert into {$table_prefix_destination}wc_order_product_lookup
@@ -668,13 +668,13 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			);
 			$res = $wpdb->query( $query );
 			if ( 1 != $res ) {
-				$msg = sprintf( 'ERROR: order product lookup insert error, source order_item_id ID %d', $order_product_lookup_row[ 'order_item_id' ] );
+				$msg = sprintf( 'ERROR: %s product lookup insert error, source order_item_id ID %d', $object_name, $order_product_lookup_row[ 'order_item_id' ] );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::warning( $msg );
 			}
 			$last_inserted_id = $wpdb->insert_id;
 		}
-		$msg = 'Order Product Lookup import done.';
+		$msg = sprintf( '%s Product Lookup import done.', $object_name );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 	}
