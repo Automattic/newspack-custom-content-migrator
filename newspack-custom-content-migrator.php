@@ -43,6 +43,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\ReusableBlocksMigrator::class,
 	Migrator\General\SportsPressMigrator::class,
 	Migrator\General\FeaturedImagesMigrator::class,
+	Migrator\General\WCOrdersMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
@@ -62,6 +63,4 @@ PluginSetup::register_migrators( array(
 	Migrator\PublisherSpecific\RafushimpoMigrator::class,
 	Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 	Migrator\PublisherSpecific\GadisMigrator::class,
-	Migrator\PublisherSpecific\TheBayNetMigrator::class,
-	Migrator\PublisherSpecific\CharlestonCityPaperMigrator::class,
 ) );
