@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
-class WCOrdersMigrator implements InterfaceMigrator {
+class WooCommOrdersMigrator implements InterfaceMigrator {
 
 	const GENERAL_LOG = 'ordersmigrator.log';
 
@@ -42,7 +42,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			'newspack-content-migrator wc-orders-migrate',
 			[ $this, 'cmd_wc_order_migrate' ],
 			[
-				'shortdesc' => 'Migrates WC Orders (with belonging Subscriptions and Customers) from source DB tables (with one prefix) to destination DB tables (with a different prefix).',
+				'shortdesc' => 'Migrates WC Orders (with belonging Subscriptions and Customers) from one site to another one. Expects to have source WoComm DB tables (with one prefix) along side destination/local DB tables (with a different prefix).',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -151,7 +151,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			);
 			if ( empty( $order_comments_rows ) ) {
 				$msg = sprintf( "No Order comments found" );
-				WP_CLI::warning( $msg );
+				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			} else {
 				$msg = sprintf( 'Found Order Comments' );
@@ -169,7 +169,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			);
 			if ( empty( $order_stats_rows ) ) {
 				$msg = sprintf( "WARNING: could not find order stats" );
-				WP_CLI::warning( $msg );
+				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			} else {
 				$msg = sprintf( 'Found Order order stats' );
@@ -187,7 +187,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			);
 			if ( empty( $order_items_rows ) ) {
 				$msg = sprintf( "WARNING: could not find order items.", $source_order_id );
-				WP_CLI::warning( $msg );
+				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 
 				$order_items_metas = [];
@@ -225,7 +225,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			);
 			if ( empty( $order_product_lookup_rows ) ) {
 				$msg = sprintf( "WARNING: could not find order product lookup records.", $source_order_id );
-				WP_CLI::warning( $msg );
+				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			} else {
 				$msg = 'Found Order Product Lookup records';
@@ -247,7 +247,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			$order_customer_lookup_row = [];
 			if ( empty( $order_user ) ) {
 				$msg = sprintf( "WARNING: could not find WP User for order ID %d.", $source_order_id );
-				WP_CLI::warning( $msg );
+				WP_CLI::success( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 			} else {
 				$msg = sprintf( 'Found Order WP User ID %s', $order_user[ 'ID' ] );
@@ -263,8 +263,8 @@ class WCOrdersMigrator implements InterfaceMigrator {
 					ARRAY_A
 				);
 				if ( empty( $order_user_meta ) ) {
-					$msg = sprintf( "WARNING: could not find WP User Meta for order ID %d. Skipping.", $source_order_id );
-					WP_CLI::warning( $msg );
+					$msg = sprintf( "WARNING: could not find WP User Meta for order ID %d.", $source_order_id );
+					WP_CLI::success( $msg );
 					$this->log( self::GENERAL_LOG, $msg );
 				} else {
 					$msg = sprintf( 'Found Order WP User meta' );
@@ -281,10 +281,9 @@ class WCOrdersMigrator implements InterfaceMigrator {
 					ARRAY_A
 				);
 				if ( empty( $order_customer_lookup_row ) ) {
-					$msg = sprintf( "ERROR: could not find customer lookup records for order ID %d. Skipping.", $source_order_id );
-					WP_CLI::warning( $msg );
+					$msg = sprintf( "WARNING: could not find customer lookup records for order ID %d. Skipping.", $source_order_id );
+					WP_CLI::success( $msg );
 					$this->log( self::GENERAL_LOG, $msg );
-					continue;
 				}
 				$msg = sprintf( 'Found Order WC Customer lookup ID %s', $order_customer_lookup_row[ 'customer_id' ] );
 				WP_CLI::success( $msg );
