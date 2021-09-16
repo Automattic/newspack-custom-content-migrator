@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
-class WooCommOrdersMigrator implements InterfaceMigrator {
+class WooCommOrdersAndSubscriptionsMigrator implements InterfaceMigrator {
 
 	const GENERAL_LOG = 'wc_orders_subscriptions_migration.log';
 
