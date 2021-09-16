@@ -97,11 +97,10 @@ class WCOrdersMigrator implements InterfaceMigrator {
 		// 	Get shop orders.
 		foreach ( $source_order_ids as $source_order_id ) {
 
-			$msg = sprintf( 'Getting order ID %d' );
+			$msg = sprintf( 'Getting order ID %d', $source_order_id );
 			WP_CLI::line( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 
-			// Export Order, Subscription, WP User and WC Customer Lookup records.
 			$order_row = $wpdb->get_row(
 				$wpdb->prepare(
 					"select wp.* from {$table_prefix_source}posts wp
@@ -117,7 +116,12 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				WP_CLI::warning( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 				continue;
+			} else {
+				$msg = sprintf( 'Found Order ID %s', $source_order_id );
+				WP_CLI::success( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
 			}
+
 			$order_meta_rows = $wpdb->get_results(
 				$wpdb->prepare(
 					"select wpm.* from {$table_prefix_source}postmeta wpm
@@ -131,7 +135,30 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				WP_CLI::warning( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 				continue;
+			} else {
+				$msg = sprintf( 'Found order meta', $source_order_id );
+				WP_CLI::success( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
 			}
+
+			$order_comments_rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"select * from {$table_prefix_source}comments
+					where comment_post_ID = %d;",
+					$source_order_id
+				),
+				ARRAY_A
+			);
+			if ( empty( $order_comments_rows ) ) {
+				$msg = sprintf( "No Order comments found" );
+				WP_CLI::warning( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
+			} else {
+				$msg = sprintf( 'Found Order Comments' );
+				WP_CLI::success( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
+			}
+
 			$order_stats_rows = $wpdb->get_results(
 				$wpdb->prepare(
 					"select wos.* from {$table_prefix_source}wc_order_stats wos
@@ -144,10 +171,11 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				$msg = sprintf( "WARNING: could not find order stats" );
 				WP_CLI::warning( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
+			} else {
+				$msg = sprintf( 'Found Order order stats' );
+				WP_CLI::success( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
 			}
-			$msg = sprintf( 'Found Order ID %s, order meta, order stats', $source_order_id );
-			WP_CLI::success( $msg );
-			$this->log( self::GENERAL_LOG, $msg );
 
 			$order_items_rows = $wpdb->get_results(
 				$wpdb->prepare(
@@ -220,6 +248,10 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				WP_CLI::warning( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 				continue;
+			} else {
+				$msg = sprintf( 'Found Order WP User ID %s', $order_user[ 'ID' ] );
+				WP_CLI::success( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
 			}
 			$order_user_meta = $wpdb->get_results(
 				$wpdb->prepare(
@@ -234,10 +266,11 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				WP_CLI::warning( $msg );
 				$this->log( self::GENERAL_LOG, $msg );
 				continue;
+			} else {
+				$msg = sprintf( 'Found Order WP User meta' );
+				WP_CLI::success( $msg );
+				$this->log( self::GENERAL_LOG, $msg );
 			}
-			$msg = sprintf( 'Found Order WP User ID %s and User meta', $order_user[ 'ID' ] );
-			WP_CLI::success( $msg );
-			$this->log( self::GENERAL_LOG, $msg );
 
 			$order_customer_lookup_row = $wpdb->get_row(
 				$wpdb->prepare(
@@ -271,7 +304,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			$user_already_exists = ! empty( $order_existing_user );
 			if ( $user_already_exists ) {
 				$user_id = $order_existing_user[ 'ID' ];
-				$msg = sprintf( 'Imported WP User, existing found, ID %d', $user_id );
+				$msg = sprintf( 'Importing WP User, existing user found, ID %d', $user_id );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::success( $msg );
 			} else {
@@ -363,7 +396,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			} else {
 				$customer_id = $customer_lookup_existing_record[ 'customer_id' ];
 
-				$msg = sprintf( 'Found Customer lookup, existing record customer_id %d', $customer_id );
+				$msg = sprintf( 'Importing Customer lookup, existing record found, customer_id %d', $customer_id );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::success( $msg );
 			}
@@ -402,8 +435,9 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				$msg = sprintf( 'ERROR: order insert error, source order ID %d', $source_order_id );
 				$this->log( self::GENERAL_LOG, $msg );
 				WP_CLI::warning( $msg );
+				continue;
 			}
-			$msg = sprintf( 'Imported Order ID %d', $order_id );
+			$msg = sprintf( 'Importing Order ID %d', $order_id );
 			$this->log( self::GENERAL_LOG, $msg );
 			WP_CLI::success( $msg );
 
@@ -429,7 +463,40 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				}
 				$last_inserted_id = $wpdb->insert_id;
 			}
-			$msg = 'Order Post Meta IMPORT done.';
+			$msg = 'Imporing Order Post Meta done.';
+			$this->log( self::GENERAL_LOG, $msg );
+			WP_CLI::success( $msg );
+
+			// Import Order Comments.
+			foreach ( $order_comments_rows as $order_comments_row ) {
+				$query = $wpdb->prepare(
+					"insert into {$table_prefix_destination}comments
+					(comment_post_ID,comment_author,comment_author_email,comment_author_url,comment_author_IP,comment_date,comment_date_gmt,comment_content,comment_karma,comment_approved,comment_agent,comment_type,comment_parent,user_id)
+					values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s); ",
+					$order_id,
+					$order_comments_row[ 'comment_author' ],
+					$order_comments_row[ 'comment_author_email' ],
+					$order_comments_row[ 'comment_author_url' ],
+					$order_comments_row[ 'comment_author_IP' ],
+					$order_comments_row[ 'comment_date' ],
+					$order_comments_row[ 'comment_date_gmt' ],
+					$order_comments_row[ 'comment_content' ],
+					$order_comments_row[ 'comment_karma' ],
+					$order_comments_row[ 'comment_approved' ],
+					$order_comments_row[ 'comment_agent' ],
+					$order_comments_row[ 'comment_type' ],
+					$order_comments_row[ 'comment_parent' ],
+					$order_comments_row[ 'user_id' ],
+				);
+				$res = $wpdb->query( $query );
+				if ( 1 != $res ) {
+					$msg = sprintf( 'ERROR: order comment insert error, source comment_ID %d', $order_comments_row[ 'comment_ID' ] );
+					$this->log( self::GENERAL_LOG, $msg );
+					WP_CLI::warning( $msg );
+				}
+				$last_inserted_id = $wpdb->insert_id;
+			}
+			$msg = 'Importing Order Comments done.';
 			$this->log( self::GENERAL_LOG, $msg );
 			WP_CLI::success( $msg );
 
@@ -460,7 +527,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 				}
 				$last_inserted_id = $wpdb->insert_id;
 			}
-			$msg = 'Order Stats IMPORT done.';
+			$msg = 'Importing Order Stats done.';
 			$this->log( self::GENERAL_LOG, $msg );
 			WP_CLI::success( $msg );
 
@@ -479,6 +546,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 					$msg = sprintf( 'ERROR: order item insert error, source order_item_id ID %d', $order_items_row[ 'order_item_id' ] );
 					$this->log( self::GENERAL_LOG, $msg );
 					WP_CLI::warning( $msg );
+					continue;
 				} else {
 					$order_item_id = $wpdb->insert_id;
 
@@ -504,7 +572,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 					}
 				}
 			}
-			$msg = 'Order Item IMPORT done.';
+			$msg = 'Importing Order Items and order item meta done.';
 			$this->log( self::GENERAL_LOG, $msg );
 			WP_CLI::success( $msg );
 
@@ -512,8 +580,9 @@ class WCOrdersMigrator implements InterfaceMigrator {
 			foreach ( $order_product_lookup_rows as $order_product_lookup_row ) {
 				$query = $wpdb->prepare(
 					"insert into {$table_prefix_destination}wc_order_product_lookup
-					(order_id,product_id,variation_id,customer_id,date_created,product_qty,product_net_revenue,product_gross_revenue,coupon_amount,tax_amount,shipping_amount,shipping_tax_amount)
-					values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s); ",
+					(order_item_id,order_id,product_id,variation_id,customer_id,date_created,product_qty,product_net_revenue,product_gross_revenue,coupon_amount,tax_amount,shipping_amount,shipping_tax_amount)
+					values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s); ",
+					$order_item_id,
 					$order_id,
 					$order_product_lookup_row[ 'product_id' ],
 					$order_product_lookup_row[ 'variation_id' ],
