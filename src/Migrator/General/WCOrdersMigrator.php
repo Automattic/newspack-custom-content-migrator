@@ -370,7 +370,7 @@ class WCOrdersMigrator implements InterfaceMigrator {
 					"insert into {$table_prefix_destination}wc_customer_lookup
 					(user_id,username,first_name,last_name,email,date_last_active,date_registered,country,postcode,city,state)
 					values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s); ",
-					$order_customer_lookup_row[ 'user_id' ],
+					$user_id,
 					$order_customer_lookup_row[ 'username' ],
 					$order_customer_lookup_row[ 'first_name' ],
 					$order_customer_lookup_row[ 'last_name' ],
