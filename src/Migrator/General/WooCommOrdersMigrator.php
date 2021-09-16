@@ -137,6 +137,14 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 
 	}
 
+	/**
+	 * Migrates either a WC Order or a WC Subscription from one set of DB tables to another.
+	 *
+	 * @param int|null $source_order_id
+	 * @param int|null $source_subscription_id
+	 * @param string   $table_prefix_source
+	 * @param string   $table_prefix_destination
+	 */
 	private function migrate_order_or_subscription( $source_order_id = null, $source_subscription_id = null, $table_prefix_source, $table_prefix_destination ) {
 		global $wpdb;
 
