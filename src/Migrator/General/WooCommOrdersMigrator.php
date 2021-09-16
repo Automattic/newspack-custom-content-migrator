@@ -670,7 +670,7 @@ class WooCommOrdersMigrator implements InterfaceMigrator {
 			}
 			$last_inserted_id = $wpdb->insert_id;
 		}
-		$msg = 'Order Product Lookup IMPORT done.';
+		$msg = 'Order Product Lookup import done.';
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
 	}
