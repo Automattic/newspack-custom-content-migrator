@@ -7,7 +7,7 @@ use \WP_CLI;
 
 class WooCommOrdersMigrator implements InterfaceMigrator {
 
-	const GENERAL_LOG = 'ordersmigrator.log';
+	const GENERAL_LOG = 'wc_orders_subscriptions_migration.log';
 
 	const EXCEPTION_CODE_SKIP_IMPORTING = 700;
 
