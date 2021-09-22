@@ -58,9 +58,10 @@ PluginSetup::register_migrators( array(
 	// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
 	// Migrator\PublisherSpecific\HipertextualMigrator::class,
 	// Migrator\PublisherSpecific\QuePasaMigrator::class,
+	// Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
+	// Migrator\PublisherSpecific\RafushimpoMigrator::class,
 	Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
-	Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
-	Migrator\PublisherSpecific\RafushimpoMigrator::class,
 	Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 	Migrator\PublisherSpecific\GadisMigrator::class,
+	Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
 ) );
