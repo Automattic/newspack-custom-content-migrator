@@ -54,7 +54,7 @@ class PrisonJournalismMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator prisonjournalism-fix-double-images',
+				'newspack-content-migrator prisonjournalism-fix-double-images',
 			[ $this, 'cmd_fix_double_images' ],
 		);
 	}
@@ -103,6 +103,30 @@ class PrisonJournalismMigrator implements InterfaceMigrator {
 				} else {
 					WP_CLI::warning( 'img[class="thumb-image"] is not duplicate' );
 					$this->log( 'pjp_imgWithClassThumbImageIsNotDuplicate.log', $post->ID );
+				}
+			}
+		}
+
+		// Second replacement.
+		$posts = $this->posts_logic->get_all_posts();
+		foreach ( $posts as $key_posts => $post ) {
+			WP_CLI::log( sprintf( '- (%d/%d) ID %d ', $key_posts + 1, count( $posts ), $post->ID ) );
+
+			$post_content_updated = $post->post_content;
+			preg_match_all( '/style="padding-bottom\:([\d\.]+)\%;"/', $post_content_updated, $matches, PREG_OFFSET_CAPTURE );
+			if ( ! empty( $matches[0] ) ) {
+				foreach ( $matches[0] as $match ) {
+					$style = $match[0];
+					$post_content_updated = str_replace( $style, '', $post_content_updated );
+					if ( $post_content_updated != $post->post_content) {
+						$wpdb->update(
+							$wpdb->prefix . 'posts',
+							[ 'post_content' => $post_content_updated ],
+							[ 'ID' => $post->ID ]
+						);
+						WP_CLI::success( 'Fixed.' );
+						$this->log( 'pjp_updated2ndDivReplacement.log', $post->ID );
+					}
 				}
 			}
 		}
