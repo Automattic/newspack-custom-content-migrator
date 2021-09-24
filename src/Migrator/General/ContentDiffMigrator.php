@@ -146,17 +146,15 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$imported_post_ids[ $post_id ] = $new_post_id;
 		}
 
-		WP_CLI::log( 'Updating the parent IDs...' );
-		$this->update_post_parents( $imported_post_ids );
-
+		// Flush the cache in order for the `$wpdb->update()`s to sink in.
 		wp_cache_flush();
 
-		/*
-		TODO:
-			- Orm slow, OOM (low memory machines)
-			- streams - JP DB and files
-		 */
+		WP_CLI::log( 'Updating the parent IDs...' );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			$this->update_post_parent( $post_id, $imported_post_ids );
+		}
 
+		wp_cache_flush();
 	}
 
 	/**
@@ -164,7 +162,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
-	 * @return array Result of $wpdb->get_results.
+	 * @return array Result from $wpdb->get_results.
 	 */
 	private function get_live_diff_content_ids( $live_table_prefix ) {
 		global $wpdb;
@@ -200,12 +198,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return array $args {
 	 *     Post and all core WP Post-related data.
 	 *
-	 *     @type array self::DATAKEY_POST {
-	 *             Contains `posts` rows.
-	 *
-	 *             @type array self::DATAKEY_POST_PARENT     If Post has a parent, this contains its `posts` row.
-	 *             @type array self::DATAKEY_POST_PARENTMETA If Post has a parent, this contains its `postmeta` rows.
-	 *     }
+	 *     @type array self::DATAKEY_POST              Contains `posts` rows.
 	 *     @type array self::DATAKEY_POSTMETA          `postmeta` rows.
 	 *     @type array self::DATAKEY_COMMENTS          `comments` rows.
 	 *     @type array self::DATAKEY_COMMENTMETA       `commentmeta` rows.
@@ -280,8 +273,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		// Get Term Relationships.
-// This is just an n:n link Post:Terms
-// => post_id >>> term_taxonomy_id
 		$term_relationships = $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_merge(
 			$data[ self::DATAKEY_TERMRELATIONSHIPS ],
@@ -290,8 +281,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		// Get Term Taxonomies.
 		foreach ( $term_relationships as $term_relationship ) {
-// Describes terms term_id : unique "taxnonomy" (e.g. category, post_tag, etc)
-// => term_taxonomy_id >>> term_id
 			$term_taxonomy_id = $term_relationship[ 'term_taxonomy_id' ];
 			$term_taxonomy = $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
@@ -306,13 +295,39 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Simple SELECT query with custom WHERE conditions.
+	 * Checks if a Term Taxonomy exists.
+	 *
+	 * @param string $term_name Term name.
+	 * @param string $term_slug Term slug.
+	 * @param string $taxonomy  Taxonomy
+	 *
+	 * @return string|null term_taxonomy_id or null.
+	 */
+	private function get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy ) {
+		global $wpdb;
+
+		return $wpdb->get_var( $wpdb->prepare(
+			"SELECT tt.term_taxonomy_id
+			FROM {$wpdb->term_taxonomy} tt
+			JOIN {$wpdb->terms} t
+		        ON tt.term_id = t.term_id
+			WHERE t.name = %s
+			AND t.slug = %s
+		    AND tt.taxonomy = %s;",
+			$term_name,
+			$term_slug,
+			$taxonomy
+		) );
+	}
+
+	/**
+	 * Simple select query with custom `where` conditions.
 	 *
 	 * @param string $table_name          Table name to select from.
 	 * @param array  $where_conditions    Keys are columns, values are their values.
 	 * @param bool   $select_just_one_row Select just one row. Default is false.
 	 *
-	 * @return array|void|null Result of $wpdb->get_results, or of $wpdb->get_row if $select_just_one_row is set to true.
+	 * @return array|void|null Result from $wpdb->get_results, or from $wpdb->get_row if $select_just_one_row is set to true.
 	 */
 	private function select( $table_name, $where_conditions, $select_just_one_row = false ) {
 		global $wpdb;
@@ -338,31 +353,24 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Checks if a Term Taxonomy exists.
+	 * Imports all the Post data.
 	 *
-	 * @param string $term_name
-	 * @param string $term_slug
-	 * @param string $taxonomy
+	 * @param array $data {
+	 *     Post and all core WP Post-related data.
 	 *
-	 * @return string|null term_taxonomy_id or null.
+	 *     @type array self::DATAKEY_POST              Contains `posts` rows.
+	 *     @type array self::DATAKEY_POSTMETA          `postmeta` rows.
+	 *     @type array self::DATAKEY_COMMENTS          `comments` rows.
+	 *     @type array self::DATAKEY_COMMENTMETA       `commentmeta` rows.
+	 *     @type array self::DATAKEY_USERS             `users` rows (for the Post Author, and the Comment Users).
+	 *     @type array self::DATAKEY_USERMETA          `usermeta` rows.
+	 *     @type array self::DATAKEY_TERMRELATIONSHIPS `term_relationships` rows.
+	 *     @type array self::DATAKEY_TERMTAXONOMY      `term_taxonomy` rows.
+	 *     @type array self::DATAKEY_TERMS             `terms` rows.
+	 * }
+	 *
+	 * @return int Imported Post ID.
 	 */
-	private function get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy ) {
-		global $wpdb;
-
-		return $wpdb->get_var( $wpdb->prepare(
-			"SELECT tt.term_taxonomy_id
-			FROM {$wpdb->term_taxonomy} tt
-			JOIN {$wpdb->terms} t
-		        ON tt.term_id = t.term_id
-			WHERE t.name = %s
-			AND t.slug = %s
-		    AND tt.taxonomy = %s;",
-			$term_name,
-			$term_slug,
-			$taxonomy
-		) );
-	}
-
 	private function import_data( $data ) {
 		global $wpdb;
 
@@ -422,7 +430,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Insert Term Taxonomy records.
 			/*
-			 * One Term can be shared by multiple Taxonomies in WP (e.g. Term "blue" by a Taxonomies "category" and "color").
+			 * A Term can be shared by multiple Taxonomies in WP (e.g. Term "blue" by a Taxonomies "category" and "color").
 			 * That's why instead of simply looping through all Term Taxonomies and inserting them, we're inserting each Term's
 			 * Term Taxonomies at this point.
 			 */
@@ -449,25 +457,28 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Loops through imported posts and updates their parents IDs.
+	 *
 	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 */
-	private function update_post_parents( $imported_post_ids ) {
+	private function update_post_parent( $post_id, $imported_post_ids ) {
 		global $wpdb;
 
-		wp_cache_flush();
-
-		foreach ( $imported_post_ids as $live_post_id => $local_post_id ) {
-			$post = get_post( $local_post_id );
-			if ( $post->post_parent > 0 ) {
-				$wpdb->update(
-					$wpdb->posts,
-					[ 'post_parent' => $imported_post_ids[ $post->post_parent ], ],
-					[ 'ID' => $post->ID, ]
-				);
-			}
+		$post = get_post( $post_id );
+		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
+		if ( $post->post_parent > 0 && $new_parent_id ) {
+			$wpdb->update( $wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
 	}
 
+	/**
+	 * Inserts Post and its Meta.
+	 *
+	 * @param array $post_row      `post` row.
+	 * @param array $postmeta_rows `postmeta` rows.
+	 *
+	 * @return int Inserted Post ID.
+	 */
 	private function insert_post( $post_row, $postmeta_rows ) {
 		global $wpdb;
 
@@ -494,6 +505,14 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		return $post_id;
 	}
 
+	/**
+	 * Inserts a User and its Meta.
+	 *
+	 * @param array $user_row      `user` row.
+	 * @param array $usermeta_rows `usermeta` rows.
+	 *
+	 * @return int Inserted User ID.
+	 */
 	private function insert_user( $user_row, $usermeta_rows ) {
 		global $wpdb;
 
@@ -520,6 +539,16 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		return $user_id;
 	}
 
+	/**
+	 * Inserts a Comment and its Meta.
+	 *
+	 * @param int   $post_id          Post ID.
+	 * @param int   $user_id          User ID.
+	 * @param array $comment_row      `comment` row.
+	 * @param array $commentmeta_rows `commentmeta` rows.
+	 *
+	 * @return int Inserted comment_id.
+	 */
 	private function insert_comment( $post_id, $user_id, $comment_row, $commentmeta_rows ) {
 		global $wpdb;
 
@@ -548,6 +577,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		return $comment_id;
 	}
 
+	/**
+	 * Inserts into `terms` table.
+	 *
+	 * @param array $term_row `term` row.
+	 *
+	 * @return int Inserted term_id.
+	 */
 	private function insert_term( $term_row ) {
 		global $wpdb;
 
@@ -562,6 +598,14 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		return $term_id;
 	}
 
+	/**
+	 * Inserts into `term_taxonomy` table.
+	 *
+	 * @param int   $term_id           `term_id` column.
+	 * @param array $term_taxonomy_row `term_taxonomy` row.
+	 *
+	 * @return int Inserted term_taxonomy_id.
+	 */
 	private function insert_term_taxonomy( $term_id, $term_taxonomy_row ) {
 		global $wpdb;
 
@@ -577,6 +621,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		return $term_taxonomy_id;
 	}
 
+	/**
+	 * Inserts into `term_relationships` table.
+	 *
+	 * @param int $object_id        `object_id` column.
+	 * @param int $term_taxonomy_id `term_taxonomy_id` column.
+	 */
 	private function insert_term_relationship( $object_id, $term_taxonomy_id ) {
 		global $wpdb;
 
