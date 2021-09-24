@@ -43,6 +43,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\ReusableBlocksMigrator::class,
 	Migrator\General\SportsPressMigrator::class,
 	Migrator\General\FeaturedImagesMigrator::class,
+	Migrator\General\ContentDiffMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
