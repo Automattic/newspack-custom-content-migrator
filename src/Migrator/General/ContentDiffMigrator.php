@@ -108,13 +108,15 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$export_dir = $assoc_args[ 'export-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
 
+		// TODO check if tables not found
+
 		WP_CLI::log( 'Searching for new content on Live Site...' );
 		$ids = $this->get_live_diff_content_ids( $live_table_prefix );
 
 		$file = $export_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		file_put_contents( $export_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV, implode( ',', $ids ) );
 
-		WP_CLI::success( sprintf( 'Diff content IDs exported to %s .', $file ) );
+		WP_CLI::success( sprintf( '%d new IDs found and exported to %s', count( $ids ), $file ) );
 	}
 
 	/**
@@ -127,6 +129,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
 
+		// TODO check if tables not found
+
 		$file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		if ( ! file_exists( $file ) ) {
 			WP_CLI::error( 'File not found.' );
@@ -138,12 +142,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		$imported_post_ids = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::log( sprintf( '(%d/%d) migrating %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$data = $this->get_data( $post_id, $live_table_prefix );
-			$new_post_id = $this->import_data( $data );
+			$imported_post_id = $this->import_data( $data );
+			WP_CLI::success( sprintf( 'imported to ID %d', $imported_post_id ) );
 
-			$imported_post_ids[ $post_id ] = $new_post_id;
+			$imported_post_ids[ $post_id ] = $imported_post_id;
 		}
 
 		// Flush the cache in order for the `$wpdb->update()`s to sink in.
@@ -165,10 +170,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return array Result from $wpdb->get_results.
 	 */
 	private function get_live_diff_content_ids( $live_table_prefix ) {
-		global $wpdb;
-
 		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
-		$posts_table = $wpdb->prefix . 'posts';
+		$posts_table = $this->wpdb()->prefix . 'posts';
 		$sql = "SELECT lwp.ID FROM {$live_posts_table} lwp
 			LEFT JOIN {$posts_table} wp
 				ON wp.post_name = lwp.post_name
@@ -177,7 +180,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				AND wp.post_date = lwp.post_date
 			WHERE lwp.post_type IN ( 'post', 'page' )
 			AND wp.ID IS NULL;";
-		$results = $wpdb->get_results( $sql, ARRAY_A );
+		$results = $this->wpdb()->get_results( $sql, ARRAY_A );
 
 		$ids = [];
 		foreach ( $results as $result ) {
@@ -208,18 +211,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * }
 	 */
 	private function get_data( $post_id, $table_prefix ) {
-		$data = [
-			self::DATAKEY_POST,
-			// If self::DATAKEY_POST have parent, the array elements also get keys self::DATAKEY_POST_PARENT and self::DATAKEY_POST_PARENTMETA.
-			self::DATAKEY_POSTMETA,
-			self::DATAKEY_COMMENTS,
-			self::DATAKEY_COMMENTMETA,
-			self::DATAKEY_USERS ,
-			self::DATAKEY_USERMETA,
-			self::DATAKEY_TERMRELATIONSHIPS,
-			self::DATAKEY_TERMTAXONOMY,
-			self::DATAKEY_TERMS,
-		];
+		$data = $this->get_empty_data_array();
 
 		// Get Post.
 		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
@@ -232,13 +224,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$data[ self::DATAKEY_POSTMETA ] = $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
 
 		// Get Post Author User.
-		$user = $this->select( $table_prefix . 'users', [ 'ID' => $data[ self::DATAKEY_POST ][ 'post_author' ] ], $select_just_one_row = true );
-		$data[ self::DATAKEY_USERS ][] = $user;
+		$author = $this->select( $table_prefix . 'users', [ 'ID' => $data[ self::DATAKEY_POST ][ 'post_author' ] ], $select_just_one_row = true );
+		$data[ self::DATAKEY_USERS ][] = $author;
 
 		// Get Post Author User Metas.
 		$data[ self::DATAKEY_USERMETA ] = array_merge(
 			$data[ self::DATAKEY_USERMETA ],
-			$this->select( $table_prefix . 'usermeta', [ 'user_id' => $user[ 'ID' ] ] )
+			$this->select( $table_prefix . 'usermeta', [ 'user_id' => $author[ 'ID' ] ] )
 		);
 
 		// Get Comments.
@@ -285,11 +277,49 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Get Terms and Term Metas.
 			$term_id = $term_taxonomy[ 'term_id' ];
-			$data[ self::DATAKEY_TERMS ] = $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
-			$data[ self::DATAKEY_TERMMETA ] = $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
+			$data[ self::DATAKEY_TERMS ] = array_merge(
+				$this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ] ),
+				$data[ self::DATAKEY_TERMS ]
+			);
+			$data[ self::DATAKEY_TERMMETA ] = array_merge(
+				$this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] ),
+				$data[ self::DATAKEY_TERMMETA ]
+			);
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Returns an empty data array.
+	 *
+	 * @return array $args {
+	 *     Post and all core WP Post-related data.
+	 *
+	 *     @type array self::DATAKEY_POST              Contains `posts` rows.
+	 *     @type array self::DATAKEY_POSTMETA          `postmeta` rows.
+	 *     @type array self::DATAKEY_COMMENTS          `comments` rows.
+	 *     @type array self::DATAKEY_COMMENTMETA       `commentmeta` rows.
+	 *     @type array self::DATAKEY_USERS             `users` rows (for the Post Author, and the Comment Users).
+	 *     @type array self::DATAKEY_USERMETA          `usermeta` rows.
+	 *     @type array self::DATAKEY_TERMRELATIONSHIPS `term_relationships` rows.
+	 *     @type array self::DATAKEY_TERMTAXONOMY      `term_taxonomy` rows.
+	 *     @type array self::DATAKEY_TERMS             `terms` rows.
+	 * }
+	 */
+	private function get_empty_data_array() {
+		return [
+			self::DATAKEY_POST => [],
+			self::DATAKEY_POSTMETA => [],
+			self::DATAKEY_COMMENTS => [],
+			self::DATAKEY_COMMENTMETA => [],
+			self::DATAKEY_USERS => [],
+			self::DATAKEY_USERMETA => [],
+			self::DATAKEY_TERMRELATIONSHIPS => [],
+			self::DATAKEY_TERMTAXONOMY => [],
+			self::DATAKEY_TERMS => [],
+			self::DATAKEY_TERMMETA => [],
+		];
 	}
 
 	/**
@@ -302,12 +332,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return string|null term_taxonomy_id or null.
 	 */
 	private function get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy ) {
-		global $wpdb;
-
-		return $wpdb->get_var( $wpdb->prepare(
+		return $this->wpdb()->get_var( $this->wpdb()->prepare(
 			"SELECT tt.term_taxonomy_id
-			FROM {$wpdb->term_taxonomy} tt
-			JOIN {$wpdb->terms} t
+			FROM {$this->wpdb()->term_taxonomy} tt
+			JOIN {$this->wpdb()->terms} t
 		        ON tt.term_id = t.term_id
 			WHERE t.name = %s
 			AND t.slug = %s
@@ -328,8 +356,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return array|void|null Result from $wpdb->get_results, or from $wpdb->get_row if $select_just_one_row is set to true.
 	 */
 	private function select( $table_name, $where_conditions, $select_just_one_row = false ) {
-		global $wpdb;
-
 		$sql = 'SELECT * FROM ' . esc_sql( $table_name );
 
 		if ( ! empty( $where_conditions ) ) {
@@ -340,13 +366,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 			$where_sprintf = ' WHERE ' . $where_sprintf;
 
-			$sql = $sql . $wpdb->prepare( $where_sprintf, array_values( $where_conditions ) );
+			$sql = $sql . $this->wpdb()->prepare( $where_sprintf, array_values( $where_conditions ) );
 		}
 
 		if ( true === $select_just_one_row ) {
-			return $wpdb->get_row( $sql, ARRAY_A );
+			return $this->wpdb()->get_row( $sql, ARRAY_A );
 		} else {
-			return $wpdb->get_results( $sql, ARRAY_A );
+			return $this->wpdb()->get_results( $sql, ARRAY_A );
 		}
 	}
 
@@ -370,24 +396,22 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return int Imported Post ID.
 	 */
 	private function import_data( $data ) {
-		global $wpdb;
-
 		// Insert Post and Post Metas.
 		$post_id = $this->insert_post( $data[ self::DATAKEY_POST ], $data[ self::DATAKEY_POSTMETA ] );
 
 		// Insert Author User.
 		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
-		$author_row = $this->filter_subarray( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
+		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
 		$author_existing = get_user_by( 'user_login', $author_row[ 'user_login' ] );
 		if ( $author_existing instanceof WP_User ) {
 			$author_id = $author_existing->ID;
 		} else {
-			$author_metas_rows = $this->filter_subarray( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row_id );
+			$author_metas_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row_id );
 			$author_id = $this->insert_user( $author_row, $author_metas_rows );
 		}
 
 		// Update inserted Post's Author.
-		$wpdb->update( $wpdb->posts, [ 'post_author' => $author_id ], [ 'ID' => $post_id ] );
+		$this->wpdb()->update( $this->wpdb()->posts, [ 'post_author' => $author_id ], [ 'ID' => $post_id ] );
 
 		// Insert Comments.
 		foreach ( $data[ self::DATAKEY_COMMENTS ] as $comment_row ) {
@@ -397,19 +421,19 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			if ( 0 == $comment_user_row_id ) {
 				$comment_user_id = 0;
 			} else {
-				$comment_user_row = $this->filter_subarray( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_row_id );
+				$comment_user_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_row_id );
 				$comment_user_existing = get_user_by( 'user_login', $comment_user_row[ 'user_login' ] );
 
 				if ( $comment_user_existing instanceof WP_User ) {
 					$comment_user_id = $comment_user_existing->ID;
 				} else {
-					$comment_user_meta_rows = $this->filter_subarray( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row_id );
+					$comment_user_meta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row_id );
 					$comment_user_id = $this->insert_user( $comment_user_row, $comment_user_meta_rows );
 				}
 			}
 
 			// Insert Comment and Comment Metas.
-			$commentmeta_rows = $this->filter_subarray( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
+			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
 			$this->insert_comment( $post_id, $comment_user_id, $comment_row, $commentmeta_rows );
 		}
 
@@ -428,11 +452,11 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Insert Term Taxonomy records.
 			/*
-			 * A Term can be shared by multiple Taxonomies in WP (e.g. Term "blue" by a Taxonomies "category" and "color").
+			 * A Term can be shared by multiple Taxonomies in WP (e.g. Term "blue" by Taxonomies "category" and "color").
 			 * That's why instead of simply looping through all Term Taxonomies and inserting them, we're inserting each Term's
 			 * Term Taxonomies at this point.
 			 */
-			$term_taxonomy_rows = $this->filter_subarray( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_row[ 'term_id' ] );
+			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_row[ 'term_id' ] );
 			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
 				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_row[ 'name' ], $term_row[ 'slug' ], $term_taxonomy_row[ 'taxonomy' ] );
 				if ( $term_taxonomy_id_existing ) {
@@ -446,9 +470,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		// Insert Term Relationships.
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship ) {
-			$term_relationship[ 'object_id' ] = $post_id;
-			$term_relationship[ 'term_taxonomy_id' ] = $term_taxonomy_ids_updates[ $term_relationship[ 'term_taxonomy_id' ] ] ?? $term_relationship[ 'term_taxonomy_id' ];
-			$this->insert_term_relationship( $term_taxonomy_id );
+			$term_taxonomy_id = $term_taxonomy_ids_updates[ $term_relationship[ 'term_taxonomy_id' ] ] ?? null;
+			$this->insert_term_relationship( $post_id, $term_taxonomy_id );
 		}
 
 		return $post_id;
@@ -460,12 +483,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 */
 	private function update_post_parent( $post_id, $imported_post_ids ) {
-		global $wpdb;
-
 		$post = get_post( $post_id );
 		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
 		if ( $post->post_parent > 0 && $new_parent_id ) {
-			$wpdb->update( $wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
+			$this->wpdb()->update( $this->wpdb()->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
 	}
 
@@ -478,15 +499,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return int Inserted Post ID.
 	 */
 	private function insert_post( $post_row, $postmeta_rows ) {
-		global $wpdb;
-
 		unset( $post_row[ 'ID' ] );
 
-		$inserted = $wpdb->insert( $wpdb->posts, $post_row );
+		$inserted = $this->wpdb()->insert( $this->wpdb()->posts, $post_row );
 		if ( 1 != $inserted ) {
 			// TODO error
 		}
-		$post_id = $wpdb->insert_id;
+		$post_id = $this->wpdb()->insert_id;
 
 		// Insert Post Metas.
 		foreach ( $postmeta_rows as $postmeta_row ) {
@@ -494,7 +513,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			unset( $postmeta_row[ 'meta_id' ] );
 			$postmeta_row[ 'post_id' ] = $post_id;
 
-			$inserted = $this->insert( $wpdb->postmeta, $postmeta_row );
+			$inserted = $this->wpdb()->insert( $this->wpdb()->postmeta, $postmeta_row );
 			if ( 1 != $inserted ) {
 				// TODO error
 			}
@@ -512,15 +531,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return int Inserted User ID.
 	 */
 	private function insert_user( $user_row, $usermeta_rows ) {
-		global $wpdb;
-
 		unset( $user_row[ 'ID' ] );
 
-		$inserted = $wpdb->insert( $wpdb->users, $user_row );
+		$inserted = $this->wpdb()->insert( $this->wpdb()->users, $user_row );
 		if ( 1 != $inserted ) {
 			// TODO error
 		}
-		$user_id = $wpdb->insert_id;
+		$user_id = $this->wpdb()->insert_id;
 
 		// Insert User Metas.
 		foreach ( $usermeta_rows as $usermeta_row ) {
@@ -528,7 +545,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			unset( $usermeta_row[ 'umeta_id' ] );
 			$usermeta_row[ 'user_id' ] = $user_id;
 
-			$inserted = $wpdb->insert( $wpdb->usermeta, $usermeta_row );
+			$inserted = $this->wpdb()->insert( $this->wpdb()->usermeta, $usermeta_row );
 			if ( 1 != $inserted ) {
 				// TODO error
 			}
@@ -548,17 +565,15 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return int Inserted comment_id.
 	 */
 	private function insert_comment( $post_id, $user_id, $comment_row, $commentmeta_rows ) {
-		global $wpdb;
-
 		unset( $comment_row[ 'comment_ID' ] );
 		$comment_row[ 'comment_post_ID' ] = $post_id;
 		$comment_row[ 'user_id' ] = $user_id;
 
-		$inserted = $wpdb->insert( $wpdb->comments, $comment_row );
+		$inserted = $this->wpdb()->insert( $this->wpdb()->comments, $comment_row );
 		if ( 1 != $inserted ) {
 			// TODO error
 		}
-		$comment_id = $wpdb->insert_id;
+		$comment_id = $this->wpdb()->insert_id;
 
 		// Insert Comment Metas.
 		foreach ( $commentmeta_rows as $usermeta_row ) {
@@ -566,7 +581,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			unset( $usermeta_row[ 'meta_id' ] );
 			$usermeta_row[ 'comment_id' ] = $comment_id;
 
-			$inserted = $wpdb->insert( $wpdb->commentmeta, $usermeta_row );
+			$inserted = $this->wpdb()->insert( $this->wpdb()->commentmeta, $usermeta_row );
 			if ( 1 != $inserted ) {
 				// TODO error
 			}
@@ -583,15 +598,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return int Inserted term_id.
 	 */
 	private function insert_term( $term_row ) {
-		global $wpdb;
-
 		unset( $term_row[ 'term_id' ] );
 
-		$inserted = $wpdb->insert( $wpdb->terms, $term_row );
+		$inserted = $this->wpdb()->insert( $this->wpdb()->terms, $term_row );
 		if ( 1 != $inserted ) {
 			// TODO error
 		}
-		$term_id = $wpdb->insert_id;
+		$term_id = $this->wpdb()->insert_id;
 
 		return $term_id;
 	}
@@ -605,16 +618,14 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @return int Inserted term_taxonomy_id.
 	 */
 	private function insert_term_taxonomy( $term_id, $term_taxonomy_row ) {
-		global $wpdb;
-
 		unset( $term_taxonomy_row[ 'term_taxonomy_id' ] );
 		$term_taxonomy_row[ 'term_id' ] = $term_id;
 
-		$inserted = $wpdb->insert( $wpdb->term_taxonomy, $term_taxonomy_row );
+		$inserted = $this->wpdb()->insert( $this->wpdb()->term_taxonomy, $term_taxonomy_row );
 		if ( 1 != $inserted ) {
 			// TODO error
 		}
-		$term_taxonomy_id = $wpdb->insert_id;
+		$term_taxonomy_id = $this->wpdb()->insert_id;
 
 		return $term_taxonomy_id;
 	}
@@ -626,10 +637,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param int $term_taxonomy_id `term_taxonomy_id` column.
 	 */
 	private function insert_term_relationship( $object_id, $term_taxonomy_id ) {
-		global $wpdb;
+		if ( $object_id || ! $term_taxonomy_id ) {
+			// TODO shouldn't happen
+		}
 
-		$inserted = $wpdb->insert(
-			$wpdb->term_relationships,
+		$inserted = $this->wpdb()->insert(
+			$this->wpdb()->term_relationships,
 			[
 				'object_id' => $object_id,
 				'term_taxonomy_id' => $term_taxonomy_id,
@@ -638,6 +651,21 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		if ( 1 != $inserted ) {
 			// TODO error
 		}
+
+		$term_taxonomy_id = $this->wpdb()->insert_id;
+
+		return $term_taxonomy_id;
+	}
+
+	/**
+	 * Gets the global $wpdb object, made for easier mocking.
+	 *
+	 * @return \wpdb
+	 */
+	private function wpdb() {
+		global $wpdb;
+
+		return $wpdb;
 	}
 
 	/**
@@ -646,15 +674,36 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param mixed $key   Array key to search for.
 	 * @param mixed $value Array value to search for
 	 *
-	 * @return null
+	 * @return null|mixed
 	 */
-	private function filter_subarray( $array, $key, $value ) {
+	private function filter_array_element( $array, $key, $value ) {
 		foreach ( $array as $subarray ) {
 			if ( isset( $subarray[ $key ] ) && $value == $subarray[ $key ] ) {
 				return $subarray;
 			}
 		}
 
+		// TODO throw exception
+
 		return null;
+	}
+
+	/**
+	 * Filters a multidimensional array and searches for all subarray elemens containing a key and value.
+	 *
+	 * @param mixed $key   Array key to search for.
+	 * @param mixed $value Array value to search for
+	 *
+	 * @return array
+	 */
+	private function filter_array_elements( $array, $key, $value ) {
+		$found = [];
+		foreach ( $array as $subarray ) {
+			if ( isset( $subarray[ $key ] ) && $value == $subarray[ $key ] ) {
+				$found[] = $subarray;
+			}
+		}
+
+		return $found;
 	}
 }

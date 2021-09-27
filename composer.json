@@ -2,7 +2,8 @@
   "name": "automattic/newspack-custom-content-migrator",
   "autoload": {
     "classmap": [
-      "src/"
+      "src/",
+      "tests/"
     ]
   },
   "repositories": [
