@@ -25,30 +25,15 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	/**
 	 * Override setUp.
 	 */
-	// public function setUp() {
-	// 	// $this->migrator = ContentDiffMigrator;
-	// }
+	public function setUp() {
+		parent::setUp();
 
-	// public function test_should_work() {
-	// 	$expected = true;
-	// 	$actual   = true;
-	//
-	// 	$this->assertSame( $expected, $actual );
-	// }
-
-	// public function test_should_load_data_correctly() {
-	//
-	// 	$wpdb_mock = $this->createMock( 'wpdb' );
-	// 	$wpdb_mock->expects( $this->once() )
-	// 			->method('select')
-	// 			->with( $this->equalTo('a1'), $this->equalTo('a2') )
-	// 			->willReturn('fooReturnnnn')
-	// 	;
-	//
-	// 	$logic = new ContentDiffMigrator( $wpdb_mock );
-	// 	$res = $logic->a();
-	// 	var_dump($res);
-	// }
+		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
+		// the Mock Builder for 'stdClass' instead.
+		$this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
+		                        ->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
+		                        ->getMock();
+	}
 
 	/**
 	 * @covers ContentDiffMigrator::get_data.
@@ -60,29 +45,8 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
 
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
-
-		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
 		$wpdb_get_row_map = [];
-		$wpdb_get_results_map = [];
 
 		// Expected calls to $wpdb::prepare() and $wpdb::get_row().
 		$sql_prepare = "SELECT * FROM {$live_table_prefix}posts WHERE ID = %s";
@@ -90,27 +54,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $post_id ], $sql ];
 		$wpdb_get_row_map[] = [ $sql, ARRAY_A, $data_sample[ ContentDiffMigrator::DATAKEY_POST ] ];
 
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_row' ] )
-		                  ->getMock();
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		          ->method( 'get_row' )
 		          ->will( $this->returnValueMap( $wpdb_get_row_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		//           ->method( 'get_results' )
-		//           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 		$post_row_actual = $logic->select_post_row( $live_table_prefix, $post_id );
-		// $data_actual = $logic->get_data( $post_id, $live_table_prefix );
 
 		$this->assertEquals( $data_sample[ ContentDiffMigrator::DATAKEY_POST ], $post_row_actual );
 	}
@@ -125,28 +78,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
 
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
-
-		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
-		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
 		// Expected calls to $wpdb::prepare() and $wpdb::get_row().
@@ -155,27 +87,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $post_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $data_sample[ ContentDiffMigrator::DATAKEY_POSTMETA ] ];
 
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 		$postmeta_rows_actual = $logic->select_postmeta_rows( $live_table_prefix, $post_id );
-		// $data_actual = $logic->get_data( $post_id, $live_table_prefix );
 
 		$this->assertEquals( $data_sample[ ContentDiffMigrator::DATAKEY_POSTMETA ], $postmeta_rows_actual );
 	}
@@ -194,37 +115,13 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		$post_author_id = 22;
 
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
-
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
 		$wpdb_get_row_map = [];
-		$wpdb_get_results_map = [];
-
 
 		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_row' ] )
-		                  ->getMock();
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+$logic = new ContentDiffMigrator( $this->wpdb_mock );
+// TODO try and move to the bottom to see if $this->wpdb_mock is passed by reference and can be configured afterwards. I think... it should work, objects are passed by reference, aren't they :)
 
 		$author_row_sample = $logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
 
@@ -235,17 +132,13 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_get_row_map[] = [ $sql, ARRAY_A, $author_row_sample ];
 
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		          ->method( 'get_row' )
 		          ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		//           ->method( 'get_results' )
-		//           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
 		// Execute and assert.
 
@@ -261,43 +154,15 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_post_author_usermeta_rows( $data_sample ) {
 
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
 		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
 
 
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
-		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$authormeta_rows_sample = $logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
 
@@ -307,15 +172,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $post_author_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $authormeta_rows_sample ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
@@ -334,40 +195,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
 
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
-
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
-		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		// Expected calls to $wpdb::prepare() and $wpdb::get_row().
 		$sql_prepare = "SELECT * FROM {$live_table_prefix}comments WHERE comment_post_ID = %s";
@@ -375,15 +207,10 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $post_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $data_sample[ ContentDiffMigrator::DATAKEY_COMMENTS ] ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
-
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
@@ -399,12 +226,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_commentmeta_rows( $data_sample ) {
 
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
 		$comment_1_id = 11;
 		// Comment 2 with an existing user (same as Post Author).
 		$comment_2_id = 12;
@@ -423,19 +245,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
-		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$commentmeta_rows_sample = $logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
 
@@ -445,15 +257,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $comment_1_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $commentmeta_rows_sample ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
@@ -469,44 +277,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_comment_user_row( $data_sample ) {
 
-		// Prepare parameters.
-
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
 		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
 
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
 		$wpdb_get_row_map = [];
-		$wpdb_get_results_map = [];
 
 
 		// Prepare mock and expectations.
 
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_row' ] )
-		                  ->getMock();
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$user_row_sample = $logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
 
@@ -517,19 +298,13 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_get_row_map[] = [ $sql, ARRAY_A, $user_row_sample ];
 
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		          ->method( 'get_row' )
 		          ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		//           ->method( 'get_results' )
-		//           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
-
-		// Execute and assert.
 
 		$user_row_actual = $logic->select_user_row( $live_table_prefix, $comment_3_user_id );
 
@@ -543,43 +318,15 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_comment_usermeta_rows( $data_sample ) {
 
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
 		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
 
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
 		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$usermeta_rows_sample = $logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
 
@@ -589,15 +336,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $comment_3_user_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $usermeta_rows_sample ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
@@ -616,41 +359,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
 
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
-
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
-		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
-
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$term_relationships_rows_sample = $logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
 
@@ -660,15 +373,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $post_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $term_relationships_rows_sample ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
@@ -684,45 +393,15 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_term_taxonomy_rows( $data_sample ) {
 
-		// Prepare parameters.
-
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
 		$term_taxonomy_1_id = 1;
 		$term_taxonomy_2_id = 2;
-
-		// Term 1 has some meta.
-		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
 
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
 		$wpdb_get_row_map = [];
-		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_row' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$term_taxonomy_rows_sample = [
 			$logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'ID', $term_taxonomy_1_id ),
@@ -738,21 +417,14 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			$wpdb_get_row_map[] = [ $sql, ARRAY_A, $term_taxonomy_row_sample ];
 		}
 
-
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		          ->method( 'get_row' )
 		          ->will( $this->returnValueMap( $wpdb_get_row_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		//           ->method( 'get_results' )
-		//           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
-
-		// Execute and assert.
 
 		$term_taxonomy_rows_actual = [];
 		foreach ( $term_taxonomy_rows_sample as $term_taxonomy_row_sample ) {
@@ -771,44 +443,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_terms_rows( $data_sample ) {
 
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
 		// Term 1 has some meta.
 		$term_1_id = 41;
 		// Term 2 has no meta.
 		$term_2_id = 42;
 
-
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
 		$wpdb_get_row_map = [];
-		$wpdb_get_results_map = [];
 
-
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_row' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
-
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$term_1_row_sample = $logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_1_id );
 		$term_2_row_sample = $logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
@@ -825,17 +470,13 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $term_2_id ], $sql ];
 		$wpdb_get_row_map[] = [ $sql, ARRAY_A, $term_2_row_sample ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		          ->method( 'get_row' )
 		          ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		//           ->method( 'get_results' )
-		//           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
 		$terms_rows_actual = array_merge(
 			$logic->select_terms_row( $live_table_prefix, $term_1_id ),
@@ -852,43 +493,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_termmeta_rows( $data_sample ) {
 
-		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
-
-		$post_author_id = 22;
-
-		// Comment 1 without a user and some meta.
-		$comment_1_id = 11;
-		// Comment 2 with an existing user (same as Post Author).
-		$comment_2_id = 12;
-		// Comment 3 with an new user and a comment parent.
-		$comment_3_id = 13;
-		$comment_3_user_id = 23;
-
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-
 		// Term 1 has some meta.
 		$term_1_id = 41;
-		// Term 2 has no meta.
-		$term_2_id = 42;
-
 
 		// Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
 		$wpdb_prepare_map = [];
-		$wpdb_get_row_map = [];
 		$wpdb_get_results_map = [];
 
 
-		// Prepare mock and expectations.
-
-		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                  ->setMethods( [ 'prepare', 'get_results' ] )
-		                  ->getMock();
-
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 
 		$termmeta_rows_sample = $logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_1_id );
 
@@ -898,15 +512,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$wpdb_prepare_map[] = [ $sql_prepare, [ $term_1_id ], $sql ];
 		$wpdb_get_results_map[] = [ $sql, ARRAY_A, $termmeta_rows_sample ];
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		          ->method( 'get_results' )
 		          ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
@@ -930,7 +540,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 *
 	 * @dataProvider db_data_provider
 	 */
-	public function test_should_select_from_db_and_load_data_array( $data_expected ) {
+	public function __test_should_select_from_db_and_load_data_array( $data_expected ) {
 
 		// $post_id = 123;
 		// $post_author_id = 22;
@@ -1239,23 +849,23 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
 		// the Mock Builder for 'stdClass' instead.
-		$wpdb_mock = $this->getMockBuilder( 'stdClass' )
+		$this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
 		                  ->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
 		                  ->getMock();
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		          ->method( 'prepare' )
 		          ->will( $this->returnValueMap( $wpdb_prepare_map ) );
 
-		$wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		          ->method( 'get_row' )
 		          ->will( $this->returnValueMap( $wpdb_get_row_map ) );
 
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		//           ->method( 'get_results' )
 		//           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
 
-		$logic = new ContentDiffMigrator( $wpdb_mock );
+		$logic = new ContentDiffMigrator( $this->wpdb_mock );
 		$data = $logic->get_data( $post_id, $live_table_prefix );
 
 
@@ -1325,23 +935,23 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// // Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
 		// // the Mock Builder for 'stdClass' instead.
-		// $wpdb_mock = $this->getMockBuilder( 'stdClass' )
+		// $this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
 		// 	->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
 		// 	->getMock();
 		//
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
+		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
 		// 	->method( 'prepare' )
 		// 	->will( $this->returnValueMap( $wpdb_prepare_map ) );
 		//
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
+		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
 		// 	->method( 'get_row' )
 		// 	->will( $this->returnValueMap( $wpdb_get_row_map ) );
 		//
-		// $wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
+		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
 		// 	->method( 'get_results' )
 		// 	->will( $this->returnValueMap( $wpdb_get_results_map ) );
 		//
-		// $logic = new ContentDiffMigrator( $wpdb_mock );
+		// $logic = new ContentDiffMigrator( $this->wpdb_mock );
 		// $data = $logic->get_data( $post_id, $live_table_prefix );
 		//
 		//
