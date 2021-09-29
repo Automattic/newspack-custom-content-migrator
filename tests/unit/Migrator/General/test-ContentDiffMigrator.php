@@ -33,7 +33,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		parent::setUp();
 
 		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// the Mock Builder for 'stdClass' instead.
+		// Mock Builder for the 'stdClass' instead.
 		$this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
 		                        ->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
 		                        ->getMock();
@@ -446,6 +446,170 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Creates a blank array which will contain value map subarrays as defined by \PHPUnit\Framework\TestCase::returnValueMap
+	 * used by mock expectation in \PHPUnit\Framework\MockObject\Builder\InvocationMocker::will to mock calls to $wpdb.
+	 *
+	 * @return array[]
+	 */
+	private function get_empty_wpdb_return_value_maps() {
+		return [
+			'wpdb::prepare' => [],
+			'wpdb::get_row' => [],
+			'wpdb::get_results' => [],
+		];
+	}
+
+	/**
+	 * Builds return value for posts table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps         Array containing return value maps.
+	 * @param array  $post_row     Post row.
+	 * @param string $table_prefix Table prefix.
+	 */
+	private function build_value_maps_select_post_row( &$maps, $post_row, $table_prefix ) {
+		$post_id = $post_row[ 'ID' ];
+		$sql_prepare = "SELECT * FROM {$table_prefix}posts WHERE ID = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
+		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $post_row ];
+	}
+
+	/**
+	 * Builds return value for postmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps          Array containing return value maps.
+	 * @param array  $postmeta_rows Post Meta rows.
+	 * @param string $table_prefix  Table prefix.
+	 * @param int    $post_id       Post ID.
+	 */
+	private function build_value_maps_select_postmeta_rows( &$maps, $postmeta_rows, $table_prefix, $post_id ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}postmeta WHERE post_id = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
+		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $postmeta_rows ];
+	}
+
+	/**
+	 * Builds return value for comments table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps          Array containing return value maps.
+	 * @param array  $comments_rows Comments rows.
+	 * @param string $table_prefix  Table prefix.
+	 * @param int    $post_id       Post ID.
+	 */
+	private function build_value_maps_select_comments_rows( &$maps, $comments_rows, $table_prefix, $post_id ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}comments WHERE comment_post_ID = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
+		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $comments_rows ];
+	}
+
+	/**
+	 * Builds return value for commentmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps             Array containing return value maps.
+	 * @param array  $commentmeta_rows Comment Meta rows.
+	 * @param string $table_prefix     Table prefix.
+	 * @param int    $comment_id       Commend ID.
+	 */
+	private function build_value_maps_select_commentmeta_rows( &$maps, $commentmeta_rows, $table_prefix, $comment_id ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}commentmeta WHERE comment_id = %s";
+		$sql = sprintf( $sql_prepare, $comment_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $comment_id ], $sql ];
+		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $commentmeta_rows ];
+	}
+
+	/**
+	 * Builds return value for user table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps         Array containing return value maps.
+	 * @param array  $user_row     User row.
+	 * @param string $table_prefix Table prefix.
+	 */
+	private function build_value_maps_select_user_row( &$maps, $user_row, $table_prefix ) {
+		$user_id = $user_row[ 'ID' ];
+		$sql_prepare = "SELECT * FROM {$table_prefix}users WHERE ID = %s";
+		$sql = sprintf( $sql_prepare, $user_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $user_id ], $sql ];
+		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $user_row ];
+	}
+
+	/**
+	 * Builds return value for usermeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps         Array containing return value maps.
+	 * @param array  $usermeta_rows
+	 * @param string $table_prefix Table prefix.
+	 * @param int    $user_id
+	 */
+	private function build_value_maps_select_usermeta_rows( &$maps, $usermeta_rows, $table_prefix, $user_id ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}usermeta WHERE user_id = %s";
+		$sql = sprintf( $sql_prepare, $user_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $user_id ], $sql ];
+		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $usermeta_rows ];
+	}
+
+	/**
+	 * Builds return value for term_relationships table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps                    Array containing return value maps.
+	 * @param array  $term_relationships_rows Term Relationships rows.
+	 * @param string $table_prefix            Table prefix.
+	 * @param int    $post_id                 Post ID.
+	 */
+	private function build_value_maps_select_term_relationships_rows( &$maps, $term_relationships_rows, $table_prefix, $post_id ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}term_relationships WHERE object_id = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
+		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $term_relationships_rows ];
+	}
+
+	/**
+	 * Builds return value for term_taxonomy table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps               Array containing return value maps.
+	 * @param array  $term_taxonomy_rows Term Taxonomy rows.
+	 * @param string $table_prefix       Table prefix.
+	 */
+	private function build_value_maps_select_term_taxonomy_row( &$maps, $term_taxonomy_row, $table_prefix ) {
+		$term_taxonomy_id          = $term_taxonomy_row[ 'term_taxonomy_id' ];
+		$sql_prepare               = "SELECT * FROM {$table_prefix}term_taxonomy WHERE term_taxonomy_id = %s";
+		$sql                       = sprintf( $sql_prepare, $term_taxonomy_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_taxonomy_id ], $sql ];
+		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $term_taxonomy_row ];
+	}
+
+	/**
+	 * Builds return value for terms table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps         Array containing return value maps.
+	 * @param array  $terms_rows   Terms rows.
+	 * @param string $table_prefix Table prefix.
+	 */
+	private function build_value_maps_select_term_row( &$maps, $term_row, $table_prefix ) {
+		$term_id = $term_row[ 'term_id' ];
+		$sql_prepare = "SELECT * FROM {$table_prefix}terms WHERE term_id = %s";
+		$sql = sprintf( $sql_prepare, $term_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
+		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $term_row ];
+	}
+
+	/**
+	 * Builds return value for termmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps          Array containing return value maps.
+	 * @param array  $termmeta_rows Term Meta rows.
+	 * @param string $table_prefix  Table prefix.
+	 * @param int    $term_id       Term ID.
+	 */
+	private function build_value_maps_select_termmeta_rows( &$maps, $termmeta_rows, $table_prefix, $term_id ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}termmeta WHERE term_id = %s";
+		$sql = sprintf( $sql_prepare, $term_id );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
+		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $termmeta_rows ];
+	}
+
+	/**
 	 * Sample data.
 	 *
 	 * @return \array[][][] Array with keys and values defined in ContentDiffMigrator::get_empty_data_array.
@@ -692,169 +856,5 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 				]
 			]
 		];
-	}
-
-	/**
-	 * Creates a blank array which will contain value map subarrays as defined by \PHPUnit\Framework\TestCase::returnValueMap
-	 * used by mock expectation in \PHPUnit\Framework\MockObject\Builder\InvocationMocker::will to mock calls to $wpdb.
-	 *
-	 * @return array[]
-	 */
-	private function get_empty_wpdb_return_value_maps() {
-		return [
-			'wpdb::prepare' => [],
-			'wpdb::get_row' => [],
-			'wpdb::get_results' => [],
-		];
-	}
-
-	/**
-	 * Builds return value for posts table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $post_row     Post row.
-	 * @param string $table_prefix Table prefix.
-	 */
-	private function build_value_maps_select_post_row( &$maps, $post_row, $table_prefix ) {
-		$post_id = $post_row[ 'ID' ];
-		$sql_prepare = "SELECT * FROM {$table_prefix}posts WHERE ID = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $post_row ];
-	}
-
-	/**
-	 * Builds return value for postmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $postmeta_rows Post Meta rows.
-	 * @param string $table_prefix  Table prefix.
-	 * @param int    $post_id       Post ID.
-	 */
-	private function build_value_maps_select_postmeta_rows( &$maps, $postmeta_rows, $table_prefix, $post_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}postmeta WHERE post_id = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $postmeta_rows ];
-	}
-
-	/**
-	 * Builds return value for comments table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $comments_rows Comments rows.
-	 * @param string $table_prefix  Table prefix.
-	 * @param int    $post_id       Post ID.
-	 */
-	private function build_value_maps_select_comments_rows( &$maps, $comments_rows, $table_prefix, $post_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}comments WHERE comment_post_ID = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $comments_rows ];
-	}
-
-	/**
-	 * Builds return value for commentmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps             Array containing return value maps.
-	 * @param array  $commentmeta_rows Comment Meta rows.
-	 * @param string $table_prefix     Table prefix.
-	 * @param int    $comment_id       Commend ID.
-	 */
-	private function build_value_maps_select_commentmeta_rows( &$maps, $commentmeta_rows, $table_prefix, $comment_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}commentmeta WHERE comment_id = %s";
-		$sql = sprintf( $sql_prepare, $comment_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $comment_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $commentmeta_rows ];
-	}
-
-	/**
-	 * Builds return value for user table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $user_row     User row.
-	 * @param string $table_prefix Table prefix.
-	 */
-	private function build_value_maps_select_user_row( &$maps, $user_row, $table_prefix ) {
-		$user_id = $user_row[ 'ID' ];
-		$sql_prepare = "SELECT * FROM {$table_prefix}users WHERE ID = %s";
-		$sql = sprintf( $sql_prepare, $user_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $user_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $user_row ];
-	}
-
-	/**
-	 * Builds return value for usermeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $usermeta_rows
-	 * @param string $table_prefix Table prefix.
-	 * @param int    $user_id
-	 */
-	private function build_value_maps_select_usermeta_rows( &$maps, $usermeta_rows, $table_prefix, $user_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}usermeta WHERE user_id = %s";
-		$sql = sprintf( $sql_prepare, $user_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $user_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $usermeta_rows ];
-	}
-
-	/**
-	 * Builds return value for term_relationships table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps                    Array containing return value maps.
-	 * @param array  $term_relationships_rows Term Relationships rows.
-	 * @param string $table_prefix            Table prefix.
-	 * @param int    $post_id                 Post ID.
-	 */
-	private function build_value_maps_select_term_relationships_rows( &$maps, $term_relationships_rows, $table_prefix, $post_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}term_relationships WHERE object_id = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $term_relationships_rows ];
-	}
-
-	/**
-	 * Builds return value for term_taxonomy table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps               Array containing return value maps.
-	 * @param array  $term_taxonomy_rows Term Taxonomy rows.
-	 * @param string $table_prefix       Table prefix.
-	 */
-	private function build_value_maps_select_term_taxonomy_row( &$maps, $term_taxonomy_row, $table_prefix ) {
-		$term_taxonomy_id          = $term_taxonomy_row[ 'term_taxonomy_id' ];
-		$sql_prepare               = "SELECT * FROM {$table_prefix}term_taxonomy WHERE term_taxonomy_id = %s";
-		$sql                       = sprintf( $sql_prepare, $term_taxonomy_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_taxonomy_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $term_taxonomy_row ];
-	}
-
-	/**
-	 * Builds return value for terms table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $terms_rows   Terms rows.
-	 * @param string $table_prefix Table prefix.
-	 */
-	private function build_value_maps_select_term_row( &$maps, $term_row, $table_prefix ) {
-		$term_id = $term_row[ 'term_id' ];
-		$sql_prepare = "SELECT * FROM {$table_prefix}terms WHERE term_id = %s";
-		$sql = sprintf( $sql_prepare, $term_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $term_row ];
-	}
-
-	/**
-	 * Builds return value for termmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $termmeta_rows Term Meta rows.
-	 * @param string $table_prefix  Table prefix.
-	 * @param int    $term_id       Term ID.
-	 */
-	private function build_value_maps_select_termmeta_rows( &$maps, $termmeta_rows, $table_prefix, $term_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}termmeta WHERE term_id = %s";
-		$sql = sprintf( $sql_prepare, $term_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $termmeta_rows ];
 	}
 }

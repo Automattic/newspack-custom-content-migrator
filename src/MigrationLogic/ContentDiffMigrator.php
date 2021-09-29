@@ -134,9 +134,6 @@ class ContentDiffMigrator {
 					);
 				}
 			}
-
-			// TODO Update `wp_comments`.`comment_parent`s.
-
 		}
 
 		// Get Term Relationships.
@@ -228,6 +225,8 @@ class ContentDiffMigrator {
 			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
 			$this->insert_comment( $post_id, $comment_user_id, $comment_row, $commentmeta_rows );
 		}
+
+		// TODO Update `wp_comments`.`comment_parent`s after ID changes on insert.
 
 		// Insert Terms.
 		$terms_ids_updates = [];
