@@ -17,11 +17,14 @@ use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
 class TestContentDiffMigrator extends WP_UnitTestCase {
 
 	/**
-	 * ContentDiffMigrator.
-	 *
-	 * @var ContentDiffMigrator
+	 * @var \PHPUnit\Framework\MockObject\MockObject|stdClass
 	 */
-	// private $migrator;
+	private $wpdb_mock;
+
+	/**
+	 * @var ContentDiffMigrator.
+	 */
+	private $logic;
 
 	/**
 	 * Override setUp.
@@ -36,6 +39,34 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                        ->getMock();
 		$this->logic = new ContentDiffMigrator( $this->wpdb_mock );
 	}
+
+	/**
+
+	simulate failures
+	- using mocks for when your services break (db, payment, ...):
+	- ie.
+	// na drugom pozivu neke metode ovog objekta
+	// dakle gleda koja po redu je 'process' zvana !
+	$mock->expects($this->at(2))
+	->method('proceess')
+	->with($this->Order)
+	->will($this->throwException(
+	new GatewayOrderFailedException()
+	)):
+
+	check if objects interract correctly
+	ie. Check if Controller modifies Reponse correcdtly:
+	- mock Resonse obj, and check it's state
+
+	$response = $this->getMock('ResponseObj');
+	$response->expects($this->once())
+	->method('header')
+	->with('Location: /posts');
+	- Give this mock to controller and see how it uses it
+	$this->Controller->response = $response;
+	$this->Controller->myMethod();
+
+	 */
 
 	/**
 	 * @covers ContentDiffMigrator::get_data.
@@ -99,10 +130,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 * @dataProvider db_data_provider
 	 */
 	public function test_should_select_post_author_row( $data_sample ) {
+		// Prepare.
 		$live_table_prefix = 'live_wp_';
 		$post_author_id = 22;
 		$author_row_sample = $this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
 
+		// Mock.
 		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
 		$this->build_value_maps_select_user( $return_value_maps, $author_row_sample, $live_table_prefix, $post_author_id );
 		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
@@ -112,8 +145,10 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                ->method( 'get_row' )
 		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
 
+		// Run.
 		$author_row_actual = $this->logic->select_user_row( $live_table_prefix, $post_author_id );
 
+		// Assert.
 		$this->assertEquals( $author_row_sample, $author_row_actual );
 	}
 
@@ -181,7 +216,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_select_commentmeta_rows( $data_sample ) {
 		// Prepare.
 		$live_table_prefix = 'live_wp_';
-		// Comment 1 has some metas.
+		// Test data for Comment 1 has some metas.
 		$comment_1_id = 11;
 		$commentmeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
 
@@ -293,12 +328,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_term_taxonomy_rows( $data_sample ) {
 		$live_table_prefix = 'live_wp_';
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-		// $term_taxonomy_rows_sample = [
-		// 	$this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'ID', $term_taxonomy_1_id ),
-		// 	$this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'ID', $term_taxonomy_2_id ),
-		// ];
 		$term_taxonomy_rows_sample = $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ];
 
 		// Mock.
@@ -319,14 +348,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		}
 
 		$this->assertEquals( $term_taxonomy_rows_sample, $term_taxonomy_rows_actual );
-	}
-
-	private function get_empty_wpdb_return_value_maps() {
-		return [
-			'wpdb::prepare' => [],
-			'wpdb::get_row' => [],
-			'wpdb::get_results' => [],
-		];
 	}
 
 	/**
@@ -368,7 +389,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_select_termmeta_rows( $data_sample ) {
 		// Prepare.
 		$live_table_prefix = 'live_wp_';
-		// Term 1 has some meta.
+		// Test data for Term 1 has some meta.
 		$term_1_id = 41;
 		$termmeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_1_id );
 
@@ -404,32 +425,24 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$author_row_sample = $this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
 		$authormeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
 		$comments_rows_sample = $data_sample[ ContentDiffMigrator::DATAKEY_COMMENTS ];
-		// Comment 1 has some metas.
-		$comment_3_user_id = 23;
-		$user_row_sample = $this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
-		// Comment 1 has some metas.
+		// Test data for Comment 1 has some metas.
 		$comment_1_id = 11;
 		$comment_2_id = 12;
 		$comment_3_id = 13;
 		$comment_1_commentmeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
 		$comment_2_commentmeta_rows_sample = [];
 		$comment_3_commentmeta_rows_sample = [];
+		$comment_3_user_id = 23;
+		$user_row_sample = $this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
+		$usermeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
 		$term_relationships_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-		// $term_taxonomy_rows_sample = [
-		// 	$this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'ID', $term_taxonomy_1_id ),
-		// 	$this->logic->filter_array_element( $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'ID', $term_taxonomy_2_id ),
-		// ];
 		$term_taxonomy_rows_sample = $data_sample[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ];
 		$terms_rows_sample = $data_sample[ ContentDiffMigrator::DATAKEY_TERMS ];
+		// Test data for Term 1 has some metas.
 		$term_1_id = 41;
 		$term_2_id = 42;
-		// $termmeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_1_id );
 		$term_1_termmeta_rows_sample = $data_sample[ ContentDiffMigrator::DATAKEY_TERMMETA ];
 		$term_2_termmeta_rows_sample = [];
-		$comment_3_user_id = 23;
-		$usermeta_rows_sample = $this->logic->filter_array_elements( $data_sample[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
 
 		// Mock.
 		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
@@ -458,163 +471,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                ->method( 'get_results' )
 		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
 
+		// Run.
 		$data_actual = $this->logic->get_data( $post_id, $live_table_prefix );
-// unset( $data_sample[ ContentDiffMigrator::DATAKEY_TERMMETA ] );
-// unset( $data_actual[ ContentDiffMigrator::DATAKEY_TERMMETA ] );
 
+		// Assert.
 		$this->assertEquals( $data_sample, $data_actual );
-return;
-
-
-		// $post_id = 123;
-		// $post_author_id = 22;
-		// $live_table_prefix = 'live_wp_';
-		//
-		// $this->mock_wpdb_select_posts( $this->wpdb_mock, $data_sample, $live_table_prefix, $post_id );
-		//
-		//
-		//
-		// // TODO use DataProvider for queried rows and for value maps.
-		//
-		//
-		//
-		//
-		//
-		// // Comment 1 without a user and some meta.
-		// $comment_1_id = 11;
-		// // Comment 2 with an existing user (same as Post Author).
-		// $comment_2_id = 12;
-		// // Comment 3 with an new user and a comment parent.
-		// $comment_3_id = 13;
-		// $comment_3_user_id = 23;
-		// $term_taxonomy_1_id = 1;
-		// $term_taxonomy_2_id = 2;
-		// // Term 1 has some meta.
-		// $term_1_id = 41;
-		// // Term 2 has no meta.
-		// $term_2_id = 42;
-		//
-		//
-		// // Value maps are defined by \PHPUnit\Framework\TestCase::returnValueMap (they consist of [ arg1, arg2, ..., return_value ]).
-		// $wpdb_prepare_map = [];
-		// $wpdb_get_row_map = [];
-		// $wpdb_get_results_map = [];
-		//
-		// // `live_wp_posts` expected calls to $wpdb::prepare() and $wpdb::get_row().
-		// $wpdb_prepare_map[] = [ ' WHERE ID = %s', [ $post_id ], " WHERE ID = {$post_id}" ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE ID = %s', $live_table_prefix . 'posts', $post_id ), ARRAY_A, $data_expected[ ContentDiffMigrator::DATAKEY_POST ] ];
-		//
-		// // Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// // the Mock Builder for 'stdClass' instead.
-		// $this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		//                   ->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
-		//                   ->getMock();
-		//
-		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
-		//           ->method( 'prepare' )
-		//           ->will( $this->returnValueMap( $wpdb_prepare_map ) );
-		//
-		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		//           ->method( 'get_row' )
-		//           ->will( $this->returnValueMap( $wpdb_get_row_map ) );
-		//
-		// // $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		// //           ->method( 'get_results' )
-		// //           ->will( $this->returnValueMap( $wpdb_get_results_map ) );
-		//
-		// $data = $this->logic->get_data( $post_id, $live_table_prefix );
-		//
-		//
-		// // TODO use DataProvider for queried rows and for value maps.
-		//
-		//
-		// $this->assertEquals( $data_expected[ ContentDiffMigrator::DATAKEY_POST ], $data[ ContentDiffMigrator::DATAKEY_POST ] );
-		//
-
-		// // `live_wp_posts` expected calls to $wpdb::prepare() and $wpdb::get_row().
-		// $wpdb_prepare_map[] = [ ' WHERE ID = %s', [ $post_id ], " WHERE ID = {$post_id}" ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE ID = %s', $live_table_prefix . 'posts', $post_id ), ARRAY_A, $post_row ];
-		//
-		// // `live_wp_postmeta` expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE post_id = %s', [ $post_id ], " WHERE post_id = {$post_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE post_id = %s', $live_table_prefix . 'postmeta', $post_id ), ARRAY_A, $postmeta_rows ];
-		//
-		// // `live_wp_users` expected calls to $wpdb::prepare() and $wpdb::get_row().
-		// $wpdb_prepare_map[] = [ ' WHERE ID = %s', [ $post_author_id ], " WHERE ID = {$post_author_id}" ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE ID = %s', $live_table_prefix . 'users', $post_author_id ), ARRAY_A, $author_user_row ];
-		//
-		// // `live_wp_usermeta` expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE user_id = %s', [ $post_author_id ], " WHERE user_id = {$post_author_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE user_id = %s', $live_table_prefix . 'usermeta', $post_author_id ), ARRAY_A, $author_usermeta_rows ];
-		//
-		// // `live_wp_comments` expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE comment_post_ID = %s', [ $post_id ], " WHERE comment_post_ID = {$post_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE comment_post_ID = %s', $live_table_prefix . 'comments', $post_id ), ARRAY_A, $comments_rows ];
-		//
-		// // `live_wp_commentmeta` expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE comment_id = %s', [ $comment_1_id ], " WHERE comment_id = {$comment_1_id}" ];
-		// $wpdb_prepare_map[] = [ ' WHERE comment_id = %s', [ $comment_2_id ], " WHERE comment_id = {$comment_2_id}" ];
-		// $wpdb_prepare_map[] = [ ' WHERE comment_id = %s', [ $comment_3_id ], " WHERE comment_id = {$comment_3_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE comment_id = %s', $live_table_prefix . 'commentmeta', $comment_1_id ), ARRAY_A, $comment_1_meta_rows ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE comment_id = %s', $live_table_prefix . 'commentmeta', $comment_2_id ), ARRAY_A, [] ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE comment_id = %s', $live_table_prefix . 'commentmeta', $comment_3_id ), ARRAY_A, [] ];
-		//
-		// // Comment 3 User expected calls to $wpdb::prepare() and $wpdb::get_row().
-		// $wpdb_prepare_map[] = [ ' WHERE ID = %s', [ $comment_3_user_id ], " WHERE ID = {$comment_3_user_id}" ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE ID = %s', $live_table_prefix . 'users', $comment_3_user_id ), ARRAY_A, $comment_3_user_row ];
-		//
-		// // Comment 3 User Metas expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE user_id = %s', [ $comment_3_user_id ], " WHERE user_id = {$comment_3_user_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE user_id = %s', $live_table_prefix . 'usermeta', $comment_3_user_id ), ARRAY_A, $comment_3_user_meta_rows ];
-		//
-		// // `live_wp_term_relationships` expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE object_id = %s', [ $post_id ], " WHERE object_id = {$post_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE object_id = %s', $live_table_prefix . 'term_relationships', $post_id ), ARRAY_A, $term_relationships_rows ];
-		//
-		// // `live_wp_term_taxonomy` expected calls to $wpdb::prepare() and $wpdb::get_row().
-		// $wpdb_prepare_map[] = [ ' WHERE term_taxonomy_id = %s', [ $term_taxonomy_1_id ], " WHERE term_taxonomy_id = {$term_taxonomy_1_id}" ];
-		// $wpdb_prepare_map[] = [ ' WHERE term_taxonomy_id = %s', [ $term_taxonomy_2_id ], " WHERE term_taxonomy_id = {$term_taxonomy_2_id}" ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE term_taxonomy_id = %s', $live_table_prefix . 'term_taxonomy', $term_taxonomy_1_id ), ARRAY_A, $term_taxonomy_1_row ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE term_taxonomy_id = %s', $live_table_prefix . 'term_taxonomy', $term_taxonomy_2_id ), ARRAY_A, $term_taxonomy_2_row ];
-		//
-		// // `live_wp_terms` expected calls to $wpdb::prepare() and $wpdb::get_row().
-		// $wpdb_prepare_map[] = [ ' WHERE term_id = %s', [ $term_1_id ], " WHERE term_id = {$term_1_id}" ];
-		// $wpdb_prepare_map[] = [ ' WHERE term_id = %s', [ $term_2_id ], " WHERE term_id = {$term_2_id}" ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE term_id = %s', $live_table_prefix . 'terms', $term_1_id ), ARRAY_A, $term_1_row ];
-		// $wpdb_get_row_map[] = [ sprintf( 'SELECT * FROM %s WHERE term_id = %s', $live_table_prefix . 'terms', $term_2_id ), ARRAY_A, $term_2_row ];
-		//
-		// // `live_wp_termmeta` expected calls to $wpdb::prepare() and $wpdb::get_results().
-		// $wpdb_prepare_map[] = [ ' WHERE term_id = %s', [ $term_1_id ], " WHERE term_id = {$term_1_id}" ];
-		// $wpdb_prepare_map[] = [ ' WHERE term_id = %s', [ $term_2_id ], " WHERE term_id = {$term_2_id}" ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE term_id = %s', $live_table_prefix . 'termmeta', $term_1_id ), ARRAY_A, $term_1_meta_rows ];
-		// $wpdb_get_results_map[] = [ sprintf( 'SELECT * FROM %s WHERE term_id = %s', $live_table_prefix . 'termmeta', $term_2_id ), ARRAY_A, [] ];
-
-		// // Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
-		// // the Mock Builder for 'stdClass' instead.
-		// $this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		// 	->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
-		// 	->getMock();
-		//
-		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_prepare_map ) ) )
-		// 	->method( 'prepare' )
-		// 	->will( $this->returnValueMap( $wpdb_prepare_map ) );
-		//
-		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_row_map ) ) )
-		// 	->method( 'get_row' )
-		// 	->will( $this->returnValueMap( $wpdb_get_row_map ) );
-		//
-		// $this->wpdb_mock->expects( $this->exactly( count( $wpdb_get_results_map ) ) )
-		// 	->method( 'get_results' )
-		// 	->will( $this->returnValueMap( $wpdb_get_results_map ) );
-		//
-		// $this->logic = new ContentDiffMigrator( $this->wpdb_mock );
-		// $data = $this->logic->get_data( $post_id, $live_table_prefix );
-		//
-		//
-		// // TODO use DataProvider for queried rows and for value maps.
-		//
-		//
-		// $this->assertEquals( $data_expected, $data );
 	}
 
 	/**
@@ -866,38 +727,13 @@ return;
 		];
 	}
 
-	// public function test_should_insert_data_correctly() {
-	// 	// exact wpdb calls
-	// }
-
-	/**
-
-		simulate failures
-			- using mocks for when your services break (db, payment, ...):
-			- ie.
-		// na drugom pozivu neke metode ovog objekta
-		// dakle gleda koja po redu je 'process' zvana !
-			$mock->expects($this->at(2))
-				->method('proceess')
-				->with($this->Order)
-				->will($this->throwException(
-					new GatewayOrderFailedException()
-				)):
-
-		check if objects interract correctly
-		ie. Check if Controller modifies Reponse correcdtly:
-			- mock Resonse obj, and check it's state
-
-			$response = $this->getMock('ResponseObj');
-			$response->expects($this->once())
-				->method('header')
-				->with('Location: /posts');
-		- Give this mock to controller and see how it uses it
-			$this->Controller->response = $response;
-			$this->Controller->myMethod();
-
-	 */
-
+	private function get_empty_wpdb_return_value_maps() {
+		return [
+			'wpdb::prepare' => [],
+			'wpdb::get_row' => [],
+			'wpdb::get_results' => [],
+		];
+	}
 
 	private function build_value_maps_select_post( &$maps, $post_row_sample, $live_table_prefix, $post_id ) {
 		$sql_prepare = "SELECT * FROM {$live_table_prefix}posts WHERE ID = %s";

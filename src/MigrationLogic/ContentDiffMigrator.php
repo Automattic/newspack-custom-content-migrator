@@ -155,12 +155,6 @@ class ContentDiffMigrator {
 			// Get Terms.
 			$term_id = $term_taxonomy[ 'term_id' ];
 			$data[ self::DATAKEY_TERMS ][] = $this->select_terms_row( $table_prefix, $term_id );
-
-			// // Get Term Metas.
-			// $data[ self::DATAKEY_TERMMETA ] = array_merge(
-			// 	$this->select_termmeta_rows( $table_prefix, $term_id ),
-			// 	$data[ self::DATAKEY_TERMMETA ]
-			// );
 		}
 
 		// Get Term Metas.
