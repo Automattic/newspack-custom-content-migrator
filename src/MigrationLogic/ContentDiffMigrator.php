@@ -91,49 +91,46 @@ class ContentDiffMigrator {
 		$data = $this->get_empty_data_array();
 
 		// Get Post.
-		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
-		if ( empty( $post_row ) ) {
-			// TODO empty
-		}
+		$post_row = $this->select_post_row( $table_prefix, $post_id );
 		$data[ self::DATAKEY_POST ] = $post_row;
 
 		// Get Post Metas.
-		$data[ self::DATAKEY_POSTMETA ] = $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
+		$data[ self::DATAKEY_POSTMETA ] = $this->select_postmeta_rows( $table_prefix, $post_id );
 
 		// Get Post Author User.
-		$author = $this->select( $table_prefix . 'users', [ 'ID' => $data[ self::DATAKEY_POST ][ 'post_author' ] ], $select_just_one_row = true );
-		$data[ self::DATAKEY_USERS ][] = $author;
+		$author_row = $this->select_user_row( $table_prefix, $data[ self::DATAKEY_POST ][ 'post_author' ] );
+		$data[ self::DATAKEY_USERS ][] = $author_row;
 
 		// Get Post Author User Metas.
 		$data[ self::DATAKEY_USERMETA ] = array_merge(
 			$data[ self::DATAKEY_USERMETA ],
-			$this->select( $table_prefix . 'usermeta', [ 'user_id' => $author[ 'ID' ] ] )
+			$this->select_usermeta_rows( $table_prefix, $author_row[ 'ID' ] )
 		);
 
 		// Get Comments.
 		if ( $post_row[ 'comment_count' ] > 0 ) {
-			$comments = $this->select( $table_prefix . 'comments', [ 'comment_post_ID' => $post_id ] );
+			$comment_rows = $this->select_comment_rows( $table_prefix, $post_id );
 			$data[ self::DATAKEY_COMMENTS ] = array_merge(
 				$data[ self::DATAKEY_COMMENTS ],
-				$comments
+				$comment_rows
 			);
 
 			// Get Comment Metas.
-			foreach ( $comments as $key_comment => $comment ) {
+			foreach ( $comment_rows as $key_comment => $comment ) {
 				$data[ self::DATAKEY_COMMENTMETA ] = array_merge(
 					$data[ self::DATAKEY_COMMENTMETA ],
-					$this->select( $table_prefix . 'commentmeta', [ 'comment_id' => $comment[ 'comment_ID' ] ] )
+					$this->select_commentmeta_rows( $table_prefix, $comment[ 'comment_ID' ] )
 				);
 
 				// Get Comment User if not already fetched.
-				if ( $comment[ 'user_id' ] > 0 && ! $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment[ 'user_id' ] ) ) {
-					$comment_user = $this->select( $table_prefix . 'users', [ 'ID' => $comment[ 'user_id' ] ], $select_just_one_row = true );
-					$data[ self::DATAKEY_USERS ][] = $comment_user;
+				if ( $comment[ 'user_id' ] > 0 && empty( $this->filter_array_elements( $data[ self::DATAKEY_USERS ], 'ID', $comment[ 'user_id' ] ) ) ) {
+					$comment_user_row = $this->select_user_row( $table_prefix, $comment[ 'user_id' ] );
+					$data[ self::DATAKEY_USERS ][] = $comment_user_row;
 
 					// Get Get Comment User Metas.
 					$data[ self::DATAKEY_USERMETA ] = array_merge(
 						$data[ self::DATAKEY_USERMETA ],
-						$this->select( $table_prefix . 'usermeta', [ 'user_id' => $comment_user[ 'ID' ] ] )
+						$this->select_usermeta_rows( $table_prefix, $comment_user_row[ 'ID' ] )
 					);
 				}
 			}
@@ -143,26 +140,25 @@ class ContentDiffMigrator {
 		}
 
 		// Get Term Relationships.
-		$term_relationships = $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
+		$term_relationships_rows = $this->select_term_relationships_rows( $table_prefix, $post_id );
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_merge(
 			$data[ self::DATAKEY_TERMRELATIONSHIPS ],
-			$term_relationships
+			$term_relationships_rows
 		);
 
 		// Get Term Taxonomies.
-		foreach ( $term_relationships as $term_relationship ) {
-			$term_taxonomy_id = $term_relationship[ 'term_taxonomy_id' ];
-			$term_taxonomy = $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
+		foreach ( $term_relationships_rows as $term_relationship_row ) {
+			$term_taxonomy_id = $term_relationship_row[ 'term_taxonomy_id' ];
+			$term_taxonomy = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
 
 			// Get Terms.
 			$term_id = $term_taxonomy[ 'term_id' ];
-			$data[ self::DATAKEY_TERMS ][] = $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
+			$data[ self::DATAKEY_TERMS ][] = $this->select_terms_row( $table_prefix, $term_id );
 
 			// Get Term Metas.
-			// $data[ self::DATAKEY_TERMMETA ][] = $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
 			$data[ self::DATAKEY_TERMMETA ] = array_merge(
-				$this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] ),
+				$this->select_termmeta_rows( $table_prefix, $term_id ),
 				$data[ self::DATAKEY_TERMMETA ]
 			);
 		}
@@ -263,8 +259,8 @@ class ContentDiffMigrator {
 		}
 
 		// Insert Term Relationships.
-		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship ) {
-			$term_taxonomy_id = $term_taxonomy_ids_updates[ $term_relationship[ 'term_taxonomy_id' ] ] ?? null;
+		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
+			$term_taxonomy_id = $term_taxonomy_ids_updates[ $term_relationship_row[ 'term_taxonomy_id' ] ] ?? null;
 			$this->insert_term_relationship( $post_id, $term_taxonomy_id );
 		}
 
@@ -359,7 +355,9 @@ class ContentDiffMigrator {
 				                  . ' ' . esc_sql( $column ) . ' = %s';
 			}
 			$where_sprintf = ' WHERE' . $where_sprintf;
-			$sql = $sql . $this->wpdb->prepare( $where_sprintf, array_values( $where_conditions ) );
+			$sql_sprintf = $sql . $where_sprintf;
+
+			$sql = $this->wpdb->prepare( $sql_sprintf, array_values( $where_conditions ) );
 		}
 
 		if ( true === $select_just_one_row ) {
@@ -367,6 +365,51 @@ class ContentDiffMigrator {
 		} else {
 			return $this->wpdb->get_results( $sql, ARRAY_A );
 		}
+	}
+
+	public function select_post_row( $table_prefix, $post_id ) {
+		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
+		if ( empty( $post_row ) ) {
+			// TODO empty
+		}
+
+		return $post_row;
+	}
+
+	public function select_postmeta_rows( $table_prefix, $post_id ) {
+		return $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
+	}
+
+	public function select_user_row( $table_prefix, $author_id ) {
+		return $this->select( $table_prefix . 'users', [ 'ID' => $author_id ], $select_just_one_row = true );
+	}
+
+	public function select_usermeta_rows( $table_prefix, $author_id ) {
+		return $this->select( $table_prefix . 'usermeta', [ 'user_id' => $author_id ] );
+	}
+
+	public function select_comment_rows( $table_prefix, $post_id ) {
+		return $this->select( $table_prefix . 'comments', [ 'comment_post_ID' => $post_id ] );
+	}
+
+	public function select_commentmeta_rows( $table_prefix, $comment_id ) {
+		return $this->select( $table_prefix . 'commentmeta', [ 'comment_id' => $comment_id ] );
+	}
+
+	public function select_term_relationships_rows( $table_prefix, $post_id ) {
+		return $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
+	}
+
+	public function select_term_taxonomy_row( $table_prefix, $term_taxonomy_id ) {
+		return $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
+	}
+
+	public function select_terms_row( $table_prefix, $term_id ) {
+		return $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
+	}
+
+	public function select_termmeta_rows( $table_prefix, $term_id ) {
+		return $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
 	}
 
 	/**
@@ -544,7 +587,7 @@ class ContentDiffMigrator {
 	 *
 	 * @return null|mixed
 	 */
-	private function filter_array_element( $array, $key, $value ) {
+	public function filter_array_element( $array, $key, $value ) {
 		foreach ( $array as $subarray ) {
 			if ( isset( $subarray[ $key ] ) && $value == $subarray[ $key ] ) {
 				return $subarray;
@@ -564,7 +607,7 @@ class ContentDiffMigrator {
 	 *
 	 * @return array
 	 */
-	private function filter_array_elements( $array, $key, $value ) {
+	public function filter_array_elements( $array, $key, $value ) {
 		$found = [];
 		foreach ( $array as $subarray ) {
 			if ( isset( $subarray[ $key ] ) && $value == $subarray[ $key ] ) {
