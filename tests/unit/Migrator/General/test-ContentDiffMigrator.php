@@ -27,17 +27,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	private $logic;
 
 	/**
+	 * @var string Local table prefix.
+	 */
+	private $table_prefix;
+
+	/**
 	 * Override setUp.
 	 */
 	public function setUp() {
+		global $wpdb;
+
 		parent::setUp();
 
 		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
 		// Mock Builder for the 'stdClass' instead.
 		$this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                        ->setMethods( [ 'prepare', 'get_row', 'get_results' ] )
+		                        ->setMethods( [ 'prepare', 'get_row', 'get_results', 'insert', 'update' ] )
 		                        ->getMock();
+		$this->wpdb_mock->table_prefix = $wpdb->prefix;
+		$this->wpdb_mock->posts = $wpdb->prefix . 'posts';
+		$this->wpdb_mock->postmeta = $wpdb->prefix . 'postmeta';
+		$this->wpdb_mock->users = $wpdb->prefix . 'users';
+		$this->wpdb_mock->usermeta = $wpdb->prefix . 'usermeta';
+		$this->wpdb_mock->comments = $wpdb->prefix . 'comments';
+		$this->wpdb_mock->commentmeta = $wpdb->prefix . 'commentmeta';
 		$this->logic = new ContentDiffMigrator( $this->wpdb_mock );
+		$this->table_prefix = $wpdb->prefix;
 	}
 
 	/**
@@ -216,6 +231,36 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $comments_rows, $comment_rows_actual );
+	}
+
+	/**
+	 * Tests that a Comments is queried correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::select_comment_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_select_comment_row( $data ) {
+		// Prepare.
+		$comment_id = 11;
+		$live_table_prefix = 'live_wp_';
+		$comment_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_id );
+
+		// Mock
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_select_comment_row( $return_value_maps, $comment_row, $live_table_prefix, $comment_id );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		          ->method( 'prepare' )
+		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
+		          ->method( 'get_row' )
+		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
+
+		// Run.
+		$comment_row_actual = $this->logic->select_comment_row( $live_table_prefix, $comment_id );
+
+		// Assert.
+		$this->assertEquals( $comment_row, $comment_row_actual );
 	}
 
 	/**
@@ -446,6 +491,229 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a Post is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_post.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_post_row( $data ) {
+		// Prepare.
+		$new_post_id = 234;
+		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_post_row( $return_value_maps, $post_row, $new_post_id );
+		$this->wpdb_mock->insert_id = $new_post_id;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_post_id_actual = $this->logic->insert_post( $post_row );
+
+		// Assert.
+		$this->assertEquals( $new_post_id, $new_post_id_actual );
+	}
+
+	/**
+	 * Tests that a Post Meta rows are inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_postmeta.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_postmeta_rows( $data ) {
+		// Prepare.
+		$new_post_id = 333;
+		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_postmeta_rows( $return_value_maps, $postmeta_rows, $new_post_id );
+		$this->wpdb_mock->insert_id = 2;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_meta_ids_actual = $this->logic->insert_postmeta( $postmeta_rows, $new_post_id );
+
+		// Assert.
+		$new_meta_ids_expected = array_fill( 0, count( $postmeta_rows ), $this->wpdb_mock->insert_id );
+		$this->assertEquals( $new_meta_ids_expected, $new_meta_ids_actual );
+	}
+
+	/**
+	 * Tests that a User is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_user.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_user_row( $data ) {
+		// Prepare.
+		$new_user_id = 234;
+		$old_user_id = 22;
+		$user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $old_user_id );
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_user_row( $return_value_maps, $user_row, $new_user_id );
+		$this->wpdb_mock->insert_id = $new_user_id;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_post_id_actual = $this->logic->insert_user( $user_row );
+
+		// Assert.
+		$this->assertEquals( $new_user_id, $new_post_id_actual );
+	}
+
+	/**
+	 * Tests that a User Meta rows are inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_usermeta.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_usermeta_rows( $data ) {
+		// Prepare.
+		$new_user_id = 333;
+		$old_user_id = 22;
+		$usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $old_user_id );
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_postmeta_rows( $return_value_maps, $usermeta_rows, $new_user_id );
+		$this->wpdb_mock->insert_id = 2;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_meta_ids_actual = $this->logic->insert_usermeta( $usermeta_rows, $new_user_id );
+
+		// Assert.
+		$new_meta_ids_expected = array_fill( 0, count( $usermeta_rows ), $this->wpdb_mock->insert_id );
+		$this->assertEquals( $new_meta_ids_expected, $new_meta_ids_actual );
+	}
+
+	/**
+	 * Tests that a User is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::update_post_author.
+	 */
+	public function test_should_update_post_author() {
+		// Prepare.
+		$post_id = 123;
+		$new_author_id = 321;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_update_post_author( $return_value_maps, $post_id, $new_author_id );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+		                ->method( 'update' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+
+		// Run.
+		$updated_actual = $this->logic->update_post_author( $post_id, $new_author_id );
+
+		// Assert.
+		$this->assertEquals( 1, $updated_actual );
+	}
+
+	/**
+	 * Tests that a Comment is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_comment.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_comment_row( $data ) {
+		// Prepare.
+		$old_comment_id = 11;
+		$new_comment_id = 456;
+		$comment_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $old_comment_id );
+		$new_post_id = 234;
+		$new_user_id = 345;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_comment_row( $return_value_maps, $comment_row, $new_post_id, $new_user_id );
+		$this->wpdb_mock->insert_id = $new_comment_id;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_comment_id_actual = $this->logic->insert_comment( $comment_row, $new_post_id, $new_user_id );
+
+		// Assert.
+		$this->assertEquals( $new_comment_id, $new_comment_id_actual );
+	}
+
+	/**
+	 * Tests that Comment Metas are inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_commentmetas.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_commentmeta_row( $data ) {
+		// Prepare.
+		$old_comment_id = 11;
+		$new_comment_id = 456;
+		$commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $old_comment_id );
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_commentmeta_rows( $return_value_maps, $commentmeta_rows, $new_comment_id );
+		$this->wpdb_mock->insert_id = 2;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$commentmeta_ids_actual = $this->logic->insert_commentmetas( $commentmeta_rows, $new_comment_id );
+
+		// Assert.
+		$commentmeta_ids_expected = array_fill( 0, count( $commentmeta_rows ), $this->wpdb_mock->insert_id);
+		$this->assertEquals( $commentmeta_ids_actual, $commentmeta_ids_expected );
+	}
+
+	/**
+	 * Tests that a Comment Parent is updated correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::update_comment_parent.
+	 */
+	public function test_should_update_comment_parent() {
+		// Prepare.
+		$comment_id = 11;
+		$comment_parent_new = 432;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_update_comment_parent( $return_value_maps, $comment_id, $comment_parent_new );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+		                ->method( 'update' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+
+		// Run.
+		$updated_actual = $this->logic->update_comment_parent( $comment_id, $comment_parent_new );
+
+		// Assert.
+		$this->assertEquals( 1, $updated_actual );
+	}
+
+
+
+	// TODO test error returns from select/insert methods.
+
+	/**
 	 * Creates a blank array which will contain value map subarrays as defined by \PHPUnit\Framework\TestCase::returnValueMap
 	 * used by mock expectation in \PHPUnit\Framework\MockObject\Builder\InvocationMocker::will to mock calls to $wpdb.
 	 *
@@ -456,11 +724,13 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'wpdb::prepare' => [],
 			'wpdb::get_row' => [],
 			'wpdb::get_results' => [],
+			'wpdb::insert' => [],
+			'wpdb::update' => [],
 		];
 	}
 
 	/**
-	 * Builds return value for posts table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for posts table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps         Array containing return value maps.
 	 * @param array  $post_row     Post row.
@@ -475,7 +745,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for postmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for postmeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps          Array containing return value maps.
 	 * @param array  $postmeta_rows Post Meta rows.
@@ -490,7 +760,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for comments table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for comments table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps          Array containing return value maps.
 	 * @param array  $comments_rows Comments rows.
@@ -505,7 +775,22 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for commentmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for comments table select query as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps         Array containing return value maps.
+	 * @param array  $comment_row  Comment row.
+	 * @param string $table_prefix Table prefix.
+	 * @param int    $comment_ID   Comment ID.
+	 */
+	private function build_value_maps_select_comment_row( &$maps, $comment_row, $table_prefix, $comment_ID ) {
+		$sql_prepare = "SELECT * FROM {$table_prefix}comments WHERE comment_ID = %s";
+		$sql = sprintf( $sql_prepare, $comment_ID );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $comment_ID ], $sql ];
+		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $comment_row ];
+	}
+
+	/**
+	 * Builds return value maps for commentmeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps             Array containing return value maps.
 	 * @param array  $commentmeta_rows Comment Meta rows.
@@ -520,7 +805,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for user table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for user table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps         Array containing return value maps.
 	 * @param array  $user_row     User row.
@@ -535,7 +820,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for usermeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for usermeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps         Array containing return value maps.
 	 * @param array  $usermeta_rows
@@ -550,7 +835,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for term_relationships table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for term_relationships table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps                    Array containing return value maps.
 	 * @param array  $term_relationships_rows Term Relationships rows.
@@ -565,7 +850,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for term_taxonomy table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for term_taxonomy table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps               Array containing return value maps.
 	 * @param array  $term_taxonomy_rows Term Taxonomy rows.
@@ -580,7 +865,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for terms table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for terms table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps         Array containing return value maps.
 	 * @param array  $terms_rows   Terms rows.
@@ -595,7 +880,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Builds return value for termmeta table select queries as used by \PHPUnit\Framework\TestCase::returnValueMap.
+	 * Builds return value maps for termmeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
 	 * @param array  $maps          Array containing return value maps.
 	 * @param array  $termmeta_rows Term Meta rows.
@@ -607,6 +892,113 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$sql = sprintf( $sql_prepare, $term_id );
 		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
 		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $termmeta_rows ];
+	}
+
+	/**
+	 * Builds return value maps for insert into posts table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps        Array containing return value maps.
+	 * @param array  $post_row    Post row.
+	 * @param int    $new_post_id Newly inserted Post ID.
+	 */
+	private function build_value_maps_insert_post_row( &$maps, $post_row, $new_post_id ) {
+		unset( $post_row[ 'ID' ] );
+		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'posts', $post_row, 1 ];
+	}
+
+	/**
+	 * Builds return value maps for insert into posts table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps          Array containing return value maps.
+	 * @param array  $postmeta_rows Post meta rows.
+	 * @param int    $new_post_id   Post ID to which this meta will be assigned to.
+	 */
+	private function build_value_maps_insert_postmeta_rows( &$maps, $postmeta_rows, $new_post_id ) {
+		foreach ( $postmeta_rows as $key_postmeta_row => $postmeta_row ) {
+			unset( $postmeta_row[ 'post_id' ] );
+			$postmeta_row[ 'post_id' ] = $new_post_id;
+			$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'postmeta', $postmeta_rows, $key_postmeta_row + 1 ];
+		}
+	}
+
+	/**
+	 * Builds return value maps for insert into users table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps        Array containing return value maps.
+	 * @param array $user_row    User row.
+	 * @param int   $new_user_id Newly inserted user ID.
+	 */
+	private function build_value_maps_insert_user_row( &$maps, $user_row, $new_user_id ) {
+		unset( $user_row[ 'ID' ] );
+		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'users', $user_row, 1 ];
+	}
+
+	/**
+	 * Builds return value maps for insert into usermeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps          Array containing return value maps.
+	 * @param array $usermeta_rows Post meta rows.
+	 * @param int   $new_user_id   User ID to which this meta will be assigned to.
+	 */
+	private function build_value_maps_insert_usermeta_rows( &$maps, $usermeta_rows, $new_user_id ) {
+		foreach ( $usermeta_rows as $key_usermeta_row => $usermeta_row ) {
+			unset( $usermeta_row[ 'post_id' ] );
+			$usermeta_row[ 'post_id' ] = $new_user_id;
+			$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'postmeta', $usermeta_rows, $key_usermeta_row + 1 ];
+		}
+	}
+
+	/**
+	 * Builds return value maps for ContentDiffMigrator::update_post_author usage of $wpdb as defined by
+	 * \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps          Array containing return value maps.
+	 * @param int   $post_id       Post ID.
+	 * @param int   $new_author_id New Author ID.
+	 */
+	private function build_value_maps_update_post_author( &$maps, $post_id, $new_author_id ) {
+		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ], 1 ];
+	}
+
+	/**
+	 * Builds return value maps for insert into comments table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps        Array containing return value maps.
+	 * @param array $user_row    User row.
+	 * @param int   $new_user_id Newly inserted user ID.
+	 */
+	private function build_value_maps_insert_comment_row( &$maps, $comment_row, $new_post_id, $new_user_id ) {
+		unset( $comment_row[ 'comment_id' ] );
+		$comment_row[ 'comment_post_id' ] = $new_post_id;
+		$comment_row[ 'user_id' ] = $new_user_id;
+		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'comments', $comment_row, 1 ];
+	}
+
+	/**
+	 * Builds return value maps for inserts into commentmeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps             Array containing return value maps.
+	 * @param array $commentmeta_rows Comment Meta rows.
+	 * @param int   $new_comment_id   Newly Comment ID.
+	 */
+	private function build_value_maps_insert_commentmeta_rows( &$maps, $commentmeta_rows, $new_comment_id ) {
+		foreach ( $commentmeta_rows as $commentmeta_row ) {
+			unset( $commentmeta_row[ 'meta_id' ] );
+			$commentmeta_row[ 'comment_id' ] = $new_comment_id ;
+			$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'commentmeta', $commentmeta_row, 1 ];
+		}
+	}
+
+	/**
+	 * Builds return value maps for ContentDiffMigrator::update_comment_parent usage of $wpdb as defined by
+	 * \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps               Array containing return value maps.
+	 * @param int   $comment_id         Comment ID.
+	 * @param int   $comment_parent_new New parent ID.
+	 */
+	private function build_value_maps_update_comment_parent( &$maps, $comment_id, $comment_parent_new ) {
+		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'comments', [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ], 1 ];
 	}
 
 	/**
@@ -660,7 +1052,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 						],
 					],
 					ContentDiffMigrator::DATAKEY_COMMENTS => [
-						// Comment 1 has no user.
+						// Comment 1 has no user, and has some meta.
 						[
 							'comment_ID' => 11,
 							'comment_post_ID' => 123,

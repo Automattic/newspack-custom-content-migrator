@@ -186,7 +186,8 @@ class ContentDiffMigrator {
 	 */
 	public function import_data( $data ) {
 		// Insert Post and Post Metas.
-		$post_id = $this->insert_post( $data[ self::DATAKEY_POST ], $data[ self::DATAKEY_POSTMETA ] );
+		$post_id = $this->insert_post( $data[ self::DATAKEY_POST ] );
+		$this->insert_postmeta( $data[ self::DATAKEY_POSTMETA ], $post_id );
 
 		// Insert Author User.
 		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
@@ -196,16 +197,19 @@ class ContentDiffMigrator {
 			$author_id = $author_existing->ID;
 		} else {
 			$author_metas_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row_id );
-			$author_id = $this->insert_user( $author_row, $author_metas_rows );
+			$author_id = $this->insert_user( $author_row );
+			$this->insert_usermeta( $author_metas_rows, $author_id );
 		}
 
 		// Update inserted Post's Author.
-		$this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $author_id ], [ 'ID' => $post_id ] );
+		$this->update_post_author( $post_id, $author_id );
 
 		// Insert Comments.
+		$comment_ids_updates = [];
 		foreach ( $data[ self::DATAKEY_COMMENTS ] as $comment_row ) {
+			$comment_id_old = $comment_row[ 'comment_ID' ];
 
-			// Insert the Comment User.
+			// First insert the Comment User, or get the existing one.
 			$comment_user_row_id = $comment_row[ 'user_id' ];
 			if ( 0 == $comment_user_row_id ) {
 				$comment_user_id = 0;
@@ -222,11 +226,21 @@ class ContentDiffMigrator {
 			}
 
 			// Insert Comment and Comment Metas.
+			$comment_id = $this->insert_comment( $comment_row, $post_id, $comment_user_id );
+			$comment_ids_updates[ $comment_id_old ] = $comment_id;
 			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
-			$this->insert_comment( $post_id, $comment_user_id, $comment_row, $commentmeta_rows );
+			$this->insert_commentmetas( $commentmeta_rows, $comment_id );
 		}
 
-		// TODO Update `wp_comments`.`comment_parent`s after ID changes on insert.
+		// Loop through all comments, and update their Parent IDs.
+		foreach ( $comment_ids_updates as $comment_id_old => $comment_id_new ) {
+			$comment_row = $this->select_comment_row( $this->wpdb->table_prefix, $comment_id_new );
+			$comment_parent = $comment_row[ 'comment_parent' ];
+			$comment_parent_new = $comment_ids_updates[ $comment_parent ] ?? null;
+			if ( $comment_parent > 0 && $comment_parent_new ) {
+				$this->update_comment_parent( $comment_id, $comment_parent_new );
+			}
+		}
 
 		// Insert Terms.
 		$terms_ids_updates = [];
@@ -337,6 +351,55 @@ class ContentDiffMigrator {
 		) );
 	}
 
+	public function select_post_row( $table_prefix, $post_id ) {
+		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
+		if ( empty( $post_row ) ) {
+			// TODO empty
+		}
+
+		return $post_row;
+	}
+
+	public function select_postmeta_rows( $table_prefix, $post_id ) {
+		return $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
+	}
+
+	public function select_user_row( $table_prefix, $author_id ) {
+		return $this->select( $table_prefix . 'users', [ 'ID' => $author_id ], $select_just_one_row = true );
+	}
+
+	public function select_usermeta_rows( $table_prefix, $author_id ) {
+		return $this->select( $table_prefix . 'usermeta', [ 'user_id' => $author_id ] );
+	}
+
+	public function select_comment_rows( $table_prefix, $post_id ) {
+		return $this->select( $table_prefix . 'comments', [ 'comment_post_ID' => $post_id ] );
+	}
+
+	public function select_comment_row( $table_prefix, $comment_ID ) {
+		return $this->select( $table_prefix . 'comments', [ 'comment_ID' => $comment_ID ], $select_just_one_row = true );
+	}
+
+	public function select_commentmeta_rows( $table_prefix, $comment_id ) {
+		return $this->select( $table_prefix . 'commentmeta', [ 'comment_id' => $comment_id ] );
+	}
+
+	public function select_term_relationships_rows( $table_prefix, $post_id ) {
+		return $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
+	}
+
+	public function select_term_taxonomy_row( $table_prefix, $term_taxonomy_id ) {
+		return $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
+	}
+
+	public function select_terms_row( $table_prefix, $term_id ) {
+		return $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
+	}
+
+	public function select_termmeta_rows( $table_prefix, $term_id ) {
+		return $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
+	}
+
 	/**
 	 * Simple select query with custom `where` conditions.
 	 *
@@ -368,61 +431,15 @@ class ContentDiffMigrator {
 		}
 	}
 
-	public function select_post_row( $table_prefix, $post_id ) {
-		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
-		if ( empty( $post_row ) ) {
-			// TODO empty
-		}
-
-		return $post_row;
-	}
-
-	public function select_postmeta_rows( $table_prefix, $post_id ) {
-		return $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
-	}
-
-	public function select_user_row( $table_prefix, $author_id ) {
-		return $this->select( $table_prefix . 'users', [ 'ID' => $author_id ], $select_just_one_row = true );
-	}
-
-	public function select_usermeta_rows( $table_prefix, $author_id ) {
-		return $this->select( $table_prefix . 'usermeta', [ 'user_id' => $author_id ] );
-	}
-
-	public function select_comment_rows( $table_prefix, $post_id ) {
-		return $this->select( $table_prefix . 'comments', [ 'comment_post_ID' => $post_id ] );
-	}
-
-	public function select_commentmeta_rows( $table_prefix, $comment_id ) {
-		return $this->select( $table_prefix . 'commentmeta', [ 'comment_id' => $comment_id ] );
-	}
-
-	public function select_term_relationships_rows( $table_prefix, $post_id ) {
-		return $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
-	}
-
-	public function select_term_taxonomy_row( $table_prefix, $term_taxonomy_id ) {
-		return $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
-	}
-
-	public function select_terms_row( $table_prefix, $term_id ) {
-		return $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
-	}
-
-	public function select_termmeta_rows( $table_prefix, $term_id ) {
-		return $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
-	}
-
 	/**
-	 * Inserts Post and its Meta.
+	 * Inserts Post.
 	 *
-	 * @param array $post_row      `post` row.
-	 * @param array $postmeta_rows `postmeta` rows.
+	 * @param array $post_row `post` row.
 	 *
 	 * @return int Inserted Post ID.
 	 */
-	private function insert_post( $post_row, $postmeta_rows ) {
-		unset( $post_row[ 'ID' ] );
+	public function insert_post( $post_row ) {
+		unset( $post_row['ID'] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $post_row );
 		if ( 1 != $inserted ) {
@@ -430,7 +447,17 @@ class ContentDiffMigrator {
 		}
 		$post_id = $this->wpdb->insert_id;
 
-		// Insert Post Metas.
+		return $post_id;
+	}
+
+	/**
+	 * @param array $postmeta_rows
+	 * @param int $post_id
+	 *
+	 * @return array Array of inserted `meta_id`s.
+	 */
+	public function insert_postmeta( $postmeta_rows, $post_id ) {
+		$postmeta_ids = [];
 		foreach ( $postmeta_rows as $postmeta_row ) {
 
 			unset( $postmeta_row[ 'meta_id' ] );
@@ -440,20 +467,20 @@ class ContentDiffMigrator {
 			if ( 1 != $inserted ) {
 				// TODO error
 			}
+			$postmeta_ids[] = $this->wpdb->insert_id;
 		}
 
-		return $post_id;
+		return $postmeta_ids;
 	}
 
 	/**
-	 * Inserts a User and its Meta.
+	 * Inserts a User.
 	 *
 	 * @param array $user_row      `user` row.
-	 * @param array $usermeta_rows `usermeta` rows.
 	 *
 	 * @return int Inserted User ID.
 	 */
-	private function insert_user( $user_row, $usermeta_rows ) {
+	public function insert_user( $user_row ) {
 		unset( $user_row[ 'ID' ] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->users, $user_row );
@@ -462,9 +489,21 @@ class ContentDiffMigrator {
 		}
 		$user_id = $this->wpdb->insert_id;
 
+		return $user_id;
+	}
+
+	/**
+	 * Inserts User Meta.
+	 *
+	 * @param array $usermeta_rows `usermeta` rows.
+	 * @param int   $user_id       User ID.
+	 *
+	 * @return int Inserted User ID.
+	 */
+	public function insert_usermeta( $usermeta_rows, $user_id ) {
+		$meta_ids = [];
 		// Insert User Metas.
 		foreach ( $usermeta_rows as $usermeta_row ) {
-
 			unset( $usermeta_row[ 'umeta_id' ] );
 			$usermeta_row[ 'user_id' ] = $user_id;
 
@@ -472,25 +511,26 @@ class ContentDiffMigrator {
 			if ( 1 != $inserted ) {
 				// TODO error
 			}
+
+			$meta_ids[] = $this->wpdb->insert_id;
 		}
 
-		return $user_id;
+		return $meta_ids;
 	}
 
 	/**
-	 * Inserts a Comment and its Meta.
+	 * Inserts a Comment with an updated post_id and user_id.
 	 *
-	 * @param int   $post_id          Post ID.
-	 * @param int   $user_id          User ID.
 	 * @param array $comment_row      `comment` row.
-	 * @param array $commentmeta_rows `commentmeta` rows.
+	 * @param int   $new_post_id      Post ID.
+	 * @param int   $new_user_id      User ID.
 	 *
 	 * @return int Inserted comment_id.
 	 */
-	private function insert_comment( $post_id, $user_id, $comment_row, $commentmeta_rows ) {
+	public function insert_comment( $comment_row, $new_post_id, $new_user_id ) {
 		unset( $comment_row[ 'comment_ID' ] );
-		$comment_row[ 'comment_post_ID' ] = $post_id;
-		$comment_row[ 'user_id' ] = $user_id;
+		$comment_row[ 'comment_post_ID' ] = $new_post_id;
+		$comment_row[ 'user_id' ] = $new_user_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->comments, $comment_row );
 		if ( 1 != $inserted ) {
@@ -498,19 +538,44 @@ class ContentDiffMigrator {
 		}
 		$comment_id = $this->wpdb->insert_id;
 
-		// Insert Comment Metas.
-		foreach ( $commentmeta_rows as $usermeta_row ) {
+		return $comment_id;
+	}
 
-			unset( $usermeta_row[ 'meta_id' ] );
-			$usermeta_row[ 'comment_id' ] = $comment_id;
+	/**
+	 * Inserts Comment Metas with an updated comment_id.
+	 *
+	 * @param array $commentmeta_rows Comment Meta rows.
+	 * @param int   $new_comment_id   New Comment ID.
+	 *
+	 * @return array
+	 */
+	public function insert_commentmetas( $commentmeta_rows, $new_comment_id ) {
+		$meta_ids = [];
+		foreach ( $commentmeta_rows as $commentmeta_row ) {
+			unset( $commentmeta_row[ 'meta_id' ] );
+			$commentmeta_row[ 'comment_id' ] = $new_comment_id;
 
-			$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $usermeta_row );
+			$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $commentmeta_row );
 			if ( 1 != $inserted ) {
 				// TODO error
 			}
+
+			$meta_ids[] = $this->wpdb->insert_id;
 		}
 
-		return $comment_id;
+		return $meta_ids;
+	}
+
+	/**
+	 * Updates a Comment's parent ID.
+	 *
+	 * @param int $comment_id         Comment ID.
+	 * @param int $comment_parent_new new Comment Parent ID.
+	 *
+	 * @return int|false Return from $wpdb::update -- the number of rows updated, or false on error.
+	 */
+	public function update_comment_parent( $comment_id, $comment_parent_new ) {
+		return $this->wpdb->update( $this->wpdb->comments, [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ] );
 	}
 
 	/**
@@ -578,6 +643,18 @@ class ContentDiffMigrator {
 		$term_taxonomy_id = $this->wpdb->insert_id;
 
 		return $term_taxonomy_id;
+	}
+
+	/**
+	 * Updates a Post's Author.
+	 *
+	 * @param int $post_id       Post ID.
+	 * @param int $new_author_id New Author ID.
+	 *
+	 * @return int|false Return from $wpdb::update -- the number of rows updated, or false on error.
+	 */
+	public function update_post_author( $post_id, $new_author_id ) {
+		return $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
 	}
 
 	/**
