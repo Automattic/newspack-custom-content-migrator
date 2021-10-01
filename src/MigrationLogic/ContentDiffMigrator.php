@@ -342,6 +342,14 @@ class ContentDiffMigrator {
 		return $term_taxonomy_id;
 	}
 
+	/**
+	 * Selects a row from the posts table.
+	 *
+	 * @param string $table_prefix
+	 * @param int $post_id
+	 *
+	 * @return array|object|null|void Return from $wpdb::get_row.
+	 */
 	public function select_post_row( $table_prefix, $post_id ) {
 		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
 		if ( empty( $post_row ) ) {
@@ -351,42 +359,122 @@ class ContentDiffMigrator {
 		return $post_row;
 	}
 
+	/**
+	 * Selects rows from the postmeta table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array|object|null Return from $wpdb::get_results.
+	 */
 	public function select_postmeta_rows( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
 	}
 
-	public function select_user_row( $table_prefix, $author_id ) {
-		return $this->select( $table_prefix . 'users', [ 'ID' => $author_id ], $select_just_one_row = true );
+	/**
+	 * Selects a row from the users table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int    $user_id      User ID.
+	 *
+	 * @return array|object|null|void Return from $wpdb::get_row.
+	 */
+	public function select_user_row( $table_prefix, $user_id ) {
+		return $this->select( $table_prefix . 'users', [ 'ID' => $user_id ], $select_just_one_row = true );
 	}
 
-	public function select_usermeta_rows( $table_prefix, $author_id ) {
-		return $this->select( $table_prefix . 'usermeta', [ 'user_id' => $author_id ] );
+	/**
+	 * Selects rows from the usermeta table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int    $user_id      User ID.
+	 *
+	 * @return array|object|null Return from $wpdb::get_results.
+	 */
+	public function select_usermeta_rows( $table_prefix, $user_id ) {
+		return $this->select( $table_prefix . 'usermeta', [ 'user_id' => $user_id ] );
 	}
 
+	/**
+	 * Selects rows from the comments table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array|object|null Return from $wpdb::get_results.
+	 */
 	public function select_comment_rows( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'comments', [ 'comment_post_ID' => $post_id ] );
 	}
 
+	/**
+	 * Selects a row from the comments table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $comment_ID Comment ID.
+	 *
+	 * @return array|object|null|void Return from $wpdb::get_row.
+	 */
 	public function select_comment_row( $table_prefix, $comment_ID ) {
 		return $this->select( $table_prefix . 'comments', [ 'comment_ID' => $comment_ID ], $select_just_one_row = true );
 	}
 
+	/**
+	 * Selects rows from the commentmeta table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $comment_id Comment ID.
+	 *
+	 * @return array|object|null Return from $wpdb::get_results.
+	 */
 	public function select_commentmeta_rows( $table_prefix, $comment_id ) {
 		return $this->select( $table_prefix . 'commentmeta', [ 'comment_id' => $comment_id ] );
 	}
 
+	/**
+	 * Selects rows from the term_relationships table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array|object|null Return from $wpdb::get_results.
+	 */
 	public function select_term_relationships_rows( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
 	}
 
+	/**
+	 * Selects a row from the term_taxonomy table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $term_taxonomy_id term_taxonomy_id.
+	 *
+	 * @return array|object|null|void Return from $wpdb::get_row.
+	 */
 	public function select_term_taxonomy_row( $table_prefix, $term_taxonomy_id ) {
 		return $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
 	}
 
+	/**
+	 * Selects a row from the terms table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $term_id Term ID.
+	 *
+	 * @return array|object|null|void Return from $wpdb::get_row.
+	 */
 	public function select_terms_row( $table_prefix, $term_id ) {
 		return $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
 	}
 
+	/**
+	 * Selects rows from the termmeta table.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param int $term_id Term ID.
+	 *
+	 * @return array|object|null Return from $wpdb::get_results.
+	 */
 	public function select_termmeta_rows( $table_prefix, $term_id ) {
 		return $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
 	}
