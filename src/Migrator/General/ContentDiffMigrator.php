@@ -104,7 +104,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
 		$export_dir = $assoc_args[ 'export-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
-return;
+
 		WP_CLI::log( 'Searching for new content on Live Site...' );
 		$ids = self::$logic->get_live_diff_content_ids( $live_table_prefix );
 
@@ -125,8 +125,6 @@ return;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
 
 		// TODO check if tables not found
-// 		global $wpdb;
-// return;
 
 		$file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		if ( ! file_exists( $file ) ) {
