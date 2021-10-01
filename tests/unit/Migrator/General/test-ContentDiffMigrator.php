@@ -1063,49 +1063,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		// Assert.
 		$this->assertEquals( $last_insert_id, $post_id_new_actual );
 	}
-	// public function test_should_correctly_import_data_array( $data ) {
-	// 	// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
-	// 	$last_insert_id = 234;
-	// 	$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
-	// 	$post_id = $post_row[ 'ID' ];
-	// 	$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
-	// 	$author_row_id = 22;
-	// 	$author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $author_row_id );
-	// 	$author_user_login = $author_row[ 'user_login' ];
-	// 	$author_user_object = new WP_User();
-	// 	$author_user_object->ID = 432;
-	//
-	// 	// Mock full execution of ContentDiffMigrator::import_data(). Will use partial mock to mock just one method.
-	// 	$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
-	// 	                           ->setConstructorArgs( [ $this->wpdb_mock ] )
-	// 	                           ->setMethods( [ 'get_user_by' ] )
-	// 	                           ->getMock();
-	// 	$wpdb_return_value_maps = $this->get_empty_wpdb_return_value_maps();
-	// 	$get_user_by_return_value_map = [];
-	// 	$this->build_value_maps_insert_post_row( $wpdb_return_value_maps, $post_row, $last_insert_id );
-	// 	$this->build_value_maps_insert_postmeta_rows( $wpdb_return_value_maps, $postmeta_rows, $last_insert_id );
-	// 	$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', $author_user_login ], $author_user_object );
-	// 		// TODO insert new author user if not exists.
-	// 	$this->build_value_maps_update_post_author( $return_value_maps, $post_id, $author_user_object->ID );
-	// 	$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
-	// 	                ->method( 'update' )
-	// 	                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
-	//
-	// 	$this->wpdb_mock->insert_id = $last_insert_id;
-	// 	$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::insert' ] ) ) )
-	// 	                ->method( 'insert' )
-	// 	                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::insert' ] ) );
-	// 	$logic_partial_mock->expects( $this->once() )
-	// 	                   ->method( 'get_user_by' )
-	// 	                   ->will( $this->returnValueMap( $get_user_by_return_value_map ) );
-	//
-	// 	// Run.
-	// 	$post_id_actual = $logic_partial_mock->import_data( $data );
-	//
-	// 	// Assert.
-	// 	$this->assertEquals( $last_insert_id, $post_id_actual );
-	// }
-
 
 	// TODO test error returns from select/insert methods.
 
