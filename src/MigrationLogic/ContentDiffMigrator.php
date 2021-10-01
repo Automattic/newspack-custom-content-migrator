@@ -168,19 +168,7 @@ class ContentDiffMigrator {
 	/**
 	 * Imports all the Post data.
 	 *
-	 * @param array $data {
-	 *     Post and all core WP Post-related data.
-	 *
-	 *     @type array self::DATAKEY_POST              Contains `posts` rows.
-	 *     @type array self::DATAKEY_POSTMETA          `postmeta` rows.
-	 *     @type array self::DATAKEY_COMMENTS          `comments` rows.
-	 *     @type array self::DATAKEY_COMMENTMETA       `commentmeta` rows.
-	 *     @type array self::DATAKEY_USERS             `users` rows (for the Post Author, and the Comment Users).
-	 *     @type array self::DATAKEY_USERMETA          `usermeta` rows.
-	 *     @type array self::DATAKEY_TERMRELATIONSHIPS `term_relationships` rows.
-	 *     @type array self::DATAKEY_TERMTAXONOMY      `term_taxonomy` rows.
-	 *     @type array self::DATAKEY_TERMS             `terms` rows.
-	 * }
+	 * @param array $data Array containing all the data, @see ContentDiffMigrator::get_data for structure.
 	 *
 	 * @return int Imported Post ID.
 	 */
@@ -189,17 +177,10 @@ class ContentDiffMigrator {
 		$post_id = $this->insert_post( $data[ self::DATAKEY_POST ] );
 		$this->insert_postmeta( $data[ self::DATAKEY_POSTMETA ], $post_id );
 
-		// Insert Author User.
+		// Use existing or insert Author User.
 		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
 		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
-		$author_existing = get_user_by( 'user_login', $author_row[ 'user_login' ] );
-		if ( $author_existing instanceof WP_User ) {
-			$author_id = $author_existing->ID;
-		} else {
-			$author_metas_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row_id );
-			$author_id = $this->insert_user( $author_row );
-			$this->insert_usermeta( $author_metas_rows, $author_id );
-		}
+		$author_id = $this->get_existing_user_or_insert_new( $author_row, $data );
 
 		// Update inserted Post's Author.
 		$this->update_post_author( $post_id, $author_id );
@@ -215,14 +196,7 @@ class ContentDiffMigrator {
 				$comment_user_id = 0;
 			} else {
 				$comment_user_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_row_id );
-				$comment_user_existing = get_user_by( 'user_login', $comment_user_row[ 'user_login' ] );
-
-				if ( $comment_user_existing instanceof WP_User ) {
-					$comment_user_id = $comment_user_existing->ID;
-				} else {
-					$comment_user_meta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row_id );
-					$comment_user_id = $this->insert_user( $comment_user_row, $comment_user_meta_rows );
-				}
+				$comment_user_id = $this->get_existing_user_or_insert_new( $comment_user_row, $data );
 			}
 
 			// Insert Comment and Comment Metas.
@@ -234,11 +208,12 @@ class ContentDiffMigrator {
 
 		// Loop through all comments, and update their Parent IDs.
 		foreach ( $comment_ids_updates as $comment_id_old => $comment_id_new ) {
-			$comment_row = $this->select_comment_row( $this->wpdb->table_prefix, $comment_id_new );
-			$comment_parent = $comment_row[ 'comment_parent' ];
-			$comment_parent_new = $comment_ids_updates[ $comment_parent ] ?? null;
-			if ( $comment_parent > 0 && $comment_parent_new ) {
-				$this->update_comment_parent( $comment_id, $comment_parent_new );
+			// $comment_row = $this->select_comment_row( $this->wpdb->table_prefix, $comment_id_new );
+			$comment_row = $this->filter_array_element( $data[ self::DATAKEY_COMMENTS ], 'comment_ID', $comment_id_old );
+			$comment_parent_old = $comment_row[ 'comment_parent' ];
+			$comment_parent_new = $comment_ids_updates[ $comment_parent_old ] ?? null;
+			if ( $comment_parent_old > 0 && $comment_parent_new ) {
+				$this->update_comment_parent( $comment_id_new, $comment_parent_new );
 			}
 		}
 
@@ -247,11 +222,11 @@ class ContentDiffMigrator {
 		$term_taxonomy_ids_updates = [];
 		foreach ( $data[ self::DATAKEY_TERMS ] as $term_row ) {
 
-			$term_existing = term_exists( $term_row[ 'name' ] );
-			if ( null == $term_existing ) {
+			$term_id_existing = $this->term_exists( $term_row[ 'name' ], '', null );
+			if ( null == $term_id_existing ) {
 				$term_id = $this->insert_term( $term_row );
 			} else {
-				$term_id = $term_existing;
+				$term_id = $term_id_existing;
 			}
 			$terms_ids_updates[ $term_row[ 'term_id' ] ] = $term_id;
 
@@ -263,20 +238,26 @@ class ContentDiffMigrator {
 			 */
 			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_row[ 'term_id' ] );
 			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
-				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_row[ 'name' ], $term_row[ 'slug' ], $term_taxonomy_row[ 'taxonomy' ] );
-				if ( $term_taxonomy_id_existing ) {
-					$term_taxonomy_id = $term_taxonomy_id_existing;
-				} else {
-					$term_taxonomy_id = $this->insert_term_taxonomy( $term_id, $term_taxonomy_row );
-				}
+				$term_taxonomy_id = $this->get_term_taxonomy_or_insert_new(
+					$term_row[ 'name' ],
+					$term_row[ 'slug' ],
+					$term_taxonomy_row[ 'taxonomy' ],
+					$term_taxonomy_row,
+					$term_id
+				);
 				$term_taxonomy_ids_updates[ $term_taxonomy_row[ 'term_taxonomy_id' ] ] = $term_taxonomy_id;
 			}
 		}
 
 		// Insert Term Relationships.
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
-			$term_taxonomy_id = $term_taxonomy_ids_updates[ $term_relationship_row[ 'term_taxonomy_id' ] ] ?? null;
-			$this->insert_term_relationship( $post_id, $term_taxonomy_id );
+			$term_taxonomy_id_old = $term_relationship_row[ 'term_taxonomy_id' ];
+			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
+			if ( ! is_null( $term_taxonomy_id_new ) ) {
+				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
+			} else {
+				// TODO missing record, but this shouldn't happen.
+			}
 		}
 
 		return $post_id;
@@ -298,19 +279,7 @@ class ContentDiffMigrator {
 	/**
 	 * Returns an empty data array.
 	 *
-	 * @return array $args {
-	 *     Post and all core WP Post-related data.
-	 *
-	 *     @type array self::DATAKEY_POST              Contains `posts` rows.
-	 *     @type array self::DATAKEY_POSTMETA          `postmeta` rows.
-	 *     @type array self::DATAKEY_COMMENTS          `comments` rows.
-	 *     @type array self::DATAKEY_COMMENTMETA       `commentmeta` rows.
-	 *     @type array self::DATAKEY_USERS             `users` rows (for the Post Author, and the Comment Users).
-	 *     @type array self::DATAKEY_USERMETA          `usermeta` rows.
-	 *     @type array self::DATAKEY_TERMRELATIONSHIPS `term_relationships` rows.
-	 *     @type array self::DATAKEY_TERMTAXONOMY      `term_taxonomy` rows.
-	 *     @type array self::DATAKEY_TERMS             `terms` rows.
-	 * }
+	 * @return array $args Empty data array for ContentDiffMigrator::get_data. @see ContentDiffMigrator::get_data for structure.
 	 */
 	private function get_empty_data_array() {
 		return [
@@ -336,7 +305,7 @@ class ContentDiffMigrator {
 	 *
 	 * @return string|null term_taxonomy_id or null.
 	 */
-	private function get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy ) {
+	public function get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy ) {
 		return $this->wpdb->get_var( $this->wpdb->prepare(
 			"SELECT tt.term_taxonomy_id
 			FROM {$this->wpdb->term_taxonomy} tt
@@ -349,6 +318,28 @@ class ContentDiffMigrator {
 			$term_slug,
 			$taxonomy
 		) );
+	}
+
+	/**
+	 * Gets an existing termtaxonomy ID, or inserts a new one.
+	 *
+	 * @param string $term_name         Term name.
+	 * @param string $term_slug         Term slug.
+	 * @param string $taxonomy          Taxonomy.
+	 * @param array  $term_taxonomy_row termtaxonomy $data row to be inserted, if one doesn't exist.
+	 * @param int    $term_id           Term ID to be used for the newly inserted termtaxonomy row.
+	 *
+	 * @return int term_taxonomy_id.
+	 */
+	public function get_term_taxonomy_or_insert_new( $term_name, $term_slug, $taxonomy, $term_taxonomy_row, $term_id ) {
+		$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy );
+		if ( $term_taxonomy_id_existing ) {
+			$term_taxonomy_id = $term_taxonomy_id_existing;
+		} else {
+			$term_taxonomy_id = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id );
+		}
+
+		return $term_taxonomy_id;
 	}
 
 	public function select_post_row( $table_prefix, $post_id ) {
@@ -585,7 +576,7 @@ class ContentDiffMigrator {
 	 *
 	 * @return int Inserted term_id.
 	 */
-	private function insert_term( $term_row ) {
+	public function insert_term( $term_row ) {
 		unset( $term_row[ 'term_id' ] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->terms, $term_row );
@@ -600,14 +591,14 @@ class ContentDiffMigrator {
 	/**
 	 * Inserts into `term_taxonomy` table.
 	 *
-	 * @param int   $term_id           `term_id` column.
 	 * @param array $term_taxonomy_row `term_taxonomy` row.
+	 * @param int   $new_term_id       New `term_id` value to be set.
 	 *
 	 * @return int Inserted term_taxonomy_id.
 	 */
-	private function insert_term_taxonomy( $term_id, $term_taxonomy_row ) {
+	public function insert_term_taxonomy( $term_taxonomy_row, $new_term_id ) {
 		unset( $term_taxonomy_row[ 'term_taxonomy_id' ] );
-		$term_taxonomy_row[ 'term_id' ] = $term_id;
+		$term_taxonomy_row[ 'term_id' ] = $new_term_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $term_taxonomy_row );
 		if ( 1 != $inserted ) {
@@ -623,8 +614,10 @@ class ContentDiffMigrator {
 	 *
 	 * @param int $object_id        `object_id` column.
 	 * @param int $term_taxonomy_id `term_taxonomy_id` column.
+	 *
+	 * @return int|false Return from $wpdb::insert, the number of rows inserted, or false on error.
 	 */
-	private function insert_term_relationship( $object_id, $term_taxonomy_id ) {
+	public function insert_term_relationship( $object_id, $term_taxonomy_id ) {
 		if ( $object_id || ! $term_taxonomy_id ) {
 			// TODO shouldn't happen
 		}
@@ -640,9 +633,7 @@ class ContentDiffMigrator {
 			// TODO error
 		}
 
-		$term_taxonomy_id = $this->wpdb->insert_id;
-
-		return $term_taxonomy_id;
+		return $inserted;
 	}
 
 	/**
@@ -655,6 +646,52 @@ class ContentDiffMigrator {
 	 */
 	public function update_post_author( $post_id, $new_author_id ) {
 		return $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
+	}
+
+	/**
+	 * Gets existing User ID from the database, or inserts a new user into the DB from the $user_row and $data.
+	 *
+	 * @param array $user_row User row.
+	 * @param array $data     Data array, @see ContentDiffMigrator::get_data for structure.
+	 *
+	 * @return int User ID.
+	 */
+	public function get_existing_user_or_insert_new( $user_row, $data ) {
+		$user_existing = $this->get_user_by( 'user_login', $user_row[ 'user_login' ] );
+		if ( $user_existing instanceof WP_User ) {
+			$user_id = $user_existing->ID;
+		} else {
+			$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $user_row[ 'ID' ] );
+			$user_id = $this->insert_user( $user_row );
+			$this->insert_usermeta( $usermeta_rows, $user_id );
+		}
+
+		return $user_id;
+	}
+
+	/**
+	 * Wrapper for WP's native \get_user_by().
+	 *
+	 * @param string     $field The field to retrieve the user with. id | ID | slug | email | login.
+	 * @param int|string $value A value for $field. A user ID, slug, email address, or login name.
+	 *
+	 * @return WP_User|false WP_User object on success, false on failure.
+	 */
+	public function get_user_by( $field, $value ) {
+		return get_user_by( $field, $value );
+	}
+
+	/**
+	 * Wrapper for WP's native \term_exists().
+	 *
+	 * @param int|string $term     The term to check. Accepts term ID, slug, or name..
+	 * @param string     $taxonomy Optional. The taxonomy name to use.
+	 * @param int        $parent   Optional. ID of parent term under which to confine the exists search.
+	 *
+	 * @return mixed @see term_exists.
+	 */
+	public function term_exists( $term, $taxonomy = '', $parent = null ) {
+		return term_exists( $term, $taxonomy, $parent );
 	}
 
 	/**

@@ -10,6 +10,7 @@ namespace NewspackCustomContentMigratorTest\Migrator\General;
 use PHP_CodeSniffer\Tests\Core\Autoloader\Sub\C;
 use WP_UnitTestCase;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
+use WP_User;
 
 /**
  * Class TestBlockquotePatcher.
@@ -42,7 +43,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		// Setting multiple expectations for method 'get_row' on mock of 'wpdb' class doesn't work for some reason, so here using
 		// Mock Builder for the 'stdClass' instead.
 		$this->wpdb_mock = $this->getMockBuilder( 'stdClass' )
-		                        ->setMethods( [ 'prepare', 'get_row', 'get_results', 'insert', 'update' ] )
+		                        ->setMethods( [ 'prepare', 'get_row', 'get_results', 'insert', 'update', 'get_var' ] )
 		                        ->getMock();
 		$this->wpdb_mock->table_prefix = $wpdb->prefix;
 		$this->wpdb_mock->posts = $wpdb->prefix . 'posts';
@@ -51,6 +52,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$this->wpdb_mock->usermeta = $wpdb->prefix . 'usermeta';
 		$this->wpdb_mock->comments = $wpdb->prefix . 'comments';
 		$this->wpdb_mock->commentmeta = $wpdb->prefix . 'commentmeta';
+		$this->wpdb_mock->terms = $wpdb->prefix . 'terms';
+		$this->wpdb_mock->term_taxonomy = $wpdb->prefix . 'term_taxonomy';
+		$this->wpdb_mock->term_relationships = $wpdb->prefix . 'term_relationships';
 		$this->logic = new ContentDiffMigrator( $this->wpdb_mock );
 		$this->table_prefix = $wpdb->prefix;
 	}
@@ -560,7 +564,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Mock.
 		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_user_row( $return_value_maps, $user_row, $new_user_id );
+		$this->build_value_maps_insert_user_row( $return_value_maps, $user_row );
 		$this->wpdb_mock->insert_id = $new_user_id;
 		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
 		                ->method( 'insert' )
@@ -571,6 +575,124 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $new_user_id, $new_post_id_actual );
+	}
+
+	/**
+	 * Tests that ContentDiffMigrator::get_existing_user_or_insert_new returns an existing user if the user exists.
+	 *
+	 * @covers ContentDiffMigrator::get_existing_user_or_insert_new.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_get_existing_user_or_insert_new_should_return_existing_user( $data ) {
+		// Prepare.
+		$existing_user_id = 22;
+		$existing_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $existing_user_id );
+		$existing_user = new WP_User();
+		$existing_user->ID = $existing_user_id;
+
+		// Mock.
+		$get_user_by_return_value_map = [];
+		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', $existing_user_row[ 'user_login' ] ], $existing_user );
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+	                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+	                           ->setMethods( [ 'get_user_by' ] )
+	                           ->getMock();
+		$logic_partial_mock->expects( $this->once() )
+		                   ->method( 'get_user_by' )
+		                   ->will( $this->returnValueMap( $get_user_by_return_value_map ) );
+
+		// Run.
+		$existing_user_id_actual = $logic_partial_mock->get_existing_user_or_insert_new( $existing_user_row, $data );
+
+		// Assert.
+		$this->assertEquals( $existing_user_id, $existing_user_id_actual );
+	}
+
+	/**
+	 * Tests that ContentDiffMigrator::get_existing_user_or_insert_new creates a new user if the user doesn't exists.
+	 *
+	 * @covers ContentDiffMigrator::get_existing_user_or_insert_new.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_get_existing_user_or_insert_new_should_create_new_user( $data ) {
+		// Prepare.
+		$user_id = 22;
+		$new_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $user_id );
+		$new_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $user_id );
+		$new_user_id = 33;
+
+		// Mock.
+		$wpdb_return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$get_user_by_return_value_map = [];
+		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', $new_user_row[ 'user_login' ] ], false );
+		$this->build_value_maps_insert_user_row( $wpdb_return_value_maps, $new_user_row );
+		$this->build_value_maps_insert_usermeta_rows( $wpdb_return_value_maps, $new_usermeta_rows, $new_user_id );
+		// Using partial mock to mock just one method.
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+	                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+	                           ->setMethods( [ 'get_user_by' ] )
+	                           ->getMock();
+		$logic_partial_mock->expects( $this->once() )
+		                   ->method( 'get_user_by' )
+		                   ->will( $this->returnValueMap( $get_user_by_return_value_map ) );
+		$this->wpdb_mock->insert_id = $new_user_id;
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_user_id_actual = $logic_partial_mock->get_existing_user_or_insert_new( $new_user_row, $data );
+
+		// Assert.
+		$this->assertEquals( $new_user_id, $new_user_id_actual );
+	}
+
+	/**
+	 * Tests that ContentDiffMigrator::get_term_taxonomy_or_insert_new insert a new termtaxonomy record if it doesn't already exist.
+	 *
+	 * Large tests like this one show that the code should be decoupled even better, and that a separate class should have been be
+	 * used here.
+	 *
+	 * @covers ContentDiffMigrator::get_term_taxonomy_or_insert_new.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_get_term_taxonomy_or_insert_new_should_insert_new_record( $data ) {
+		// Prepare.
+		$term_id = 41;
+		$term_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_id );
+		$term_id_new = 234;
+		$term_name = $term_row[ 'name' ];
+		$term_slug = $term_row[ 'slug' ];
+		$term_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id );
+		$term_taxonomy_id_new = 123;
+		$taxonomy = $term_taxonomy_row[ 'taxonomy' ];
+
+		// Mock.
+		// Existance of record should be queried correctly.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_get_existing_term_taxonomy( $return_value_maps, $term_name, $term_slug, $taxonomy, null );
+		$this->wpdb_mock->insert_id = 123;
+		// New termtaxonomy record should get inserted.
+		$this->build_value_maps_insert_term_taxonmy_row( $return_value_maps, $term_taxonomy_row, $term_id_new );
+		$this->wpdb_mock->insert_id = $term_taxonomy_id_new;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		                ->method( 'prepare' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_var' ] ) ) )
+		                ->method( 'get_var' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_var' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$term_taxonomy_id_actual = $this->logic->get_term_taxonomy_or_insert_new( $term_name, $term_slug, $taxonomy, $term_taxonomy_row, $term_id );
+
+		// Assert.
+		$this->assertEquals( $term_taxonomy_id_new, $term_taxonomy_id_actual );
 	}
 
 	/**
@@ -686,6 +808,66 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a Term is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_term.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_term_row( $data ) {
+		// Prepare.
+		$term_id = 41;
+		$term_id_new = 123;
+		$term_row = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'comment_id', $term_id );
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_term_row( $return_value_maps, $term_row );
+		$this->wpdb_mock->insert_id = $term_id_new;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$term_id_new_actual = $this->logic->insert_term( $term_row );
+
+		// Assert.
+		$this->assertEquals( $term_id_new, $term_id_new_actual );
+	}
+
+	/**
+	 * Tests that ContentDiffMigrator::get_existing_term_taxonomy performs correct calls to the $wpdb and returns existing records.
+	 *
+	 * @covers ContentDiffMigrator::get_existing_term_taxonomy.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_get_existing_term_taxonomy_should_query_and_return_correct_value( $data ) {
+		// Prepare.
+		$term_name = 'name';
+		$term_slug = 'slug';
+		$taxonomy = 'taxonomy';
+		$term_taxonomy_id_expected = 123;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_get_existing_term_taxonomy( $return_value_maps, $term_name, $term_slug, $taxonomy, $term_taxonomy_id_expected );
+		$this->wpdb_mock->insert_id = $term_taxonomy_id_expected;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		                ->method( 'prepare' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_var' ] ) ) )
+		                ->method( 'get_var' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_var' ] ) );
+
+		// Run.
+		$term_taxonomy_id_actual = $this->logic->get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy );
+
+		// Assert.
+		$this->assertEquals( $term_taxonomy_id_expected, $term_taxonomy_id_actual );
+	}
+
+	/**
 	 * Tests that a Comment Parent is updated correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::update_comment_parent.
@@ -709,6 +891,220 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$this->assertEquals( 1, $updated_actual );
 	}
 
+	/**
+	 * Tests that a Term Taxonomy is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_term_taxonomy.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_term_taxonomy( $data ) {
+		// Prepare.
+		$term_id = 41;
+		$term_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id );
+		$term_id_new = 234;
+		$term_taxonomy_id_expected = 123;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_term_taxonmy_row( $return_value_maps, $term_taxonomy_row, $term_id_new );
+		$this->wpdb_mock->insert_id = $term_taxonomy_id_expected;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$term_taxonomy_id_new_actual = $this->logic->insert_term_taxonomy( $term_taxonomy_row, $term_id_new );
+
+		// Assert.
+		$this->assertEquals( $term_taxonomy_id_expected, $term_taxonomy_id_new_actual );
+	}
+
+	/**
+	 * Tests that a Term Relationship is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_term_relationship.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_term_relationship( $data ) {
+		// Prepare.
+		$post_id = 123;
+		$term_taxonomy_id = 234;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_term_relationship_row( $return_value_maps, $post_id, $term_taxonomy_id );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$inserted = $this->logic->insert_term_relationship( $post_id, $term_taxonomy_id );
+
+		// Assert.
+		$this->assertEquals( 1, $inserted );
+	}
+
+	/**
+	 * Checks that ContentDiffMigrator::import_data queries the DB as expected, and inserts the data array correctly.
+	 *
+	 * Though a super long test, all its bits are also individually tested. This test is an extra effort to ensure the import_data
+	 * will do the final DB updates correctly.
+	 *
+	 * @covers ContentDiffMigrator::import_data.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_correctly_import_data_array( $data ) {
+		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
+		$last_insert_id = 300;
+		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+		$post_id = $post_row[ 'ID' ];
+		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+		$user_admin = new WP_User();
+		$user_admin->ID = 50;
+		$comment_1_id = 11;
+		$comment_1_id_new = 31;
+		$comment_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_1_id );
+		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
+		$comment_2_id = 12;
+		$comment_2_id_new = 32;
+		$comment_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_2_id );
+		$comment_2_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_2_id );
+		$comment_3_id = 13;
+		$comment_3_id_new = 33;
+		$comment_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_3_id );
+		$comment_3_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_3_id );
+		$user_test_user = new WP_User();
+		$user_test_user->ID = 51;
+		$term_1_id = 41;
+		$term_1_id_existing = 61;
+		$term_1_name = 'Uncategorized';
+		$term_1_slug = 'uncategorized';
+		$term_2_name = 'Custom Term';
+		$term_2_slug = 'custom-term';
+		$term_2_id = 42;
+		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
+		$term_2_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_2_id );
+
+		// Mock full execution of ContentDiffMigrator::import_data(). Using a partial mock to mock responses from wapper methods
+		// for WP's native global functions.
+		$get_user_by_return_value_map = [];
+		$term_exists_return_value_map = [];
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'get_user_by', 'term_exists' ] )
+		                           ->getMock();
+		// Post's User 'admin' will be inserted as new user.
+		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', 'admin' ], $user_admin );
+		// Comment 2's User is the same existing User 'admin'.
+		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', 'admin' ], $user_admin );
+		// Comment 3's User doesn't exist, and will have to be inserted too.
+		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', 'test_user' ], $user_test_user );
+		$logic_partial_mock->expects( $this->exactly( count( $get_user_by_return_value_map ) ) )
+		                   ->method( 'get_user_by' )
+		                   ->will( $this->returnValueMap( $get_user_by_return_value_map ) );
+		// Term 1 exists.
+		$this->build_value_map( $term_exists_return_value_map, [ $term_1_name, '', null ], $term_1_id_existing );
+		// Term 2 should be inserted as new.
+		$this->build_value_map( $term_exists_return_value_map, [ $term_2_name, '', null ], null );
+		$logic_partial_mock->expects( $this->exactly( count( $term_exists_return_value_map ) ) )
+		                   ->method( 'term_exists' )
+		                   ->will( $this->returnValueMap( $term_exists_return_value_map ) );
+		// Expectations for all $wpdb calls.
+		$wpdb_return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		// Should insert Post.
+		$this->build_value_maps_insert_post_row( $wpdb_return_value_maps, $post_row, $last_insert_id );
+		// Should insert Post Meta.
+		$this->build_value_maps_insert_postmeta_rows( $wpdb_return_value_maps, $postmeta_rows, $last_insert_id );
+		// Post gets updated with newly inserted user ID.
+		$this->build_value_maps_update_post_author( $wpdb_return_value_maps, $post_id, $user_admin->ID );
+		// Comment 1 with no user.
+		$this->build_value_maps_insert_comment_row( $wpdb_return_value_maps, $comment_1_row, $last_insert_id, 0 );
+		$this->build_value_maps_insert_commentmeta_rows( $wpdb_return_value_maps, $comment_1_commentmeta_rows, $comment_1_id_new );
+		// Comment 2 with existing 'admin' User.
+		$this->build_value_maps_insert_comment_row( $wpdb_return_value_maps, $comment_2_row, $last_insert_id, $user_admin->ID );
+		$this->build_value_maps_insert_commentmeta_rows( $wpdb_return_value_maps, $comment_2_commentmeta_rows, $comment_2_id_new );
+		// Comment 3 with new 'test_user' User.
+		$this->build_value_maps_insert_comment_row( $wpdb_return_value_maps, $comment_3_row, $last_insert_id, $user_test_user->ID );
+		$this->build_value_maps_insert_commentmeta_rows( $wpdb_return_value_maps, $comment_3_commentmeta_rows, $comment_3_id_new );
+		// Comment 3 has a parent which should get updated.
+		$this->build_value_maps_update_comment_parent( $wpdb_return_value_maps, $comment_3_id, $last_insert_id );
+		// Term 2 is new and should be inserted.
+		$this->build_value_maps_insert_term_row( $wpdb_return_value_maps, $term_2_row );
+		// term_taxonomy_id = 1 relationship will already exist.
+		$term_1_taxonomy_id = 1;
+		$this->build_value_maps_get_existing_term_taxonomy( $wpdb_return_value_maps, $term_1_name, $term_1_slug, 'category', $term_1_taxonomy_id );
+		// term_taxonomy_id = 2 should be inserted as new.
+		$this->build_value_maps_get_existing_term_taxonomy( $wpdb_return_value_maps, $term_2_name, $term_2_slug, 'category', null );
+		$this->build_value_maps_insert_term_taxonmy_row( $wpdb_return_value_maps, $term_2_taxonomy_row, 222 );
+		// term_relationship 1 and 2 inserts.
+		$this->build_value_maps_insert_term_relationship_row( $wpdb_return_value_maps, $post_id, $last_insert_id );
+		$this->build_value_maps_insert_term_relationship_row( $wpdb_return_value_maps, $post_id, $last_insert_id );
+		// Expectations.
+		$this->wpdb_mock->insert_id = $last_insert_id;
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::update' ] ) ) )
+		                ->method( 'update' )
+		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::update' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::insert' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::prepare' ] ) ) )
+		                ->method( 'prepare' )
+		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::prepare' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::get_var' ] ) ) )
+		                ->method( 'get_var' )
+		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::get_var' ] ) );
+
+		// Run.
+		$post_id_new_actual = $logic_partial_mock->import_data( $data );
+
+		// Assert.
+		$this->assertEquals( $last_insert_id, $post_id_new_actual );
+	}
+	// public function test_should_correctly_import_data_array( $data ) {
+	// 	// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
+	// 	$last_insert_id = 234;
+	// 	$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+	// 	$post_id = $post_row[ 'ID' ];
+	// 	$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+	// 	$author_row_id = 22;
+	// 	$author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $author_row_id );
+	// 	$author_user_login = $author_row[ 'user_login' ];
+	// 	$author_user_object = new WP_User();
+	// 	$author_user_object->ID = 432;
+	//
+	// 	// Mock full execution of ContentDiffMigrator::import_data(). Will use partial mock to mock just one method.
+	// 	$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+	// 	                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+	// 	                           ->setMethods( [ 'get_user_by' ] )
+	// 	                           ->getMock();
+	// 	$wpdb_return_value_maps = $this->get_empty_wpdb_return_value_maps();
+	// 	$get_user_by_return_value_map = [];
+	// 	$this->build_value_maps_insert_post_row( $wpdb_return_value_maps, $post_row, $last_insert_id );
+	// 	$this->build_value_maps_insert_postmeta_rows( $wpdb_return_value_maps, $postmeta_rows, $last_insert_id );
+	// 	$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', $author_user_login ], $author_user_object );
+	// 		// TODO insert new author user if not exists.
+	// 	$this->build_value_maps_update_post_author( $return_value_maps, $post_id, $author_user_object->ID );
+	// 	$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+	// 	                ->method( 'update' )
+	// 	                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+	//
+	// 	$this->wpdb_mock->insert_id = $last_insert_id;
+	// 	$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::insert' ] ) ) )
+	// 	                ->method( 'insert' )
+	// 	                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::insert' ] ) );
+	// 	$logic_partial_mock->expects( $this->once() )
+	// 	                   ->method( 'get_user_by' )
+	// 	                   ->will( $this->returnValueMap( $get_user_by_return_value_map ) );
+	//
+	// 	// Run.
+	// 	$post_id_actual = $logic_partial_mock->import_data( $data );
+	//
+	// 	// Assert.
+	// 	$this->assertEquals( $last_insert_id, $post_id_actual );
+	// }
 
 
 	// TODO test error returns from select/insert methods.
@@ -726,7 +1122,19 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'wpdb::get_results' => [],
 			'wpdb::insert' => [],
 			'wpdb::update' => [],
+			'wpdb::get_var' => [],
 		];
+	}
+
+	/**
+	 * Builds a simple return value as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $map       Array containing the return value map.
+	 * @param array $arguments Method arguments.
+	 * @param mixed $return    Return value.
+	 */
+	private function build_value_map( &$map, $arguments, $return ) {
+		$map[] = array_merge( $arguments, [ $return ] );
 	}
 
 	/**
@@ -924,11 +1332,10 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	/**
 	 * Builds return value maps for insert into users table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
-	 * @param array $maps        Array containing return value maps.
-	 * @param array $user_row    User row.
-	 * @param int   $new_user_id Newly inserted user ID.
+	 * @param array $maps     Array containing return value maps.
+	 * @param array $user_row User row.
 	 */
-	private function build_value_maps_insert_user_row( &$maps, $user_row, $new_user_id ) {
+	private function build_value_maps_insert_user_row( &$maps, $user_row ) {
 		unset( $user_row[ 'ID' ] );
 		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'users', $user_row, 1 ];
 	}
@@ -990,6 +1397,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Builds return value maps for inserts into terms table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps     Array containing return value maps.
+	 * @param array $term_row Term rows.
+	 */
+	private function build_value_maps_insert_term_row( &$maps, $term_row ) {
+		unset( $term_row[ 'term_id' ] );
+		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'terms', $term_row, 1 ];
+	}
+
+	/**
 	 * Builds return value maps for ContentDiffMigrator::update_comment_parent usage of $wpdb as defined by
 	 * \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
@@ -999,6 +1417,57 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	private function build_value_maps_update_comment_parent( &$maps, $comment_id, $comment_parent_new ) {
 		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'comments', [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ], 1 ];
+	}
+
+	/**
+	 * Builds return value maps for ContentDiffMigrator::get_existing_term_taxonomy usage of $wpdb as defined by
+	 * \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array  $maps                      Array containing return value maps.
+	 * @param string $term_name                 Term name.
+	 * @param string $term_slug                 Taxonomy slug.
+	 * @param string $taxonomy                  Taxonomy name.
+	 * @param int    $term_taxonomy_id_expected Expected return term_taxonomy_id value.
+	 */
+	private function build_value_maps_get_existing_term_taxonomy( &$maps, $term_name, $term_slug, $taxonomy, $term_taxonomy_id_expected ) {
+		$sql_sprintf = "SELECT tt.term_taxonomy_id
+			FROM {$this->wpdb_mock->term_taxonomy} tt
+			JOIN {$this->wpdb_mock->terms} t
+		        ON tt.term_id = t.term_id
+			WHERE t.name = %s
+			AND t.slug = %s
+		    AND tt.taxonomy = %s;";
+		$sql = sprintf( $sql_sprintf, $term_name, $term_slug, $taxonomy );
+		$maps[ 'wpdb::prepare' ][] = [ $sql_sprintf, $term_name, $term_slug, $taxonomy, $sql ];
+		$maps[ 'wpdb::get_var' ][] = [ $sql, $term_taxonomy_id_expected ];
+	}
+
+	/**
+	 * Builds return value maps for inserts into termtaxonomy table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps              Array containing return value maps.
+	 * @param array $term_taxonomy_row Term Taxonomy row.
+	 * @param int   $term_id_new       New Term ID.
+	 */
+	private function build_value_maps_insert_term_taxonmy_row( &$maps, $term_taxonomy_row, $term_id_new ) {
+		unset( $term_taxonomy_row[ 'term_taxonomy_id' ] );
+		$term_taxonomy_row[ 'term_id' ] = $term_id_new;
+		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'termtaxonomy', $term_taxonomy_row, 1 ];
+	}
+
+	/**
+	 * Builds return value maps for inserts into term_relationships table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps             Array containing return value maps.
+	 * @param array $object_id        Object ID.
+	 * @param int   $term_taxonomy_id Term Taxonomy ID.
+	 */
+	private function build_value_maps_insert_term_relationship_row( &$maps, $object_id, $term_taxonomy_id ) {
+		$maps[ 'wpdb::insert' ][] = [
+			$this->wpdb_mock->table_prefix . 'term_relationships',
+			[ 'object_id' => $object_id, 'term_taxonomy_id' => $term_taxonomy_id, ],
+			1
+		];
 	}
 
 	/**
@@ -1225,8 +1694,8 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 						// Term 2 has no meta.
 						[
 							'term_id' => 42,
-							'name' => 'Officia eos ut temporibus',
-							'slug' => 'officia-eos-ut-temporibus',
+							'name' => 'Custom Term',
+							'slug' => 'custom-term',
 							'term_group' => 0
 						],
 					],
