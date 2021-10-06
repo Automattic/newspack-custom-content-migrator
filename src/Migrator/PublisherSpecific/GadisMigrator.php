@@ -99,6 +99,14 @@ class GadisMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator gadis-import-events',
+			[ $this, 'cmd_import_events' ],
+			[
+				'shortdesc' => 'Import Gadis Events',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator gadis-remove-uncategorized-cat',
 			[ $this, 'cmd_remove_uncategorized' ],
 			[
@@ -757,6 +765,15 @@ class GadisMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Import GadisTV Events.
+	 *
+	 * @param array $articles Gadis articles.
+	 */
+	private function import_events( $articles ) {
+		return;
+	}
+
+	/**
 	 * Callable for the `newspack-content-migrator gadis-import-posts` command.
 	 *
 	 * @param array $args       CLI arguments.
@@ -765,7 +782,8 @@ class GadisMigrator implements InterfaceMigrator {
 	public function cmd_import_posts( $args, $assoc_args ) {
 		global $wpdb;
 		$time_start = microtime( true );
-		$articles   = $wpdb->get_results( 'SELECT * FROM articles;', ARRAY_A );
+		// Select every article that is not an event.
+		$articles = $wpdb->get_results( "SELECT * FROM articles WHERE category NOT IN ('event');", ARRAY_A );
 		$this->import_articles( $articles );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
@@ -781,6 +799,25 @@ class GadisMigrator implements InterfaceMigrator {
 		$time_start = microtime( true );
 		$items      = $wpdb->get_results( 'SELECT * FROM gadistvs ORDER BY id ASC;', ARRAY_A );
 		$this->import_videos( $items );
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator gadis-import-events` command.
+	 *
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_import_events( $args, $assoc_args ) {
+		if ( ! function_exists( 'tribe_create_event') ) {
+			WP_CLI::warning( 'The Events Calendar plugin is not installed' );
+			return;
+		}
+		global $wpdb;
+		$time_start = microtime( true );
+		// Select every article that is not an event.
+		$articles = $wpdb->get_results( "SELECT * FROM articles WHERE category IN ('event');", ARRAY_A );
+		$this->import_events( $articles );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
