@@ -72,7 +72,7 @@ class GadisMigrator implements InterfaceMigrator {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -272,7 +272,7 @@ class GadisMigrator implements InterfaceMigrator {
 	 * @param array $article        Gadis article object.
 	 */
 	private function set_categories( $sub_categories, $post_id, $article ) {
-		if ( empty ( $article['category'] ) ) {
+		if ( empty( $article['category'] ) ) {
 			return;
 		}
 		$post_cats = [];
@@ -348,7 +348,7 @@ class GadisMigrator implements InterfaceMigrator {
 			array_filter(
 				$tags,
 				function( $tag ) use ( $gadis_id ) {
-					return $tag['article_id'] === $gadis_id && ! empty ( $tag['tag'] );
+					return $tag['article_id'] === $gadis_id && ! empty( $tag['tag'] );
 				}
 			)
 		);
@@ -401,7 +401,7 @@ class GadisMigrator implements InterfaceMigrator {
 
 		$profile = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT * FROM user_profiles WHERE user_id = %d;",
+				'SELECT * FROM user_profiles WHERE user_id = %d;',
 				(int) $gadis_id
 			),
 			ARRAY_A
@@ -504,7 +504,7 @@ class GadisMigrator implements InterfaceMigrator {
 
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
 
-			$ID = null;
+			$ID          = null;
 			$result_meta = $wpdb->get_row(
 				$wpdb->prepare(
 					'SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;',
@@ -555,7 +555,7 @@ class GadisMigrator implements InterfaceMigrator {
 				'post_title'    => $article['title'],
 				'post_content'  => $post_content,
 				'post_excerpt'  => $article['description'] ? $article['description'] : '',
-				'post_status'   => 1 === (int) $article[ 'is_publish' ] ? 'publish' : 'draft',
+				'post_status'   => 1 === (int) $article['is_publish'] ? 'publish' : 'draft',
 				'post_author'   => $user_id,
 				'post_date'     => $pages[0]['created_at'],
 				'post_modified' => $pages[0]['updated_at'],
@@ -585,11 +585,13 @@ class GadisMigrator implements InterfaceMigrator {
 
 			$post_id = wp_insert_post( $post_data, true );
 			if ( is_wp_error( $post_id ) ) {
-				WP_CLI::warning( sprintf(
-					"Insert post error, %d - %s",
-					$gadis_id,
-					$post_id->get_error_message()
-				) );
+				WP_CLI::warning(
+					sprintf(
+						'Insert post error, %d - %s',
+						$gadis_id,
+						$post_id->get_error_message()
+					) 
+				);
 				$this->log( self::LOG_INSERT_POST_ERROR, sprintf( '%d %s', $gadis_id, $post_id->get_error_message() ) );
 				continue;
 			}
@@ -625,7 +627,7 @@ class GadisMigrator implements InterfaceMigrator {
 		// Setup default user
 		$user    = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id LEFT JOIN user_profiles AS p ON p.user_id = u.id WHERE p.username = %s;",
+				'SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id LEFT JOIN user_profiles AS p ON p.user_id = u.id WHERE p.username = %s;',
 				self::DEFAULT_USER_SLUG
 			),
 			ARRAY_A
@@ -655,7 +657,7 @@ class GadisMigrator implements InterfaceMigrator {
 
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $video_key + 1, count( $videos ), $video['id'] ) );
 
-			$post_id = null;
+			$post_id     = null;
 			$result_meta = $wpdb->get_row(
 				$wpdb->prepare(
 					"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s;",
@@ -777,7 +779,7 @@ class GadisMigrator implements InterfaceMigrator {
 	public function cmd_import_tv( $args, $assoc_args ) {
 		global $wpdb;
 		$time_start = microtime( true );
-		$items      = $wpdb->get_results( "SELECT * FROM gadistvs ORDER BY id ASC;", ARRAY_A );
+		$items      = $wpdb->get_results( 'SELECT * FROM gadistvs ORDER BY id ASC;', ARRAY_A );
 		$this->import_videos( $items );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
@@ -789,12 +791,12 @@ class GadisMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args CLI associative arguments.
 	 */
 	public function cmd_remove_uncategorized( $args, $assoc_args ) {
-		$post_ids = $this->posts_logic->get_all_posts_ids();
+		$post_ids          = $this->posts_logic->get_all_posts_ids();
 		$cat_uncategorized = get_category_by_slug( 'uncategorized' );
 		foreach ( $post_ids as $key => $post_id ) {
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key + 1, count( $post_ids ), $post_id ) );
 
-			$cat_ids = wp_get_post_categories( $post_id );
+			$cat_ids         = wp_get_post_categories( $post_id );
 			$cat_ids_updated = $cat_ids;
 			foreach ( $cat_ids_updated as $key_cat => $cat_id ) {
 				if ( $cat_uncategorized->term_id == $cat_id ) {
