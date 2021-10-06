@@ -44,6 +44,7 @@ PluginSetup::register_migrators( array(
 	Migrator\General\SportsPressMigrator::class,
 	Migrator\General\FeaturedImagesMigrator::class,
 	Migrator\General\ContentDiffMigrator::class,
+	Migrator\General\WooCommOrdersAndSubscriptionsMigrator::class,
 
 	// Migrator\PublisherSpecific\KawowoMigrator::class,
 	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
@@ -58,10 +59,10 @@ PluginSetup::register_migrators( array(
 	// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
 	// Migrator\PublisherSpecific\HipertextualMigrator::class,
 	// Migrator\PublisherSpecific\QuePasaMigrator::class,
+	// Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
+	// Migrator\PublisherSpecific\RafushimpoMigrator::class,
 	Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
-	Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
-	Migrator\PublisherSpecific\RafushimpoMigrator::class,
 	Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 	Migrator\PublisherSpecific\GadisMigrator::class,
-	Migrator\PublisherSpecific\TheBayNetMigrator::class,
+	Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
 ) );

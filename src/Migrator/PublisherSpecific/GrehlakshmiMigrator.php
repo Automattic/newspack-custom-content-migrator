@@ -77,7 +77,13 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_import_xmls' ],
 			[
 				'shortdesc' => 'Imports Grehlakshmi custom XML content.',
-				'synopsis'  => [],
+				'synopsis'  => [
+					'type'        => 'assoc',
+					'name'        => 'xml-file',
+					'description' => "Full path to the XML file.",
+					'optional'    => false,
+					'repeating'   => false,
+				],
 			]
 		);
 		WP_CLI::add_command(
@@ -85,7 +91,13 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_update_imported_posts_meta' ],
 			[
 				'shortdesc' => 'Updates all imported Post\' Tags, Categories, and properly sets all their info from metas.',
-				'synopsis'  => [],
+				'synopsis'  => [
+					'type'        => 'assoc',
+					'name'        => 'ids-csv',
+					'description' => "IDs of posts which to update.",
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			]
 		);
 		WP_CLI::add_command(
@@ -107,13 +119,12 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	}
 
 	public function cmd_import_xmls( $args, $assoc_args ) {
-		// $xml_file = isset( $assoc_args[ 'xml-file' ] ) ? true : false;
+		$xml_file = $assoc_args[ 'xml-file' ] ?? false;
+		if ( false === $xml_file || ! file_exists( $xml_file ) ) {
+			WP_CLI::error( sprintf( 'XML file %s not found. ', $xml_file ) );
+		}
 
 		$time_start = microtime( true );
-
-		// Live exports.
-		$xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/1/Kreatio_export/XML_data/delta_export.xml';
-		// $xml_file = '/srv/www/0_data_no_backup/0_grehlakshmi/1/Kreatio_export/XML_data/export.xml';
 
 		$line_number       = 0;
 		$lines_total       = $this->count_file_lines( $xml_file );
@@ -209,9 +220,17 @@ class GrehlakshmiMigrator implements InterfaceMigrator {
 	 * Callable for `newspack-content-migrator update-imported-posts`
 	 */
 	public function cmd_update_imported_posts_meta( $args, $assoc_args ) {
+		$ids = $assoc_args[ 'ids-csv' ] ? explode( ',', $assoc_args[ 'ids-csv' ] ) : [];
 		$time_start = microtime( true );
 
-		$posts = $this->posts_logic->get_all_posts( 'post', [ 'publish', 'pending', 'draft' ] );
+		if ( $ids ) {
+			$posts = [];
+			foreach ( $ids as $id ) {
+				$posts[] = get_post( $id );
+			}
+		} else {
+			$posts = $this->posts_logic->get_all_posts( 'post', [ 'publish', 'pending', 'draft' ] );
+		}
 		foreach ( $posts as $key_posts => $post ) {
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
 
