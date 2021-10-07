@@ -4,7 +4,9 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use \WP_CLI;
+use \WP_User;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -28,11 +30,17 @@ class PrisonJournalismMigrator implements InterfaceMigrator {
 	private $posts_logic;
 
 	/**
+	 * @var CoAuthorPlusLogic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->dom_crawler = new Crawler();
 		$this->posts_logic = new PostsLogic();
+		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -57,6 +65,77 @@ class PrisonJournalismMigrator implements InterfaceMigrator {
 				'newspack-content-migrator prisonjournalism-fix-double-images',
 			[ $this, 'cmd_fix_double_images' ],
 		);
+		WP_CLI::add_command(
+				'newspack-content-migrator prisonjournalism-fix-authors',
+			[ $this, 'cmd_fix_authors' ],
+			[
+				'shortdesc' => 'Imports authors from file.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'authors-file',
+						'description' => 'PHP file containing a formatted array of author info.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator prisonjournalism-fix-authors`.
+	 */
+	public function cmd_fix_authors( $args, $assoc_args ) {
+		$authors_file = $assoc_args[ 'authors-file' ] ?? null;
+		if ( ! file_exists( $authors_file ) ) {
+			WP_CLI::error( 'Authors file not found.' );
+		}
+
+		$authors_info = include $authors_file;
+		foreach ( $authors_info as $key_author_info => $author_info ) {
+			WP_CLI::log( sprintf( '(%d/%d) importing author', $key_author_info + 1, count( $authors_info) ) );
+
+			if ( count( $author_info ) != 5 ) {
+				$debug = 1;
+			}
+
+			$first_name = $author_info[0];
+			$last_name = $author_info[1];
+			$byline = $author_info[2];
+			$writer_bio = $author_info[3];
+			// Removes all chars except alpha numeric chars and period.
+			$user_login = preg_replace('/[^\.\w]/u', '', $byline );
+			// $user_login = preg_replace('/[\W\s^\.]/u', '', $byline );
+
+			// Create GAs CAP fields:
+			// 	First Name > First Name
+			// 	Last Name > Last Name
+			// 	Byline > Display Name
+			// 	Writer Bio > Biographical Info
+			$ga_id = $this->coauthorsplus_logic->create_guest_author( [
+				'display_name' => $byline,
+				'user_login' => $user_login,
+				'first_name' => $first_name,
+				'last_name' => $last_name,
+				'description' => $writer_bio,
+			] );
+
+			$msg = sprintf( "GA ID %d created for '%s' '%s' '%s'", $ga_id, $first_name, $last_name, $byline );
+			$this->log( 'authorsfix.log', $msg );
+			WP_CLI::log( $msg );
+
+			// Map GA to User:
+			// first name "Alex Edward", last name "Taylor", became a user with username AlexEdwardTaylor.
+			$user = get_user_by( 'login', $user_login );
+			if ( $user instanceof WP_User ) {
+				$this->coauthorsplus_logic->link_guest_author_to_wp_user( $ga_id, $user );
+
+				$msg = sprintf( "linked GA ID %d to User ID %d '%s' '%s'", $ga_id, $user->ID, $user->user_nicename, $user->user_login );
+				$this->log( 'authorsfix.log', $msg );
+				WP_CLI::log( $msg );
+			}
+		}
 	}
 
 	/**
