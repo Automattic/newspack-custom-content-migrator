@@ -16,6 +16,9 @@ class GadisMigrator implements InterfaceMigrator {
 	const LOG_POST_SKIPPED                = 'GADIS_postSkipped.log';
 	const LOG_POST_NO_CONTENT             = 'GADIS_postNoContent.log';
 	const LOG_INSERT_POST_ERROR           = 'GADIS_insertPostError.log';
+	const LOG_EVENT_SKIPPED               = 'GADIS_eventSkipped.log';
+	const LOG_EVENT_NO_CONTENT            = 'GADIS_eventNoContent.log';
+	const LOG_INSERT_EVENT_ERROR          = 'GADIS_eventPostError.log';
 	const LOG_USER_ERROR                  = 'GADIS_userError.log';
 	const LOG_CAT_CREATE_ERROR            = 'GADIS_ERRCatsCreate.log';
 	const LOG_CAT_SET_ERROR               = 'GADIS_ERRCatsSet.log';
@@ -492,6 +495,53 @@ class GadisMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Get article data.
+	 *
+	 * @param object $article Article object.
+	 *
+	 * @return object $article_data Containing pages, tags, gallery images and user data.
+	 */
+	private function get_article_data( $article ) {
+		global $wpdb;
+		$gadis_id  = $article['id'];
+		$pages     = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT * FROM article_pages WHERE article_id = %d;',
+				(int) $gadis_id
+			),
+			ARRAY_A
+		);
+		$tags      = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM article_tags WHERE tag != '' AND article_id = %d;",
+				(int) $gadis_id
+			),
+			ARRAY_A
+		);
+		$galleries = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT * FROM article_galleries WHERE article_id = %d;',
+				(int) $gadis_id
+			),
+			ARRAY_A
+		);
+		$user      = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT * FROM users WHERE id = %d;',
+				(int) $article['user_id']
+			),
+			ARRAY_A
+		);
+		return [
+			'article'   => $article,
+			'pages'     => $pages,
+			'tags'      => $tags,
+			'galleries' => $galleries,
+			'user'      => $user,
+		];
+	}
+
+	/**
 	 * Import Gadis articles.
 	 *
 	 * @param array   $articles     Gadis articles.
@@ -500,22 +550,17 @@ class GadisMigrator implements InterfaceMigrator {
 	private function import_articles( $articles, $force_import = false ) {
 
 		global $wpdb;
-
-		$article_pages  = $wpdb->get_results( 'SELECT * FROM article_pages;', ARRAY_A );
-		$tags           = $wpdb->get_results( "SELECT * FROM article_tags WHERE tag != '';", ARRAY_A );
-		$galleries      = $wpdb->get_results( 'SELECT * FROM article_galleries;', ARRAY_A );
 		$sub_categories = $wpdb->get_results( 'SELECT * FROM sub_categories;', ARRAY_A );
-		$users          = $wpdb->get_results( 'SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id WHERE r.role_id IN (1, 4, 6);', ARRAY_A );
 
 		foreach ( $articles as $article_key => $article ) {
-			$gadis_id = $article['id'];
+			$gadis_id     = $article['id'];
+			$article_data = $this->get_article_data( $article );
 
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
-
-			$ID          = null;
+			$post_id     = null;
 			$result_meta = $wpdb->get_row(
 				$wpdb->prepare(
-					'SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;',
+					"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;",
 					'gadis_id',
 					(int) $gadis_id
 				),
@@ -527,46 +572,28 @@ class GadisMigrator implements InterfaceMigrator {
 					$this->log( self::LOG_POST_SKIPPED, $gadis_id . ' already imported. Skipping.' );
 					continue;
 				}
-				$ID = $result_meta['post_id'];
+				$post_id = $result_meta['post_id'];
 			}
 
-			$pages = array_values(
-				array_filter(
-					$article_pages,
-					function( $article_content ) use ( $article ) {
-						return $article_content['article_id'] === $article['id'];
-					}
-				)
-			);
-
-			if ( empty( $pages ) ) {
+			if ( empty( $article_data['pages'] ) ) {
 				WP_CLI::warning( $gadis_id . ' does not have content.' );
 				$this->log( self::LOG_POST_NO_CONTENT, $gadis_id . '  does not have content.' );
 				continue;
 			}
 
-			$gallery = array_values(
-				array_filter(
-					$galleries,
-					function( $image ) use ( $article ) {
-						return $image['article_id'] === $article['id'];
-					}
-				)
-			);
-
-			$user_id      = $this->upsert_user( $users, $article['user_id'] );
-			$post_content = $this->get_post_content( $pages, $gallery );
+			$user_id      = $this->upsert_user( [ $article_data['user'] ], $article['user_id'] );
+			$post_content = $this->get_post_content( $article_data['pages'], $article['galleries'] );
 
 			$post_data = [
-				'ID'            => $ID,
+				'ID'            => $post_id,
 				'post_type'     => 'post',
 				'post_title'    => $article['title'],
 				'post_content'  => $post_content,
 				'post_excerpt'  => $article['description'] ? $article['description'] : '',
 				'post_status'   => 1 === (int) $article['is_publish'] ? 'publish' : 'draft',
 				'post_author'   => $user_id,
-				'post_date'     => $pages[0]['created_at'],
-				'post_modified' => $pages[0]['updated_at'],
+				'post_date'     => $article_data['pages'][0]['created_at'],
+				'post_modified' => $article_data['pages'][0]['updated_at'],
 				'post_name'     => $article['slug'],
 			];
 			$post_meta = [
@@ -607,7 +634,7 @@ class GadisMigrator implements InterfaceMigrator {
 			$this->set_post_meta( $post_id, $post_meta );
 			$this->set_featured_image( $post_id, $article );
 			$this->set_categories( $sub_categories, $post_id, $article );
-			$this->set_tags( $tags, $post_id, $gadis_id );
+			$this->set_tags( $article_data['tags'], $post_id, $gadis_id );
 		}
 	}
 
@@ -767,10 +794,102 @@ class GadisMigrator implements InterfaceMigrator {
 	/**
 	 * Import GadisTV Events.
 	 *
-	 * @param array $articles Gadis articles.
+	 * @param array   $articles     Gadis articles.
+	 * @param boolean $force_import Whether to update already imported events.
 	 */
-	private function import_events( $articles ) {
-		return;
+	private function import_events( $articles, $force_import = false ) {
+		global $wpdb;
+		$sub_categories = $wpdb->get_results( 'SELECT * FROM sub_categories;', ARRAY_A );
+
+		foreach ( $articles as $article_key => $article ) {
+			$gadis_id     = $article['id'];
+			$article_data = $this->get_article_data( $article );
+
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
+			$post_id     = null;
+			$result_meta = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;",
+					'gadis_id',
+					(int) $gadis_id
+				),
+				ARRAY_A
+			);
+			if ( isset( $result_meta['post_id'] ) ) {
+				if ( false === $force_import ) {
+					WP_CLI::warning( $gadis_id . ' already imported. Skipping.' );
+					$this->log( self::LOG_EVENT_SKIPPED, $gadis_id . ' already imported. Skipping.' );
+					continue;
+				}
+				$post_id = $result_meta['post_id'];
+			}
+
+			if ( empty( $article_data['pages'] ) ) {
+				WP_CLI::warning( $gadis_id . ' does not have content.' );
+				$this->log( self::LOG_EVENT_NO_CONTENT, $gadis_id . '  does not have content.' );
+				continue;
+			}
+
+			$user_id      = $this->upsert_user( [ $article_data['user'] ], $article['user_id'] );
+			$post_content = $this->get_post_content( $article_data['pages'], $article['galleries'] );
+
+			$start_date = new \DateTime( $article['start_date'] );
+			$end_date   = new \DateTime( $article['end_date'] ?? $article['start_date'] );
+
+			$post_data = [
+				'ID'             => $post_id,
+				'post_type'      => 'post',
+				'post_title'     => $article['title'],
+				'post_content'   => $post_content,
+				'post_excerpt'   => $article['description'] ? $article['description'] : '',
+				'post_status'    => 1 === (int) $article['is_publish'] ? 'publish' : 'draft',
+				'post_author'    => $user_id,
+				'post_date'      => $article_data['pages'][0]['created_at'],
+				'post_modified'  => $article_data['pages'][0]['updated_at'],
+				'post_name'      => $article['slug'],
+				'EventStartDate' => $start_date->format( 'Y-m-d' ),
+				'EventEndDate'   => $end_date->format( 'Y-m-d' ),
+				'EventAllDay'    => true,
+			];
+			$post_meta = [
+				'gadis_id'         => $gadis_id,
+				'presented_by'     => $article['presented_by'],
+				'is_paywall'       => $article['is_paywall'],
+				'sponsor_text'     => $article['sponsor_text'],
+				'url_sponsor'      => $article['url_sponsor'],
+				'challenge_status' => $article['challenge_status'],
+				'view_counter'     => $article['view_counter'],
+			];
+
+			// Events meta.
+			$post_meta = array_merge(
+				$post_meta,
+				[
+					'meeting_id' => $article['meeting_id'],
+					'topic'      => $article['topic'],
+					'zoom_link'  => $article['zoom_link'],
+					'start_date' => $article['start_date'],
+					'end_date'   => $article['end_date'],
+				]
+			);
+
+			$post_id = \tribe_create_event( $post_data );
+			if ( false === $post_id ) {
+				WP_CLI::warning(
+					sprintf(
+						'Insert event error, %d',
+						$gadis_id
+					) 
+				);
+				$this->log( self::LOG_INSERT_EVENT_ERROR, sprintf( '%d', $gadis_id ) );
+				continue;
+			}
+
+			$this->set_post_meta( $post_id, $post_meta );
+			$this->set_featured_image( $post_id, $article );
+			$this->set_categories( $sub_categories, $post_id, $article );
+			$this->set_tags( $article_data['tags'], $post_id, $gadis_id );
+		}
 	}
 
 	/**
@@ -809,7 +928,7 @@ class GadisMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args CLI associative arguments.
 	 */
 	public function cmd_import_events( $args, $assoc_args ) {
-		if ( ! function_exists( 'tribe_create_event') ) {
+		if ( ! function_exists( 'tribe_create_event' ) ) {
 			WP_CLI::warning( 'The Events Calendar plugin is not installed' );
 			return;
 		}
