@@ -55,6 +55,12 @@ class GadisMigrator implements InterfaceMigrator {
 	private $attachments_logic;
 
 	/**
+	 * @var string
+	 * YouTube API Key.
+	 */
+	private $youtube_api_key = '';
+
+	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -95,7 +101,15 @@ class GadisMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_import_tv' ],
 			[
 				'shortdesc' => 'Import Gadis TV',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'youtube_api_key',
+						'description' => 'YouTube API Key to fetch video metadata.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 		WP_CLI::add_command(
@@ -622,6 +636,13 @@ class GadisMigrator implements InterfaceMigrator {
 
 		global $wpdb, $wp_embed;
 
+		$youtube_api_key = $this->youtube_api_key;
+
+		if ( empty( $youtube_api_key ) ) {
+			WP_CLI::warning( 'YouTube API Key is required.');
+			return;
+		}
+
 		// Setup default user
 		$user    = $wpdb->get_row(
 			$wpdb->prepare(
@@ -677,13 +698,29 @@ class GadisMigrator implements InterfaceMigrator {
 
 			// Ensure we have a valid YouTube URL.
 			preg_match( '/^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/', $video['url'], $matches );
-			if ( isset( $matches[7] ) && $matches[7] ) {
-				$youtube_id = $matches[7];
-				$url        = 'https://www.youtube.com/watch?v=' . $youtube_id;
+			if ( ! isset( $matches[7] ) || ! $matches[7] ) {
+				continue;
 			}
 
+			$youtube_id  = $matches[7];
+			$url         = 'https://www.youtube.com/watch?v=' . $youtube_id;
 			$oembed      = _wp_oembed_get_object();
 			$oembed_data = $oembed->get_data( $url );
+			$api_url     = 'https://www.googleapis.com/youtube/v3/videos?part=snippet&id=' . $youtube_id .  '&key=' . $youtube_api_key;
+
+			if ( ! $oembed_data || 'YouTube' !== $oembed_data->provider_name ) {
+				WP_CLI::warning( 'Failed to fetch oEmbed data.' );
+				continue;
+			}
+
+			// Get video date from YouTube API.
+			try {
+				$youtube_data = json_decode( wp_safe_remote_get( $api_url )['body'] );
+				$video_date   = $youtube_data->items[0]->snippet->publishedAt;
+			} catch ( Exception $e ) {
+				WP_CLI::warning( $e->getMessage() );
+				continue;
+			}
 
 			// Thumbnail.
 			$thumbnail_url = false;
@@ -723,6 +760,7 @@ class GadisMigrator implements InterfaceMigrator {
 			$post_data = [
 				'ID'            => $post_id,
 				'post_type'     => 'post',
+				'post_date'     => $video_date,
 				'post_title'    => $video['title'],
 				'post_author'   => $user_id,
 				'post_status'   => 'publish',
@@ -776,6 +814,7 @@ class GadisMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_import_tv( $args, $assoc_args ) {
 		global $wpdb;
+		$this->youtube_api_key = $assoc_args['youtube_api_key'];
 		$time_start = microtime( true );
 		$items      = $wpdb->get_results( "SELECT * FROM gadistvs ORDER BY id ASC;", ARRAY_A );
 		$this->import_videos( $items );
