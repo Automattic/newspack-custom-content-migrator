@@ -66,5 +66,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
 	)
 );
