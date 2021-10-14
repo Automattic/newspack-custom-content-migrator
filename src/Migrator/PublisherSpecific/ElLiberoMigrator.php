@@ -114,7 +114,7 @@ class ElLiberoMigrator implements InterfaceMigrator {
 			WP_CLI::line( 'Linking ' . count( $post_ids ) . ' posts to new category.' );
 
 			foreach ( $post_ids as $post_id ) {
-				wp_set_post_categories( $post_id, $category->term_id );
+				wp_set_post_categories( $post_id, $category->term_id, true );
 			}
 
 			WP_CLI::line( "Updating '{$post_type}' to 'post'" );
