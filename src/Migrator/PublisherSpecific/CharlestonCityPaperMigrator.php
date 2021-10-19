@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \WP_CLI;
 
 /**
@@ -16,9 +17,16 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var CoAuthorPlus $coauthorsplus_logic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Constructor.
 	 */
-	private function __construct() {}
+	private function __construct() {
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -28,7 +36,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -42,12 +50,12 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 			'newspack-content-migrator charlestoncitypaper-uploadcare-checkfilesinfolders',
 			[ $this, 'cmd_uploadcare_checkfilesinfolders' ],
 			[
-			'shortdesc' => 'A helper command which checks Upload Care contents.',
+				'shortdesc' => 'A helper command which checks Upload Care contents.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'uploadcare-path',
-						'description' => "Full path to location of all Upload Care folders and files.",
+						'description' => 'Full path to location of all Upload Care folders and files.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -58,7 +66,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 			'newspack-content-migrator charlestoncitypaper-uploadcare-fix',
 			[ $this, 'cmd_uploadcare_fix' ],
 			[
-			'shortdesc' => 'Fixes uploadcare images to local path.',
+				'shortdesc' => 'Fixes uploadcare images to local path.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -74,7 +82,21 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 			'newspack-content-migrator charlestoncitypaper-uploads-subfolders-fix',
 			[ $this, 'cmd_uploads_subfolders_fix' ],
 			[
-			'shortdesc' => 'Fixes upload subfolders by moving files out of these one level below.',
+				'shortdesc' => 'Fixes upload subfolders by moving files out of these one level below.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlestoncitypaper-create-merge-authors-from-post-author-meta',
+			[ $this, 'cmd_create_merge_authors_from_post_author_meta' ],
+			[
+				'shortdesc' => 'Loop over all the posts checking their `author` meta, link the author if it exists as a WP user, or create it as a Guest Author.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlestoncitypaper-migrate-authors-from-publishpress-to-cap',
+			[ $this, 'cmd_migrate_authors_from_publishpress_to_cap' ],
+			[
+				'shortdesc' => 'Loop over all the posts checking their `author` meta, link the author if it exists as a WP user, or create it as a Guest Author.',
 			]
 		);
 	}
@@ -88,7 +110,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 	public function cmd_uploads_subfolders_fix( $args, $assoc_args ) {
 		$time_start = microtime( true );
 
-		$uploads_dir = wp_get_upload_dir()[ 'basedir' ] ?? null;
+		$uploads_dir = wp_get_upload_dir()['basedir'] ?? null;
 		if ( is_null( $uploads_dir ) ) {
 			WP_CLI::error( 'Could not get upload dir.' );
 		}
@@ -113,7 +135,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 			// Work through `mm` folders.
 			$mms = glob( $uploads_dir . '/' . $yyyy_name . '/*', GLOB_ONLYDIR );
 			foreach ( $mms as $key_mms => $mm_dir ) {
-				$mm_name = pathinfo( $mm_dir )[ 'basename' ] ?? null;
+				$mm_name = pathinfo( $mm_dir )['basename'] ?? null;
 				if ( is_null( $mm_name ) ) {
 					continue;
 				}
@@ -129,8 +151,8 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 
 				// Work through the subfolders.
 				$mm_full_path = $uploads_dir . '/' . $yyyy_name . '/' . $mm_name;
-				$mm_subdirs = glob( $mm_full_path . '/*', GLOB_ONLYDIR );
-				$progress = \WP_CLI\Utils\make_progress_bar( 'Moving...', count( $mm_subdirs ) );
+				$mm_subdirs   = glob( $mm_full_path . '/*', GLOB_ONLYDIR );
+				$progress     = \WP_CLI\Utils\make_progress_bar( 'Moving...', count( $mm_subdirs ) );
 				foreach ( $mm_subdirs as $mm_subdir ) {
 					$progress->tick();
 
@@ -145,7 +167,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 						$this->log( 'ccp_subfoldersMove', $subdir_file );
 						$old_file = $mm_subdir . '/' . $subdir_file;
 						$new_file = $mm_full_path . '/' . $subdir_file;
-						$renamed = rename( $old_file, $new_file );
+						$renamed  = rename( $old_file, $new_file );
 						if ( false === $renamed ) {
 							$this->log( 'ccp_subfoldersMoveError', $old_file . ' ' . $new_file );
 						}
@@ -165,7 +187,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_uploadcare_fix( $args, $assoc_args ) {
-		$uploadcare_path = $assoc_args[ 'uploadcare-path' ] ?? null;
+		$uploadcare_path = $assoc_args['uploadcare-path'] ?? null;
 		if ( ! file_exists( $uploadcare_path ) ) {
 			WP_CLI::error( sprintf( 'Location %s not found.', $uploadcare_path ) );
 		}
@@ -175,11 +197,13 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 		// Clear option value upload_url_path.
 		$res_cleared_upload_url_path = update_option( 'upload_url_path', '' );
 
-		$images = get_posts( [
-			'post_type' => 'attachment',
-			'post_mime_type' => 'image',
-			'numberposts' => -1,
-		] );
+		$images   = get_posts(
+			[
+				'post_type'      => 'attachment',
+				'post_mime_type' => 'image',
+				'numberposts'    => -1,
+			]
+		);
 		$progress = \WP_CLI\Utils\make_progress_bar( 'Images', count( $images ) );
 
 		foreach ( $images as $image ) {
@@ -198,7 +222,7 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 				continue;
 			}
 			$url_old = wp_get_attachment_url( $image->ID );
-			$path = $uploadcare_path . '/' . $relative_path;
+			$path    = $uploadcare_path . '/' . $relative_path;
 
 			$res_updated = update_attached_file( $image->ID, $path );
 
@@ -215,11 +239,12 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
+
 	/**
 	 * Callable for `newspack-content-migrator charlestoncitypaper-uploadcare-checkfilesinfolders`.
 	 */
 	public function cmd_uploadcare_checkfilesinfolders( $args, $assoc_args ) {
-		$uploadcare_path = $assoc_args[ 'uploadcare-path' ] ?? null;
+		$uploadcare_path = $assoc_args['uploadcare-path'] ?? null;
 		if ( ! file_exists( $uploadcare_path ) ) {
 			WP_CLI::error( sprintf( 'Location %s not found.', $uploadcare_path ) );
 		}
@@ -228,19 +253,167 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 
 		$uploadcare_subdirs = glob( $uploadcare_path . '/*', GLOB_ONLYDIR );
 
-		$one_file_per_folder = true;
+		$one_file_per_folder          = true;
 		$subfolders_not_having_1_file = [];
 
 		foreach ( $uploadcare_subdirs as $uploadcare_subdir ) {
 			$files = array_diff( scandir( $uploadcare_subdir ), [ '.', '..' ] );
 			if ( count( $files ) > 1 || count( $files ) < 1 ) {
-				$one_file_per_folder = false;
+				$one_file_per_folder            = false;
 				$subfolders_not_having_1_file[] = $uploadcare_subdir;
 			}
 		}
 
 		if ( false === $one_file_per_folder ) {
 			WP_CLI::error( 'Some folders do not have exactly one file in them.' );
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator charlestoncitypaper-create-merge-authors-from-post-author-meta`
+	 */
+	public function cmd_create_merge_authors_from_post_author_meta( $args, $assoc_args ) {
+		$dry_run           = $assoc_args['dry_run'] ?? false;
+		$post_id           = $assoc_args['post_id'] ?? false;
+		$posts_from_author = $assoc_args['posts_from_author'] ?? false;
+		$time_start        = microtime( true );
+
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
+
+		WP_CLI::line( sprintf( 'dry run mode: %s', $dry_run ? 'on' : 'off' ) );
+
+		$posts_count      = 0;
+		$posts_total      = array_sum( (array) wp_count_posts( 'post' ) );
+		$posts_query_args = [
+			'posts_per_page' => -1,
+			'post_type'      => 'post',
+			'paged'          => 1,
+			'fields'         => 'ids,post_author',
+		];
+
+		if ( $post_id ) {
+			$posts_query_args['p'] = $post_id;
+		}
+
+		$posts = get_posts( $posts_query_args );
+
+		foreach ( $posts as $post ) {
+			$posts_count++;
+			// handle only posts from the author: citypaper.
+			if ( $posts_from_author && $posts_from_author !== $post->post_author ) {
+				WP_CLI::line( sprintf( 'Skiping post %d with author %s', $post->ID, $post->post_author ) );
+				continue;
+			}
+
+			WP_CLI::line( sprintf( 'Checking post: %d/%d', $posts_count, $posts_total ) );
+
+			$author_meta = get_post_meta( $post->ID, 'author' );
+			if ( ! empty( $author_meta ) && '' !== current( $author_meta ) ) {
+
+				$author_name = array_shift( $author_meta );
+				if ( is_array( $author_name ) ) {
+					// sometimes posts are linked to many authors, we reset the authors list variable.
+					$author_meta = $author_name;
+					$author_name = array_shift( $author_meta );
+				}
+
+				// Handling main author.
+				// check if we do have a WP User with that name.
+				$user = $this->get_wp_user_by_name( $author_name );
+
+				// If we do have an existing WP User, we link the post to them.
+				if ( $user ) {
+					WP_CLI::line( sprintf( '%s(%d) will be assigned as main author to the post #%d', $user->display_name, $user->ID, $post->ID ) );
+
+					if ( ! $dry_run ) {
+						wp_update_post(
+							[
+								'ID'          => $post->ID,
+								'post_author' => $user->ID,
+							]
+						);
+					}
+				} else {
+					// if not, we create a GA and link them to the post.
+					if ( ! $dry_run ) {
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author_name ] );
+						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
+					}
+					WP_CLI::line( sprintf( 'Co-Author %s(%d) will be assigned to the post #%d', $author_name, $co_author_id, $post->ID ) );
+				}
+
+				// Handle co-authors in case the post have more than one author.
+				foreach ( $author_meta as $co_author ) {
+					if ( ! $dry_run ) {
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
+						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
+
+						// Link the co-author created with the WP User with the same name if it exists.
+						$co_author_wp_user = $this->get_wp_user_by_name( $co_author );
+						if ( $co_author_wp_user ) {
+							$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id, $co_author_wp_user );
+						}
+					}
+
+					WP_CLI::line( sprintf( 'Co-Author %s(%d) will be assigned to the post #%d', $co_author, $co_author_id, $post->ID ) );
+				}
+			}
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator charlestoncitypaper-migrate-authors-from-publishpress-to-cap`
+	 */
+	public function cmd_migrate_authors_from_publishpress_to_cap( $args, $assoc_args ) {
+		$dry_run    = $assoc_args['dry_run'] ?? false;
+		$post_id    = $assoc_args['post_id'] ?? false;
+		$time_start = microtime( true );
+
+		if ( ! function_exists( 'get_multiple_authors' ) ) {
+			WP_CLI::warning( 'PublishPress Authors plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
+
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
+
+		WP_CLI::line( sprintf( 'dry run mode: %s', $dry_run ? 'on' : 'off' ) );
+
+		$posts_query_args = [
+			'posts_per_page' => -1,
+			'post_type'      => 'post',
+			'paged'          => 1,
+			'fields'         => 'ids,post_author',
+		];
+
+		if ( $post_id ) {
+			$posts_query_args['p'] = $post_id;
+		}
+
+		$posts = get_posts( $posts_query_args );
+
+		foreach ( $posts as $post ) {
+			$authors = get_multiple_authors( $post->ID, false, false, true );
+			if ( ! empty( $authors ) ) {
+				foreach ( $authors as $author ) {
+					if ( ! $dry_run ) {
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author->display_name ] );
+						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
+						WP_CLI::line( sprintf( 'Co-Author %s created and linked to post #%d.', $author->display_name, $post->ID ) );
+					} else {
+						WP_CLI::line( sprintf( 'Co-Author %s will be created and linked to post #%d.', $author->display_name, $post->ID ) );
+					}
+				}
+			}
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
@@ -254,5 +427,26 @@ class CharlestonCityPaperMigrator implements InterfaceMigrator {
 	 */
 	private function log( $file, $message ) {
 		file_put_contents( $file, $message . "\n", FILE_APPEND );
+	}
+
+	/**
+	 * Retrieve WP user by name.
+	 *
+	 * @param string $user_name Name to look for.
+	 * @return (WP_User|false) WP_User object on success, false on failure.
+	 */
+	private function get_wp_user_by_name( $user_name ) {
+		$user_query = new \WP_User_Query(
+			[
+				'search'        => $user_name,
+				'search_fields' => array( 'user_login', 'user_nicename', 'display_name' ),
+			]
+		);
+
+		// If we do have an existing WP User, we link the post to them.
+		if ( ! empty( $user_query->results ) ) {
+			return current( $user_query->results );
+		}
+		return false;
 	}
 }
