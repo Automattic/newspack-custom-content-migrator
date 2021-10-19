@@ -157,18 +157,19 @@ class PrisonJournalismMigrator implements InterfaceMigrator {
 					WP_CLI::log( 'no img, skipping' );
 					continue;
 				}
-				if ( $images->getIterator()->count() > 1 ) {
-					WP_CLI::warning( 'more than one img[class="thumb-image"], skipping' );
-					$this->log( 'pjp_moreThanOneImgWithClassThumbImage.log', $post->ID );
-					continue;
-				}
 
 				$image = $images->getIterator()[0];
 				$img_raw_html = $image->ownerDocument->saveHTML( $image );
 				$img_src = $image->getAttribute( 'src' );
 
+				// DOM Crawler's `<img` ends with the `>`, and HTML source's with a `/>` or a ` />`. Dirty way to work, but let's simply provide these two options, too.
+				$img_raw_html_alt1 = rtrim( $image->ownerDocument->saveHTML( $image ), '>' ) . '/>';
+				$img_raw_html_alt2 = rtrim( $image->ownerDocument->saveHTML( $image ), '>' ) . ' />';
+
 				$post_content_updated = $post->post_content;
 				$post_content_updated = str_replace( $img_raw_html, '', $post_content_updated );
+				$post_content_updated = str_replace( $img_raw_html_alt1, '', $post_content_updated );
+				$post_content_updated = str_replace( $img_raw_html_alt2, '', $post_content_updated );
 				$img_is_duplicate = false != strpos( $post_content_updated, $img_src );
 
 				if ( $img_is_duplicate && $post_content_updated != $post->post_content) {
@@ -187,12 +188,12 @@ class PrisonJournalismMigrator implements InterfaceMigrator {
 		}
 
 		// Second replacement.
-		$posts = $this->posts_logic->get_all_posts();
 		foreach ( $posts as $key_posts => $post ) {
 			WP_CLI::log( sprintf( '- (%d/%d) ID %d ', $key_posts + 1, count( $posts ), $post->ID ) );
 
 			$post_content_updated = $post->post_content;
-			preg_match_all( '/style="padding-bottom\:([\d\.]+)\%;"/', $post_content_updated, $matches, PREG_OFFSET_CAPTURE );
+			// Multi-line inline styling coming from Squarespace's export.
+			preg_match_all( '/style="[^"]*padding-bottom\:([\d\.]+)\%;[^"]*"/xims', $post_content_updated, $matches, PREG_OFFSET_CAPTURE );
 			if ( ! empty( $matches[0] ) ) {
 				foreach ( $matches[0] as $match ) {
 					$style = $match[0];
