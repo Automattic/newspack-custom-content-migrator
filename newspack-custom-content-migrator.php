@@ -62,7 +62,7 @@ PluginSetup::register_migrators(
 		// Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
 		// Migrator\PublisherSpecific\RafushimpoMigrator::class,
 		// Migrator\PublisherSpecific\CharlestonCityPaperMigrator::class,
-		Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
+		// Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
 		Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
