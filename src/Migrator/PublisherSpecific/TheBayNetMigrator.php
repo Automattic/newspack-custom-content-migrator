@@ -42,6 +42,79 @@ class TheBayNetMigrator implements InterfaceMigrator {
 			'newspack-content-migrator thebaynet-restructure-cats',
 			[ $this, 'cmd_restructure_cats' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-fix-xmls',
+			[ $this, 'cmd_fix_xmls' ],
+			[
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'xml-file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_xmls( $args, $assoc_args ) {
+		$xml_file = $assoc_args[ 'xml-file' ] ?? null;
+		$contents = file_get_contents( $xml_file );
+		$contents_exploded = explode( "\n", $contents );
+		$updated_content = false;
+
+		foreach ( $contents_exploded as $key_line => $line ) {
+
+			if ( false != strpos( $line, '<dc:creator></dc:creator>' ) ) {
+				continue;
+			}
+
+			if ( false != strpos( $line, '<dc:creator>' ) ) {
+				$start_string = '<dc:creator><![CDATA[';
+				$pos_start = strpos( $line, $start_string );
+				if ( false == $pos_start ) {
+					\WP_CLI::error( sprintf( 'not found %s line %d', $start_string, $key_line + 1 ) );
+				}
+				$pos_start += strlen( $start_string );
+
+				$end_string = ']]></dc:creator>';
+				$pos_end = strpos( $line, $end_string );
+				if ( false == $pos_end ) {
+					\WP_CLI::error( sprintf( 'not found %s line %d', $end_string, $key_line + 1 ) );
+				}
+
+				$author = substr( $line, $pos_start, $pos_end - $pos_start );
+				if ( strlen( $author ) > 60 ) {
+					$new_author = substr( $author, 0, 60 );
+					$new_line = substr( $line, 0, $pos_start )
+						. $new_author
+						. $end_string;
+					$contents_exploded[ $key_line ] = $new_line;
+
+					\WP_CLI::log( '  + shortened line CDATA ' . ( $key_line + 1 ) . "\n" );
+					$updated_content = true;
+				}
+			}
+		}
+
+		if ( true == $updated_content ) {
+			$pathinfo = pathinfo( $xml_file );
+			$new_xml_file = $pathinfo['dirname'] . '/' . $pathinfo['filename'] . '_FIXED.' . $pathinfo['extension'];
+
+			$saved = file_put_contents( $new_xml_file, implode( "\n", $contents_exploded ) );
+			if ( false == $saved ) {
+				// debug;
+				$d=1;
+			}
+			\WP_CLI::success( 'updated ' . $new_xml_file );
+		}
+
+		\WP_CLI::log( 'done' );
 	}
 
 	/**
