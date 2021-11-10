@@ -41,6 +41,9 @@ class GadisMigrator implements InterfaceMigrator {
 		'alumni'    => 'Alumni', // Exists on categories table but not on articles table.
 	];
 
+	// Default user slug.
+	const DEFAULT_USER_SLUG = 'admin';
+
 	/**
 	 * @var PostsLogic.
 	 */
@@ -50,6 +53,12 @@ class GadisMigrator implements InterfaceMigrator {
 	 * @var AttachmentsLogic.
 	 */
 	private $attachments_logic;
+
+	/**
+	 * @var string
+	 * YouTube API Key.
+	 */
+	private $youtube_api_key = '';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -88,11 +97,19 @@ class GadisMigrator implements InterfaceMigrator {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator gadis-test-gallery',
-			[ $this, 'cmd_test_gallery' ],
+			'newspack-content-migrator gadis-import-tv',
+			[ $this, 'cmd_import_tv' ],
 			[
-				'shortdesc' => 'Test gallery import',
-				'synopsis'  => [],
+				'shortdesc' => 'Import Gadis TV',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'youtube_api_key',
+						'description' => 'YouTube API Key to fetch video metadata.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 		WP_CLI::add_command(
@@ -119,11 +136,12 @@ class GadisMigrator implements InterfaceMigrator {
 		// Compose the HTML with all the <li><figure><img/></figure></li> image pieces.
 		$images_li_html = '';
 		foreach ( $ids as $id ) {
-			$img_url = wp_get_attachment_url( $id );
-			$img_caption = wp_get_attachment_caption( $id );
-			$img_alt = get_post_meta( $id, '_wp_attachment_image_alt', true );
+			$img_url       = wp_get_attachment_url( $id );
+			$img_caption   = wp_get_attachment_caption( $id );
+			$img_alt       = get_post_meta( $id, '_wp_attachment_image_alt', true );
 			$img_data_link = $img_url;
-			$img_element = sprintf(
+
+			$img_element        = sprintf(
 				'<img src="%s" alt="%s" data-id="%d" data-full-url="%s" data-link="%s" class="%s"/>',
 				$img_url,
 				$img_alt,
@@ -135,7 +153,7 @@ class GadisMigrator implements InterfaceMigrator {
 			$figcaption_element = ! empty( $img_caption )
 				? sprintf( '<figcaption class="blocks-gallery-item__caption">%s</figcaption>', esc_attr( $img_caption ) )
 				: '';
-			$images_li_html .= '<li class="blocks-gallery-item">'
+			$images_li_html    .= '<li class="blocks-gallery-item">'
 				. '<figure>'
 				. $img_element
 				. $figcaption_element
@@ -144,21 +162,21 @@ class GadisMigrator implements InterfaceMigrator {
 		}
 
 		// The inner HTML of the gallery block.
-		$inner_html = '<figure class="wp-block-gallery columns-3 is-cropped">'
+		$inner_html    = '<figure class="wp-block-gallery columns-3 is-cropped">'
 			. '<ul class="blocks-gallery-grid">'
 			. $images_li_html
 			. '</ul>'
 			. '</figure>';
 		$block_gallery = [
-			'blockName' => 'core/gallery',
-			'attrs' => [
-				'ids' => $ids,
-				'linkTo' => 'none',
+			'blockName'    => 'core/gallery',
+			'attrs'        => [
+				'ids'         => $ids,
+				'linkTo'      => 'none',
 				'ampCarousel' => true,
 				'ampLightbox' => true,
 			],
-			'innerBlocks' => [],
-			'innerHTML' => $inner_html,
+			'innerBlocks'  => [],
+			'innerHTML'    => $inner_html,
 			'innerContent' => [ $inner_html ],
 		];
 
@@ -181,7 +199,7 @@ class GadisMigrator implements InterfaceMigrator {
 	private function set_post_meta( $post_id, $post_meta ) {
 		foreach ( $post_meta as $meta_key => $meta_value ) {
 			if ( ! empty( $meta_value ) ) {
-				update_post_meta( $post_id, $meta_key, $meta_value);
+				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
 		}
 	}
@@ -195,7 +213,7 @@ class GadisMigrator implements InterfaceMigrator {
 	 * @return string Post content.
 	 */
 	private function get_post_content( $pages, $gallery ) {
-		$content = '';
+		$content    = '';
 		$page_count = count( $pages );
 		foreach ( $pages as $page ) {
 			$content .= $page['content'];
@@ -223,6 +241,31 @@ class GadisMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Set post featured image from remote URL.
+	 *
+	 * @param int    $post_id     Post ID.
+	 * @param array  $url         Remote URL.
+	 * @param string $title       Optional. Attachment title.
+	 * @param string $caption     Optional. Attachment caption.
+	 * @param string $description Optional. Attachment description.
+	 * @param string $alt         Optional. Image Attachment `alt` attribute.
+	 */
+	private function set_featured_image_from_remote_url( $post_id, $url, $title = null, $caption = null, $description = null, $alt = null ) {
+		$image_id = $this->attachments_logic->import_external_file( $url, $title, $caption, $description, $alt, $post_id );
+		if ( is_wp_error( $image_id ) ) {
+			$this->log( self::LOG_FEATURED_IMAGE_IMPORT_ERROR, sprintf( '%d %s %s', $post_id, $url, $image_id->get_error_message() ) );
+			WP_CLI::warning( sprintf( 'Error importing featured image %s -- %s', $url, $image_id->get_error_message() ) );
+			return;
+		}
+		$image_set = set_post_thumbnail( $post_id, $image_id );
+		if ( false == $image_set ) {
+			$this->log( self::LOG_ERR_FEATURED_IMAGE_SET, sprintf( '%d %s %s', $post_id, $url, $image_id ) );
+			WP_CLI::warning( sprintf( 'Error setting featured image %s -- %s', $url, $image_id ) );
+			return;
+		}
+	}
+
+	/**
 	 * Set post featured image from Gadis article "cover".
 	 *
 	 * @param int   $post_id Post ID.
@@ -231,22 +274,7 @@ class GadisMigrator implements InterfaceMigrator {
 	private function set_featured_image( $post_id, $article ) {
 		if ( ! empty( $article['cover'] ) ) {
 			$url = self::CDN_URI . '/' . $article['cover'];
-
-			// Import.
-			$featured_image_id = $this->attachments_logic->import_external_file( $url );
-			if ( is_wp_error( $featured_image_id ) ) {
-				$this->log( self::LOG_FEATURED_IMAGE_IMPORT_ERROR, sprintf( '%d %s %s', $post_id, $url, $featured_image_id->get_error_message() ) );
-				WP_CLI::warning( sprintf( 'Error importing featured image %s -- %s', $url, $featured_image_id->get_error_message() ) );
-				return;
-			}
-
-			// Set featured image.
-			$featured_image_set = set_post_thumbnail( $post_id, $featured_image_id );
-			if ( false == $featured_image_set ) {
-				$this->log( self::LOG_ERR_FEATURED_IMAGE_SET, sprintf( '%d %s %s', $post_id, $url, $featured_image_id ) );
-				WP_CLI::warning( sprintf( 'Error setting featured image %s -- %s', $url, $featured_image_id ) );
-				return;
-			}
+			$this->set_featured_image_from_remote_url( $post_id, $url );
 		}
 	}
 
@@ -283,7 +311,7 @@ class GadisMigrator implements InterfaceMigrator {
 
 		// Subcategory.
 		if ( ! empty( $article['subcategory_id'] ) ) {
-			$subcategory = array_values(
+			$subcategory      = array_values(
 				array_filter(
 					$sub_categories,
 					function( $cat ) use ( $article ) {
@@ -431,8 +459,8 @@ class GadisMigrator implements InterfaceMigrator {
 			'phone'    => $user['phone'] ?? '',
 		];
 		foreach ( $meta_keys as $key ) {
-			if ( ! empty ( $profile[$key] ) ) {
-				$user_meta[$key] = $profile[$key];
+			if ( ! empty( $profile[ $key ] ) ) {
+				$user_meta[ $key ] = $profile[ $key ];
 			}
 		}
 
@@ -472,20 +500,20 @@ class GadisMigrator implements InterfaceMigrator {
 	/**
 	 * Import Gadis articles.
 	 *
-	 * @param array    $articles    Gadis articles.
+	 * @param array   $articles     Gadis articles.
 	 * @param boolean $force_import Whether to update already imported articles.
 	 */
 	private function import_articles( $articles, $force_import = false ) {
 
 		global $wpdb;
 
-		$article_pages  = $wpdb->get_results( "SELECT * FROM article_pages;", ARRAY_A );
+		$article_pages  = $wpdb->get_results( 'SELECT * FROM article_pages;', ARRAY_A );
 		$tags           = $wpdb->get_results( "SELECT * FROM article_tags WHERE tag != '';", ARRAY_A );
-		$galleries      = $wpdb->get_results( "SELECT * FROM article_galleries;", ARRAY_A );
-		$sub_categories = $wpdb->get_results( "SELECT * FROM sub_categories;", ARRAY_A );
-		$users          = $wpdb->get_results( "SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id WHERE r.role_id IN (1, 4, 6);", ARRAY_A );
+		$galleries      = $wpdb->get_results( 'SELECT * FROM article_galleries;', ARRAY_A );
+		$sub_categories = $wpdb->get_results( 'SELECT * FROM sub_categories;', ARRAY_A );
+		$users          = $wpdb->get_results( 'SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id WHERE r.role_id IN (1, 4, 6);', ARRAY_A );
 
-		foreach( $articles as $article_key => $article ) {
+		foreach ( $articles as $article_key => $article ) {
 			$gadis_id = $article['id'];
 
 			WP_CLI::line( sprintf( '(%d/%d) ID %d', $article_key + 1, count( $articles ), $gadis_id ) );
@@ -493,7 +521,7 @@ class GadisMigrator implements InterfaceMigrator {
 			$ID = null;
 			$result_meta = $wpdb->get_row(
 				$wpdb->prepare(
-					"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;",
+					'SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %d;',
 					'gadis_id',
 					(int) $gadis_id
 				),
@@ -517,7 +545,7 @@ class GadisMigrator implements InterfaceMigrator {
 				)
 			);
 
-			if( empty( $pages ) ) {
+			if ( empty( $pages ) ) {
 				WP_CLI::warning( $gadis_id . ' does not have content.' );
 				$this->log( self::LOG_POST_NO_CONTENT, $gadis_id . '  does not have content.' );
 				continue;
@@ -558,13 +586,16 @@ class GadisMigrator implements InterfaceMigrator {
 			];
 
 			// Events meta.
-			$post_meta = array_merge( $post_meta, [
-				'meeting_id' => $article['meeting_id'],
-				'topic'      => $article['topic'],
-				'zoom_link'  => $article['zoom_link'],
-				'start_date' => $article['start_date'],
-				'end_date'   => $article['end_date'],
-			] );
+			$post_meta = array_merge(
+				$post_meta,
+				[
+					'meeting_id' => $article['meeting_id'],
+					'topic'      => $article['topic'],
+					'zoom_link'  => $article['zoom_link'],
+					'start_date' => $article['start_date'],
+					'end_date'   => $article['end_date'],
+				]
+			);
 
 			$post_id = wp_insert_post( $post_data, true );
 			if ( is_wp_error( $post_id ) ) {
@@ -585,6 +616,183 @@ class GadisMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Transform provider name to slug. (kebab case)
+	 * 
+	 * @param string $provider_name Provider name.
+	 * 
+	 * @return string Provider slug.
+	 */
+	private function get_video_provider_slug( $provider_name ) {
+		return strtolower( str_replace( ' ', '-', $provider_name ) );
+	}
+
+	/**
+	 * Import GadisTV videos.
+	 *
+	 * @param array   $videos       GadisTV videos.
+	 * @param boolean $force_import Whether to update already imported articles.
+	 */
+	private function import_videos( $videos, $force_import = false ) {
+
+		global $wpdb, $wp_embed;
+
+		$youtube_api_key = $this->youtube_api_key;
+
+		if ( empty( $youtube_api_key ) ) {
+			WP_CLI::warning( 'YouTube API Key is required.');
+			return;
+		}
+
+		// Setup default user
+		$user    = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT u.id, u.email, u.fullname, r.role_id FROM users AS u LEFT JOIN role_users AS r ON r.user_id = u.id LEFT JOIN user_profiles AS p ON p.user_id = u.id WHERE p.username = %s;",
+				self::DEFAULT_USER_SLUG
+			),
+			ARRAY_A
+		);
+		$user_id = $this->upsert_user( [ $user ], $user['id'] ); 
+
+		// Setup default category
+		$category = get_category_by_slug( 'gadistv' );
+		if ( ! $category ) {
+			$insert_term_res = wp_insert_term(
+				'GadisTV',
+				'category',
+				[ 'slug' => 'gadistv' ]
+			);
+			if ( is_wp_error( $insert_term_res ) ) {
+				$this->log( self::LOG_CAT_CREATE_ERROR, sprintf( 'GadisTV %s', $insert_term_res->get_error_message() ) );
+				WP_CLI::warning( sprintf( 'Error creating category GadisTV -- %s', $insert_term_res->get_error_message() ) );
+				return;
+			}
+			$term_id = $insert_term_res['term_id'];
+		} else {
+			$term_id = $category->term_id;
+		}
+
+		foreach ( $videos as $video_key => $video ) {
+			$gadis_id = 'gadistv_' . $video['id'];
+
+			WP_CLI::line( sprintf( '(%d/%d) ID %d', $video_key + 1, count( $videos ), $video['id'] ) );
+
+			$post_id = null;
+			$result_meta = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s;",
+					'gadis_id',
+					$gadis_id
+				),
+				ARRAY_A
+			);
+			if ( isset( $result_meta['post_id'] ) ) {
+				if ( false === $force_import ) {
+					WP_CLI::warning( $gadis_id . ' already imported. Skipping.' );
+					$this->log( self::LOG_POST_SKIPPED, $gadis_id . ' already imported. Skipping.' );
+					continue;
+				}
+				$post_id = $result_meta['post_id'];
+			}
+
+			$url = $video['url'];
+
+			// Ensure we have a valid YouTube URL.
+			preg_match( '/^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/', $video['url'], $matches );
+			if ( ! isset( $matches[7] ) || ! $matches[7] ) {
+				continue;
+			}
+
+			$youtube_id  = $matches[7];
+			$url         = 'https://www.youtube.com/watch?v=' . $youtube_id;
+			$oembed      = _wp_oembed_get_object();
+			$oembed_data = $oembed->get_data( $url );
+			$api_url     = 'https://www.googleapis.com/youtube/v3/videos?part=snippet&id=' . $youtube_id .  '&key=' . $youtube_api_key;
+
+			if ( ! $oembed_data || 'YouTube' !== $oembed_data->provider_name ) {
+				WP_CLI::warning( 'Failed to fetch oEmbed data.' );
+				continue;
+			}
+
+			// Get video date from YouTube API.
+			try {
+				$youtube_data = json_decode( wp_safe_remote_get( $api_url )['body'] );
+				$video_date   = $youtube_data->items[0]->snippet->publishedAt;
+			} catch ( Exception $e ) {
+				WP_CLI::warning( $e->getMessage() );
+				continue;
+			}
+
+			// Thumbnail.
+			$thumbnail_url = false;
+			if ( $oembed_data && ! empty( $oembed_data->thumbnail_url ) ) {
+				$thumbnail_url = $oembed_data->thumbnail_url;
+			}
+
+			$block      = [
+				'url'              => $url,
+				'type'             => $oembed_data && ! empty( $oembed_data->type ) ? $oembed_data->type : 'rich',
+				'providerNameSlug' => $oembed_data && ! empty( $oembed_data->provider_name ) ? $this->get_video_provider_slug( $oembed_data->provider_name ) : 'embed-handler',
+				'responsive'       => true,
+				'className'        => [],
+			];
+			$classnames = [
+				'wp-block-embed',
+				'wp-block-embed-' . $block['providerNameSlug'],
+				'is-type-' . $block['type'],
+				'is-provider-' . $block['providerNameSlug'],
+			];
+
+			$post_content  = '<!-- wp:embed ' . wp_json_encode( $block ) . ' -->';
+			$post_content .= "\n";
+			$post_content .= '<figure class="' . esc_attr( implode( ' ', $classnames + $block['className'] ) ) . '">';
+			$post_content .= "\n";
+			$post_content .= '<div class="wp-block-embed__wrapper">' . "\n" . $url . "\n" . '</div>';
+			$post_content .= "\n";
+			$post_content .= '</figure>';
+			$post_content .= "\n";
+			$post_content .= '<!-- /wp:embed -->';
+
+			$post_meta = [
+				'gadis_id'        => $gadis_id,
+				'gadis_video_url' => $url,
+			];
+
+			$post_data = [
+				'ID'            => $post_id,
+				'post_type'     => 'post',
+				'post_date'     => $video_date,
+				'post_title'    => $video['title'],
+				'post_author'   => $user_id,
+				'post_status'   => 'publish',
+				'post_category' => [ $term_id ],
+				'post_content'  => $post_content,
+			];
+
+			$post_id = wp_insert_post( $post_data );
+			if ( is_wp_error( $post_id ) ) {
+				WP_CLI::warning(
+					sprintf(
+						'Insert post error, %d - %s',
+						$gadis_id,
+						$post_id->get_error_message()
+					)
+				);
+				$this->log( self::LOG_INSERT_POST_ERROR, sprintf( '%d %s', $video['id'], $post_id->get_error_message() ) );
+				continue;
+			}
+
+			$this->set_post_meta( $post_id, $post_meta );
+			if ( $thumbnail_url ) {
+				$this->set_featured_image_from_remote_url( $post_id, $thumbnail_url, $video['title'] );
+			}
+
+			// Trigger caching of embed block.
+			$wp_embed->cache_oembed( $post_id );
+		}
+
+	}
+
+	/**
 	 * Callable for the `newspack-content-migrator gadis-import-posts` command.
 	 *
 	 * @param array $args       CLI arguments.
@@ -593,24 +801,23 @@ class GadisMigrator implements InterfaceMigrator {
 	public function cmd_import_posts( $args, $assoc_args ) {
 		global $wpdb;
 		$time_start = microtime( true );
-		$articles   = $wpdb->get_results( "SELECT * FROM articles;", ARRAY_A );
+		$articles   = $wpdb->get_results( 'SELECT * FROM articles;', ARRAY_A );
 		$this->import_articles( $articles );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
-	 * Callable for the `newspack-content-migrator gadis-test-gallery` command.
+	 * Callable for the `newspack-content-migrator gadis-import-tv` command.
 	 *
 	 * @param array $args       CLI arguments.
 	 * @param array $assoc_args CLI associative arguments.
 	 */
-	public function cmd_test_gallery( $args, $assoc_args ) {
+	public function cmd_import_tv( $args, $assoc_args ) {
 		global $wpdb;
-		$time_start         = microtime( true );
-		$ids_with_galleries = $wpdb->get_results( "SELECT DISTINCT article_id FROM article_galleries LIMIT 10;", ARRAY_A );
-		$where              = "WHERE id IN (" . implode( ',', array_map( 'intval', array_column( $ids_with_galleries, 'article_id' ) ) ) . ")";
-		$articles           = $wpdb->get_results( "SELECT * FROM articles $where;", ARRAY_A );
-		$this->import_articles( $articles, true );
+		$this->youtube_api_key = $assoc_args['youtube_api_key'];
+		$time_start = microtime( true );
+		$items      = $wpdb->get_results( "SELECT * FROM gadistvs ORDER BY id ASC;", ARRAY_A );
+		$this->import_videos( $items );
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
@@ -647,7 +854,7 @@ class GadisMigrator implements InterfaceMigrator {
 	 * @param string $message Log message.
 	 */
 	private function log( $file, $message ) {
-		$message = date( DATE_ATOM ) . ' - '  . $message . "\n";
+		$message = date( DATE_ATOM ) . ' - ' . $message . "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }

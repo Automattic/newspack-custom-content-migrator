@@ -5,9 +5,9 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:	    0.5.0
+ * Version:     0.5.0
  *
- * @package	 Newspack_Custom_Content_Migrator
+ * @package  Newspack_Custom_Content_Migrator
  */
 
 namespace NewspackCustomContentMigrator;
@@ -22,45 +22,50 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::setup_wordpress_importer();
-PluginSetup::register_migrators( array(
-	Migrator\General\PostsMigrator::class,
-	Migrator\General\MetaToContentMigrator::class,
-	Migrator\General\MenusMigrator::class,
-	Migrator\General\CssMigrator::class,
-	Migrator\General\ContentConverterPluginMigrator::class,
-	Migrator\General\SettingsMigrator::class,
-	Migrator\General\WooCommMigrator::class,
-	Migrator\General\ReaderRevenueMigrator::class,
-	Migrator\General\CampaignsMigrator::class,
-	Migrator\General\ListingsMigrator::class,
-	Migrator\General\InlineFeaturedImageMigrator::class,
-	Migrator\General\SubtitleMigrator::class,
-	Migrator\General\CoAuthorPlusMigrator::class,
-	Migrator\General\CPTMigrator::class,
-	Migrator\General\AdsMigrator::class,
-	Migrator\General\NewslettersMigrator::class,
-	Migrator\General\TaxonomyMigrator::class,
-	Migrator\General\ReusableBlocksMigrator::class,
-	Migrator\General\SportsPressMigrator::class,
-	Migrator\General\FeaturedImagesMigrator::class,
+PluginSetup::register_migrators(
+	array(
+		Migrator\General\PostsMigrator::class,
+		Migrator\General\MetaToContentMigrator::class,
+		Migrator\General\MenusMigrator::class,
+		Migrator\General\CssMigrator::class,
+		Migrator\General\ContentConverterPluginMigrator::class,
+		Migrator\General\SettingsMigrator::class,
+		Migrator\General\WooCommMigrator::class,
+		Migrator\General\ReaderRevenueMigrator::class,
+		Migrator\General\CampaignsMigrator::class,
+		Migrator\General\ListingsMigrator::class,
+		Migrator\General\InlineFeaturedImageMigrator::class,
+		Migrator\General\SubtitleMigrator::class,
+		Migrator\General\CoAuthorPlusMigrator::class,
+		Migrator\General\CPTMigrator::class,
+		Migrator\General\AdsMigrator::class,
+		Migrator\General\NewslettersMigrator::class,
+		Migrator\General\TaxonomyMigrator::class,
+		Migrator\General\ReusableBlocksMigrator::class,
+		Migrator\General\SportsPressMigrator::class,
+		Migrator\General\FeaturedImagesMigrator::class,
+		Migrator\General\WooCommOrdersAndSubscriptionsMigrator::class,
 
-	// Migrator\PublisherSpecific\KawowoMigrator::class,
-	// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
-	// Migrator\PublisherSpecific\SahanJournalMigrator::class,
-	// Migrator\PublisherSpecific\HKFPMigrator::class,
-	// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-	// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
-	// Migrator\PublisherSpecific\TRNNMigrator::class,
-	// Migrator\PublisherSpecific\OnTheWightMigrator::class,
-	// Migrator\PublisherSpecific\EastMojoMigrator::class,
-	// Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
-	// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
-	// Migrator\PublisherSpecific\HipertextualMigrator::class,
-	// Migrator\PublisherSpecific\QuePasaMigrator::class,
-	Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
-	Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
-	Migrator\PublisherSpecific\RafushimpoMigrator::class,
-	Migrator\PublisherSpecific\OurWeeklyMigrator::class,
-	Migrator\PublisherSpecific\GadisMigrator::class,
-	Migrator\PublisherSpecific\TheBayNetMigrator::class,
-) );
+		// Migrator\PublisherSpecific\KawowoMigrator::class,
+		// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
+		// Migrator\PublisherSpecific\SahanJournalMigrator::class,
+		// Migrator\PublisherSpecific\HKFPMigrator::class,
+		// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
+		// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
+		// Migrator\PublisherSpecific\TRNNMigrator::class,
+		// Migrator\PublisherSpecific\OnTheWightMigrator::class,
+		// Migrator\PublisherSpecific\EastMojoMigrator::class,
+		// Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
+		// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
+		// Migrator\PublisherSpecific\HipertextualMigrator::class,
+		// Migrator\PublisherSpecific\QuePasaMigrator::class,
+		// Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
+		// Migrator\PublisherSpecific\RafushimpoMigrator::class,
+		// Migrator\PublisherSpecific\CharlestonCityPaperMigrator::class,
+		// Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
+		Migrator\PublisherSpecific\OurWeeklyMigrator::class,
+		Migrator\PublisherSpecific\GadisMigrator::class,
+		Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+	)
+);
