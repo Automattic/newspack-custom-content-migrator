@@ -463,18 +463,6 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Selects a row from the comments table.
-	 *
-	 * @param string $table_prefix Table prefix.
-	 * @param int $comment_ID Comment ID.
-	 *
-	 * @return array|object|null|void Return from $wpdb::get_row.
-	 */
-	public function select_comment_row( $table_prefix, $comment_ID ) {
-		return $this->select( $table_prefix . 'comments', [ 'comment_ID' => $comment_ID ], $select_just_one_row = true );
-	}
-
-	/**
 	 * Selects rows from the commentmeta table.
 	 *
 	 * @param string $table_prefix Table prefix.
@@ -588,7 +576,7 @@ class ContentDiffMigrator {
 	 * @param array $postmeta_rows
 	 * @param int $post_id
 	 *
-	 * @return array Array of inserted `meta_id`s.
+	 * @return int Inserted meta_id.
 	 */
 	public function insert_postmeta_row( $postmeta_row, $post_id ) {
 		$orig_meta_id = $postmeta_row[ 'meta_id' ];
@@ -606,7 +594,7 @@ class ContentDiffMigrator {
 	/**
 	 * Inserts a User.
 	 *
-	 * @param array $user_row      `user` row.
+	 * @param array $user_row `user` row.
 	 *
 	 * @return int Inserted User ID.
 	 */
@@ -625,10 +613,10 @@ class ContentDiffMigrator {
 	/**
 	 * Inserts User Meta.
 	 *
-	 * @param array $usermeta_rows `usermeta` rows.
+	 * @param array $usermeta_row `usermeta` row.
 	 * @param int   $user_id       User ID.
 	 *
-	 * @return int Inserted User ID.
+	 * @return int Inserted umeta_id.
 	 */
 	public function insert_usermeta_row( $usermeta_row, $user_id ) {
 		$orig_umeta_id = $usermeta_row[ 'umeta_id' ];
@@ -672,7 +660,7 @@ class ContentDiffMigrator {
 	 * @param array $commentmeta_row Comment Meta rows.
 	 * @param int   $new_comment_id  New Comment ID.
 	 *
-	 * @return array
+	 * @return int Inserted meta_id.
 	 */
 	public function insert_commentmeta_row( $commentmeta_row, $new_comment_id ) {
 		$orig_meta_id = $commentmeta_row[ 'meta_id' ];
@@ -750,7 +738,7 @@ class ContentDiffMigrator {
 	 * @param int $object_id        `object_id` column.
 	 * @param int $term_taxonomy_id `term_taxonomy_id` column.
 	 *
-	 * @return int|false Return from $wpdb::insert, the number of rows inserted, or false on error.
+	 * @return int Inserted object_id.
 	 */
 	public function insert_term_relationship( $object_id, $term_taxonomy_id ) {
 		if ( ! $object_id || ! $term_taxonomy_id ) {
