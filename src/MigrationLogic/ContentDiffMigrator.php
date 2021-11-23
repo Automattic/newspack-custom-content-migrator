@@ -19,6 +19,21 @@ class ContentDiffMigrator {
 	const DATAKEY_TERMS = 'terms';
 	const DATAKEY_TERMMETA = 'termmeta';
 
+	const CORE_WP_TABLES = [
+		'commentmeta',
+		'comments',
+		'links',
+		'options',
+		'postmeta',
+		'posts',
+		'terms',
+		'termmeta',
+		'term_relationships',
+		'term_taxonomy',
+		'usermeta',
+		'users',
+	];
+
 	/**
 	 * @var object Global $wpdb.
 	 */
@@ -41,8 +56,9 @@ class ContentDiffMigrator {
 	 * @return array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
+		global $wpdb;
 
-		// TODO check if live tables not found
+		$this->validate_core_wp_db_tables( $live_table_prefix );
 
 		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
 		$posts_table = $this->wpdb->prefix . 'posts';
@@ -767,6 +783,38 @@ class ContentDiffMigrator {
 	 */
 	public function get_user_by( $field, $value ) {
 		return get_user_by( $field, $value );
+	}
+
+	/**
+	 * Gets all the tables in the active DB.
+	 *
+	 * @return array List of all tables in DB.
+	 */
+	public function get_all_db_tables() {
+		$all_tables = [];
+		$all_tables_result = $this->wpdb->get_results( 'SHOW TABLES;', ARRAY_N );
+		foreach ( $all_tables_result as $table ) {
+			$all_tables[] = $table[0];
+		}
+
+		return $all_tables;
+	}
+
+	/**
+	 * Checks whether all core WP DB tables are present in used DB.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 *
+	 * @throws \RuntimeException In case not all live DB core WP tables are found.
+	 */
+	public function validate_core_wp_db_tables( $table_prefix ) {
+		$all_tables = $this->get_all_db_tables();
+		foreach ( self::CORE_WP_TABLES as $table ) {
+			$tablename = $table_prefix . $table;
+			if ( ! in_array( $tablename, $all_tables ) ) {
+				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) );
+			}
+		}
 	}
 
 	/**

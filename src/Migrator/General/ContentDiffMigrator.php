@@ -8,7 +8,7 @@ use \WP_CLI;
 
 class ContentDiffMigrator implements InterfaceMigrator {
 
-	const LIVE_DIFF_CONTENT_IDS_CSV = 'newspack-live-diff-content-ids-csv.txt';
+	const LIVE_DIFF_CONTENT_IDS_CSV = 'newspack-live-content-diff-ids-csv.txt';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -106,12 +106,16 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
 
 		WP_CLI::log( 'Searching for new content on Live Site...' );
-		$ids = self::$logic->get_live_diff_content_ids( $live_table_prefix );
+		try {
+			$ids = self::$logic->get_live_diff_content_ids( $live_table_prefix );
+		} catch ( \Exception $e ) {
+			WP_CLI::error( $e->getMessage() );
+		}
 
 		$file = $export_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		file_put_contents( $export_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV, implode( ',', $ids ) );
 
-		WP_CLI::success( sprintf( '%d new IDs found and exported to %s', count( $ids ), $file ) );
+		WP_CLI::success( sprintf( '%d new IDs found, and these IDs exported to %s', count( $ids ), $file ) );
 	}
 
 	/**
@@ -124,15 +128,20 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
 
-		// TODO check if tables not found
+		// Check if live DB tables are present.
+		try {
+			self::$logic->validate_core_wp_db_tables( $live_table_prefix );
+		} catch ( \Exception $e ) {
+			WP_CLI::error( $e->getMessage() );
+		}
 
 		$file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		if ( ! file_exists( $file ) ) {
-			WP_CLI::error( 'File not found.' );
+			WP_CLI::error( sprintf( 'File %s not found.', $file ) );
 		}
 		$post_ids = explode( ',', file_get_contents( $file ) );
 		if ( empty( $post_ids ) ) {
-			WP_CLI::error( 'File does not contain valid CSV IDs.' );
+			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file ) );
 		}
 
 		$imported_post_ids = [];
