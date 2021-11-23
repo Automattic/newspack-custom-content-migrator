@@ -578,6 +578,42 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a User Meta row is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::update_post_parent.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_update_post_parent( $data ) {
+		// Prepare.
+		$post_id = 123;
+		$post_parent = 145;
+		$new_post_parent = 456;
+		$imported_post_ids[ $post_parent ] = $new_post_parent;
+		$post = new \stdClass();
+		$post->ID = $post_id;
+		$post->post_parent = $post_parent;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_update_post_parent( $return_value_maps, $post_id, $new_post_parent );
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'get_post' ] )
+		                           ->getMock();
+		$logic_partial_mock->expects( $this->once() )
+		                   ->method( 'get_post' )
+						   ->with( $post_id )
+		                   ->will( $this->returnValue( $post ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+		                ->method( 'update' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+
+		// Run.
+		$logic_partial_mock->update_post_parent( $post_id, $imported_post_ids );
+	}
+
+	/**
 	 * Tests that a User is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::update_post_author.
@@ -1188,6 +1224,18 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	private function build_value_maps_update_post_author( &$maps, $post_id, $new_author_id ) {
 		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ], 1 ];
+	}
+
+	/**
+	 * Builds return value maps for ContentDiffMigrator::update_post_parent usage of $wpdb as defined by
+	 * \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps            Array containing return value maps.
+	 * @param int   $new_post_parent New Post Parent ID.
+	 * @param int   $new_author_id   New Author ID.
+	 */
+	private function build_value_maps_update_post_parent( &$maps, $post_id, $new_post_parent ) {
+		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_parent' => $new_post_parent ], [ 'ID' => $post_id ] ];
 	}
 
 	/**

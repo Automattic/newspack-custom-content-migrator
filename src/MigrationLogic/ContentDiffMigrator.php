@@ -351,7 +351,7 @@ class ContentDiffMigrator {
 	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 */
 	public function update_post_parent( $post_id, $imported_post_ids ) {
-		$post = get_post( $post_id );
+		$post = $this->get_post( $post_id );
 		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
 		if ( $post->post_parent > 0 && $new_parent_id ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
@@ -831,6 +831,24 @@ class ContentDiffMigrator {
 	 */
 	public function term_exists( $term, $taxonomy = '', $parent = null ) {
 		return term_exists( $term, $taxonomy, $parent );
+	}
+
+	/**
+	 * Wrapper for WP's native \get_post().
+	 *
+	 * @param int|WP_Post|null $post   Optional. Post ID or post object. `null`, `false`, `0` and other PHP falsey
+	 *                                 values return the current global post inside the loop. A numerically valid post
+	 *                                 ID that points to a non-existent post returns `null`. Defaults to global $post.
+	 * @param string           $output Optional. The required return type. One of OBJECT, ARRAY_A, or ARRAY_N, which
+	 *                                 correspond to a WP_Post object, an associative array, or a numeric array,
+	 *                                 respectively. Default OBJECT.
+	 * @param string           $filter Optional. Type of filter to apply. Accepts 'raw', 'edit', 'db',
+	 *                                 or 'display'. Default 'raw'.
+	 * @return WP_Post|array|null Type corresponding to $output on success or null on failure.
+	 *                            When $output is OBJECT, a `WP_Post` instance is returned.
+	 */
+	public function get_post( $post = null, $output = OBJECT, $filter = 'raw' ) {
+		return get_post( $post, $output, $filter );
 	}
 
 	/**
