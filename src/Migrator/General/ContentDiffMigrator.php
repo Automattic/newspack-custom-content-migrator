@@ -149,7 +149,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$data = self::$logic->get_data( $post_id, $live_table_prefix );
-			$imported_post_id = self::$logic->import_data( $data );
+			$imported_post_id = self::$logic->insert_post( $data[ self::$logic::DATAKEY_POST ] );
+			$import_errors = self::$logic->import_post_data( $imported_post_id, $data );
 			WP_CLI::success( sprintf( 'imported to ID %d', $imported_post_id ) );
 
 			$imported_post_ids[ $post_id ] = $imported_post_id;

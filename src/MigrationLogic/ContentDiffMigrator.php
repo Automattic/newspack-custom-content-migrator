@@ -102,8 +102,6 @@ class ContentDiffMigrator {
 	 */
 	public function get_data( $post_id, $table_prefix ) {
 
-		// TODO check if live tables not found
-
 		$data = $this->get_empty_data_array();
 
 		// Get Post.
@@ -182,15 +180,14 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Imports all the Post data.
+	 * Imports all the Post related data.
 	 *
 	 * @param array $data Array containing all the data, @see ContentDiffMigrator::get_data for structure.
 	 *
 	 * @return int Imported Post ID.
 	 */
-	public function import_data( $data ) {
-		// Insert Post and Post Metas.
-		$post_id = $this->insert_post( $data[ self::DATAKEY_POST ] );
+	public function import_post_data( $post_id, $data ) {
+		// Insert Post Metas.
 		$this->insert_postmeta( $data[ self::DATAKEY_POSTMETA ], $post_id );
 
 		// Use existing or insert Author User.
@@ -270,11 +267,14 @@ class ContentDiffMigrator {
 			$term_taxonomy_id_old = $term_relationship_row[ 'term_taxonomy_id' ];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
 			if ( ! is_null( $term_taxonomy_id_new ) ) {
+				// ERR here -- log and continue
 				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
 			} else {
-				// TODO missing record, but this shouldn't happen.
+				throw new \RuntimeException( sprintf( 'Updated term_taxonomy_id not found.' ) );
 			}
 		}
+
+		// need to return both post_id value, and exception errors... hmmm.
 
 		return $post_id;
 	}
@@ -722,8 +722,8 @@ class ContentDiffMigrator {
 	 * @return int|false Return from $wpdb::insert, the number of rows inserted, or false on error.
 	 */
 	public function insert_term_relationship( $object_id, $term_taxonomy_id ) {
-		if ( $object_id || ! $term_taxonomy_id ) {
-			// TODO shouldn't happen
+		if ( ! $object_id || ! $term_taxonomy_id ) {
+			throw new \RuntimeException( sprintf( 'insert_term_relationship parameters error.' ) );
 		}
 
 		$inserted = $this->wpdb->insert(
@@ -734,7 +734,7 @@ class ContentDiffMigrator {
 			]
 		);
 		if ( 1 != $inserted ) {
-			// TODO error
+			// TODO
 		}
 
 		return $inserted;

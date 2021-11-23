@@ -947,16 +947,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Checks that ContentDiffMigrator::import_data queries the DB as expected, and inserts the data array correctly.
+	 * Checks that ContentDiffMigrator::import_post_data queries the DB as expected, and inserts the data array correctly.
 	 *
-	 * Though a super long test, all its bits are also individually tested. This test is an extra effort to ensure the import_data
+	 * Though a super long test, all its bits are also individually tested. This test is an extra effort to ensure the import_post_data
 	 * will do the final DB updates correctly.
 	 *
-	 * @covers ContentDiffMigrator::import_data.
+	 * @covers ContentDiffMigrator::import_post_data.
 	 *
 	 * @dataProvider db_data_provider
 	 */
-	public function test_should_correctly_import_data_array( $data ) {
+	public function test_should_correctly_import_post_data_array( $data ) {
 		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
 		$last_insert_id = 300;
 		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
@@ -988,7 +988,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
 		$term_2_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_2_id );
 
-		// Mock full execution of ContentDiffMigrator::import_data(). Using a partial mock to mock responses from wapper methods
+		// Mock full execution of ContentDiffMigrator::import_post_data(). Using a partial mock to mock responses from wapper methods
 		// for WP's native global functions.
 		$get_user_by_return_value_map = [];
 		$term_exists_return_value_map = [];
@@ -1014,8 +1014,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                   ->will( $this->returnValueMap( $term_exists_return_value_map ) );
 		// Expectations for all $wpdb calls.
 		$wpdb_return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		// Should insert Post.
-		$this->build_value_maps_insert_post_row( $wpdb_return_value_maps, $post_row, $last_insert_id );
 		// Should insert Post Meta.
 		$this->build_value_maps_insert_postmeta_rows( $wpdb_return_value_maps, $postmeta_rows, $last_insert_id );
 		// Post gets updated with newly inserted user ID.
@@ -1058,7 +1056,8 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::get_var' ] ) );
 
 		// Run.
-		$post_id_new_actual = $logic_partial_mock->import_data( $data );
+		$inserted_post_id = $last_insert_id;
+		$post_id_new_actual = $logic_partial_mock->import_post_data( $inserted_post_id, $data );
 
 		// Assert.
 		$this->assertEquals( $last_insert_id, $post_id_new_actual );
