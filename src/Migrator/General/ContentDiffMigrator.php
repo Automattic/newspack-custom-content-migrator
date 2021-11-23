@@ -156,16 +156,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			if ( false === $imported_post_id ) {
 				$msg = sprintf( 'Error inserting Live ID %d.', $post_id );
 				WP_CLI::warning( $msg );
-				$msg_log = sprintf( 'Error inserting Live ID %d ; $data = %s', $post_id, json_encode( $data ) );
-				file_put_contents( $error_log, $msg_log, FILE_APPEND );
 				continue;
 			}
 
 			$import_errors = self::$logic->import_post_data( $imported_post_id, $data );
 			if ( ! empty( $import_errors ) ) {
-				$msg = sprintf( 'Errors while importing Live ID %d, imported ID %d: %s', $post_id, $imported_post_id, implode( '; ', $import_errors ) );
+				$msg = sprintf( 'Errors while importing Live ID %d, imported ID %d : %s', $post_id, $imported_post_id, implode( '; ', $import_errors ) );
 				WP_CLI::warning( $msg );
-				file_put_contents( $error_log, $msg_log, FILE_APPEND );
 			}
 			WP_CLI::success( sprintf( 'imported to ID %d', $imported_post_id ) );
 
@@ -180,8 +177,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			self::$logic->update_post_parent( $post_id, $imported_post_ids );
 		}
 
-		if ( file_exists( $error_log ) ) {
-			WP_CLI::warning( sprintf( 'Some errors occurred! See %s on launch site for more details.', $error_log ) );
+		if ( file_exists( self::$logic->get_import_error_log() ) ) {
+			WP_CLI::warning( sprintf( 'Some errors occurred! See %s on launch site for more details.', self::$logic->get_import_error_log() ) );
 		}
 
 		wp_cache_flush();

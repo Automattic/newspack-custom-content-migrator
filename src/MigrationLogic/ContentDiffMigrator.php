@@ -34,6 +34,8 @@ class ContentDiffMigrator {
 		'users',
 	];
 
+	const IMPORT_ERROR_LOG = 'newspack-content-diff-import-err.log';
+
 	/**
 	 * @var object Global $wpdb.
 	 */
@@ -56,8 +58,6 @@ class ContentDiffMigrator {
 	 * @return array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
-		global $wpdb;
-
 		$this->validate_core_wp_db_tables( $live_table_prefix );
 
 		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
@@ -190,12 +190,23 @@ class ContentDiffMigrator {
 		$errors = [];
 
 		// Insert Post Metas.
-		$this->insert_postmeta( $data[ self::DATAKEY_POSTMETA ], $post_id );
+		foreach ( $data[ self::DATAKEY_POSTMETA ] as $postmeta_row ) {
+			$this->insert_postmeta_row( $postmeta_row, $post_id );
+		}
 
-		// Use existing or insert Author User.
+		// Get existing Author User or insert a new one.
 		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
 		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
-		$author_id = $this->get_existing_user_or_insert_new( $author_row, $data );
+		$user_existing = $this->get_user_by( 'user_login', $author_row[ 'user_login' ] );
+		if ( $user_existing instanceof WP_User ) {
+			$author_id = $user_existing->ID;
+		} else {
+			$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
+			$author_id = $this->insert_user( $author_row );
+			foreach ( $usermeta_rows as $usermeta_row ) {
+				$this->insert_usermeta_row( $usermeta_row, $author_id );
+			}
+		}
 
 		// Update inserted Post's Author.
 		$this->update_post_author( $post_id, $author_id );
@@ -205,29 +216,40 @@ class ContentDiffMigrator {
 		foreach ( $data[ self::DATAKEY_COMMENTS ] as $comment_row ) {
 			$comment_id_old = $comment_row[ 'comment_ID' ];
 
-			// First insert the Comment User, or get the existing one.
+			// Insert the Comment User.
 			$comment_user_row_id = $comment_row[ 'user_id' ];
 			if ( 0 == $comment_user_row_id ) {
 				$comment_user_id = 0;
 			} else {
+				// Get existing Comment User or insert a new one.
 				$comment_user_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_row_id );
-				$comment_user_id = $this->get_existing_user_or_insert_new( $comment_user_row, $data );
+				$comment_user_existing = $this->get_user_by( 'user_login', $comment_user_row[ 'user_login' ] );
+				if ( $comment_user_existing instanceof WP_User ) {
+					$comment_user_id = $comment_user_existing->ID;
+				} else {
+					$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row[ 'ID' ] );
+					$comment_user_id = $this->insert_user( $comment_user_row );
+					foreach ( $usermeta_rows as $usermeta_row ) {
+						$this->insert_usermeta_row( $usermeta_row, $comment_user_id );
+					}
+				}
 			}
 
 			// Insert Comment and Comment Metas.
 			$comment_id = $this->insert_comment( $comment_row, $post_id, $comment_user_id );
 			$comment_ids_updates[ $comment_id_old ] = $comment_id;
 			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
-			$this->insert_commentmetas( $commentmeta_rows, $comment_id );
+			foreach ( $commentmeta_rows as $commentmeta_row ) {
+				$this->insert_commentmeta_row( $commentmeta_row, $comment_id );
+			}
 		}
 
 		// Loop through all comments, and update their Parent IDs.
 		foreach ( $comment_ids_updates as $comment_id_old => $comment_id_new ) {
-			// $comment_row = $this->select_comment_row( $this->wpdb->table_prefix, $comment_id_new );
 			$comment_row = $this->filter_array_element( $data[ self::DATAKEY_COMMENTS ], 'comment_ID', $comment_id_old );
 			$comment_parent_old = $comment_row[ 'comment_parent' ];
 			$comment_parent_new = $comment_ids_updates[ $comment_parent_old ] ?? null;
-			if ( $comment_parent_old > 0 && $comment_parent_new ) {
+			if ( $comment_parent_old > 0 && $comment_parent_new && ( $comment_parent_old != $comment_parent_new ) ) {
 				$this->update_comment_parent( $comment_id_new, $comment_parent_new );
 			}
 		}
@@ -253,13 +275,14 @@ class ContentDiffMigrator {
 			 */
 			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_row[ 'term_id' ] );
 			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
-				$term_taxonomy_id = $this->get_term_taxonomy_or_insert_new(
-					$term_row[ 'name' ],
-					$term_row[ 'slug' ],
-					$term_taxonomy_row[ 'taxonomy' ],
-					$term_taxonomy_row,
-					$term_id
-				);
+				// Get term_taxonomy or insert new.
+				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_row[ 'name' ], $term_row[ 'slug' ], $term_taxonomy_row[ 'taxonomy' ] );
+				if ( $term_taxonomy_id_existing ) {
+					$term_taxonomy_id = $term_taxonomy_id_existing;
+				} else {
+					$term_taxonomy_id = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id );
+				}
+
 				$term_taxonomy_ids_updates[ $term_taxonomy_row[ 'term_taxonomy_id' ] ] = $term_taxonomy_id;
 			}
 		}
@@ -268,12 +291,10 @@ class ContentDiffMigrator {
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
 			$term_taxonomy_id_old = $term_relationship_row[ 'term_taxonomy_id' ];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
-			if ( ! is_null( $term_taxonomy_id_new ) ) {
-				// TODO ERR here -- log and continue
-				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
+			if ( is_null( $term_taxonomy_id_new ) ) {
+				$this->log_insert_error( sprintf( "Error could not insert term_relationship because updated term_taxonomy_id not found, term_taxonomy_id_old='%s'", $term_taxonomy_id_old ) );
 			} else {
-				// TODO check exception usage
-				throw new \RuntimeException( sprintf( 'Updated term_taxonomy_id not found.' ) );
+				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
 			}
 		}
 
@@ -338,28 +359,6 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets an existing termtaxonomy ID, or inserts a new one.
-	 *
-	 * @param string $term_name         Term name.
-	 * @param string $term_slug         Term slug.
-	 * @param string $taxonomy          Taxonomy.
-	 * @param array  $term_taxonomy_row termtaxonomy $data row to be inserted, if one doesn't exist.
-	 * @param int    $term_id           Term ID to be used for the newly inserted termtaxonomy row.
-	 *
-	 * @return int term_taxonomy_id.
-	 */
-	public function get_term_taxonomy_or_insert_new( $term_name, $term_slug, $taxonomy, $term_taxonomy_row, $term_id ) {
-		$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy );
-		if ( $term_taxonomy_id_existing ) {
-			$term_taxonomy_id = $term_taxonomy_id_existing;
-		} else {
-			$term_taxonomy_id = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id );
-		}
-
-		return $term_taxonomy_id;
-	}
-
-	/**
 	 * Selects a row from the posts table.
 	 *
 	 * @param string $table_prefix
@@ -368,12 +367,7 @@ class ContentDiffMigrator {
 	 * @return array|object|null|void Return from $wpdb::get_row.
 	 */
 	public function select_post_row( $table_prefix, $post_id ) {
-		$post_row = $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
-		if ( empty( $post_row ) ) {
-			// TODO empty
-		}
-
-		return $post_row;
+		return $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
 	}
 
 	/**
@@ -535,15 +529,16 @@ class ContentDiffMigrator {
 	 * @return int Inserted Post ID.
 	 */
 	public function insert_post( $post_row ) {
+		$orig_id = $post_row['ID'];
 		unset( $post_row['ID'] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $post_row );
 		if ( 1 != $inserted ) {
+			$this->log_insert_error( sprintf( 'Error inserting post, ID %d', $orig_id ) );
 			return false;
 		}
-		$post_id = $this->wpdb->insert_id;
 
-		return $post_id;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -552,21 +547,18 @@ class ContentDiffMigrator {
 	 *
 	 * @return array Array of inserted `meta_id`s.
 	 */
-	public function insert_postmeta( $postmeta_rows, $post_id ) {
-		$postmeta_ids = [];
-		foreach ( $postmeta_rows as $postmeta_row ) {
+	public function insert_postmeta_row( $postmeta_row, $post_id ) {
+		$orig_meta_id = $postmeta_row[ 'meta_id' ];
+		unset( $postmeta_row[ 'meta_id' ] );
+		$postmeta_row[ 'post_id' ] = $post_id;
 
-			unset( $postmeta_row[ 'meta_id' ] );
-			$postmeta_row[ 'post_id' ] = $post_id;
-
-			$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $postmeta_row );
-			if ( 1 != $inserted ) {
-				// TODO error
-			}
-			$postmeta_ids[] = $this->wpdb->insert_id;
+		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $postmeta_row );
+		if ( 1 != $inserted ) {
+			$this->log_insert_error( sprintf( 'Error inserting post meta, meta_id %d', $orig_meta_id ) );
+			return false;
 		}
 
-		return $postmeta_ids;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -577,15 +569,16 @@ class ContentDiffMigrator {
 	 * @return int Inserted User ID.
 	 */
 	public function insert_user( $user_row ) {
+		$orig_id = $user_row[ 'ID' ] ;
 		unset( $user_row[ 'ID' ] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->users, $user_row );
 		if ( 1 != $inserted ) {
-			// TODO error
+			$this->log_insert_error( sprintf( 'Error inserting user, ID %d', $orig_id ) );
+			return false;
 		}
-		$user_id = $this->wpdb->insert_id;
 
-		return $user_id;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -596,22 +589,18 @@ class ContentDiffMigrator {
 	 *
 	 * @return int Inserted User ID.
 	 */
-	public function insert_usermeta( $usermeta_rows, $user_id ) {
-		$meta_ids = [];
-		// Insert User Metas.
-		foreach ( $usermeta_rows as $usermeta_row ) {
-			unset( $usermeta_row[ 'umeta_id' ] );
-			$usermeta_row[ 'user_id' ] = $user_id;
+	public function insert_usermeta_row( $usermeta_row, $user_id ) {
+		$orig_umeta_id = $usermeta_row[ 'umeta_id' ];
+		unset( $usermeta_row[ 'umeta_id' ] );
+		$usermeta_row[ 'user_id' ] = $user_id;
 
-			$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $usermeta_row );
-			if ( 1 != $inserted ) {
-				// TODO error
-			}
-
-			$meta_ids[] = $this->wpdb->insert_id;
+		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $usermeta_row );
+		if ( 1 != $inserted ) {
+			$this->log_insert_error( sprintf( 'Error inserting user meta, umeta_id %d', $orig_umeta_id ) );
+			return false;
 		}
 
-		return $meta_ids;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -624,42 +613,40 @@ class ContentDiffMigrator {
 	 * @return int Inserted comment_id.
 	 */
 	public function insert_comment( $comment_row, $new_post_id, $new_user_id ) {
+		$orig_comment_id = $comment_row[ 'comment_ID' ];
 		unset( $comment_row[ 'comment_ID' ] );
 		$comment_row[ 'comment_post_ID' ] = $new_post_id;
 		$comment_row[ 'user_id' ] = $new_user_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->comments, $comment_row );
 		if ( 1 != $inserted ) {
-			// TODO error
+			$this->log_insert_error( sprintf( 'Error inserting comment, comment_ID %d', $orig_comment_id ) );
+			return false;
 		}
-		$comment_id = $this->wpdb->insert_id;
 
-		return $comment_id;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
 	 * Inserts Comment Metas with an updated comment_id.
 	 *
-	 * @param array $commentmeta_rows Comment Meta rows.
-	 * @param int   $new_comment_id   New Comment ID.
+	 * @param array $commentmeta_row Comment Meta rows.
+	 * @param int   $new_comment_id  New Comment ID.
 	 *
 	 * @return array
 	 */
-	public function insert_commentmetas( $commentmeta_rows, $new_comment_id ) {
-		$meta_ids = [];
-		foreach ( $commentmeta_rows as $commentmeta_row ) {
-			unset( $commentmeta_row[ 'meta_id' ] );
-			$commentmeta_row[ 'comment_id' ] = $new_comment_id;
+	public function insert_commentmeta_row( $commentmeta_row, $new_comment_id ) {
+		$orig_meta_id = $commentmeta_row[ 'meta_id' ];
+		unset( $commentmeta_row[ 'meta_id' ] );
+		$commentmeta_row[ 'comment_id' ] = $new_comment_id;
 
-			$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $commentmeta_row );
-			if ( 1 != $inserted ) {
-				// TODO error
-			}
-
-			$meta_ids[] = $this->wpdb->insert_id;
+		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $commentmeta_row );
+		if ( 1 != $inserted ) {
+			$this->log_insert_error( sprintf( 'Error inserting comment meta, meta_id %d', $orig_meta_id ) );
+			return false;
 		}
 
-		return $meta_ids;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -671,7 +658,12 @@ class ContentDiffMigrator {
 	 * @return int|false Return from $wpdb::update -- the number of rows updated, or false on error.
 	 */
 	public function update_comment_parent( $comment_id, $comment_parent_new ) {
-		return $this->wpdb->update( $this->wpdb->comments, [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ] );
+		$updated = $this->wpdb->update( $this->wpdb->comments, [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ] );
+		if ( 1 != $updated ) {
+			$this->log_insert_error( sprintf( 'Error updating comment parent, comment ID %d, comment_parent new %d', $comment_id, $comment_parent_new ) );
+		}
+
+		return $updated;
 	}
 
 	/**
@@ -682,15 +674,16 @@ class ContentDiffMigrator {
 	 * @return int Inserted term_id.
 	 */
 	public function insert_term( $term_row ) {
+		$orig_term_id = $term_row[ 'term_id' ];
 		unset( $term_row[ 'term_id' ] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->terms, $term_row );
 		if ( 1 != $inserted ) {
-			// TODO error
+			$this->log_insert_error( sprintf( 'Error inserting term, term_id %d', $orig_term_id ) );
+			return false;
 		}
-		$term_id = $this->wpdb->insert_id;
 
-		return $term_id;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -702,16 +695,17 @@ class ContentDiffMigrator {
 	 * @return int Inserted term_taxonomy_id.
 	 */
 	public function insert_term_taxonomy( $term_taxonomy_row, $new_term_id ) {
+		$original_term_taxonomy_id = $term_taxonomy_row[ 'term_taxonomy_id' ];
 		unset( $term_taxonomy_row[ 'term_taxonomy_id' ] );
 		$term_taxonomy_row[ 'term_id' ] = $new_term_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $term_taxonomy_row );
 		if ( 1 != $inserted ) {
-			// TODO error
+			$this->log_insert_error( sprintf( 'Error inserting term_taxonomy, term_taxonomy_id %s', $original_term_taxonomy_id ) );
+			return false;
 		}
-		$term_taxonomy_id = $this->wpdb->insert_id;
 
-		return $term_taxonomy_id;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
@@ -724,7 +718,8 @@ class ContentDiffMigrator {
 	 */
 	public function insert_term_relationship( $object_id, $term_taxonomy_id ) {
 		if ( ! $object_id || ! $term_taxonomy_id ) {
-			throw new \RuntimeException( sprintf( 'insert_term_relationship parameters error.' ) );
+			$this->log_insert_error( sprintf( "insert_term_relationship parameters error, object_id='%s', term_taxonomy_id='%s'", $object_id, $term_taxonomy_id ) );
+			return false;
 		}
 
 		$inserted = $this->wpdb->insert(
@@ -735,10 +730,11 @@ class ContentDiffMigrator {
 			]
 		);
 		if ( 1 != $inserted ) {
-			// TODO
+			$this->log_insert_error( sprintf( 'Error inserting term relationship, object_id %s, term_taxonomy_id %s', $object_id, $term_taxonomy_id ) );
+			return false;
 		}
 
-		return $inserted;
+		return $this->wpdb->insert_id;;
 	}
 
 	/**
@@ -750,7 +746,12 @@ class ContentDiffMigrator {
 	 * @return int|false Return from $wpdb::update -- the number of rows updated, or false on error.
 	 */
 	public function update_post_author( $post_id, $new_author_id ) {
-		return $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
+		$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
+		if ( 1 != $updated ) {
+			$this->log_insert_error( sprintf( 'Error updating post author, post_id %s, post_author %s', $post_id, $new_author_id ) );
+		}
+
+		return $updated;
 	}
 
 	/**
@@ -846,8 +847,6 @@ class ContentDiffMigrator {
 			}
 		}
 
-		// TODO throw exception
-
 		return null;
 	}
 
@@ -868,5 +867,25 @@ class ContentDiffMigrator {
 		}
 
 		return $found;
+	}
+
+	/**
+	 * Gets import error log file.
+	 *
+	 * @param string $folder Optional path to where the log should be saved.
+	 *
+	 * @return string Full path to the import error log file.
+	 */
+	public function get_import_error_log( $folder ) {
+		return ( $folder ?? '/tmp' ) . '/' . self::IMPORT_ERROR_LOG;
+	}
+
+	/**
+	 * Logs error message to Insert Log file.
+	 *
+	 * @param string $msg Error message.
+	 */
+	public function log_insert_error( $msg ) {
+		file_put_contents( $this->get_import_error_log(), $msg, FILE_APPEND );
 	}
 }
