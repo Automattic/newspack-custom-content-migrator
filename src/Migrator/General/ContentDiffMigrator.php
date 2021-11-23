@@ -9,6 +9,7 @@ use \WP_CLI;
 class ContentDiffMigrator implements InterfaceMigrator {
 
 	const LIVE_DIFF_CONTENT_IDS_CSV = 'newspack-live-content-diff-ids-csv.txt';
+	const LIVE_DIFF_CONTENT_ERR_LOG = 'newspack-live-content-diff-err.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -127,6 +128,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
 		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
+		$error_log = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
 
 		// Check if live DB tables are present.
 		try {
@@ -149,8 +151,22 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$data = self::$logic->get_data( $post_id, $live_table_prefix );
+
 			$imported_post_id = self::$logic->insert_post( $data[ self::$logic::DATAKEY_POST ] );
+			if ( false === $imported_post_id ) {
+				$msg = sprintf( 'Error inserting Live ID %d.', $post_id );
+				WP_CLI::warning( $msg );
+				$msg_log = sprintf( 'Error inserting Live ID %d ; $data = %s', $post_id, json_encode( $data ) );
+				file_put_contents( $error_log, $msg_log, FILE_APPEND );
+				continue;
+			}
+
 			$import_errors = self::$logic->import_post_data( $imported_post_id, $data );
+			if ( ! empty( $import_errors ) ) {
+				$msg = sprintf( 'Errors while importing Live ID %d, imported ID %d: %s', $post_id, $imported_post_id, implode( '; ', $import_errors ) );
+				WP_CLI::warning( $msg );
+				file_put_contents( $error_log, $msg_log, FILE_APPEND );
+			}
 			WP_CLI::success( sprintf( 'imported to ID %d', $imported_post_id ) );
 
 			$imported_post_ids[ $post_id ] = $imported_post_id;
@@ -162,6 +178,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		WP_CLI::log( 'Updating the parent IDs...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			self::$logic->update_post_parent( $post_id, $imported_post_ids );
+		}
+
+		if ( file_exists( $error_log ) ) {
+			WP_CLI::warning( sprintf( 'Some errors occurred! See %s on launch site for more details.', $error_log ) );
 		}
 
 		wp_cache_flush();

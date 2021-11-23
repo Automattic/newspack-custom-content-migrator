@@ -184,9 +184,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param array $data Array containing all the data, @see ContentDiffMigrator::get_data for structure.
 	 *
-	 * @return int Imported Post ID.
+	 * @return array List of errors which occurred.
 	 */
 	public function import_post_data( $post_id, $data ) {
+		$errors = [];
+
 		// Insert Post Metas.
 		$this->insert_postmeta( $data[ self::DATAKEY_POSTMETA ], $post_id );
 
@@ -267,14 +269,13 @@ class ContentDiffMigrator {
 			$term_taxonomy_id_old = $term_relationship_row[ 'term_taxonomy_id' ];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
 			if ( ! is_null( $term_taxonomy_id_new ) ) {
-				// ERR here -- log and continue
+				// TODO ERR here -- log and continue
 				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
 			} else {
+				// TODO check exception usage
 				throw new \RuntimeException( sprintf( 'Updated term_taxonomy_id not found.' ) );
 			}
 		}
-
-		// need to return both post_id value, and exception errors... hmmm.
 
 		return $post_id;
 	}
@@ -538,7 +539,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $post_row );
 		if ( 1 != $inserted ) {
-			// TODO error
+			return false;
 		}
 		$post_id = $this->wpdb->insert_id;
 
