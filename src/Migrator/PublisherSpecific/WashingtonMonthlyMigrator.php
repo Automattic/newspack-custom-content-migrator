@@ -196,6 +196,8 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 			}
 			if ( is_null( $ga_ids ) ) {
 				$errors[] = sprintf( 'Could not locate GA for acf_id %d', $acf_id );
+				WP_CLI::success( sprintf( '(%d/%d) Possible error with assigning Post ID %d, check log file when finished.', $i, count( $posts_with_acf_authors ), $post_id ) );
+				continue;
 			}
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
 			WP_CLI::success( sprintf( '(%d/%d) Post ID %d got GA(s) %s', $i, count( $posts_with_acf_authors ), $post_id, implode( ',', $ga_ids ) ) );
