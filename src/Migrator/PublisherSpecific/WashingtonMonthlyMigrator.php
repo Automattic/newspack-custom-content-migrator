@@ -82,7 +82,7 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 			$category_slug = $issue_taxonomy[ 'slug' ];
 
 			$issue_cat_id = wp_insert_category( [
-				'cat_name' => $parent_cat_id,
+				'cat_name' => $category_name,
 				'category_nicename' => $category_slug,
 				'category_parent' => $parent_cat_id
 			] );
