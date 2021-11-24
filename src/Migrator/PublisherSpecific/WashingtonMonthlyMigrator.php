@@ -184,22 +184,30 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 		}
 
 		// Assign GAs to their posts.
+		$errors = [];
 		$posts_with_acf_authors = $this->get_posts_acf_authors();
-		// $progress = \WP_CLI\Utils\make_progress_bar( 'GAs assigned', count( $posts_with_acf_authors ) );
 		WP_CLI::log( 'Assigning CAP GAs to Posts...' );
 		$i = 0;
 		foreach ( $posts_with_acf_authors as $post_id => $acf_ids ) {
 			$i++;
-			// $progress->tick();
 			$ga_ids = [];
 			foreach ( $acf_ids as $acf_id ) {
-				$ga_ids[] = $acf_authors_to_gas[ $acf_id ];
+				$ga_ids[] = $acf_authors_to_gas[ $acf_id ] ?? null;
+			}
+			if ( is_null( $ga_ids ) ) {
+				$errors[] = sprintf( 'Could not locate GA for acf_id %d', $acf_id );
 			}
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
 			WP_CLI::success( sprintf( '(%d/%d) Post ID %d got GA(s) %s', $i, count( $posts_with_acf_authors ), $post_id, implode( ',', $ga_ids ) ) );
 		}
-		// $progress->finish();
-		WP_CLI::success( 'Done.' );
+		if ( empty( $errors ) ) {
+			WP_CLI::success( 'Done assigning GAs to Posts.' );
+		} else {
+			$log_file = 'wm_err_authors.log';
+			$msg = sprintf( 'Errors while assigning GAs to posts and saved to log %s', $log_file );
+			WP_CLI::error( $msg );
+			file_put_contents( $log_file, $msg );
+		}
 	}
 
 	/**
