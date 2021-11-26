@@ -33,5 +33,8 @@ function _manually_load_plugin() {
 
 tests_add_filter( 'muplugins_loaded', '_manually_load_plugin' );
 
+// WP 5.8.2 started requiring yoast/phpunit-polyfills for tests.
+require_once dirname( __FILE__ ) . '/../vendor/autoload.php';
+
 // Start up the WP testing environment.
 require "{$_tests_dir}/includes/bootstrap.php";
