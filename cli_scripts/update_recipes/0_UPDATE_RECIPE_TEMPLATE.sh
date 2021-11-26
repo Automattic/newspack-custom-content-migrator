@@ -57,42 +57,7 @@ echo_ts "checking $THIS_PLUGINS_NAME plugin status..."
 update_plugin_status
 
 echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql..."
-dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql
-
-# --- export:
-
-echo_ts 'exporting Staging site Pages...'
-wp_cli newspack-content-migrator export-all-staging-pages --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'exporting Staging site Menus...'
-wp_cli newspack-content-migrator export-menus --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site custom CSS..."
-wp_cli newspack-content-migrator export-current-theme-custom-css --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging pages settings..."
-wp_cli newspack-content-migrator export-pages-settings --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site identity settings..."
-wp_cli newspack-content-migrator export-customize-site-identity-settings --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site Reader Revenue and Donation products..."
-wp_cli newspack-content-migrator export-reader-revenue --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site Listings..."
-wp_cli newspack-content-migrator export-listings --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site Campaigns..."
-wp_cli newspack-content-migrator export-campaigns --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site Ad units..."
-wp_cli newspack-content-migrator export-ads --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Staging site Newsletters..."
-wp_cli newspack-content-migrator export-newsletters --output-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts "exporting Reusable Blocks..."
-wp_cli newspack-content-migrator export-reusable-blocks --output-dir=$TEMP_DIR_MIGRATOR
+dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_StagingBackup_${DB_CHARSET}.sql
 
 # --- import DB:
 
@@ -107,44 +72,11 @@ replace_staging_tables_with_live_tables
 
 # --- import Staging site data:
 
-echo_ts 'importing Pages from Staging and Live...'
-wp_cli newspack-content-migrator import-staging-site-pages --input-dir=$TEMP_DIR_MIGRATOR
+echo_ts 'Searching for new content from Live...'
+wp_cli newspack-content-migrator content-diff-search-new-content-on-live --export-dir=$TEMP_DIR_MIGRATOR --live-table-prefix=live_=$TABLE_PREFIX
 
-echo_ts 'importing Menus from Staging...'
-wp_cli newspack-content-migrator import-menus --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing custom CSS from Staging...'
-wp_cli newspack-content-migrator import-custom-css-file --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Pages settings from Staging...'
-wp_cli newspack-content-migrator import-pages-settings --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing identity settings from Staging...'
-wp_cli newspack-content-migrator import-customize-site-identity-settings --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Reader Revenue products from Staging...'
-wp_cli newspack-content-migrator import-reader-revenue --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Listings from Staging...'
-wp_cli newspack-content-migrator import-listings --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Campaigns from Staging...'
-wp_cli newspack-content-migrator import-campaigns --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Ads from Staging...'
-wp_cli newspack-content-migrator import-ads --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Newsletters from Staging...'
-wp_cli newspack-content-migrator import-newsletters --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'importing Reusable Blocks from Staging...'
-wp_cli newspack-content-migrator import-reusable-blocks --input-dir=$TEMP_DIR_MIGRATOR
-
-echo_ts 'updating WooComm settings...'
-wp_cli newspack-content-migrator woocomm-setup
-
-echo_ts 'importing content previously converted to blocks from Staging...'
-import_blocks_content_from_staging_site
+echo_ts 'importing new content from Live...'
+wp_cli newspack-content-migrator content-diff-import-new-live-content --input-dir=$TEMP_DIR_MIGRATOR
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
