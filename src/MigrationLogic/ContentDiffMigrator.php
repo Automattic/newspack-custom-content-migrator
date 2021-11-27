@@ -197,22 +197,20 @@ class ContentDiffMigrator {
 		// Get existing Author User or insert a new one.
 		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
 		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
+		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
 		$user_existing = $this->get_user_by( 'user_login', $author_row[ 'user_login' ] );
 		if ( $user_existing instanceof WP_User ) {
 			$author_id = $user_existing->ID;
 		} else {
+			// Insert a new Author User.
 			try {
-				$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
 				$author_id = $this->insert_user( $author_row );
+				foreach ( $usermeta_rows as $usermeta_row ) {
+					$this->insert_usermeta_row( $usermeta_row, $author_id );
+				}
 			} catch ( \Exception $e) {
 				$error_messages[] = $e->getMessage();
-			}
-			foreach ( $usermeta_rows as $usermeta_row ) {
-				try {
-					$this->insert_usermeta_row( $usermeta_row, $author_id );
-				} catch ( \Exception $e) {
-					$error_messages[] = $e->getMessage();
-				}
+				$author_id = [];
 			}
 		}
 
@@ -235,40 +233,35 @@ class ContentDiffMigrator {
 			} else {
 				// Get existing Comment User or insert a new one.
 				$comment_user_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_row_id );
+				$comment_usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row[ 'ID' ] );
 				$comment_user_existing = $this->get_user_by( 'user_login', $comment_user_row[ 'user_login' ] );
 				if ( $comment_user_existing instanceof WP_User ) {
 					$comment_user_id = $comment_user_existing->ID;
 				} else {
+					// Insert a new Comment User.
 					try {
-						$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row[ 'ID' ] );
 						$comment_user_id = $this->insert_user( $comment_user_row );
+						foreach ( $comment_usermeta_rows as $comment_usermeta_row ) {
+							$this->insert_usermeta_row( $comment_usermeta_row, $comment_user_id );
+						}
 					} catch ( \Exception $e) {
 						$error_messages[] = $e->getMessage();
-					}
-					foreach ( $usermeta_rows as $usermeta_row ) {
-						try {
-							$this->insert_usermeta_row( $usermeta_row, $comment_user_id );
-						} catch ( \Exception $e) {
-							$error_messages[] = $e->getMessage();
-						}
+						$comment_user_id = null;
 					}
 				}
 			}
 
 			// Insert Comment and Comment Metas.
+			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
 			try {
 				$comment_id = $this->insert_comment( $comment_row, $post_id, $comment_user_id );
+				$comment_ids_updates[ $comment_id_old ] = $comment_id;
+				foreach ( $commentmeta_rows as $commentmeta_row ) {
+						$this->insert_commentmeta_row( $commentmeta_row, $comment_id );
+				}
 			} catch ( \Exception $e) {
 				$error_messages[] = $e->getMessage();
-			}
-			$comment_ids_updates[ $comment_id_old ] = $comment_id;
-			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
-			foreach ( $commentmeta_rows as $commentmeta_row ) {
-				try {
-					$this->insert_commentmeta_row( $commentmeta_row, $comment_id );
-				} catch ( \Exception $e) {
-					$error_messages[] = $e->getMessage();
-				}
+				$comment_id = null;
 			}
 		}
 
@@ -297,6 +290,7 @@ class ContentDiffMigrator {
 					$term_id = $this->insert_term( $term_row );
 				} catch ( \Exception $e) {
 					$error_messages[] = $e->getMessage();
+					$term_id = null;
 				}
 			} else {
 				$term_id = $term_id_existing;
@@ -320,6 +314,7 @@ class ContentDiffMigrator {
 						$term_taxonomy_id = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id );
 					} catch ( \Exception $e) {
 						$error_messages[] = $e->getMessage();
+						$term_taxonomy_id = null;
 					}
 				}
 
@@ -332,7 +327,7 @@ class ContentDiffMigrator {
 			$term_taxonomy_id_old = $term_relationship_row[ 'term_taxonomy_id' ];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
 			if ( is_null( $term_taxonomy_id_new ) ) {
-				$this->log_insert_error( sprintf( "Error could not insert term_relationship because updated term_taxonomy_id not found, term_taxonomy_id_old='%s'", $term_taxonomy_id_old ) );
+				$error_messages[] = sprintf( "Error could not insert term_relationship because updated term_taxonomy_id not found, term_taxonomy_id_old='%s'", $term_taxonomy_id_old );
 			} else {
 				try {
 					$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
@@ -585,7 +580,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $postmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting post meta, meta_id %d', $orig_meta_id ) );
+			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, meta_id %d, post_id %s, postmeta_row %s', $orig_meta_id, $post_id, json_encode( $postmeta_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
