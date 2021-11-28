@@ -7,6 +7,7 @@
 
 namespace NewspackCustomContentMigratorTest\Migrator\General;
 
+use http\Exception\UnexpectedValueException;
 use PHP_CodeSniffer\Tests\Core\Autoloader\Sub\C;
 use WP_UnitTestCase;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
@@ -53,6 +54,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$this->wpdb_mock->comments = $wpdb->prefix . 'comments';
 		$this->wpdb_mock->commentmeta = $wpdb->prefix . 'commentmeta';
 		$this->wpdb_mock->terms = $wpdb->prefix . 'terms';
+		$this->wpdb_mock->termmeta = $wpdb->prefix . 'termmeta';
 		$this->wpdb_mock->term_taxonomy = $wpdb->prefix . 'term_taxonomy';
 		$this->wpdb_mock->term_relationships = $wpdb->prefix . 'term_relationships';
 		$this->logic = new ContentDiffMigrator( $this->wpdb_mock );
@@ -60,32 +62,45 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-
-	simulate failures
-	- using mocks for when your services break (db, payment, ...):
-	- ie.
-	// na drugom pozivu neke metode ovog objekta
-	// dakle gleda koja po redu je 'process' zvana !
-	$mock->expects($this->at(2))
-	->method('proceess')
-	->with($this->Order)
-	->will($this->throwException(
-	new GatewayOrderFailedException()
-	)):
-
-	check if objects interract correctly
-	ie. Check if Controller modifies Reponse correcdtly:
-	- mock Resonse obj, and check it's state
-
-	$response = $this->getMock('ResponseObj');
-	$response->expects($this->once())
-	->method('header')
-	->with('Location: /posts');
-	- Give this mock to controller and see how it uses it
-	$this->Controller->response = $response;
-	$this->Controller->myMethod();
-
+	 * Enables partial mocking with exact lists of arguments and return values, while minding the exact execution order,
+	 * i.e. \PHPUnit\Framework\TestCase::at.
+	 *
+	 * This is a custom alternative to have the functionality provided by withConsecutive() which will be deprecated in PHPUnit 10,
+	 * and the at() which will also be deprecated.
+	 *
+	 * @param \PHPUnit\Framework\MockObject\MockBuilder $mock MockBuilder object.
+	 * @param string $method Method mocked.
+	 * @param array $return_value_map An array of function arguments and a return value.
+	 *
+	 * @return mixed
 	 */
+	public function mock_consecutive_value_maps( $mock, $method, $return_value_map ) {
+		$at = 1;
+		$total_calls = count( $return_value_map );
+		$mock->expects( $this->exactly( $total_calls ) )
+		     ->method( $method )
+		     ->will( $this->returnCallback( function() use ( $return_value_map, &$at, $method ) {
+			     $numargs = func_num_args();
+			     $arg_list = func_get_args();
+			     $this_return_value_map = $return_value_map[ $at - 1 ];
+			     foreach ( $arg_list as $key_arg => $arg ) {
+				     if ( $this_return_value_map[ $key_arg ] !== $arg ) {
+					     throw new \UnexpectedValueException( sprintf(
+						     'Unexpected argument number %d with value %s in method %s at execution %d.',
+						     $key_arg + 1,
+						     print_r( $arg, true ),
+						     $method,
+						     $at
+					     ) );
+				     }
+			     }
+
+			     $at++;
+			     return $this_return_value_map[$numargs] ?? null;
+		     } ) );
+
+		return $mock;
+	}
 
 	/**
 	 * Tests that a Post is queried correctly and that correct calls are made to the $wpdb.
@@ -465,6 +480,153 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Checks that ContentDiffMigrator::get_data queries the DB as expected, and returns a correctly formatted data array.
+	 *
+	 * @covers ContentDiffMigrator::get_data.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_correctly_load_data_array_simplified( $data ) {
+		// Prepare test data.
+		$live_table_prefix = 'live_wp_';
+		$post_id = 123;
+		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+		$post_author_id = $post_row[0][ 'post_author' ];
+		$post_author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
+		$post_author_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
+		$comments_rows = $data[ ContentDiffMigrator::DATAKEY_COMMENTS ];
+		$comment_1_id = 11;
+		$comment_1_row = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $post_author_id );
+		$comment_2_id = 12;
+		$comment_3_id = 13;
+		// Comment 1 is the only comment with some metas.
+		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
+		$comment_2_commentmeta_rows = [];
+		$comment_3_commentmeta_rows = [];
+		$comment_3_user_id = 23;
+		// Test data for Comment 3 contains a new User.
+		$comment_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
+		$comment_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
+
+		// Mock.
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [
+			                           'select_post_row',
+			                           'select_postmeta_rows',
+			                           'select_user_row',
+			                           'select_usermeta_rows',
+			                           'select_comment_rows',
+			                           'select_commentmeta_rows',
+			                           'select_term_relationships_rows',
+			                           'select_term_taxonomy_row',
+			                           'select_term_row',
+			                           'select_termmeta_rows',
+		                           ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_post_row', [
+			[ $live_table_prefix, $post_id, $post_row ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_postmeta_rows', [
+			[ $live_table_prefix, $post_id, $postmeta_rows ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_user_row', [
+			[ $live_table_prefix, $post_author_id, $post_author_row ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_usermeta_rows', [
+			[ $live_table_prefix, $post_author_id, $post_author_meta_rows ],
+		] );
+		// $comment_rows = $this->( $table_prefix, $post_id );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_comment_rows', [
+			[ $live_table_prefix, $post_author_id, [ $comments_rows[0] ] ],
+			// [ $live_table_prefix, $post_author_id, $comment_1_row ],
+		] );
+
+		// Run.
+		$data_actual = $logic_partial_mock->get_data( $post_id, $live_table_prefix );
+
+// $data[ ContentDiffMigrator::DATAKEY_POST ] = [];
+// $data[ ContentDiffMigrator::DATAKEY_POSTMETA ] = [];
+// $data[ ContentDiffMigrator::DATAKEY_COMMENTS ] = [];
+$data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ] = [];
+$data[ ContentDiffMigrator::DATAKEY_USERS ] = [];
+	$data[ ContentDiffMigrator::DATAKEY_USERS ][] = $post_author_row;
+$data[ ContentDiffMigrator::DATAKEY_USERMETA ] = [];
+	$data[ ContentDiffMigrator::DATAKEY_USERMETA ] = $post_author_meta_rows;
+$data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ] = [];
+$data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ] = [];
+$data[ ContentDiffMigrator::DATAKEY_TERMS ] = [];
+$data[ ContentDiffMigrator::DATAKEY_TERMMETA ] = [];
+
+		// Assert.
+		$this->assertEquals( $data, $data_actual );
+return;
+
+		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
+		$live_table_prefix = 'live_wp_';
+		$post_id = 123;
+		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+		$post_author_id = 22;
+		$author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
+		$authormeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
+		$comments_rows = $data[ ContentDiffMigrator::DATAKEY_COMMENTS ];
+		$comment_1_id = 11;
+		$comment_2_id = 12;
+		$comment_3_id = 13;
+		// Test data for Comment 1 has some metas.
+		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
+		$comment_2_commentmeta_rows = [];
+		$comment_3_commentmeta_rows = [];
+		$comment_3_user_id = 23;
+		// Test data for Comment 3 contains a new User.
+		$comment_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
+		$comment_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
+		$term_relationships_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
+		$term_taxonomy_1_id = 1;
+		$term_taxonomy_2_id = 2;
+		$term_taxonomy_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $term_taxonomy_1_id );
+		$term_taxonomy_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $term_taxonomy_2_id );
+		$term_1_id = 41;
+		$term_2_id = 42;
+		$term_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_1_id );
+		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
+		// Test data for Term 1 has some metas.
+		$term_1_termmeta_rows = $data[ ContentDiffMigrator::DATAKEY_TERMMETA ];
+		$term_2_termmeta_rows = [];
+
+		// Mock full execution of ContentDiffMigrator::get_data().
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_select_post_row( $return_value_maps, $post_row, $live_table_prefix );
+		$this->build_value_maps_select_postmeta_rows( $return_value_maps, $postmeta_rows, $live_table_prefix, $post_id );
+		$this->build_value_maps_select_user_row( $return_value_maps, $author_row, $live_table_prefix );
+		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $authormeta_rows, $live_table_prefix, $post_author_id );
+		$this->build_value_maps_select_comments_rows( $return_value_maps, $comments_rows, $live_table_prefix, $post_id );
+		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_1_commentmeta_rows, $live_table_prefix, $comment_1_id );
+		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_2_commentmeta_rows, $live_table_prefix, $comment_2_id );
+		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_3_commentmeta_rows, $live_table_prefix, $comment_3_id );
+		$this->build_value_maps_select_user_row( $return_value_maps, $comment_user_row, $live_table_prefix );
+		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $comment_usermeta_rows, $live_table_prefix, $comment_3_user_id );
+		$this->build_value_maps_select_term_relationships_rows( $return_value_maps, $term_relationships_rows, $live_table_prefix, $post_id );
+		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_1_row, $live_table_prefix );
+		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_2_row, $live_table_prefix );
+		$this->build_value_maps_select_term_row( $return_value_maps, $term_1_row, $live_table_prefix );
+		$this->build_value_maps_select_term_row( $return_value_maps, $term_2_row, $live_table_prefix );
+		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $term_1_termmeta_rows, $live_table_prefix, $term_1_id );
+		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $term_2_termmeta_rows, $live_table_prefix, $term_2_id );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		                ->method( 'prepare' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
+		                ->method( 'get_row' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		                ->method( 'get_results' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+	}
+
+	/**
 	 * Tests that a Post is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_post.
@@ -499,6 +661,35 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 * @dataProvider db_data_provider
 	 */
 	public function test_should_insert_postmeta_row( $data ) {
+		// Prepare.
+		$new_post_id = 333;
+		$meta_id = 22;
+		$postmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_POSTMETA ], 'meta_id', $meta_id );
+		$meta_id_new = 54;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_postmeta_row( $return_value_maps, $postmeta_row, $new_post_id );
+		$this->wpdb_mock->insert_id = $meta_id_new;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$new_meta_ids_actual = $this->logic->insert_postmeta_row( $postmeta_row, $new_post_id );
+
+		// Assert.
+		$this->assertEquals( $meta_id_new, $new_meta_ids_actual );
+	}
+
+	/**
+	 * Tests that a proper exception is thrown when insert_postmeta_row fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_postmeta_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_postmeta_row_should_throw_exception( $data ) {
 		// Prepare.
 		$new_post_id = 333;
 		$meta_id = 22;
@@ -704,7 +895,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 *
 	 * @dataProvider db_data_provider
 	 */
-	public function test_should_insert_term_row( $data ) {
+	public function test_should_insert_term( $data ) {
 		// Prepare.
 		$term_id = 41;
 		$term_id_new = 123;
@@ -723,6 +914,35 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $term_id_new, $term_id_new_actual );
+	}
+
+	/**
+	 * Tests that a Term Meta row is inserted correctly and that correct calls are made to the $wpdb.
+	 *
+	 * @covers ContentDiffMigrator::insert_termmeta_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_should_insert_termmeta_row( $data ) {
+		// Prepare.
+		$term_id = 42;
+		$term_id_new = 123;
+		$termmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_id );
+		$insert_id_expected = 543;
+
+		// Mock.
+		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
+		$this->build_value_maps_insert_termmeta_row( $return_value_maps, $termmeta_row, $term_id_new );
+		$this->wpdb_mock->insert_id = $insert_id_expected;
+		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		                ->method( 'insert' )
+		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+
+		// Run.
+		$termmeta_id_actual = $this->logic->insert_termmeta_row( $termmeta_row, $term_id_new );
+
+		// Assert.
+		$this->assertEquals( $insert_id_expected, $termmeta_id_actual );
 	}
 
 	/**
@@ -839,10 +1059,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Checks that ContentDiffMigrator::import_post_data queries the DB as expected, and inserts the data array correctly.
-	 *
-	 * Though a super long test, all its bits are also individually tested. This test is an extra effort to ensure the import_post_data
-	 * will do the final DB updates correctly.
+	 * Checks that ContentDiffMigrator::import_post_data runs all insert methods with all the appropriate arguments.
 	 *
 	 * @covers ContentDiffMigrator::import_post_data.
 	 *
@@ -850,28 +1067,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_correctly_import_post_data_array( $data ) {
 		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
-		$last_insert_id = 300;
 		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
-		$post_id = $post_row[ 'ID' ];
-		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+		$new_post_id = 500;
+		$post_author_id = $post_row[ 'post_author' ];
+		$post_author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
+		$post_author_user_login = $post_author_row[ 'user_login' ];
+		$post_author_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
+		$new_post_author_id = 321;
 		$user_admin = new WP_User();
-		$user_admin->ID = 50;
+		$user_admin->ID = 22;
 		$comment_1_id = 11;
 		$comment_1_id_new = 31;
 		$comment_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_1_id );
-		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
 		$comment_2_id = 12;
 		$comment_2_id_new = 32;
 		$comment_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_2_id );
-		$comment_2_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_2_id );
 		$comment_3_id = 13;
 		$comment_3_id_new = 33;
 		$comment_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_3_id );
-		$comment_3_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_3_id );
-		$user_test_user = new WP_User();
-		$user_test_user->ID = 51;
+		$comment1_user_id = 0;
+		$comment2_user_id = $comment_2_row[ 'user_id' ];
+		$comment3_user_id = $comment_3_row[ 'user_id' ];
+		$comment3_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment3_user_id );
+		$comment3_user_login = $comment3_user_row[ 'user_login' ];
+		$comment3_user_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment3_user_id );
+		$new_comment3_user_id = 400;
 		$term_1_id = 41;
-		$term_1_id_existing = 61;
 		$term_1_name = 'Uncategorized';
 		$term_1_slug = 'uncategorized';
 		$term_2_name = 'Custom Term';
@@ -879,83 +1100,128 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_2_id = 42;
 		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
 		$term_2_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_2_id );
+		$term_2_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_2_id );
+		$new_term_2_id = 62;
+		$term_3_name = 'Blue';
+		$term_3_slug = 'blue';
+		$term_3_id = 70;
+		$term_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_3_id );
+		$term_3_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_3_id );
+		$new_term_3_id = 100;
+		$term_taxonomy_rows = $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ];
+		$term_1_taxonomy_id = 1;
+		$term_2_taxonomy_id = 2;
+		$new_term_taxonomy_3_id = 521;
+		$new_term_taxonomy_4_id = 522;
 
-		// Mock full execution of ContentDiffMigrator::import_post_data(). Using a partial mock to mock responses from wapper methods
-		// for WP's native global functions.
-		$get_user_by_return_value_map = [];
-		$term_exists_return_value_map = [];
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
 		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
-		                           ->setMethods( [ 'get_user_by', 'term_exists' ] )
+		                           ->setMethods( [
+			                           'insert_postmeta_row',
+			                           'insert_user',
+			                           'insert_usermeta_row',
+			                           'update_post_author',
+		                           	   'get_user_by',
+			                           'insert_comment',
+			                           'insert_commentmeta_row',
+			                           'update_comment_parent',
+			                           'term_exists',
+			                           'insert_term',
+			                           'insert_termmeta_row',
+			                           'get_existing_term_taxonomy',
+			                           'insert_term_taxonomy',
+			                           'insert_term_relationship',
+		                           ] )
 		                           ->getMock();
-		// Post's User 'admin' will be inserted as new user.
-		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', 'admin' ], $user_admin );
-		// Comment 2's User is the same existing User 'admin'.
-		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', 'admin' ], $user_admin );
-		// Comment 3's User doesn't exist, and will have to be inserted too.
-		$this->build_value_map( $get_user_by_return_value_map, [ 'user_login', 'test_user' ], $user_test_user );
-		$logic_partial_mock->expects( $this->exactly( count( $get_user_by_return_value_map ) ) )
-		                   ->method( 'get_user_by' )
-		                   ->will( $this->returnValueMap( $get_user_by_return_value_map ) );
-		// Term 1 exists.
-		$this->build_value_map( $term_exists_return_value_map, [ $term_1_name, '', null ], $term_1_id_existing );
-		// Term 2 should be inserted as new.
-		$this->build_value_map( $term_exists_return_value_map, [ $term_2_name, '', null ], null );
-		$logic_partial_mock->expects( $this->exactly( count( $term_exists_return_value_map ) ) )
-		                   ->method( 'term_exists' )
-		                   ->will( $this->returnValueMap( $term_exists_return_value_map ) );
-		// Expectations for all $wpdb calls.
-		$wpdb_return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		// Should insert Post Meta.
-		$this->build_value_maps_insert_postmeta_rows( $wpdb_return_value_maps, $postmeta_rows, $last_insert_id );
-		// Post gets updated with newly inserted user ID.
-		$this->build_value_maps_update_post_author( $wpdb_return_value_maps, $last_insert_id, $user_admin->ID );
-		// Comment 1 with no user.
-		$this->build_value_maps_insert_comment_row( $wpdb_return_value_maps, $comment_1_row, $last_insert_id, 0 );
-		$this->build_value_maps_insert_commentmeta_rows( $wpdb_return_value_maps, $comment_1_commentmeta_rows, $last_insert_id );
-		// Comment 2 with existing 'admin' User.
-		$this->build_value_maps_insert_comment_row( $wpdb_return_value_maps, $comment_2_row, $last_insert_id, $user_admin->ID );
-		$this->build_value_maps_insert_commentmeta_rows( $wpdb_return_value_maps, $comment_2_commentmeta_rows, $last_insert_id );
-		// Comment 3 with new 'test_user' User.
-		$this->build_value_maps_insert_comment_row( $wpdb_return_value_maps, $comment_3_row, $last_insert_id, $user_test_user->ID );
-		$this->build_value_maps_insert_commentmeta_rows( $wpdb_return_value_maps, $comment_3_commentmeta_rows, $last_insert_id );
-		// Comment 3 has a parent which should get updated.
-		$this->build_value_maps_update_comment_parent( $wpdb_return_value_maps, $last_insert_id, $last_insert_id );
-		// Term 2 is new and should be inserted.
-		$this->build_value_maps_insert_term_row( $wpdb_return_value_maps, $term_2_row );
-		// term_taxonomy_id = 1 relationship will already exist.
-		$term_1_taxonomy_id = 1;
-		$this->build_value_maps_get_existing_term_taxonomy( $wpdb_return_value_maps, $term_1_name, $term_1_slug, 'category', $term_1_taxonomy_id );
-		// term_taxonomy_id = 2 should be inserted as new.
-		$this->build_value_maps_get_existing_term_taxonomy( $wpdb_return_value_maps, $term_2_name, $term_2_slug, 'category', null );
-		$this->build_value_maps_insert_term_taxonmy_row( $wpdb_return_value_maps, $term_2_taxonomy_row, $last_insert_id );
-		// term_relationship 1 and 2 inserts.
-		$this->build_value_maps_insert_term_relationship_row( $wpdb_return_value_maps, $last_insert_id, $term_1_taxonomy_id );
-		$this->build_value_maps_insert_term_relationship_row( $wpdb_return_value_maps, $last_insert_id, $last_insert_id );
-		// Expectations.
-		$this->wpdb_mock->insert_id = $last_insert_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::update' ] ) ) )
-		                ->method( 'update' )
-		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::update' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::insert' ] ) ) )
-		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::insert' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::prepare' ] ) ) )
-		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $wpdb_return_value_maps[ 'wpdb::get_var' ] ) ) )
-		                ->method( 'get_var' )
-		                ->will( $this->returnValueMap( $wpdb_return_value_maps[ 'wpdb::get_var' ] ) );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_postmeta_row', [
+			[ $data[ ContentDiffMigrator::DATAKEY_POSTMETA ][0], $new_post_id ],
+			[ $data[ ContentDiffMigrator::DATAKEY_POSTMETA ][1], $new_post_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_user_by', [
+			// First call is when trying to get the existing Post user, false will be returned because it is a new user.
+			[ 'user_login', $post_author_user_login, false ],
+			// Comment 1 has no user ('user_id' => 0), so no call is made to it.
+			// Comment 2, existing $user_admin is returned.
+			[ 'user_login', 'admin', $user_admin ],
+			// Comment 3.
+			[ 'user_login', $comment3_user_login, false ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_user', [
+			// Inserting a new Post User.
+			[ $post_author_row, $new_post_author_id ],
+			// Inserting a new Comment3 User.
+			[ $comment3_user_row, $new_comment3_user_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_usermeta_row', [
+			// Inserting a new Post User.
+			[ $post_author_usermeta_rows[0], $new_post_author_id ],
+			[ $post_author_usermeta_rows[1], $new_post_author_id ],
+			[ $post_author_usermeta_rows[2], $new_post_author_id ],
+			// Inserting a new Comment3 User.
+			[ $comment3_user_usermeta_rows[0], $new_comment3_user_id ],
+			[ $comment3_user_usermeta_rows[1], $new_comment3_user_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'update_post_author', [
+			[ $new_post_id, $new_post_author_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_comment', [
+			[ $comment_1_row, $new_post_id, 0, $comment_1_id_new ],
+			[ $comment_2_row, $new_post_id, $comment2_user_id, $comment_2_id_new ],
+			[ $comment_3_row, $new_post_id, $new_comment3_user_id, $comment_3_id_new ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'update_comment_parent', [
+			// Comment 1 has a parent, which is Comment 2.
+			[ $comment_3_id_new, $comment_2_id_new ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'term_exists', [
+			// Term 1 exists, $term_1_id is returned.
+			[ $term_1_name, '', null, $term_1_id ],
+			// Term 2 doesn't exist, null is returned.
+			[ $term_2_name, '', null, null ],
+			// Term 3 doesn't exist.
+			[ $term_3_name, '', null, null ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_term', [
+			// Term 2 gets inserted.
+			[ $term_2_row, $new_term_2_id ],
+			// Term 3 gets inserted.
+			[ $term_3_row, $new_term_3_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_termmeta_row', [
+			// Term 2 has some meta.
+			[ $term_2_meta_rows[0], $new_term_2_id ],
+			[ $term_2_meta_rows[1], $new_term_2_id ],
+			// Term .
+			[ $term_3_meta_rows[0], $new_term_3_id ],
+			[ $term_3_meta_rows[1], $new_term_3_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_existing_term_taxonomy', [
+			// Term 1 calls.
+			[ $term_1_name, $term_1_slug, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
+			// Term 2 calls.
+			[ $term_2_name, $term_2_slug, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
+			// Term 3 calls.
+			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
+			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_term_taxonomy', [
+			// Term 3 calls.
+			[ $term_taxonomy_rows[2], $new_term_3_id, $new_term_taxonomy_3_id ],
+			[ $term_taxonomy_rows[3], $new_term_3_id, $new_term_taxonomy_4_id ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_term_relationship', [
+			[ $new_post_id, $term_1_taxonomy_id ],
+			[ $new_post_id, $term_2_taxonomy_id ],
+			[ $new_post_id, $new_term_taxonomy_3_id ],
+			[ $new_post_id, $new_term_taxonomy_4_id ],
+		] );
 
 		// Run.
-		$inserted_post_id = $last_insert_id;
-		$import_errors = $logic_partial_mock->import_post_data( $inserted_post_id, $data );
+		$import_errors = $logic_partial_mock->import_post_data( $new_post_id, $data );
 
 		// Assert.
 		$this->assertEquals( [], $import_errors );
 	}
-
-	// TODO test error returns from select/insert methods.
 
 	/**
 	 * Creates a blank array which will contain value map subarrays as defined by \PHPUnit\Framework\TestCase::returnValueMap
@@ -1215,6 +1481,19 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Builds return value maps for a single insert into termmeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
+	 *
+	 * @param array $maps         Array containing return value maps.
+	 * @param array $termmeta_row Term meta rows.
+	 * @param int   $new_term_id  Term ID to which this meta will be assigned to.
+	 */
+	private function build_value_maps_insert_termmeta_row( &$maps, $termmeta_row, $new_term_id ) {
+		unset( $termmeta_row[ 'meta_id' ] );
+		$termmeta_row[ 'term_id' ] = $new_term_id;
+		$maps[ 'wpdb::insert' ][]  = [ $this->wpdb_mock->table_prefix . 'termmeta', $termmeta_row, 1 ];
+	}
+
+	/**
 	 * Builds return value maps for ContentDiffMigrator::update_post_author usage of $wpdb as defined by
 	 * \PHPUnit\Framework\TestCase::returnValueMap.
 	 *
@@ -1365,29 +1644,31 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 				[
 					// Post.
 					ContentDiffMigrator::DATAKEY_POST => [
-						'ID' => 123,
-						'post_author' => 22,
-						'post_date' => '2021-09-23 11:43:56.000',
-						'post_date_gmt' => '2021-09-23 11:43:56.000',
-						'post_content' => '<p>WP</p>',
-						'post_title' => 'Hello world!',
-						'post_excerpt' => '',
-						'post_status' => 'publish',
-						'comment_status' => 'open',
-						'ping_status' => 'open',
-						'post_password' => '',
-						'post_name' => 'hello-world',
-						'to_ping' => '',
-						'pinged' => '',
-						'post_modified' => '2021-09-23 11:43:56.000',
-						'post_modified_gmt' => '2021-09-23 11:43:56.000',
-						'post_content_filtered' => '',
-						'post_parent' => 0,
-						'guid' => 'http://testing.test/?p=1',
-						'menu_order' => 0,
-						'post_type' => 'post',
-						'post_mime_type' => '',
-						'comment_count' => 1,
+						[
+							'ID' => 123,
+							'post_author' => 21,
+							'post_date' => '2021-09-23 11:43:56.000',
+							'post_date_gmt' => '2021-09-23 11:43:56.000',
+							'post_content' => '<p>WP</p>',
+							'post_title' => 'Hello world!',
+							'post_excerpt' => '',
+							'post_status' => 'publish',
+							'comment_status' => 'open',
+							'ping_status' => 'open',
+							'post_password' => '',
+							'post_name' => 'hello-world',
+							'to_ping' => '',
+							'pinged' => '',
+							'post_modified' => '2021-09-23 11:43:56.000',
+							'post_modified_gmt' => '2021-09-23 11:43:56.000',
+							'post_content_filtered' => '',
+							'post_parent' => 0,
+							'guid' => 'http://testing.test/?p=1',
+							'menu_order' => 0,
+							'post_type' => 'post',
+							'post_mime_type' => '',
+							'comment_count' => 3,
+						]
 					],
 					// Postmeta.
 					ContentDiffMigrator::DATAKEY_POSTMETA => [
@@ -1476,7 +1757,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 						],
 					],
 					ContentDiffMigrator::DATAKEY_USERS => [
-						// Post Author User, also used by Comment 2.
+						// Post Author User.
+						[
+							'ID' => 21,
+							'user_login' => 'postauthor',
+							'user_pass' => '$P$BJTe8iBJUuOui0O.A4JDRkLMfqqraF.',
+							'user_nicename' => 'postauthor',
+							'user_email' => 'postauthor@local.test',
+							'user_url' => 'http=>\/\/testing.test',
+							'user_registered' => '2021-09-23T09=>43=>56.000Z',
+							'user_activation_key' => '',
+							'user_status' => 0,
+							'display_name' => 'postauthor'
+						],
+						// Comment 2 User.
 						[
 							'ID' => 22,
 							'user_login' => 'admin',
@@ -1504,7 +1798,26 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 						]
 					],
 					ContentDiffMigrator::DATAKEY_USERMETA => [
-						// User Meta for Post Author, and Comment 2 existing User.
+						// User Meta for Post Author.
+						[
+							'umeta_id' => 1,
+							'user_id' => 21,
+							'meta_key' => 'nickname',
+							'meta_value' => 'newuser',
+						],
+						[
+							'umeta_id' => 2,
+							'user_id' => 21,
+							'meta_key' => 'first_name',
+							'meta_value' => 'New',
+						],
+						[
+							'umeta_id' => 3,
+							'user_id' => 21,
+							'meta_key' => 'last_name',
+							'meta_value' => 'User',
+						],
+						// User Meta for Comment 2 existing User.
 						[
 							'umeta_id' => 1,
 							'user_id' => 22,
@@ -1548,6 +1861,19 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 							'term_taxonomy_id' => 2,
 							'term_order' => 0
 						],
+						[
+							'object_id' => 123,
+							'term_taxonomy_id' => 3,
+							'term_order' => 0
+						],
+						[
+							'term_taxonomy_id' => 4,
+							'term_id' => 70,
+							'taxonomy' => 'croatian-coastal-area',
+							'description' => 'Croatian Coastal Area',
+							'parent' => 0,
+							'count' => 0
+						],
 					],
 					ContentDiffMigrator::DATAKEY_TERMTAXONOMY => [
 						[
@@ -1565,37 +1891,73 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 							'description' => 'Lorem Ipsum',
 							'parent' => 0,
 							'count' => 8
-						]
+						],
+						[
+							'term_taxonomy_id' => 3,
+							'term_id' => 70,
+							'taxonomy' => 'color',
+							'description' => 'Color',
+							'parent' => 0,
+							'count' => 0
+						],
+						[
+							'term_taxonomy_id' => 4,
+							'term_id' => 70,
+							'taxonomy' => 'mood',
+							'description' => 'Mood',
+							'parent' => 0,
+							'count' => 0
+						],
 					],
 					ContentDiffMigrator::DATAKEY_TERMS => [
-						// Term 1 has some meta.
+						// Term 1 has no meta.
 						[
 							'term_id' => 41,
 							'name' => 'Uncategorized',
 							'slug' => 'uncategorized',
 							'term_group' => 0
 						],
-						// Term 2 has no meta.
+						// Term 2 has some meta.
 						[
 							'term_id' => 42,
 							'name' => 'Custom Term',
 							'slug' => 'custom-term',
 							'term_group' => 0
 						],
+						// Term 3 has some meta.
+						[
+							'term_id' => 70,
+							'name' => 'Blue',
+							'slug' => 'blue',
+							'term_group' => 0
+						],
 					],
 					ContentDiffMigrator::DATAKEY_TERMMETA => [
-						// Term 1 Meta.
+						// Term 2 Meta.
 						[
 							'meta_id' => 1,
-							'term_id' => 41,
+							'term_id' => 42,
 							'meta_key' => '_some_numbermeta',
 							'meta_value' => '7'
 						],
 						[
 							'meta_id' => 2,
-							'term_id' => 41,
+							'term_id' => 42,
 							'meta_key' => '_some_other_numbermeta',
 							'meta_value' => '71'
+						],
+						// Term 2 Meta.
+						[
+							'meta_id' => 1,
+							'term_id' => 70,
+							'meta_key' => 'brightness',
+							'meta_value' => 60,
+						],
+						[
+							'meta_id' => 2,
+							'term_id' => 70,
+							'meta_key' => 'contrast',
+							'meta_value' => 50,
 						],
 					],
 				]
