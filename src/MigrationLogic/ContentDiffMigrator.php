@@ -795,18 +795,6 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Wrapper for WP's native \get_user_by().
-	 *
-	 * @param string     $field The field to retrieve the user with. id | ID | slug | email | login.
-	 * @param int|string $value A value for $field. A user ID, slug, email address, or login name.
-	 *
-	 * @return WP_User|false WP_User object on success, false on failure.
-	 */
-	public function get_user_by( $field, $value ) {
-		return get_user_by( $field, $value );
-	}
-
-	/**
 	 * Gets all the tables in the active DB.
 	 *
 	 * @return array List of all tables in DB.
@@ -836,6 +824,18 @@ class ContentDiffMigrator {
 				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) );
 			}
 		}
+	}
+
+	/**
+	 * Wrapper for WP's native \get_user_by().
+	 *
+	 * @param string     $field The field to retrieve the user with. id | ID | slug | email | login.
+	 * @param int|string $value A value for $field. A user ID, slug, email address, or login name.
+	 *
+	 * @return WP_User|false WP_User object on success, false on failure.
+	 */
+	public function get_user_by( $field, $value ) {
+		return get_user_by( $field, $value );
 	}
 
 	/**
@@ -875,7 +875,7 @@ class ContentDiffMigrator {
 	 * @param mixed $key   Array key to search for.
 	 * @param mixed $value Array value to search for
 	 *
-	 * @return null|mixed
+	 * @return null|array The array which matches the $key $value filter, or null.
 	 */
 	public function filter_array_element( $array, $key, $value ) {
 		foreach ( $array as $subarray ) {
@@ -893,7 +893,7 @@ class ContentDiffMigrator {
 	 * @param mixed $key   Array key to search for.
 	 * @param mixed $value Array value to search for
 	 *
-	 * @return array
+	 * @return array An array with sub-arrays which match the $key $value filter, or an empty array if nothing is found.
 	 */
 	public function filter_array_elements( $array, $key, $value ) {
 		$found = [];

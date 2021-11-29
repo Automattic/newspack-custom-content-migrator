@@ -62,11 +62,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Enables partial mocking with exact lists of arguments and return values, while minding the exact execution order,
-	 * i.e. \PHPUnit\Framework\TestCase::at.
+	 * Enables to set expectations on a partial mock object, so that the exact list of arguments and return values is checked in
+	 * respect to the exact execution order, i.e. \PHPUnit\Framework\TestCase::at.
 	 *
-	 * This is a custom alternative to have the functionality provided by withConsecutive() which will be deprecated in PHPUnit 10,
-	 * and the at() which will also be deprecated.
+	 * This is a custom alternative which could otherwise have been obtained with `withConsecutive()` and `at()` but since these
+	 * two methods which will be deprecated in PHPUnit 10, here is a custom alternative to using those (perhaps PHPUnit 11 will
+	 * fill the missing functionality gap).
 	 *
 	 * @param \PHPUnit\Framework\MockObject\MockBuilder $mock MockBuilder object.
 	 * @param string $method Method mocked.
@@ -112,18 +113,22 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_select_post_row( $data ) {
 		// Prepare.
 		$live_table_prefix = 'live_wp_';
-		$post_id = 123;
 		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+		$post_id = $post_row[ 'ID' ];
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}posts WHERE ID = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_post_row( $return_value_maps, $post_row, $live_table_prefix );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
+		                ->will( $this->returnValueMap( [
+			                [ $sql_prepare, [ $post_id ], $sql ]
+		                ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_row' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $sql, ARRAY_A, $post_row ]
+		                ] ) );
 
 		// Run.
 		$post_row_actual = $this->logic->select_post_row( $live_table_prefix, $post_id );
@@ -144,16 +149,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$live_table_prefix = 'live_wp_';
 		$post_id = 123;
 		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}postmeta WHERE post_id = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_postmeta_rows( $return_value_maps, $postmeta_rows, $live_table_prefix, $post_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'prepare' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		          ->will( $this->returnValueMap( [
+			          [ $sql_prepare, [ $post_id ], $sql ]
+		          ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'get_results' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+		          ->will( $this->returnValueMap( [
+			          [ $sql, ARRAY_A, $postmeta_rows ]
+		          ] ) );
 
 		// Run.
 		$postmeta_rows_actual = $this->logic->select_postmeta_rows( $live_table_prefix, $post_id );
@@ -174,16 +183,21 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$live_table_prefix = 'live_wp_';
 		$post_author_id = 22;
 		$author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
+		$autor_id = $author_row[ 'ID' ];
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}users WHERE ID = %s";
+		$sql = sprintf( $sql_prepare, $autor_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_user_row( $return_value_maps, $author_row, $live_table_prefix );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
+		                ->will( $this->returnValueMap( [
+			                [ $sql_prepare, [ $autor_id ], $sql ]
+		                ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_row' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $sql, ARRAY_A, $author_row ]
+		                ] ) );
 
 		// Run.
 		$author_row_actual = $this->logic->select_user_row( $live_table_prefix, $post_author_id );
@@ -204,16 +218,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$live_table_prefix = 'live_wp_';
 		$post_author_id = 22;
 		$authormeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}usermeta WHERE user_id = %s";
+		$sql = sprintf( $sql_prepare, $post_author_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $authormeta_rows, $live_table_prefix, $post_author_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		                ->will( $this->returnValueMap( [
+			                [ $sql_prepare, [ $post_author_id ], $sql ]
+		                ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_results' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $sql, ARRAY_A, $authormeta_rows ]
+		                ] ) );
 
 		// Run.
 		$author_meta_rows_actual = $this->logic->select_usermeta_rows( $live_table_prefix, $post_author_id );
@@ -234,16 +252,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$post_id = 123;
 		$live_table_prefix = 'live_wp_';
 		$comments_rows = $data[ ContentDiffMigrator::DATAKEY_COMMENTS ];
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}comments WHERE comment_post_ID = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
 
 		// Mock
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_comments_rows( $return_value_maps, $comments_rows, $live_table_prefix, $post_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'prepare' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		          ->will( $this->returnValueMap( [
+			          [ $sql_prepare, [ $post_id ], $sql ]
+		          ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'get_results' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+		          ->will( $this->returnValueMap( [
+			          [ $sql, ARRAY_A, $comments_rows ]
+		          ] ) );
 
 		// Run.
 		$comment_rows_actual = $this->logic->select_comment_rows( $live_table_prefix, $post_id );
@@ -264,16 +286,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$live_table_prefix = 'live_wp_';
 		$comment_1_id = 11;
 		$commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}commentmeta WHERE comment_id = %s";
+		$sql = sprintf( $sql_prepare, $comment_1_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $commentmeta_rows, $live_table_prefix, $comment_1_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'prepare' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		          ->will( $this->returnValueMap( [
+			          [ $sql_prepare, [ $comment_1_id ], $sql ]
+		          ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'get_results' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+		          ->will( $this->returnValueMap( [
+			          [ $sql, ARRAY_A, $commentmeta_rows ]
+		          ] ) );
 
 		// Run.
 		$comment_rows_actual = $this->logic->select_commentmeta_rows( $live_table_prefix, $comment_1_id );
@@ -294,16 +320,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$live_table_prefix = 'live_wp_';
 		$post_id = 123;
 		$term_relationships_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}term_relationships WHERE object_id = %s";
+		$sql = sprintf( $sql_prepare, $post_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_term_relationships_rows( $return_value_maps, $term_relationships_rows, $live_table_prefix, $post_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		                ->will( $this->returnValueMap( [
+			                [ $sql_prepare, [ $post_id ], $sql ]
+		                ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_results' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $sql, ARRAY_A, $term_relationships_rows ]
+		                ] ) );
 
 		// Run.
 		$term_relationships_rows_actual = $this->logic->select_term_relationships_rows( $live_table_prefix, $post_id );
@@ -321,24 +351,28 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_select_term_taxonomy_rows( $data ) {
 		$live_table_prefix = 'live_wp_';
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', 1 );
+		$term_taxonomy_id = 1;
+		$term_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', 1 );
+		$sql_prepare               = "SELECT * FROM {$live_table_prefix}term_taxonomy WHERE term_taxonomy_id = %s";
+		$sql                       = sprintf( $sql_prepare, $term_taxonomy_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_1_row, $live_table_prefix );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
+		                ->will( $this->returnValueMap( [
+			                [ $sql_prepare, [ $term_taxonomy_id ], $sql ]
+		                ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_row' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $sql, ARRAY_A, $term_taxonomy_row ]
+		                ] ) );
 
 		// Run.
-		$term_taxonomy_row_actual = $this->logic->select_term_taxonomy_row( $live_table_prefix, $term_taxonomy_1_id );
+		$term_taxonomy_row_actual = $this->logic->select_term_taxonomy_row( $live_table_prefix, $term_taxonomy_id );
 
 		// Assert.
-		$this->assertEquals( $term_taxonomy_1_row, $term_taxonomy_row_actual );
+		$this->assertEquals( $term_taxonomy_row, $term_taxonomy_row_actual );
 	}
 
 	/**
@@ -351,24 +385,28 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_select_terms_rows( $data ) {
 		// Prepare.
 		$live_table_prefix = 'live_wp_';
-		$term_1_id = 41;
-		$term_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_1_id );
+		$term_id = 41;
+		$term_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_id );
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}terms WHERE term_id = %s";
+		$sql = sprintf( $sql_prepare, $term_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_term_row( $return_value_maps, $term_1_row, $live_table_prefix );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'prepare' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
+		          ->will( $this->returnValueMap( [
+			          [ $sql_prepare, [ $term_id ], $sql ]
+		          ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'get_row' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
+		          ->will( $this->returnValueMap( [
+			          [ $sql, ARRAY_A, $term_row ]
+		          ] ) );
 
 		// Run.
-		$term_row_actual = $this->logic->select_term_row( $live_table_prefix, $term_1_id );
+		$term_row_actual = $this->logic->select_term_row( $live_table_prefix, $term_id );
 
 		// Assert.
-		$this->assertEquals( $term_1_row, $term_row_actual );
+		$this->assertEquals( $term_row, $term_row_actual );
 	}
 
 	/**
@@ -381,19 +419,22 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_select_termmeta_rows( $data ) {
 		// Prepare.
 		$live_table_prefix = 'live_wp_';
-		// Test data for Term 1 has some meta.
 		$term_1_id = 41;
 		$termmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_1_id );
+		$sql_prepare = "SELECT * FROM {$live_table_prefix}termmeta WHERE term_id = %s";
+		$sql = sprintf( $sql_prepare, $term_1_id );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $termmeta_rows, $live_table_prefix, $term_1_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'prepare' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
+		          ->will( $this->returnValueMap( [
+			          [ $sql_prepare, [ $term_1_id ], $sql ]
+		          ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		          ->method( 'get_results' )
-		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
+		          ->will( $this->returnValueMap( [
+			          [ $sql, ARRAY_A, $termmeta_rows ]
+		          ] ) );
 
 		// Run.
 		$term_relationships_rows_actual = $this->logic->select_termmeta_rows( $live_table_prefix, $term_1_id );
@@ -527,14 +568,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		// Prepare.
 		$new_post_id = 234;
 		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+		$post_row_expected = $post_row;
+		unset( $post_row_expected[ 'ID' ] );
+
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_post_row( $return_value_maps, $post_row, $new_post_id );
 		$this->wpdb_mock->insert_id = $new_post_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'posts', $post_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$new_post_id_actual = $this->logic->insert_post( $post_row );
@@ -556,14 +600,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$meta_id = 22;
 		$postmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_POSTMETA ], 'meta_id', $meta_id );
 		$meta_id_new = 54;
+		$postmeta_row_expected = $postmeta_row;
+		unset( $postmeta_row_expected[ 'meta_id' ] );
+		$postmeta_row_expected[ 'post_id' ] = $new_post_id;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_postmeta_row( $return_value_maps, $postmeta_row, $new_post_id );
 		$this->wpdb_mock->insert_id = $meta_id_new;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'postmeta', $postmeta_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$new_meta_ids_actual = $this->logic->insert_postmeta_row( $postmeta_row, $new_post_id );
@@ -585,14 +632,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$meta_id = 22;
 		$postmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_POSTMETA ], 'meta_id', $meta_id );
 		$meta_id_new = 54;
+		$postmeta_row_expected = $postmeta_row;
+		unset( $postmeta_row_expected[ 'meta_id' ] );
+		$postmeta_row_expected[ 'post_id' ] = $new_post_id;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_postmeta_row( $return_value_maps, $postmeta_row, $new_post_id );
 		$this->wpdb_mock->insert_id = $meta_id_new;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'postmeta', $postmeta_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$new_meta_ids_actual = $this->logic->insert_postmeta_row( $postmeta_row, $new_post_id );
@@ -613,14 +663,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$new_user_id = 234;
 		$old_user_id = 22;
 		$user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $old_user_id );
+		$user_row_expected = $user_row;
+		unset( $user_row_expected[ 'ID' ] );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_user_row( $return_value_maps, $user_row );
 		$this->wpdb_mock->insert_id = $new_user_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'users', $user_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$new_post_id_actual = $this->logic->insert_user( $user_row );
@@ -642,14 +694,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$umeta_id     = 2;
 		$new_umeta_id = 56;
 		$usermeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'umeta_id', $umeta_id );
+		$usermeta_row_expected = $usermeta_row;
+		unset( $usermeta_row_expected[ 'umeta_id' ] );
+		$usermeta_row_expected[ 'user_id' ] = $new_user_id;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_usermeta_row( $return_value_maps, $usermeta_row, $new_user_id );
 		$this->wpdb_mock->insert_id = $new_umeta_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'usermeta', $usermeta_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$new_meta_ids_actual = $this->logic->insert_usermeta_row( $usermeta_row, $new_user_id );
@@ -676,8 +731,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$post->post_parent = $post_parent;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_update_post_parent( $return_value_maps, $post_id, $new_post_parent );
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
 		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
 		                           ->setMethods( [ 'get_post' ] )
@@ -686,9 +739,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                   ->method( 'get_post' )
 						   ->with( $post_id )
 		                   ->will( $this->returnValue( $post ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'update' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_parent' => $new_post_parent ], [ 'ID' => $post_id ] ]
+		                ] ) );
 
 		// Run.
 		$logic_partial_mock->update_post_parent( $post_id, $imported_post_ids );
@@ -705,11 +760,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$new_author_id = 321;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_update_post_author( $return_value_maps, $post_id, $new_author_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'update' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ], 1 ]
+		                ] ) );
 
 		// Run.
 		$updated_actual = $this->logic->update_post_author( $post_id, $new_author_id );
@@ -732,14 +787,18 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$comment_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $old_comment_id );
 		$new_post_id = 234;
 		$new_user_id = 345;
+		$comment_row_expected = $comment_row;
+		unset( $comment_row_expected[ 'comment_ID' ] );
+		$comment_row_expected[ 'comment_post_ID' ] = $new_post_id;
+		$comment_row_expected[ 'user_id' ] = $new_user_id;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_comment_row( $return_value_maps, $comment_row, $new_post_id, $new_user_id );
 		$this->wpdb_mock->insert_id = $new_comment_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'comments', $comment_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$new_comment_id_actual = $this->logic->insert_comment( $comment_row, $new_post_id, $new_user_id );
@@ -758,18 +817,20 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_insert_commentmeta_row( $data ) {
 		// Prepare.
 		$meta_id        = 2;
-		$comment_id = 11;
 		$new_comment_id = 456;
 		$new_commentmeta_id = 456;
 		$commentmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'meta_id', $meta_id );
+		$commentmeta_row_expected = $commentmeta_row;
+		unset( $commentmeta_row_expected[ 'meta_id' ] );
+		$commentmeta_row_expected[ 'comment_id' ] = $new_comment_id ;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_commentmeta_row( $return_value_maps, $commentmeta_row, $new_comment_id );
 		$this->wpdb_mock->insert_id = $new_commentmeta_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'commentmeta', $commentmeta_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$commentmeta_ids_actual = $this->logic->insert_commentmeta_row( $commentmeta_row, $new_comment_id );
@@ -790,14 +851,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_id = 41;
 		$term_id_new = 123;
 		$term_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_id );
+		$term_row_expected = $term_row;
+		unset( $term_row_expected[ 'term_id' ] );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_term_row( $return_value_maps, $term_row );
 		$this->wpdb_mock->insert_id = $term_id_new;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'terms', $term_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$term_id_new_actual = $this->logic->insert_term( $term_row );
@@ -819,14 +882,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_id_new = 123;
 		$termmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_id );
 		$insert_id_expected = 543;
+		$termmeta_row_expected = $termmeta_row;
+		unset( $termmeta_row_expected[ 'meta_id' ] );
+		$termmeta_row_expected[ 'term_id' ] = $term_id_new;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_termmeta_row( $return_value_maps, $termmeta_row, $term_id_new );
 		$this->wpdb_mock->insert_id = $insert_id_expected;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap([
+			                [ $this->wpdb_mock->table_prefix . 'termmeta', $termmeta_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$termmeta_id_actual = $this->logic->insert_termmeta_row( $termmeta_row, $term_id_new );
@@ -848,17 +914,27 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_slug = 'slug';
 		$taxonomy = 'taxonomy';
 		$term_taxonomy_id_expected = 123;
+		$sql_sprintf = "SELECT tt.term_taxonomy_id
+			FROM {$this->wpdb_mock->term_taxonomy} tt
+			JOIN {$this->wpdb_mock->terms} t
+		        ON tt.term_id = t.term_id
+			WHERE t.name = %s
+			AND t.slug = %s
+		    AND tt.taxonomy = %s;";
+		$sql = sprintf( $sql_sprintf, $term_name, $term_slug, $taxonomy );
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_get_existing_term_taxonomy( $return_value_maps, $term_name, $term_slug, $taxonomy, $term_taxonomy_id_expected );
 		$this->wpdb_mock->insert_id = $term_taxonomy_id_expected;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_var' ] ) ) )
+		                ->will( $this->returnValueMap( [
+			                [ $sql_sprintf, $term_name, $term_slug, $taxonomy, $sql ]
+		                ] ) );
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_var' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_var' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $sql, $term_taxonomy_id_expected ]
+		                ] ) );
 
 		// Run.
 		$term_taxonomy_id_actual = $this->logic->get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy );
@@ -878,11 +954,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$comment_parent_new = 432;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_update_comment_parent( $return_value_maps, $comment_id, $comment_parent_new );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::update' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'update' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::update' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'comments', [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ], 1 ]
+		                ] ) );
 
 		// Run.
 		$updated_actual = $this->logic->update_comment_parent( $comment_id, $comment_parent_new );
@@ -904,14 +980,17 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id );
 		$term_id_new = 234;
 		$term_taxonomy_id_expected = 123;
+		$term_taxonomy_row_expected = $term_taxonomy_row;
+		unset( $term_taxonomy_row_expected[ 'term_taxonomy_id' ] );
+		$term_taxonomy_row_expected[ 'term_id' ] = $term_id_new;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_term_taxonmy_row( $return_value_maps, $term_taxonomy_row, $term_id_new );
 		$this->wpdb_mock->insert_id = $term_taxonomy_id_expected;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'term_taxonomy', $term_taxonomy_row_expected, 1 ]
+		                ] ) );
 
 		// Run.
 		$term_taxonomy_id_new_actual = $this->logic->insert_term_taxonomy( $term_taxonomy_row, $term_id_new );
@@ -934,12 +1013,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$last_insert_id = 345;
 
 		// Mock.
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_insert_term_relationship_row( $return_value_maps, $post_id, $term_taxonomy_id );
 		$this->wpdb_mock->insert_id = $last_insert_id;
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::insert' ] ) ) )
+		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::insert' ] ) );
+		                ->will( $this->returnValueMap( [
+			                [ $this->wpdb_mock->table_prefix . 'term_relationships', [ 'object_id' => $post_id, 'term_taxonomy_id' => $term_taxonomy_id, ], 1 ]
+		                ] ) );
 
 		// Run.
 		$inserted = $this->logic->insert_term_relationship( $post_id, $term_taxonomy_id );
@@ -1127,399 +1206,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'wpdb::insert' => [],
 			'wpdb::update' => [],
 			'wpdb::get_var' => [],
-		];
-	}
-
-	/**
-	 * Builds a simple return value as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $map       Array containing the return value map.
-	 * @param array $arguments Method arguments.
-	 * @param mixed $return    Return value.
-	 */
-	private function build_value_map( &$map, $arguments, $return ) {
-		$map[] = array_merge( $arguments, [ $return ] );
-	}
-
-	/**
-	 * Builds return value maps for posts table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $post_row     Post row.
-	 * @param string $table_prefix Table prefix.
-	 */
-	private function build_value_maps_select_post_row( &$maps, $post_row, $table_prefix ) {
-		$post_id = $post_row[ 'ID' ];
-		$sql_prepare = "SELECT * FROM {$table_prefix}posts WHERE ID = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $post_row ];
-	}
-
-	/**
-	 * Builds return value maps for postmeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $postmeta_rows Post Meta rows.
-	 * @param string $table_prefix  Table prefix.
-	 * @param int    $post_id       Post ID.
-	 */
-	private function build_value_maps_select_postmeta_rows( &$maps, $postmeta_rows, $table_prefix, $post_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}postmeta WHERE post_id = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $postmeta_rows ];
-	}
-
-	/**
-	 * Builds return value maps for comments table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $comments_rows Comments rows.
-	 * @param string $table_prefix  Table prefix.
-	 * @param int    $post_id       Post ID.
-	 */
-	private function build_value_maps_select_comments_rows( &$maps, $comments_rows, $table_prefix, $post_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}comments WHERE comment_post_ID = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $comments_rows ];
-	}
-
-	/**
-	 * Builds return value maps for comments table select query as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $comment_row  Comment row.
-	 * @param string $table_prefix Table prefix.
-	 * @param int    $comment_ID   Comment ID.
-	 */
-	private function build_value_maps_select_comment_row( &$maps, $comment_row, $table_prefix, $comment_ID ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}comments WHERE comment_ID = %s";
-		$sql = sprintf( $sql_prepare, $comment_ID );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $comment_ID ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $comment_row ];
-	}
-
-	/**
-	 * Builds return value maps for commentmeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps             Array containing return value maps.
-	 * @param array  $commentmeta_rows Comment Meta rows.
-	 * @param string $table_prefix     Table prefix.
-	 * @param int    $comment_id       Commend ID.
-	 */
-	private function build_value_maps_select_commentmeta_rows( &$maps, $commentmeta_rows, $table_prefix, $comment_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}commentmeta WHERE comment_id = %s";
-		$sql = sprintf( $sql_prepare, $comment_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $comment_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $commentmeta_rows ];
-	}
-
-	/**
-	 * Builds return value maps for user table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $user_row     User row.
-	 * @param string $table_prefix Table prefix.
-	 */
-	private function build_value_maps_select_user_row( &$maps, $user_row, $table_prefix ) {
-		$user_id = $user_row[ 'ID' ];
-		$sql_prepare = "SELECT * FROM {$table_prefix}users WHERE ID = %s";
-		$sql = sprintf( $sql_prepare, $user_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $user_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $user_row ];
-	}
-
-	/**
-	 * Builds return value maps for usermeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $usermeta_rows
-	 * @param string $table_prefix Table prefix.
-	 * @param int    $user_id
-	 */
-	private function build_value_maps_select_usermeta_rows( &$maps, $usermeta_rows, $table_prefix, $user_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}usermeta WHERE user_id = %s";
-		$sql = sprintf( $sql_prepare, $user_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $user_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $usermeta_rows ];
-	}
-
-	/**
-	 * Builds return value maps for term_relationships table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps                    Array containing return value maps.
-	 * @param array  $term_relationships_rows Term Relationships rows.
-	 * @param string $table_prefix            Table prefix.
-	 * @param int    $post_id                 Post ID.
-	 */
-	private function build_value_maps_select_term_relationships_rows( &$maps, $term_relationships_rows, $table_prefix, $post_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}term_relationships WHERE object_id = %s";
-		$sql = sprintf( $sql_prepare, $post_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $post_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $term_relationships_rows ];
-	}
-
-	/**
-	 * Builds return value maps for term_taxonomy table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps               Array containing return value maps.
-	 * @param array  $term_taxonomy_rows Term Taxonomy rows.
-	 * @param string $table_prefix       Table prefix.
-	 */
-	private function build_value_maps_select_term_taxonomy_row( &$maps, $term_taxonomy_row, $table_prefix ) {
-		$term_taxonomy_id          = $term_taxonomy_row[ 'term_taxonomy_id' ];
-		$sql_prepare               = "SELECT * FROM {$table_prefix}term_taxonomy WHERE term_taxonomy_id = %s";
-		$sql                       = sprintf( $sql_prepare, $term_taxonomy_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_taxonomy_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $term_taxonomy_row ];
-	}
-
-	/**
-	 * Builds return value maps for terms table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $terms_rows   Terms rows.
-	 * @param string $table_prefix Table prefix.
-	 */
-	private function build_value_maps_select_term_row( &$maps, $term_row, $table_prefix ) {
-		$term_id = $term_row[ 'term_id' ];
-		$sql_prepare = "SELECT * FROM {$table_prefix}terms WHERE term_id = %s";
-		$sql = sprintf( $sql_prepare, $term_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
-		$maps[ 'wpdb::get_row' ][] = [ $sql, ARRAY_A, $term_row ];
-	}
-
-	/**
-	 * Builds return value maps for termmeta table select queries as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $termmeta_rows Term Meta rows.
-	 * @param string $table_prefix  Table prefix.
-	 * @param int    $term_id       Term ID.
-	 */
-	private function build_value_maps_select_termmeta_rows( &$maps, $termmeta_rows, $table_prefix, $term_id ) {
-		$sql_prepare = "SELECT * FROM {$table_prefix}termmeta WHERE term_id = %s";
-		$sql = sprintf( $sql_prepare, $term_id );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_prepare, [ $term_id ], $sql ];
-		$maps[ 'wpdb::get_results' ][] = [ $sql, ARRAY_A, $termmeta_rows ];
-	}
-
-	/**
-	 * Builds return value maps for insert into posts table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps        Array containing return value maps.
-	 * @param array  $post_row    Post row.
-	 * @param int    $new_post_id Newly inserted Post ID.
-	 */
-	private function build_value_maps_insert_post_row( &$maps, $post_row, $new_post_id ) {
-		unset( $post_row[ 'ID' ] );
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'posts', $post_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for insert into posts table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps          Array containing return value maps.
-	 * @param array  $postmeta_rows Post meta rows.
-	 * @param int    $new_post_id   Post ID to which this meta will be assigned to.
-	 */
-	private function build_value_maps_insert_postmeta_rows( &$maps, $postmeta_rows, $new_post_id ) {
-		foreach ( $postmeta_rows as $key_postmeta_row => $postmeta_row ) {
-			unset( $postmeta_row[ 'meta_id' ] );
-			$postmeta_row[ 'post_id' ] = $new_post_id;
-			$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'postmeta', $postmeta_row, 1 ];
-		}
-	}
-
-	/**
-	 * Builds return value maps for a single insert into posts table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps         Array containing return value maps.
-	 * @param array  $postmeta_row Post meta rows.
-	 * @param int    $new_post_id  Post ID to which this meta will be assigned to.
-	 */
-	private function build_value_maps_insert_postmeta_row( &$maps, $postmeta_row, $new_post_id ) {
-		unset( $postmeta_row[ 'meta_id' ] );
-		$postmeta_row[ 'post_id' ] = $new_post_id;
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'postmeta', $postmeta_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for insert into users table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps     Array containing return value maps.
-	 * @param array $user_row User row.
-	 */
-	private function build_value_maps_insert_user_row( &$maps, $user_row ) {
-		unset( $user_row[ 'ID' ] );
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'users', $user_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for a single insert into usermeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps         Array containing return value maps.
-	 * @param array $usermeta_row Post meta rows.
-	 * @param int   $new_user_id  User ID to which this meta will be assigned to.
-	 */
-	private function build_value_maps_insert_usermeta_row( &$maps, $usermeta_row, $new_user_id ) {
-		unset( $usermeta_row[ 'umeta_id' ] );
-		$usermeta_row[ 'user_id' ] = $new_user_id;
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'usermeta', $usermeta_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for a single insert into termmeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps         Array containing return value maps.
-	 * @param array $termmeta_row Term meta rows.
-	 * @param int   $new_term_id  Term ID to which this meta will be assigned to.
-	 */
-	private function build_value_maps_insert_termmeta_row( &$maps, $termmeta_row, $new_term_id ) {
-		unset( $termmeta_row[ 'meta_id' ] );
-		$termmeta_row[ 'term_id' ] = $new_term_id;
-		$maps[ 'wpdb::insert' ][]  = [ $this->wpdb_mock->table_prefix . 'termmeta', $termmeta_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for ContentDiffMigrator::update_post_author usage of $wpdb as defined by
-	 * \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps          Array containing return value maps.
-	 * @param int   $post_id       Post ID.
-	 * @param int   $new_author_id New Author ID.
-	 */
-	private function build_value_maps_update_post_author( &$maps, $post_id, $new_author_id ) {
-		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ], 1 ];
-	}
-
-	/**
-	 * Builds return value maps for ContentDiffMigrator::update_post_parent usage of $wpdb as defined by
-	 * \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps            Array containing return value maps.
-	 * @param int   $new_post_parent New Post Parent ID.
-	 * @param int   $new_author_id   New Author ID.
-	 */
-	private function build_value_maps_update_post_parent( &$maps, $post_id, $new_post_parent ) {
-		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'posts', [ 'post_parent' => $new_post_parent ], [ 'ID' => $post_id ] ];
-	}
-
-	/**
-	 * Builds return value maps for insert into comments table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps        Array containing return value maps.
-	 * @param array $user_row    User row.
-	 * @param int   $new_user_id Newly inserted user ID.
-	 */
-	private function build_value_maps_insert_comment_row( &$maps, $comment_row, $new_post_id, $new_user_id ) {
-		unset( $comment_row[ 'comment_ID' ] );
-		$comment_row[ 'comment_post_ID' ] = $new_post_id;
-		$comment_row[ 'user_id' ] = $new_user_id;
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'comments', $comment_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for inserts into commentmeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps             Array containing return value maps.
-	 * @param array $commentmeta_rows Comment Meta rows.
-	 * @param int   $new_comment_id   Newly Comment ID.
-	 */
-	private function build_value_maps_insert_commentmeta_rows( &$maps, $commentmeta_rows, $new_comment_id ) {
-		foreach ( $commentmeta_rows as $commentmeta_row ) {
-			unset( $commentmeta_row[ 'meta_id' ] );
-			$commentmeta_row[ 'comment_id' ] = $new_comment_id ;
-			$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'commentmeta', $commentmeta_row, 1 ];
-		}
-	}
-
-	/**
-	 * Builds return value maps for one insert into commentmeta table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps             Array containing return value maps.
-	 * @param array $commentmeta_rows Comment Meta rows.
-	 * @param int   $new_comment_id   Newly Comment ID.
-	 */
-	private function build_value_maps_insert_commentmeta_row( &$maps, $commentmeta_row, $new_comment_id ) {
-		unset( $commentmeta_row[ 'meta_id' ] );
-		$commentmeta_row[ 'comment_id' ] = $new_comment_id ;
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'commentmeta', $commentmeta_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for inserts into terms table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps     Array containing return value maps.
-	 * @param array $term_row Term rows.
-	 */
-	private function build_value_maps_insert_term_row( &$maps, $term_row ) {
-		unset( $term_row[ 'term_id' ] );
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'terms', $term_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for ContentDiffMigrator::update_comment_parent usage of $wpdb as defined by
-	 * \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps               Array containing return value maps.
-	 * @param int   $comment_id         Comment ID.
-	 * @param int   $comment_parent_new New parent ID.
-	 */
-	private function build_value_maps_update_comment_parent( &$maps, $comment_id, $comment_parent_new ) {
-		$maps[ 'wpdb::update' ][] = [ $this->wpdb_mock->table_prefix . 'comments', [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ], 1 ];
-	}
-
-	/**
-	 * Builds return value maps for ContentDiffMigrator::get_existing_term_taxonomy usage of $wpdb as defined by
-	 * \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array  $maps             Array containing return value maps.
-	 * @param string $term_name        Term name.
-	 * @param string $term_slug        Taxonomy slug.
-	 * @param string $taxonomy         Taxonomy name.
-	 * @param int    $term_taxonomy_id Expected return term_taxonomy_id value.
-	 */
-	private function build_value_maps_get_existing_term_taxonomy( &$maps, $term_name, $term_slug, $taxonomy, $term_taxonomy_id ) {
-		$sql_sprintf = "SELECT tt.term_taxonomy_id
-			FROM {$this->wpdb_mock->term_taxonomy} tt
-			JOIN {$this->wpdb_mock->terms} t
-		        ON tt.term_id = t.term_id
-			WHERE t.name = %s
-			AND t.slug = %s
-		    AND tt.taxonomy = %s;";
-		$sql = sprintf( $sql_sprintf, $term_name, $term_slug, $taxonomy );
-		$maps[ 'wpdb::prepare' ][] = [ $sql_sprintf, $term_name, $term_slug, $taxonomy, $sql ];
-		$maps[ 'wpdb::get_var' ][] = [ $sql, $term_taxonomy_id ];
-	}
-
-	/**
-	 * Builds return value maps for inserts into termtaxonomy table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps              Array containing return value maps.
-	 * @param array $term_taxonomy_row Term Taxonomy row.
-	 * @param int   $term_id_new       New Term ID.
-	 */
-	private function build_value_maps_insert_term_taxonmy_row( &$maps, $term_taxonomy_row, $term_id_new ) {
-		unset( $term_taxonomy_row[ 'term_taxonomy_id' ] );
-		$term_taxonomy_row[ 'term_id' ] = $term_id_new;
-		$maps[ 'wpdb::insert' ][] = [ $this->wpdb_mock->table_prefix . 'term_taxonomy', $term_taxonomy_row, 1 ];
-	}
-
-	/**
-	 * Builds return value maps for inserts into term_relationships table as defined by \PHPUnit\Framework\TestCase::returnValueMap.
-	 *
-	 * @param array $maps             Array containing return value maps.
-	 * @param array $object_id        Object ID.
-	 * @param int   $term_taxonomy_id Term Taxonomy ID.
-	 */
-	private function build_value_maps_insert_term_relationship_row( &$maps, $object_id, $term_taxonomy_id ) {
-		$maps[ 'wpdb::insert' ][] = [
-			$this->wpdb_mock->table_prefix . 'term_relationships',
-			[ 'object_id' => $object_id, 'term_taxonomy_id' => $term_taxonomy_id, ],
-			1
 		];
 	}
 
