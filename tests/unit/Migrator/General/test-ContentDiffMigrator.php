@@ -344,7 +344,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	/**
 	 * Tests that a Term is queried correctly and that correct calls are made to the $wpdb.
 	 *
-	 * @covers ContentDiffMigrator::select_terms_row.
+	 * @covers ContentDiffMigrator::select_term_row.
 	 *
 	 * @dataProvider db_data_provider
 	 */
@@ -365,7 +365,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		          ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
 
 		// Run.
-		$term_row_actual = $this->logic->select_terms_row( $live_table_prefix, $term_1_id );
+		$term_row_actual = $this->logic->select_term_row( $live_table_prefix, $term_1_id );
 
 		// Assert.
 		$this->assertEquals( $term_1_row, $term_row_actual );
@@ -410,104 +410,37 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 * @dataProvider db_data_provider
 	 */
 	public function test_should_correctly_load_data_array( $data ) {
-		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
-		$live_table_prefix = 'live_wp_';
-		$post_id = 123;
-		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
-		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
-		$post_author_id = 22;
-		$author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
-		$authormeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
-		$comments_rows = $data[ ContentDiffMigrator::DATAKEY_COMMENTS ];
-		$comment_1_id = 11;
-		$comment_2_id = 12;
-		$comment_3_id = 13;
-		// Test data for Comment 1 has some metas.
-		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
-		$comment_2_commentmeta_rows = [];
-		$comment_3_commentmeta_rows = [];
-		$comment_3_user_id = 23;
-		// Test data for Comment 3 contains a new User.
-		$comment_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
-		$comment_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
-		$term_relationships_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-		$term_taxonomy_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $term_taxonomy_1_id );
-		$term_taxonomy_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $term_taxonomy_2_id );
-		$term_1_id = 41;
-		$term_2_id = 42;
-		$term_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_1_id );
-		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
-		// Test data for Term 1 has some metas.
-		$term_1_termmeta_rows = $data[ ContentDiffMigrator::DATAKEY_TERMMETA ];
-		$term_2_termmeta_rows = [];
-
-		// Mock full execution of ContentDiffMigrator::get_data().
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_post_row( $return_value_maps, $post_row, $live_table_prefix );
-		$this->build_value_maps_select_postmeta_rows( $return_value_maps, $postmeta_rows, $live_table_prefix, $post_id );
-		$this->build_value_maps_select_user_row( $return_value_maps, $author_row, $live_table_prefix );
-		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $authormeta_rows, $live_table_prefix, $post_author_id );
-		$this->build_value_maps_select_comments_rows( $return_value_maps, $comments_rows, $live_table_prefix, $post_id );
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_1_commentmeta_rows, $live_table_prefix, $comment_1_id );
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_2_commentmeta_rows, $live_table_prefix, $comment_2_id );
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_3_commentmeta_rows, $live_table_prefix, $comment_3_id );
-		$this->build_value_maps_select_user_row( $return_value_maps, $comment_user_row, $live_table_prefix );
-		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $comment_usermeta_rows, $live_table_prefix, $comment_3_user_id );
-		$this->build_value_maps_select_term_relationships_rows( $return_value_maps, $term_relationships_rows, $live_table_prefix, $post_id );
-		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_1_row, $live_table_prefix );
-		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_2_row, $live_table_prefix );
-		$this->build_value_maps_select_term_row( $return_value_maps, $term_1_row, $live_table_prefix );
-		$this->build_value_maps_select_term_row( $return_value_maps, $term_2_row, $live_table_prefix );
-		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $term_1_termmeta_rows, $live_table_prefix, $term_1_id );
-		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $term_2_termmeta_rows, $live_table_prefix, $term_2_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
-		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
-		                ->method( 'get_row' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
-		                ->method( 'get_results' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
-
-		// Run.
-		$data_actual = $this->logic->get_data( $post_id, $live_table_prefix );
-
-		// Assert.
-		$this->assertEquals( $data, $data_actual );
-	}
-
-	/**
-	 * Checks that ContentDiffMigrator::get_data queries the DB as expected, and returns a correctly formatted data array.
-	 *
-	 * @covers ContentDiffMigrator::get_data.
-	 *
-	 * @dataProvider db_data_provider
-	 */
-	public function test_should_correctly_load_data_array_simplified( $data ) {
 		// Prepare test data.
 		$live_table_prefix = 'live_wp_';
 		$post_id = 123;
 		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
 		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
-		$post_author_id = $post_row[0][ 'post_author' ];
+		$post_author_id = $post_row[ 'post_author' ];
 		$post_author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
 		$post_author_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
 		$comments_rows = $data[ ContentDiffMigrator::DATAKEY_COMMENTS ];
 		$comment_1_id = 11;
-		$comment_1_row = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $post_author_id );
-		$comment_2_id = 12;
-		$comment_3_id = 13;
-		// Comment 1 is the only comment with some metas.
 		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
-		$comment_2_commentmeta_rows = [];
-		$comment_3_commentmeta_rows = [];
-		$comment_3_user_id = 23;
-		// Test data for Comment 3 contains a new User.
-		$comment_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
-		$comment_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
+		$comment_2_id = 12;
+		$comment_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_2_id );
+		$comment_2_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_2_id );
+		$comment_2_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_2_row[ 'user_id' ] );
+		$comment_2_user_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_2_user_row[ 'ID' ] );
+		$comment_3_id = 13;
+		$comment_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_3_id );
+		$comment_3_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_3_id );
+		$comment_3_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_row[ 'user_id' ] );
+		$comment_3_user_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_row[ 'ID' ] );
+		$term_relationships_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
+		$term_taxonomy_rows = $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ];
+		$term_1_id = 41;
+		$term_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_1_id );
+		$term_2_id = 42;
+		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
+		$term_2_termmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_2_id );
+		$term_3_id = 70;
+		$term_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_3_id );
+		$term_3_termmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_3_id );
 
 		// Mock.
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
@@ -532,98 +465,55 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			[ $live_table_prefix, $post_id, $postmeta_rows ],
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_user_row', [
+			// Post Author.
 			[ $live_table_prefix, $post_author_id, $post_author_row ],
+			// Comment 2 User.
+			[ $live_table_prefix, $comment_2_row[ 'user_id' ], $comment_2_user_row ],
+			// Comment 3 User.
+			[ $live_table_prefix, $comment_3_row[ 'user_id' ], $comment_3_user_row ],
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_usermeta_rows', [
+			// Post Author.
 			[ $live_table_prefix, $post_author_id, $post_author_meta_rows ],
+			// Comment 2 User.
+			[ $live_table_prefix, $comment_2_user_row[ 'ID' ], $comment_2_user_meta_rows ],
+			// Comment 3 User.
+			[ $live_table_prefix, $comment_3_user_row[ 'ID' ], $comment_3_user_meta_rows ],
 		] );
-		// $comment_rows = $this->( $table_prefix, $post_id );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_comment_rows', [
-			[ $live_table_prefix, $post_author_id, [ $comments_rows[0] ] ],
-			// [ $live_table_prefix, $post_author_id, $comment_1_row ],
+			[ $live_table_prefix, $post_id, $comments_rows ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_commentmeta_rows', [
+			[ $live_table_prefix, $comment_1_id, $comment_1_commentmeta_rows ],
+			[ $live_table_prefix, $comment_2_id, $comment_2_commentmeta_rows ],
+			[ $live_table_prefix, $comment_3_id, $comment_3_commentmeta_rows ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_term_relationships_rows', [
+			[ $live_table_prefix, $post_id, $term_relationships_rows ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_term_taxonomy_row', [
+			[ $live_table_prefix, $term_relationships_rows[0][ 'term_taxonomy_id' ], $term_taxonomy_rows[0] ],
+			[ $live_table_prefix, $term_relationships_rows[1][ 'term_taxonomy_id' ], $term_taxonomy_rows[1] ],
+			[ $live_table_prefix, $term_relationships_rows[2][ 'term_taxonomy_id' ], $term_taxonomy_rows[2] ],
+			[ $live_table_prefix, $term_relationships_rows[3][ 'term_taxonomy_id' ], $term_taxonomy_rows[3] ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_term_row', [
+			[ $live_table_prefix, $term_1_id, $term_1_row ],
+			[ $live_table_prefix, $term_2_id, $term_2_row ],
+			[ $live_table_prefix, $term_3_id, $term_3_row ],
+		] );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'select_termmeta_rows', [
+			[ $live_table_prefix, $term_1_id, [] ],
+			// Terms 2 and 3 will have some meta.
+			[ $live_table_prefix, $term_2_id, $term_2_termmeta_rows ],
+			[ $live_table_prefix, $term_3_id, $term_3_termmeta_rows ],
 		] );
 
 		// Run.
 		$data_actual = $logic_partial_mock->get_data( $post_id, $live_table_prefix );
 
-// $data[ ContentDiffMigrator::DATAKEY_POST ] = [];
-// $data[ ContentDiffMigrator::DATAKEY_POSTMETA ] = [];
-// $data[ ContentDiffMigrator::DATAKEY_COMMENTS ] = [];
-$data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ] = [];
-$data[ ContentDiffMigrator::DATAKEY_USERS ] = [];
-	$data[ ContentDiffMigrator::DATAKEY_USERS ][] = $post_author_row;
-$data[ ContentDiffMigrator::DATAKEY_USERMETA ] = [];
-	$data[ ContentDiffMigrator::DATAKEY_USERMETA ] = $post_author_meta_rows;
-$data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ] = [];
-$data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ] = [];
-$data[ ContentDiffMigrator::DATAKEY_TERMS ] = [];
-$data[ ContentDiffMigrator::DATAKEY_TERMMETA ] = [];
-
 		// Assert.
 		$this->assertEquals( $data, $data_actual );
-return;
-
-		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
-		$live_table_prefix = 'live_wp_';
-		$post_id = 123;
-		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
-		$postmeta_rows = $data[ ContentDiffMigrator::DATAKEY_POSTMETA ];
-		$post_author_id = 22;
-		$author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
-		$authormeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $post_author_id );
-		$comments_rows = $data[ ContentDiffMigrator::DATAKEY_COMMENTS ];
-		$comment_1_id = 11;
-		$comment_2_id = 12;
-		$comment_3_id = 13;
-		// Test data for Comment 1 has some metas.
-		$comment_1_commentmeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'comment_id', $comment_1_id );
-		$comment_2_commentmeta_rows = [];
-		$comment_3_commentmeta_rows = [];
-		$comment_3_user_id = 23;
-		// Test data for Comment 3 contains a new User.
-		$comment_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment_3_user_id );
-		$comment_usermeta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'user_id', $comment_3_user_id );
-		$term_relationships_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ], 'object_id', $post_id );
-		$term_taxonomy_1_id = 1;
-		$term_taxonomy_2_id = 2;
-		$term_taxonomy_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $term_taxonomy_1_id );
-		$term_taxonomy_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $term_taxonomy_2_id );
-		$term_1_id = 41;
-		$term_2_id = 42;
-		$term_1_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_1_id );
-		$term_2_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_2_id );
-		// Test data for Term 1 has some metas.
-		$term_1_termmeta_rows = $data[ ContentDiffMigrator::DATAKEY_TERMMETA ];
-		$term_2_termmeta_rows = [];
-
-		// Mock full execution of ContentDiffMigrator::get_data().
-		$return_value_maps = $this->get_empty_wpdb_return_value_maps();
-		$this->build_value_maps_select_post_row( $return_value_maps, $post_row, $live_table_prefix );
-		$this->build_value_maps_select_postmeta_rows( $return_value_maps, $postmeta_rows, $live_table_prefix, $post_id );
-		$this->build_value_maps_select_user_row( $return_value_maps, $author_row, $live_table_prefix );
-		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $authormeta_rows, $live_table_prefix, $post_author_id );
-		$this->build_value_maps_select_comments_rows( $return_value_maps, $comments_rows, $live_table_prefix, $post_id );
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_1_commentmeta_rows, $live_table_prefix, $comment_1_id );
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_2_commentmeta_rows, $live_table_prefix, $comment_2_id );
-		$this->build_value_maps_select_commentmeta_rows( $return_value_maps, $comment_3_commentmeta_rows, $live_table_prefix, $comment_3_id );
-		$this->build_value_maps_select_user_row( $return_value_maps, $comment_user_row, $live_table_prefix );
-		$this->build_value_maps_select_usermeta_rows( $return_value_maps, $comment_usermeta_rows, $live_table_prefix, $comment_3_user_id );
-		$this->build_value_maps_select_term_relationships_rows( $return_value_maps, $term_relationships_rows, $live_table_prefix, $post_id );
-		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_1_row, $live_table_prefix );
-		$this->build_value_maps_select_term_taxonomy_row( $return_value_maps, $term_taxonomy_2_row, $live_table_prefix );
-		$this->build_value_maps_select_term_row( $return_value_maps, $term_1_row, $live_table_prefix );
-		$this->build_value_maps_select_term_row( $return_value_maps, $term_2_row, $live_table_prefix );
-		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $term_1_termmeta_rows, $live_table_prefix, $term_1_id );
-		$this->build_value_maps_select_termmeta_rows( $return_value_maps, $term_2_termmeta_rows, $live_table_prefix, $term_2_id );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::prepare' ] ) ) )
-		                ->method( 'prepare' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::prepare' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_row' ] ) ) )
-		                ->method( 'get_row' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_row' ] ) );
-		$this->wpdb_mock->expects( $this->exactly( count( $return_value_maps[ 'wpdb::get_results' ] ) ) )
-		                ->method( 'get_results' )
-		                ->will( $this->returnValueMap( $return_value_maps[ 'wpdb::get_results' ] ) );
 	}
 
 	/**
@@ -1644,31 +1534,29 @@ return;
 				[
 					// Post.
 					ContentDiffMigrator::DATAKEY_POST => [
-						[
-							'ID' => 123,
-							'post_author' => 21,
-							'post_date' => '2021-09-23 11:43:56.000',
-							'post_date_gmt' => '2021-09-23 11:43:56.000',
-							'post_content' => '<p>WP</p>',
-							'post_title' => 'Hello world!',
-							'post_excerpt' => '',
-							'post_status' => 'publish',
-							'comment_status' => 'open',
-							'ping_status' => 'open',
-							'post_password' => '',
-							'post_name' => 'hello-world',
-							'to_ping' => '',
-							'pinged' => '',
-							'post_modified' => '2021-09-23 11:43:56.000',
-							'post_modified_gmt' => '2021-09-23 11:43:56.000',
-							'post_content_filtered' => '',
-							'post_parent' => 0,
-							'guid' => 'http://testing.test/?p=1',
-							'menu_order' => 0,
-							'post_type' => 'post',
-							'post_mime_type' => '',
-							'comment_count' => 3,
-						]
+						'ID' => 123,
+						'post_author' => 21,
+						'post_date' => '2021-09-23 11:43:56.000',
+						'post_date_gmt' => '2021-09-23 11:43:56.000',
+						'post_content' => '<p>WP</p>',
+						'post_title' => 'Hello world!',
+						'post_excerpt' => '',
+						'post_status' => 'publish',
+						'comment_status' => 'open',
+						'ping_status' => 'open',
+						'post_password' => '',
+						'post_name' => 'hello-world',
+						'to_ping' => '',
+						'pinged' => '',
+						'post_modified' => '2021-09-23 11:43:56.000',
+						'post_modified_gmt' => '2021-09-23 11:43:56.000',
+						'post_content_filtered' => '',
+						'post_parent' => 0,
+						'guid' => 'http://testing.test/?p=1',
+						'menu_order' => 0,
+						'post_type' => 'post',
+						'post_mime_type' => '',
+						'comment_count' => 3,
 					],
 					// Postmeta.
 					ContentDiffMigrator::DATAKEY_POSTMETA => [
@@ -1867,12 +1755,9 @@ return;
 							'term_order' => 0
 						],
 						[
+							'object_id' => 123,
 							'term_taxonomy_id' => 4,
-							'term_id' => 70,
-							'taxonomy' => 'croatian-coastal-area',
-							'description' => 'Croatian Coastal Area',
-							'parent' => 0,
-							'count' => 0
+							'term_order' => 0
 						],
 					],
 					ContentDiffMigrator::DATAKEY_TERMTAXONOMY => [
@@ -1946,7 +1831,7 @@ return;
 							'meta_key' => '_some_other_numbermeta',
 							'meta_value' => '71'
 						],
-						// Term 2 Meta.
+						// Term 3 Meta.
 						[
 							'meta_id' => 1,
 							'term_id' => 70,

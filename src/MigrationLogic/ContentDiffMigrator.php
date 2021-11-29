@@ -10,7 +10,7 @@ class ContentDiffMigrator {
 	// Data array keys.
 	const DATAKEY_POST = 'post';
 	const DATAKEY_POSTMETA = 'postmeta';
-	const DATAKEY_COMMENTS = 'comment';
+	const DATAKEY_COMMENTS = 'comments';
 	const DATAKEY_COMMENTMETA = 'commentmeta';
 	const DATAKEY_USERS = 'users';
 	const DATAKEY_USERMETA = 'usermeta';
@@ -108,7 +108,7 @@ class ContentDiffMigrator {
 		$data[ self::DATAKEY_POSTMETA ] = $this->select_postmeta_rows( $table_prefix, $post_id );
 
 		// Get Post Author User.
-		$author_row = $this->select_user_row( $table_prefix, $data[ self::DATAKEY_POST ][0][ 'post_author' ] );
+		$author_row = $this->select_user_row( $table_prefix, $data[ self::DATAKEY_POST ][ 'post_author' ] );
 		$data[ self::DATAKEY_USERS ][] = $author_row;
 
 		// Get Post Author User Metas.
@@ -118,13 +118,10 @@ class ContentDiffMigrator {
 		);
 
 		// Get Comments.
-		if ( $post_row[0][ 'comment_count' ] > 0 ) {
+		if ( $post_row[ 'comment_count' ] > 0 ) {
 			$comment_rows = $this->select_comment_rows( $table_prefix, $post_id );
-			$data[ self::DATAKEY_COMMENTS ] = array_merge(
-				$data[ self::DATAKEY_COMMENTS ],
-				$comment_rows
-			);
-return $data;
+			$data[ self::DATAKEY_COMMENTS ] = $comment_rows;
+
 			// Get Comment Metas.
 			foreach ( $comment_rows as $key_comment => $comment ) {
 				$data[ self::DATAKEY_COMMENTMETA ] = array_merge(
@@ -148,12 +145,11 @@ return $data;
 
 		// Get Term Relationships.
 		$term_relationships_rows = $this->select_term_relationships_rows( $table_prefix, $post_id );
-		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_merge(
-			$data[ self::DATAKEY_TERMRELATIONSHIPS ],
-			$term_relationships_rows
-		);
+		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = $term_relationships_rows;
 
 		// Get Term Taxonomies.
+		// Note -- a Term can be shared by multiple Taxonomies in WP.
+		$queried_term_ids = [];
 		foreach ( $term_relationships_rows as $term_relationship_row ) {
 			$term_taxonomy_id = $term_relationship_row[ 'term_taxonomy_id' ];
 			$term_taxonomy = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
@@ -161,15 +157,16 @@ return $data;
 
 			// Get Terms.
 			$term_id = $term_taxonomy[ 'term_id' ];
-			$data[ self::DATAKEY_TERMS ][] = $this->select_terms_row( $table_prefix, $term_id );
-		}
+			if ( ! in_array( $term_id, $queried_term_ids ) ) {
+				$data[ self::DATAKEY_TERMS ][] = $this->select_term_row( $table_prefix, $term_id );
+				$queried_term_ids[] = $term_id;
 
-		// Get Term Metas.
-		foreach ( $data[ self::DATAKEY_TERMS ] as $term_row ) {
-			$data[ self::DATAKEY_TERMMETA ] = array_merge(
-				$this->select_termmeta_rows( $table_prefix, $term_row[ 'term_id' ] ),
-				$data[ self::DATAKEY_TERMMETA ]
-			);
+				// Get Term Metas.
+				$data[ self::DATAKEY_TERMMETA ] = array_merge(
+					$data[ self::DATAKEY_TERMMETA ],
+					$this->select_termmeta_rows( $table_prefix, $term_id )
+				);
+			}
 		}
 
 		return $data;
@@ -195,7 +192,7 @@ return $data;
 		}
 
 		// Get existing Author User or insert a new one.
-		$author_row_id = $data[ self::DATAKEY_POST ][0][ 'post_author' ];
+		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
 		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
 		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
 		$user_existing = $this->get_user_by( 'user_login', $author_row[ 'user_login' ] );
@@ -506,7 +503,7 @@ return $data;
 	 *
 	 * @return array|object|null|void Return from $wpdb::get_row.
 	 */
-	public function select_terms_row( $table_prefix, $term_id ) {
+	public function select_term_row( $table_prefix, $term_id ) {
 		return $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
 	}
 
