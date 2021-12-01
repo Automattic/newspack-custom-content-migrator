@@ -253,16 +253,16 @@ class ContentDiffMigrator {
 			}
 
 			// Insert Comment and Comment Metas.
-			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_row[ 'comment_ID' ] );
+			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_id_old );
+			$comment_id_new = null;
 			try {
-				$comment_id = $this->insert_comment( $comment_row, $post_id, $comment_user_id_new );
-				$comment_ids_updates[ $comment_id_old ] = $comment_id;
+				$comment_id_new = $this->insert_comment( $comment_row, $post_id, $comment_user_id_new );
+				$comment_ids_updates[ $comment_id_old ] = $comment_id_new;
 				foreach ( $commentmeta_rows as $commentmeta_row ) {
-						$this->insert_commentmeta_row( $commentmeta_row, $comment_id );
+						$this->insert_commentmeta_row( $commentmeta_row, $comment_id_new );
 				}
 			} catch ( \Exception $e) {
 				$error_messages[] = $e->getMessage();
-				$comment_id = null;
 			}
 		}
 
@@ -286,22 +286,23 @@ class ContentDiffMigrator {
 		foreach ( $data[ self::DATAKEY_TERMS ] as $term_row ) {
 			$term_id_existing = $this->term_exists( $term_row[ 'name' ] );
 			$term_id_existing = is_numeric( $term_id_existing ) ? (int) $term_id_existing : $term_id_existing;
-			$term_id = null;
+			$term_id_old = $term_row[ 'term_id' ];
+			$term_id_new = null;
 			if ( ! is_null( $term_id_existing ) ) {
-				$term_id = $term_id_existing;
+				$term_id_new = $term_id_existing;
 			} else {
 				try {
-					$term_id = $this->insert_term( $term_row );
-					$termmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMMETA ], 'term_id' , $term_row[ 'term_id' ] );
+					$term_id_new = $this->insert_term( $term_row );
+					$termmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMMETA ], 'term_id' , $term_id_old );
 					foreach ( $termmeta_rows as $termmeta_row ) {
-						$this->insert_termmeta_row( $termmeta_row, $term_id );
+						$this->insert_termmeta_row( $termmeta_row, $term_id_new );
 					}
 				} catch ( \Exception $e) {
 					$error_messages[] = $e->getMessage();
 				}
 			}
-			if ( ! is_null( $term_id ) ){
-				$terms_ids_updates[ $term_row[ 'term_id' ] ] = $term_id;
+			if ( ! is_null( $term_id_new ) ){
+				$terms_ids_updates[ $term_id_old ] = $term_id_new;
 			}
 
 			// Insert Term Taxonomy records.
@@ -309,21 +310,22 @@ class ContentDiffMigrator {
 			 * Note -- A Term can be shared by multiple Taxonomies in WP, e.g. the same Term "blue" used by Taxonomies "category"
 			 * and "color".
 			 */
-			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_row[ 'term_id' ] );
+			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id_old );
 			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
 				// Get term_taxonomy or insert new.
 				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_row[ 'name' ], $term_row[ 'slug' ], $term_taxonomy_row[ 'taxonomy' ] );
-				$term_taxonomy_id = null;
+				$term_taxonomy_id_old = $term_taxonomy_row[ 'term_taxonomy_id' ];
+				$term_taxonomy_id_new = null;
 				if ( $term_taxonomy_id_existing ) {
-					$term_taxonomy_id = $term_taxonomy_id_existing;
+					$term_taxonomy_id_new = $term_taxonomy_id_existing;
 				} else {
 					try {
-						$term_taxonomy_id = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id );
+						$term_taxonomy_id_new = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id_new );
 					} catch ( \Exception $e) {
 						$error_messages[] = $e->getMessage();
 					}
 				}
-				$term_taxonomy_ids_updates[ $term_taxonomy_row[ 'term_taxonomy_id' ] ] = $term_taxonomy_id;
+				$term_taxonomy_ids_updates[ $term_taxonomy_id_old ] = $term_taxonomy_id_new;
 			}
 		}
 
