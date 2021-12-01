@@ -196,7 +196,7 @@ class ContentDiffMigrator {
 		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
 		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
 		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
-		$user_existing = $this->get_user_by( 'user_login', $author_row[ 'user_login' ] );
+		$user_existing = $this->get_user_by( 'login', $author_row[ 'user_login' ] );
 		$author_id = null;
 		if ( $user_existing instanceof WP_User ) {
 			$author_id = (int) $user_existing->ID;
@@ -213,11 +213,13 @@ class ContentDiffMigrator {
 		}
 
 		// Update inserted Post's Author.
-		try {
-			$this->update_post_author( $post_id, $author_id );
-		} catch ( \Exception $e) {
-			$error_messages[] = $e->getMessage();
-		}
+        if ( ! is_null( $author_id ) && $author_id != $author_row_id ) {
+			try {
+				$this->update_post_author( $post_id, $author_id );
+			} catch ( \Exception $e) {
+				$error_messages[] = $e->getMessage();
+			}
+        }
 
 		// Insert Comments.
 		$comment_ids_updates = [];
@@ -235,7 +237,7 @@ class ContentDiffMigrator {
 				$comment_user_existing = null;
 				if ( ! is_null( $comment_user_row ) ) {
 					$comment_usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row[ 'ID' ] );
-					$comment_user_existing = $this->get_user_by( 'user_login', $comment_user_row[ 'user_login' ] );
+					$comment_user_existing = $this->get_user_by( 'login', $comment_user_row[ 'user_login' ] );
 				}
 				if ( $comment_user_existing instanceof WP_User ) {
 					$comment_user_id_new = (int) $comment_user_existing->ID;
