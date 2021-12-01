@@ -85,15 +85,15 @@ class ContentDiffMigrator {
 	 * @return array $args {
 	 *     Post and all core WP Post-related data.
 	 *
-	 *     @type array self::DATAKEY_POST              Contains `posts` rows.
-	 *     @type array self::DATAKEY_POSTMETA          `postmeta` rows.
-	 *     @type array self::DATAKEY_COMMENTS          `comments` rows.
-	 *     @type array self::DATAKEY_COMMENTMETA       `commentmeta` rows.
-	 *     @type array self::DATAKEY_USERS             `users` rows (for the Post Author, and the Comment Users).
-	 *     @type array self::DATAKEY_USERMETA          `usermeta` rows.
-	 *     @type array self::DATAKEY_TERMRELATIONSHIPS `term_relationships` rows.
-	 *     @type array self::DATAKEY_TERMTAXONOMY      `term_taxonomy` rows.
-	 *     @type array self::DATAKEY_TERMS             `terms` rows.
+	 *     @type array self::DATAKEY_POST              Contains `posts` row.
+	 *     @type array self::DATAKEY_POSTMETA          Post's `postmeta` rows.
+	 *     @type array self::DATAKEY_COMMENTS          Post's `comments` rows.
+	 *     @type array self::DATAKEY_COMMENTMETA       Post's `commentmeta` rows.
+	 *     @type array self::DATAKEY_USERS             Post's `users` rows (for the Post Author, and the Comment Users).
+	 *     @type array self::DATAKEY_USERMETA          Post's `usermeta` rows.
+	 *     @type array self::DATAKEY_TERMRELATIONSHIPS Post's `term_relationships` rows.
+	 *     @type array self::DATAKEY_TERMTAXONOMY      Post's `term_taxonomy` rows.
+	 *     @type array self::DATAKEY_TERMS             Post's `terms` rows.
 	 * }
 	 */
 	public function get_data( $post_id, $table_prefix ) {
@@ -129,7 +129,7 @@ class ContentDiffMigrator {
 					$this->select_commentmeta_rows( $table_prefix, $comment[ 'comment_ID' ] )
 				);
 
-				// Get Comment User if not already fetched.
+				// Get Comment User (if the same User was not already fetched).
 				if ( $comment[ 'user_id' ] > 0 && empty( $this->filter_array_elements( $data[ self::DATAKEY_USERS ], 'ID', $comment[ 'user_id' ] ) ) ) {
 					$comment_user_row = $this->select_user_row( $table_prefix, $comment[ 'user_id' ] );
 					$data[ self::DATAKEY_USERS ][] = $comment_user_row;
@@ -148,7 +148,7 @@ class ContentDiffMigrator {
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = $term_relationships_rows;
 
 		// Get Term Taxonomies.
-		// Note -- a Term can be shared by multiple Taxonomies in WP.
+		// Note -- a Term can be shared by multiple Taxonomies in WP, so it's only fetched once.
 		$queried_term_ids = [];
 		foreach ( $term_relationships_rows as $term_relationship_row ) {
 			$term_taxonomy_id = $term_relationship_row[ 'term_taxonomy_id' ];
@@ -298,7 +298,11 @@ class ContentDiffMigrator {
 			} else {
 				$term_id = $term_id_existing;
 			}
-			$terms_ids_updates[ $term_row[ 'term_id' ] ] = $term_id;
+			// TODO -- do this check for all values which get inserted, make inserts fault-resistant
+			// TODO -- also do checks for faulty selects in get_data, make get_data return errors and make it fault resistant by not allowing nulls or empty arrays for insertion
+			if ( ! is_null( $term_id ) ){
+				$terms_ids_updates[ $term_row[ 'term_id' ] ] = $term_id;
+			}
 
 			// Insert Term Taxonomy records.
 			/*
@@ -319,7 +323,6 @@ class ContentDiffMigrator {
 						$term_taxonomy_id = null;
 					}
 				}
-
 				$term_taxonomy_ids_updates[ $term_taxonomy_row[ 'term_taxonomy_id' ] ] = $term_taxonomy_id;
 			}
 		}
@@ -329,7 +332,7 @@ class ContentDiffMigrator {
 			$term_taxonomy_id_old = $term_relationship_row[ 'term_taxonomy_id' ];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
 			if ( is_null( $term_taxonomy_id_new ) ) {
-				$error_messages[] = sprintf( "Error could not insert term_relationship because updated term_taxonomy_id not found, term_taxonomy_id_old='%s'", $term_taxonomy_id_old );
+				$error_messages[] = sprintf( 'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old %s', $term_taxonomy_id_old );
 			} else {
 				try {
 					$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
@@ -358,7 +361,19 @@ class ContentDiffMigrator {
 	/**
 	 * Returns an empty data array.
 	 *
-	 * @return array $args Empty data array for ContentDiffMigrator::get_data. @see ContentDiffMigrator::get_data for structure.
+	 * @return array $args {
+	 *     And empty array with structured keys which will contain all Post and Post-related data.
+	 *
+	 *     @type array self::DATAKEY_POST              Contains `posts` row.
+	 *     @type array self::DATAKEY_POSTMETA          Post's `postmeta` rows.
+	 *     @type array self::DATAKEY_COMMENTS          Post's `comments` rows.
+	 *     @type array self::DATAKEY_COMMENTMETA       Post's `commentmeta` rows.
+	 *     @type array self::DATAKEY_USERS             Post's `users` rows (for the Post Author, and the Comment Users).
+	 *     @type array self::DATAKEY_USERMETA          Post's `usermeta` rows.
+	 *     @type array self::DATAKEY_TERMRELATIONSHIPS Post's `term_relationships` rows.
+	 *     @type array self::DATAKEY_TERMTAXONOMY      Post's `term_taxonomy` rows.
+	 *     @type array self::DATAKEY_TERMS             Post's `terms` rows.
+	 * }
 	 */
 	private function get_empty_data_array() {
 		return [
@@ -405,7 +420,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix
 	 * @param int $post_id
 	 *
-	 * @return array|object|null|void Return from $wpdb::get_row.
+	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
 	public function select_post_row( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'posts', [ 'ID' => $post_id ], $select_just_one_row = true );
@@ -417,7 +432,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $post_id Post ID.
 	 *
-	 * @return array|object|null Return from $wpdb::get_results.
+	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
 	public function select_postmeta_rows( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'postmeta', [ 'post_id' => $post_id ] );
@@ -429,7 +444,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int    $user_id      User ID.
 	 *
-	 * @return array|object|null|void Return from $wpdb::get_row.
+	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
 	public function select_user_row( $table_prefix, $user_id ) {
 		return $this->select( $table_prefix . 'users', [ 'ID' => $user_id ], $select_just_one_row = true );
@@ -441,7 +456,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int    $user_id      User ID.
 	 *
-	 * @return array|object|null Return from $wpdb::get_results.
+	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
 	public function select_usermeta_rows( $table_prefix, $user_id ) {
 		return $this->select( $table_prefix . 'usermeta', [ 'user_id' => $user_id ] );
@@ -453,7 +468,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $post_id Post ID.
 	 *
-	 * @return array|object|null Return from $wpdb::get_results.
+	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
 	public function select_comment_rows( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'comments', [ 'comment_post_ID' => $post_id ] );
@@ -465,7 +480,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $comment_id Comment ID.
 	 *
-	 * @return array|object|null Return from $wpdb::get_results.
+	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
 	public function select_commentmeta_rows( $table_prefix, $comment_id ) {
 		return $this->select( $table_prefix . 'commentmeta', [ 'comment_id' => $comment_id ] );
@@ -477,7 +492,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $post_id Post ID.
 	 *
-	 * @return array|object|null Return from $wpdb::get_results.
+	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
 	public function select_term_relationships_rows( $table_prefix, $post_id ) {
 		return $this->select( $table_prefix . 'term_relationships', [ 'object_id' => $post_id ] );
@@ -489,7 +504,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $term_taxonomy_id term_taxonomy_id.
 	 *
-	 * @return array|object|null|void Return from $wpdb::get_row.
+	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
 	public function select_term_taxonomy_row( $table_prefix, $term_taxonomy_id ) {
 		return $this->select( $table_prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $term_taxonomy_id ], $select_just_one_row = true );
@@ -501,7 +516,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $term_id Term ID.
 	 *
-	 * @return array|object|null|void Return from $wpdb::get_row.
+	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
 	public function select_term_row( $table_prefix, $term_id ) {
 		return $this->select( $table_prefix . 'terms', [ 'term_id' => $term_id ], $select_just_one_row = true );
@@ -513,7 +528,7 @@ class ContentDiffMigrator {
 	 * @param string $table_prefix Table prefix.
 	 * @param int $term_id Term ID.
 	 *
-	 * @return array|object|null Return from $wpdb::get_results.
+	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
 	public function select_termmeta_rows( $table_prefix, $term_id ) {
 		return $this->select( $table_prefix . 'termmeta', [ 'term_id' => $term_id ] );
@@ -524,9 +539,10 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $table_name          Table name to select from.
 	 * @param array  $where_conditions    Keys are columns, values are their values.
-	 * @param bool   $select_just_one_row Select just one row. Default is false.
+	 * @param bool   $select_just_one_row Select just one row will use wpdb::get_row. Default is false which uses wpdb::get_results.
 	 *
-	 * @return array|void|null Result from $wpdb->get_results, or from $wpdb->get_row if $select_just_one_row is set to true.
+	 * @return array|null wpdb results in associative array form. If $select_just_one_row is used, the result is an array or null.
+	 *                    Otherwise, the result is an array with subarray rows, or an empty array.
 	 */
 	private function select( $table_name, $where_conditions, $select_just_one_row = false ) {
 		$sql = 'SELECT * FROM ' . esc_sql( $table_name );
@@ -555,15 +571,18 @@ class ContentDiffMigrator {
 	 *
 	 * @param array $post_row `post` row.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted Post ID.
 	 */
 	public function insert_post( $post_row ) {
-		$orig_id = $post_row['ID'];
-		unset( $post_row['ID'] );
+		$insert_post_row = $post_row;
+		$orig_id = $insert_post_row['ID'];
+		unset( $insert_post_row['ID'] );
 
-		$inserted = $this->wpdb->insert( $this->wpdb->posts, $post_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->posts, $insert_post_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d', $orig_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, json_encode( $post_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -573,16 +592,18 @@ class ContentDiffMigrator {
 	 * @param array $postmeta_rows
 	 * @param int $post_id
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted meta_id.
 	 */
 	public function insert_postmeta_row( $postmeta_row, $post_id ) {
-		$orig_meta_id = $postmeta_row[ 'meta_id' ];
-		unset( $postmeta_row[ 'meta_id' ] );
-		$postmeta_row[ 'post_id' ] = $post_id;
+		$insert_postmeta_row = $postmeta_row;
+		unset( $insert_postmeta_row[ 'meta_id' ] );
+		$insert_postmeta_row[ 'post_id' ] = $post_id;
 
-		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $postmeta_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $insert_postmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, meta_id %d, post_id %s, postmeta_row %s', $orig_meta_id, $post_id, json_encode( $postmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, json_encode( $postmeta_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -593,15 +614,17 @@ class ContentDiffMigrator {
 	 *
 	 * @param array $user_row `user` row.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted User ID.
 	 */
 	public function insert_user( $user_row ) {
-		$orig_id = $user_row[ 'ID' ] ;
-		unset( $user_row[ 'ID' ] );
+		$insert_user_row = $user_row;
+		unset( $insert_user_row[ 'ID' ] );
 
-		$inserted = $this->wpdb->insert( $this->wpdb->users, $user_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->users, $insert_user_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d', $orig_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row[ 'ID' ], json_encode( $user_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -613,16 +636,18 @@ class ContentDiffMigrator {
 	 * @param array $usermeta_row `usermeta` row.
 	 * @param int   $user_id       User ID.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted umeta_id.
 	 */
 	public function insert_usermeta_row( $usermeta_row, $user_id ) {
-		$orig_umeta_id = $usermeta_row[ 'umeta_id' ];
-		unset( $usermeta_row[ 'umeta_id' ] );
-		$usermeta_row[ 'user_id' ] = $user_id;
+		$insert_usermeta_row = $usermeta_row;
+		unset( $insert_usermeta_row[ 'umeta_id' ] );
+		$insert_usermeta_row[ 'user_id' ] = $user_id;
 
-		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $usermeta_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $insert_usermeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user meta, umeta_id %d', $orig_umeta_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, json_encode( $usermeta_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -635,17 +660,19 @@ class ContentDiffMigrator {
 	 * @param int   $new_post_id      Post ID.
 	 * @param int   $new_user_id      User ID.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted comment_id.
 	 */
 	public function insert_comment( $comment_row, $new_post_id, $new_user_id ) {
-		$orig_comment_id = $comment_row[ 'comment_ID' ];
-		unset( $comment_row[ 'comment_ID' ] );
-		$comment_row[ 'comment_post_ID' ] = $new_post_id;
-		$comment_row[ 'user_id' ] = $new_user_id;
+		$insert_comment_row = $comment_row;
+		unset( $insert_comment_row[ 'comment_ID' ] );
+		$insert_comment_row[ 'comment_post_ID' ] = $new_post_id;
+		$insert_comment_row[ 'user_id' ] = $new_user_id;
 
-		$inserted = $this->wpdb->insert( $this->wpdb->comments, $comment_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->comments, $insert_comment_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment, comment_ID %d', $orig_comment_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -657,16 +684,18 @@ class ContentDiffMigrator {
 	 * @param array $commentmeta_row Comment Meta rows.
 	 * @param int   $new_comment_id  New Comment ID.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted meta_id.
 	 */
 	public function insert_commentmeta_row( $commentmeta_row, $new_comment_id ) {
-		$orig_meta_id = $commentmeta_row[ 'meta_id' ];
-		unset( $commentmeta_row[ 'meta_id' ] );
-		$commentmeta_row[ 'comment_id' ] = $new_comment_id;
+		$insert_commentmeta_row = $commentmeta_row;
+		unset( $insert_commentmeta_row[ 'meta_id' ] );
+		$insert_commentmeta_row[ 'comment_id' ] = $new_comment_id;
 
-		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $commentmeta_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $insert_commentmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment meta, meta_id %d', $orig_meta_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -674,6 +703,8 @@ class ContentDiffMigrator {
 
 	/**
 	 * Updates a Comment's parent ID.
+	 *
+	 * @throws \RuntimeException In case update fails.
 	 *
 	 * @param int $comment_id         Comment ID.
 	 * @param int $comment_parent_new new Comment Parent ID.
@@ -683,7 +714,7 @@ class ContentDiffMigrator {
 	public function update_comment_parent( $comment_id, $comment_parent_new ) {
 		$updated = $this->wpdb->update( $this->wpdb->comments, [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ] );
 		if ( 1 != $updated ) {
-			throw new \RuntimeException( sprintf( 'Error updating comment parent, comment ID %d, comment_parent new %d', $comment_id, $comment_parent_new ) );
+			throw new \RuntimeException( sprintf( 'Error updating comment parent, $comment_id %d, $comment_parent_new %d', $comment_id, $comment_parent_new ) );
 		}
 
 		return $updated;
@@ -694,15 +725,17 @@ class ContentDiffMigrator {
 	 *
 	 * @param array $term_row `term` row.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted term_id.
 	 */
 	public function insert_term( $term_row ) {
-		$orig_term_id = $term_row[ 'term_id' ];
-		unset( $term_row[ 'term_id' ] );
+		$insert_term_row = $term_row;
+		unset( $insert_term_row[ 'term_id' ] );
 
-		$inserted = $this->wpdb->insert( $this->wpdb->terms, $term_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->terms, $insert_term_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term, term_id %d', $orig_term_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term, $term_row %s', json_encode( $term_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -714,16 +747,18 @@ class ContentDiffMigrator {
 	 * @param array $termmeta_row `usermeta` row.
 	 * @param int   $term_id      User ID.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted meta_id.
 	 */
 	public function insert_termmeta_row( $termmeta_row, $term_id ) {
-		$orig_meta_id = $termmeta_row[ 'meta_id' ];
-		unset( $termmeta_row[ 'meta_id' ] );
-		$termmeta_row[ 'term_id' ] = $term_id;
+		$insert_termmeta_row = $termmeta_row;
+		unset( $insert_termmeta_row[ 'meta_id' ] );
+		$insert_termmeta_row[ 'term_id' ] = $term_id;
 
-		$inserted = $this->wpdb->insert( $this->wpdb->termmeta, $termmeta_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->termmeta, $insert_termmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term meta, meta_id %d', $orig_meta_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, json_encode( $termmeta_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -735,16 +770,18 @@ class ContentDiffMigrator {
 	 * @param array $term_taxonomy_row `term_taxonomy` row.
 	 * @param int   $new_term_id       New `term_id` value to be set.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted term_taxonomy_id.
 	 */
 	public function insert_term_taxonomy( $term_taxonomy_row, $new_term_id ) {
-		$original_term_taxonomy_id = $term_taxonomy_row[ 'term_taxonomy_id' ];
-		unset( $term_taxonomy_row[ 'term_taxonomy_id' ] );
-		$term_taxonomy_row[ 'term_id' ] = $new_term_id;
+		$insert_term_taxonomy_row = $term_taxonomy_row;
+		unset( $insert_term_taxonomy_row[ 'term_taxonomy_id' ] );
+		$insert_term_taxonomy_row[ 'term_id' ] = $new_term_id;
 
-		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $term_taxonomy_row );
+		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $insert_term_taxonomy_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, term_taxonomy_id %s', $original_term_taxonomy_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, json_encode( $term_taxonomy_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -756,13 +793,11 @@ class ContentDiffMigrator {
 	 * @param int $object_id        `object_id` column.
 	 * @param int $term_taxonomy_id `term_taxonomy_id` column.
 	 *
+	 * @throws \RuntimeException In case insert fails.
+	 *
 	 * @return int Inserted object_id.
 	 */
 	public function insert_term_relationship( $object_id, $term_taxonomy_id ) {
-		if ( ! $object_id || ! $term_taxonomy_id ) {
-			throw new \RuntimeException( sprintf( "insert_term_relationship parameters error, object_id='%s', term_taxonomy_id='%s'", $object_id, $term_taxonomy_id ) );
-		}
-
 		$inserted = $this->wpdb->insert(
 			$this->wpdb->term_relationships,
 			[
@@ -771,7 +806,7 @@ class ContentDiffMigrator {
 			]
 		);
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term relationship, object_id %s, term_taxonomy_id %s', $object_id, $term_taxonomy_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $object_id, $term_taxonomy_id ) );
 		}
 
 		return $this->wpdb->insert_id;;
@@ -779,6 +814,8 @@ class ContentDiffMigrator {
 
 	/**
 	 * Updates a Post's Author.
+	 *
+	 * @throws \RuntimeException In case update fails.
 	 *
 	 * @param int $post_id       Post ID.
 	 * @param int $new_author_id New Author ID.
@@ -788,7 +825,7 @@ class ContentDiffMigrator {
 	public function update_post_author( $post_id, $new_author_id ) {
 		$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
 		if ( 1 != $updated ) {
-			throw new \RuntimeException( sprintf( 'Error updating post author, post_id %s, post_author %s', $post_id, $new_author_id ) );
+			throw new \RuntimeException( sprintf( 'Error updating post author, $post_id %d, $new_author_id %d', $post_id, $new_author_id ) );
 		}
 
 		return $updated;

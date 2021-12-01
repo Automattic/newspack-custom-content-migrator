@@ -588,6 +588,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a proper exception is thrown when insert_post fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_post.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_post_should_throw_exception( $data ) {
+		// Prepare.
+		$new_post_id = 333;
+		$id = 123;
+		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting post, ID %d, post row %s', $id, json_encode( $post_row ) ) );
+
+		// Run.
+		$this->logic->insert_post( $post_row );
+	}
+
+	/**
 	 * Tests that a Post Meta rows are inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_postmeta_row.
@@ -631,24 +657,18 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$new_post_id = 333;
 		$meta_id = 22;
 		$postmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_POSTMETA ], 'meta_id', $meta_id );
-		$meta_id_new = 54;
-		$postmeta_row_expected = $postmeta_row;
-		unset( $postmeta_row_expected[ 'meta_id' ] );
-		$postmeta_row_expected[ 'post_id' ] = $new_post_id;
 
 		// Mock.
-		$this->wpdb_mock->insert_id = $meta_id_new;
 		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'insert' )
-		                ->will( $this->returnValueMap( [
-			                [ $this->wpdb_mock->table_prefix . 'postmeta', $postmeta_row_expected, 1 ]
-		                ] ) );
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $new_post_id, json_encode( $postmeta_row ) ) );
 
 		// Run.
-		$new_meta_ids_actual = $this->logic->insert_postmeta_row( $postmeta_row, $new_post_id );
-
-		// Assert.
-		$this->assertEquals( $meta_id_new, $new_meta_ids_actual );
+		$this->logic->insert_postmeta_row( $postmeta_row, $new_post_id );
 	}
 
 	/**
@@ -682,6 +702,31 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a proper exception is thrown when insert_user fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_pinsert_userostmeta_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_user_should_throw_exception( $data ) {
+		// Prepare.
+		$old_user_id = 22;
+		$user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $old_user_id );
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row[ 'ID' ], json_encode( $user_row ) ) );
+
+		// Run.
+		$this->logic->insert_user( $user_row );
+	}
+
+	/**
 	 * Tests that a User Meta row is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_usermeta.
@@ -711,6 +756,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $new_umeta_id, $new_meta_ids_actual );
+	}
+
+	/**
+	 * Tests that a proper exception is thrown when insert_usermeta_row fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_usermeta_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_usermeta_row_should_throw_exception( $data ) {
+		// Prepare.
+		$new_user_id  = 333;
+		$umeta_id     = 2;
+		$usermeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERMETA ], 'umeta_id', $umeta_id );
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $new_user_id, json_encode( $usermeta_row ) ) );
+
+		// Run.
+		$this->logic->insert_usermeta_row( $usermeta_row, $new_user_id );
 	}
 
 	/**
@@ -774,6 +845,31 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a proper exception is thrown when update_post_author fails.
+	 *
+	 * @covers ContentDiffMigrator::update_post_author.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_update_post_author_should_throw_exception( $data ) {
+		// Prepare.
+		$post_id = 123;
+		$new_author_id = 321;
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'update' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error updating post author, $post_id %d, $new_author_id %d', $post_id, $new_author_id ) );
+
+		// Run.
+		$this->logic->update_post_author( $post_id, $new_author_id );
+	}
+
+	/**
 	 * Tests that a Comment is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_comment.
@@ -805,6 +901,33 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $new_comment_id, $new_comment_id_actual );
+	}
+
+	/**
+	 * Tests that a proper exception is thrown when insert_comment fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_comment.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_comment_should_throw_exception( $data ) {
+		// Prepare.
+		$comment_id = 11;
+		$comment_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_id );
+		$new_post_id = 234;
+		$new_user_id = 345;
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) );
+
+		// Run.
+		$this->logic->insert_comment( $comment_row, $new_post_id, $new_user_id );
 	}
 
 	/**
@@ -840,6 +963,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a proper exception is thrown when insert_commentmeta_row fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_commentmeta_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_commentmeta_row_should_throw_exception( $data ) {
+		// Prepare.
+		$meta_id        = 2;
+		$new_comment_id = 456;
+		$commentmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTMETA ], 'meta_id', $meta_id );
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) );
+
+		// Run.
+		$this->logic->insert_commentmeta_row( $commentmeta_row, $new_comment_id );
+	}
+
+	/**
 	 * Tests that a Term is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_term.
@@ -867,6 +1016,31 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $term_id_new, $term_id_new_actual );
+	}
+
+	/**
+	 * Tests that a proper exception is thrown when insert_term fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_term.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_term_should_throw_exception( $data ) {
+		// Prepare.
+		$term_id = 41;
+		$term_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_id );
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting term, $term_row %s', json_encode( $term_row ) ) );
+
+		// Run.
+		$this->logic->insert_term( $term_row );
 	}
 
 	/**
@@ -899,6 +1073,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $insert_id_expected, $termmeta_id_actual );
+	}
+
+	/**
+	 * Tests that a proper exception is thrown when insert_termmeta_row fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_termmeta_row.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_termmeta_row_should_throw_exception( $data ) {
+		// Prepare.
+		$term_id = 42;
+		$term_id_new = 123;
+		$termmeta_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_id );
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id_new, json_encode( $termmeta_row ) ) );
+
+		// Run.
+		$this->logic->insert_termmeta_row( $termmeta_row, $term_id_new );
 	}
 
 	/**
@@ -968,6 +1168,31 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a proper exception is thrown when update_comment_parent fails.
+	 *
+	 * @covers ContentDiffMigrator::update_comment_parent.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_update_comment_parent_should_throw_exception( $data ) {
+		// Prepare.
+		$comment_id = 11;
+		$comment_parent_new = 432;
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'update' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error updating comment parent, $comment_id %d, $comment_parent_new %d', $comment_id, $comment_parent_new ) );
+
+		// Run.
+		$this->logic->update_comment_parent( $comment_id, $comment_parent_new );
+	}
+
+	/**
 	 * Tests that a Term Taxonomy is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_term_taxonomy.
@@ -1000,6 +1225,32 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a proper exception is thrown when insert_term_taxonomy fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_term_taxonomy.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_term_taxonomy_should_throw_exception( $data ) {
+		// Prepare.
+		$term_id = 41;
+		$term_taxonomy_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id );
+		$term_id_new = 234;
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $term_id_new, json_encode( $term_taxonomy_row ) ) );
+
+		// Run.
+		$this->logic->insert_term_taxonomy( $term_taxonomy_row, $term_id_new );
+	}
+
+	/**
 	 * Tests that a Term Relationship is inserted correctly and that correct calls are made to the $wpdb.
 	 *
 	 * @covers ContentDiffMigrator::insert_term_relationship.
@@ -1025,6 +1276,31 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( $last_insert_id, $inserted );
+	}
+
+	/**
+	 * Tests that a proper exception is thrown when insert_term_relationship fails.
+	 *
+	 * @covers ContentDiffMigrator::insert_term_relationship.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_insert_term_relationship_should_throw_exception( $data ) {
+		// Prepare.
+		$post_id = 123;
+		$term_taxonomy_id = 234;
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+		                ->method( 'insert' )
+		                ->will( $this->returnValue( false ) );
+
+		// Expect.
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $post_id, $term_taxonomy_id ) );
+
+		// Run.
+		$this->logic->insert_term_relationship( $post_id, $term_taxonomy_id );
 	}
 
 	/**
@@ -1190,6 +1466,134 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 		// Assert.
 		$this->assertEquals( [], $import_errors );
+	}
+
+	/**
+	 * Checks that ContentDiffMigrator::import_post_data captures all errors that occurred.
+	 *
+	 * @covers ContentDiffMigrator::import_post_data.
+	 *
+	 * @dataProvider db_data_provider
+	 */
+	public function test_import_post_data_should_capture_errors( $data ) {
+		// Prepare all the test data that's going to be queried by the ContentDiffMigrator::get_data method.
+		$post_row = $data[ ContentDiffMigrator::DATAKEY_POST ];
+		$new_post_id = 500;
+		$post_author_id = $post_row[ 'post_author' ];
+		$post_author_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $post_author_id );
+		$post_author_user_login = $post_author_row[ 'user_login' ];
+		$user_admin = new WP_User();
+		$user_admin->ID = 22;
+		$comment_3_id = 13;
+		$comment_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_COMMENTS ], 'comment_ID', $comment_3_id );
+		$comment3_user_id = $comment_3_row[ 'user_id' ];
+		$comment3_user_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_USERS ], 'ID', $comment3_user_id );
+		$comment3_user_login = $comment3_user_row[ 'user_login' ];
+		$term_1_id = 41;
+		$term_1_name = 'Uncategorized';
+		$term_1_slug = 'uncategorized';
+		$term_2_name = 'Custom Term';
+		$term_2_slug = 'custom-term';
+		$term_3_name = 'Blue';
+		$term_3_slug = 'blue';
+		$term_taxonomy_rows = $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ];
+
+		// Mock.
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [
+			                           'insert_postmeta_row',
+			                           'insert_user',
+			                           'insert_usermeta_row',
+			                           'update_post_author',
+		                           	   'get_user_by',
+			                           'insert_comment',
+			                           'insert_commentmeta_row',
+			                           'update_comment_parent',
+			                           'term_exists',
+			                           'insert_term',
+			                           'insert_termmeta_row',
+			                           'get_existing_term_taxonomy',
+			                           'insert_term_taxonomy',
+			                           'insert_term_relationship',
+		                           ] )
+		                           ->getMock();
+		$logic_partial_mock->method( 'insert_postmeta_row' )
+			->will( $this->throwException( new \RuntimeException( 'err insert_postmeta_row' ) ) );
+		$logic_partial_mock->method( 'insert_postmeta_row' )
+			->will( $this->throwException( new \RuntimeException( 'err insert_postmeta_row' ) ) );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_user_by', [
+			// Trying to get the existing Post user, returns false because it is a new user.
+			[ 'user_login', $post_author_user_login, false ],
+			// Comment 1 has no user.
+			// Comment 2, existing $user_admin is returned.
+			[ 'user_login', 'admin', $user_admin ],
+			// Comment 3.
+			[ 'user_login', $comment3_user_login, false ],
+		] );
+		$logic_partial_mock->method( 'insert_user' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err insert_user' ) ) );
+		$logic_partial_mock->method( 'update_post_author' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err update_post_author' ) ) );
+		$logic_partial_mock->method( 'insert_comment' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err insert_comment' ) ) );
+		$logic_partial_mock->method( 'update_comment_parent' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err update_comment_parent' ) ) );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'term_exists', [
+			// Term 1 exists, $term_1_id is returned.
+			[ $term_1_name, '', null, $term_1_id ],
+			// Term 2 doesn't exist, null is returned.
+			[ $term_2_name, '', null, null ],
+			// Term 3 doesn't exist.
+			[ $term_3_name, '', null, null ],
+		] );
+		$logic_partial_mock->method( 'insert_term' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term' ) ) );
+		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_existing_term_taxonomy', [
+			// Term 1 calls.
+			[ $term_1_name, $term_1_slug, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
+			// Term 2 calls.
+			[ $term_2_name, $term_2_slug, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
+			// Term 3 calls.
+			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
+			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
+		] );
+		$logic_partial_mock->method( 'insert_term_taxonomy' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term_taxonomy' ) ) );
+		$logic_partial_mock->method( 'insert_term_relationship' )
+		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term_relationship' ) ) );
+
+		// Run.
+		$import_errors = $logic_partial_mock->import_post_data( $new_post_id, $data );
+
+		// Assert.
+		$expected_errors = [
+			'err insert_postmeta_row',
+			'err insert_postmeta_row',
+			// Inserting Post User.
+			'err insert_user',
+			'err update_post_author',
+			// Comment 1 doesn't have a User.
+			'err insert_comment',
+			// Comment 2 doesn't has an existing User.
+			'err insert_comment',
+			// Comment 3 has a new User.
+			'err insert_user',
+			'err insert_comment',
+			// Terms insertions.
+			'err insert_term',
+			'err insert_term',
+			// Termtaxonomy rows.
+			'err insert_term_taxonomy',
+			'err insert_term_taxonomy',
+			// Term relationships rows.
+			'err insert_term_relationship',
+			'err insert_term_relationship',
+			// Inserts didn't happen here.
+			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 3',
+			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 4',
+		];
+		$this->assertEquals( $expected_errors, $import_errors );
 	}
 
 	/**
