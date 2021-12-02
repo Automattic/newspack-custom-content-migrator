@@ -123,7 +123,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$file = $export_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		file_put_contents( $export_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV, implode( ',', $ids ) );
 
-		WP_CLI::success( sprintf( '%d new IDs found, and these IDs exported to %s', count( $ids ), $file ) );
+		WP_CLI::success( sprintf( '%d new IDs found, and a list of these IDs exported to %s', count( $ids ), $file ) );
 	}
 
 	/**
@@ -154,6 +154,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 		$imported_post_ids = [];
+
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$data = self::$logic->get_data( (int) $post_id, $live_table_prefix );
@@ -182,8 +183,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		wp_cache_flush();
 
 		WP_CLI::log( 'Updating parent IDs...' );
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-			self::$logic->update_post_parent( $post_id, $imported_post_ids );
+		foreach ( $imported_post_ids as $post_id_old => $post_id_new ) {
+			self::$logic->update_post_parent( $post_id_new, $imported_post_ids );
 		}
 
 		if ( file_exists( $err_log_file ) ) {
@@ -201,6 +202,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param string $msg Error message.
 	 */
 	public function log( $file, $msg ) {
-		file_put_contents( $file, $msg, FILE_APPEND );
+		file_put_contents( $file, $msg . "\n", FILE_APPEND );
 	}
 }

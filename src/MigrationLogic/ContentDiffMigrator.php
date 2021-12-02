@@ -65,6 +65,7 @@ class ContentDiffMigrator {
 				AND wp.post_status = lwp.post_status
 				AND wp.post_date = lwp.post_date
 			WHERE lwp.post_type IN ( 'post', 'page' )
+			AND lwp.post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' )
 			AND wp.ID IS NULL;";
 		$results = $this->wpdb->get_results( $sql, ARRAY_A );
 
@@ -193,19 +194,19 @@ class ContentDiffMigrator {
 		}
 
 		// Get existing Author User or insert a new one.
-		$author_row_id = $data[ self::DATAKEY_POST ][ 'post_author' ];
-		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_row_id );
+		$author_id_old = $data[ self::DATAKEY_POST ][ 'post_author' ];
+		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old );
 		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
 		$user_existing = $this->get_user_by( 'login', $author_row[ 'user_login' ] );
-		$author_id = null;
+		$author_id_new = null;
 		if ( $user_existing instanceof WP_User ) {
-			$author_id = (int) $user_existing->ID;
+			$author_id_new = (int) $user_existing->ID;
 		} else {
 			// Insert a new Author User.
 			try {
-				$author_id = $this->insert_user( $author_row );
+				$author_id_new = $this->insert_user( $author_row );
 				foreach ( $usermeta_rows as $usermeta_row ) {
-					$this->insert_usermeta_row( $usermeta_row, $author_id );
+					$this->insert_usermeta_row( $usermeta_row, $author_id_new );
 				}
 			} catch ( \Exception $e) {
 				$error_messages[] = $e->getMessage();
@@ -213,9 +214,9 @@ class ContentDiffMigrator {
 		}
 
 		// Update inserted Post's Author.
-        if ( ! is_null( $author_id ) && $author_id != $author_row_id ) {
+        if ( ! is_null( $author_id_new ) && $author_id_new != $author_id_old ) {
 			try {
-				$this->update_post_author( $post_id, $author_id );
+				$this->update_post_author( $post_id, $author_id_new );
 			} catch ( \Exception $e) {
 				$error_messages[] = $e->getMessage();
 			}
@@ -352,12 +353,13 @@ class ContentDiffMigrator {
 	/**
 	 * Loops through imported posts and updates their parents IDs.
 	 *
+	 * @param int   $post_id           Post ID to update its Parent.
 	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 */
 	public function update_post_parent( $post_id, $imported_post_ids ) {
 		$post = $this->get_post( $post_id );
 		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
-		if ( $post->post_parent > 0 && $new_parent_id ) {
+		if ( $post->post_parent > 0 && ! is_null( $new_parent_id ) ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
 	}
