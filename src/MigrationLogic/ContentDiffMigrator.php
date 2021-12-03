@@ -49,7 +49,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets a diff of new Posts and Pages from the Live Site.
+	 * Gets a diff of new Posts, Pages and Attachments from the Live Site.
 	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
@@ -64,7 +64,7 @@ class ContentDiffMigrator {
 				AND wp.post_title = lwp.post_title
 				AND wp.post_status = lwp.post_status
 				AND wp.post_date = lwp.post_date
-			WHERE lwp.post_type IN ( 'post', 'page' )
+			WHERE lwp.post_type IN ( 'post', 'page', 'attachment' )
 			AND lwp.post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' )
 			AND wp.ID IS NULL;";
 		$results = $this->wpdb->get_results( $sql, ARRAY_A );
@@ -351,7 +351,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Loops through imported posts and updates their parents IDs.
+	 * Updates Post's parent ID.
 	 *
 	 * @param int   $post_id           Post ID to update its Parent.
 	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
@@ -361,6 +361,25 @@ class ContentDiffMigrator {
 		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
 		if ( $post->post_parent > 0 && ! is_null( $new_parent_id ) ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
+		}
+	}
+
+	/**
+	 * Updates Thumbnail IDs.
+	 *
+	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 */
+	public function update_featured_images( $imported_post_ids ) {
+		$old_ids = array_keys( $imported_post_ids );
+
+		$postmeta_table = $this->wpdb->postmeta;
+		$placeholders = implode( ',', array_fill( 0, count( $old_ids ), '%d' ) );
+		$sql = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
+		$results = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_ids ), ARRAY_A );
+
+		foreach ( $results as $result ) {
+			$new_id = $imported_post_ids[ $result[ 'meta_value' ] ];
+			$this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
 		}
 	}
 

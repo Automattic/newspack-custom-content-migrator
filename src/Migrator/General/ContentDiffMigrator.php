@@ -154,7 +154,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 		$imported_post_ids = [];
-
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$data = self::$logic->get_data( (int) $post_id, $live_table_prefix );
@@ -173,7 +172,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$msg_long = sprintf( 'Errors occurred while importing Live ID %d, imported ID %d : %s', $post_id, $imported_post_id, implode( '; ', $import_errors ) );
 				$this->log( $err_log_file, $msg_long );
 			}
-			WP_CLI::success( sprintf( 'created Post ID %d (from Live Post ID %d)', $imported_post_id, $post_id ) );
+			WP_CLI::success( sprintf( 'created %s ID %d (from Live ID %d)', $data[ self::$logic::DATAKEY_POST ][ 'post_type' ], $imported_post_id, $post_id ) );
 
 			$imported_post_ids[ $post_id ] = $imported_post_id;
 			$this->log( $log_file, sprintf( 'Imported live ID %d to ID %d', $post_id, $imported_post_id ) );
@@ -182,10 +181,11 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Flush the cache in order for the `$wpdb->update()`s to sink in.
 		wp_cache_flush();
 
-		WP_CLI::log( 'Updating parent IDs...' );
+		WP_CLI::log( 'Updating ID references...' );
 		foreach ( $imported_post_ids as $post_id_old => $post_id_new ) {
 			self::$logic->update_post_parent( $post_id_new, $imported_post_ids );
 		}
+		self::$logic->update_featured_images( $imported_post_ids );
 
 		if ( file_exists( $err_log_file ) ) {
 			WP_CLI::warning( sprintf( 'Some errors occurred! See %s on launch site for more details.', $err_log_file ) );
