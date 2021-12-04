@@ -5,13 +5,8 @@
 TABLE_PREFIX=wp_
 # The --default-character-set param for mysql commands: utf8, utf8mb4, latin1.
 DB_CHARSET=utf8mb4
-# To provide content from the Live site:
-#   1. either set location of LIVE_JETPACK_ARCHIVE,
-#   2. or set both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE, and leave LIVE_JETPACK_ARCHIVE empty,
-#      and comment out `purge_temp_folders`.
-LIVE_JETPACK_ARCHIVE=/tmp/launch/jetpack_rewind_backup.tar.gz
-LIVE_HTDOCS_FILES=""
-LIVE_SQL_DUMP_FILE=""
+# Full path to JP archive.
+LIVE_JETPACK_ARCHIVE=""
 # Live site hostname without the www. prefix, e.g. publisher.com.
 LIVE_SITE_HOSTNAME=""
 # Staging site hostname -- site from which this site was cloned, e.g. "publisher-staging.newspackstaging.com".
@@ -34,11 +29,10 @@ while true; do
   esac
 done
 
-
 # START -----------------------------------------------------------------------------
 
 TIME_START=`date +%s`
-. ./../inc/functions.sh
+. ./inc/functions.sh
 
 set_config
 validate_all_params
@@ -54,9 +48,9 @@ echo_ts 'unpacking Jetpack Rewind backup archive and preparing contents for impo
 unpack_jetpack_archive
 
 echo_ts "checking $THIS_PLUGINS_NAME plugin status..."
-update_plugin_status
+activate_this_plugin
 
-echo_ts "backing up current DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_backup_${DB_CHARSET}.sql..."
+echo_ts "backing up Staging DB to ${TEMP_DIR}/${DB_NAME_LOCAL}_StagingBackup_${DB_CHARSET}.sql..."
 dump_db ${TEMP_DIR}/${DB_NAME_LOCAL}_StagingBackup_${DB_CHARSET}.sql
 
 # --- import DB:
@@ -67,21 +61,17 @@ prepare_live_sql_dump_for_import
 echo_ts 'importing Live DB tables...'
 import_live_sql_dump
 
-echo_ts 'switching Staging tables with Live tables...'
-replace_staging_tables_with_live_tables
-
-# --- import Staging site data:
+# --- import Live site content diff:
 
 echo_ts 'Searching for new content from Live...'
 wp_cli newspack-content-migrator content-diff-search-new-content-on-live --export-dir=$TEMP_DIR_MIGRATOR --live-table-prefix=live_$TABLE_PREFIX
 
 echo_ts 'importing new content from Live...'
-wp_cli newspack-content-migrator content-diff-import-new-live-content \
-    --input-dir=$TEMP_DIR_MIGRATOR \
+wp_cli newspack-content-migrator content-diff-migrate-live-content \
+    --import-dir=$TEMP_DIR_MIGRATOR \
     --live-table-prefix=live_$TABLE_PREFIX \
     --live-hostname=$LIVE_SITE_HOSTNAME \
     --staging-hostname=$STAGING_SITE_HOSTNAME ;
-
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
@@ -94,7 +84,7 @@ clean_up_options
 echo_ts 'updating seo settings...'
 wp_cli newspack-content-migrator update-seo-settings
 
-echo_ts 'setting file permissions to public content (some warnings are expected)...'
+echo_ts 'setting file permissions for public content...'
 set_public_content_file_permissions
 
 echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'

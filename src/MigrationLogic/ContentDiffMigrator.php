@@ -1009,12 +1009,16 @@ class ContentDiffMigrator {
 	 * Checks whether all core WP DB tables are present in used DB.
 	 *
 	 * @param string $table_prefix Table prefix.
+	 * @param string $skip_tables  Core WP DB tables to skip (without prefix).
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
-	public function validate_core_wp_db_tables( $table_prefix ) {
+	public function validate_core_wp_db_tables( $table_prefix, $skip_tables = [] ) {
 		$all_tables = $this->get_all_db_tables();
 		foreach ( self::CORE_WP_TABLES as $table ) {
+			if ( in_array( $table, $skip_tables ) ) {
+				continue;
+			}
 			$tablename = $table_prefix . $table;
 			if ( ! in_array( $tablename, $all_tables ) ) {
 				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) );

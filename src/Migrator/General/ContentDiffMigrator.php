@@ -123,7 +123,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
 
 		try {
-			self::$logic->validate_core_wp_db_tables( $live_table_prefix );
+			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
 		} catch ( \Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
@@ -166,7 +166,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file ) );
 		}
 		try {
-			self::$logic->validate_core_wp_db_tables( $live_table_prefix );
+			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
 		} catch ( \Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
@@ -220,22 +220,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$this->log( $log_file_blocks_ids_updates, json_encode( $updates ) );
 		}
 		WP_CLI::success( 'Done ID updates.' );
-
-		// Search-replace hostnames in all Staging site tables.
-		$table_prefix = $wpdb->prefix;
-		$tables = self::$logic->get_all_db_tables();
-		$cmd_search_replace_sprintf = "search-replace '//%s' '//%s' %s --skip-columns=guid --all-tables";
-		$options = [ 'return' => true, 'exit_error' => false, ];
-		WP_CLI::log( sprintf( 'Updating hostnames from `//(www.)%s` to `//%s`...', $live_hostname, $staging_hostname ) );
-		foreach ( $tables as $key_table => $table ) {
-			if ( 0 !== strpos( $table, $table_prefix ) ) {
-				continue;
-			}
-			WP_CLI::log( sprintf( '- `%s`', $table ) );
-			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, $live_hostname, $staging_hostname, $table ), $options );
-			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, 'www.' . $live_hostname, $staging_hostname, $table ), $options );
-		}
-		WP_CLI::success( 'Done search-replacements.' );
 
 		// Output a list of all logs with some contents.
 		$cli_output_logs_report = [];
