@@ -211,16 +211,12 @@ class ContentDiffMigrator {
 			if ( ! is_null( $existing_category ) ) {
 				$term_id_new = $existing_category[ 'term_id' ];
 			} else {
-				$term_id_new = $this->insert_term( [
-					'name' => $live_category[ 'name' ],
-					'slug' => $live_category[ 'slug' ],
+				$term_id_new = wp_insert_category( [
+					'cat_name'             => $live_category[ 'name' ],
+					'category_description' => $live_category[ 'description' ],
+					'category_nicename'    => $live_category[ 'slug' ],
+					'category_parent'      => $parent_term_id,
 				] );
-				$term_taxonomy_id_new = $this->insert_term_taxonomy( [
-					'taxonomy' => 'category',
-					'description' => $live_category[ 'description' ],
-					'parent' => $parent_term_id,
-					'count' => $live_category[ 'count' ],
-				], $term_id_new );
 			}
 
 			$terms_updates[ $live_category[ 'term_id' ] ] = $term_id_new;
