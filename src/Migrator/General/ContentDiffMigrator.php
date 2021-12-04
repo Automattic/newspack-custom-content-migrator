@@ -173,6 +173,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		// Recreate all categories.
 		self::$logic->create_all_categories( $live_table_prefix );;
+		WP_CLI::success( 'Categories reconstructed.' );
 
 		$time_start = microtime( true );
 		$imported_post_ids = [];
@@ -218,6 +219,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		if ( ! empty( $updates ) ) {
 			$this->log( $log_file_blocks_ids_updates, json_encode( $updates ) );
 		}
+		WP_CLI::success( 'Done ID updates.' );
 
 		// Search-replace hostnames in all Staging site tables.
 		$table_prefix = $wpdb->prefix;
@@ -233,6 +235,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, $live_hostname, $staging_hostname, $table ), $options );
 			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, 'www.' . $live_hostname, $staging_hostname, $table ), $options );
 		}
+		WP_CLI::success( 'Done search-replacements.' );
 
 		// Output a list of all logs with some contents.
 		$cli_output_logs_report = [];

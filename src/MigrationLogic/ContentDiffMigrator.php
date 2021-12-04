@@ -173,6 +173,14 @@ class ContentDiffMigrator {
 		return $data;
 	}
 
+	/**
+	 * Creates all categories from Live to local. Because cats are hierarchical, the whole structure should be in place before
+	 * they get assigned to posts.
+	 *
+	 * @param string $live_table_prefix Live DB table prefix.
+	 *
+	 * @return array Keys are old Live term_ids, values are existing or created term_ids.
+	 */
 	public function create_all_categories( $live_table_prefix ) {
 		$table_prefix = $this->wpdb->prefix;
 		$live_terms_table = esc_sql( $live_table_prefix . 'terms' );
