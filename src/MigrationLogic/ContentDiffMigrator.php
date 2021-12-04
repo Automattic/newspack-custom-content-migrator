@@ -173,6 +173,62 @@ class ContentDiffMigrator {
 		return $data;
 	}
 
+	public function create_all_categories( $live_table_prefix ) {
+		$table_prefix = $this->wpdb->prefix;
+		$live_terms_table = esc_sql( $live_table_prefix . 'terms' );
+		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
+		$terms_table = esc_sql( $table_prefix . 'terms' );
+		$termstaxonomy_table = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// Get all live site's categories (ordered by parent for easier hierarchical reconstruction).
+		$live_categories = $this->wpdb->get_results(
+			"SELECT t.term_id, t.name, t.slug, tt.parent, tt.description, tt.count
+			FROM $live_terms_table t
+	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
+			WHERE tt.taxonomy = 'category'
+			ORDER BY tt.parent;",
+			ARRAY_A
+		);
+		$terms_updates = [];
+		foreach ( $live_categories as $live_category ) {
+			// Get or create category.
+			$parent_term_id = 0;
+			if ( 0 != $live_category[ 'parent' ] ) {
+				$parent_term_id = $terms_updates[ $live_category[ 'parent' ] ];
+			}
+
+			$existing_category = $this->wpdb->get_row( $this->wpdb->prepare(
+					"SELECT t.term_id
+					FROM $terms_table t
+			        JOIN $termstaxonomy_table tt ON t.term_id = tt.term_id AND tt.parent = %s
+					WHERE t.name = %s AND t.slug = %s;",
+					$parent_term_id,
+					$live_category[ 'name' ],
+					$live_category[ 'slug' ]
+				),
+				ARRAY_A
+			);
+			if ( ! is_null( $existing_category ) ) {
+				$term_id_new = $existing_category[ 'term_id' ];
+			} else {
+				$term_id_new = $this->insert_term( [
+					'name' => $live_category[ 'name' ],
+					'slug' => $live_category[ 'slug' ],
+				] );
+				$term_taxonomy_id_new = $this->insert_term_taxonomy( [
+					'taxonomy' => 'category',
+					'description' => $live_category[ 'description' ],
+					'parent' => $parent_term_id,
+					'count' => $live_category[ 'count' ],
+				], $term_id_new );
+			}
+
+			$terms_updates[ $live_category[ 'term_id' ] ] = $term_id_new;
+		}
+
+		return $terms_updates;
+	}
+
 	/**
 	 * Imports all the Post related data.
 	 *
@@ -826,7 +882,9 @@ class ContentDiffMigrator {
 	 */
 	public function insert_term( $term_row ) {
 		$insert_term_row = $term_row;
-		unset( $insert_term_row[ 'term_id' ] );
+		if ( isset( $insert_term_row[ 'term_id' ] ) ) {
+			unset( $insert_term_row[ 'term_id' ] );
+		}
 
 		$inserted = $this->wpdb->insert( $this->wpdb->terms, $insert_term_row );
 		if ( 1 != $inserted ) {
@@ -871,7 +929,9 @@ class ContentDiffMigrator {
 	 */
 	public function insert_term_taxonomy( $term_taxonomy_row, $new_term_id ) {
 		$insert_term_taxonomy_row = $term_taxonomy_row;
-		unset( $insert_term_taxonomy_row[ 'term_taxonomy_id' ] );
+		if ( isset( $insert_term_taxonomy_row[ 'term_taxonomy_id' ] ) ) {
+			unset( $insert_term_taxonomy_row[ 'term_taxonomy_id' ] );
+		}
 		$insert_term_taxonomy_row[ 'term_id' ] = $new_term_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $insert_term_taxonomy_row );

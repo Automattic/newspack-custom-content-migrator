@@ -171,6 +171,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::error( $e->getMessage() );
 		}
 
+		// Recreate all categories.
+		self::$logic->create_all_categories( $live_table_prefix );;
+
 		$time_start = microtime( true );
 		$imported_post_ids = [];
 		$imported_attachment_ids = [];
@@ -225,7 +228,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				continue;
 			}
 
-			WP_CLI::log( sprintf( '(%d/%d) Updating hostnames in `%s` content from `//(www.)%s` to `//%s`...', $table, $live_hostname, $staging_hostname ) );
+			WP_CLI::log( sprintf( '(%d/%d) Updating hostnames in `%s`, from `//(www.)%s` to `//%s`...', $table, $live_hostname, $staging_hostname ) );
 			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, $live_hostname, $staging_hostname, $table ) );
 			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, 'www.' . $live_hostname, $staging_hostname, $table ) );
 		}
