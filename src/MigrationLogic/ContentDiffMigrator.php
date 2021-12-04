@@ -367,20 +367,88 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Thumbnail IDs.
 	 *
-	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param array $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 */
-	public function update_featured_images( $imported_post_ids ) {
-		$old_ids = array_keys( $imported_post_ids );
-
+	public function update_featured_images( $imported_attachment_ids ) {
+		$old_attachment_ids = array_keys( $imported_attachment_ids );
 		$postmeta_table = $this->wpdb->postmeta;
-		$placeholders = implode( ',', array_fill( 0, count( $old_ids ), '%d' ) );
+		$placeholders = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
 		$sql = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		$results = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_ids ), ARRAY_A );
+		$results = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
 
 		foreach ( $results as $result ) {
-			$new_id = $imported_post_ids[ $result[ 'meta_value' ] ];
-			$this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
+			$new_id = $imported_attachment_ids[ $result[ 'meta_value' ] ] ?? null;
+			if ( ! is_null( $new_id ) ) {
+				$this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
+			}
 		}
+	}
+
+	/**
+	 * @param array $imported_post_ids       An array of imported Post IDs, keys are old IDs, values are new IDs.
+	 * @param array $imported_attachment_ids An array of imported Attachment IDs, keys are old IDs, values are new IDs.
+	 *
+	 * @return array Updates to be logged, contains subarrays of rows updated, e.g. ID, post_content, etc.
+	 */
+	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids ) {
+		$log_updates = [];
+
+		// Pattern for matching Gutenberg block's ID attribute value.
+		$pattern_id = '|
+			(\<\!--      # beginning of the block element
+			\s           # followed by a space
+			wp\:[^\s]+   # element name/designation
+			\s           # followed by a space
+			{            # opening brace
+			[^}]*        # zero or more characters except closing brace
+			"id"\:)      # id attribute
+			(%d)         # id value
+			([^\d\>]+)   # any following char except numeric and comment closing angle bracket
+		|xims';
+		// Pattern for matching <img> element's class value.
+		$pattern_class = '|
+			(\<img
+			[^\>]*                   # zero or more characters except closing angle bracket
+			class="wp-image-)(%d)("  # class image with id
+			[^\d"]*                  # zero or more characters except numeric and double quote
+			/\>)                     # closing angle bracket
+		|xims';
+
+		$patterns = [];
+		$replacements = [];
+		// Compose patterns and replacements for every attachment ID.
+		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
+			$patterns[] = sprintf( $pattern_id, $att_id_old );
+			$replacements[] = '${1}' . $att_id_new . '${3}';
+			$patterns[] = sprintf( $pattern_class, $att_id_old );
+			$replacements[] = '${1}' . $att_id_new . '${3}';
+		}
+
+		$post_ids_new = array_values( $imported_post_ids );
+		$posts_table = $this->wpdb->posts;
+		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
+		$results = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );", $post_ids_new ), ARRAY_A );
+		foreach ( $results as $result ) {
+			$id = $result[ 'ID' ];
+			$content_before = $result[ 'post_content' ];
+			$excerpt_before = $result[ 'post_excerpt' ];
+			$content_updated = preg_replace( $patterns, $replacements, $content_before );
+			$excerpt_updated = preg_replace( $patterns, $replacements, $excerpt_before );
+			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
+				$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ], [ 'ID' => $id ] );
+				if ( false != $updated && $updated > 0 ) {
+					$log_updates[] = [
+						'ID' => $id,
+						'post_content_before' => $content_before,
+						'post_excerpt_before' => $excerpt_before,
+						'post_content_after' => $content_updated,
+						'post_excerpt_after' => $excerpt_updated,
+					];
+				}
+			}
+		}
+
+		return $log_updates;
 	}
 
 	/**

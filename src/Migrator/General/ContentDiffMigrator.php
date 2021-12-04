@@ -11,6 +11,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	const LIVE_DIFF_CONTENT_IDS_CSV = 'newspack-live-content-diff-ids-csv.txt';
 	const LIVE_DIFF_CONTENT_LOG = 'newspack-live-content-diff.log';
 	const LIVE_DIFF_CONTENT_ERR_LOG = 'newspack-live-content-diff-err.log';
+	const LIVE_DIFF_CONTENT_BLOCKS_IDS_LOG = 'newspack-live-content-diff-blocks-ids.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -92,6 +93,20 @@ class ContentDiffMigrator implements InterfaceMigrator {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-hostname',
+						'description' => "Live site's hostname.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'staging-hostname',
+						'description' => "Staging site's hostname.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -135,8 +150,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
 		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
+		$staging_hostname = $assoc_args[ 'staging-hostname' ] ?? false;
+		$live_hostname = $assoc_args[ 'live-hostname' ] ?? false;
 		$log_file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_LOG;
-		$err_log_file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
+		$log_file_err = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
+		$log_file_blocks_ids_updates = $import_dir . '/' . self::LIVE_DIFF_CONTENT_BLOCKS_IDS_LOG;
+		global $wpdb;
 
 		$file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		if ( ! file_exists( $file ) ) {
@@ -154,14 +173,21 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		$time_start = microtime( true );
 		$imported_post_ids = [];
+		$imported_attachment_ids = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$data = self::$logic->get_data( (int) $post_id, $live_table_prefix );
+			$post_type = $data[ self::$logic::DATAKEY_POST ][ 'post_type' ];
 			try {
 				$imported_post_id = self::$logic->insert_post( $data[ self::$logic::DATAKEY_POST ] );
+				if ( 'attachment' == $post_type ) {
+					$imported_attachment_ids[ $post_id ] = $imported_post_id;
+				} else {
+					$imported_post_ids[ $post_id ] = $imported_post_id;
+				}
 			} catch ( \Exception $e ) {
 				WP_CLI::error( sprintf( 'Error inserting post, ID %d', $post_id) );
-				$this->log( $err_log_file, $e->getMessage() );
+				$this->log( $log_file_err, $e->getMessage() );
 				continue;
 			}
 
@@ -170,11 +196,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$msg_short = sprintf( 'Errors occurred while importing Live ID %d, imported ID %d.', $post_id, $imported_post_id );
 				WP_CLI::warning( $msg_short );
 				$msg_long = sprintf( 'Errors occurred while importing Live ID %d, imported ID %d : %s', $post_id, $imported_post_id, implode( '; ', $import_errors ) );
-				$this->log( $err_log_file, $msg_long );
+				$this->log( $log_file_err, $msg_long );
 			}
-			WP_CLI::success( sprintf( 'created %s ID %d (from Live ID %d)', $data[ self::$logic::DATAKEY_POST ][ 'post_type' ], $imported_post_id, $post_id ) );
 
-			$imported_post_ids[ $post_id ] = $imported_post_id;
+			WP_CLI::success( sprintf( 'created %s ID %d (from Live ID %d)', ucfirst( $post_type ), $imported_post_id, $post_id ) );
 			$this->log( $log_file, sprintf( 'Imported live ID %d to ID %d', $post_id, $imported_post_id ) );
 		}
 
@@ -185,10 +210,40 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		foreach ( $imported_post_ids as $post_id_old => $post_id_new ) {
 			self::$logic->update_post_parent( $post_id_new, $imported_post_ids );
 		}
-		self::$logic->update_featured_images( $imported_post_ids );
+		self::$logic->update_featured_images( $imported_attachment_ids );
+		$updates = self::$logic->update_blocks_ids( $imported_post_ids, $imported_attachment_ids );
+		if ( ! empty( $updates ) ) {
+			$this->log( $log_file_blocks_ids_updates, json_encode( $updates ) );
+		}
 
-		if ( file_exists( $err_log_file ) ) {
-			WP_CLI::warning( sprintf( 'Some errors occurred! See %s on launch site for more details.', $err_log_file ) );
+		// Search-replace hostnames.
+		$table_prefix = $wpdb->prefix;
+		$tables = self::$logic->get_all_db_tables();
+		$cmd_search_replace_sprintf = "search-replace '//%s' '//%s' %s --skip-columns=guid --all-tables";
+		foreach ( $tables as $key_table => $table ) {
+			if ( 0 !== strpos( $table, $table_prefix ) ) {
+				continue;
+			}
+
+			WP_CLI::log( sprintf( '(%d/%d) Updating hostnames in `%s` content from `//(www.)%s` to `//%s`...', $table, $live_hostname, $staging_hostname ) );
+			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, $live_hostname, $staging_hostname, $table ) );
+			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, 'www.' . $live_hostname, $staging_hostname, $table ) );
+		}
+
+		// Output a list of all logs with some contents.
+		$cli_output_logs_report = [];
+		if ( file_exists( $log_file_err ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - some errors occurred', $log_file_err );
+		}
+		if ( file_exists( $log_file ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - list of imported IDs', $log_file );
+		}
+		if ( file_exists( $log_file_blocks_ids_updates ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - detailed log of blocks IDs updates', $log_file_blocks_ids_updates );
+		}
+		if ( ! empty( $cli_output_logs_report ) ) {
+			WP_CLI::warning( "Check the following logs for more details:" );
+			WP_CLI::log( "- " . implode( "\n- ", $cli_output_logs_report ) );
 		}
 
 		wp_cache_flush();

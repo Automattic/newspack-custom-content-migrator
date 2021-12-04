@@ -73,10 +73,15 @@ replace_staging_tables_with_live_tables
 # --- import Staging site data:
 
 echo_ts 'Searching for new content from Live...'
-wp_cli newspack-content-migrator content-diff-search-new-content-on-live --export-dir=$TEMP_DIR_MIGRATOR --live-table-prefix=live_=$TABLE_PREFIX
+wp_cli newspack-content-migrator content-diff-search-new-content-on-live --export-dir=$TEMP_DIR_MIGRATOR --live-table-prefix=live_$TABLE_PREFIX
 
 echo_ts 'importing new content from Live...'
-wp_cli newspack-content-migrator content-diff-import-new-live-content --input-dir=$TEMP_DIR_MIGRATOR
+wp_cli newspack-content-migrator content-diff-import-new-live-content \
+    --input-dir=$TEMP_DIR_MIGRATOR \
+    --live-table-prefix=live_$TABLE_PREFIX \
+    --live-hostname=$LIVE_SITE_HOSTNAME \
+    --staging-hostname=$STAGING_SITE_HOSTNAME ;
+
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
