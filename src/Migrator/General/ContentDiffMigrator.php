@@ -219,18 +219,19 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$this->log( $log_file_blocks_ids_updates, json_encode( $updates ) );
 		}
 
-		// Search-replace hostnames.
+		// Search-replace hostnames in all Staging site tables.
 		$table_prefix = $wpdb->prefix;
 		$tables = self::$logic->get_all_db_tables();
 		$cmd_search_replace_sprintf = "search-replace '//%s' '//%s' %s --skip-columns=guid --all-tables";
+		$options = [ 'return' => true, 'exit_error' => false, ];
+		WP_CLI::log( sprintf( 'Updating hostnames from `//(www.)%s` to `//%s`...', $live_hostname, $staging_hostname ) );
 		foreach ( $tables as $key_table => $table ) {
 			if ( 0 !== strpos( $table, $table_prefix ) ) {
 				continue;
 			}
-
-			WP_CLI::log( sprintf( '(%d/%d) Updating hostnames in `%s`, from `//(www.)%s` to `//%s`...', $table, $live_hostname, $staging_hostname ) );
-			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, $live_hostname, $staging_hostname, $table ) );
-			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, 'www.' . $live_hostname, $staging_hostname, $table ) );
+			WP_CLI::log( sprintf( '- `%s`', $table ) );
+			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, $live_hostname, $staging_hostname, $table ), $options );
+			WP_CLI::runcommand( sprintf( $cmd_search_replace_sprintf, 'www.' . $live_hostname, $staging_hostname, $table ), $options );
 		}
 
 		// Output a list of all logs with some contents.
