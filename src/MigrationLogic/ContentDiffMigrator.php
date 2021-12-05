@@ -174,63 +174,91 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Creates all categories from Live to local. Because cats are hierarchical, the whole structure should be in place before
-	 * they get assigned to posts.
+	 * Creates all hierarchical and non-hierarchical taxonomies from Live to local, except for built-in 'post_tag' and 'post_format'.
+	 *
+	 * If hierarchical cats are used, the whole structure should be in place before they can get assigned to posts, and same goes
+	 * for any custom taxonomies which might be used.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
-	 * @return array Keys are old Live term_ids, values are existing or created term_ids.
+	 * @return array Newly inserted Terms Taxonomies. Keys are taxonomies, with term_ids as subarrays. In case of errors, will
+	 *               contain a key 'errors' with error messages.
 	 */
-	public function create_all_categories( $live_table_prefix ) {
+	public function recreate_taxonomies( $live_table_prefix ) {
 		$table_prefix = $this->wpdb->prefix;
 		$live_terms_table = esc_sql( $live_table_prefix . 'terms' );
 		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
 		$terms_table = esc_sql( $table_prefix . 'terms' );
 		$termstaxonomy_table = esc_sql( $table_prefix . 'term_taxonomy' );
 
-		// Get all live site's categories (ordered by parent for easier hierarchical reconstruction).
-		$live_categories = $this->wpdb->get_results(
-			"SELECT t.term_id, t.name, t.slug, tt.parent, tt.description, tt.count
+		// Temporarily register custom taxonomies to allow creation.
+		$custom_taxonomies = $this->wpdb->get_results(
+			"SELECT DISTINCT taxonomy
+			FROM $live_termstaxonomy_table
+			WHERE taxonomy NOT IN ( 'post_tag', 'post_format', 'category' );",
+			ARRAY_A
+		);
+		foreach ( $custom_taxonomies as $custom_taxonomy ) {
+			register_taxonomy( $custom_taxonomy[ 'taxonomy' ], [ 'post' ], [ 'hierarchical' => true, 'query_var' => true, ] );
+		}
+
+		// Get all live site's hiearchical taxonomies, ordered by parent for easy hierarchical reconstruction.
+		$live_taxonomies = $this->wpdb->get_results(
+			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 			FROM $live_terms_table t
 	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
-			WHERE tt.taxonomy = 'category'
+			WHERE tt.taxonomy NOT IN ( 'post_tag', 'post_format' )
 			ORDER BY tt.parent;",
 			ARRAY_A
 		);
 		$terms_updates = [];
-		foreach ( $live_categories as $live_category ) {
-			// Get or create category.
+		$created_terms_in_taxonomies = [];
+		foreach ( $live_taxonomies as $live_taxonomy ) {
+			// Get or create taxonomy.
 			$parent_term_id = 0;
-			if ( 0 != $live_category[ 'parent' ] ) {
-				$parent_term_id = $terms_updates[ $live_category[ 'parent' ] ];
+			if ( 0 != $live_taxonomy[ 'parent' ] ) {
+				$parent_term_id = $terms_updates[ $live_taxonomy[ 'parent' ] ];
 			}
 
-			$existing_category = $this->wpdb->get_row( $this->wpdb->prepare(
+			$existing_taxonomy = $this->wpdb->get_row( $this->wpdb->prepare(
 					"SELECT t.term_id
 					FROM $terms_table t
 			        JOIN $termstaxonomy_table tt ON t.term_id = tt.term_id AND tt.parent = %s
-					WHERE t.name = %s AND t.slug = %s;",
+					WHERE t.name = %s
+					AND t.slug = %s
+					AND tt.taxonomy = %s;",
 					$parent_term_id,
-					$live_category[ 'name' ],
-					$live_category[ 'slug' ]
+					$live_taxonomy[ 'name' ],
+					$live_taxonomy[ 'slug' ],
+					$live_taxonomy[ 'taxonomy' ]
 				),
 				ARRAY_A
 			);
-			if ( ! is_null( $existing_category ) ) {
-				$term_id_new = $existing_category[ 'term_id' ];
+			if ( ! is_null( $existing_taxonomy ) ) {
+				$term_id_new = $existing_taxonomy[ 'term_id' ];
 			} else {
-				$term_id_new = wp_insert_category( [
-					'cat_name'             => $live_category[ 'name' ],
-					'category_description' => $live_category[ 'description' ],
-					'category_nicename'    => $live_category[ 'slug' ],
-					'category_parent'      => $parent_term_id,
-				] );
+				$term_inserted = wp_insert_term(
+					$live_taxonomy[ 'name' ],
+					$live_taxonomy[ 'taxonomy' ],
+					[
+						'description' => $live_taxonomy[ 'description' ],
+						'parent' => $parent_term_id,
+						'slug' => $live_taxonomy[ 'slug' ],
+					]
+				);
+				if ( ! is_wp_error( $term_inserted ) ) {
+					$term_id_new = $term_inserted[ 'term_id' ] ?? null;
+					$created_terms_in_taxonomies[ $live_taxonomy[ 'taxonomy' ] ][] = $term_id_new;
+				} else {
+					$created_terms_in_taxonomies[ 'errors' ][] = sprintf( 'Error inserting term `%s` taxonomy `%s` -- %s', $live_taxonomy[ 'name' ], $live_taxonomy[ 'taxonomy' ], $term_inserted->get_error_message() );
+					$term_id_new = null;
+				}
 			}
 
-			$terms_updates[ $live_category[ 'term_id' ] ] = $term_id_new;
+			$terms_updates[ $live_taxonomy[ 'term_id' ] ] = $term_id_new;
 		}
 
-		return $terms_updates;
+		return $created_terms_in_taxonomies;
 	}
 
 	/**
@@ -445,6 +473,8 @@ class ContentDiffMigrator {
 	}
 
 	/**
+	 * Updates Gutenberg Blocks' references for attachment IDs in created `post_content` and `post_excerpt` fields.
+	 *
 	 * @param array $imported_post_ids       An array of imported Post IDs, keys are old IDs, values are new IDs.
 	 * @param array $imported_attachment_ids An array of imported Attachment IDs, keys are old IDs, values are new IDs.
 	 *
@@ -465,7 +495,7 @@ class ContentDiffMigrator {
 			(%d)         # id value
 			([^\d\>]+)   # any following char except numeric and comment closing angle bracket
 		|xims';
-		// Pattern for matching <img> element's class value.
+		// Pattern for matching <img> element's class value which contains the att. ID.
 		$pattern_class = '|
 			(\<img
 			[^\>]*                   # zero or more characters except closing angle bracket

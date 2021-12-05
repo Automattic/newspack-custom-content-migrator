@@ -93,20 +93,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 						'optional'    => false,
 						'repeating'   => false,
 					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'live-hostname',
-						'description' => "Live site's hostname.",
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'staging-hostname',
-						'description' => "Staging site's hostname.",
-						'optional'    => false,
-						'repeating'   => false,
-					],
 				],
 			]
 		);
@@ -150,12 +136,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
 		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
-		$staging_hostname = $assoc_args[ 'staging-hostname' ] ?? false;
-		$live_hostname = $assoc_args[ 'live-hostname' ] ?? false;
 		$log_file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_LOG;
 		$log_file_err = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
 		$log_file_blocks_ids_updates = $import_dir . '/' . self::LIVE_DIFF_CONTENT_BLOCKS_IDS_LOG;
-		global $wpdb;
 
 		$file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		if ( ! file_exists( $file ) ) {
@@ -172,12 +155,31 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		// Recreate all categories.
-		self::$logic->create_all_categories( $live_table_prefix );;
-		WP_CLI::success( 'Categories reconstructed.' );
+		WP_CLI::log( 'Recreating hierarchical taxonomies...' );
+		$created_terms_in_taxonomies = self::$logic->recreate_taxonomies( $live_table_prefix );
+		if ( isset( $created_terms_in_taxonomies[ 'errors' ] ) && ! empty( $created_terms_in_taxonomies[ 'errors' ] ) ) {
+			foreach ( $created_terms_in_taxonomies[ 'errors' ] as $error ) {
+				WP_CLI::warning( $error );
+				$this->log( $log_file_err, $error );
+			}
+			unset( $created_terms_in_taxonomies[ 'errors' ] );
+		}
+		if ( ! empty( $created_terms_in_taxonomies ) ) {
+			$taxonomies = array_keys( $created_terms_in_taxonomies );
+			$msg = 'Taxonomies and terms created: ';
+			foreach ( $taxonomies as $taxonomy ) {
+				$msg .= "\n" . sprintf( '- `%s`, %d terms', $taxonomy, count( $created_terms_in_taxonomies[ $taxonomy ] ) );
+			}
+			WP_CLI::success( $msg );
+			$this->log( $log_file, $msg );
+		} else {
+			WP_CLI::success( 'No new custom taxonomies found.' );
+		}
 
 		$time_start = microtime( true );
 		$imported_post_ids = [];
 		$imported_attachment_ids = [];
+		WP_CLI::log( 'Now importing post objects...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$data = self::$logic->get_data( (int) $post_id, $live_table_prefix );
