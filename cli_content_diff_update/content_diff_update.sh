@@ -69,9 +69,7 @@ wp_cli newspack-content-migrator content-diff-search-new-content-on-live --expor
 echo_ts 'importing new content from Live...'
 wp_cli newspack-content-migrator content-diff-migrate-live-content \
     --import-dir=$TEMP_DIR_MIGRATOR \
-    --live-table-prefix=live_$TABLE_PREFIX \
-    --live-hostname=$LIVE_SITE_HOSTNAME \
-    --staging-hostname=$STAGING_SITE_HOSTNAME ;
+    --live-table-prefix=live_$TABLE_PREFIX ;
 
 echo_ts 'syncing files from Live site...'
 update_files_from_live_site
@@ -84,7 +82,7 @@ clean_up_options
 echo_ts 'updating seo settings...'
 wp_cli newspack-content-migrator update-seo-settings
 
-echo_ts 'setting file permissions for public content...'
+echo_ts 'setting file permissions to public content...'
 set_public_content_file_permissions
 
 echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'

@@ -139,14 +139,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$log_file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_LOG;
 		$log_file_err = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
 		$log_file_blocks_ids_updates = $import_dir . '/' . self::LIVE_DIFF_CONTENT_BLOCKS_IDS_LOG;
+		unlink( $log_file );
+		unlink( $log_file_err );
+		unlink( $log_file_blocks_ids_updates );
 
-		$file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
-		if ( ! file_exists( $file ) ) {
-			WP_CLI::error( sprintf( 'File %s not found.', $file ) );
+		$file_ids_csv = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
+		if ( ! file_exists( $file_ids_csv ) ) {
+			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_csv ) );
 		}
-		$post_ids = explode( ',', file_get_contents( $file ) );
+		$post_ids = explode( ',', file_get_contents( $file_ids_csv ) );
 		if ( empty( $post_ids ) ) {
-			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file ) );
+			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}
 		try {
 			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
@@ -155,7 +158,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		// Recreate all categories.
-		WP_CLI::log( 'Recreating hierarchical taxonomies...' );
+		WP_CLI::log( 'Recreating taxonomies...' );
 		$created_terms_in_taxonomies = self::$logic->recreate_taxonomies( $live_table_prefix );
 		if ( isset( $created_terms_in_taxonomies[ 'errors' ] ) && ! empty( $created_terms_in_taxonomies[ 'errors' ] ) ) {
 			foreach ( $created_terms_in_taxonomies[ 'errors' ] as $error ) {
@@ -179,9 +182,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$time_start = microtime( true );
 		$imported_post_ids = [];
 		$imported_attachment_ids = [];
-		WP_CLI::log( 'Now importing post objects...' );
+		WP_CLI::log( sprintf( 'Importing %d post objects, hold tight...', count( $post_ids ) ) );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::log( sprintf( '(%d/%d) migrating ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$data = self::$logic->get_data( (int) $post_id, $live_table_prefix );
 			$post_type = $data[ self::$logic::DATAKEY_POST ][ 'post_type' ];
 			try {
@@ -192,22 +194,22 @@ class ContentDiffMigrator implements InterfaceMigrator {
 					$imported_post_ids[ $post_id ] = $imported_post_id;
 				}
 			} catch ( \Exception $e ) {
-				WP_CLI::error( sprintf( 'Error inserting post, ID %d', $post_id) );
+				WP_CLI::error( sprintf( 'Error inserting %s Live ID %d', $post_type, $post_id) );
 				$this->log( $log_file_err, $e->getMessage() );
 				continue;
 			}
 
 			$import_errors = self::$logic->import_post_data( $imported_post_id, $data );
 			if ( ! empty( $import_errors ) ) {
-				$msg_short = sprintf( 'Errors occurred while importing Live ID %d, imported ID %d.', $post_id, $imported_post_id );
+				$msg_short = sprintf( 'Errors while importing %s, Live ID %d, imported ID %d.', $post_type, $post_id, $imported_post_id );
 				WP_CLI::warning( $msg_short );
-				$msg_long = sprintf( 'Errors occurred while importing Live ID %d, imported ID %d : %s', $post_id, $imported_post_id, implode( '; ', $import_errors ) );
+				$msg_long = sprintf( 'Errors while importing %s, Live ID %d, imported ID %d : %s', $post_type, $post_id, $imported_post_id, implode( '; ', $import_errors ) );
 				$this->log( $log_file_err, $msg_long );
 			}
 
-			WP_CLI::success( sprintf( 'created %s ID %d (from Live ID %d)', ucfirst( $post_type ), $imported_post_id, $post_id ) );
 			$this->log( $log_file, sprintf( 'Imported live ID %d to ID %d', $post_id, $imported_post_id ) );
 		}
+		WP_CLI::success( 'Done importing.' );
 
 		// Flush the cache in order for the `$wpdb->update()`s to sink in.
 		wp_cache_flush();
@@ -221,7 +223,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		if ( ! empty( $updates ) ) {
 			$this->log( $log_file_blocks_ids_updates, json_encode( $updates ) );
 		}
-		WP_CLI::success( 'Done ID updates.' );
+		WP_CLI::success( 'Done updating IDs.' );
+
+		WP_CLI::log( sprintf( 'All done migrating content! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 
 		// Output a list of all logs with some contents.
 		$cli_output_logs_report = [];
@@ -235,13 +239,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$cli_output_logs_report[] = sprintf( '%s - detailed log of blocks IDs updates', $log_file_blocks_ids_updates );
 		}
 		if ( ! empty( $cli_output_logs_report ) ) {
-			WP_CLI::warning( "Check the following logs for more details:" );
+			WP_CLI::log( '' );
+			WP_CLI::warning( "Check the logs for more details:" );
 			WP_CLI::log( "- " . implode( "\n- ", $cli_output_logs_report ) );
 		}
 
 		wp_cache_flush();
-
-		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**

@@ -2,7 +2,7 @@
 
 # A more convenient way to execute WP CLI.
 function wp_cli() {
-  eval wp $@
+  eval $WP_CLI_BIN --path=$WP_CLI_PATH $@
 }
 
 # Based on the last previously executed command's exit code, sets a custom variable's
