@@ -56,6 +56,22 @@ class PublicIntegrityMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator publicintegrity-migrate-terms-authors-to-cap',
+			[ $this, 'cmd_migrate_terms_authors_to_cap' ],
+			[
+				'shortdesc' => 'Migrates authors from terms table to Co-Authors Plus.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'exclude-terms',
+						'description' => 'Terms to be excluded IDs separated by a comma.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -124,6 +140,70 @@ class PublicIntegrityMigrator implements InterfaceMigrator {
 			$msg      = sprintf( 'Errors while assigning GAs to posts and saved to log %s', $log_file );
 			WP_CLI::error( $msg );
 			file_put_contents( $log_file, $msg );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator publicintegrity-migrate-terms-authors-to-cap`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_migrate_terms_authors_to_cap( $args, $assoc_args ) {
+		$terms_excluded_ids = array_key_exists( 'exclude-terms', $assoc_args ) ? array_map(
+			function( $id ) {
+				return intval( $id );
+			},
+			explode( ',', $assoc_args['exclude-terms'] )
+		) : [];
+
+		$args             = array(
+			'nopaging'    => true,
+			'post_type'   => 'post',
+			'post_status' => 'publish',
+			'fields'      => 'ids',
+			'author__in'  => [ 0 ], // posts with issues have author ID = 0.
+		);
+		$query            = new \WP_Query( $args );
+		$posts_to_fix_ids = $query->get_posts();
+
+		if ( ! empty( $posts_to_fix_ids ) ) {
+			WP_CLI::log( 'Converting Authors from terms to CAP GAs...' );
+
+			foreach ( $posts_to_fix_ids as $post_id ) {
+				$author_term_ids = array_filter(
+					get_post_meta( $post_id, 'authors', true ),
+					function( $author_term_id ) use ( $terms_excluded_ids ) {
+						return ! in_array( intval( $author_term_id ), $terms_excluded_ids );
+					}
+				);
+
+				if ( count( $author_term_ids ) > 0 ) {
+					$post_authors = [];
+					foreach ( $author_term_ids as $author_term_id ) {
+						$author_term = get_term( $author_term_id );
+						if ( $author_term && '' !== $author_term->name ) {
+							// create GA.
+							$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+								[
+									'display_name' => $author_term->name,
+									'first_name'   => $author_term->name,
+								]
+							);
+							if ( is_wp_error( $guest_author_id ) ) {
+								WP_CLI::error( sprintf( 'Errors while creating CAP GAs: %s', $guest_author_id->get_error_message() ) );
+							} else {
+								$post_authors[] = $guest_author_id;
+							}
+						}
+					}
+					// Assign GA to post.
+					if ( count( $post_authors ) > 0 ) {
+						$this->coauthorsplus_logic->assign_guest_authors_to_post( $post_authors, $post_id );
+						WP_CLI::success( sprintf( 'Post ID %d got GA(s) %s', $post_id, implode( ',', $post_authors ) ) );
+					}
+				}
+			}
 		}
 	}
 
