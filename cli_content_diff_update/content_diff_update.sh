@@ -88,6 +88,11 @@ set_public_content_file_permissions
 echo_ts 'dropping temp DB tables (prefixed with `live_` and `staging_`)...'
 drop_temp_db_tables
 
+echo_ts 'cleaning up tmp resources...'
+rm -rf $LIVE_JETPACK_ARCHIVE > /dev/null 2>&1"
+rm -rf $TEMP_DIR_JETPACK > /dev/null 2>&1"
+rm -rf $TEMP_DIR_JETPACK_UNZIP/* > /dev/null 2>&1"
+
 echo_ts 'flushing WP cache...'
 wp_cli cache flush
 

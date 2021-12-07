@@ -207,7 +207,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$this->log( $log_file_err, $msg_long );
 			}
 
-			$this->log( $log_file, sprintf( 'Imported live ID %d to ID %d', $post_id, $imported_post_id ) );
+			$this->log( $log_file, sprintf( 'Imported %s live ID %d to ID %d', $post_type, $post_id, $imported_post_id ) );
 		}
 		WP_CLI::success( 'Done importing.' );
 
@@ -239,8 +239,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$cli_output_logs_report[] = sprintf( '%s - detailed log of blocks IDs updates', $log_file_blocks_ids_updates );
 		}
 		if ( ! empty( $cli_output_logs_report ) ) {
-			WP_CLI::log( '' );
-			WP_CLI::warning( "Check the logs for more details:" );
+			WP_CLI::log( "Check the logs for more details:" );
 			WP_CLI::log( "- " . implode( "\n- ", $cli_output_logs_report ) );
 		}
 
