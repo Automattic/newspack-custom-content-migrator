@@ -998,7 +998,7 @@ class ContentDiffMigrator {
 			throw new \RuntimeException( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $object_id, $term_taxonomy_id ) );
 		}
 
-		return $this->wpdb->insert_id;;
+		return $this->wpdb->insert_id;
 	}
 
 	/**
