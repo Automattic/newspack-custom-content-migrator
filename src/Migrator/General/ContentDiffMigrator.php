@@ -157,7 +157,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::error( $e->getMessage() );
 		}
 
-		// Recreate all categories.
+		// Recreate all hierarchical taxonomies, such as categories and other custom taxonomies.
 		WP_CLI::log( 'Recreating taxonomies...' );
 		$created_terms_in_taxonomies = self::$logic->recreate_taxonomies( $live_table_prefix );
 		if ( isset( $created_terms_in_taxonomies[ 'errors' ] ) && ! empty( $created_terms_in_taxonomies[ 'errors' ] ) ) {
@@ -165,19 +165,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				WP_CLI::warning( $error );
 				$this->log( $log_file_err, $error );
 			}
-			unset( $created_terms_in_taxonomies[ 'errors' ] );
 		}
-		if ( ! empty( $created_terms_in_taxonomies ) ) {
-			$taxonomies = array_keys( $created_terms_in_taxonomies );
-			$msg = 'Taxonomies and terms created: ';
-			foreach ( $taxonomies as $taxonomy ) {
-				$msg .= "\n" . sprintf( '- `%s`, %d terms', $taxonomy, count( $created_terms_in_taxonomies[ $taxonomy ] ) );
-			}
-			WP_CLI::success( $msg );
-			$this->log( $log_file, $msg );
-		} else {
-			WP_CLI::success( 'No new custom taxonomies found.' );
-		}
+		WP_CLI::success( 'Done' );
 
 		$time_start = microtime( true );
 		$imported_post_ids = [];
@@ -209,7 +198,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			$this->log( $log_file, sprintf( 'Imported %s live ID %d to ID %d', $post_type, $post_id, $imported_post_id ) );
 		}
-		WP_CLI::success( 'Done importing.' );
+		WP_CLI::success( sprintf( 'Done importing %d posts and %d attachments.', count( $imported_post_ids ), count( $imported_attachment_ids ) ) );
 
 		// Flush the cache in order for the `$wpdb->update()`s to sink in.
 		wp_cache_flush();
