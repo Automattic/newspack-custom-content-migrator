@@ -216,7 +216,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		WP_CLI::log( sprintf( 'All done migrating content! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 
-		// Output a list of all logs with some contents.
+		// List all the logs which contain some info.
 		$cli_output_logs_report = [];
 		if ( file_exists( $log_file_err ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - some errors occurred', $log_file_err );
