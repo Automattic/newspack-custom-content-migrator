@@ -69,5 +69,9 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
 		// Migrator\PublisherSpecific\PublicIntegrityMigrator::class,
 		// Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
+<<<<<<< Updated upstream
+=======
+		// Migrator\PublisherSpecific\AragonDigitalMigrator::class,
+>>>>>>> Stashed changes
 	)
 );
