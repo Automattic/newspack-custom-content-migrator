@@ -1,4 +1,7 @@
 #!/bin/bash
+#
+# Executes the content diff update -- finds new content in Rewind archive, and imports it to local site.
+#
 
 # ---------- VARIABLES CAN EITHER BE SET HERE MANUALLY ... :
 # Local WP DB table prefix.
