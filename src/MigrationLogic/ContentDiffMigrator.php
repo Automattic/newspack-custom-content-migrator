@@ -302,13 +302,13 @@ class ContentDiffMigrator {
 		}
 
 		// Update inserted Post's Author.
-        if ( ! is_null( $author_id_new ) && $author_id_new != $author_id_old ) {
+		if ( ! is_null( $author_id_new ) && $author_id_new != $author_id_old ) {
 			try {
 				$this->update_post_author( $post_id, $author_id_new );
 			} catch ( \Exception $e) {
 				$error_messages[] = $e->getMessage();
 			}
-        }
+		}
 
 		// Insert Comments.
 		$comment_ids_updates = [];
@@ -453,7 +453,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates Thumbnail IDs.
+	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
 	 * @param array $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 */
@@ -473,7 +473,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates Gutenberg Blocks' references for attachment IDs in created `post_content` and `post_excerpt` fields.
+	 * Updates Gutenberg Blocks' attachment IDs with new attachment IDs in created `post_content` and `post_excerpt` fields.
 	 *
 	 * @param array $imported_post_ids       An array of imported Post IDs, keys are old IDs, values are new IDs.
 	 * @param array $imported_attachment_ids An array of imported Attachment IDs, keys are old IDs, values are new IDs.
@@ -720,7 +720,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Simple select query with custom `where` conditions.
+	 * Simple reusable select query with custom `where` conditions.
 	 *
 	 * @param string $table_name          Table name to select from.
 	 * @param array  $where_conditions    Keys are columns, values are their values.
@@ -1021,7 +1021,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets all the tables in the active DB.
+	 * Gets a list of all the tables in the active DB.
 	 *
 	 * @return array List of all tables in DB.
 	 */
@@ -1057,7 +1057,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Wrapper for WP's native \get_user_by().
+	 * Wrapper for WP's native \get_user_by(), for easier testing.
 	 *
 	 * @param string     $field The field to retrieve the user with. id | ID | slug | email | login.
 	 * @param int|string $value A value for $field. A user ID, slug, email address, or login name.
@@ -1069,7 +1069,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Wrapper for WP's native \term_exists().
+	 * Wrapper for WP's native \term_exists(), for easier testing.
 	 *
 	 * @param int|string $term     The term to check. Accepts term ID, slug, or name..
 	 * @param string     $taxonomy Optional. The taxonomy name to use.
@@ -1082,7 +1082,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Wrapper for WP's native \get_post().
+	 * Wrapper for WP's native \get_post(), for easier testing.
 	 *
 	 * @param int|WP_Post|null $post   Optional. Post ID or post object. `null`, `false`, `0` and other PHP falsey
 	 *                                 values return the current global post inside the loop. A numerically valid post

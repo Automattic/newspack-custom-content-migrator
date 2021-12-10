@@ -63,11 +63,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 
 	/**
 	 * Enables to set expectations on a partial mock object, so that the exact list of arguments and return values is checked in
-	 * respect to the exact execution order, i.e. \PHPUnit\Framework\TestCase::at.
+	 * respect to the exact execution order (i.e. \PHPUnit\Framework\TestCase::at).
 	 *
 	 * This is a custom alternative which could otherwise have been obtained with `withConsecutive()` and `at()` but since these
-	 * two methods which will be deprecated in PHPUnit 10, here is a custom alternative to using those (perhaps PHPUnit 11 will
-	 * fill the missing functionality gap).
+	 * two methods will be deprecated in PHPUnit 10, here is a custom alternative to using those (perhaps PHPUnit 11 will fill
+	 * the missing functionality gap).
 	 *
 	 * @param \PHPUnit\Framework\MockObject\MockBuilder $mock MockBuilder object.
 	 * @param string $method Method mocked.

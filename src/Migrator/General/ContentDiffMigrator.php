@@ -136,6 +136,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
 		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
 		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
+
+		// Clean up log files.
 		$log_file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_LOG;
 		$log_file_err = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
 		$log_file_blocks_ids_updates = $import_dir . '/' . self::LIVE_DIFF_CONTENT_BLOCKS_IDS_LOG;
@@ -143,6 +145,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		unlink( $log_file_err );
 		unlink( $log_file_blocks_ids_updates );
 
+		// Validate params.
 		$file_ids_csv = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
 		if ( ! file_exists( $file_ids_csv ) ) {
 			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_csv ) );
@@ -176,6 +179,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$data = self::$logic->get_data( (int) $post_id, $live_table_prefix );
 			$post_type = $data[ self::$logic::DATAKEY_POST ][ 'post_type' ];
 			try {
+				// Import and create just the `posts` table record, and get the new ID.
 				$imported_post_id = self::$logic->insert_post( $data[ self::$logic::DATAKEY_POST ] );
 				if ( 'attachment' == $post_type ) {
 					$imported_attachment_ids[ $post_id ] = $imported_post_id;
@@ -188,6 +192,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				continue;
 			}
 
+			// Import all the related Post data.
 			$import_errors = self::$logic->import_post_data( $imported_post_id, $data );
 			if ( ! empty( $import_errors ) ) {
 				$msg_short = sprintf( 'Errors while importing %s, Live ID %d, imported ID %d.', $post_type, $post_id, $imported_post_id );
