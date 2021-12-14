@@ -11,7 +11,7 @@ use \WP_CLI;
  */
 class WashingtonMonthlyMigrator implements InterfaceMigrator {
 
-	CONST PARENT_ISSUES_CATEGORY = 'Issues';
+	CONST PARENT_ISSUES_CATEGORY = 'Magazine';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
