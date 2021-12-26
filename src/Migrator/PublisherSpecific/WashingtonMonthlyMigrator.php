@@ -64,6 +64,14 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator washingtonmonthly-update-cap-twitter-handles-to-links',
+			[ $this, 'cmd_change_cap_twitter_handles_to_links' ],
+			[
+				'shortdesc' => 'Previous code prepends Author\'s Twitter handles to their bios. This command upgrades them to clickable links.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -209,6 +217,45 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 			$msg = sprintf( 'Errors while assigning GAs to posts and saved to log %s', $log_file );
 			WP_CLI::error( $msg );
 			file_put_contents( $log_file, $msg );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator washingtonmonthly-migrate-acf-authors-to-cap`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_change_cap_twitter_handles_to_links( $args, $assoc_args )
+	{
+		global $wpdb;
+
+		$results = $wpdb->get_results( $wpdb->prepare( "select meta_id, meta_value from " . $wpdb->postmeta . " where meta_key = 'cap-description' and meta_value like 'Follow%on Twitter%' and meta_id <> 6837300;" ), ARRAY_A );
+		foreach ( $results as $res ) {
+			$meta_id = $res['meta_id'];
+			$meta_value = $res['meta_value'];
+
+			$matches = [];
+			preg_match( '|(Follow\s(?!on\sTwitter).*on\sTwitter\s@([^.]+)\.)|imxs', $meta_value, $matches );
+			$line_twitter = $matches[1] ?? null;
+			$handle       = $matches[2] ?? null;
+			if ( is_null( $line_twitter ) || is_null( $handle ) ) {
+				throw new \RuntimeException( sprintf( 'Regex not matched well for meta_id %d (possibly already updated).', $meta_id ) );
+			}
+
+			$new_line_twitter = $line_twitter;
+			$new_line_twitter = str_replace( '@' . $handle, '<a href="https://twitter.com/' . $handle . '>@' . $handle . '</a>', $new_line_twitter );
+
+			$new_line_twitter = str_replace( '  ', ' ', $new_line_twitter );
+
+			WP_CLI::log( $line_twitter );
+			WP_CLI::log( $new_line_twitter );
+			WP_CLI::log( '' );
+
+			$meta_value_updated = $meta_value;
+			$meta_value_updated = str_replace( $line_twitter, $new_line_twitter, $meta_value_updated );
+
+			$wpdb->query( $wpdb->prepare( "update " . $wpdb->postmeta . " set meta_value = %s where meta_id = %d;", $meta_value_updated, $meta_id ) );
 		}
 	}
 

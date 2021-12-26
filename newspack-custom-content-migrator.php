@@ -63,11 +63,11 @@ PluginSetup::register_migrators(
 		// Migrator\PublisherSpecific\RafushimpoMigrator::class,
 		// Migrator\PublisherSpecific\CharlestonCityPaperMigrator::class,
 		// Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
-		Migrator\PublisherSpecific\OurWeeklyMigrator::class,
-		Migrator\PublisherSpecific\GadisMigrator::class,
-		Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
-		Migrator\PublisherSpecific\ElLiberoMigrator::class,
 		// Migrator\PublisherSpecific\PublicIntegrityMigrator::class,
-		// Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
+		// Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
+		// Migrator\PublisherSpecific\OurWeeklyMigrator::class,
+		Migrator\PublisherSpecific\GadisMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
 	)
 );
