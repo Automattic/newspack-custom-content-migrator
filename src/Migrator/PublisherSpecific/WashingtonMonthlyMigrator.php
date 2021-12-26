@@ -244,9 +244,7 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 			}
 
 			$new_line_twitter = $line_twitter;
-			$new_line_twitter = str_replace( '@' . $handle, '<a href="https://twitter.com/' . $handle . '>@' . $handle . '</a>', $new_line_twitter );
-
-			$new_line_twitter = str_replace( '  ', ' ', $new_line_twitter );
+			$new_line_twitter = str_replace( '@' . $handle, '<a href="https://twitter.com/' . $handle . '" target="_blank">@' . $handle . '</a>', $new_line_twitter );
 
 			WP_CLI::log( $line_twitter );
 			WP_CLI::log( $new_line_twitter );
