@@ -1384,12 +1384,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_user_by', [
 			// First call is when trying to get the existing Post user, false will be returned because it is a new user.
-			[ 'user_login', $post_author_user_login, false ],
+			[ 'login', $post_author_user_login, false ],
 			// Comment 1 has no user ('user_id' => 0), so no call is made to it.
 			// Comment 2, existing $user_admin is returned.
-			[ 'user_login', 'admin', $user_admin ],
+			[ 'login', 'admin', $user_admin ],
 			// Comment 3.
-			[ 'user_login', $comment3_user_login, false ],
+			[ 'login', $comment3_user_login, false ],
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_user', [
 			// Inserting a new Post User.
@@ -1524,12 +1524,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			->will( $this->throwException( new \RuntimeException( 'err insert_postmeta_row' ) ) );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_user_by', [
 			// Trying to get the existing Post user, returns false because it is a new user.
-			[ 'user_login', $post_author_user_login, false ],
+			[ 'login', $post_author_user_login, false ],
 			// Comment 1 has no user.
 			// Comment 2, existing $user_admin is returned.
-			[ 'user_login', 'admin', $user_admin ],
+			[ 'login', 'admin', $user_admin ],
 			// Comment 3.
-			[ 'user_login', $comment3_user_login, false ],
+			[ 'login', $comment3_user_login, false ],
 		] );
 		$logic_partial_mock->method( 'insert_user' )
 		                   ->will( $this->throwException( new \RuntimeException( 'err insert_user' ) ) );
@@ -1572,7 +1572,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'err insert_postmeta_row',
 			// Inserting Post User.
 			'err insert_user',
-			'err update_post_author',
+// 'err update_post_author',
 			// Comment 1 doesn't have a User.
 			'err insert_comment',
 			// Comment 2 doesn't has an existing User.
