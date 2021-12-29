@@ -401,13 +401,13 @@ class ContentDiffMigrator {
 
 			// Insert Term Taxonomy records.
 			/*
-			 * Note -- A Term can be shared by multiple Taxonomies in WP, e.g. the same Term "blue" used by Taxonomies "category"
-			 * and "color".
+			 * Note -- A Term can be shared by multiple Taxonomies in WP, e.g. the same Term "blue" can be used by the Taxonomies
+			 * "category" and "tag", and also a custom Taxonomy called "color".
 			 */
 			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id_old );
 			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
 				// Get term_taxonomy or insert new.
-				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( $term_row[ 'name' ], $term_row[ 'slug' ], $term_taxonomy_row[ 'taxonomy' ] );
+				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( (int) $term_id_new, $term_taxonomy_row[ 'taxonomy' ] );
 				$term_taxonomy_id_old = $term_taxonomy_row[ 'term_taxonomy_id' ];
 				$term_taxonomy_id_new = null;
 				if ( $term_taxonomy_id_existing ) {
@@ -579,26 +579,20 @@ class ContentDiffMigrator {
 	/**
 	 * Checks if a Term Taxonomy exists.
 	 *
-	 * @param string $term_name Term name.
-	 * @param string $term_slug Term slug.
-	 * @param string $taxonomy  Taxonomy
+	 * @param int    $term_id  term_id.
+	 * @param string $taxonomy Taxonomy
 	 *
 	 * @return int|null term_taxonomy_id or null.
 	 */
-	public function get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy ) {
+	public function get_existing_term_taxonomy( $term_id, $taxonomy ) {
 		$var = $this->wpdb->get_var( $this->wpdb->prepare(
 			"SELECT tt.term_taxonomy_id
 			FROM {$this->wpdb->term_taxonomy} tt
-			JOIN {$this->wpdb->terms} t
-		        ON tt.term_id = t.term_id
-			WHERE t.name = %s
-			AND t.slug = %s
-		    AND tt.taxonomy = %s;",
-			$term_name,
-			$term_slug,
+			WHERE tt.term_id = %d
+			AND tt.taxonomy = %s;",
+			$term_id,
 			$taxonomy
 		) );
-
 		return is_numeric( $var ) ? (int) $var : $var;
 	}
 
