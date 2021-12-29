@@ -480,12 +480,10 @@ class ContentDiffMigrator {
 	 *
 	 * @param array $imported_post_ids       An array of imported Post IDs, keys are old IDs, values are new IDs.
 	 * @param array $imported_attachment_ids An array of imported Attachment IDs, keys are old IDs, values are new IDs.
-	 *
-	 * @return array Updates to be logged, contains subarrays of rows updated, e.g. ID, post_content, etc.
+	 * @param string $log_file_path          Optional. Full path to a log file. If provided, the method will save and append a
+	 *                                       detailed output of all the changes made.
 	 */
-	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids ) {
-		$log_updates = [];
-
+	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_path = null ) {
 		// Pattern for matching Gutenberg block's ID attribute value.
 		$pattern_id = '|
 			(\<\!--      # beginning of the block element
@@ -521,7 +519,7 @@ class ContentDiffMigrator {
 		$posts_table = $this->wpdb->posts;
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
 		$results = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );", $post_ids_new ), ARRAY_A );
-		foreach ( $results as $result ) {
+		foreach ( $results as $key_result => $result ) {
 			$id = $result[ 'ID' ];
 			$content_before = $result[ 'post_content' ];
 			$excerpt_before = $result[ 'post_excerpt' ];
@@ -529,19 +527,18 @@ class ContentDiffMigrator {
 			$excerpt_updated = preg_replace( $patterns, $replacements, $excerpt_before );
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
 				$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ], [ 'ID' => $id ] );
-				if ( false != $updated && $updated > 0 ) {
-					$log_updates[] = [
+				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+					$updates = [
 						'ID' => $id,
 						'post_content_before' => $content_before,
 						'post_excerpt_before' => $excerpt_before,
 						'post_content_after' => $content_updated,
 						'post_excerpt_after' => $excerpt_updated,
 					];
+					$this->log( $log_file_path, json_encode( $updates ) );
 				}
 			}
 		}
-
-		return $log_updates;
 	}
 
 	/**
@@ -1131,5 +1128,14 @@ class ContentDiffMigrator {
 		}
 
 		return $found;
+	}
+
+	/**
+	 * Logs error message to file.
+	 *
+	 * @param string $msg Error message.
+	 */
+	public function log( $file, $msg ) {
+		file_put_contents( $file, $msg . "\n", FILE_APPEND );
 	}
 }

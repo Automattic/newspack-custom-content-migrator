@@ -141,9 +141,15 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$log_file = $import_dir . '/' . self::LIVE_DIFF_CONTENT_LOG;
 		$log_file_err = $import_dir . '/' . self::LIVE_DIFF_CONTENT_ERR_LOG;
 		$log_file_blocks_ids_updates = $import_dir . '/' . self::LIVE_DIFF_CONTENT_BLOCKS_IDS_LOG;
-		unlink( $log_file );
-		unlink( $log_file_err );
-		unlink( $log_file_blocks_ids_updates );
+		if ( file_exists( $log_file ) ) {
+			unlink( $log_file );
+		}
+		if ( file_exists( $log_file_err ) ) {
+			unlink( $log_file_err );
+		}
+		if ( file_exists( $log_file_blocks_ids_updates ) ) {
+			unlink( $log_file_blocks_ids_updates );
+		}
 
 		// Validate params.
 		$file_ids_csv = $import_dir . '/' . self::LIVE_DIFF_CONTENT_IDS_CSV;
@@ -208,14 +214,15 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Flush the cache in order for the `$wpdb->update()`s to sink in.
 		wp_cache_flush();
 
-		WP_CLI::log( 'Updating ID references...' );
+		WP_CLI::log( 'Updating Post ID references...' );
 		foreach ( $imported_post_ids as $post_id_old => $post_id_new ) {
 			self::$logic->update_post_parent( $post_id_new, $imported_post_ids );
 		}
-		self::$logic->update_featured_images( $imported_attachment_ids );
-		$updates = self::$logic->update_blocks_ids( $imported_post_ids, $imported_attachment_ids );
-		if ( ! empty( $updates ) ) {
-			$this->log( $log_file_blocks_ids_updates, json_encode( $updates ) );
+		if ( ! empty( $imported_attachment_ids ) ) {
+			WP_CLI::log( 'Updating Featured images IDs...' );
+			self::$logic->update_featured_images( $imported_attachment_ids );
+			WP_CLI::log( 'Updating attachment IDs in block content...' );
+			self::$logic->update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_blocks_ids_updates );
 		}
 		WP_CLI::success( 'Done updating IDs.' );
 
