@@ -289,6 +289,9 @@ class ContentDiffMigrator {
 		$author_id_new = null;
 		if ( $user_existing instanceof WP_User ) {
 			$author_id_new = (int) $user_existing->ID;
+		} else if ( is_null( $author_row ) ) {
+			// Some source posts might have author value 0.
+			$author_id_new = 0;
 		} else {
 			// Insert a new Author User.
 			try {
