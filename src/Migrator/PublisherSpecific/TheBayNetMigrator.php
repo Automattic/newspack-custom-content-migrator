@@ -170,8 +170,21 @@ class TheBayNetMigrator implements InterfaceMigrator {
 			"Health" => "Health & Wellness",
 			"Politics" => "Government & Politics",
 			"Opinion" => "Opinions",
+			// ---- 2nd round of Category renaming
+			"Community" => "My Town",
+			"Community - Lifestyle" => "My Town - Lifestyle",
+			"Culture" => "My Town",
+			"First Responder Spotlight" => "Fire & Rescue",
+			"Public Works" => "Government & Politics",
+			"Real Estate Listings" => "Real Estate",
+			"Southern Maryland Business" => "Economy & Business",
+			"Travel & Tourism" => "My Town",
+			"Wedding Spotlight" => "Weddings",
+			// ---- 3rd round of Category renaming
+			"Outdoors Spotlight" => "Outdoors",
+			"Classifieds - Automotive" => "Automotive",
+			"Classifieds - Pets" => "Pets",
 		] );
-
 
 		WP_CLI::line( '3/4 Removing Categories.' );
 		$this->remove_categories( [ "Uncategorised", ] );
