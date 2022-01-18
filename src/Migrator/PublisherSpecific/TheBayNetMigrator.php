@@ -180,6 +180,10 @@ class TheBayNetMigrator implements InterfaceMigrator {
 			"Southern Maryland Business" => "Economy & Business",
 			"Travel & Tourism" => "My Town",
 			"Wedding Spotlight" => "Weddings",
+			// ---- 3rd round of Category renaming
+			"Outdoors Spotlight" => "Outdoors",
+			"Classifieds - Automotive" => "Automotive",
+			"Classifieds - Pets" => "Pets",
 		] );
 
 		WP_CLI::line( '3/4 Removing Categories.' );
