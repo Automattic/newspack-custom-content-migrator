@@ -56,6 +56,76 @@ class TheBayNetMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-update-user-fullnames',
+			[ $this, 'cmd_update_user_fullnames' ],
+			[
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'authors-file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+
+	/**
+	 * Update author names with their full names.
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_user_fullnames( $args, $assoc_args ) {
+		$authors_file = $assoc_args[ 'authors-file' ] ?? null;
+		global $wpdb;
+
+		$authors = include $authors_file;
+		foreach ( $authors as $author_nicename => $author_full_name ) {
+			if ( strlen( $author_nicename ) > 60 ) {
+				$author_nicename_60 = substr( $author_nicename, 0, 60 );
+				unset( $authors[ $author_nicename ] );
+				$authors[ $author_nicename_60 ] = $author_full_name;
+			}
+		}
+		$results = $wpdb->get_results( "select ID, user_login, user_nicename from wp_users;", ARRAY_A );
+		$not_updated_user_ids = [];
+		$error_ids = [];
+		foreach ( $results as $key_result => $result ) {
+			$user_ID = $result['ID'];
+			$user_login = $result['user_login'];
+			// User_nicename is what's displayed on post template.
+			$user_nicename = $result['user_nicename'];
+
+			echo sprintf( "%d/%d ID %d\n", $key_result+1, count($results), $user_ID );
+
+			if ( isset( $authors[ $user_nicename ] ) ) {
+				$author_display_name = $authors[ $user_nicename ];
+				$author_display_name_60 = substr( $author_display_name, 0, 60);
+				$updated = wp_update_user( array(
+					'ID' => $user_ID,
+					// Can be long.
+					'first_name' => $author_display_name,
+					'nickname' => $author_display_name,
+					'display_name' => $author_display_name,
+					// 60 chars max.
+					'user_nicename' => $author_display_name_60,
+				) );
+				if ( is_wp_error( $updated ) ) {
+					$d=1;
+					$error_ids[] = $user_ID;
+					echo sprintf( "xxx\n" );
+				}
+			} else {
+				$not_updated_user_ids[] = $user_ID;
+				echo sprintf( "---\n" );
+			}
+		}
+
+		echo sprintf( "not updated IDs:\n%s", implode(',', $not_updated_user_ids) );
+		echo sprintf( "error IDs:\n%s", implode(',', $error_ids) );
 	}
 
 	/**
