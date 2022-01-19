@@ -68,6 +68,7 @@ PluginSetup::register_migrators(
 		// Migrator\PublisherSpecific\OurWeeklyMigrator::class,
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoContentMigrator::class,
 		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
 	)
 );
