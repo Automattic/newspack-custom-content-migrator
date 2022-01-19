@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \WP_CLI;
 
 /**
@@ -70,8 +71,83 @@ class TheBayNetMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-unslugify-slugs',
+			[ $this, 'cmd_unslugify_slugs' ],
+			[
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'user-ids-csv',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-convert-users-to-gas',
+			[ $this, 'cmd_convert_users_to_gas' ],
+		);
 	}
 
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_convert_users_to_gas( $args, $assoc_args ) {
+		$cap_logic = new CoAuthorPlus;
+		global $wpdb;
+
+		$results = $wpdb->get_results( "select * from wp_users where user_email = ''; ", ARRAY_A );
+
+		foreach ( $results as $key_result => $result ) {
+			$user_id = $result['ID'];
+			$display_name = $result['display_name'];
+			try {
+
+				// Create GA
+				$ga_id = $cap_logic->create_guest_author([
+					'display_name' => $display_name,
+				]);
+
+				// Assign posts to GA.
+				$post_results = $wpdb->get_results( "select * from wp_posts where post_author = $user_id and post_type in ('post', 'page'); ", ARRAY_A );
+				foreach ( $post_results as $key_post => $post_result ) {
+					echo sprintf( "%d/%d %d -- %d/%d\n", $key_result+1, count($results), $user_id, $key_post+1, count($post_results) );
+					$post_id = $post_result['ID'];
+					$cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id );
+				}
+
+				$user = get_user_by( 'ID', $user_id );
+				$cap_logic->link_guest_author_to_wp_user( $ga_id, $user );
+
+			} catch ( \Exception $e ) {
+				$d=1;
+			}
+		}
+
+		wp_cache_flush();
+		$d=1;
+	}
+
+	/**
+	 * Prepare unslugified version of username slugs (logins).
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_unslugify_slugs( $args, $assoc_args ) {
+		$user_ids_csv = $assoc_args['user-ids-csv'] ?? null;
+		global $wpdb;
+
+		$results = $wpdb->get_results( "select ID, user_login from wp_users where ID in ($user_ids_csv);", ARRAY_A );
+		foreach ( $results as $key_result => $result ) {
+			$user_id = $result['ID'];
+			$user_login = $result['user_login'];
+			$unslugified_login = ucwords( str_replace( '-', ' ', $user_login ), ' ' );
+			echo sprintf( "$user_id \n$user_login \n$unslugified_login \n\n" );
+		}
+	}
 
 	/**
 	 * Update author names with their full names.
