@@ -93,8 +93,42 @@ class TheBayNetMigrator implements InterfaceMigrator {
 			'newspack-content-migrator thebaynet-remove-mmddyyyy-categories',
 			[ $this, 'cmd_remove_mmddyyyy_categories' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-add-gallery-category',
+			[ $this, 'cmd_add_gallery_category' ],
+		);
 	}
 
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_add_gallery_category( $args, $assoc_args ) {
+		global $wpdb;
+
+		$gal_cat = get_category_by_slug( 'gallery' );
+		if ( false == $gal_cat ) {
+			echo "gallery cat not found\n";
+			exit;
+		}
+
+		$errors = [];
+		$results = $wpdb->get_results( "select ID, post_content from wp_posts where post_type = 'post' and post_status = 'publish' and post_content like '%[gallery id%' ; ", ARRAY_A );
+		foreach ( $results as $key_result => $result ) {
+			$post_id = $result['ID'];
+			echo sprintf( "%d/%d %d\n", $key_result+1, count($results), $post_id );
+
+			$set = wp_set_post_categories( $post_id, [ $gal_cat->term_id ], true );
+			if ( false == $set || is_wp_error( $set ) ) {
+				$errors[] = $post_id;
+			}
+		}
+
+		if ( ! empty( $errors) ) {
+			echo sprintf( "errors:\n%s\n", implode(',', $errors));
+		}
+		return;
+	}
 	/**
 	 * @param $args
 	 * @param $assoc_args
@@ -104,7 +138,7 @@ class TheBayNetMigrator implements InterfaceMigrator {
 			'hide_empty'             => false,
 			'number' => 0,
 		]);
-		
+
 		$not_deleted = [];
 		$error = [];
 		foreach ( $categories as $key_category => $category ) {
