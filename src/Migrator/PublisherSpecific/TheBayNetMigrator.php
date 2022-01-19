@@ -99,7 +99,10 @@ class TheBayNetMigrator implements InterfaceMigrator {
 		$cap_logic = new CoAuthorPlus;
 		global $wpdb;
 
-		$results = $wpdb->get_results( "select * from wp_users where user_email = ''; ", ARRAY_A );
+		$results = $wpdb->get_results( "select * from wp_users where user_email = '' ; ", ARRAY_A );
+		// $results = $wpdb->get_results( "select * from wp_users where ID in (
+		//      6665,7044,6317,6090,7120,6085,6885,7328,7284,7056,7184,5760,6956,6354,7088,6434,6741,7319,7267,5702,4496,6030,6671,5832,5824,6894,7086,6472,6212,5204,6077,6731,7105,6908,7179,6937,5853,7206,7282,7067,6171,6359,6523,5695,6361,6326,6163,5798,6258,6193,6294,6893,7154,6033,6043,7325,5700,7247,6499,6878,6421,5970,5976,6449,5699,5761,7194,6496,7134,4393,6052,5991,6412,6268,7202,5979,6269,6170,5903,6096,7065,6813,6553,6351,6578,5931,6784,6098,7109,6355,6448,7167,6622,7195,6256,6546,6476,7326,4544,6733,6942,6943,6492,6494,7294,7228,6964,4655,6666,4252,4451,4152,4024,6855,6899,6839,6959,6297,4664,5128,4467,5398,6659,6924,6658,4377,5519,6547,4205,4362,5631,6757,4606,6982,4777,4879,6846,7253,6752,4674,4055,6972,5329,5213,5395,4364,4154,6515,6184,6756,6977,4515,4411,5550,6334,5632,5086,5238,5240,6973,6843,6298,6295,4611,4175,4815,7258,6903,6904,6133,4659,6296,4484,4358,5406,6191,6907,6902,4004,6755,3986,6386,4040,5891,5633,4494,6377,4429,7177,6838,6533,6204,4581,4978,4466,4717,6568,4320,5998,6990,6606,5694,4282,6604,6906,5511,6975,6614,6521,6176,6955,5847,6474,6624,6626,5634,6150,7327,4713,6744,4167,6032,6247,6250,6070,5812,5902,6429,4051,6615,7024,7123,6005,6433,4483,5698,6608,6042,6729,5203
+		// ) ; ", ARRAY_A );
 
 		foreach ( $results as $key_result => $result ) {
 			$user_id = $result['ID'];
@@ -112,7 +115,8 @@ class TheBayNetMigrator implements InterfaceMigrator {
 				]);
 
 				// Assign posts to GA.
-				$post_results = $wpdb->get_results( "select * from wp_posts where post_author = $user_id and post_type in ('post', 'page'); ", ARRAY_A );
+				$post_results = $wpdb->get_results( "select * from wp_posts where post_author = $user_id and post_type in ('post', 'page') ; ", ARRAY_A );
+
 				foreach ( $post_results as $key_post => $post_result ) {
 					echo sprintf( "%d/%d %d -- %d/%d\n", $key_result+1, count($results), $user_id, $key_post+1, count($post_results) );
 					$post_id = $post_result['ID'];
