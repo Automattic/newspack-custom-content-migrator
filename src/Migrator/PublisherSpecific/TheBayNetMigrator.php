@@ -89,6 +89,42 @@ class TheBayNetMigrator implements InterfaceMigrator {
 			'newspack-content-migrator thebaynet-convert-users-to-gas',
 			[ $this, 'cmd_convert_users_to_gas' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-remove-mmddyyyy-categories',
+			[ $this, 'cmd_remove_mmddyyyy_categories' ],
+		);
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_remove_mmddyyyy_categories( $args, $assoc_args ) {
+		$categories = get_categories([
+			'hide_empty'             => false,
+			'number' => 0,
+		]);
+		
+		$not_deleted = [];
+		$error = [];
+		foreach ( $categories as $key_category => $category ) {
+			echo sprintf( "%d/%d %d %s\n", $key_category+1, count( $categories ), $category->term_id, $category->name );
+			$matches = [];
+			preg_match( '|(\d{2}/\d{2}/\d{4})|', $category->name, $matches );
+			if ( isset( $matches[1] ) && $matches[1] == $category->name ) {
+				$deleted = wp_delete_category( $category->term_id );
+				if ( is_wp_error( $deleted ) ) {
+					$error[ $category->term_id ] = $category->name;
+				} else {
+					$deleted[ $category->term_id ] = $category->name;
+				}
+			} else {
+				$not_deleted[ $category->term_id ] = $category->name;
+			}
+		}
+
+		echo sprintf( "\nnot deleted:\n%s\n", implode( ',', array_keys( $not_deleted ) ) );
+		echo sprintf( "\nerrors:\n%s\n", implode( ',', array_keys( $error ) ) );
 	}
 
 	/**
