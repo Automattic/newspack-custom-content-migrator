@@ -16,7 +16,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	 *
 	 * @var ElLiberoContentMigrator $instance
 	 */
-	private static ElLiberoContentMigrator $instance;
+	private static $instance;
 
 	/**
 	 * Template string for embedded SoundCloud content.
@@ -35,6 +35,13 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	protected string $audio_embed = '<!-- wp:audio {"id":{child_id}} -->
 	<figure class="wp-block-audio"><audio controls src="{s3_upload_url}"></audio></figure>
 	<!-- /wp:audio -->';
+
+	/**
+	 * Template string for embedded HTML content.
+	 *
+	 * @var string $html_embed
+	 */
+	protected string $html_embed = '<!-- wp:html -->{html_content}<!-- /wp:html -->';
 
 	/**
 	 * Constructor.
@@ -223,10 +230,17 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 				$parent_post = $wpdb->get_results( $parent_post_sql );
 				$parent_post = array_shift( $parent_post );
 
+				$html_content = strtr(
+					$this->html_embed,
+					[
+						'{html_content}' => $html_content['body'],
+					]
+				);
+
 				$wpdb->update(
 					$wpdb->posts,
 					[
-						'post_content' => $html_content['body'],
+						'post_content' => $html_content,
 					],
 					[
 						'ID' => $parent_post->post_parent,
