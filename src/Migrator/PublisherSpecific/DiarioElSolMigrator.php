@@ -11,7 +11,7 @@ use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogi
 use \WP_CLI;
 
 /**
- * Custom migration scripts for Washington Monthly.
+ * Custom migration scripts for Diario el Sol.
  */
 class DiarioElSolMigrator implements InterfaceMigrator {
 	// Logs.
@@ -253,11 +253,16 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			$original_id = $category['_id']['$oid'];
 
 			// Check if we have already imported the category.
-			$category_id = wp_create_category( sanitize_title( $category['name'] ) );
+			$category_id = wp_insert_category(
+				[
+					'cat_name'          => $category['name'],
+					'category_nicename' => $category['url'],
+				]
+			);
 
 			if ( is_wp_error( $category_id ) ) {
-				$this->log( self::CATEGORIES_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $category_id->get_error_message(), wp_json_encode( $category ) ) );
-				WP_CLI::warning( sprintf( 'Error creating user %s -- %s [%s]', $original_id, $category_id->get_error_message(), wp_json_encode( $category ) ) );
+				$this->log( self::CATEGORIES_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $category_id->get_error_message(), wp_json_encode( $category ) ), false );
+				WP_CLI::warning( sprintf( 'Error creating category %s -- %s [%s]', $original_id, $category_id->get_error_message(), wp_json_encode( $category ) ) );
 				continue;
 			}
 
@@ -266,7 +271,6 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			// Set Category Meta.
 			update_term_meta( $category_id, 'original_id', $original_id );
 			$this->log( self::CATEGORIES_LOGS, sprintf( 'Imported category: %s', $original_id ) );
-			WP_CLI::warning( sprintf( 'Imported category: %s', $original_id ) );
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d categories took %d mins.', $added_categories, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
@@ -297,11 +301,15 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			$original_id = $tag['_id']['$oid'];
 
 			// Check if we have already imported the tag.
-			$created_tag = wp_create_tag( sanitize_title( $tag['name'] ) );
+			$created_tag = wp_insert_term(
+				$tag['name'],
+				'post_tag',
+				[ 'slug' => ltrim( $tag['url'], '/' ) ]
+			);
 
 			if ( is_wp_error( $created_tag ) ) {
-				$this->log( self::TAGS_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $tag->get_error_message(), wp_json_encode( $tag ) ) );
-				WP_CLI::warning( sprintf( 'Error creating user %s -- %s [%s]', $original_id, $tag->get_error_message(), wp_json_encode( $tag ) ) );
+				$this->log( self::TAGS_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $created_tag->get_error_message(), wp_json_encode( $tag ) ), false );
+				WP_CLI::warning( sprintf( 'Error creating user %s -- %s [%s]', $original_id, $created_tag->get_error_message(), wp_json_encode( $tag ) ) );
 				continue;
 			}
 
@@ -316,7 +324,6 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			}
 
 			$this->log( self::TAGS_LOGS, sprintf( 'Imported tag: %s', $original_id ) );
-			WP_CLI::warning( sprintf( 'Imported tag: %s', $original_id ) );
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d tags took %d mins.', $added_tags, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
@@ -343,11 +350,6 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 		foreach ( $posts as $post ) {
 			$original_id = $post['_id']['$oid'];
-			if ( count( $post['tags'] ) > 1 ) {
-				print_r( json_encode( $post ) );
-				die();
-			}
-			continue;
 
 			// Check if we have already imported the post.
 			$existing_posts = get_posts(
@@ -357,10 +359,8 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 				]
 			);
 
-			$post_id = null;
 			if ( count( $existing_posts ) > 0 ) {
-				// TODO: Update Post.
-				// $post_id = $existing_posts[0]->ID; ???
+				$this->log( self::POSTS_LOGS, sprintf( 'Skipped post %s as it\'s already imported with the ID: %d', $original_id, $existing_posts[0]->ID ) );
 			} else {
 				// Get post author.
 				$author_id          = 0;
@@ -388,7 +388,7 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				// Create Post.
 				$post_data = [
-					'ID'            => $post_id,
+					'ID'            => null,
 					'post_type'     => 'post',
 					'post_title'    => $post['title'],
 					'post_content'  => $post['body'],
@@ -477,30 +477,46 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				// Set Post Meta.
 				// Categories.
-				$categories = $this->get_term_by_meta(
-					'original_id',
-					array_map(
+				$raw_categories     = $this->get_term_by_meta( 'original_id', $post['categories'] );
+				$created_categories = [];
+				if ( empty( $raw_categories ) ) {
+					// Sometimes categories are set from the tags (e.g. note #oid = 59ce420ae101583a8815faa5).
+					$categories_from_tags = $this->get_term_by_meta( 'original_id', $post['categories'], 'post_tag' );
+					foreach ( $categories_from_tags as $category_from_tag ) {
+						$created_category = category_exists( $category_from_tag->name );
+						if ( $created_category ) {
+							$created_categories[] = $created_category;
+						} else {
+
+							$created_category = wp_insert_category(
+								[
+									'cat_name'          => $category_from_tag->name,
+									'category_nicename' => $category_from_tag->slug,
+								],
+								true
+							);
+							if ( is_wp_error( $created_category ) ) {
+								WP_CLI::error( sprintf( 'Error creating Category from Tag $s: %s', $category_from_tag->name, $created_category->get_error_message() ) );
+							} else {
+								$created_categories[] = $created_category;
+							}
+						}
+					}
+				}
+
+				wp_set_post_categories(
+					$post_id,
+					empty( $raw_categories ) ? $created_categories : array_map(
 						function( $category ) {
-								return $category['$oid'];
+							return $category->term_id;
 						},
-						$post['categories']
+						$raw_categories
 					)
 				);
-				var_dump( $post );
-				var_dump( $post['categories'] );
-				var_dump( $categories );
-				die();
+
 				// Tags.
-				$tags   = $this->get_term_by_meta(
-					'original_id',
-					array_map(
-						function( $tag ) {
-							return $tag['$oid'];
-						},
-						$post['tags']
-					),
-					'post_tag'
-				);
+				$tags = $this->get_term_by_meta( 'original_id', $post['tags'], 'post_tag' );
+
 				$result = wp_set_post_tags(
 					$post_id,
 					array_map(
@@ -519,13 +535,12 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				// Set the rest of post meta.
 				update_post_meta( $post_id, 'original_id', $original_id );
-				print_r( json_encode( $post ) );
-				die();
 				foreach ( [ 'isPushDown', 'isHighlighted', 'articleRssLink', 'sendNotification', 'notShowOnLast', 'notShowOnRanking', 'isRss', 'isSponsored' ] as $post_meta_to_import ) {
 					if ( array_key_exists( $post_meta_to_import, $post ) && ! is_null( $post[ $post_meta_to_import ] ) ) {
 						update_term_meta( $post_id, "imported_$post_meta_to_import", $post[ $post_meta_to_import ] );
 					}
 				}
+				WP_CLI::line( sprintf( 'Imported Post %s with ID: %d.', $original_id, $post_id ) );
 			}
 		}
 
@@ -572,12 +587,19 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 	/**
 	 * Get term by custom meta/taxonomy
 	 *
-	 * @param string   $meta_key Meta to look for.
-	 * @param string[] $meta_values Meta value.
-	 * @param string   $taxonomy Term taxonomy.
+	 * @param string     $meta_key Meta to look for.
+	 * @param string[][] $raw_meta_values Raw Meta value indexed by 'oid' key.
+	 * @param string     $taxonomy Term taxonomy.
 	 * @return array List of terms found.
 	 */
-	private function get_term_by_meta( $meta_key, $meta_values, $taxonomy = 'category' ) {
+	private function get_term_by_meta( $meta_key, $raw_meta_values, $taxonomy = 'category' ) {
+		$meta_values = array_map(
+			function( $tag ) {
+				return $tag['$oid'];
+			},
+			$raw_meta_values
+		);
+
 		$args = [
 			'hide_empty' => false,
 			'meta_query' => [
@@ -626,8 +648,11 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 	 * @param string $file    File name or path.
 	 * @param string $message Log message.
 	 */
-	private function log( $file, $message ) {
+	private function log( $file, $message, $to_cli = true ) {
 		$message .= "\n";
+		if ( $to_cli ) {
+			WP_CLI::line( $message );
+		}
 		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
