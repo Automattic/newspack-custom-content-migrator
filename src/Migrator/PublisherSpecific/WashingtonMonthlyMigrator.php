@@ -681,9 +681,7 @@ class WashingtonMonthlyMigrator implements InterfaceMigrator {
 			join `wp_rbTMja_postmeta` pm on pm.post_id = p.ID
 			where p.post_type = 'post'
 			and pm.meta_key = 'author'
-			and pm.meta_value <> ''
-and p.ID = 131884
-;",
+			and pm.meta_value <> '' ; ",
 			ARRAY_A
 		);
 		foreach ( $results as $result ) {
