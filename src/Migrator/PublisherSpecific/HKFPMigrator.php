@@ -83,7 +83,60 @@ class HKFPMigrator implements InterfaceMigrator {
 			]
 		);
 
-  }
+		WP_CLI::add_command(
+			'newspack-content-migrator hkfp-revert-remove-sn-captions',
+			[ $this, 'cmd_hkfp_revert_remove_sn_captions' ],
+		);
+	}
+
+	public function cmd_hkfp_revert_remove_sn_captions() {
+		global $wpdb;
+
+		$table_revert_wpposts    = 'snreplace_revert_wp_posts';
+		$table_revert_wppostmeta = 'snreplace_revert_wp_postmeta';
+
+		// Check if revert tables exist.
+		$exists_revert_wpposts = $wpdb->query( "show tables like '$table_revert_wpposts';" );
+		if ( 1 !== $exists_revert_wpposts ) {
+			WP_CLI::error( sprintf( "Table %s not found.", $table_revert_wpposts ) );
+		}
+		$exists_revert_wppostmeta = $wpdb->query( "show tables like '$table_revert_wppostmeta';" );
+		if ( 1 !== $exists_revert_wppostmeta ) {
+			WP_CLI::error( sprintf( "Table %s not found.", $table_revert_wppostmeta ) );
+		}
+
+		$results_posts = $wpdb->get_results( "select * from $table_revert_wpposts ;", ARRAY_A );
+		foreach ( $results_posts as $result_post ) {
+			$post_id = $result_post['ID'];
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $result_post['post_content'],
+					'post_title' => $result_post['post_title'],
+					'post_excerpt' => $result_post['post_excerpt'],
+				],
+				[ 'ID' => $post_id ]
+			);
+
+			WP_CLI::log( sprintf( "reverted attID %d", $post_id ) );
+		}
+
+		$results_postmeta = $wpdb->get_results( "select * from $table_revert_wppostmeta ;", ARRAY_A );
+		foreach ( $results_postmeta as $result_postmeta ) {
+			$meta_id = $result_postmeta['meta_id'];
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $result_postmeta['meta_value'] ],
+				[ 'meta_id' => $meta_id ]
+			);
+
+			WP_CLI::log( sprintf( "reverted meta for attID %d", $result_postmeta['post_id'] ) );
+		}
+
+		wp_cache_flush();
+
+		WP_CLI::log( "Done." );
+	}
 
 	/**
 	 * Run through all posts and make sure In Pictures ones are set to the Wide template.

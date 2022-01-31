@@ -71,3 +71,4 @@ PluginSetup::register_migrators( array(
 	Migrator\PublisherSpecific\ElLiberoMigrator::class,
 	Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
 ) );
+
