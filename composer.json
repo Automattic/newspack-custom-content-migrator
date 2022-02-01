@@ -10,13 +10,23 @@
     {
       "url": "https://github.com/Automattic/newspack-cms-importers.git",
       "type": "git"
+    },
+    {
+      "url": "https://github.com/Automattic/newspack-content-converter.git",
+      "type": "git"
+    },
+    {
+      "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
+      "type": "git"
     }
   ],
   "require": {
     "paquettg/php-html-parser": "^3.1",
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
-    "automattic/newspack-cms-importers": "dev-master"
+    "automattic/newspack-cms-importers": "dev-master",
+    "automattic/newspack-content-converter": "dev-master",
+    "automattic/newspack-post-image-downloader": "dev-master"
   },
   "require-dev": {
     "automattic/vipwpcs": "^2.0",
