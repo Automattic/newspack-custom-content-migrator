@@ -96,7 +96,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		global $wpdb;
 
 		// Make sure NGG DB tables are available.
-		$this->validate_db_tables_exist( [ $wpdb->prefix . 'ngg_albums', $wpdb->prefix . 'ngg_gallery', $wpdb->prefix . 'ngg_pictures' ] );
+		$this->validate_db_tables_exist( [ $wpdb->prefix . 'ngg_album', $wpdb->prefix . 'ngg_gallery', $wpdb->prefix . 'ngg_pictures' ] );
 
 		$ngg_options = get_option( 'ngg_options' );
 		$this->galleries_rows = $wpdb->get_results( " select * from {$wpdb->prefix}ngg_gallery ; ", ARRAY_A );
@@ -121,6 +121,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 
 			echo sprintf( "imported att_id %d\n", $att_id );
 		}
+echo 'done'; exit;
 
 
 		echo sprintf( "\nCONVERTING NEXTGEN GALLERIES TO GUTENBERG GALLERY BLOCKS...\n" );
