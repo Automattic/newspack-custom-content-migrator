@@ -46,6 +46,7 @@ PluginSetup::register_migrators( array(
 		Migrator\General\FeaturedImagesMigrator::class,
 		Migrator\General\ContentDiffMigrator::class,
 		Migrator\General\WooCommOrdersAndSubscriptionsMigrator::class,
+		Migrator\General\NextgenGalleryMigrator::class,
 
 		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,

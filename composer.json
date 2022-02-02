@@ -10,13 +10,18 @@
     {
       "url": "https://github.com/Automattic/newspack-cms-importers.git",
       "type": "git"
+    },
+    {
+      "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
+      "type": "git"
     }
   ],
   "require": {
     "paquettg/php-html-parser": "^3.1",
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
-    "automattic/newspack-cms-importers": "dev-master"
+    "automattic/newspack-cms-importers": "dev-master",
+    "automattic/newspack-post-image-downloader": "dev-master"
   },
   "require-dev": {
     "automattic/vipwpcs": "^2.0",
@@ -26,5 +31,8 @@
     "dealerdirect/phpcodesniffer-composer-installer": "^0.7.0",
     "yoast/phpunit-polyfills": "^1.0",
     "phpunit/phpunit": "7.*"
+  },
+  "config": {
+    "vendor-dir": "vendor"
   }
 }
