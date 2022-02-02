@@ -14,6 +14,10 @@
     {
       "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
       "type": "git"
+    },
+    {
+      "url": "https://github.com/Automattic/newspack-content-converter.git",
+      "type": "git"
     }
   ],
   "require": {
@@ -21,7 +25,8 @@
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
     "automattic/newspack-cms-importers": "dev-master",
-    "automattic/newspack-post-image-downloader": "dev-master"
+    "automattic/newspack-post-image-downloader": "dev-master",
+    "automattic/newspack-content-converter": "dev-master"
   },
   "require-dev": {
     "automattic/vipwpcs": "^2.0",
