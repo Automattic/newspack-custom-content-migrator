@@ -81,7 +81,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		WP_CLI::add_command( 'newspack-content-migrator nextgen-gallery-to-gutenberg-gallery-blocks',
 			[ $this, 'cmd_nextgen_galleries_to_gutenberg_gallery_blocks' ],
 			[
-				'shortdesc' => 'Import NextGen images to Media Library, and converts NextGen Galleries throughout all Posts and Pages to Gutenberg Gallery blocks.',
+				'shortdesc' => 'Import NextGen images to Media Library, and converts NextGen Galleries throughout all Posts and Pages to Gutenberg Gallery blocks. Before running this command, make sure NextGen DB tables are present locally, and that the gallery folder is found at the configured location and contains all the NextGen images and has correct file permissions.',
 			]
 		);
 	}
@@ -157,7 +157,8 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		$alt = $image_row[ 'alttext' ];
 
 		// Gallery and path info.
-		$image_path = ABSPATH . $gallery_row[ 'path' ];
+		$atomic_compatible_public_folder_path = rtrim( WP_CONTENT_DIR, '/wp-content' );
+		$image_path = $atomic_compatible_public_folder_path . $gallery_row[ 'path' ];
 		$image_file_full_path = $image_path . $filename;
 
 		// Check if file exists.
