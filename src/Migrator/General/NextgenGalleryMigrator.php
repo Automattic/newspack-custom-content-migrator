@@ -13,6 +13,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 
 	const META_NGG_PICTUREID = '_newspack_ngg_pictureid';
 	const META_NGG_PICTURE_GALLERYID = '_newspack_ngg_picture_galleryid';
+	const META_NGG_PICTURE_SORTORDER = '_newspack_ngg_picture_sortorder';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -44,6 +45,9 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 */
 	private $galleries_rows;
 
+	/**
+	 * NextgenGalleryMigrator constructor.
+	 */
 	private function __construct() {
 		$this->downloader = new Downloader();
 		$this->posts_logic = new PostsLogic();
@@ -73,23 +77,16 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		WP_CLI::add_command( 'newspack-content-migrator nextgen-gallery-to-gutenberg-gallery-blocks',
 			[ $this, 'cmd_nextgen_galleries_to_gutenberg_gallery_blocks' ],
 			[
-				'shortdesc' => 'Import NextGen images to Media Library, and converts NextGen Gallery Blocks to Gutenberg Gallery blocks.',
-				// 'synopsis'  => [
-				// 	[
-				// 		'type'        => 'assoc',
-				// 		'name'        => 'unset-author-tags',
-				// 		'description' => 'If used, will unset these author tags from the posts.',
-				// 		'optional'    => true,
-				// 		'repeating'   => false,
-				// 	],
-				// ],
+				'shortdesc' => 'Import NextGen images to Media Library, and converts NextGen Galleries throughout all Posts and Pages to Gutenberg Gallery blocks.',
 			]
 		);
 	}
 
 	/**
-	 * @param $args
-	 * @param $assoc_args
+	 * Callable for `newspack-content-migrator nextgen-gallery-to-gutenberg-gallery-blocks`.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
 	 */
 	public function cmd_nextgen_galleries_to_gutenberg_gallery_blocks( $args, $assoc_args ) {
 		global $wpdb;
@@ -115,14 +112,17 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 
 
 		echo sprintf( "\nCONVERTING NEXTGEN GALLERIES TO GUTENBERG GALLERY BLOCKS...\n" );
-		// $posts_ids = $this->posts_logic->get_all_posts_ids();
-// TODO
+		$posts_ids = $this->posts_logic->get_all_posts_ids( $post_type = [ 'post', 'page' ] );
+// TODO dev test remove
 $posts_ids = [ 4936 ];
 		foreach ( $posts_ids as $key_post_id => $post_id ) {
 			echo sprintf( "%d/%d post ID %s\n", $key_post_id+1, count( $posts_ids ), $post_id );
 			$post = get_post( $post_id );
 			$updated = $this->convert_ngg_galleries_in_post_to_gutenberg_gallery( $post );
-			if ( true === $updated ) {
+			if ( is_wp_error( $updated ) ) {
+				echo sprintf( "%s\n", $updated->get_error_message() );
+				continue;
+			} else if ( true === $updated ) {
 				echo sprintf( "saved as Gutenberg Gallery block\n" );
 			}
 		}
@@ -154,6 +154,7 @@ $posts_ids = [ 4936 ];
 			return new \WP_Error( 100, sprintf( "ERROR ngg_image pid %d not found in %s\n", $image_row[ 'pid' ], $image_file_full_path ) );
 		}
 
+		// Import to Media Library.
 		$att_id = $this->downloader->import_external_file(
 			$image_file_full_path,
 			$title = $filename,
@@ -165,8 +166,10 @@ $posts_ids = [ 4936 ];
 			return new \WP_Error( 101, sprintf( "ERROR importing image %s : %s\n", $image_file_full_path, $att_id->get_error_message() ) );
 		}
 
+		// Save meta referencing these Attachments as NGG pictures.
 		add_post_meta( $att_id, self::META_NGG_PICTUREID, $image_row[ 'pid' ] );
 		add_post_meta( $att_id, self::META_NGG_PICTURE_GALLERYID, $image_row[ 'galleryid' ] );
+		add_post_meta( $att_id, self::META_NGG_PICTURE_SORTORDER, $image_row[ 'sortorder' ] );
 	}
 
 	/**
@@ -178,7 +181,6 @@ $posts_ids = [ 4936 ];
 	public function convert_ngg_galleries_in_post_to_gutenberg_gallery( $post ) {
 		global $wpdb;
 		$post_content_updated = $post->post_content;
-
 
 		/**
 		 * Transform NextGenGallery blocks to Gutenberg Gallery Block:
@@ -200,9 +202,14 @@ $posts_ids = [ 4936 ];
 				}
 
 				$gallery_ids = $this->squarebracketselement_manipulator->get_attribute_value( 'ids', $shortcode_html );
+				$gallery_ids = explode( ',', $gallery_ids );
 				foreach ( $gallery_ids as $gallery_id ) {
 					$att_ids = array_merge( $att_ids, $this->get_attachment_ids_in_ngg_gallery( $gallery_id ) );
 				}
+			}
+
+			if ( empty( $att_ids ) ) {
+				return new \WP_Error( 102, sprintf( "ERR not found any Att IDs in gallery_ids %s post ID %d", implode( ',', $gallery_ids ), $post->ID ) );
 			}
 
 			// Replace NGG gallery block with Gutenberg Gallery block.
@@ -219,6 +226,10 @@ $posts_ids = [ 4936 ];
 
 		if ( $post->post_content != $post_content_updated ) {
 			$updated = $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
+			if ( $updated != 1 || false === $updated ) {
+				return new \WP_Error( 103, sprintf( "ERR could not update post ID %d", $post->ID ) );
+			}
+
 			return ( $updated > 0 ) && ( false !== $updated );
 		}
 
@@ -234,7 +245,22 @@ $posts_ids = [ 4936 ];
 	 * @return array Attachment IDs from Media Library which belong to the NGG $gallery_id.
 	 */
 	public function get_attachment_ids_in_ngg_gallery( $gallery_id ) {
+		global $wpdb;
+
 		$att_ids = [];
+
+		$atts_rows = $wpdb->get_results(
+			"select wp.ID
+			from {$wpdb->posts} wp
+			join {$wpdb->postmeta} wpm on wpm.post_id = wp.ID
+			where wp.post_type = 'attachment'
+			and wpm.meta_key = {self::META_NGG_PICTURE_GALLERYID}
+			order by {self::META_NGG_PICTURE_SORTORDER} ;",
+			ARRAY_A
+		);
+		foreach ( $atts_rows as $atts_row ) {
+			$att_ids[] = $atts_row[ 'ID' ];
+		}
 
 		return $att_ids;
 	}
@@ -247,15 +273,40 @@ $posts_ids = [ 4936 ];
 	 * @return null|string Gutenberg Gallery Block HTML.
 	 */
 	public function get_gutenberg_gallery_block_html( $att_ids ) {
-		$html = null;
+		if ( empty( $att_ids ) ) {
+			return null;
+		}
 
-		return $html;
+		$gallery_block_html_sprintf = <<<HTML
+<!-- wp:gallery {"linkTo":"none"} -->
+<figure class="wp-block-gallery has-nested-images columns-default is-cropped">%s</figure>
+<!-- /wp:gallery -->
+HTML;
+		$image_block_html_sprintf = <<<HTML
+<!-- wp:image {"id":%s,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%s"/><figcaption>%s</figcaption></figure>
+<!-- /wp:image -->
+HTML;
+
+		// Get all belonging Images Blocks.
+		$images_blocks_html = '';
+		foreach ( $att_ids as $att_id ) {
+			$att_src = wp_get_attachment_url( $att_id );
+			$att_caption = wp_get_attachment_caption( $att_id );
+			$images_blocks_html .= empty( $images_blocks_html ) ? '' : "\n\n" ;
+			$images_blocks_html .= sprintf( $image_block_html_sprintf, $att_id, $att_src, $att_id, $att_caption );
+		}
+
+		// Inject Images Blocks into the Gallery Block.
+		$gallery_block_html = sprintf( $gallery_block_html_sprintf, $images_blocks_html );
+
+		return $gallery_block_html;
 	}
 
 	/**
-	 * Returns `wp_ngg_gallery` row with given gid.
+	 * Returns a `wp_ngg_gallery` row with Gallery ID.
 	 *
-	 * @param int $gid
+	 * @param int $gid Gallery ID.
 	 *
 	 * @return array|null
 	 */
