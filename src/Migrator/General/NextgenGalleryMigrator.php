@@ -151,6 +151,14 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 * @return int|\WP_Error Attachment ID or \WP_Error.
 	 */
 	public function import_ngg_image_to_media_library( $image_row, $gallery_row ) {
+		global $wpdb;
+
+		// Check if img was already imported.
+		$att_post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s ;", self::META_NGG_PICTUREID, $image_row[ 'pid' ] ) );
+		if ( ! is_null( $att_post_id ) ) {
+			return new \WP_Error( 200, sprintf( "skipping, ngg_image pid %d already imported as att ID %s\n", $image_row[ 'pid' ], $att_post_id ) );
+		}
+
 		// Img info.
 		$filename = $image_row[ 'filename' ];
 		$description = $image_row[ 'description' ];
