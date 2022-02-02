@@ -94,6 +94,10 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_nextgen_galleries_to_gutenberg_gallery_blocks( $args, $assoc_args ) {
 		global $wpdb;
+
+		// Make sure NGG DB tables are available.
+		$this->validate_db_tables_exist( [ $wpdb->prefix . 'ngg_albums', $wpdb->prefix . 'ngg_gallery', $wpdb->prefix . 'ngg_pictures' ] );
+
 		$ngg_options = get_option( 'ngg_options' );
 		$this->galleries_rows = $wpdb->get_results( " select * from {$wpdb->prefix}ngg_gallery ; ", ARRAY_A );
 
@@ -210,6 +214,28 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Checks if DB tables exist locally.
+	 *
+	 * @param array $tables Tables to check.
+	 *
+	 * @return bool
+	 *
+	 * @throws \Exception
+	 */
+	private function validate_db_tables_exist( $tables ) {
+		global $wpdb;
+
+		foreach ( $tables as $table ) {
+			$row = $wpdb->get_row( $wpdb->prepare( "select * from information_schema.tables where table_schema = %s AND table_name = %s limit 1;", DB_NAME, $table ), ARRAY_A );
+			if ( is_null( $row ) || empty( $row ) ) {
+				throw new \Exception( sprintf( "NGG table %s not found in DB.", $table ) );
+			}
+		}
+
+		return true;
 	}
 
 	/**
