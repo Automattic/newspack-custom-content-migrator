@@ -222,8 +222,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 * @param int $post_id         Post ID.
 	 * @param string $post_content HTML.
 	 *
-	 * @return string|false|\WP_Error Refreshed post_content with Gutenberg Gallery blocks instead of NGG, or false if no NGG blocks
-	 *                                found, or \WP_Error on exceptions.
+	 * @return string|\WP_Error Refreshed post_content with Gutenberg Gallery blocks instead of NGG, or \WP_Error on exceptions.
 	 */
 	public function convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_id, $post_content ) {
 
@@ -232,7 +231,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		// Match the NGG Gallery block.
 		$matches_blocks = $this->wpblock_manipulator->match_wp_block( 'wp:imagely/nextgen-gallery', $post_content );
 		if ( is_null( $matches_blocks ) ) {
-			return false;
+			return $post_content_updated;
 		}
 
 		foreach ( $matches_blocks[0] as $match_block ) {
