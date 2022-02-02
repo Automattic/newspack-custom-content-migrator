@@ -121,7 +121,6 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 
 			echo sprintf( "imported att_id %d\n", $att_id );
 		}
-echo 'done'; exit;
 
 
 		echo sprintf( "\nCONVERTING NEXTGEN GALLERIES TO GUTENBERG GALLERY BLOCKS...\n" );
@@ -191,6 +190,8 @@ echo 'done'; exit;
 	 * Expects all the images were already imported using $this->import_ngg_images_to_media_library().
 	 *
 	 * @param array $ngg_options NGG Options value.
+	 *
+	 * @return bool|\WP_Error
 	 */
 	public function convert_ngg_galleries_in_post_to_gutenberg_gallery( $post ) {
 		global $wpdb;
@@ -199,6 +200,7 @@ echo 'done'; exit;
 		$post_content_updated = $this->convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post->ID, $post->post_content );
 		if ( is_wp_error( $post_content_updated ) ) {
 			echo sprintf( "%s\n", $post_content_updated->get_error_message() );
+			return false;
 		}
 
 		// TODO: In future we can add NGG shortcode replacements here too, e.g. `[nggallery id=1 template=sample1]`.
