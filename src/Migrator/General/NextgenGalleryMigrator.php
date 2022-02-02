@@ -11,8 +11,12 @@ use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsE
 
 class NextgenGalleryMigrator implements InterfaceMigrator {
 
+	// Mtas saved to imported images:
+	//   - original NGG picture ID;
 	const META_NGG_PICTUREID = '_newspack_ngg_pictureid';
+	//   - which gallery ID this image belonged to;
 	const META_NGG_PICTURE_GALLERYID = '_newspack_ngg_picture_galleryid';
+	//   - sort order for this image in belonging NGG Gallery;
 	const META_NGG_PICTURE_SORTORDER = '_newspack_ngg_picture_sortorder';
 
 	/**
@@ -94,12 +98,16 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		$this->galleries_rows = $wpdb->get_results( " select * from {$wpdb->prefix}ngg_gallery ; ", ARRAY_A );
 
 
-		echo sprintf( "\nIMPORTING NGG IMAGES TO MEDIA LIBRARY...\n" );
+		echo sprintf( "MPORTING NGG IMAGES TO MEDIA LIBRARY...\n" );
 		$images_rows = $wpdb->get_results( " select * from {$wpdb->prefix}ngg_pictures ; ", ARRAY_A );
 		foreach ( $images_rows as $key_image_row => $image_row ) {
-			echo sprintf( "%d/%d image %d %s\n", $key_image_row+1, count( $images_rows ), $image_row[ 'pid' ], $image_row[ 'filename' ] );
+			echo sprintf( "%d/%d importing image `pid` %d %s\n", $key_image_row+1, count( $images_rows ), $image_row[ 'pid' ], $image_row[ 'filename' ] );
 
 			$gallery_row = $this->get_gallery_row_by_gid( $image_row[ 'galleryid' ] );
+			if ( is_null( $gallery_row ) ) {
+				echo sprintf( "ERROR not found gallery `gid` for image `pid` %d %s\n", $image_row[ 'pid' ] );
+				continue;
+			}
 			$att_id = $this->import_ngg_image_to_media_library( $image_row, $gallery_row );
 
 			if ( is_wp_error( $att_id ) ) {
@@ -113,8 +121,6 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 
 		echo sprintf( "\nCONVERTING NEXTGEN GALLERIES TO GUTENBERG GALLERY BLOCKS...\n" );
 		$posts_ids = $this->posts_logic->get_all_posts_ids( $post_type = [ 'post', 'page' ] );
-// TODO dev test remove
-$posts_ids = [ 4936 ];
 		foreach ( $posts_ids as $key_post_id => $post_id ) {
 			echo sprintf( "%d/%d post ID %s\n", $key_post_id+1, count( $posts_ids ), $post_id );
 			$post = get_post( $post_id );
@@ -123,12 +129,13 @@ $posts_ids = [ 4936 ];
 				echo sprintf( "%s\n", $updated->get_error_message() );
 				continue;
 			} else if ( true === $updated ) {
-				echo sprintf( "saved as Gutenberg Gallery block\n" );
+				echo sprintf( "converted to Gutenberg Gallery\n" );
 			}
 		}
 
 
 		echo sprintf( "\nDONE. Next:\n- clean up and delete all images from the NGG gallery path %s\n", $ngg_options[ 'gallerypath' ] );
+		wp_cache_flush();
 	}
 
 	/**
@@ -157,10 +164,10 @@ $posts_ids = [ 4936 ];
 		// Import to Media Library.
 		$att_id = $this->downloader->import_external_file(
 			$image_file_full_path,
-			$title = $filename,
-			$caption = $alt,
-			$description = $description,
-			$alt = $alt
+			$filename,
+			$description,
+			null,
+			$alt
 		);
 		if ( is_wp_error( $att_id ) ) {
 			return new \WP_Error( 101, sprintf( "ERROR importing image %s : %s\n", $image_file_full_path, $att_id->get_error_message() ) );
@@ -170,6 +177,8 @@ $posts_ids = [ 4936 ];
 		add_post_meta( $att_id, self::META_NGG_PICTUREID, $image_row[ 'pid' ] );
 		add_post_meta( $att_id, self::META_NGG_PICTURE_GALLERYID, $image_row[ 'galleryid' ] );
 		add_post_meta( $att_id, self::META_NGG_PICTURE_SORTORDER, $image_row[ 'sortorder' ] );
+
+		return $att_id;
 	}
 
 	/**
@@ -180,20 +189,62 @@ $posts_ids = [ 4936 ];
 	 */
 	public function convert_ngg_galleries_in_post_to_gutenberg_gallery( $post ) {
 		global $wpdb;
-		$post_content_updated = $post->post_content;
 
-		/**
-		 * Transform NextGenGallery blocks to Gutenberg Gallery Block:
-		 *      <!-- wp:imagely/nextgen-gallery -->
-		 *      [ngg src="galleries" ids="3" display="pro_mosaic" captions_display_title="1" is_ecommerce_enabled="1"]
-		 *      <!-- /wp:imagely/nextgen-gallery -->
-		 */
-		$matches_blocks = $this->wpblock_manipulator->match_wp_block( 'wp:imagely/nextgen-gallery' );
+		// Convert NGG Gallery blocks to pure Gutenberg Gallery blocks.
+		$post_content_updated = $this->convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post->ID, $post->post_content );
+		if ( is_wp_error( $post_content_updated ) ) {
+			echo sprintf( "%s\n", $post_content_updated->get_error_message() );
+		}
+
+		// TODO: In future we can add NGG shortcode replacements here too, e.g. `[nggallery id=1 template=sample1]`.
+		// E.g. `$post_content_updated = $this->convert_ngg_shortcodes_to_gutenberg_gallery_blocks( $post->ID, $post_content_updated );`.
+
+		// Persist updates.
+		if ( $post->post_content != $post_content_updated ) {
+			$updated = $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
+			if ( $updated != 1 || false === $updated ) {
+				return new \WP_Error( 103, sprintf( "ERR could not update post ID %d", $post->ID ) );
+			}
+
+			return ( $updated > 0 ) && ( false !== $updated );
+		}
+
+		return false;
+	}
+
+	/**
+	 * Transforms NextGenGallery blocks to Gutenberg Gallery Block, e.g.:
+	 *
+	 *      <!-- wp:imagely/nextgen-gallery -->
+	 *      [ngg src="galleries" ids="3" display="pro_mosaic" captions_display_title="1" is_ecommerce_enabled="1"]
+	 *      <!-- /wp:imagely/nextgen-gallery -->
+	 *
+	 * @param int $post_id         Post ID.
+	 * @param string $post_content HTML.
+	 *
+	 * @return string|false|\WP_Error Refreshed post_content with Gutenberg Gallery blocks instead of NGG, or false if no NGG blocks
+	 *                                found, or \WP_Error on exceptions.
+	 */
+	public function convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_id, $post_content ) {
+
+		$post_content_updated = $post_content;
+
+		// Match the NGG Gallery block.
+		$matches_blocks = $this->wpblock_manipulator->match_wp_block( 'wp:imagely/nextgen-gallery', $post_content );
+		if ( is_null( $matches_blocks ) ) {
+			return false;
+		}
+
 		foreach ( $matches_blocks[0] as $match_block ) {
 			$block_html = $match_block[0];
 
-			$att_ids = [];
+			// Match the shortcode inside the NGG Gallery block.
 			$matches_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'ngg', $block_html );
+			if ( empty( $matches_shortcodes[0] ) ) {
+				return new \WP_Error( 103, sprintf( "ERR [ngg] shortcode not found inside a wp:imagely/nextgen-gallery block in post ID %d", $post_id ) );
+			}
+
+			$att_ids = [];
 			foreach ( $matches_shortcodes as $match_shortcode ) {
 				$shortcode_html = $match_shortcode[0];
 				$shortcode_src = $this->squarebracketselement_manipulator->get_attribute_value( 'src', $shortcode_html );
@@ -209,7 +260,7 @@ $posts_ids = [ 4936 ];
 			}
 
 			if ( empty( $att_ids ) ) {
-				return new \WP_Error( 102, sprintf( "ERR not found any Att IDs in gallery_ids %s post ID %d", implode( ',', $gallery_ids ), $post->ID ) );
+				return new \WP_Error( 102, sprintf( "ERR not found any Att IDs for gallery_ids %s in post ID %d", implode( ',', $gallery_ids ), $post_id ) );
 			}
 
 			// Replace NGG gallery block with Gutenberg Gallery block.
@@ -217,23 +268,7 @@ $posts_ids = [ 4936 ];
 			$post_content_updated = str_replace( $block_html, $gutenberg_gallery_block_html, $post_content_updated );
 		}
 
-
-		/**
-		 * TODO -- In future we can add shortcode replacements here too, e.g.
-		 *      [nggallery id=1 template=sample1]
-		 */
-
-
-		if ( $post->post_content != $post_content_updated ) {
-			$updated = $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
-			if ( $updated != 1 || false === $updated ) {
-				return new \WP_Error( 103, sprintf( "ERR could not update post ID %d", $post->ID ) );
-			}
-
-			return ( $updated > 0 ) && ( false !== $updated );
-		}
-
-		return false;
+		return $post_content_updated;
 	}
 
 	/**
@@ -247,19 +282,24 @@ $posts_ids = [ 4936 ];
 	public function get_attachment_ids_in_ngg_gallery( $gallery_id ) {
 		global $wpdb;
 
+		// Get images from Media Library belonging to this NGG gallery; order needs casting to number, because otherwise sorts as strings.
 		$att_ids = [];
-
-		$atts_rows = $wpdb->get_results(
-			"select wp.ID
-			from {$wpdb->posts} wp
-			join {$wpdb->postmeta} wpm on wpm.post_id = wp.ID
-			where wp.post_type = 'attachment'
-			and wpm.meta_key = {self::META_NGG_PICTURE_GALLERYID}
-			order by {self::META_NGG_PICTURE_SORTORDER} ;",
+		$atts_rows = $wpdb->get_results( $wpdb->prepare(
+				"select wpm.post_id, wpm_order.meta_value as sorting_order
+				from wp_postmeta wpm
+				left join wp_postmeta wpm_order
+				on wpm_order.post_id = wpm.post_id and wpm_order.meta_key = %s
+				where wpm.meta_key = %s
+				and wpm.meta_value = %s
+				order by cast(sorting_order as unsigned) ; ",
+				self::META_NGG_PICTURE_SORTORDER,
+				self::META_NGG_PICTURE_GALLERYID,
+				$gallery_id,
+			),
 			ARRAY_A
 		);
-		foreach ( $atts_rows as $atts_row ) {
-			$att_ids[] = $atts_row[ 'ID' ];
+		foreach ( $atts_rows as $att_row ) {
+			$att_ids[] = $att_row[ 'post_id' ];
 		}
 
 		return $att_ids;

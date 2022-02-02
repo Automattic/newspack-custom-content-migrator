@@ -29,7 +29,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-content-converter.git",
-                "reference": "e08481cd90370a6bda3229e29799ce48c0f2e983"
+                "reference": "76ef55ebf5a948e81001542fb1f9dd3cd5709e42"
             },
             "require": {
                 "brainmaestro/composer-git-hooks": "^2.6",
@@ -67,7 +67,7 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Plugin that enables mass conversion of pre-Gutenberg post content to the Gutenberg Blocks content.",
-            "time": "2022-02-02T13:00:26+00:00"
+            "time": "2022-02-02T16:20:06+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
