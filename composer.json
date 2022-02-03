@@ -26,7 +26,8 @@
     "symfony/css-selector": "^5.2",
     "automattic/newspack-cms-importers": "dev-master",
     "automattic/newspack-post-image-downloader": "dev-master",
-    "automattic/newspack-content-converter": "dev-master"
+    "automattic/newspack-content-converter": "dev-master",
+    "halaxa/json-machine": "0.8.0-BETA2"
   },
   "require-dev": {
     "automattic/vipwpcs": "^2.0",
