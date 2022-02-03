@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \WP_CLI;
 
 /**
@@ -56,6 +57,225 @@ class TheBayNetMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-update-user-fullnames',
+			[ $this, 'cmd_update_user_fullnames' ],
+			[
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'authors-file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-unslugify-slugs',
+			[ $this, 'cmd_unslugify_slugs' ],
+			[
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'user-ids-csv',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-convert-users-to-gas',
+			[ $this, 'cmd_convert_users_to_gas' ],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-remove-mmddyyyy-categories',
+			[ $this, 'cmd_remove_mmddyyyy_categories' ],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thebaynet-add-gallery-category',
+			[ $this, 'cmd_add_gallery_category' ],
+		);
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_add_gallery_category( $args, $assoc_args ) {
+		global $wpdb;
+
+		$gal_cat = get_category_by_slug( 'gallery' );
+		if ( false == $gal_cat ) {
+			echo "gallery cat not found\n";
+			exit;
+		}
+
+		$errors = [];
+		$results = $wpdb->get_results( "select ID, post_content from wp_posts where post_type = 'post' and post_status = 'publish' and post_content like '%[gallery id%' ; ", ARRAY_A );
+		foreach ( $results as $key_result => $result ) {
+			$post_id = $result['ID'];
+			echo sprintf( "%d/%d %d\n", $key_result+1, count($results), $post_id );
+
+			$set = wp_set_post_categories( $post_id, [ $gal_cat->term_id ], true );
+			if ( false == $set || is_wp_error( $set ) ) {
+				$errors[] = $post_id;
+			}
+		}
+
+		if ( ! empty( $errors) ) {
+			echo sprintf( "errors:\n%s\n", implode(',', $errors));
+		}
+		return;
+	}
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_remove_mmddyyyy_categories( $args, $assoc_args ) {
+		$categories = get_categories([
+			'hide_empty'             => false,
+			'number' => 0,
+		]);
+
+		$not_deleted = [];
+		$error = [];
+		foreach ( $categories as $key_category => $category ) {
+			echo sprintf( "%d/%d %d %s\n", $key_category+1, count( $categories ), $category->term_id, $category->name );
+			$matches = [];
+			preg_match( '|(\d{2}/\d{2}/\d{4})|', $category->name, $matches );
+			if ( isset( $matches[1] ) && $matches[1] == $category->name ) {
+				$deleted = wp_delete_category( $category->term_id );
+				if ( is_wp_error( $deleted ) ) {
+					$error[ $category->term_id ] = $category->name;
+				} else {
+					$deleted[ $category->term_id ] = $category->name;
+				}
+			} else {
+				$not_deleted[ $category->term_id ] = $category->name;
+			}
+		}
+
+		echo sprintf( "\nnot deleted:\n%s\n", implode( ',', array_keys( $not_deleted ) ) );
+		echo sprintf( "\nerrors:\n%s\n", implode( ',', array_keys( $error ) ) );
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_convert_users_to_gas( $args, $assoc_args ) {
+		$cap_logic = new CoAuthorPlus;
+		global $wpdb;
+
+		$results = $wpdb->get_results( "select * from wp_users where user_email = '' ; ", ARRAY_A );
+		// $results = $wpdb->get_results( "select * from wp_users where ID in (
+		//      6665,7044,6317,6090,7120,6085,6885,7328,7284,7056,7184,5760,6956,6354,7088,6434,6741,7319,7267,5702,4496,6030,6671,5832,5824,6894,7086,6472,6212,5204,6077,6731,7105,6908,7179,6937,5853,7206,7282,7067,6171,6359,6523,5695,6361,6326,6163,5798,6258,6193,6294,6893,7154,6033,6043,7325,5700,7247,6499,6878,6421,5970,5976,6449,5699,5761,7194,6496,7134,4393,6052,5991,6412,6268,7202,5979,6269,6170,5903,6096,7065,6813,6553,6351,6578,5931,6784,6098,7109,6355,6448,7167,6622,7195,6256,6546,6476,7326,4544,6733,6942,6943,6492,6494,7294,7228,6964,4655,6666,4252,4451,4152,4024,6855,6899,6839,6959,6297,4664,5128,4467,5398,6659,6924,6658,4377,5519,6547,4205,4362,5631,6757,4606,6982,4777,4879,6846,7253,6752,4674,4055,6972,5329,5213,5395,4364,4154,6515,6184,6756,6977,4515,4411,5550,6334,5632,5086,5238,5240,6973,6843,6298,6295,4611,4175,4815,7258,6903,6904,6133,4659,6296,4484,4358,5406,6191,6907,6902,4004,6755,3986,6386,4040,5891,5633,4494,6377,4429,7177,6838,6533,6204,4581,4978,4466,4717,6568,4320,5998,6990,6606,5694,4282,6604,6906,5511,6975,6614,6521,6176,6955,5847,6474,6624,6626,5634,6150,7327,4713,6744,4167,6032,6247,6250,6070,5812,5902,6429,4051,6615,7024,7123,6005,6433,4483,5698,6608,6042,6729,5203
+		// ) ; ", ARRAY_A );
+
+		foreach ( $results as $key_result => $result ) {
+			$user_id = $result['ID'];
+			$display_name = $result['display_name'];
+			try {
+
+				// Create GA
+				$ga_id = $cap_logic->create_guest_author([
+					'display_name' => $display_name,
+				]);
+
+				// Assign posts to GA.
+				$post_results = $wpdb->get_results( "select * from wp_posts where post_author = $user_id and post_type in ('post', 'page') ; ", ARRAY_A );
+
+				foreach ( $post_results as $key_post => $post_result ) {
+					echo sprintf( "%d/%d %d -- %d/%d\n", $key_result+1, count($results), $user_id, $key_post+1, count($post_results) );
+					$post_id = $post_result['ID'];
+					$cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id );
+				}
+
+				$user = get_user_by( 'ID', $user_id );
+				$cap_logic->link_guest_author_to_wp_user( $ga_id, $user );
+
+			} catch ( \Exception $e ) {
+				$d=1;
+			}
+		}
+
+		wp_cache_flush();
+		$d=1;
+	}
+
+	/**
+	 * Prepare unslugified version of username slugs (logins).
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_unslugify_slugs( $args, $assoc_args ) {
+		$user_ids_csv = $assoc_args['user-ids-csv'] ?? null;
+		global $wpdb;
+
+		$results = $wpdb->get_results( "select ID, user_login from wp_users where ID in ($user_ids_csv);", ARRAY_A );
+		foreach ( $results as $key_result => $result ) {
+			$user_id = $result['ID'];
+			$user_login = $result['user_login'];
+			$unslugified_login = ucwords( str_replace( '-', ' ', $user_login ), ' ' );
+			echo sprintf( "$user_id \n$user_login \n$unslugified_login \n\n" );
+		}
+	}
+
+	/**
+	 * Update author names with their full names.
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_user_fullnames( $args, $assoc_args ) {
+		$authors_file = $assoc_args[ 'authors-file' ] ?? null;
+		global $wpdb;
+
+		$authors = include $authors_file;
+		foreach ( $authors as $author_nicename => $author_full_name ) {
+			if ( strlen( $author_nicename ) > 60 ) {
+				$author_nicename_60 = substr( $author_nicename, 0, 60 );
+				unset( $authors[ $author_nicename ] );
+				$authors[ $author_nicename_60 ] = $author_full_name;
+			}
+		}
+		$results = $wpdb->get_results( "select ID, user_login, user_nicename from wp_users;", ARRAY_A );
+		$not_updated_user_ids = [];
+		$error_ids = [];
+		foreach ( $results as $key_result => $result ) {
+			$user_ID = $result['ID'];
+			$user_login = $result['user_login'];
+			// User_nicename is what's displayed on post template.
+			$user_nicename = $result['user_nicename'];
+
+			echo sprintf( "%d/%d ID %d\n", $key_result+1, count($results), $user_ID );
+
+			if ( isset( $authors[ $user_nicename ] ) ) {
+				$author_display_name = $authors[ $user_nicename ];
+				$author_display_name_60 = substr( $author_display_name, 0, 60);
+				$updated = wp_update_user( array(
+					'ID' => $user_ID,
+					// Can be long.
+					'first_name' => $author_display_name,
+					'nickname' => $author_display_name,
+					'display_name' => $author_display_name,
+					// 60 chars max.
+					'user_nicename' => $author_display_name_60,
+				) );
+				if ( is_wp_error( $updated ) ) {
+					$d=1;
+					$error_ids[] = $user_ID;
+					echo sprintf( "xxx\n" );
+				}
+			} else {
+				$not_updated_user_ids[] = $user_ID;
+				echo sprintf( "---\n" );
+			}
+		}
+
+		echo sprintf( "not updated IDs:\n%s", implode(',', $not_updated_user_ids) );
+		echo sprintf( "error IDs:\n%s", implode(',', $error_ids) );
 	}
 
 	/**

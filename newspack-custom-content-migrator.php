@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     0.5.0
+ * Version:     0.7.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -22,8 +22,8 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::setup_wordpress_importer();
-PluginSetup::register_migrators(
-	array(
+PluginSetup::register_migrators( array(
+		// General.
 		Migrator\General\PostsMigrator::class,
 		Migrator\General\MetaToContentMigrator::class,
 		Migrator\General\MenusMigrator::class,
@@ -44,31 +44,19 @@ PluginSetup::register_migrators(
 		Migrator\General\ReusableBlocksMigrator::class,
 		Migrator\General\SportsPressMigrator::class,
 		Migrator\General\FeaturedImagesMigrator::class,
+		Migrator\General\ContentDiffMigrator::class,
 		Migrator\General\WooCommOrdersAndSubscriptionsMigrator::class,
+		Migrator\General\NextgenGalleryMigrator::class,
 
-		// Migrator\PublisherSpecific\KawowoMigrator::class,
-		// Migrator\PublisherSpecific\AsiaTimesMigrator::class,
-		// Migrator\PublisherSpecific\SahanJournalMigrator::class,
-		// Migrator\PublisherSpecific\HKFPMigrator::class,
-		// Migrator\PublisherSpecific\LocalNewsMattersMigrator::class,
-		// Migrator\PublisherSpecific\CarolinaPublicPressMigrator::class,
-		// Migrator\PublisherSpecific\TRNNMigrator::class,
-		// Migrator\PublisherSpecific\OnTheWightMigrator::class,
-		// Migrator\PublisherSpecific\EastMojoMigrator::class,
-		// Migrator\PublisherSpecific\LaVozDeAlcalaMigrator::class,
-		// Migrator\PublisherSpecific\MichiganDailyMigrator::class,
-		// Migrator\PublisherSpecific\HipertextualMigrator::class,
-		// Migrator\PublisherSpecific\QuePasaMigrator::class,
-		// Migrator\PublisherSpecific\ThepavlovictodayMigrator::class,
-		// Migrator\PublisherSpecific\RafushimpoMigrator::class,
-		// Migrator\PublisherSpecific\CharlestonCityPaperMigrator::class,
-		// Migrator\PublisherSpecific\GrehlakshmiMigrator::class,
-		// Migrator\PublisherSpecific\PublicIntegrityMigrator::class,
-		// Migrator\PublisherSpecific\PrisonJournalismMigrator::class,
-		// Migrator\PublisherSpecific\OurWeeklyMigrator::class,
+		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+<<<<<<< HEAD
 		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
 		Migrator\PublisherSpecific\Umbria24Migrator::class,
 	)
 );
+=======
+		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
+) );
+>>>>>>> master
