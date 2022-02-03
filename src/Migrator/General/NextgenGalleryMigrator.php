@@ -113,7 +113,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( ! empty( $missing_pid_files ) ) {
-			\WP_CLI::confirm( sprintf( "%d out of total %d image files not found. Do you still want to continue importing available images, and converting NGG galleries to Gutenberg Galleries with available images?", count( $missing_pid_files ), count( $images_rows ) ) );
+			\WP_CLI::confirm( sprintf( "Not found %d image files from total %d. Do you still want to continue importing available images, and converting NGG galleries to Gutenberg Galleries with just these available images?", count( $missing_pid_files ), count( $images_rows ) ) );
 		}
 
 
