@@ -51,12 +51,5 @@ PluginSetup::register_migrators( array(
 		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
-<<<<<<< HEAD
-		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
-		Migrator\PublisherSpecific\Umbria24Migrator::class,
-	)
-);
-=======
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 ) );
->>>>>>> master
