@@ -102,8 +102,23 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		$this->galleries_rows = $wpdb->get_results( " select * from {$wpdb->prefix}ngg_gallery ; ", ARRAY_A );
 
 
-		echo sprintf( "MPORTING NGG IMAGES TO MEDIA LIBRARY...\n" );
+		echo sprintf( "CHECKING NGG IMAGE FILES...\n" );
 		$images_rows = $wpdb->get_results( " select * from {$wpdb->prefix}ngg_pictures ; ", ARRAY_A );
+		$missing_pid_files = [];
+		foreach ( $images_rows as $key_image_row => $image_row ) {
+			$gallery_row = $this->get_gallery_row_by_gid( $image_row[ 'galleryid' ] );
+			$image_file_full_path = rtrim( WP_CONTENT_DIR, '/wp-content' ) . $gallery_row[ 'path' ] . $image_row[ 'filename' ];;
+			if ( ! file_exists( $image_file_full_path ) ) {
+				$missing_pid_files[] =  $image_row[ 'pid' ];
+			}
+		}
+		if ( ! empty( $missing_pid_files ) ) {
+			\WP_CLI::confirm( sprintf( "%d out of total %d image files not found. Do you still want to continue importing available images, and converting NGG galleries to Gutenberg Galleries with available images?", count( $missing_pid_files ), count( $images_rows ) ) );
+		}
+
+
+		
+		echo sprintf( "IMPORTING NGG IMAGES TO MEDIA LIBRARY...\n" );
 		foreach ( $images_rows as $key_image_row => $image_row ) {
 			echo sprintf( "%d/%d importing image `pid` %d %s\n", $key_image_row+1, count( $images_rows ), $image_row[ 'pid' ], $image_row[ 'filename' ] );
 
