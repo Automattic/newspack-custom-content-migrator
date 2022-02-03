@@ -117,7 +117,6 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		}
 
 
-		
 		echo sprintf( "IMPORTING NGG IMAGES TO MEDIA LIBRARY...\n" );
 		foreach ( $images_rows as $key_image_row => $image_row ) {
 			echo sprintf( "%d/%d importing image `pid` %d %s\n", $key_image_row+1, count( $images_rows ), $image_row[ 'pid' ], $image_row[ 'filename' ] );
@@ -338,8 +337,8 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		$att_ids = [];
 		$atts_rows = $wpdb->get_results( $wpdb->prepare(
 				"select wpm.post_id, wpm_order.meta_value as sorting_order
-				from wp_postmeta wpm
-				left join wp_postmeta wpm_order
+				from {$wpdb->prefix}postmeta wpm
+				left join {$wpdb->prefix}postmeta wpm_order
 				on wpm_order.post_id = wpm.post_id and wpm_order.meta_key = %s
 				where wpm.meta_key = %s
 				and wpm.meta_value = %s
