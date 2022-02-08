@@ -14,8 +14,9 @@ use \DOMDocument;
  */
 class NoozhawkMigrator implements InterfaceMigrator {
 	// Logs.
-	const AUTHORS_LOGS = 'NH_authors.log';
-	const EXCERPT_LOGS = 'NH_authors.log';
+	const AUTHORS_LOGS    = 'NH_authors.log';
+	const EXCERPT_LOGS    = 'NH_authors.log';
+	const CO_AUTHORS_LOGS = 'NH_co_authors.log';
 
 	/**
 	 * @var CoAuthorPlusLogic.
@@ -116,6 +117,15 @@ class NoozhawkMigrator implements InterfaceMigrator {
 						'repeating'   => false,
 					),
 				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-import-co-authors-from-alias-meta',
+			array( $this, 'cmd_nh_import_co_authors_from_alias_meta' ),
+			array(
+				'shortdesc' => 'Import co-authors from CSV',
+				'synopsis'  => array(),
 			)
 		);
 	}
@@ -223,7 +233,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			fclose( $h );
 		}
 
-		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d co-authors took %d mins.', count( $co_authors_added ), floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		WP_CLI::line( 'All done! 🙌' );
 	}
 
 	/**
@@ -277,36 +287,133 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		$events = array_map(
 			function( $event ) {
 				preg_match( '/\$\s*(?<price>\d+)/', self::get_event_meta( $event['postmeta'], 'event_price' ), $price_matches );
-				$has_price = array_key_exists( 'price', $price_matches );
+				$has_price     = array_key_exists( 'price', $price_matches );
+				$event_day     = ( new \DateTime( $event['post_date_gmt'] ) );
+				$event_content = preg_replace( '/\s*<h1[^>]*>[^<]*<\/h1>\s*<div\s+class="subheader"[^>]*>[^<]*<\/div>\s*<img[^>]*>/', '', $event['post_content'] );
 
 				return [
-					$event['post_title'],
-					self::get_event_meta( $event['postmeta'], 'event_intro' ),
-					$event['Event Start Date'],
-					date( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_start' ) ) ),
-					// $event['Event End Date'],
-					// $event['Event End Time'],
-					// $event['Timezone'],
-					$event['post_content'],
-					$has_price ? $price_matches['price'] : self::get_event_meta( $event['postmeta'], 'event_price' ),
-					$has_price ? '$' : '',
-					self::get_event_meta( $event['postmeta'], 'event_location' ),
-					$event['attachment_url'],
-					self::get_event_meta( $event['postmeta'], 'event_url' ),
-					self::get_event_meta( $event['postmeta'], 'event_sponsors' ),
+					'title'                => $event['post_title'],
+					'event_intro'          => self::get_event_meta( $event['postmeta'], 'event_intro' ),
+					'event_start_date'     => $event_day->format( 'Y-m-d' ),
+					'event_end_date'       => $event_day->format( 'Y-m-d' ),
+					'event_start_time'     => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_start' ) ) ),
+					'event_end_time'       => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_end' ) ) ),
+					'event_timezone'       => $event_day->getTimezone()->getName(),
+					'event_price'          => $has_price ? $price_matches['price'] : self::get_event_meta( $event['postmeta'], 'event_price' ),
+					'event_price_currency' => $has_price ? '$' : '',
+					'event_description'    => $event_content,
+					'event_location'       => self::get_event_meta( $event['postmeta'], 'event_location' ),
+					'event_image'          => $event['attachment_url'],
+					'event_url'            => self::get_event_meta( $event['postmeta'], 'event_url' ),
+					'event_sponsors'       => self::get_event_meta( $event['postmeta'], 'event_sponsors' ),
 				];
 			},
 			$raw_events
 		);
 
-		$csv_output_file = fopen( $events_csv_output_path, 'w' );
-		foreach ( $events as $event ) {
-			fputcsv( $csv_output_file, $event );
+		if ( ! empty( $events ) ) {
+			$csv_output_file = fopen( $events_csv_output_path, 'w' );
+			fputcsv( $csv_output_file, array_keys( $events[0] ) );
+			foreach ( $events as $event ) {
+				fputcsv( $csv_output_file, $event );
+			}
+
+			fclose( $csv_output_file );
+
+			WP_CLI::line( sprintf( 'The XML content was successfully migrated to a CSV file: %s', $events_csv_output_path ) );
+		} else {
+
+			WP_CLI::line( 'There are no events to import!' );
 		}
+	}
 
-		fclose( $csv_output_file );
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-import-co-authors-from-alias-meta`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_import_co_authors_from_alias_meta( $args, $assoc_args ) {
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
+				'meta_key'    => 'created_by_alias',
+			)
+		);
 
-		WP_CLI::line( sprintf( 'The XML content was successfully migrated to a CSV file: %s', $events_csv_output_path ) );
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			$co_author_alias_meta = get_post_meta( $post->ID, 'created_by_alias', true );
+
+			if ( ! empty( $co_author_alias_meta ) ) {
+				$co_authors_names = array_filter(
+					// Split co-authors meta by '&' and ',', and trim white space.
+					array_map(
+						function( $co_author_name ) {
+							return trim( $co_author_name );
+						},
+						preg_split( '/[&|,]/', $co_author_alias_meta, -1, PREG_SPLIT_NO_EMPTY )
+					),
+					// Filter co-authors with HTML tags, as they are  not real co-authors, but post statuses.
+					function( $co_author_name ) {
+						return wp_strip_all_tags( $co_author_name ) === $co_author_name;
+					}
+				);
+
+				$guest_authors_ids = [];
+				foreach ( $co_authors_names as $co_author_name ) {
+					try {
+						$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+							array(
+								'display_name' => sanitize_user( $co_author_name, false ),
+							)
+						);
+						if ( is_wp_error( $guest_author_id ) ) {
+							WP_CLI::warning( sprintf( "Could not create GA '%s': %s", $co_author_name, $guest_author_id->get_error_message() ) );
+							$this->log( self::CO_AUTHORS_LOGS, sprintf( "Could not create GA '%s': %s", $co_author_name, $guest_author_id->get_error_message() ) );
+							continue;
+						}
+
+						$guest_authors_ids[] = $guest_author_id;
+
+						// Set original ID.
+						update_post_meta( $guest_author_id, 'imported_from_alias_meta', true );
+						$this->log( self::CO_AUTHORS_LOGS, sprintf( '- %s', $co_author_name ) );
+
+						// Link WP_User if existing.
+						$existing_wp_users = ( new \WP_User_Query(
+							[
+								'search'        => $co_author_name,
+								'search_fields' => array( 'user_login', 'user_nicename', 'display_name' ),
+							]
+						) )->get_results();
+						if ( ! empty( $existing_wp_users ) ) {
+							$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author_id, $existing_wp_users[0] );
+							$this->log( self::CO_AUTHORS_LOGS, sprintf( '- Guest author %s linked to WP_User', $co_author_name, $existing_wp_users[0]->display_name ) );
+						}
+					} catch ( \Exception $e ) {
+						WP_CLI::warning( sprintf( "Could not create GA '%s': %s", $co_author_name, $e->getMessage() ) );
+						$this->log( self::CO_AUTHORS_LOGS, sprintf( "Could not create GA '%s': %s", $co_author_name, $e->getMessage() ) );
+					}
+				}
+
+				// Fix post_author = 0.
+				if ( 0 === intval( $post->post_author ) ) {
+					wp_update_post(
+						[
+							'ID'          => $post->ID,
+							'post_author' => 4, // Michelle Nelson user ID.
+						]
+					);
+					$this->log( self::CO_AUTHORS_LOGS, sprintf( 'The author of the post %d was updated to Michelle nelson.', $post->ID ) );
+				}
+
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors_ids, $post->ID );
+				$this->log( self::CO_AUTHORS_LOGS, sprintf( '(%d/%d) co-authors imported for the post: %d', $index, $total_posts, $post->ID ) );
+			}
+		}
 	}
 
 	/**
