@@ -8,6 +8,8 @@ use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 use \WP_Error;
 use \DOMDocument;
+use \CoAuthors_Guest_Authors;
+use \CoAuthors_Plus;
 
 /**
  * Custom migration scripts for Noozhawk.
@@ -24,6 +26,16 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var null|CoAuthors_Guest_Authors
+	 */
+	public $coauthors_guest_authors;
+
+	/**
+	 * @var null|CoAuthors_Plus
+	 */
+	public $coauthors_plus;
+
+	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -32,7 +44,9 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
+		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
+		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
+		$this->coauthors_plus          = new CoAuthors_Plus();
 	}
 
 	/**
@@ -125,6 +139,15 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			array( $this, 'cmd_nh_import_co_authors_from_alias_meta' ),
 			array(
 				'shortdesc' => 'Import co-authors from CSV',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-clean-co-authors-import',
+			array( $this, 'cmd_nh_clean_co_authors_import' ),
+			array(
+				'shortdesc' => 'Remove imported co-authors from all posts.',
 				'synopsis'  => array(),
 			)
 		);
@@ -412,6 +435,181 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors_ids, $post->ID );
 				$this->log( self::CO_AUTHORS_LOGS, sprintf( '(%d/%d) co-authors imported for the post: %d', $index, $total_posts, $post->ID ) );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-clean-co-authors-import`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_clean_co_authors_import( $args, $assoc_args ) {
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
+				'meta_key'    => 'created_by_alias',
+				// 'post__in'    => [ 216322 ],
+			)
+		);
+
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			$co_author_alias_meta = get_post_meta( $post->ID, 'created_by_alias', true );
+
+			if ( ! empty( $co_author_alias_meta ) ) {
+				// $co_authors_names = array_filter(
+				// Split co-authors meta by '&' and ',', and trim white space.
+				// array_map(
+				// function( $co_author_name ) {
+				// return trim( $co_author_name );
+				// },
+				// preg_split( '/[&|,]/', $co_author_alias_meta, -1, PREG_SPLIT_NO_EMPTY )
+				// ),
+				// Filter co-authors with HTML tags, as they are  not real co-authors, but post statuses.
+				// function( $co_author_name ) {
+				// return wp_strip_all_tags( $co_author_name ) === $co_author_name;
+				// }
+				// );
+
+				// $to_clean = false;
+				// foreach ( $co_authors_names as $co_author_name ) {
+				// $display_name    = sanitize_user( $co_author_name, false );
+				// $guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+				// array(
+				// 'display_name' => $display_name,
+				// )
+				// );
+				// if ( $guest_author_id ) {
+				// $to_clean = substr( $display_name, 0, 1 ) === '#';
+				// }
+
+				// if ( $to_clean ) {
+				// break;
+				// }
+				// }
+
+				// if ( $to_clean ) {
+				// foreach ( $co_authors_names as $co_author_name ) {
+				// $guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+				// array(
+				// 'display_name' => $display_name,
+				// )
+				// );
+
+				// if ( $guest_author_id ) {
+				// $this->coauthors_guest_authors->delete( $guest_author_id );
+				// WP_CLI::line( sprintf( 'Co-author "%s" was deleted!', $co_author_name ) );
+				// }
+				// }
+
+				// Add the right co-author.
+				// $guest_authors_ids = [];
+				// $co_author_name    = html_entity_decode( $co_author_alias_meta );
+				// $co_authors        = explode( '|', $co_author_name );
+				// foreach ( $co_authors as $co_author_raw ) {
+				// $co_author = trim( $co_author_raw );
+
+				// try {
+				// $guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+				// array(
+				// 'display_name' => $co_author,
+				// )
+				// );
+				// if ( is_wp_error( $guest_author_id ) ) {
+				// WP_CLI::warning( sprintf( "Could not create GA '%s': %s", $co_author_name, $guest_author_id->get_error_message() ) );
+				// $this->log( self::CO_AUTHORS_LOGS, sprintf( "Could not create GA '%s': %s", $co_author_name, $guest_author_id->get_error_message() ) );
+				// continue;
+				// }
+
+				// $guest_authors_ids[] = $guest_author_id;
+
+				// Set original ID.
+				// update_post_meta( $guest_author_id, 'imported_from_alias_meta', true );
+				// $this->log( self::CO_AUTHORS_LOGS, sprintf( '- %s', $co_author_name ) );
+
+				// Link WP_User if existing.
+				// $existing_wp_users = ( new \WP_User_Query(
+				// [
+				// 'search'        => $co_author_name,
+				// 'search_fields' => array( 'user_login', 'user_nicename', 'display_name' ),
+				// ]
+				// ) )->get_results();
+				// if ( ! empty( $existing_wp_users ) ) {
+				// $this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author_id, $existing_wp_users[0] );
+				// $this->log( self::CO_AUTHORS_LOGS, sprintf( '- Guest author %s linked to WP_User', $co_author_name, $existing_wp_users[0]->display_name ) );
+				// }
+				// } catch ( \Exception $e ) {
+				// WP_CLI::warning( sprintf( "Could not create GA '%s': %s", $co_author_name, $e->getMessage() ) );
+				// $this->log( self::CO_AUTHORS_LOGS, sprintf( "Could not create GA '%s': %s", $co_author_name, $e->getMessage() ) );
+				// }
+				// }
+
+
+				// if ( ! empty( $guest_authors_ids ) ) {
+				// $this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors_ids, $post->ID );
+				// $this->log( self::CO_AUTHORS_LOGS, sprintf( '(%d/%d) co-authors imported for the post: %d', $index, $total_posts, $post->ID ) );
+				// }
+				// }
+
+				// Fix badly splited co-author name.
+				$post_co_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post->ID );
+
+				foreach ( $post_co_authors as $post_co_author ) {
+					foreach ( $post_co_authors as $post_co_author_to_check ) {
+						if ( ( $post_co_author->display_name !== $post_co_author_to_check->display_name ) && ( strpos( $post_co_author->display_name, $post_co_author_to_check->display_name ) !== false ) ) {
+							$this->coauthors_guest_authors->delete( $post_co_author_to_check->ID );
+							WP_CLI::line( sprintf( "Deleting '%s' (%d) from '%s'.", $post_co_author_to_check->display_name, $post_co_author_to_check->ID, $post_co_author->display_name ) );
+						}
+					}
+
+					// Remove {update} x:xx p.m. co-authors.
+					if ( substr( $post_co_author->display_name, 0, 8 ) === '{update}' || substr( strtolower( $post_co_author->display_name ), 0, 7 ) === 'updated' ) {
+						$this->coauthors_guest_authors->delete( $post_co_author->ID );
+						WP_CLI::line( sprintf( "Deleting '%s'.", $post_co_author->display_name ) );
+					}
+
+					if ( preg_match( '/^[0-9]{1,2}:[0-9]{1,2}\s?(a|p)\.m\.$/', $post_co_author->display_name ) ) {
+						$this->coauthors_guest_authors->delete( $post_co_author->ID );
+						WP_CLI::line( sprintf( "Deleting '%s'.", $post_co_author->display_name ) );
+					}
+				}
+
+				// Fix Noozhawk Staff Writer suffix.
+				if ( 2 === count( $post_co_authors ) ) {
+					$suffix = 'Noozhawk Staff Writer';
+
+					$co_author_to_keep = false;
+					if ( $suffix === $post_co_authors[0]->display_name ) {
+						$co_author_to_keep = $post_co_authors[1];
+					} elseif ( $suffix === $post_co_authors[1]->display_name ) {
+						$co_author_to_keep = $post_co_authors[0];
+					}
+
+					if ( $co_author_to_keep ) {
+						if ( substr_compare( $co_author_to_keep->display_name, $suffix, -strlen( $suffix ) ) !== 0 ) {
+							$co_author_to_keep->display_name = $co_author_to_keep->display_name . ', ' . $suffix;
+						}
+
+						$this->coauthors_plus->update_author_term( $co_author_to_keep );
+
+						wp_update_post(
+							array(
+								'ID'         => $co_author_to_keep->ID,
+								'post_title' => $co_author_to_keep->display_name,
+							)
+						);
+
+						update_post_meta( $co_author_to_keep->ID, 'cap-display_name', $co_author_to_keep->display_name );
+
+						// $this->coauthors_guest_authors->delete_guest_author_cache( $co_author_to_keep->ID );
+						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_to_keep->ID ], $post->ID );
+						WP_CLI::line( sprintf( "Setting '%s' as co-author for the post %d", $co_author_to_keep->display_name, $post->ID ) );
+					}
+				}
 			}
 		}
 	}
