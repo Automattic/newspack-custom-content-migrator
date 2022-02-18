@@ -21,6 +21,10 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	const AUTHORS_LOGS    = 'NH_authors.log';
 	const EXCERPT_LOGS    = 'NH_authors.log';
 	const CO_AUTHORS_LOGS = 'NH_co_authors.log';
+	// Output filenames.
+	const VENUES_CSV_FILENAME     = 'nh-venues.csv';
+	const ORGANIZERS_CSV_FILENAME = 'nh-organizers.csv';
+	const EVENTS_CSV_FILENAME     = 'nh-events.csv';
 
 	/**
 	 * @var CoAuthorPlusLogic.
@@ -139,8 +143,8 @@ class NoozhawkMigrator implements InterfaceMigrator {
 					),
 					array(
 						'type'        => 'assoc',
-						'name'        => 'events-csv-output-path',
-						'description' => 'CSV output path.',
+						'name'        => 'csv-output-folder-path',
+						'description' => 'CSV output folder path.',
 						'optional'    => false,
 						'repeating'   => false,
 					),
@@ -313,7 +317,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_nh_convert_events_xml_to_csv( $args, $assoc_args ) {
 		$events_xml_path        = $assoc_args['events-xml-path'] ?? null;
-		$events_csv_output_path = $assoc_args['events-csv-output-path'] ?? null;
+		$events_csv_output_path = $assoc_args['csv-output-folder-path'] ?? null;
 
 		if ( ! file_exists( $events_xml_path ) ) {
 			WP_CLI::error( sprintf( 'Events XML export %s not found.', $events_xml_path ) );
@@ -321,56 +325,79 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 		$raw_events = $this->parse_XML_events( $events_xml_path );
 
-		$events = array_map(
-			function( $event ) {
-				preg_match( '/\$\s*(?<price>\d+)/', self::get_event_meta( $event['postmeta'], 'event_price' ), $price_matches );
-				$has_price = array_key_exists( 'price', $price_matches );
-				$event_day = ( new \DateTime( $event['post_date_gmt'] ) );
+		$organizers = [];
+		$venues     = [];
+		$events     = [];
 
-				// Event Content.
-				$this->dom_crawler->clear();
-				$this->dom_crawler->add( $event['post_content'] );
-				$event_content_dom = $this->dom_crawler->filter( '.profileRow.float-right' );
-				$event_content     = 1 === $event_content_dom->count() ? trim( $event_content_dom->getNode( 0 )->textContent ) : self::get_event_meta( $event['postmeta'], 'event_intro' );
+		foreach ( $raw_events as $event ) {
+			preg_match( '/\$\s*(?<price>\d+)/', self::get_event_meta( $event['postmeta'], 'event_price' ), $price_matches );
+			$has_price = array_key_exists( 'price', $price_matches );
+			$event_day = ( new \DateTime( $event['post_date_gmt'] ) );
 
-				// Event Image.
-				$image_media_id = $this->attachment_logic->import_external_file( $event['attachment_url'], $event['post_title'] );
-				$featured_image = wp_get_attachment_url( $image_media_id );
+			// Event Content.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $event['post_content'] );
+			$event_content_dom = $this->dom_crawler->filter( '.profileRow.float-right' );
+			$event_content     = 1 === $event_content_dom->count() ? trim( $event_content_dom->getNode( 0 )->textContent ) : self::get_event_meta( $event['postmeta'], 'event_intro' );
 
-				WP_CLI::line( sprintf( 'Converted event: %s', $event['post_title'] ) );
+			// Event Image.
+			$image_media_id = $this->attachment_logic->import_external_file( $event['attachment_url'], $event['post_title'] );
+			$featured_image = wp_get_attachment_url( $image_media_id );
 
-				return [
-					'EVENT NAME'            => $event['post_title'],
-					'EVENT VENUE NAME'      => self::get_event_meta( $event['postmeta'], 'event_location' ),
-					'EVENT ORGANIZER NAME'  => self::get_event_meta( $event['postmeta'], 'event_sponsors' ),
-					'EVENT START DATE'      => $event_day->format( 'Y-m-d' ),
-					'EVENT START TIME'      => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_start' ) ) ),
-					'EVENT END DATE'        => $event_day->format( 'Y-m-d' ),
-					'EVENT END TIME'        => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_end' ) ) ),
-					'ALL DAY EVENT'         => false,
-					'TIMEZONE'              => $event_day->getTimezone()->getName(),
-					'EVENT COST'            => $has_price ? $price_matches['price'] : self::get_event_meta( $event['postmeta'], 'event_price' ),
-					'EVENT CURRENCY SYMBOL' => $has_price ? '$' : '',
-					'EVENT FEATURED IMAGE'  => $featured_image,
-					'EVENT WEBSITE'         => self::get_event_meta( $event['postmeta'], 'event_url' ),
-					'EVENT DESCRIPTION'     => $event_content,
-				];
-			},
-			$raw_events
-		);
+			WP_CLI::line( sprintf( 'Converted event: %s', $event['post_title'] ) );
 
-		if ( ! empty( $events ) ) {
-			$csv_output_file = fopen( $events_csv_output_path, 'w' );
-			fputcsv( $csv_output_file, array_keys( $events[0] ) );
-			foreach ( $events as $event ) {
-				fputcsv( $csv_output_file, $event );
+			$venue     = self::get_event_meta( $event['postmeta'], 'event_location' );
+			$organizer = self::get_event_meta( $event['postmeta'], 'event_sponsors' );
+
+			if ( ! empty( $organizer ) && ! in_array( $organizer, $organizers ) ) {
+				$organizers[] = $organizer;
 			}
 
-			fclose( $csv_output_file );
+			if ( ! empty( $venue ) && ! in_array( $venue, $venues ) ) {
+				$venues[] = $venue;
+			}
 
-			WP_CLI::line( sprintf( 'The XML content was successfully migrated to a CSV file: %s', $events_csv_output_path ) );
+			$events[] = [
+				'EVENT NAME'            => $event['post_title'],
+				'EVENT VENUE NAME'      => $venue,
+				'EVENT ORGANIZER NAME'  => $organizer,
+				'EVENT START DATE'      => $event_day->format( 'Y-m-d' ),
+				'EVENT START TIME'      => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_start' ) ) ),
+				'EVENT END DATE'        => $event_day->format( 'Y-m-d' ),
+				'EVENT END TIME'        => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_end' ) ) ),
+				'ALL DAY EVENT'         => false,
+				'TIMEZONE'              => $event_day->getTimezone()->getName(),
+				'EVENT COST'            => $has_price ? $price_matches['price'] : self::get_event_meta( $event['postmeta'], 'event_price' ),
+				'EVENT CURRENCY SYMBOL' => $has_price ? '$' : '',
+				'EVENT FEATURED IMAGE'  => $featured_image,
+				'EVENT WEBSITE'         => self::get_event_meta( $event['postmeta'], 'event_url' ),
+				'EVENT DESCRIPTION'     => $event_content,
+			];
+		}
+
+		if ( ! empty( $events ) ) {
+			$this->save_CSV(
+				$events_csv_output_path . self::VENUES_CSV_FILENAME,
+				array_map(
+					function( $d ) {
+						return [ 'Venue Name' => $d ];
+					},
+					$venues
+				)
+			);
+			$this->save_CSV(
+				$events_csv_output_path . self::ORGANIZERS_CSV_FILENAME,
+				array_map(
+					function( $d ) {
+						return [ 'Organizer Name' => $d ];
+					},
+					$organizers
+				)
+			);
+			$this->save_CSV( $events_csv_output_path . self::EVENTS_CSV_FILENAME, $events );
+
+			WP_CLI::line( sprintf( 'The XML content was successfully migrated to the folder: %s', $events_csv_output_path ) );
 		} else {
-
 			WP_CLI::line( 'There are no events to import!' );
 		}
 	}
@@ -766,6 +793,23 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		}
 
 		return $meta_data[ $meta_id ]['value'];
+	}
+
+	/**
+	 * Save array of data to a CSV file.
+	 *
+	 * @param string $output_file Filepath where the save the CSV.
+	 * @param mixed  $data Data to save as a CSV.
+	 * @return void
+	 */
+	private function save_CSV( $output_file, $data ) {
+		$csv_output_file = fopen( $output_file, 'w' );
+		fputcsv( $csv_output_file, array_keys( $data[0] ) );
+		foreach ( $data as $datum ) {
+			fputcsv( $csv_output_file, $datum );
+		}
+
+		fclose( $csv_output_file );
 	}
 
 	/**
