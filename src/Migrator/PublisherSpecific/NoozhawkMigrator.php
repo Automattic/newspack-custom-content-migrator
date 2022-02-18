@@ -3,8 +3,10 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Migrator\General\SubtitleMigrator;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 use \WP_Error;
 use \DOMDocument;
@@ -26,6 +28,11 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var AttachmentsLogic.
+	 */
+	private $attachment_logic;
+
+	/**
 	 * @var null|CoAuthors_Guest_Authors
 	 */
 	public $coauthors_guest_authors;
@@ -41,12 +48,19 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var Crawler
+	 */
+	private $dom_crawler;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
+		$this->attachment_logic        = new AttachmentsLogic();
 		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
 		$this->coauthors_plus          = new CoAuthors_Plus();
+		$this->dom_crawler             = new Crawler();
 	}
 
 	/**
@@ -310,25 +324,36 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		$events = array_map(
 			function( $event ) {
 				preg_match( '/\$\s*(?<price>\d+)/', self::get_event_meta( $event['postmeta'], 'event_price' ), $price_matches );
-				$has_price     = array_key_exists( 'price', $price_matches );
-				$event_day     = ( new \DateTime( $event['post_date_gmt'] ) );
-				$event_content = preg_replace( '/\s*<h1[^>]*>[^<]*<\/h1>\s*<div\s+class="subheader"[^>]*>[^<]*<\/div>\s*<img[^>]*>/', '', $event['post_content'] );
+				$has_price = array_key_exists( 'price', $price_matches );
+				$event_day = ( new \DateTime( $event['post_date_gmt'] ) );
+
+				// Event Content.
+				$this->dom_crawler->clear();
+				$this->dom_crawler->add( $event['post_content'] );
+				$event_content_dom = $this->dom_crawler->filter( '.profileRow.float-right' );
+				$event_content     = 1 === $event_content_dom->count() ? trim( $event_content_dom->getNode( 0 )->textContent ) : self::get_event_meta( $event['postmeta'], 'event_intro' );
+
+				// Event Image.
+				$image_media_id = $this->attachment_logic->import_external_file( $event['attachment_url'], $event['post_title'] );
+				$featured_image = wp_get_attachment_url( $image_media_id );
+
+				WP_CLI::line( sprintf( 'Converted event: %s', $event['post_title'] ) );
 
 				return [
-					'title'                => $event['post_title'],
-					'event_intro'          => self::get_event_meta( $event['postmeta'], 'event_intro' ),
-					'event_start_date'     => $event_day->format( 'Y-m-d' ),
-					'event_end_date'       => $event_day->format( 'Y-m-d' ),
-					'event_start_time'     => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_start' ) ) ),
-					'event_end_time'       => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_end' ) ) ),
-					'event_timezone'       => $event_day->getTimezone()->getName(),
-					'event_price'          => $has_price ? $price_matches['price'] : self::get_event_meta( $event['postmeta'], 'event_price' ),
-					'event_price_currency' => $has_price ? '$' : '',
-					'event_description'    => $event_content,
-					'event_location'       => self::get_event_meta( $event['postmeta'], 'event_location' ),
-					'event_image'          => $event['attachment_url'],
-					'event_url'            => self::get_event_meta( $event['postmeta'], 'event_url' ),
-					'event_sponsors'       => self::get_event_meta( $event['postmeta'], 'event_sponsors' ),
+					'EVENT NAME'            => $event['post_title'],
+					'EVENT VENUE NAME'      => self::get_event_meta( $event['postmeta'], 'event_location' ),
+					'EVENT ORGANIZER NAME'  => self::get_event_meta( $event['postmeta'], 'event_sponsors' ),
+					'EVENT START DATE'      => $event_day->format( 'Y-m-d' ),
+					'EVENT START TIME'      => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_start' ) ) ),
+					'EVENT END DATE'        => $event_day->format( 'Y-m-d' ),
+					'EVENT END TIME'        => gmdate( 'H:i:s', strtotime( self::get_event_meta( $event['postmeta'], 'event_end' ) ) ),
+					'ALL DAY EVENT'         => false,
+					'TIMEZONE'              => $event_day->getTimezone()->getName(),
+					'EVENT COST'            => $has_price ? $price_matches['price'] : self::get_event_meta( $event['postmeta'], 'event_price' ),
+					'EVENT CURRENCY SYMBOL' => $has_price ? '$' : '',
+					'EVENT FEATURED IMAGE'  => $featured_image,
+					'EVENT WEBSITE'         => self::get_event_meta( $event['postmeta'], 'event_url' ),
+					'EVENT DESCRIPTION'     => $event_content,
 				];
 			},
 			$raw_events
