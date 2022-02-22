@@ -2,7 +2,7 @@
 
 # A more convenient way to execute WP CLI.
 function wp_cli() {
- eval $WP_CLI_BIN --path=$WP_CLI_PATH $@
+  eval $WP_CLI_BIN --path=$WP_CLI_PATH $@
 }
 
 # Based on the last previously executed command's exit code, sets a custom variable's
@@ -21,7 +21,7 @@ function set_var_by_previous_exit_code() {
 }
 
 # Checks if Plugin is active, and activates it if not.
-function update_plugin_status() {
+function activate_this_plugin() {
   local PLUGIN_STATUS=$(wp_cli plugin list | grep "$THIS_PLUGINS_NAME" | awk '{print $2}')
   if [[ 'active' = $PLUGIN_STATUS ]]; then
     return
@@ -63,7 +63,7 @@ function get_vip_search_replace() {
 # Sets config variables which can be automatically set.
 function set_config() {
   THIS_PLUGINS_NAME='newspack-custom-content-migrator'
-  # Tables to import fully from the Live Site, given here without the table prefix.
+  # Tables to import from the Live Site, given here without the table prefix.
   IMPORT_TABLES=(commentmeta comments links postmeta posts term_relationships term_taxonomy termmeta terms usermeta users)
   # If left empty, the DB_NAME_LOCAL will be fetched from the user name, as the Atomic sites' convention.
   DB_NAME_LOCAL=""
@@ -88,10 +88,6 @@ function set_config() {
   if [ "" = "$DB_NAME_LOCAL" ]; then
     DB_NAME_LOCAL=$( whoami )
   fi
-  # If not specified otherwise, Jetpack table prefix is the same as local WP DB prefix.
-  if [ "" = "$JETPACK_TABLE_PREFIX" ]; then
-    JETPACK_TABLE_PREFIX=$TABLE_PREFIX
-  fi
 
   # Set array with hostname replacements for live SQL dump file before importing it into local.
   declare -gA LIVE_SQL_DUMP_HOSTNAME_REPLACEMENTS
@@ -103,7 +99,6 @@ function validate_all_params() {
   validate_db_connection
   validate_db_charset
   validate_table_prefix
-  validate_live_site_export_variables
   validate_live_db_hostname_replacements
 }
 
@@ -117,22 +112,14 @@ function purge_temp_folders() {
 
 # Extracts the Jetpack archive, and prepares its contents for import.
 function unpack_jetpack_archive() {
-  if [ "" = "$LIVE_JETPACK_ARCHIVE" ]; then
-    echo_ts "using live SQL dump from $LIVE_SQL_DUMP_FILE and files from $LIVE_HTDOCS_FILES ..."
-    return
-  fi
-
   echo_ts 'extracting archive...'
   jetpack_archive_extract
 
   echo_ts "preparing the SQL dump..."
   jetpack_archive_prepare_live_sql_dump
-  echo_ts "created $LIVE_SQL_DUMP_FILE"
 
   echo_ts 'preparing the files...'
   jetpack_archive_prepare_files_for_sync
-
-  echo_ts "files for syncing stored to $LIVE_HTDOCS_FILES"
 }
 
 function jetpack_archive_extract() {
@@ -151,9 +138,7 @@ function jetpack_archive_prepare_live_sql_dump() {
   # First get the list of all individual SQL table dump files from the Jetpack SQL export.
   local LIST_OF_TABLENAMES=""
   for KEY in "${!IMPORT_TABLES[@]}"; do
-    # Using the JETPACK_TABLE_PREFIX var here enables a different table prefix for the
-    # Jetpack dumps and the Staging/Launch site tables.
-    local TABLE_FILE_FULL_PATH=$TEMP_DIR_JETPACK_UNZIP/sql/$JETPACK_TABLE_PREFIX${IMPORT_TABLES[KEY]}.sql
+    local TABLE_FILE_FULL_PATH=$TEMP_DIR_JETPACK_UNZIP/sql/$TABLE_PREFIX${IMPORT_TABLES[KEY]}.sql
     LIST_OF_TABLENAMES="$LIST_OF_TABLENAMES $TABLE_FILE_FULL_PATH"
 
     # Also check if table dump exists in the Jetpack export.
@@ -166,6 +151,8 @@ function jetpack_archive_prepare_live_sql_dump() {
   # Export all table dumps into the LIVE_SQL_DUMP_FILE file
   mkdir -p $TEMP_DIR_JETPACK/sql
   cat $LIST_OF_TABLENAMES > $LIVE_SQL_DUMP_FILE
+
+  echo_ts "created $LIVE_SQL_DUMP_FILE"
 }
 
 # Prepares files for import from the Jetpack export, sets their location to LIVE_HTDOCS_FILES
@@ -176,11 +163,8 @@ function jetpack_archive_prepare_files_for_sync() {
   mkdir -p $LIVE_HTDOCS_FILES/wp-content
   mv $TEMP_DIR_JETPACK_UNZIP/wp-content/uploads $LIVE_HTDOCS_FILES/wp-content
   rm -rf $TEMP_DIR_JETPACK_UNZIP
-}
 
-function export_staging_site_sportspress_plugin_contents() {
-  wp_cli newspack-content-migrator export-sportspress-content --output-dir=$TEMP_DIR_MIGRATOR
-  set_var_by_previous_exit_code IS_EXPORTED_SPORTSPRESS_PLUGIN_CONTENTS
+  echo_ts "files for syncing stored to $LIVE_HTDOCS_FILES"
 }
 
 function prepare_live_sql_dump_for_import() {
@@ -188,7 +172,8 @@ function prepare_live_sql_dump_for_import() {
   replace_hostnames $LIVE_SQL_DUMP_FILE $LIVE_SQL_DUMP_FILE_REPLACED
 
   echo_ts 'setting `live_` table prefix to tables in Live site SQL dump...'
-  sed -i "s/\`$JETPACK_TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
+  sed -i "s/\`$TABLE_PREFIX/\`live_$TABLE_PREFIX/g" $LIVE_SQL_DUMP_FILE_REPLACED
+  echo_ts 'created a live db dump with `live_` prefixes and replaced hostnames, '"$LIVE_SQL_DUMP_FILE_REPLACED..."
 }
 
 # Replace multiple hostnames in a file using the VIP's search-replace tool.
@@ -227,6 +212,14 @@ function replace_hostnames() {
 }
 
 function import_live_sql_dump() {
+  # First drop the `live_wp_` tables from Staging, if any, before importing them.
+  local DROP_LIVE_TABLES=""
+  for KEY in "${!IMPORT_TABLES[@]}"; do
+    DROP_LIVE_TABLES="$DROP_LIVE_TABLES drop table if exists live_$TABLE_PREFIX${IMPORT_TABLES[KEY]} ;"
+  done
+  mysql -h $DB_HOST_LOCAL --default-character-set=$DB_CHARSET ${DB_NAME_LOCAL} -e "$DROP_LIVE_TABLES"
+
+  # Import the new live dump.
   mysql -h $DB_HOST_LOCAL --default-character-set=$DB_CHARSET ${DB_NAME_LOCAL} < $LIVE_SQL_DUMP_FILE_REPLACED
 }
 
@@ -254,47 +247,6 @@ function dump_db() {
     > $1
 }
 
-# Replaces tables defined in $IMPORT_TABLES with Live Site tables (imported with the
-# `live_` table name prefix).
-function replace_staging_tables_with_live_tables() {
-  for TABLE in "${IMPORT_TABLES[@]}"; do
-      echo "- switching $TABLE ..."
-      # Add prefix `staging_` to current table.
-      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DROP TABLE IF EXISTS staging_$TABLE_PREFIX$TABLE;"
-      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; RENAME TABLE $TABLE_PREFIX$TABLE TO staging_$TABLE_PREFIX$TABLE;"
-      # This ensures the table charset definition stays the same, only the data from live gets inserted.
-      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; CREATE TABLE $TABLE_PREFIX$TABLE LIKE staging_$TABLE_PREFIX$TABLE;"
-      mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; INSERT INTO $TABLE_PREFIX$TABLE SELECT * FROM live_$TABLE_PREFIX$TABLE;"
-  done
-}
-
-# Imports previously converted blocks contents from the `staging_wp_posts` table.
-function import_blocks_content_from_staging_site() {
-  if [ "" = "$STAGING_SITE_HOSTNAME" ]; then
-    echo_ts_yellow "Param STAGING_SITE_HOSTNAME not provided, skipping."
-    exit
-  fi
-
-  echo_ts "deleting the Newspack Content Converter plugin..."
-  wp_cli plugin deactivate newspack-content-converter
-  wp_cli plugin delete newspack-content-converter
-  # The NCC plugin will drop the table only if 'deleted' from Dashboard, but not from CLI;
-  # this needs update, but for now manually drop ncc_wp_posts table and clean the options.
-  mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DROP TABLE IF EXISTS ncc_wp_posts; "
-  mysql -h $DB_HOST_LOCAL -e "USE $DB_NAME_LOCAL; DELETE FROM ${TABLE_PREFIX}options \
-    WHERE option_name IN ( 'ncc-conversion_batch_size', 'ncc-conversion_max_batches', 'ncc-convert_post_statuses_csv', \
-    'ncc-convert_post_types_csv', 'ncc-is_queued_conversion', 'ncc-patching_batch_size', 'ncc-patching_max_batches', \
-    'ncc-is_queued_retry_failed_conversion', 'ncc-conversion_queued_batches_csv', 'ncc-retry_conversion_failed_queued_batches_csv', \
-    'ncc-retry_conversion_failed_max_batches' ) ; "
-
-  echo_ts "reinstalling the Newspack Content Converter Plugin..."
-  wp_cli plugin install --force https://github.com/Automattic/newspack-content-converter/releases/latest/download/newspack-content-converter.zip
-  wp_cli plugin activate newspack-content-converter
-
-  echo_ts "importing contents already converted to blocks from Staging site..."
-  wp_cli newspack-content-migrator import-blocks-content-from-staging-site --table-prefix=$TABLE_PREFIX --staging-hostname=$STAGING_SITE_HOSTNAME
-}
-
 function clean_up_options() {
   mysql -h $DB_HOST_LOCAL -e "USE ${DB_NAME_LOCAL}; \
       DELETE FROM ${TABLE_PREFIX}options WHERE option_name LIKE '%googlesitekit%' ; "
@@ -315,8 +267,8 @@ function drop_temp_db_tables() {
 }
 
 function set_public_content_file_permissions() {
-  find "$HTDOCS_PATH/wp-content" -type d -print0 | xargs -0 chmod 755
-  find "$HTDOCS_PATH/wp-content" -type f -print0 | xargs -0 chmod 644
+  find "$HTDOCS_PATH/wp-content" -type d -print0 | xargs -0 chmod 755 > /dev/null 2>&1
+  find "$HTDOCS_PATH/wp-content" -type f -print0 | xargs -0 chmod 644 > /dev/null 2>&1
 }
 
 function validate_db_connection() {
@@ -345,24 +297,6 @@ function validate_table_prefix() {
   if [ 0 = $COUNT ]; then
     echo_ts_red "ERROR: no tables with prefix $TABLE_PREFIX found; check the TABLE_PREFIX variable."
     exit
-  fi
-}
-
-# Either LIVE_JETPACK_ARCHIVE must be provided, or both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE.
-function validate_live_site_export_variables() {
-  if [ "" != "$LIVE_JETPACK_ARCHIVE" ]; then
-    if [ ! -f $LIVE_JETPACK_ARCHIVE ]; then
-      echo_ts_red "Jetpack Rewind archive not found at location $LIVE_JETPACK_ARCHIVE."
-      exit
-    fi
-  else
-    if [ "" = "$LIVE_HTDOCS_FILES" ] && [ "" = "$LIVE_SQL_DUMP_FILE" ]; then
-      echo_ts_red "if LIVE_JETPACK_ARCHIVE config param is not provided, then both LIVE_HTDOCS_FILES and LIVE_SQL_DUMP_FILE must be set."
-      exit
-    else
-      validate_live_files
-      validate_live_sql_dump_file
-    fi
   fi
 }
 
