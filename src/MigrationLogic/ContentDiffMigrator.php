@@ -56,20 +56,35 @@ class ContentDiffMigrator {
 	 * @return array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
+		$ids = [];
 		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
 		$posts_table = $this->wpdb->prefix . 'posts';
-		$sql = "SELECT lwp.ID FROM {$live_posts_table} lwp
+
+		// Get all Posts and Pages except revisions and trashed items.
+		$sql_posts = "SELECT lwp.ID FROM {$live_posts_table} lwp
 			LEFT JOIN {$posts_table} wp
 				ON wp.post_name = lwp.post_name
 				AND wp.post_title = lwp.post_title
 				AND wp.post_status = lwp.post_status
 				AND wp.post_date = lwp.post_date
-			WHERE lwp.post_type IN ( 'post', 'page', 'attachment' )
-			AND lwp.post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' )
+			WHERE lwp.post_type IN ( 'post', 'page' )
+			AND lwp.post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' )
 			AND wp.ID IS NULL;";
-		$results = $this->wpdb->get_results( $sql, ARRAY_A );
+		$results = $this->wpdb->get_results( $sql_posts, ARRAY_A );
+		foreach ( $results as $result ) {
+			$ids[] = $result[ 'ID' ];
+		}
 
-		$ids = [];
+		// Get attachments.
+		$sql_attachments = "SELECT lwp.ID FROM {$live_posts_table} lwp
+			LEFT JOIN {$posts_table} wp
+				ON wp.post_name = lwp.post_name
+				AND wp.post_title = lwp.post_title
+				AND wp.post_status = lwp.post_status
+				AND wp.post_date = lwp.post_date
+			WHERE lwp.post_type IN ( 'attachment' )
+			AND wp.ID IS NULL;";
+		$results = $this->wpdb->get_results( $sql_attachments, ARRAY_A );
 		foreach ( $results as $result ) {
 			$ids[] = $result[ 'ID' ];
 		}
