@@ -174,40 +174,28 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Creates all hierarchical and non-hierarchical taxonomies from Live to local, except for built-in 'post_tag' and 'post_format'.
+	 * Recreates all categories from Live to local.
 	 *
-	 * If hierarchical cats are used, the whole structure should be in place before they can get assigned to posts, and same goes
-	 * for any custom taxonomies which might be used.
+	 * If hierarchical cats are used, thir whole structure should be in place when they get assigned to posts.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
 	 * @return array Newly inserted Terms Taxonomies. Keys are taxonomies, with term_ids as subarrays. In case of errors, will
 	 *               contain a key 'errors' with error messages.
 	 */
-	public function recreate_taxonomies( $live_table_prefix ) {
+	public function recreate_categories( $live_table_prefix ) {
 		$table_prefix = $this->wpdb->prefix;
 		$live_terms_table = esc_sql( $live_table_prefix . 'terms' );
 		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
 		$terms_table = esc_sql( $table_prefix . 'terms' );
 		$termstaxonomy_table = esc_sql( $table_prefix . 'term_taxonomy' );
 
-		// Temporarily register custom taxonomies to allow creation.
-		$custom_taxonomies = $this->wpdb->get_results(
-			"SELECT DISTINCT taxonomy
-			FROM $live_termstaxonomy_table
-			WHERE taxonomy NOT IN ( 'post_tag', 'post_format', 'category' );",
-			ARRAY_A
-		);
-		foreach ( $custom_taxonomies as $custom_taxonomy ) {
-			register_taxonomy( $custom_taxonomy[ 'taxonomy' ], [ 'post' ], [ 'hierarchical' => true, 'query_var' => true, ] );
-		}
-
 		// Get all live site's hiearchical taxonomies, ordered by parent for easy hierarchical reconstruction.
 		$live_taxonomies = $this->wpdb->get_results(
 			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 			FROM $live_terms_table t
 	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
-			WHERE tt.taxonomy NOT IN ( 'post_tag', 'post_format' )
+			WHERE tt.taxonomy IN ( 'category' )
 			ORDER BY tt.parent;",
 			ARRAY_A
 		);

@@ -166,9 +166,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			WP_CLI::error( $e->getMessage() );
 		}
 
-		// Recreate all hierarchical taxonomies, such as categories and other custom taxonomies.
-		WP_CLI::log( 'Recreating taxonomies...' );
-		$created_terms_in_taxonomies = self::$logic->recreate_taxonomies( $live_table_prefix );
+		WP_CLI::log( 'Recreating categories...' );
+		$created_terms_in_taxonomies = self::$logic->recreate_categories( $live_table_prefix );
 		if ( isset( $created_terms_in_taxonomies[ 'errors' ] ) && ! empty( $created_terms_in_taxonomies[ 'errors' ] ) ) {
 			foreach ( $created_terms_in_taxonomies[ 'errors' ] as $error ) {
 				WP_CLI::warning( $error );
