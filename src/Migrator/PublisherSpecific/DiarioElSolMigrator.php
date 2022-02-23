@@ -363,7 +363,6 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 		foreach ( $posts as $post ) {
 			$original_id = $post['_id']['$oid'];
-
 			// Check if we have already imported the post.
 			if ( in_array( $original_id, $imported_notes ) ) {
 				$this->log( self::POSTS_LOGS, sprintf( 'Skipped post %s as it\'s already imported', $original_id ) );
@@ -484,60 +483,64 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				// Set Post Meta.
 				// Categories.
-				$raw_categories     = $this->get_term_by_meta( 'original_id', $post['categories'] );
-				$created_categories = array();
-				if ( empty( $raw_categories ) ) {
-					// Sometimes categories are set from the tags (e.g. note #oid = 59ce420ae101583a8815faa5).
-					$categories_from_tags = $this->get_term_by_meta( 'original_id', $post['categories'], 'post_tag' );
-					foreach ( $categories_from_tags as $category_from_tag ) {
-						$created_category = category_exists( $category_from_tag->name );
-						if ( $created_category ) {
-							$created_categories[] = $created_category;
-						} else {
-							$created_category = wp_insert_category(
-								array(
-									'cat_name'          => $category_from_tag->name,
-									'category_nicename' => $category_from_tag->slug,
-								),
-								true
-							);
-							if ( is_wp_error( $created_category ) ) {
-								WP_CLI::error( sprintf( 'Error creating Category from Tag $s: %s', $category_from_tag->name, $created_category->get_error_message() ) );
-							} else {
+				if ( ! empty( $post['categories'] ) ) {
+					$raw_categories     = $this->get_term_by_meta( 'original_id', $post['categories'] );
+					$created_categories = array();
+					if ( empty( $raw_categories ) ) {
+						// Sometimes categories are set from the tags (e.g. note #oid = 59ce420ae101583a8815faa5).
+						$categories_from_tags = $this->get_term_by_meta( 'original_id', $post['categories'], 'post_tag' );
+						foreach ( $categories_from_tags as $category_from_tag ) {
+							$created_category = category_exists( $category_from_tag->name );
+							if ( $created_category ) {
 								$created_categories[] = $created_category;
+							} else {
+								$created_category = wp_insert_category(
+									array(
+										'cat_name' => $category_from_tag->name,
+										'category_nicename' => $category_from_tag->slug,
+									),
+									true
+								);
+								if ( is_wp_error( $created_category ) ) {
+									WP_CLI::error( sprintf( 'Error creating Category from Tag $s: %s', $category_from_tag->name, $created_category->get_error_message() ) );
+								} else {
+									$created_categories[] = $created_category;
+								}
 							}
 						}
 					}
-				}
 
-				wp_set_post_categories(
-					$post_id,
-					empty( $raw_categories ) ? $created_categories : array_map(
-						function( $category ) {
-							return $category->term_id;
-						},
-						$raw_categories
-					)
-				);
+					wp_set_post_categories(
+						$post_id,
+						empty( $raw_categories ) ? $created_categories : array_map(
+							function( $category ) {
+								return $category->term_id;
+							},
+							$raw_categories
+						)
+					);
+				}
 
 				// Tags.
-				$tags = $this->get_term_by_meta( 'original_id', $post['tags'], 'post_tag' );
+				if ( ! empty( $post['tags'] ) ) {
+					$tags = $this->get_term_by_meta( 'original_id', $post['tags'], 'post_tag' );
 
-				$result = wp_set_post_tags(
-					$post_id,
-					array_map(
-						function( $tag ) {
-							return $tag->name;
-						},
-						$tags
-					)
-				);
-				if ( is_wp_error( $result ) ) {
-					$this->log( self::POSTS_LOGS, sprintf( '%d %s %s', $post_id, wp_json_encode( $result ), $result->get_error_message() ) );
-					WP_CLI::warning( sprintf( 'Error setting post tags %s -- %s', wp_json_encode( $result ), $result->get_error_message() ) );
+					$result = wp_set_post_tags(
+						$post_id,
+						array_map(
+							function( $tag ) {
+								return $tag->name;
+							},
+							$tags
+						)
+					);
+					if ( is_wp_error( $result ) ) {
+						$this->log( self::POSTS_LOGS, sprintf( '%d %s %s', $post_id, wp_json_encode( $result ), $result->get_error_message() ) );
+						WP_CLI::warning( sprintf( 'Error setting post tags %s -- %s', wp_json_encode( $result ), $result->get_error_message() ) );
+					}
+
+					WP_CLI::warning( sprintf( 'Setting Post %d tags %s', $post_id, wp_json_encode( $result ) ) );
 				}
-
-				WP_CLI::warning( sprintf( 'Setting Post %d tags %s', $post_id, wp_json_encode( $result ) ) );
 
 				// Set the rest of post meta.
 				update_post_meta( $post_id, 'original_id', $original_id );
