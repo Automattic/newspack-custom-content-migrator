@@ -69,7 +69,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-el-libero-content',
+			'newspack-content-migrator el-libero-migrate-content',
 			[ $this, 'handler' ],
 			[
 				'shortdesc' => 'Will handle migrating custom content from wp_postmeta to wp_post.post_content',
@@ -80,6 +80,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 
 	/**
 	 * Handler function.
+	 * @throws Exception
 	 */
 	public function handler() {
 		$this->migrate_podcasts();
