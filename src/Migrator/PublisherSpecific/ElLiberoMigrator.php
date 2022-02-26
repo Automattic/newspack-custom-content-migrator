@@ -72,7 +72,7 @@ class ElLiberoMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-el-libero-posts',
+			'newspack-content-migrator el-libero-migrate-posts',
 			array( $this, 'handle_post_migration' ),
 			array(
 				'shortdesc' => 'Will handle post_type migration to categories',
@@ -80,7 +80,7 @@ class ElLiberoMigrator implements InterfaceMigrator {
 			),
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-el-libero-authors',
+			'newspack-content-migrator el-libero-migrate-authors',
 			array( $this, 'handle_authors_migration' ),
 			array(
 				'shortdesc' => 'Will handle `autor` data migration to create Authors.',
