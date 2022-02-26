@@ -141,11 +141,33 @@ class ElLiberoMigrator implements InterfaceMigrator {
 	public function handle_authors_migration() {
 		global $wpdb;
 
-		$list_of_authors_sql = "SELECT sub.meta_value, GROUP_CONCAT(DISTINCT sub.post_id) as post_ids FROM (
-                  SELECT *
-                  FROM $wpdb->postmeta pm
-                  WHERE pm.meta_key = 'autor'
-              ) as sub GROUP BY sub.meta_value ORDER BY sub.meta_value";
+		$wpdb->query( "SET SESSION group_concat_max_len = 1000000" );
+
+		$list_of_authors_sql = "
+			SELECT 
+			       sub.meta_value, 
+			       GROUP_CONCAT(sub.post_id) as post_ids 
+			FROM (
+  				SELECT *
+  				FROM wp_postmeta pm
+  				WHERE pm.meta_key = 'autor'
+    			AND pm.post_id NOT IN (
+    			    SELECT 
+    			           object_id 
+    			    FROM wp_term_relationships 
+    			    WHERE term_taxonomy_id IN (
+      					SELECT wp_term_taxonomy.term_taxonomy_id
+      					FROM wp_term_taxonomy
+      					WHERE term_id IN (15406, 1590, 1392)
+  					)
+    			) 
+  				AND pm.post_id NOT IN (
+  				    SELECT wtr.object_id FROM wp_terms t
+                    LEFT JOIN wp_term_taxonomy wtt on t.term_id = wtt.term_id
+                    LEFT JOIN wp_term_relationships wtr on wtt.term_taxonomy_id = wtr.term_taxonomy_id
+                    WHERE t.term_id = 15392
+  				)
+			) AS sub GROUP BY sub.meta_value ORDER BY sub.meta_value";
 
 		$list_of_authors = $wpdb->get_results( $list_of_authors_sql );
 
@@ -166,16 +188,48 @@ class ElLiberoMigrator implements InterfaceMigrator {
 						continue;
 					}
 				} else {
-					$user = username_exists( $this->nicename( $record->meta_value ) );
+
+					$name = explode( ',', $record->meta_value );
+					$name = trim( array_shift( $name ) );
+					$name = explode(' y ', $name);
+					$name = trim( array_shift( $name ) );
+					$name = explode( ' e ', $name );
+					$name = trim( array_shift( $name ) );
+
+					if ( in_array( $name, [ 'C. Novoa', 'Carmen Novoa V.' ] ) ) {
+						$name = 'Carmen Novoa';
+					}
+
+					if ( in_array( $name, [ 'J.P. Lührs', 'J. P. L.'] ) ) {
+						$name = 'Juan Pedro Lührs';
+					}
+
+					if ( in_array( $name, [ 'R.G.', 'R. G.', 'R. Gaggero', 'Renato Gaggero L.' ] ) ) {
+						$name = 'Renato Gaggero';
+					}
+
+					if ( in_array( $name, [ 'El Líibero' ] ) ) {
+						$name = 'El Líbero';
+					}
+
+					if ( in_array( $name, [ 'Nicolás González S.' ] ) ) {
+						$name = 'Nicolás González';
+					}
+
+					if ( in_array( $name, [ 'Uziel Gómez  Padrón', 'Uziel Gómez P.', 'Uziel Gómez Padrón' ] ) ) {
+						$name = 'Uziel Gómez';
+					}
+
+					$user = username_exists( $this->nicename( $name ) );
 
 					if ( $user ) {
 						$update_post_author_sql = "UPDATE $wpdb->posts SET post_author = $user WHERE ID IN ($record->post_ids)";
 					} else {
 						$user_id = wp_insert_user(
 							[
-								'display_name'  => $record->meta_value,
-								'user_nicename' => $this->nicename( $record->meta_value ),
-								'user_login'    => $this->nicename( $record->meta_value ),
+								'display_name'  => $name,
+								'user_nicename' => $this->nicename( $name ),
+								'user_login'    => $this->nicename( $name ),
 								'user_pass'     => wp_generate_password(),
 							]
 						);
