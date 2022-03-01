@@ -108,10 +108,27 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 		}
 
 		foreach ( $results as $link ) {
-			if ( ! empty( $link->post_content ) ) {
-				$this->output( "Skipping post_id: $link->post_id because post_content is not empty." );
+			$soundcloud_embed = strtr(
+				$this->soundcloud_embed,
+				[
+					'{url}' => $link->meta_value,
+				]
+			);
+
+			if ( ! empty( $link->post_content ) && ! str_contains( $link->post_content, 'wp-block-embed is-type-rich is-provider-soundcloud wp-block-embed-soundcloud' ) ) {
+				$this->output( "Appending SoundCloud link to post_id: $link->post_id because post_content is not empty." );
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_content' => "$link->post_content<p><br></p>$soundcloud_embed",
+					],
+					[
+						'ID' => $link->post_id,
+					]
+				);
 				continue;
 			}
+
 			// Probably a way to call DB once for this info, but going to be a bit quick and dirty.
 			$content_sql = "SELECT meta_value FROM $wpdb->postmeta
 				WHERE meta_key = 'bajada_noticia'
@@ -120,15 +137,8 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 
 			$content_result = $wpdb->get_results( $content_sql );
 
-			$soundcloud_embed = strtr(
-				$this->soundcloud_embed,
-				[
-					'{url}' => $link->meta_value,
-				]
-			);
-
 			$content_result = array_shift( $content_result );
-			$post_content   = "$content_result->meta_value</br>$soundcloud_embed";
+			$post_content   = "<p>$content_result->meta_value</p><p><br></p>$soundcloud_embed";
 			$wpdb->update(
 				$wpdb->posts,
 				[
