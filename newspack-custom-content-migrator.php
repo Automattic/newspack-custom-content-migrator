@@ -52,4 +52,5 @@ PluginSetup::register_migrators( array(
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
+		Migrator\PublisherSpecific\PhilomathMigrator::class,
 ) );
