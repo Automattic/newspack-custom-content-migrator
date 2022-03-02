@@ -1500,7 +1500,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_1_id = 41;
 		$term_1_name = 'Uncategorized';
 		$term_1_slug = 'uncategorized';
-		$term_2_id = 62;
 		$term_2_name = 'Custom Term';
 		$term_2_slug = 'custom-term';
 		$term_3_name = 'Blue';
