@@ -1500,6 +1500,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_1_id = 41;
 		$term_1_name = 'Uncategorized';
 		$term_1_slug = 'uncategorized';
+		$term_2_id = 62;
 		$term_2_name = 'Custom Term';
 		$term_2_slug = 'custom-term';
 		$term_3_name = 'Blue';
@@ -1559,12 +1560,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term' ) ) );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_existing_term_taxonomy', [
 			// Term 1 calls.
-			[ $term_1_name, $term_1_slug, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
+			[ $term_1_id, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
 			// Term 2 calls.
-			[ $term_2_name, $term_2_slug, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
+			[ 0, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
 			// Term 3 calls.
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
+			[ 0, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
+			[ 0, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
 		] );
 		$logic_partial_mock->method( 'insert_term_taxonomy' )
 		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term_taxonomy' ) ) );
