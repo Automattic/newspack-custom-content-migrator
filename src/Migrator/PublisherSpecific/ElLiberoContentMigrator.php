@@ -149,6 +149,35 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * If the post doesn't already have a cached iframe of the SoundCloud link,
+	 * it will attempt to add one.
+	 *
+	 * @param string $url SoundCloud link.
+	 * @param int    $post_id Post ID.
+	 */
+	protected function add_soundcloud_oembed( string $url, int $post_id ) {
+		global $wpdb;
+
+		$has_oembed_sql = "SELECT meta_key, meta_value FROM $wpdb->postmeta 
+				WHERE post_id = $post_id 
+				  AND meta_key LIKE '_oembed_%'";
+		$this->output_sql( $has_oembed_sql );
+		$has_oembed = $wpdb->get_results( $has_oembed_sql );
+		$has_oembed = ! empty( $has_oembed );
+
+		if ( ! $has_oembed ) {
+
+			$key_suffix    = md5( $url . serialize( wp_embed_defaults( $url ) ) );
+			$cachekey      = "_oembed_$key_suffix";
+			$cachekey_time = "_oembed_time_$key_suffix";
+
+			update_post_meta( $post_id, $cachekey,  );
+			update_post_meta( $post_id, $cachekey_time, time() );
+			$this->output( "Created embed: $cachekey " );
+		}
+	}
+
+	/**
 	 * Migrate MP3's to block format.
 	 *
 	 * @return void
