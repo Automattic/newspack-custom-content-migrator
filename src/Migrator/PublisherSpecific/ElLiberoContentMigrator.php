@@ -6,6 +6,7 @@ use Exception;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use WP_CLI;
 use WP_Error;
+use WP_oEmbed;
 
 /**
  * Custom Libero migration script.
@@ -80,6 +81,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 
 	/**
 	 * Handler function.
+	 *
 	 * @throws Exception
 	 */
 	public function handler() {
@@ -108,19 +110,14 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 		}
 
 		foreach ( $results as $link ) {
-			$soundcloud_embed = strtr(
-				$this->soundcloud_embed,
-				[
-					'{url}' => $link->meta_value,
-				]
-			);
+			$soundcloud_embed = ( new WP_oEmbed() )->get_html( $link->meta_value );
 
 			if ( ! empty( $link->post_content ) && ! str_contains( $link->post_content, 'wp-block-embed is-type-rich is-provider-soundcloud wp-block-embed-soundcloud' ) ) {
 				$this->output( "Appending SoundCloud link to post_id: $link->post_id because post_content is not empty." );
 				$wpdb->update(
 					$wpdb->posts,
 					[
-						'post_content' => "$link->post_content<p><br></p>$soundcloud_embed",
+						'post_content' => "<p>$link->post_content</p><p><br></p>$soundcloud_embed",
 					],
 					[
 						'ID' => $link->post_id,
@@ -235,7 +232,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 		foreach ( $attached_html as $html ) {
 			$html_content = wp_remote_get( "https://ellibero.s3.amazonaws.com/nuevoellibero/wp-content/uploads/$html->file_path" );
 
-			if ( ! ( $html_content instanceof WP_Error ) && 200 === $html_content['response']['code']) {
+			if ( ! ( $html_content instanceof WP_Error ) && 200 === $html_content['response']['code'] ) {
 				$parent_post_sql = "SELECT post_parent FROM $wpdb->posts WHERE ID = $html->post_id";
 				$this->output_sql( $parent_post_sql );
 				$parent_post = $wpdb->get_results( $parent_post_sql );
