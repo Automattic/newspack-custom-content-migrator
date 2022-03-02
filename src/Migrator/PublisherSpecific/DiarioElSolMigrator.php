@@ -141,6 +141,30 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 				),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator diario-el-sol-fix-posts-categories',
+			array( $this, 'cmd_des_fix_posts_categories' ),
+			array(
+				'shortdesc' => 'Fix Diario El Sol posts categories imported from a JSON export.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-json-path',
+						'description' => 'JSON file path that contains posts data.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'imported-cache-path',
+						'description' => 'Cache file containing the original_id of the imported notes (original_id per line).',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
 	}
 
 	/**
@@ -398,7 +422,7 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 					'post_type'     => 'post',
 					'post_title'    => $post['title'],
 					'post_content'  => $post['body'],
-					'post_excerpt'  => $post['epigraph'],
+					'post_excerpt'  => $post['epigraph'] ? $post['epigraph'] : '',
 					'post_status'   => $post['isPublished'] ? 'publish' : 'draft',
 					'post_author'   => $author_id,
 					'post_date'     => $post['publishedAt']['$date'],
@@ -416,7 +440,7 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				// Set co-authors if exists.
 				if ( ! empty( $co_authors ) ) {
-					$this->coauthors_guest_authors->assign_guest_authors_to_post( $co_authors, $post_id );
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors, $post_id );
 					$this->log( self::POSTS_LOGS, sprintf( 'Post %s with co-authors: %s', $post_id, wp_json_encode( $co_authors ) ) );
 				}
 
@@ -558,6 +582,58 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d posts took %d mins.', $added_posts, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator diario-el-sol-fix-posts-categories`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_des_fix_posts_categories( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts_json_path = $assoc_args['posts-json-path'] ?? null;
+		$cache_path      = $assoc_args['imported-cache-path'] ?? null;
+
+		if ( ! file_exists( $posts_json_path ) ) {
+			WP_CLI::error( sprintf( 'Posts export %s not found.', $posts_json_path ) );
+		}
+
+		if ( ! file_exists( $cache_path ) ) {
+			WP_CLI::error( sprintf( 'Posts exported log %s not found.', $cache_path ) );
+		}
+
+		$notes          = Items::fromFile( $posts_json_path, array( 'decoder' => new ExtJsonDecoder( true ) ) );
+		$imported_notes = file( $cache_path, FILE_IGNORE_NEW_LINES );
+
+		$posts_data = $wpdb->get_results(
+			"SELECT ID, meta_value, count(t.term_id) as cat_count FROM wp_posts p
+			INNER JOIN wp_postmeta pm on (p.ID = pm.post_id and pm.meta_key = 'original_id')
+			INNER JOIN wp_term_relationships tr on p.ID = tr.object_id
+			INNER JOIN wp_term_taxonomy tt on tr.term_taxonomy_id = tt.term_taxonomy_id
+			INNER JOIN wp_terms t on tt.term_id = t.term_id
+			WHERE tt.taxonomy = 'category'
+			GROUP BY ID
+			HAVING cat_count > 18",
+			\ARRAY_A
+		);
+
+		foreach ( $notes as $note ) {
+			$original_id     = $note['_id']['$oid'];
+			$post_data_index = array_search( $original_id, array_column( $posts_data, 'meta_value' ) );
+			if ( $post_data_index ) {
+				$post_data = $posts_data[ $post_data_index ];
+				if ( empty( $note['categories'] ) ) {
+					wp_set_post_categories( $post_data['ID'], array() );
+					WP_CLI::line( sprintf( 'Categories cleared for the post %d', $post_data['ID'] ) );
+				} else {
+					WP_CLI::warning( sprintf( 'Check post %d (%s)!', $post_data['ID'], $original_id ) );
+				}
+			}
+		}
+
+		WP_CLI::line( 'All done! 🙌' );
 	}
 
 	/**
