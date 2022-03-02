@@ -1737,7 +1737,7 @@ HTML;
 			33333 => 33330,
 		];
 
-		// The first assertion is for Jetpack Slideshow block.
+		// The first assertion is for Jetpack Slideshow block. 1111111111, 2222222222, 3333333333 are just decoys, and should not be updated, checking proper substring matching.
 		$html_slideshow = $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 );
 		$html_slideshow_expected = $this->blocks_data_provider->get_jetpack_slideshow_block( 11110, 22220, 33330 )
@@ -1779,6 +1779,7 @@ HTML;
 			33333 => 33330,
 		];
 
+		// 1111111111, 2222222222, 3333333333 are just decoys, and should not be updated, checking proper substring matching.
 		$html = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 22222, 33333 )
