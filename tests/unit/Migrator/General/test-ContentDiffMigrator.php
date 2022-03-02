@@ -1117,25 +1117,22 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_get_existing_term_taxonomy_should_query_and_return_correct_value( $data ) {
 		// Prepare.
-		$term_name = 'name';
-		$term_slug = 'slug';
+		$term_id = 123;
 		$taxonomy = 'taxonomy';
-		$term_taxonomy_id_expected = 123;
+		$term_taxonomy_id_expected = 234;
 		$sql_sprintf = "SELECT tt.term_taxonomy_id
 			FROM {$this->wpdb_mock->term_taxonomy} tt
-			JOIN {$this->wpdb_mock->terms} t
-		        ON tt.term_id = t.term_id
-			WHERE t.name = %s
-			AND t.slug = %s
-		    AND tt.taxonomy = %s;";
-		$sql = sprintf( $sql_sprintf, $term_name, $term_slug, $taxonomy );
+			WHERE tt.term_id = %d
+			AND tt.taxonomy = %s;";
+		$sql = sprintf( $sql_sprintf, $term_id, $taxonomy );
 
 		// Mock.
 		$this->wpdb_mock->insert_id = $term_taxonomy_id_expected;
 		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
 		                ->will( $this->returnValueMap( [
-			                [ $sql_sprintf, $term_name, $term_slug, $taxonomy, $sql ]
+			                // [ $sql_sprintf, $term_name, $term_slug, $taxonomy, $sql ]
+			                [ $sql_sprintf, $term_id, $taxonomy, $sql ]
 		                ] ) );
 		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_var' )
@@ -1144,7 +1141,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                ] ) );
 
 		// Run.
-		$term_taxonomy_id_actual = $this->logic->get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy );
+		$term_taxonomy_id_actual = $this->logic->get_existing_term_taxonomy( $term_id, $taxonomy );
 
 		// Assert.
 		$this->assertEquals( $term_taxonomy_id_expected, $term_taxonomy_id_actual );
