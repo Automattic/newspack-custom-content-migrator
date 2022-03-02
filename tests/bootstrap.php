@@ -5,15 +5,16 @@
  * @package Newspack_Custom_Content_Migrator
  */
 
-if ( PHP_MAJOR_VERSION >= 8 ) {
-	echo "The scaffolded tests cannot currently be run on PHP 8.0+. See https://github.com/wp-cli/scaffold-command/issues/285" . PHP_EOL; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-	exit( 1 );
-}
-
 $_tests_dir = getenv( 'WP_TESTS_DIR' );
 
 if ( ! $_tests_dir ) {
 	$_tests_dir = rtrim( sys_get_temp_dir(), '/\\' ) . '/wordpress-tests-lib';
+}
+
+// Forward custom PHPUnit Polyfills configuration to PHPUnit bootstrap file.
+$_phpunit_polyfills_path = getenv( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' );
+if ( false !== $_phpunit_polyfills_path ) {
+	define( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH', $_phpunit_polyfills_path );
 }
 
 if ( ! file_exists( "{$_tests_dir}/includes/functions.php" ) ) {
@@ -32,9 +33,6 @@ function _manually_load_plugin() {
 }
 
 tests_add_filter( 'muplugins_loaded', '_manually_load_plugin' );
-
-// WP 5.8.2 started requiring yoast/phpunit-polyfills for tests.
-require_once dirname( __FILE__ ) . '/../vendor/autoload.php';
 
 // Start up the WP testing environment.
 require "{$_tests_dir}/includes/bootstrap.php";
