@@ -534,10 +534,10 @@ class ContentDiffMigrator {
 	 */
 	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
 		// Pattern for matching <img> element's data-id attribute's value which contains the att.ID ; uses %d as placeholder for sprintf.
-		$pattern_data_id_attr = '|
+		$pattern_data_id_attr_w_placeholder = '|
 			(\<img
 			[^\>]*                   # zero or more characters except closing angle bracket
-			data-id=")(%d)("         # data-id attribute with id as value
+			data-id=")(%d)("         # data-id attribute with id as value, actual number should be inserted with sprintf
 			[^\>]*                   # zero or more characters except closing angle bracket
 			/\>)                     # closing angle bracket
 		|xims';
@@ -546,7 +546,7 @@ class ContentDiffMigrator {
 		$patterns = [];
 		$replacements = [];
 		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
-			$patterns[] = sprintf( $pattern_data_id_attr, $att_id_old );
+			$patterns[] = sprintf( $pattern_data_id_attr_w_placeholder, $att_id_old );
 			$replacements[] = '${1}' . $att_id_new . '${3}';
 		}
 
@@ -593,7 +593,7 @@ class ContentDiffMigrator {
 	public function update_gutenberg_blocks_single_id( $imported_attachment_ids, $content ) {
 
 		// Pattern for matching any Gutenberg block's "id" attribute value ; uses %d as placeholder for sprintf.
-		$pattern_id = '|
+		$pattern_id_w_placeholder = '|
 			(\<\!--      # beginning of the block element
 			\s           # followed by a space
 			wp\:[^\s]+   # element name/designation
@@ -610,7 +610,7 @@ class ContentDiffMigrator {
 		$patterns = [];
 		$replacements = [];
 		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
-			$patterns[] = sprintf( $pattern_id, $att_id_old );
+			$patterns[] = sprintf( $pattern_id_w_placeholder, $att_id_old );
 			$replacements[] = '${1}' . $att_id_new . '${3}';
 		}
 
