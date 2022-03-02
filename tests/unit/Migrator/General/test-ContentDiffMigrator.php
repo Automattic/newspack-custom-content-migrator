@@ -11,6 +11,7 @@ use http\Exception\UnexpectedValueException;
 use PHP_CodeSniffer\Tests\Core\Autoloader\Sub\C;
 use WP_UnitTestCase;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
+use NewspackCustomContentMigratorTest\DataProviders\DataProviderGutenbergBlocks;
 use WP_User;
 
 /**
@@ -27,6 +28,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 * @var ContentDiffMigrator.
 	 */
 	private $logic;
+
+	/**
+	 * @var DataProviderGutenbergBlocks.
+	 */
+	private $blocks_data_provider;
 
 	/**
 	 * @var string Local table prefix.
@@ -58,6 +64,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$this->wpdb_mock->term_taxonomy = $wpdb->prefix . 'term_taxonomy';
 		$this->wpdb_mock->term_relationships = $wpdb->prefix . 'term_relationships';
 		$this->logic = new ContentDiffMigrator( $this->wpdb_mock );
+		$this->blocks_data_provider = new DataProviderGutenbergBlocks();
 		$this->table_prefix = $wpdb->prefix;
 	}
 
@@ -1594,6 +1601,209 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 4',
 		];
 		$this->assertEquals( $expected_errors, $import_errors );
+	}
+
+	/**
+	 * Tests if update_image_element_class_attribute updates class attribute with new ID reference correctly, for various class values examples.
+	 */
+	public function test_update_image_element_class_attribute_should_update_class() {
+		// Old IDs => new IDs.
+		$imported_attachment_ids = [
+			11111 => 11110,
+		];
+
+		$html = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11111"/>
+HTML;
+		$html_expected = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11110"/>
+HTML;
+		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$this->assertEquals( $html_expected, $html_actual );
+
+		$html = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclass wp-image-11111"/>
+HTML;
+		$html_expected = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclass wp-image-11110"/>
+HTML;
+		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$this->assertEquals( $html_expected, $html_actual );
+
+		$html = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11111 otherclass"/>
+HTML;
+		$html_expected = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11110 otherclass"/>
+HTML;
+		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$this->assertEquals( $html_expected, $html_actual );
+
+		$html = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclassA wp-image-11111 otherclassB"/>
+HTML;
+		$html_expected = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclassA wp-image-11110 otherclassB"/>
+HTML;
+		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Tests if update_image_element_class_attribute updates data-id attribute with new ID reference correctly.
+	 */
+	public function test_update_image_element_class_attribute_should_update_data_id_attribute() {
+		// Old IDs => new IDs.
+		$imported_attachment_ids = [
+			11111 => 11110,
+		];
+		$html = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11111"/>
+HTML;
+		$html_expected = <<<HTML
+<img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11110" class="wp-image-11111"/>
+HTML;
+
+		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html );
+
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Tests ID updates on an entire Gutenberg Gallery block, by updating block IDs in block header/definition, and by updating
+	 * nested image blocks correctly.
+	 */
+	public function test_wp_gallery_block_ids_all_get_updated_correctly() {
+		// Old IDs => new IDs.
+		$imported_attachment_ids = [
+			11111 => 11110,
+			22222 => 22220,
+			33333 => 33330,
+		];
+		$html = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 );
+
+		$html_actual = $html;
+		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
+
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Tests that update_gutenberg_blocks_single_id updates correctly different blocks' IDs in headers.
+	 */
+	public function test_update_gutenberg_blocks_single_id_should_update_id() {
+		// Old IDs => new IDs.
+		$imported_attachment_ids = [
+			11111 => 11110,
+			33333 => 33330,
+			44444 => 44440,
+		];
+		$html_with_placeholders = <<<HTML
+<!-- wp:blocka {"id":%d,"sizeSlug":"large"} -->
+some content
+<!-- /wp:image -->
+
+<!-- wp:blockb {"id":%d} -->
+some other content
+<!-- /wp:image -->
+
+<!-- wp:blockc {"sizeSlug":"large","id":%d} -->
+something else
+<!-- /wp:image -->
+
+<!-- wp:blockd {"id":%d} -->
+there's always something... :)
+<!-- /wp:image -->
+HTML;
+
+		$html = sprintf( $html_with_placeholders, 11111, 22222, 33333, 44444 );
+		$html_expected = sprintf( $html_with_placeholders, 11110, 22222, 33330, 44440 );
+
+		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html );
+
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Tests if several different blocks which use CSV IDs in their headers get updated correctly.
+	 */
+	public function test_update_gutenberg_blocks_multiple_ids_should_update_multiple_csv_ids_in_block_definitions() {
+
+		// Old IDs => new IDs.
+		$imported_attachment_ids = [
+			11111 => 11110,
+			22222 => 22220,
+			33333 => 33330,
+		];
+
+		// The first assertion is for Jetpack Slideshow block.
+		$html_slideshow = $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 );
+		$html_slideshow_expected = $this->blocks_data_provider->get_jetpack_slideshow_block( 11110, 22220, 33330 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 );
+
+		$html_slideshow_actual = $html_slideshow;
+		$html_slideshow_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_slideshow_actual );
+		$html_slideshow_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_slideshow_actual );
+		$html_slideshow_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_slideshow_actual );
+
+		$this->assertEquals( $html_slideshow_expected, $html_slideshow_actual );
+
+
+		// The second assertion is for Jetpack Tiled Gallery block.
+		$html_jp_tiled_gallery = $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 99999, 33333 )
+		                         . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
+		$html_jp_tiled_gallery_expected = $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11110, 99999, 33330 )
+		                                  . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
+
+		$html_jp_tiled_gallery_actual = $html_jp_tiled_gallery;
+		$html_jp_tiled_gallery_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
+		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
+		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
+
+		$this->assertEquals( $html_jp_tiled_gallery_expected, $html_jp_tiled_gallery_actual );
+	}
+
+	/**
+	 * A more exhaustive search replace test, testing all the exact replacements which the update_blocks_ids method does.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids
+	 */
+	public function test_update_blocks_ids_should_update_all_ids_correctly() {
+
+		// Old IDs => new IDs.
+		$imported_attachment_ids = [
+			11111 => 11110,
+			22222 => 22220,
+			33333 => 33330,
+		];
+
+		$html = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 22222, 33333 )
+			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( 1111111111, 2222222222, 3333333333 )
+	        . "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
+	        . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
+		;
+		$html_expected = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11110, 22220, 33330 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11110, 22220, 33330 )
+			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( 1111111111, 2222222222, 3333333333 )
+	        . "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
+	        . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
+		;
+
+		$html_actual = $html;
+		// All the updates made in \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids.
+		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
+
+		$this->assertEquals( $html_expected, $html_actual );
 	}
 
 	/**

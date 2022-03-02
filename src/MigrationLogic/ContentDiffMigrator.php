@@ -498,15 +498,17 @@ class ContentDiffMigrator {
 			$content_before = $content_updated = $result[ 'post_content' ];
 			$excerpt_before = $excerpt_updated = $result[ 'post_excerpt' ];
 
-			// Do replacements in content.
+			// Do all replacements in content.
 			$content_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_gutenberg_image_blocks_class_attribute( $imported_attachment_ids, $content_updated );
 			$content_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
 
-			// Do replacements in excerpt.
+			// Do all replacements in excerpt.
 			$excerpt_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_gutenberg_image_blocks_class_attribute( $imported_attachment_ids, $excerpt_updated );
 			$excerpt_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
 
 			// Persist and log updates (if $log_file_path is given).
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
@@ -525,14 +527,18 @@ class ContentDiffMigrator {
 		}
 	}
 
-	public function update_gutenberg_image_blocks_class_attribute( $imported_attachment_ids, $content ) {
-
-		// Pattern for matching <img> element's class value which contains the att.ID ; uses %d as placeholder for sprintf.
-		$pattern_img_class = '|
+	/**
+	 * Updates <img> element's data-id attribute value.
+	 *
+	 * @return string HTML.
+	 */
+	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
+		// Pattern for matching <img> element's data-id attribute's value which contains the att.ID ; uses %d as placeholder for sprintf.
+		$pattern_data_id_attr = '|
 			(\<img
 			[^\>]*                   # zero or more characters except closing angle bracket
-			class="wp-image-)(%d)("  # class image with id
-			[^\d"]*                  # zero or more characters except numeric and double quote
+			data-id=")(%d)("         # data-id attribute with id as value
+			[^\>]*                   # zero or more characters except closing angle bracket
 			/\>)                     # closing angle bracket
 		|xims';
 
@@ -540,7 +546,42 @@ class ContentDiffMigrator {
 		$patterns = [];
 		$replacements = [];
 		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
-			$patterns[] = sprintf( $pattern_img_class, $att_id_old );
+			$patterns[] = sprintf( $pattern_data_id_attr, $att_id_old );
+			$replacements[] = '${1}' . $att_id_new . '${3}';
+		}
+
+		$content_updated = preg_replace( $patterns, $replacements, $content );
+
+		return $content_updated;
+
+	}
+
+	public function update_image_element_class_attribute( $imported_attachment_ids, $content ) {
+
+		// Pattern for matching <img> element's class value which contains the att.ID ; uses %d as placeholder for sprintf.
+		$pattern_img_class_w_placeholder = '|
+			(
+				\<img
+				[^\>]*       # zero or more characters except closing angle bracket
+				class="
+				[^"]*        # zero or more characters except class closing double quote
+				wp-image-
+			)
+			(
+				\b%d(?!\d).*?\b   # ID to be inserted with sprintf and not followed by any other digits so that we dont replace a substring
+			)
+			(
+				[^\>]*       # zero or more characters except closing angle bracket
+				/\>          # closing angle bracket
+			)
+		|xims';
+				// %d           # ID, to be inserted with sprintf
+
+		// Add every attachment ID to patterns and replacements.
+		$patterns = [];
+		$replacements = [];
+		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
+			$patterns[] = sprintf( $pattern_img_class_w_placeholder, $att_id_old );
 			$replacements[] = '${1}' . $att_id_new . '${3}';
 		}
 
@@ -614,7 +655,8 @@ class ContentDiffMigrator {
 		preg_match_all( $pattern_csv_ids, $content, $matches );
 		$ids_csv_replacements = [];
 		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
-			foreach ( $matches[2] as $ids_csv ) {
+			// Loop through all $matches[2], which are the CSV IDs, and either update them, or leave them alone.
+			foreach ( $matches[2] as $key_match => $ids_csv ) {
 				$ids = explode( ',', $ids_csv );
 				$ids_updated = [];
 				foreach ( $ids as $key_id => $id ) {
@@ -625,22 +667,29 @@ class ContentDiffMigrator {
 					}
 				}
 
-				// Store "before CSV IDs" and "after CSV IDs" in $ids_csv_replacements.
+				// If IDs were updated, store the "before CSV IDs" and "after CSV IDs" in $ids_csv_replacements.
 				if ( $ids_updated != $ids ) {
-					$ids_csv_replacements[ implode( ',', $ids ) ] = implode( ',', $ids_updated );
+					$ids_csv_replacements[ $key_match ] = [
+						'before_csv_ids' => implode( ',', $ids ),
+						'after_csv_ids' => implode( ',', $ids_updated ),
+					];
 				}
 			}
 		}
 
 		// Add every CSV IDs string to patterns and replacements.
-		$patterns = [];
-		$replacements = [];
-		foreach ( $ids_csv_replacements as $ids_csv_before => $ids_csv_after ) {
-			$patterns[] = $pattern_csv_ids;
-			$replacements[] = '${1}' . $ids_csv_after . '${3}';
-		}
+		$content_updated = $content;
+		foreach ( $ids_csv_replacements as $key_match => $changes ) {
+			$ids_csv_before = $changes[ 'before_csv_ids' ];
+			$ids_csv_after = $changes[ 'after_csv_ids' ];
 
-		$content_updated = preg_replace( $patterns, $replacements, $content );
+			// Make the replacement to just this specific WP Block in which this ID CSV was found.
+			$block_header_this_match = $matches[1][ $key_match ];
+			$search = $block_header_this_match . $ids_csv_before;
+			$replace = $block_header_this_match . $ids_csv_after;
+
+			$content_updated = str_replace( $search, $replace, $content_updated );
+		}
 
 		return $content_updated;
 	}
