@@ -1360,6 +1360,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_3_row = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_3_id );
 		$term_3_meta_rows = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_3_id );
 		$new_term_3_id = 100;
+		$new_term_4_id = 100;
 		$term_taxonomy_rows = $data[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ];
 		$term_1_taxonomy_id = 1;
 		$term_2_taxonomy_id = 2;
@@ -1449,12 +1450,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_existing_term_taxonomy', [
 			// Term 1 calls.
-			[ $term_1_name, $term_1_slug, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
+			[ $term_1_id, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
 			// Term 2 calls.
-			[ $term_2_name, $term_2_slug, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
+			[ $new_term_2_id, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
 			// Term 3 calls.
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
+			[ $new_term_3_id, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
+			[ $new_term_4_id, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_term_taxonomy', [
 			// Term 3 calls.
