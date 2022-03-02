@@ -676,7 +676,7 @@ class ContentDiffMigrator {
 			}
 		}
 
-		// Add every CSV IDs string to patterns and replacements.
+		// Replace every CSV IDs string which was updated.
 		$content_updated = $content;
 		foreach ( $ids_csv_replacements as $key_match => $changes ) {
 			$ids_csv_before = $changes[ 'before_csv_ids' ];
