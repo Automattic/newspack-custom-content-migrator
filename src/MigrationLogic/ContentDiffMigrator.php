@@ -575,7 +575,6 @@ class ContentDiffMigrator {
 				/\>          # closing angle bracket
 			)
 		|xims';
-				// %d           # ID, to be inserted with sprintf
 
 		// Add every attachment ID to patterns and replacements.
 		$patterns = [];
