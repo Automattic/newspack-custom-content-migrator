@@ -216,7 +216,12 @@ class ContentDiffMigrator {
 		);
 		$terms_updates = [];
 		$created_terms_in_taxonomies = [];
-		foreach ( $live_taxonomies as $live_taxonomy ) {
+		foreach ( $live_taxonomies as $key_live_taxonomy => $live_taxonomy ) {
+			// Output a '.' every 2000 objects to prevent process getting killed.
+			if ( 0 == $key_live_taxonomy % 2000 ) {
+				echo '.';
+			}
+
 			// Get or create taxonomy.
 			$parent_term_id = 0;
 			if ( 0 != $live_taxonomy[ 'parent' ] ) {
@@ -470,7 +475,12 @@ class ContentDiffMigrator {
 		$sql = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
 		$results = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
 
-		foreach ( $results as $result ) {
+		foreach ( $results as $key_result => $result ) {
+			// Output a '.' every 2000 objects to prevent process getting killed.
+			if ( 0 == $key_result % 2000 ) {
+				echo '.';
+			}
+
 			$new_id = $imported_attachment_ids[ $result[ 'meta_value' ] ] ?? null;
 			if ( ! is_null( $new_id ) ) {
 				$this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
@@ -523,6 +533,11 @@ class ContentDiffMigrator {
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
 		$results = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );", $post_ids_new ), ARRAY_A );
 		foreach ( $results as $key_result => $result ) {
+			// Output a '.' every 2000 objects to prevent process getting killed.
+			if ( 0 == $key_result % 2000 ) {
+				echo '.';
+			}
+
 			$id = $result[ 'ID' ];
 			$content_before = $result[ 'post_content' ];
 			$excerpt_before = $result[ 'post_excerpt' ];
