@@ -158,8 +158,8 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	protected function add_soundcloud_oembed( string $url, int $post_id ) {
 		global $wpdb;
 
-		$has_oembed_sql = "SELECT meta_key, meta_value FROM $wpdb->postmeta
-				WHERE post_id = $post_id
+		$has_oembed_sql = "SELECT meta_key, meta_value FROM $wpdb->postmeta 
+				WHERE post_id = $post_id 
 				  AND meta_key LIKE '_oembed_%'";
 		$this->output_sql( $has_oembed_sql );
 		$has_oembed = $wpdb->get_results( $has_oembed_sql );
