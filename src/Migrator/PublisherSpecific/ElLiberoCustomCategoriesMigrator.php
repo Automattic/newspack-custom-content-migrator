@@ -20,7 +20,7 @@ class ElLiberoCustomCategoriesMigrator implements InterfaceMigrator {
 	 *
 	 * @var array|array[] $category_mapping
 	 */
-	protected array $category_mapping = [
+	protected $category_mapping = [
 		'Actualidad'               => [
 			'slug'     => 'actualidad',
 			'new_name' => null,
@@ -401,14 +401,14 @@ class ElLiberoCustomCategoriesMigrator implements InterfaceMigrator {
 	 *
 	 * @var int $maximum_term_id Default to 0.
 	 */
-	private int $maximum_term_id = 0;
+	private $maximum_term_id = 0;
 
 	/**
 	 * ElLiberoCustomCategoriesMigrator Singleton.
 	 *
 	 * @var ElLiberoCustomCategoriesMigrator|null $instance
 	 */
-	private static ?ElLiberoCustomCategoriesMigrator $instance = null;
+	private static $instance = null;
 
 	/**
 	 * Constructor.
@@ -521,7 +521,7 @@ class ElLiberoCustomCategoriesMigrator implements InterfaceMigrator {
 		$this->output( "There are $dupes_count duplicates in $wpdb->term_relationships", '%B' );
 
 		if ( ! empty( $dupes ) ) {
-			$object_ids = array_map( fn( $dupe ) => $dupe->object_id, $dupes );
+			$object_ids = array_map( function( $dupe ) { return $dupe->object_id; }, $dupes );
 
 			$delete_sql = "DELETE FROM $wpdb->term_relationships WHERE term_taxonomy_id = $term_taxonomy_id AND object_id IN (" . implode( ',', $object_ids ) . ')';
 			$this->output_sql( $delete_sql );
@@ -855,7 +855,7 @@ class ElLiberoCustomCategoriesMigrator implements InterfaceMigrator {
 
 			$this->merge_terms(
 				$first_term_record->term_id,
-				array_map( fn( $term ) => $term->term_id, $terms ),
+				array_map( function( $term ) { return $term->term_id; }, $terms ),
 				$include_taxonomies,
 				$exclude_taxonomies,
 				$taxonomy,
