@@ -24,7 +24,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	 *
 	 * @var string $soundcloud_embed
 	 */
-	protected string $soundcloud_embed = '<!-- wp:embed {"url":"{url}","type":"rich","providerNameSlug":"soundcloud","responsive":true} -->
+	protected $soundcloud_embed = '<!-- wp:embed {"url":"{url}","type":"rich","providerNameSlug":"soundcloud","responsive":true} -->
 	<figure class="wp-block-embed is-type-rich is-provider-soundcloud wp-block-embed-soundcloud"><div class="wp-block-embed__wrapper">{url}</div></figure>
 	<!-- /wp:embed -->';
 
@@ -33,7 +33,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	 *
 	 * @var string $audio_embed
 	 */
-	protected string $audio_embed = '<!-- wp:audio {"id":{child_id}} -->
+	protected $audio_embed = '<!-- wp:audio {"id":{child_id}} -->
 	<figure class="wp-block-audio"><audio controls src="{s3_upload_url}"></audio></figure>
 	<!-- /wp:audio -->';
 
@@ -42,7 +42,7 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	 *
 	 * @var string $html_embed
 	 */
-	protected string $html_embed = '<!-- wp:html -->{html_content}<!-- /wp:html -->';
+	protected $html_embed = '<!-- wp:html -->{html_content}<!-- /wp:html -->';
 
 	/**
 	 * Constructor.
@@ -158,8 +158,8 @@ class ElLiberoContentMigrator implements InterfaceMigrator {
 	protected function add_soundcloud_oembed( string $url, int $post_id ) {
 		global $wpdb;
 
-		$has_oembed_sql = "SELECT meta_key, meta_value FROM $wpdb->postmeta 
-				WHERE post_id = $post_id 
+		$has_oembed_sql = "SELECT meta_key, meta_value FROM $wpdb->postmeta
+				WHERE post_id = $post_id
 				  AND meta_key LIKE '_oembed_%'";
 		$this->output_sql( $has_oembed_sql );
 		$has_oembed = $wpdb->get_results( $has_oembed_sql );
