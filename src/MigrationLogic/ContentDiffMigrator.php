@@ -112,7 +112,7 @@ class ContentDiffMigrator {
 	 *     @type array self::DATAKEY_TERMS             Post's `terms` rows.
 	 * }
 	 */
-	public function get_data( $post_id, $table_prefix ) {
+	public function get_post_data( $post_id, $table_prefix ) {
 
 		$data = $this->get_empty_data_array();
 
@@ -191,7 +191,7 @@ class ContentDiffMigrator {
 	/**
 	 * Recreates all categories from Live to local.
 	 *
-	 * If hierarchical cats are used, thir whole structure should be in place when they get assigned to posts.
+	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
@@ -450,14 +450,12 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates Post's parent ID.
+	 * Updates Post's post_parent ID.
 	 *
-	 * @param int   $post_id           Post ID to update its Parent.
-	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param WP_Post $post          Post Object.
+	 * @param int     $new_parent_id New post_parent ID for this post.
 	 */
-	public function update_post_parent( $post_id, $imported_post_ids ) {
-		$post = $this->get_post( $post_id );
-		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
+	public function update_post_parent( $post, $new_parent_id ) {
 		if ( $post->post_parent > 0 && ! is_null( $new_parent_id ) ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
@@ -466,10 +464,16 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
+	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
+	 *                                        detailed output of all the changes made.
 	 */
-	public function update_featured_images( $imported_attachment_ids ) {
-		$old_attachment_ids = array_keys( $imported_attachment_ids );
+	public function update_featured_images( $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
+		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
+			return [];
+		}
+
 		$postmeta_table = $this->wpdb->postmeta;
 		$placeholders = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
 		$sql = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
@@ -481,9 +485,14 @@ class ContentDiffMigrator {
 				echo '.';
 			}
 
+			$old_id = $result[ 'meta_value' ] ?? null;
 			$new_id = $imported_attachment_ids[ $result[ 'meta_value' ] ] ?? null;
 			if ( ! is_null( $new_id ) ) {
-				$this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
+				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
+				// Log.
+				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+					$this->log( $log_file_path, json_encode( [ 'old_id' => $old_id, 'new_id' => $new_id, ] ) );
+				}
 			}
 		}
 	}
@@ -491,12 +500,16 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Gutenberg Blocks' attachment IDs with new attachment IDs in created `post_content` and `post_excerpt` fields.
 	 *
-	 * @param array $imported_post_ids       An array of imported Post IDs, keys are old IDs, values are new IDs.
-	 * @param array $imported_attachment_ids An array of imported Attachment IDs, keys are old IDs, values are new IDs.
-	 * @param string $log_file_path          Optional. Full path to a log file. If provided, the method will save and append a
-	 *                                       detailed output of all the changes made.
+	 * @param array  $post_ids_new                An array of newly imported Post IDs. Will only fetch an do replacements in these.
+	 * @param array  $imported_attachment_ids_map An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $log_file_path               Optional. Full path to a log file. If provided, will save and append a detailed
+	 *                                            output of all the changes made.
 	 */
-	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_path = null ) {
+	public function update_blocks_ids( $post_ids_new, $imported_attachment_ids_map, $log_file_path = null ) {
+		if ( empty( $imported_attachment_ids_map ) || empty( $post_ids_new ) ) {
+			return;
+		}
+
 		// Pattern for matching Gutenberg block's ID attribute value.
 		$pattern_id = '|
 			(\<\!--      # beginning of the block element
@@ -518,17 +531,17 @@ class ContentDiffMigrator {
 			/\>)                     # closing angle bracket
 		|xims';
 
+		// Compose patterns and replacements for every attachment ID update (both in block header, and in <img> class value).
 		$patterns = [];
 		$replacements = [];
-		// Compose patterns and replacements for every attachment ID.
-		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
+		foreach ( $imported_attachment_ids_map as $att_id_old => $att_id_new ) {
 			$patterns[] = sprintf( $pattern_id, $att_id_old );
 			$replacements[] = '${1}' . $att_id_new . '${3}';
 			$patterns[] = sprintf( $pattern_class, $att_id_old );
 			$replacements[] = '${1}' . $att_id_new . '${3}';
 		}
 
-		$post_ids_new = array_values( $imported_post_ids );
+		// Fetch just the imported Post IDs.
 		$posts_table = $this->wpdb->posts;
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
 		$results = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );", $post_ids_new ), ARRAY_A );
@@ -546,14 +559,14 @@ class ContentDiffMigrator {
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
 				$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ], [ 'ID' => $id ] );
 				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$updates = [
-						'ID' => $id,
+					$log_entry = [
+						'id_new' => $id,
 						'post_content_before' => $content_before,
-						'post_excerpt_before' => $excerpt_before,
 						'post_content_after' => $content_updated,
+						'post_excerpt_before' => $excerpt_before,
 						'post_excerpt_after' => $excerpt_updated,
 					];
-					$this->log( $log_file_path, json_encode( $updates ) );
+					$this->log( $log_file_path, json_encode( $log_entry ) );
 				}
 			}
 		}
