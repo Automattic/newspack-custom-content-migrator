@@ -794,22 +794,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	public function test_should_update_post_parent( $data ) {
 		// Prepare.
 		$post_id = 123;
-		$post_parent = 145;
 		$new_post_parent = 456;
-		$imported_post_ids[ $post_parent ] = $new_post_parent;
 		$post = new \stdClass();
 		$post->ID = $post_id;
-		$post->post_parent = $post_parent;
+		$post->post_parent = 145;
 
 		// Mock.
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
 		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
-		                           ->setMethods( [ 'get_post' ] )
+		                           ->setMethods( [ 'update' ] )
 		                           ->getMock();
-		$logic_partial_mock->expects( $this->once() )
-		                   ->method( 'get_post' )
-						   ->with( $post_id )
-		                   ->will( $this->returnValue( $post ) );
 		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'update' )
 		                ->will( $this->returnValueMap( [
@@ -817,7 +811,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                ] ) );
 
 		// Run.
-		$logic_partial_mock->update_post_parent( $post_id, $imported_post_ids );
+		$logic_partial_mock->update_post_parent( $post, $new_post_parent );
 	}
 
 	/**
@@ -1110,25 +1104,21 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_get_existing_term_taxonomy_should_query_and_return_correct_value( $data ) {
 		// Prepare.
-		$term_name = 'name';
-		$term_slug = 'slug';
+		$term_id = 333;
 		$taxonomy = 'taxonomy';
 		$term_taxonomy_id_expected = 123;
 		$sql_sprintf = "SELECT tt.term_taxonomy_id
 			FROM {$this->wpdb_mock->term_taxonomy} tt
-			JOIN {$this->wpdb_mock->terms} t
-		        ON tt.term_id = t.term_id
-			WHERE t.name = %s
-			AND t.slug = %s
-		    AND tt.taxonomy = %s;";
-		$sql = sprintf( $sql_sprintf, $term_name, $term_slug, $taxonomy );
+			WHERE tt.term_id = %d
+			AND tt.taxonomy = %s;";
+		$sql = sprintf( $sql_sprintf, $term_id, $taxonomy );
 
 		// Mock.
 		$this->wpdb_mock->insert_id = $term_taxonomy_id_expected;
 		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'prepare' )
 		                ->will( $this->returnValueMap( [
-			                [ $sql_sprintf, $term_name, $term_slug, $taxonomy, $sql ]
+			                [ $sql_sprintf, $term_id, $taxonomy, $sql ]
 		                ] ) );
 		$this->wpdb_mock->expects( $this->once() )
 		                ->method( 'get_var' )
@@ -1137,7 +1127,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                ] ) );
 
 		// Run.
-		$term_taxonomy_id_actual = $this->logic->get_existing_term_taxonomy( $term_name, $term_slug, $taxonomy );
+		$term_taxonomy_id_actual = $this->logic->get_existing_term_taxonomy( $term_id, $taxonomy );
 
 		// Assert.
 		$this->assertEquals( $term_taxonomy_id_expected, $term_taxonomy_id_actual );
@@ -1442,12 +1432,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_existing_term_taxonomy', [
 			// Term 1 calls.
-			[ $term_1_name, $term_1_slug, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
+			[ $term_1_id, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
 			// Term 2 calls.
-			[ $term_2_name, $term_2_slug, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
+			[ $new_term_2_id, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
 			// Term 3 calls.
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
+			[ $new_term_3_id, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
+			[ $new_term_3_id, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
 		] );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'insert_term_taxonomy', [
 			// Term 3 calls.
@@ -1551,12 +1541,12 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term' ) ) );
 		$this->mock_consecutive_value_maps( $logic_partial_mock, 'get_existing_term_taxonomy', [
 			// Term 1 calls.
-			[ $term_1_name, $term_1_slug, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
+			[ $term_1_id, $term_taxonomy_rows[0][ 'taxonomy' ], 1 ],
 			// Term 2 calls.
-			[ $term_2_name, $term_2_slug, $term_taxonomy_rows[1][ 'taxonomy' ], 2 ],
+			[ 0, $term_taxonomy_rows[1][ 'taxonomy' ], null ],
 			// Term 3 calls.
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
-			[ $term_3_name, $term_3_slug, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
+			[ 0, $term_taxonomy_rows[2][ 'taxonomy' ], null ],
+			[ 0, $term_taxonomy_rows[3][ 'taxonomy' ], null ],
 		] );
 		$logic_partial_mock->method( 'insert_term_taxonomy' )
 		                   ->will( $this->throwException( new \RuntimeException( 'err insert_term_taxonomy' ) ) );
@@ -1572,7 +1562,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'err insert_postmeta_row',
 			// Inserting Post User.
 			'err insert_user',
-// 'err update_post_author',
+			// 'err update_post_author',
 			// Comment 1 doesn't have a User.
 			'err insert_comment',
 			// Comment 2 doesn't has an existing User.
@@ -1580,16 +1570,16 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			// Comment 3 has a new User.
 			'err insert_user',
 			'err insert_comment',
-			// Terms insertions.
+			// Terms and termtaxonomy insertions.
 			'err insert_term',
+			'err insert_term_taxonomy',
 			'err insert_term',
-			// Termtaxonomy rows.
 			'err insert_term_taxonomy',
 			'err insert_term_taxonomy',
 			// Term relationships rows.
 			'err insert_term_relationship',
-			'err insert_term_relationship',
 			// Inserts didn't happen here.
+			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 2',
 			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 3',
 			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 4',
 		];
