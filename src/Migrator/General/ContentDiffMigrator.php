@@ -328,7 +328,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$post_type = $post_data[ self::$logic::DATAKEY_POST ]['post_type'];
 
 			// Extra check, shouldn't happen, but better safe than sorry.
-			if ( ! in_array( $post_type, [ 'post', 'attachment' ] ) ) {
+			if ( ! in_array( $post_type, [ 'post', 'page', 'attachment' ] ) ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for Live Post ID %s', $post_type, $post_id_live ) );
 				echo "\n";
 				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
