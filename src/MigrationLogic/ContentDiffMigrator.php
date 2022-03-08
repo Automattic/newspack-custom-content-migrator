@@ -205,7 +205,7 @@ class ContentDiffMigrator {
 		$terms_table = esc_sql( $table_prefix . 'terms' );
 		$termstaxonomy_table = esc_sql( $table_prefix . 'term_taxonomy' );
 
-		// Get all live site's hiearchical taxonomies, ordered by parent for easy hierarchical reconstruction.
+		// Get all live site's hierarchical categories, ordered by parent for easy hierarchical reconstruction.
 		$live_taxonomies = $this->wpdb->get_results(
 			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 			FROM $live_terms_table t
@@ -456,7 +456,7 @@ class ContentDiffMigrator {
 	 * @param int     $new_parent_id New post_parent ID for this post.
 	 */
 	public function update_post_parent( $post, $new_parent_id ) {
-		if ( $post->post_parent > 0 && ! is_null( $new_parent_id ) ) {
+		if ( 0 != $post->post_parent && ! is_null( $new_parent_id ) ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
 	}
@@ -491,7 +491,7 @@ class ContentDiffMigrator {
 				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
 				// Log.
 				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$this->log( $log_file_path, json_encode( [ 'old_id' => $old_id, 'new_id' => $new_id, ] ) );
+					$this->log( $log_file_path, json_encode( [ 'id_old' => (int) $old_id, 'id_new' => (int) $new_id, ] ) );
 				}
 			}
 		}
@@ -558,16 +558,34 @@ class ContentDiffMigrator {
 			$excerpt_updated = preg_replace( $patterns, $replacements, $excerpt_before );
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
 				$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ], [ 'ID' => $id ] );
-				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$log_entry = [
-						'id_new' => $id,
-						'post_content_before' => $content_before,
-						'post_content_after' => $content_updated,
-						'post_excerpt_before' => $excerpt_before,
-						'post_excerpt_after' => $excerpt_updated,
-					];
-					$this->log( $log_file_path, json_encode( $log_entry ) );
+			}
+
+			if ( ! is_null( $log_file_path ) ) {
+				// Log the post ID that was checked.
+				$log_entry = [ 'id_new' => $id ];
+
+				// And if any updates were made, log them fully.
+				if ( $content_before != $content_updated ) {
+					$log_entry = array_merge(
+						$log_entry,
+						[
+							'post_content_before' => $content_before,
+							'post_content_after'  => $content_updated,
+						]
+					);
 				}
+
+				if ( $excerpt_before != $excerpt_updated ) {
+					$log_entry = array_merge(
+						$log_entry,
+						[
+							'post_excerpt_before' => $excerpt_before,
+							'post_excerpt_after'  => $excerpt_updated,
+						]
+					);
+				}
+
+				$this->log( $log_file_path, json_encode( $log_entry ) );
 			}
 		}
 	}
