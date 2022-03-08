@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Migrator\General;
 
-use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator as ContentDiffMigratorLogic;
-use \WP_CLI;
+use WP_CLI;
 
 class ContentDiffMigrator implements InterfaceMigrator {
 
@@ -200,44 +200,44 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
-		// echo 'Recreating categories..';
-		// $this->recreate_categories();
-		// echo "\nDone!\n";
+		echo 'Recreating categories..';
+		$this->recreate_categories();
+		echo "\nDone!\n";
 
 		echo sprintf( 'Importing %d post objects, hold tight..', count( $all_live_posts_ids ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids );
 		echo "\nDone!\n";
 
-		// echo 'Updating Post parent IDs..';
-		// $this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
-		// echo "\nDone!\n";
+		echo 'Updating Post parent IDs..';
+		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
+		echo "\nDone!\n";
 
-		// echo 'Updating Featured images IDs..';
-		// $this->update_featured_image_ids( $imported_posts_data );
-		// echo "\nDone!\n";
+		echo 'Updating Featured images IDs..';
+		$this->update_featured_image_ids( $imported_posts_data );
+		echo "\nDone!\n";
 
 		echo 'Updating attachment IDs in block content..';
 		$this->update_attachment_ids_in_blocks( $imported_posts_data );
 		echo "\nDone!\n";
 
-		// echo "\n";
-		// WP_CLI::success( 'All done migrating content! 🙌 ' );
-		//
-		// // Output info about all available logs.
-		// $cli_output_logs_report = [];
-		// if ( file_exists( $this->log_error ) ) {
-		// 	$cli_output_logs_report[] = sprintf( '%s - errors', $this->log_error );
-		// }
-		// if ( file_exists( $this->log_imported_post_ids ) ) {
-		// 	$cli_output_logs_report[] = sprintf( '%s - all imported IDs', $this->log_imported_post_ids );
-		// }
-		// if ( file_exists( $this->log_updated_blocks_ids ) ) {
-		// 	$cli_output_logs_report[] = sprintf( '%s - detailed blocks IDs post content replacements', $this->log_updated_blocks_ids );
-		// }
-		// if ( ! empty( $cli_output_logs_report ) ) {
-		// 	WP_CLI::log( "Check the logs for more details:" );
-		// 	WP_CLI::log( "- " . implode( "\n- ", $cli_output_logs_report ) );
-		// }
+		echo "\n";
+		WP_CLI::success( 'All done migrating content! 🙌 ' );
+
+		// Output info about all available logs.
+		$cli_output_logs_report = [];
+		if ( file_exists( $this->log_error ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - errors', $this->log_error );
+		}
+		if ( file_exists( $this->log_imported_post_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - all imported IDs', $this->log_imported_post_ids );
+		}
+		if ( file_exists( $this->log_updated_blocks_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - detailed blocks IDs post content replacements', $this->log_updated_blocks_ids );
+		}
+		if ( ! empty( $cli_output_logs_report ) ) {
+			WP_CLI::log( "Check the logs for more details:" );
+			WP_CLI::log( "- " . implode( "\n- ", $cli_output_logs_report ) );
+		}
 
 		wp_cache_flush();
 	}
@@ -261,7 +261,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	/**
 	 * Creates and imports posts and all related post data. Skips previously imported IDs found in $this->log_imported_post_ids.
 	 *
-	 * @param array $all_live_posts_ids Live IDs to be imported locally.
+	 * @param array $all_live_posts_ids Live IDs to be imported to local.
 	 *
 	 * @return array $imported_posts_data {
 	 *     Array with subarray records for all the imported post objects.
@@ -272,26 +272,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 *         @type string $id_new    New ID of imported post.
 	 *     }
 	 * }
-	 *
 	 */
 	public function import_posts( $all_live_posts_ids  ) {
 
 		$post_ids_for_import = $all_live_posts_ids;
-// // TODO TEMP DEV:
-$post_ids_for_import = [
-	// thumbs atts
-	948875,948872,948866,948863,948861,
-// 	// posts
-// 	948869,948868,948860,948859,948858
-];
 
 		// Skip previously imported posts.
 		$imported_posts_data = $this->get_data_from_log( $this->log_imported_post_ids, [ 'post_type', 'id_old', 'id_new' ] ) ?? [];
-
-
-/*TODO rm TEMP DEV*/ return $imported_posts_data;
-
-
 		foreach ( $imported_posts_data as $imported_post_data ) {
 			$id_old = $imported_post_data[ 'id_old' ] ?? null;
 			$key_id_old = array_search( $id_old, $post_ids_for_import );
@@ -318,14 +305,15 @@ $post_ids_for_import = [
 			// Get all Post data from DB.
 			$post_data = self::$logic->get_post_data( (int) $post_id_live, $this->live_table_prefix );
 			$post_type = $post_data[ self::$logic::DATAKEY_POST ][ 'post_type' ];
-			// Shouldn't happen, but better safe than sorry.
+
+			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ! in_array( $post_type, [ 'post', 'attachment' ] ) ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for Live Post ID %s', $post_type, $post_id_live ) );
 				echo "\n";
 				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
 			}
 
-			// First just insert a new `wp_posts` entry to get the new ID.
+			// First just insert a new `wp_posts` record to get the new ID.
 			try {
 				$post_id_new = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
 				$imported_posts_data[] = [
@@ -340,7 +328,7 @@ $post_ids_for_import = [
 				continue;
 			}
 
-			// Import all related Post data.
+			// Now import all related Post data.
 			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data );
 			if ( ! empty( $import_errors ) ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error while importing post data for %s, Live ID %d, imported ID %d : %s', $post_type, $post_id_live, $post_id_new, implode( '; ', $import_errors ) ) );
@@ -358,6 +346,20 @@ $post_ids_for_import = [
 		return $imported_posts_data;
 	}
 
+	/**
+	 * Updates all Posts' post_parent IDs.
+	 *
+	 * @param array $all_live_posts_ids Old (Live) IDs to have their post_parent updated.
+	 * @param array $imported_posts_data {
+	 *     Return result from import_posts method, a map of all the imported post objects.
+	 *
+	 *     @type array $record {
+	 *         @type string $post_type Imported post_object.
+	 *         @type string $id_old    Original ID on live.
+	 *         @type string $id_new    New ID of imported post.
+	 *     }
+	 * }
+	 */
 	public function update_post_parent_ids( $all_live_posts_ids, $imported_posts_data ) {
 
 		$parent_ids_for_update = $all_live_posts_ids;
@@ -380,8 +382,9 @@ $post_ids_for_import = [
 			echo "\n" . sprintf( '%s post_parent IDs of total %d were already updated, continuing where left off. Hold tight..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) );
 		}
 
-		// Create convenient post and attachment array maps, with old IDs as keys and new IDs are values.
 		/**
+		 * Helper map of imported Posts.
+		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_post_ids_map = [];
@@ -389,7 +392,10 @@ $post_ids_for_import = [
 		foreach ( $imported_posts_data_post as $entry ) {
 			$imported_post_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
 		}
+
 		/**
+		 * Helper map of imported Attachments.
+		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_attachment_ids_map = [];
@@ -418,7 +424,8 @@ $post_ids_for_import = [
 
 			$parent_id_old = $post->post_parent;
 			$parent_id_new = $imported_post_ids[ $post->post_parent ] ?? null;
-			// Safety check. Shouldn't happen, but better safe than sorry.
+
+			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ( 0 !== $post->post_parent ) && is_null( $parent_id_new ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, null value for $parent_id_new = %s, id_old = %s', $parent_id_new ) );
 				echo "\n";
@@ -432,10 +439,24 @@ $post_ids_for_import = [
 		}
 	}
 
+	/**
+	 * Updates all Featured Images IDs.
+	 *
+	 * @param array $imported_posts_data {
+	 *     Return result from import_posts method, a map of all the imported post objects.
+	 *
+	 *     @type array $record {
+	 *         @type string $post_type Imported post_object.
+	 *         @type string $id_old    Original ID on live.
+	 *         @type string $id_new    New ID of imported post.
+	 *     }
+	 * }
+	 */
 	public function update_featured_image_ids( $imported_posts_data ) {
 
-		// Create convenient attachment array map, with old IDs as keys and new IDs are values.
 		/**
+		 * Helper map of imported Attachments.
+		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_attachment_ids_map = [];
@@ -444,15 +465,11 @@ $post_ids_for_import = [
 			$imported_attachment_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
 		}
 
+		// We need the old Live attachment IDs; we'll first search for those then update them with new IDs.
+		$attachment_ids_for_featured_image_update = array_keys( $imported_attachment_ids_map );
+
 		// Skip previously updated Attachment IDs.
 		$updated_featured_images_data = $this->get_data_from_log( $this->log_updated_featured_imgs_ids, [ 'id_old', 'id_new' ] ) ?? [];
-// TEMP DBG:
-foreach ( $updated_featured_images_data as $entry ) {
-	if ( ! isset( $entry[ 'id_old' ] ) ) {
-		$d=1;
-	}
-}
-		$attachment_ids_for_featured_image_update = array_keys( $imported_attachment_ids_map );
 		foreach ( $updated_featured_images_data as $entry ) {
 			$id_old = $entry[ 'id_old' ] ?? null;
 			$key_id_old = array_search( $id_old, $attachment_ids_for_featured_image_update );
@@ -461,7 +478,7 @@ foreach ( $updated_featured_images_data as $entry ) {
 			}
 		}
 		if ( empty( $attachment_ids_for_featured_image_update ) ) {
-			echo "\n" . 'All posts\' featured image IDs were already updated, continuing.';
+			echo "\n" . 'All posts already had their featured image IDs updated, continuing.';
 			return;
 		}
 		if ( $attachment_ids_for_featured_image_update !== array_keys( $imported_attachment_ids_map ) ) {
@@ -471,10 +488,27 @@ foreach ( $updated_featured_images_data as $entry ) {
 		self::$logic->update_featured_images( $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
 
+	/**
+	 * Updates Attachment IDs in Post contents.
+	 *
+	 * Some Gutenberg Blocks contain `id` or `ids` of Attachments attributes in their headers, and image elements contain those
+	 * IDs too.
+	 *
+	 * @param array $imported_posts_data {
+	 *     Return result from import_posts method, a map of all the imported post objects.
+	 *
+	 *     @type array $record {
+	 *         @type string $post_type Imported post_object.
+	 *         @type string $id_old    Original ID on live.
+	 *         @type string $id_new    New ID of imported post.
+	 *     }
+	 * }
+	 */
 	public function update_attachment_ids_in_blocks( $imported_posts_data ) {
 
-		// Create convenient post and attachment array maps, with old IDs as keys and new IDs are values.
 		/**
+		 * Helper map of imported Posts.
+		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_post_ids_map = [];
@@ -482,7 +516,10 @@ foreach ( $updated_featured_images_data as $entry ) {
 		foreach ( $imported_posts_data_post as $entry ) {
 			$imported_post_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
 		}
+
 		/**
+		 * Helper map of imported Attachments.
+		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_attachment_ids_map = [];
@@ -493,12 +530,6 @@ foreach ( $updated_featured_images_data as $entry ) {
 
 		// Skip previously updated Posts.
 		$updated_post_ids = $this->get_data_from_log( $this->log_updated_blocks_ids, [ 'id_new' ] ) ?? [];
-// TEMP DBG:
-foreach ( $updated_post_ids as $entry ) {
-	if ( ! isset( $entry[ 'id_new' ] ) ) {
-		$d=1;
-	}
-}
 		$new_post_ids_for_blocks_update = array_values( $imported_post_ids_map );
 		foreach ( $updated_post_ids as $entry ) {
 			$id_new = $entry[ 'id_new' ] ?? null;
@@ -508,16 +539,13 @@ foreach ( $updated_post_ids as $entry ) {
 			}
 		}
 		if ( empty( $new_post_ids_for_blocks_update ) ) {
-			echo "\n" . 'All posts\' already had their blocks\' IDs updated, continuing.';
+			echo "\n" . 'All posts already had their blocks\' att. IDs updated, continuing.';
 			return;
 		}
 		if ( $new_post_ids_for_blocks_update !== array_values( $imported_post_ids_map ) ) {
 			$new_post_ids_for_blocks_update = array_values( $new_post_ids_for_blocks_update );
 			echo "\n" . sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) );
 		}
-
-// TODO check if $new_post_ids_for_blocks_update skipped "id_new":"115"
-		$d=1;
 
 		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, $this->log_updated_blocks_ids );
 	}
@@ -532,15 +560,17 @@ foreach ( $updated_post_ids as $entry ) {
 	 * @return array Found results. Mind that if $return_first is true, it will return a one-dimensional array,
 	 *               and if $return_first is false, it will return two-dimensional array with all matched elements as subarrays.
 	 */
-	private function filter_log_data_array ( $imported_posts_data, $where, $return_first = true ) {
+	private function filter_log_data_array( $imported_posts_data, $where, $return_first = true ) {
 		$return = [];
 		foreach ( $imported_posts_data as $entry ) {
 			// Check $where conditions.
 			foreach ( $where as $key => $value ) {
 				if ( isset( $entry[ $key ] ) && $value == $entry[ $key ] ) {
 					if ( true === $return_first ) {
+						// Return first element matching $where.
 						return $entry;
 					} else {
+						// Return all the elements.
 						$return[] = $entry;
 					}
 				}
