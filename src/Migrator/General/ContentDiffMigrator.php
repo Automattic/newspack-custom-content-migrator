@@ -6,52 +6,73 @@ use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator as ContentDiffMigratorLogic;
 use WP_CLI;
 
+/**
+ * Content Diff Migrator CLI commands class.
+ *
+ * @package NewspackCustomContentMigrator\Migrator\General
+ */
 class ContentDiffMigrator implements InterfaceMigrator {
 
-	const LOG_IDS_CSV = 'content-diff__new-ids-csv.log';
-	const LOG_IMPORTED_POST_IDS = 'content-diff__imported-post-ids.log';
-	const LOG_UPDATED_PARENT_IDS = 'content-diff__updated-parent-ids.log';
+	const LOG_IDS_CSV                     = 'content-diff__new-ids-csv.log';
+	const LOG_IMPORTED_POST_IDS           = 'content-diff__imported-post-ids.log';
+	const LOG_UPDATED_PARENT_IDS          = 'content-diff__updated-parent-ids.log';
 	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
-	const LOG_UPDATED_BLOCKS_IDS = 'content-diff__wp-blocks-ids-updates.log';
-	const LOG_ERROR = 'content-diff__err.log';
+	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
+	const LOG_ERROR                       = 'content-diff__err.log';
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
 
 	/**
+	 * Content Diff logic class.
+	 *
 	 * @var null|ContentDiffMigratorLogic Logic.
 	 */
 	private static $logic = null;
 
 	/**
-	 * @var string Prefix of tables from the live DB, which are imported next to local WP tables.
+	 * Prefix of tables from the live DB, which are imported next to local WP tables.
+	 *
+	 * @var null|string Live DB tables prefix.
 	 */
 	private $live_table_prefix;
 
 	/**
-	 * @var string Path to general error log.
+	 * General error log file.
+	 *
+	 * @var null|string Full path to file.
 	 */
 	private $log_error;
 
 	/**
-	 * @var string Path to log containing imported post IDs.
+	 * Log containing imported post IDs.
+	 *
+	 * @var null|string Full path to file.
 	 */
 	private $log_imported_post_ids;
 
 	/**
-	 * @var string Path to log containing posts ID which had their post_parent IDs updated.
+	 * Log containing posts ID which had their post_parent IDs updated.
+	 *
+	 * @var null|string Full path to file.
 	 */
 	private $log_updated_posts_parent_ids;
 
 	/**
-	 * @var string Path to log containing attachment IDs which were updated to new IDs if used as attachment images
+	 * Log containing attachment IDs which were updated to new IDs if used as attachment images.
+	 *
+	 * @var null|string Full path to file.
 	 */
 	private $log_updated_featured_imgs_ids;
 
 	/**
-	 * @var string Path to log containing post IDs which had their content updated with new IDs in blocks syntax.
+	 * Log containing post IDs which had their content updated with new IDs in blocks syntax.
+	 *
+	 * @var null|string Full path to file.
 	 */
 	private $log_updated_blocks_ids;
 
@@ -71,8 +92,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		if ( null === self::$instance ) {
 			global $wpdb;
 
-			self::$logic = new ContentDiffMigratorLogic( $wpdb );
-			self::$instance = new $class;
+			self::$logic    = new ContentDiffMigratorLogic( $wpdb );
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -137,8 +158,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args CLI assoc args.
 	 */
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
-		$export_dir = $assoc_args[ 'export-dir' ] ?? false;
-		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
+		$export_dir        = $assoc_args['export-dir'] ?? false;
+		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
 
 		try {
 			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
@@ -166,8 +187,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args CLI assoc args.
 	 */
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
-		$import_dir = $assoc_args[ 'import-dir' ] ?? false;
-		$live_table_prefix = $assoc_args[ 'live-table-prefix' ] ?? false;
+		$import_dir        = $assoc_args['import-dir'] ?? false;
+		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
 
 		// Validate all params.
 		$file_ids_csv = $import_dir . '/' . self::LOG_IDS_CSV;
@@ -193,7 +214,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$this->log_updated_blocks_ids        = $import_dir . '/' . self::LOG_UPDATED_BLOCKS_IDS;
 
 		// Timestamp the logs.
-		$ts = date( 'Y-m-d h:i:s a', time() );
+		$ts = gmdate( 'Y-m-d h:i:s a', time() );
 		$this->log( $this->log_error, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_imported_post_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_posts_parent_ids, sprintf( 'Starting %s.', $ts ) );
@@ -235,8 +256,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$cli_output_logs_report[] = sprintf( '%s - detailed blocks IDs post content replacements', $this->log_updated_blocks_ids );
 		}
 		if ( ! empty( $cli_output_logs_report ) ) {
-			WP_CLI::log( "Check the logs for more details:" );
-			WP_CLI::log( "- " . implode( "\n- ", $cli_output_logs_report ) );
+			WP_CLI::log( 'Check the logs for more details:' );
+			WP_CLI::log( '- ' . implode( "\n- ", $cli_output_logs_report ) );
 		}
 
 		wp_cache_flush();
@@ -250,10 +271,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$created_terms_in_taxonomies = self::$logic->recreate_categories( $this->live_table_prefix );
 
 		// Output and log errors.
-		if ( isset( $created_terms_in_taxonomies[ 'errors' ] ) && ! empty( $created_terms_in_taxonomies[ 'errors' ] ) ) {
-			foreach ( $created_terms_in_taxonomies[ 'errors' ] as $error ) {
+		if ( isset( $created_terms_in_taxonomies['errors'] ) && ! empty( $created_terms_in_taxonomies['errors'] ) ) {
+			foreach ( $created_terms_in_taxonomies['errors'] as $error ) {
 				WP_CLI::warning( $error );
-				$this->log( $this->log_error, "recreate_categories error: " . $error );
+				$this->log( $this->log_error, 'recreate_categories error: ' . $error );
 			}
 		}
 	}
@@ -273,17 +294,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 *     }
 	 * }
 	 */
-	public function import_posts( $all_live_posts_ids  ) {
+	public function import_posts( $all_live_posts_ids ) {
 
 		$post_ids_for_import = $all_live_posts_ids;
 
 		// Skip previously imported posts.
 		$imported_posts_data = $this->get_data_from_log( $this->log_imported_post_ids, [ 'post_type', 'id_old', 'id_new' ] ) ?? [];
 		foreach ( $imported_posts_data as $imported_post_data ) {
-			$id_old = $imported_post_data[ 'id_old' ] ?? null;
+			$id_old     = $imported_post_data['id_old'] ?? null;
 			$key_id_old = array_search( $id_old, $post_ids_for_import );
 			if ( ! is_null( $id_old ) && false !== $key_id_old ) {
-				unset ( $post_ids_for_import[ $key_id_old ] );
+				unset( $post_ids_for_import[ $key_id_old ] );
 			}
 		}
 		if ( empty( $post_ids_for_import ) ) {
@@ -298,13 +319,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Import Posts.
 		foreach ( $post_ids_for_import as $key_post_id => $post_id_live ) {
 			// Output a '.' every 2000 objects to let CLI know it's running.
-			if (  0 == $key_post_id % 2000 ) {
+			if ( 0 == $key_post_id % 2000 ) {
 				echo '.';
 			}
 
 			// Get all Post data from DB.
 			$post_data = self::$logic->get_post_data( (int) $post_id_live, $this->live_table_prefix );
-			$post_type = $post_data[ self::$logic::DATAKEY_POST ][ 'post_type' ];
+			$post_type = $post_data[ self::$logic::DATAKEY_POST ]['post_type'];
 
 			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ! in_array( $post_type, [ 'post', 'attachment' ] ) ) {
@@ -315,16 +336,16 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// First just insert a new `wp_posts` record to get the new ID.
 			try {
-				$post_id_new = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
+				$post_id_new           = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
 				$imported_posts_data[] = [
 					'post_type' => $post_type,
-					'id_old' => (int) $post_id_live,
-					'id_new' => (int) $post_id_new,
+					'id_old'    => (int) $post_id_live,
+					'id_new'    => (int) $post_id_new,
 				];
 			} catch ( \Exception $e ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error while inserting post %s Live ID %d : %s', $post_type, $post_id_live, $e->getMessage() ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error inserting %s Live ID %d (details in log file)', $post_type, $post_id_live) );
+				WP_CLI::warning( sprintf( 'Error inserting %s Live ID %d (details in log file)', $post_type, $post_id_live ) );
 				continue;
 			}
 
@@ -337,7 +358,16 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 
 			// Log imported post.
-			$this->log( $this->log_imported_post_ids, json_encode( [ 'post_type' => $post_type, 'id_old' => (int) $post_id_live, 'id_new' => (int) $post_id_new, ] ) );
+			$this->log(
+				$this->log_imported_post_ids,
+				json_encode(
+					[
+						'post_type' => $post_type,
+						'id_old'    => (int) $post_id_live,
+						'id_new'    => (int) $post_id_new,
+					]
+				)
+			);
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -367,10 +397,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Skip previously updated IDs.
 		$previously_updated_parent_ids_data = $this->get_data_from_log( $this->log_updated_posts_parent_ids, [ 'id_old' ] );
 		foreach ( $previously_updated_parent_ids_data as $entry ) {
-			$id_old = $entry[ 'id_old' ] ?? null;
+			$id_old     = $entry['id_old'] ?? null;
 			$key_id_old = array_search( $id_old, $parent_ids_for_update );
 			if ( ! is_null( $id_old ) && false !== $key_id_old ) {
-				unset ( $parent_ids_for_update[ $key_id_old ] );
+				unset( $parent_ids_for_update[ $key_id_old ] );
 			}
 		}
 		if ( empty( $parent_ids_for_update ) ) {
@@ -387,10 +417,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_post_ids_map = [];
+		$imported_post_ids_map    = [];
 		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'post' ], false );
 		foreach ( $imported_posts_data_post as $entry ) {
-			$imported_post_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
+			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
 
 		/**
@@ -398,23 +428,24 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = [];
+		$imported_attachment_ids_map   = [];
 		$imported_post_data_attachment = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'attachment' ], false );
 		foreach ( $imported_post_data_attachment as $entry ) {
-			$imported_attachment_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
+			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
 
 		// Update parent IDs.
 		$i = 0;
 		foreach ( $parent_ids_for_update as $id_old ) {
 			// Output a '.' every 2000 objects to let CLI know it's running.
-			if ( 0 == $i++ % 2000 ) {
+			if ( 0 == $i % 2000 ) {
 				echo '.';
 			}
+			$i++;
 
 			// Get Post ID and its new parent_id.
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
-			$post = get_post( $id_new );
+			$post   = get_post( $id_new );
 			if ( is_null( $post ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found id_old = %s, id_new = %s in $imported_post_ids_map.', $id_old, $id_new ) );
 				echo "\n";
@@ -435,7 +466,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Update and log.
 			self::$logic->update_post_parent( $post, $parent_id_new );
-			$this->log( $this->log_updated_posts_parent_ids, json_encode( [ 'id_old' => $id_old, 'id_new' => $post->ID, 'parent_id_old' => $parent_id_old, 'parent_id_new' => $parent_id_new ] ) );
+			$this->log(
+				$this->log_updated_posts_parent_ids,
+				json_encode(
+					[
+						'id_old'        => $id_old,
+						'id_new'        => $post->ID,
+						'parent_id_old' => $parent_id_old,
+						'parent_id_new' => $parent_id_new,
+					]
+				)
+			);
 		}
 	}
 
@@ -459,10 +500,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = [];
+		$imported_attachment_ids_map   = [];
 		$imported_post_data_attachment = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'attachment' ], false );
 		foreach ( $imported_post_data_attachment as $entry ) {
-			$imported_attachment_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
+			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
 
 		// We need the old Live attachment IDs; we'll first search for those then update them with new IDs.
@@ -471,17 +512,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Skip previously updated Attachment IDs.
 		$updated_featured_images_data = $this->get_data_from_log( $this->log_updated_featured_imgs_ids, [ 'id_old', 'id_new' ] ) ?? [];
 		foreach ( $updated_featured_images_data as $entry ) {
-			$id_old = $entry[ 'id_old' ] ?? null;
+			$id_old     = $entry['id_old'] ?? null;
 			$key_id_old = array_search( $id_old, $attachment_ids_for_featured_image_update );
 			if ( ! is_null( $id_old ) && false !== $key_id_old ) {
-				unset ( $attachment_ids_for_featured_image_update[ $key_id_old ] );
+				unset( $attachment_ids_for_featured_image_update[ $key_id_old ] );
 			}
 		}
 		if ( empty( $attachment_ids_for_featured_image_update ) ) {
 			echo "\n" . 'All posts already had their featured image IDs updated, continuing.';
 			return;
 		}
-		if ( $attachment_ids_for_featured_image_update !== array_keys( $imported_attachment_ids_map ) ) {
+		if ( array_keys( $imported_attachment_ids_map !== $attachment_ids_for_featured_image_update ) ) {
 			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
 			echo "\n" . sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) );
 		}
@@ -511,10 +552,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_post_ids_map = [];
+		$imported_post_ids_map    = [];
 		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'post' ], false );
 		foreach ( $imported_posts_data_post as $entry ) {
-			$imported_post_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
+			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
 
 		/**
@@ -522,27 +563,27 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = [];
+		$imported_attachment_ids_map   = [];
 		$imported_post_data_attachment = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'attachment' ], false );
 		foreach ( $imported_post_data_attachment as $entry ) {
-			$imported_attachment_ids_map[ $entry[ 'id_old' ] ] = $entry[ 'id_new' ];
+			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
 
 		// Skip previously updated Posts.
-		$updated_post_ids = $this->get_data_from_log( $this->log_updated_blocks_ids, [ 'id_new' ] ) ?? [];
+		$updated_post_ids               = $this->get_data_from_log( $this->log_updated_blocks_ids, [ 'id_new' ] ) ?? [];
 		$new_post_ids_for_blocks_update = array_values( $imported_post_ids_map );
 		foreach ( $updated_post_ids as $entry ) {
-			$id_new = $entry[ 'id_new' ] ?? null;
+			$id_new     = $entry['id_new'] ?? null;
 			$key_id_new = array_search( $id_new, $new_post_ids_for_blocks_update );
 			if ( ! is_null( $id_new ) && false !== $key_id_new ) {
-				unset ( $new_post_ids_for_blocks_update[ $key_id_new ] );
+				unset( $new_post_ids_for_blocks_update[ $key_id_new ] );
 			}
 		}
 		if ( empty( $new_post_ids_for_blocks_update ) ) {
 			echo "\n" . 'All posts already had their blocks\' att. IDs updated, continuing.';
 			return;
 		}
-		if ( $new_post_ids_for_blocks_update !== array_values( $imported_post_ids_map ) ) {
+		if ( array_values( $imported_post_ids_map ) !== $new_post_ids_for_blocks_update ) {
 			$new_post_ids_for_blocks_update = array_values( $new_post_ids_for_blocks_update );
 			echo "\n" . sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) );
 		}
@@ -602,7 +643,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				}
 
 				// Get data if line contains these JSON keys.
-				$data_key = count( $data );
+				$data_key          = count( $data );
 				$data[ $data_key ] = [];
 				foreach ( $json_keys as $json_key ) {
 					if ( isset( $line_decoded[ $json_key ] ) ) {
@@ -622,7 +663,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	/**
 	 * Logs error message to file.
 	 *
-	 * @param string $msg Error message.
+	 * @param string $file Full file path.
+	 * @param string $msg  Error message.
 	 */
 	public function log( $file, $msg ) {
 		file_put_contents( $file, $msg . "\n", FILE_APPEND );
