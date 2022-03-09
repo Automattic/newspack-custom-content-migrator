@@ -329,7 +329,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ! in_array( $post_type, [ 'post', 'page', 'attachment' ] ) ) {
-				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for Live Post ID %s', $post_type, $post_id_live ) );
+				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for id_old=%s', $post_type, $post_id_live ) );
 				echo "\n";
 				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
 			}
@@ -343,7 +343,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 					'id_new'    => (int) $post_id_new,
 				];
 			} catch ( \Exception $e ) {
-				$this->log( $this->log_error, sprintf( 'import_posts error while inserting post %s Live ID %d : %s', $post_type, $post_id_live, $e->getMessage() ) );
+				$this->log( $this->log_error, sprintf( 'import_posts error while inserting post_type %s id_old=%d : %s', $post_type, $post_id_live, $e->getMessage() ) );
 				echo "\n";
 				WP_CLI::warning( sprintf( 'Error inserting %s Live ID %d (details in log file)', $post_type, $post_id_live ) );
 
@@ -354,9 +354,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// Now import all related Post data.
 			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data );
 			if ( ! empty( $import_errors ) ) {
-				$this->log( $this->log_error, sprintf( 'import_posts error while importing post data for %s, Live ID %d, imported ID %d : %s', $post_type, $post_id_live, $post_id_new, implode( '; ', $import_errors ) ) );
+				$this->log( $this->log_error, sprintf( 'import_posts error while importing post data for %s, id_old=%d, id_new=%d : %s', $post_type, $post_id_live, $post_id_new, implode( '; ', $import_errors ) ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Some errors while importing %s, Live ID %d, imported ID %d (details in log file).', $post_type, $post_id_live, $post_id_new ) );
+				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (details in log file).', $post_type, $post_id_live, $post_id_new ) );
 			}
 
 			// Log imported post.
@@ -415,12 +415,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		/**
-		 * Helper map of imported Posts.
+		 * Helper map of imported Posts and Pages.
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_post_ids_map    = [];
-		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'post' ], false );
+		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
 		foreach ( $imported_posts_data_post as $entry ) {
 			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
@@ -449,36 +449,43 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
 			$post   = get_post( $id_new );
 			if ( is_null( $post ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found id_old = %s, id_new = %s in $imported_post_ids_map.', $id_old, $id_new ) );
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found id_old=%s, id_new=%s in $imported_post_ids_map.', $id_old, $id_new ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, Post not found id_old = %s, id_new = %s in $imported_post_ids_map.', $id_old, $id_new ) );
+				WP_CLI::warning( sprintf( 'Error updating post_parent, Post not found id_old=%s, id_new=%s in $imported_post_ids_map.', $id_old, $id_new ) );
 				continue;
 			}
 
 			$parent_id_old = $post->post_parent;
-			$parent_id_new = $imported_post_ids[ $post->post_parent ] ?? null;
+			$parent_id_new = $imported_post_ids_map[ $post->post_parent ] ?? null;
 
 			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ( 0 !== $post->post_parent ) && is_null( $parent_id_new ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, null value for $parent_id_new = %s, id_old = %s', $parent_id_new ) );
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, null value for $parent_id_new=%s, $parent_id_old=%s', $parent_id_new, $parent_id_old ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, $parent_id_new = %s not found id_old = %s in $imported_post_ids.', $parent_id_new ) );
+				WP_CLI::warning( sprintf( 'Error updating post_parent, $parent_id_old=%s $parent_id_new=%s.', $parent_id_old, $parent_id_new ) );
 				continue;
 			}
 
-			// Update and log.
+			// Update.
 			self::$logic->update_post_parent( $post, $parent_id_new );
-			$this->log(
-				$this->log_updated_posts_parent_ids,
-				json_encode(
+
+			// Log.
+			// IDs of the Post.
+			$log_entry = [
+				'id_old' => $id_old,
+				'id_new' => $post->ID,
+			];
+			if ( 0 != $parent_id_old && ! is_null( $parent_id_new ) ) {
+				// IDs of post_parent.
+				$log_entry = array_merge(
+					$log_entry,
 					[
-						'id_old'        => $id_old,
-						'id_new'        => $post->ID,
 						'parent_id_old' => $parent_id_old,
 						'parent_id_new' => $parent_id_new,
 					]
-				)
-			);
+				);
+			}
+			$this->log( $this->log_updated_posts_parent_ids, json_encode( $log_entry ) );
 		}
 	}
 
@@ -550,12 +557,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function update_attachment_ids_in_blocks( $imported_posts_data ) {
 
 		/**
-		 * Helper map of imported Posts.
+		 * Helper map of imported Posts and Pages.
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
 		$imported_post_ids_map    = [];
-		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'post' ], false );
+		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
 		foreach ( $imported_posts_data_post as $entry ) {
 			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
@@ -597,7 +604,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * Filters the log data array by where clause and returns found element(s).
 	 *
 	 * @param array $imported_posts_data Log data array, consists of subarrays with one or more multiple key=>values.
-	 * @param array $where               Search conditions, match key and value in $imported_posts_data.
+	 * @param array $where               Search conditions, match key and value(s) in $imported_posts_data. Value can either be
+	 *                                   a scalar, or an array of multiple possible "or" values.
 	 * @param bool  $return_first        If true, return just the first found entry, otherwise return all which match the conditions.
 	 *
 	 * @return array Found results. Mind that if $return_first is true, it will return a one-dimensional array,
@@ -608,13 +616,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		foreach ( $imported_posts_data as $entry ) {
 			// Check $where conditions.
 			foreach ( $where as $key => $value ) {
-				if ( isset( $entry[ $key ] ) && $value == $entry[ $key ] ) {
-					if ( true === $return_first ) {
-						// Return first element matching $where.
-						return $entry;
-					} else {
-						// Return all the elements.
-						$return[] = $entry;
+				// If value is an array, it contains multiple OR options.
+				$multiple_values = is_array( $value ) ? $value : [ $value ];
+				foreach ( $multiple_values as $specific_value ) {
+					if ( isset( $entry[ $key ] ) && $specific_value == $entry[ $key ] ) {
+						if ( true === $return_first ) {
+							// Return first element matching $where.
+							return $entry;
+						} else {
+							// Return all the elements.
+							$return[] = $entry;
+						}
 					}
 				}
 			}

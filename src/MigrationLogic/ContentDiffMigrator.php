@@ -176,14 +176,23 @@ class ContentDiffMigrator {
 		// Note -- a Term can be shared by multiple Taxonomies in WP, so it's only fetched once.
 		$queried_term_ids = [];
 		foreach ( $term_relationships_rows as $term_relationship_row ) {
-			$term_taxonomy_id                     = $term_relationship_row['term_taxonomy_id'];
-			$term_taxonomy                        = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
+			$term_taxonomy_id = $term_relationship_row['term_taxonomy_id'];
+			$term_taxonomy    = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
+			// Skip in case of a record missing in Live DB.
+			if ( is_null( $term_taxonomy ) ) {
+				continue;
+			}
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
 
 			// Get Terms.
 			$term_id = $term_taxonomy['term_id'];
 			if ( ! in_array( $term_id, $queried_term_ids ) ) {
-				$data[ self::DATAKEY_TERMS ][] = $this->select_term_row( $table_prefix, $term_id );
+				$term = $this->select_term_row( $table_prefix, $term_id );
+				// Skip in case of a record missing in Live DB.
+				if ( is_null( $term ) ) {
+					continue;
+				}
+				$data[ self::DATAKEY_TERMS ][] = $term;
 				$queried_term_ids[]            = $term_id;
 
 				// Get Term Metas.
@@ -452,7 +461,8 @@ class ContentDiffMigrator {
 			$term_taxonomy_id_old = (int) $term_relationship_row['term_taxonomy_id'];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
 			if ( is_null( $term_taxonomy_id_new ) ) {
-				$error_messages[] = sprintf( 'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old %s', $term_taxonomy_id_old );
+				// Missing records in live DB.
+				$error_messages[] = sprintf( 'Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%s is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table', $data[ self::DATAKEY_POST ]['ID'], $post_id, $term_taxonomy_id_old );
 			} else {
 				try {
 					$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
