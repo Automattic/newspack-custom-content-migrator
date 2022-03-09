@@ -41,7 +41,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	private $blocks_data_provider;
 
 	/**
-	 * @var string Local table prefix.
+	 * Local DB table prefix.
+	 *
+	 * @var string Local DB table prefix.
 	 */
 	private $table_prefix;
 
@@ -1945,40 +1947,40 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			11111 => 11110,
 		];
 
-		$html = <<<HTML
+		$html          = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11111"/>
 HTML;
 		$html_expected = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11110"/>
 HTML;
-		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$html_actual   = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
 		$this->assertEquals( $html_expected, $html_actual );
 
-		$html = <<<HTML
+		$html          = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclass wp-image-11111"/>
 HTML;
 		$html_expected = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclass wp-image-11110"/>
 HTML;
-		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$html_actual   = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
 		$this->assertEquals( $html_expected, $html_actual );
 
-		$html = <<<HTML
+		$html          = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11111 otherclass"/>
 HTML;
 		$html_expected = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11110 otherclass"/>
 HTML;
-		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$html_actual   = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
 		$this->assertEquals( $html_expected, $html_actual );
 
-		$html = <<<HTML
+		$html          = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclassA wp-image-11111 otherclassB"/>
 HTML;
 		$html_expected = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="otherclassA wp-image-11110 otherclassB"/>
 HTML;
-		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
+		$html_actual   = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html );
 		$this->assertEquals( $html_expected, $html_actual );
 	}
 
@@ -1990,10 +1992,10 @@ HTML;
 		$imported_attachment_ids = [
 			11111 => 11110,
 		];
-		$html = <<<HTML
+		$html                    = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11111" class="wp-image-11111"/>
 HTML;
-		$html_expected = <<<HTML
+		$html_expected           = <<<HTML
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11110" class="wp-image-11111"/>
 HTML;
 
@@ -2013,8 +2015,8 @@ HTML;
 			22222 => 22220,
 			33333 => 33330,
 		];
-		$html = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 );
-		$html_expected = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 );
+		$html                    = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 );
+		$html_expected           = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 );
 
 		$html_actual = $html;
 		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html_actual );
@@ -2034,7 +2036,7 @@ HTML;
 			33333 => 33330,
 			44444 => 44440,
 		];
-		$html_with_placeholders = <<<HTML
+		$html_with_placeholders  = <<<HTML
 <!-- wp:blocka {"id":%d,"sizeSlug":"large"} -->
 some content
 <!-- /wp:image -->
@@ -2052,7 +2054,7 @@ there's always something... :)
 <!-- /wp:image -->
 HTML;
 
-		$html = sprintf( $html_with_placeholders, 11111, 22222, 33333, 44444 );
+		$html          = sprintf( $html_with_placeholders, 11111, 22222, 33333, 44444 );
 		$html_expected = sprintf( $html_with_placeholders, 11110, 22222, 33330, 44440 );
 
 		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html );
@@ -2073,12 +2075,12 @@ HTML;
 		];
 
 		// The first assertion is for Jetpack Slideshow block. 1111111111, 2222222222, 3333333333 are just decoys, and should not be updated, checking proper substring matching.
-		$html_slideshow = $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
+		$html_slideshow          = $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 4444, 22222, 5555 );
 		$html_slideshow_expected = $this->blocks_data_provider->get_jetpack_slideshow_block( 11110, 22220, 33330 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
-		    . "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 4444, 22220, 5555 );
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 4444, 22220, 5555 );
 
 		$html_slideshow_actual = $html_slideshow;
 		$html_slideshow_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_slideshow_actual );
@@ -2089,12 +2091,12 @@ HTML;
 
 
 		// The second assertion is for Jetpack Tiled Gallery block.
-		$html_jp_tiled_gallery = $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 99999, 33333 )
-		                         . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
-		                         . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 555, 11111, 666 );
+		$html_jp_tiled_gallery          = $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 99999, 33333 )
+								 . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
+								 . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 555, 11111, 666 );
 		$html_jp_tiled_gallery_expected = $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11110, 99999, 33330 )
-		                                  . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
-		                                  . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 555, 11110, 666 );
+										  . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
+										  . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 555, 11110, 666 );
 
 		$html_jp_tiled_gallery_actual = $html_jp_tiled_gallery;
 		$html_jp_tiled_gallery_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
@@ -2119,20 +2121,18 @@ HTML;
 		];
 
 		// 1111111111, 2222222222, 3333333333 are just decoys, and should not be updated, checking proper substring matching.
-		$html = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 )
+		$html          = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( 1111111111, 2222222222, 3333333333 )
-	        . "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
-	        . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
-		;
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
 		$html_expected = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11110, 22220, 33330 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11110, 22220, 33330 )
 			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( 1111111111, 2222222222, 3333333333 )
-	        . "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
-	        . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 )
-		;
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
+			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
 
 		$html_actual = $html;
 		// All the updates made in \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids.

@@ -524,10 +524,10 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Gutenberg Blocks' attachment IDs with new attachment IDs in created `post_content` and `post_excerpt` fields.
 	 *
-	 * @param array  $post_ids_new                An array of newly imported Post IDs. Will only fetch an do replacements in these.
-	 * @param array  $imported_attachment_ids_map An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $log_file_path               Optional. Full path to a log file. If provided, will save and append a detailed
-	 *                                            output of all the changes made.
+	 * @param array  $imported_post_ids       An array of newly imported Post IDs. Will only fetch an do replacements in these.
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $log_file_path           Optional. Full path to a log file. If provided, will save and append a detailed
+	 *                                        output of all the changes made.
 	 */
 	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_path = null ) {
 
@@ -535,15 +535,21 @@ class ContentDiffMigrator {
 		$post_ids_new = array_values( $imported_post_ids );
 		$posts_table  = $this->wpdb->posts;
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
-		$sql          = $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );",
-			$post_ids_new );
+		// phpcs:disable -- wpdb::prepare used by wrapper method.
+		$sql          = $this->wpdb->prepare(
+			"SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );",
+			$post_ids_new
+		);
 		$results      = $this->wpdb->get_results( $sql, ARRAY_A );
+		// phpcs:enable
 
 		// Loop through all imported posts, and do all the replacements.
 		foreach ( $results as $key_result => $result ) {
-			$id = $result['ID'];
-			$content_before = $content_updated = $result['post_content'];
-			$excerpt_before = $excerpt_updated = $result['post_excerpt'];
+			$id              = $result['ID'];
+			$content_before  = $result['post_content'];
+			$content_updated = $result['post_content'];
+			$excerpt_before  = $result['post_excerpt'];
+			$excerpt_updated = $result['post_excerpt'];
 
 			// Do all replacements in content.
 			$content_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $content_updated );
@@ -559,9 +565,14 @@ class ContentDiffMigrator {
 
 			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
-				$updated = $this->wpdb->update( $this->wpdb->posts,
-					[ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ],
-					[ 'ID' => $id ] );
+				$updated = $this->wpdb->update(
+					$this->wpdb->posts,
+					[
+						'post_content' => $content_updated,
+						'post_excerpt' => $excerpt_updated,
+					],
+					[ 'ID' => $id ]
+				);
 			}
 
 			// Log updates.
@@ -598,7 +609,10 @@ class ContentDiffMigrator {
 	/**
 	 * Updates <img> element's data-id attribute value.
 	 *
-	 * @return string HTML.
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]
 	 */
 	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
 
@@ -635,7 +649,7 @@ class ContentDiffMigrator {
 				// Check if this ID was updated.
 				if ( ! is_null( $id_new ) ) {
 					// Update just this specific block's header where this ID was matched (by $key_match).
-					$matched_block_header = $matches[0][ $key_match ];
+					$matched_block_header         = $matches[0][ $key_match ];
 					$matched_block_header_updated = str_replace(
 						sprintf( 'data-id="%d"', $id ),
 						sprintf( 'data-id="%d"', $id_new ),
@@ -655,6 +669,14 @@ class ContentDiffMigrator {
 		return $content_updated;
 	}
 
+	/**
+	 * Updates the ID in <img> element's class attribute, e.g. `class="wp-image-123"`.
+	 *
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]
+	 */
 	public function update_image_element_class_attribute( $imported_attachment_ids, $content ) {
 
 		$content_updated = $content;
@@ -691,7 +713,7 @@ class ContentDiffMigrator {
 				// Check if this ID was updated.
 				if ( ! is_null( $id_new ) ) {
 					// Update just this specific block's header where this ID was matched (by $key_match).
-					$matched_block_header = $matches[0][ $key_match ];
+					$matched_block_header         = $matches[0][ $key_match ];
 					$matched_block_header_updated = str_replace(
 						sprintf( 'wp-image-%d', $id ),
 						sprintf( 'wp-image-%d', $id_new ),
@@ -711,6 +733,14 @@ class ContentDiffMigrator {
 		return $content_updated;
 	}
 
+	/**
+	 * Updates IDs in Gutenberg blocks which contain single IDs.
+	 *
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]
+	 */
 	public function update_gutenberg_blocks_single_id( $imported_attachment_ids, $content ) {
 
 		$content_updated = $content;
@@ -748,7 +778,7 @@ class ContentDiffMigrator {
 				// Check if this ID was updated.
 				if ( ! is_null( $id_new ) ) {
 					// Update just this specific block's header where this ID was matched (by $key_match).
-					$matched_block_header = $matches[0][ $key_match ];
+					$matched_block_header         = $matches[0][ $key_match ];
 					$matched_block_header_updated = str_replace(
 						sprintf( '"id":%d', $id ),
 						sprintf( '"id":%d', $id_new ),
@@ -769,10 +799,10 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Update Gutenberg blocks which contain multiple CSV IDs.
+	 * Updates IDs in Gutenberg blocks which contain multiple CSV IDs.
 	 *
-	 * @param $imported_attachment_ids
-	 * @param $content
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
 	 *
 	 * @return string|string[]|null
 	 */
@@ -805,7 +835,7 @@ class ContentDiffMigrator {
 		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
 			// Loop through all $matches[2], which are the CSV IDs, and either update them, or leave them alone.
 			foreach ( $matches[2] as $key_match => $ids_csv ) {
-				$ids = explode( ',', $ids_csv );
+				$ids         = explode( ',', $ids_csv );
 				$ids_updated = [];
 				foreach ( $ids as $key_id => $id ) {
 					if ( isset( $imported_attachment_ids[ $id ] ) ) {
@@ -819,7 +849,7 @@ class ContentDiffMigrator {
 				if ( $ids_updated != $ids ) {
 					$ids_csv_replacements[ $key_match ] = [
 						'before_csv_ids' => implode( ',', $ids ),
-						'after_csv_ids' => implode( ',', $ids_updated ),
+						'after_csv_ids'  => implode( ',', $ids_updated ),
 					];
 				}
 			}
@@ -828,11 +858,11 @@ class ContentDiffMigrator {
 		// Replace every CSV IDs string which was updated.
 		$content_updated = $content;
 		foreach ( $ids_csv_replacements as $key_match => $changes ) {
-			$ids_csv_before = $changes[ 'before_csv_ids' ];
-			$ids_csv_after = $changes[ 'after_csv_ids' ];
+			$ids_csv_before = $changes['before_csv_ids'];
+			$ids_csv_after  = $changes['after_csv_ids'];
 
 			// Make the replacement to just this specific WP Block header where these CSV IDs were found.
-			$matched_block_header = $matches[0][ $key_match ];
+			$matched_block_header         = $matches[0][ $key_match ];
 			$matched_block_header_updated = str_replace(
 				sprintf( '"ids":[%s]', $ids_csv_before ),
 				sprintf( '"ids":[%s]', $ids_csv_after ),
