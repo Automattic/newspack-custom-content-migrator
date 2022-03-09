@@ -1725,11 +1725,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'term_exists',
 			[
 				// Term 1 exists, $term_1_id is returned.
-				[ $term_1_name, '', null, $term_1_id ],
+				[ $term_1_name, $term_1_slug, $term_1_id ],
 				// Term 2 doesn't exist, null is returned.
-				[ $term_2_name, '', null, null ],
+				[ $term_2_name, $term_2_slug, null ],
 				// Term 3 doesn't exist.
-				[ $term_3_name, '', null, null ],
+				[ $term_3_name, $term_3_slug, null ],
 			]
 		);
 		$this->mock_consecutive_value_maps(
@@ -1878,11 +1878,11 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'term_exists',
 			[
 				// Term 1 exists, $term_1_id is returned.
-				[ $term_1_name, '', null, $term_1_id ],
+				[ $term_1_name, $term_1_slug, $term_1_id ],
 				// Term 2 doesn't exist, null is returned.
-				[ $term_2_name, '', null, null ],
+				[ $term_2_name, $term_2_slug, null ],
 				// Term 3 doesn't exist.
-				[ $term_3_name, '', null, null ],
+				[ $term_3_name, $term_3_slug, null ],
 			]
 		);
 		$logic_partial_mock->method( 'insert_term' )
@@ -2142,6 +2142,50 @@ HTML;
 		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
 
 		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Checks that term_exists performs a correct query.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.
+	 */
+	public function test_term_exists_should_query_correctly() {
+
+		// Prepare.
+		$term_name        = 'foo';
+		$term_slug        = 'bar';
+		$term_id_expected = 123;
+		$sql_sprintf      = "SELECT term_id
+				FROM {$this->wpdb_mock->terms}
+				WHERE name = %s
+				AND slug = %s ; ";
+		$sql              = sprintf( $sql_sprintf, $term_name, $term_slug );
+
+		// Mock.
+		$this->wpdb_mock->expects( $this->once() )
+						->method( 'prepare' )
+						->will(
+							$this->returnValueMap(
+								[
+									[ $sql_sprintf, $term_name, $term_slug, $sql ],
+								]
+							)
+						);
+		$this->wpdb_mock->expects( $this->once() )
+						->method( 'get_var' )
+						->will(
+							$this->returnValueMap(
+								[
+									[ $sql, $term_id_expected ],
+								]
+							)
+						);
+
+		// Run.
+		$term_id_actual = $this->logic->term_exists( $term_name, $term_slug );
+
+		// Assert.
+		$this->assertEquals( $term_id_expected, $term_id_actual );
 	}
 
 	/**

@@ -215,7 +215,7 @@ class ContentDiffMigrator {
 		$termstaxonomy_table      = esc_sql( $table_prefix . 'term_taxonomy' );
 
 		// Get all live site's hierarchical categories, ordered by parent for easy hierarchical reconstruction.
-		// phpcs:disable -- wpdb::prepare is used by wrapper method.
+		// phpcs:disable -- wpdb::prepare is used by wrapper.
 		$live_taxonomies             = $this->wpdb->get_results(
 			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 			FROM $live_terms_table t
@@ -239,7 +239,7 @@ class ContentDiffMigrator {
 				$parent_term_id = $terms_updates[ $live_taxonomy['parent'] ];
 			}
 
-			// phpcs:disable -- wpdb::prepare is used by wrapper method.
+			// phpcs:disable -- wpdb::prepare is used by wrapper.
 			$existing_taxonomy = $this->wpdb->get_row(
 				$this->wpdb->prepare(
 					"SELECT t.term_id
@@ -400,7 +400,8 @@ class ContentDiffMigrator {
 		$terms_ids_updates         = [];
 		$term_taxonomy_ids_updates = [];
 		foreach ( $data[ self::DATAKEY_TERMS ] as $term_row ) {
-			$term_id_existing = $this->term_exists( $term_row['name'] );
+			// Use existing term, or create a new one.
+			$term_id_existing = $this->term_exists( $term_row['name'], $term_row['slug'] );
 			$term_id_existing = is_numeric( $term_id_existing ) ? (int) $term_id_existing : $term_id_existing;
 			$term_id_old      = $term_row['term_id'];
 			$term_id_new      = null;
@@ -492,7 +493,7 @@ class ContentDiffMigrator {
 		$postmeta_table = $this->wpdb->postmeta;
 		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
 		$sql            = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		// phpcs:ignore -- wpdb::prepare is used by wrapper method.
+		// phpcs:ignore -- wpdb::prepare is used by wrapper.
 		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
 
 		foreach ( $results as $key_result => $result ) {
@@ -535,7 +536,7 @@ class ContentDiffMigrator {
 		$post_ids_new = array_values( $imported_post_ids );
 		$posts_table  = $this->wpdb->posts;
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
-		// phpcs:disable -- wpdb::prepare used by wrapper method.
+		// phpcs:disable -- wpdb::prepare used by wrapper.
 		$sql          = $this->wpdb->prepare(
 			"SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );",
 			$post_ids_new
@@ -917,7 +918,7 @@ class ContentDiffMigrator {
 	 * @return int|null term_taxonomy_id or null.
 	 */
 	public function get_existing_term_taxonomy( $term_id, $taxonomy ) {
-		// phpcs:disable -- wpdb::prepare used by wrapper method.
+		// phpcs:disable -- wpdb::prepare used by wrapper.
 		$var = $this->wpdb->get_var(
 			$this->wpdb->prepare(
 				"SELECT tt.term_taxonomy_id
@@ -1410,14 +1411,29 @@ class ContentDiffMigrator {
 	/**
 	 * Wrapper for WP's native \term_exists(), for easier testing.
 	 *
-	 * @param int|string $term     The term to check. Accepts term ID, slug, or name..
-	 * @param string     $taxonomy Optional. The taxonomy name to use.
-	 * @param int        $parent   Optional. ID of parent term under which to confine the exists search.
+	 * @param string $term_name Term name.
+	 * @param string $term_slug Term slug.
 	 *
 	 * @return mixed @see term_exists.
 	 */
-	public function term_exists( $term, $taxonomy = '', $parent = null ) {
-		return term_exists( $term, $taxonomy, $parent );
+	public function term_exists( $term_name, $term_slug ) {
+
+		// Native WP's term_exists() is highly discouraged due to not being cached, so writing custom query.
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$term_id = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT term_id
+				FROM {$this->wpdb->terms}
+				WHERE name = %s
+				AND slug = %s ; ",
+				$term_name,
+				$term_slug
+			)
+		);
+		// phpcs:enable
+
+		return is_numeric( $term_id ) ? (int) $term_id : null;
 	}
 
 	/**

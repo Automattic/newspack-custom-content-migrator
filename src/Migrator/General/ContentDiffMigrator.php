@@ -346,6 +346,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$this->log( $this->log_error, sprintf( 'import_posts error while inserting post %s Live ID %d : %s', $post_type, $post_id_live, $e->getMessage() ) );
 				echo "\n";
 				WP_CLI::warning( sprintf( 'Error inserting %s Live ID %d (details in log file)', $post_type, $post_id_live ) );
+
+				// Error is logged. Continue importing other posts.
 				continue;
 			}
 
