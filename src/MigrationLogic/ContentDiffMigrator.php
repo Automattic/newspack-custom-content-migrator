@@ -529,69 +529,42 @@ class ContentDiffMigrator {
 	 * @param string $log_file_path               Optional. Full path to a log file. If provided, will save and append a detailed
 	 *                                            output of all the changes made.
 	 */
-	public function update_blocks_ids( $post_ids_new, $imported_attachment_ids_map, $log_file_path = null ) {
-		if ( empty( $imported_attachment_ids_map ) || empty( $post_ids_new ) ) {
-			return;
-		}
+	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_path = null ) {
 
-		// Pattern for matching Gutenberg block's ID attribute value.
-		$pattern_id = '|
-			(\<\!--      # beginning of the block element
-			\s           # followed by a space
-			wp\:[^\s]+   # element name/designation
-			\s           # followed by a space
-			{            # opening brace
-			[^}]*        # zero or more characters except closing brace
-			"id"\:)      # id attribute
-			(%d)         # id value
-			([^\d\>]+)   # any following char except numeric and comment closing angle bracket
-		|xims';
-		// Pattern for matching <img> element's class value which contains the att. ID.
-		$pattern_class = '|
-			(\<img
-			[^\>]*                   # zero or more characters except closing angle bracket
-			class="wp-image-)(%d)("  # class image with id
-			[^\d"]*                  # zero or more characters except numeric and double quote
-			/\>)                     # closing angle bracket
-		|xims';
-
-		// Compose patterns and replacements for every attachment ID update (both in block header, and in <img> class value).
-		$patterns     = [];
-		$replacements = [];
-		foreach ( $imported_attachment_ids_map as $att_id_old => $att_id_new ) {
-			$patterns[]     = sprintf( $pattern_id, $att_id_old );
-			$replacements[] = '${1}' . $att_id_new . '${3}';
-			$patterns[]     = sprintf( $pattern_class, $att_id_old );
-			$replacements[] = '${1}' . $att_id_new . '${3}';
-		}
-
-		// Fetch just the imported Post IDs.
+		// Fetch imported posts.
+		$post_ids_new = array_values( $imported_post_ids );
 		$posts_table  = $this->wpdb->posts;
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
-		// phpcs:ignore -- wpdb::prepare is used by wrapper method.
-		$results      = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );", $post_ids_new ), ARRAY_A );
+		$sql          = $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );",
+			$post_ids_new );
+		$results      = $this->wpdb->get_results( $sql, ARRAY_A );
+
+		// Loop through all imported posts, and do all the replacements.
 		foreach ( $results as $key_result => $result ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_result % 2000 ) {
-				echo '.';
-			}
+			$id = $result['ID'];
+			$content_before = $content_updated = $result['post_content'];
+			$excerpt_before = $excerpt_updated = $result['post_excerpt'];
 
-			$id              = $result['ID'];
-			$content_before  = $result['post_content'];
-			$excerpt_before  = $result['post_excerpt'];
-			$content_updated = preg_replace( $patterns, $replacements, $content_before );
-			$excerpt_updated = preg_replace( $patterns, $replacements, $excerpt_before );
+			// Do all replacements in content.
+			$content_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
+
+			// Do all replacements in excerpt.
+			$excerpt_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
+
+			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
-				$updated = $this->wpdb->update(
-					$this->wpdb->posts,
-					[
-						'post_content' => $content_updated,
-						'post_excerpt' => $excerpt_updated,
-					],
-					[ 'ID' => $id ]
-				);
+				$updated = $this->wpdb->update( $this->wpdb->posts,
+					[ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ],
+					[ 'ID' => $id ] );
 			}
 
+			// Log updates.
 			if ( ! is_null( $log_file_path ) ) {
 				// Log the post ID that was checked.
 				$log_entry = [ 'id_new' => $id ];
@@ -620,6 +593,172 @@ class ContentDiffMigrator {
 				$this->log( $log_file_path, json_encode( $log_entry ) );
 			}
 		}
+	}
+
+	/**
+	 * Updates <img> element's data-id attribute value.
+	 *
+	 * @return string HTML.
+	 */
+	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
+		// Pattern for matching <img> element's data-id attribute's value which contains the att.ID ; uses %d as placeholder for sprintf.
+		$pattern_data_id_attr_w_placeholder = '|
+			(\<img
+			[^\>]*                   # zero or more characters except closing angle bracket
+			data-id=")(%d)("         # data-id attribute with id as value, actual number should be inserted with sprintf
+			[^\>]*                   # zero or more characters except closing angle bracket
+			/\>)                     # closing angle bracket
+		|xims';
+
+		// Add every attachment ID to patterns and replacements.
+		$patterns = [];
+		$replacements = [];
+		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
+			$patterns[] = sprintf( $pattern_data_id_attr_w_placeholder, $att_id_old );
+			$replacements[] = '${1}' . $att_id_new . '${3}';
+		}
+
+		$content_updated = preg_replace( $patterns, $replacements, $content );
+
+		return $content_updated;
+
+	}
+
+	public function update_image_element_class_attribute( $imported_attachment_ids, $content ) {
+
+		// Pattern for matching <img> element's class value which contains the att.ID ; uses %d as placeholder for sprintf.
+		$pattern_img_class_w_placeholder = '|
+			(
+				\<img
+				[^\>]*       # zero or more characters except closing angle bracket
+				class="
+				[^"]*        # zero or more characters except class closing double quote
+				wp-image-
+			)
+			(
+				\b%d(?!\d).*?\b   # ID to be inserted with sprintf and not followed by any other digits so that we dont replace a substring
+			)
+			(
+				[^\>]*       # zero or more characters except closing angle bracket
+				/\>          # closing angle bracket
+			)
+		|xims';
+
+		// Add every attachment ID to patterns and replacements.
+		$patterns = [];
+		$replacements = [];
+		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
+			$patterns[] = sprintf( $pattern_img_class_w_placeholder, $att_id_old );
+			$replacements[] = '${1}' . $att_id_new . '${3}';
+		}
+
+		$content_updated = preg_replace( $patterns, $replacements, $content );
+
+		return $content_updated;
+
+	}
+
+	public function update_gutenberg_blocks_single_id( $imported_attachment_ids, $content ) {
+
+		// Pattern for matching any Gutenberg block's "id" attribute value ; uses %d as placeholder for sprintf.
+		$pattern_id_w_placeholder = '|
+			(\<\!--      # beginning of the block element
+			\s           # followed by a space
+			wp\:[^\s]+   # element name/designation
+			\s           # followed by a space
+			{            # opening brace
+			[^}]*        # zero or more characters except closing brace
+			"id"\:)      # id attribute
+			(%d)         # id value
+			([^\d\>]+)   # any following char except numeric and comment closing angle bracket
+		|xims';
+
+
+		// Add every attachment ID to patterns and replacements.
+		$patterns = [];
+		$replacements = [];
+		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
+			$patterns[] = sprintf( $pattern_id_w_placeholder, $att_id_old );
+			$replacements[] = '${1}' . $att_id_new . '${3}';
+		}
+
+		$content_updated = preg_replace( $patterns, $replacements, $content );
+
+		return $content_updated;
+	}
+
+	/**
+	 * Update Gutenberg blocks which contain multiple CSV IDs.
+	 *
+	 * @param $imported_attachment_ids
+	 * @param $content
+	 *
+	 * @return string|string[]|null
+	 */
+	public function update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content ) {
+
+		// Pattern for matching Gutenberg block's multiple CSV IDs attribute value.
+		$pattern_csv_ids = '|
+			(
+				\<\!--       # beginning of the block element
+				\s           # followed by a space
+				wp\:[^\s]+   # element name/designation
+				\s           # followed by a space
+				{            # opening brace
+				[^}]*        # zero or more characters except closing brace
+				"ids"\:      # ids attribute
+				\[           # opening square bracket containing CSV IDs
+			)
+			(
+				 [\d,]+      # coma separated IDs
+			)
+			(
+				\]           # closing square bracket containing CSV IDs
+				[^\d\>]+     # any following char except numeric and comment closing angle bracket
+			)
+		|xims';
+
+		// Loop through all CSV IDs matches, and prepare replacements.
+		preg_match_all( $pattern_csv_ids, $content, $matches );
+		$ids_csv_replacements = [];
+		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
+			// Loop through all $matches[2], which are the CSV IDs, and either update them, or leave them alone.
+			foreach ( $matches[2] as $key_match => $ids_csv ) {
+				$ids = explode( ',', $ids_csv );
+				$ids_updated = [];
+				foreach ( $ids as $key_id => $id ) {
+					if ( isset( $imported_attachment_ids[ $id ] ) ) {
+						$ids_updated[ $key_id ] = $imported_attachment_ids[ $id ];
+					} else {
+						$ids_updated[ $key_id ] = $id;
+					}
+				}
+
+				// If IDs were updated, store the "before CSV IDs" and "after CSV IDs" in $ids_csv_replacements.
+				if ( $ids_updated != $ids ) {
+					$ids_csv_replacements[ $key_match ] = [
+						'before_csv_ids' => implode( ',', $ids ),
+						'after_csv_ids' => implode( ',', $ids_updated ),
+					];
+				}
+			}
+		}
+
+		// Replace every CSV IDs string which was updated.
+		$content_updated = $content;
+		foreach ( $ids_csv_replacements as $key_match => $changes ) {
+			$ids_csv_before = $changes[ 'before_csv_ids' ];
+			$ids_csv_after = $changes[ 'after_csv_ids' ];
+
+			// Make the replacement to just this specific WP Block in which this ID CSV was found.
+			$block_header_this_match = $matches[1][ $key_match ];
+			$search = $block_header_this_match . $ids_csv_before;
+			$replace = $block_header_this_match . $ids_csv_after;
+
+			$content_updated = str_replace( $search, $replace, $content_updated );
+		}
+
+		return $content_updated;
 	}
 
 	/**
