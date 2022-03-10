@@ -436,7 +436,7 @@ class ElLiberoCustomCategoriesMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-el-libero-categories',
+			'newspack-content-migrator el-libero-migrate-categories',
 			[ $this, 'driver' ],
 			[
 				'shortdesc' => 'Will handle category migration for El Libero.',
