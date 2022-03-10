@@ -89,7 +89,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 						'description' => 'Gallery block type to be used as a replacement for the Next Geb Gallery shortcode. Accepted values are gutenberg-gallery, jetpack-gallery. Defaults to gutenberg-gallery.',
 						'optional'    => true,
 						'repeating'   => false,
-						'default'     => 'gutenberg-gallery',
+						'default'     => 'jetpack-gallery',
 						'options'     => array( 'gutenberg-gallery', 'jetpack-gallery' ),
 					),
 					array(
