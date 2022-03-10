@@ -99,6 +99,12 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * Get page HTML content from a given URL.
+	 *
+	 * @param string $url URL to get its content.
+	 * @return string|false HTML content or false if it's not found.
+	 */
 	private function get_url_content( $url ) {
 		$response = wp_remote_get( $url );
 		if ( 404 === wp_remote_retrieve_response_code( $response ) ) {
@@ -108,6 +114,12 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 		return wp_remote_retrieve_body( $response );
 	}
 
+	/**
+	 * Get author byline from staging post content using dom crawler.
+	 *
+	 * @param string $content Post content to get the author byline from.
+	 * @return string|null Author byline, or null if it's not found.
+	 */
 	private function get_author_from_staging_content( $content ) {
 		$this->dom_crawler->clear();
 		$this->dom_crawler->add( $content );
@@ -115,6 +127,12 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 		return $dom->getNode( 0 ) ? trim( str_ireplace( 'by', '', $dom->getNode( 0 )->nodeValue ) ) : null;
 	}
 
+	/**
+	 * Get author byline from live post content using dom crawler.
+	 *
+	 * @param string $content Post content to get the author byline from.
+	 * @return string|null Author byline, or null if it's not found.
+	 */
 	private function get_author_from_live_content( $content ) {
 		$this->dom_crawler->clear();
 		$this->dom_crawler->add( $content );
@@ -125,8 +143,9 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 	/**
 	 * Simple file logging.
 	 *
-	 * @param string $file    File name or path.
-	 * @param string $message Log message.
+	 * @param string  $file    File name or path.
+	 * @param string  $message Log message.
+	 * @param boolean $to_cli Display the logged message in CLI.
 	 */
 	private function log( $file, $message, $to_cli = true ) {
 		$message .= "\n";
