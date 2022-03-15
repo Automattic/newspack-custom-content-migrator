@@ -2,8 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Rafu Shimpo.
@@ -16,9 +17,16 @@ class PhilomathMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var ContentDiffMigrator Instance.
+	 */
+	private $content_diff = null;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		global $wpdb;
+		$this->content_diff = new ContentDiffMigrator( $wpdb );
 	}
 
 	/**
@@ -43,6 +51,68 @@ class PhilomathMigrator implements InterfaceMigrator {
 			'newspack-content-migrator philomath-update-gallery-image-links',
 			[ $this, 'cmd_update_gallery_image_links' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator philomath-update-jp-blocks-ids',
+			[ $this, 'cmd_update_jp_blocks_ids' ],
+		);
+	}
+
+	/**
+	 * @param array $args       CLI arguments.
+	 * @param array $assoc_args CLI associative arguments.
+	 */
+	public function cmd_update_jp_blocks_ids( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Get $imported_attachment_ids.
+		$live_posts_prefix = 'live_wp_';
+		$live_posts = $live_posts_prefix . 'posts';
+		$live_postmeta = $live_posts_prefix . 'postmeta';
+		$results = $wpdb->get_results( "select ID, guid from $live_posts where post_type = 'attachment'; ", ARRAY_A );
+
+		// Build a map of old to new att. IDs.
+		$mising_old_atts = [];
+		foreach ( $results as $key_result => $result ) {
+
+			// Get old live site att ID, and file.
+			$id_old = $result[ 'ID' ];
+			$guid_parsed = parse_url( $result['guid'] );
+			$att_path_old = $guid_parsed['path'];
+			if ( ! $att_path_old ) {
+				$d = 1;
+			}
+
+			// Match existing att ID and file.
+			$id_new = $wpdb->get_var( $wpdb->prepare( "select ID from $wpdb->posts where guid like %s ; ", '%'. $att_path_old ) );
+			if ( ! $id_new ) {
+				$mising_old_atts[ $id_old ] = $att_path_old;
+				continue;
+			}
+
+			$imported_attachment_ids[ (int) $id_old ] = (int) $id_new;
+		}
+
+		// Upate IDs in content.
+		$results = $wpdb->get_results( "select ID, post_content from {$wpdb->posts} where post_type = 'post'; ", ARRAY_A );
+		foreach ( $results as $key_result => $result ) {
+			echo sprintf( "(%d)/(%d) %d", $key_result+1, count( $results ), $result[ 'ID' ] ) . "\n";
+
+			$content_updated = $result[ 'post_content' ];
+			$content_updated = $this->content_diff->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->content_diff->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->content_diff->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
+
+			if ( $result[ 'post_content' ] != $content_updated ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $content_updated ],
+					[ 'ID' => $result[ 'ID' ] ]
+				);
+				echo 'Updated' . "\n";
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
