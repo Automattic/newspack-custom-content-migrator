@@ -79,6 +79,9 @@ class NinjaTablesMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args
 	 */
 	public function cmd_export_ninja_tables( $args, $assoc_args ) {
+		if ( is_null( $this->ninja_tables_logic->ninja_tables_admin ) ) {
+			WP_CLI::error( 'Ninja Tables plugin is a dependency, and will have to be installed before this command can be used.' );
+		}
 		// Get all Ninja tables.
 		$reflector = new \ReflectionObject( $this->ninja_tables_logic->ninja_tables_admin );
 		$method    = $reflector->getMethod( 'getAllTablesForMce' );
