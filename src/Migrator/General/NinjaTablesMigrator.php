@@ -83,20 +83,14 @@ class NinjaTablesMigrator implements InterfaceMigrator {
 		$reflector = new \ReflectionObject( $this->ninja_tables_logic->ninja_tables_admin );
 		$method    = $reflector->getMethod( 'getAllTablesForMce' );
 		$method->setAccessible( true );
-		$all_tables_raw = $method->invoke( $this->ninja_tables_logic->ninja_tables_admin );
-		$all_tables     = array_filter(
-			array_map(
-				function( $table ) {
-					return $table['value'];
-				},
-				$all_tables_raw
-			)
-		);
+		$all_tables = $method->invoke( $this->ninja_tables_logic->ninja_tables_admin );
 
 		// Export tables.
-		foreach ( $all_tables as $table_id ) {
+		foreach ( $all_tables as $table ) {
+			$table_id             = $table['value'];
+			$table_name           = $table['text'];
 			$_REQUEST['table_id'] = $table_id;
-			$this->ninja_tables_logic->export_data( $table_id, path_join( $assoc_args['output-dir'], "$table_id." . $assoc_args['output-type'] ), $assoc_args['output-type'] );
+			$this->ninja_tables_logic->export_data( $table_id, path_join( $assoc_args['output-dir'], "$table_name." . $assoc_args['output-type'] ), $assoc_args['output-type'] );
 			WP_CLI::line( sprintf( 'Table exported successfully: %d', $table_id ) );
 		}
 		WP_CLI::line( 'Export is done!' );
