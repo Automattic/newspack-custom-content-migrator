@@ -447,7 +447,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Get Post ID and its new parent_id.
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
-			$post   = get_post( $id_new );
+			$id_new = is_null( $id_new ) ? $imported_attachment_ids_map[ $id_old ] : $id_new;
+			$post = get_post( $id_new );
 			if ( is_null( $post ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found id_old=%s, id_new=%s in $imported_post_ids_map.', $id_old, $id_new ) );
 				echo "\n";
@@ -455,9 +456,14 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				continue;
 			}
 
+			// No update to do.
+			if ( 0 === $post->post_parent ) {
+				continue;
+			}
+
 			$parent_id_old = $post->post_parent;
 			$parent_id_new = $imported_post_ids_map[ $post->post_parent ] ?? null;
-
+			$parent_id_new = is_null( $parent_id_new ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
 			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ( 0 !== $post->post_parent ) && is_null( $parent_id_new ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, null value for $parent_id_new=%s, $parent_id_old=%s', $parent_id_new, $parent_id_old ) );
