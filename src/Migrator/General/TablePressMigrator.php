@@ -79,8 +79,13 @@ class TablePressMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args
 	 */
 	public function cmd_import_table_press( $args, $assoc_args ) {
+		if ( is_null( $this->table_press_logic->tablepress_import ) ) {
+			WP_CLI::error( 'TablePress plugin is a dependency, and will have to be installed before this command can be used.' );
+		}
+
 		$table_files  = array_filter( glob( $assoc_args['input-dir'] . '/*.' . $assoc_args['input-type'] ), 'is_file' );
 		$total_tables = count( $table_files );
+
 		foreach ( $table_files as $key_table_file => $table_file ) {
 			WP_CLI::line( sprintf( 'Importing table %d/%d.', $key_table_file + 1, $total_tables ) );
 
