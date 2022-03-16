@@ -47,6 +47,7 @@ PluginSetup::register_migrators( array(
 		Migrator\General\ContentDiffMigrator::class,
 		Migrator\General\WooCommOrdersAndSubscriptionsMigrator::class,
 		Migrator\General\NextgenGalleryMigrator::class,
+		Migrator\General\NinjaTablesMigrator::class,
 
 		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,
