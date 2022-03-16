@@ -70,7 +70,7 @@ class NinjaTables {
 				}
 				array_push( $export_data, $temp );
 			}
-			$this->export_as_csv( $export_data, $file_path );
+			$this->export_as_csv( array_values( $header ), $export_data, $file_path );
 		} elseif ( $format == 'json' ) {
 			$table = get_post( $table_id );
 
@@ -128,12 +128,14 @@ class NinjaTables {
 	/**
 	 * Fill file with CSV data from given array.
 	 *
+	 * @param mixed[] $header Data columns titles.
 	 * @param mixed[] $data Data to save in the file as CSV.
 	 * @param string  $file_path File path where to save the CSV file.
 	 */
-	private function export_as_csv( $data, $file_path ) {
+	private function export_as_csv( $header, $data, $file_path ) {
 		$f = fopen( $file_path, 'w' );
 
+		fputcsv( $f, $header );
 		foreach ( $data as $row ) {
 			fputcsv( $f, $row );
 		}
