@@ -54,6 +54,7 @@ PluginSetup::register_migrators( array(
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoCustomCategoriesMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoContentMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrateMissingUsers::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
 ) );
