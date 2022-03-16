@@ -87,11 +87,13 @@ class NinjaTablesMigrator implements InterfaceMigrator {
 
 		// Export tables.
 		foreach ( $all_tables as $table ) {
-			$table_id             = $table['value'];
-			$table_name           = $table['text'];
-			$_REQUEST['table_id'] = $table_id;
-			$this->ninja_tables_logic->export_data( $table_id, path_join( $assoc_args['output-dir'], "$table_name." . $assoc_args['output-type'] ), $assoc_args['output-type'] );
-			WP_CLI::line( sprintf( 'Table exported successfully: %d', $table_id ) );
+			$table_id   = $table['value'];
+			$table_name = $table['text'];
+			if ( $table_id ) {
+				$_REQUEST['table_id'] = $table_id;
+				$this->ninja_tables_logic->export_data( $table_id, path_join( $assoc_args['output-dir'], "$table_name." . $assoc_args['output-type'] ), $assoc_args['output-type'] );
+				WP_CLI::line( sprintf( 'Table exported successfully: %d', $table_id ) );
+			}
 		}
 		WP_CLI::line( 'Export is done!' );
 	}

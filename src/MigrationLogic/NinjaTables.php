@@ -47,15 +47,15 @@ class NinjaTables {
 		$table_columns  = \ninja_table_get_table_columns( $table_id, 'admin' );
 		$table_settings = \ninja_table_get_table_settings( $table_id, 'admin' );
 
+		$header = array();
+		foreach ( $table_columns as $item ) {
+			$header[ $item['key'] ] = $item['name'];
+		}
+
 		if ( 'csv' === $format ) {
 			$sorting_type  = ArrayHelper::get( $table_settings, 'sorting_type', 'by_created_at' );
 			$table_columns = \ninja_table_get_table_columns( $table_id, 'admin' );
 			$data          = \ninjaTablesGetTablesDataByID( $table_id, $table_columns, $sorting_type, true );
-			$header        = array();
-
-			foreach ( $table_columns as $item ) {
-				$header[ $item['key'] ] = $item['name'];
-			}
 
 			$export_data = array();
 
@@ -75,51 +75,23 @@ class NinjaTables {
 			$table = get_post( $table_id );
 
 			$data_provider = \ninja_table_get_data_provider( $table_id );
-			$rows          = array();
+			$rows          = array( array_values( $header ) );
 			if ( 'default' === $data_provider ) {
 				$raw_rows = \ninja_tables_DbTable()
 					->select( array( 'position', 'owner_id', 'attribute', 'value', 'settings', 'created_at', 'updated_at' ) )
 					->where( 'table_id', $table_id )
 					->get();
 				foreach ( $raw_rows as $row ) {
-					$row->value = json_decode( $row->value, true );
-					$rows[]     = $row;
+					$rows[] = array_values( json_decode( $row->value, true ) );
 				}
 			}
 
-			$matas    = get_post_meta( $table_id );
-			$all_meta = array();
-
-			$excluded_meta_keys = array(
-				'_ninja_table_cache_object',
-				'_ninja_table_cache_html',
-				'_external_cached_data',
-				'_last_external_cached_time',
-				'_last_edited_by',
-				'_last_edited_time',
-				'__ninja_cached_table_html',
+			$data = array(
+				'name' => $table->post_title,
+				'data' => $rows,
 			);
 
-			foreach ( $matas as $meta_key => $meta_value ) {
-				if ( ! in_array( $meta_key, $excluded_meta_keys, true ) ) {
-					if ( isset( $meta_value[0] ) ) {
-						$meta_value            = maybe_unserialize( $meta_value[0] );
-						$all_meta[ $meta_key ] = $meta_value;
-					}
-				}
-			}
-
-			$export_data = array(
-				'post'          => $table,
-				'columns'       => $table_columns,
-				'settings'      => $table_settings,
-				'data_provider' => $data_provider,
-				'metas'         => $all_meta,
-				'rows'          => array(),
-				'original_rows' => $rows,
-			);
-
-			file_put_contents( $file_path, wp_json_encode( $export_data ) );
+			file_put_contents( $file_path, wp_json_encode( $data ) );
 		} else {
 			WP_CLI::error( sprintf( 'The %s export format is not supported, please choose either csv or json.', $format ) );
 		}
