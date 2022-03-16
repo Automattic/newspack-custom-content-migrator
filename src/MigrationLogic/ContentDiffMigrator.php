@@ -1,4 +1,9 @@
 <?php
+/**
+ * Content Diff migrator exports and imports the content differential from one site to the local site.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\MigrationLogic;
 

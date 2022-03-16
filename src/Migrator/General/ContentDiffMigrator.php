@@ -1,4 +1,9 @@
 <?php
+/**
+ * Content Diff migrator exports and imports the content differential from one site to the local site.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Migrator\General;
 
@@ -448,7 +453,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// Get Post ID and its new parent_id.
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
 			$id_new = is_null( $id_new ) ? $imported_attachment_ids_map[ $id_old ] : $id_new;
-			$post = get_post( $id_new );
+			$post   = get_post( $id_new );
 			if ( is_null( $post ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found id_old=%s, id_new=%s in $imported_post_ids_map.', $id_old, $id_new ) );
 				echo "\n";
