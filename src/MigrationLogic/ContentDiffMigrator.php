@@ -487,7 +487,7 @@ class ContentDiffMigrator {
 	 * @param int     $new_parent_id New post_parent ID for this post.
 	 */
 	public function update_post_parent( $post, $new_parent_id ) {
-		if ( 0 != $post->post_parent && ! is_null( $new_parent_id ) ) {
+		if ( 0 != $post->post_parent && ! is_null( $new_parent_id ) && ( $new_parent_id != $post->post_parent ) ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
 	}
