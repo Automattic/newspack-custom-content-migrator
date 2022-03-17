@@ -313,7 +313,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $post_ids_for_import ) ) {
-			echo "\n" . 'All posts were already imported, continuing.';
+			echo "\n" . 'All posts were already imported, moving on.';
 			return $imported_posts_data;
 		}
 		if ( $post_ids_for_import !== $all_live_posts_ids ) {
@@ -411,12 +411,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $parent_ids_for_update ) ) {
-			echo "\n" . 'All posts already had their post_parent updated, continuing.';
+			echo "\n" . 'All posts already had their post_parent updated, moving on.';
 			return;
 		}
 		if ( $parent_ids_for_update !== $all_live_posts_ids ) {
 			$parent_ids_for_update = array_values( $parent_ids_for_update );
-			echo "\n" . sprintf( '%s post_parent IDs of total %d were already updated, continuing from there. Hold tight..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) );
+			echo "\n" . sprintf( '%s post_parent IDs of total %d were already updated, continuing from there..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) );
 		}
 
 		/**
@@ -455,9 +455,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$id_new = is_null( $id_new ) ? $imported_attachment_ids_map[ $id_old ] : $id_new;
 			$post   = get_post( $id_new );
 			if ( is_null( $post ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found in $imported_post_ids_map, id_old=%s, id_new=%s.', $id_old, $id_new ) );
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found in $imported_post_ids_map, $id_old=%s, $id_new=%s.', $id_old, $id_new ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, post not found in $imported_post_ids_map id_old=%s, id_new=%s.', $id_old, $id_new ) );
+				WP_CLI::warning( sprintf( 'Error updating post_parent, post not found in $imported_post_ids_map $id_old=%s, $id_new=%s.', $id_old, $id_new ) );
 				continue;
 			}
 
@@ -480,9 +480,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// Check and warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
 			// post_type different than 'post','page' or 'attachment', or an error like the post_parent object missing in Live DB.
 			if ( ( 0 !== $post->post_parent ) && is_null( $parent_id_new ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $parent_id_old=%s, $parent_id_new is null.', $parent_id_old ) );
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, $parent_id_old=%s, $parent_id_new is null.', $parent_id_old ) );
+				WP_CLI::warning( sprintf( 'Error updating post_parent, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
 				continue;
 			}
 
@@ -547,7 +547,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $attachment_ids_for_featured_image_update ) ) {
-			echo "\n" . 'All posts already had their featured image IDs updated, continuing.';
+			echo "\n" . 'All posts already had their featured image IDs updated, moving on.';
 			return;
 		}
 		if ( array_keys( $imported_attachment_ids_map !== $attachment_ids_for_featured_image_update ) ) {
@@ -608,7 +608,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $new_post_ids_for_blocks_update ) ) {
-			echo "\n" . 'All posts already had their blocks\' att. IDs updated, continuing.';
+			echo "\n" . 'All posts already had their blocks\' att. IDs updated, moving on.';
 			return;
 		}
 		if ( array_values( $imported_post_ids_map ) !== $new_post_ids_for_blocks_update ) {
@@ -704,10 +704,11 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		global $wpdb;
 
 		$live_posts_table = $this->live_table_prefix . 'posts';
-		$posts_table = $wpdb->posts;
+		$posts_table      = $wpdb->posts;
 
-		$parent_id_new = $wpdb->get_var( $wpdb->prepare(
-			"SELECT wp.ID
+		$parent_id_new = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT wp.ID
 			FROM {$live_posts_table} lwp
 			LEFT JOIN {$posts_table} wp
 				ON wp.post_name = lwp.post_name
@@ -716,8 +717,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				AND wp.post_date = lwp.post_date
 				AND wp.post_type = lwp.post_type
 			WHERE lwp.ID = %d ;",
-			$id_live
-		) );
+				$id_live
+			) 
+		);
 
 		return $parent_id_new;
 	}
