@@ -416,7 +416,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 		if ( $parent_ids_for_update !== $all_live_posts_ids ) {
 			$parent_ids_for_update = array_values( $parent_ids_for_update );
-			echo "\n" . sprintf( '%s post_parent IDs of total %d were already updated, continuing where left off. Hold tight..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) );
+			echo "\n" . sprintf( '%s post_parent IDs of total %d were already updated, continuing from there. Hold tight..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) );
 		}
 
 		/**
@@ -443,7 +443,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		// Update parent IDs.
 		$i = 0;
-		foreach ( $parent_ids_for_update as $id_old ) {
+		foreach ( $parent_ids_for_update as $key_id_old => $id_old ) {
 			// Output a '.' every 2000 objects to let CLI know it's running.
 			if ( 0 == $i % 2000 ) {
 				echo '.';
@@ -455,9 +455,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$id_new = is_null( $id_new ) ? $imported_attachment_ids_map[ $id_old ] : $id_new;
 			$post   = get_post( $id_new );
 			if ( is_null( $post ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found id_old=%s, id_new=%s in $imported_post_ids_map.', $id_old, $id_new ) );
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found in $imported_post_ids_map, id_old=%s, id_new=%s.', $id_old, $id_new ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, Post not found id_old=%s, id_new=%s in $imported_post_ids_map.', $id_old, $id_new ) );
+				WP_CLI::warning( sprintf( 'Error updating post_parent, post not found in $imported_post_ids_map id_old=%s, id_new=%s.', $id_old, $id_new ) );
 				continue;
 			}
 
@@ -469,25 +469,33 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$parent_id_old = $post->post_parent;
 			$parent_id_new = $imported_post_ids_map[ $post->post_parent ] ?? null;
 			$parent_id_new = is_null( $parent_id_new ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
-			// Extra check, shouldn't happen, but better safe than sorry.
+
+			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
+			// it won't be present in the list of the posts we imported, $all_live_posts_ids. So let's try and search for this
+			// post_parent directly in DB, and find it's new ID.
+			if ( is_null( $parent_id_new ) ) {
+				$parent_id_new = $this->get_existing_post_by_live_id( $parent_id_old );
+			}
+
+			// Check and warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
+			// post_type different than 'post','page' or 'attachment', or an error like the post_parent object missing in Live DB.
 			if ( ( 0 !== $post->post_parent ) && is_null( $parent_id_new ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, null value for $parent_id_new=%s, $parent_id_old=%s', $parent_id_new, $parent_id_old ) );
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $parent_id_old=%s, $parent_id_new is null.', $parent_id_old ) );
 				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, $parent_id_old=%s $parent_id_new=%s.', $parent_id_old, $parent_id_new ) );
+				WP_CLI::warning( sprintf( 'Error updating post_parent, $parent_id_old=%s, $parent_id_new is null.', $parent_id_old ) );
 				continue;
 			}
 
 			// Update.
 			self::$logic->update_post_parent( $post, $parent_id_new );
 
-			// Log.
-			// IDs of the Post.
+			// Log IDs of the Post.
 			$log_entry = [
 				'id_old' => $id_old,
 				'id_new' => $post->ID,
 			];
 			if ( 0 != $parent_id_old && ! is_null( $parent_id_new ) ) {
-				// IDs of post_parent.
+				// Log, add IDs of post_parent.
 				$log_entry = array_merge(
 					$log_entry,
 					[
@@ -683,6 +691,35 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Takes the old Live site's ID, and finds this post in the local site.
+	 *
+	 * @param int $id_live Old live site's post object ID.
+	 *
+	 * @return int|null Found local ID.
+	 */
+	private function get_existing_post_by_live_id( $id_live ) {
+		global $wpdb;
+
+		$live_posts_table = $this->live_table_prefix . 'posts';
+		$posts_table = $wpdb->posts;
+
+		$parent_id_new = $wpdb->get_var( $wpdb->prepare(
+			"SELECT wp.ID
+			FROM {$live_posts_table} lwp
+			LEFT JOIN {$posts_table} wp
+				ON wp.post_name = lwp.post_name
+				AND wp.post_title = lwp.post_title
+				AND wp.post_status = lwp.post_status
+				AND wp.post_date = lwp.post_date
+				AND wp.post_type = lwp.post_type
+			WHERE lwp.ID = %d ;",
+			$id_live
+		) );
+
+		return $parent_id_new;
 	}
 
 	/**
