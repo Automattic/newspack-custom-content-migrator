@@ -550,7 +550,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			echo "\n" . 'All posts already had their featured image IDs updated, moving on.';
 			return;
 		}
-		if ( array_keys( $imported_attachment_ids_map !== $attachment_ids_for_featured_image_update ) ) {
+		if ( array_keys( $imported_attachment_ids_map ) !== $attachment_ids_for_featured_image_update ) {
 			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
 			echo "\n" . sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) );
 		}
@@ -718,7 +718,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				AND wp.post_type = lwp.post_type
 			WHERE lwp.ID = %d ;",
 				$id_live
-			) 
+			)
 		);
 
 		return $parent_id_new;
