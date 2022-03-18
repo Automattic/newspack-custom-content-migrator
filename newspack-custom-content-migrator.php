@@ -22,7 +22,8 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::setup_wordpress_importer();
-PluginSetup::register_migrators( array(
+PluginSetup::register_migrators(
+	array(
 		// General.
 		Migrator\General\PostsMigrator::class,
 		Migrator\General\MetaToContentMigrator::class,
@@ -47,6 +48,7 @@ PluginSetup::register_migrators( array(
 		Migrator\General\ContentDiffMigrator::class,
 		Migrator\General\WooCommOrdersAndSubscriptionsMigrator::class,
 		Migrator\General\NextgenGalleryMigrator::class,
+		Migrator\General\TablePressMigrator::class,
 		Migrator\General\NinjaTablesMigrator::class,
 
 		// Publisher specific:
@@ -57,4 +59,5 @@ PluginSetup::register_migrators( array(
 		Migrator\PublisherSpecific\ElLiberoMigrateMissingUsers::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
-) );
+	)
+);
