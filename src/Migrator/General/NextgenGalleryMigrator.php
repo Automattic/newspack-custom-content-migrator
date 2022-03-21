@@ -18,6 +18,9 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	const META_NGG_PICTURE_GALLERYID = '_newspack_ngg_picture_galleryid';
 	// - sort order for this image in belonging NGG Gallery;
 	const META_NGG_PICTURE_SORTORDER = '_newspack_ngg_picture_sortorder';
+	// Supported Gallery blocks.
+	const GUTENBERG_GALLERY_TYPES = array( 'gutenberg-gallery', 'gutenberg-gallery-with-lightbox' );
+	const JETPACK_GALLERY_TYPES   = array( 'jetpack-gallery' );
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -90,14 +93,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 						'default'     => 'jetpack-gallery',
-						'options'     => array( 'gutenberg-gallery', 'jetpack-gallery' ),
-					),
-					array(
-						'type'        => 'flag',
-						'name'        => 'from-shortcode',
-						'description' => 'If the NGG shortcode is escaped in the post content.',
-						'optional'    => true,
-						'repeating'   => false,
+						'options'     => array_merge( self::GUTENBERG_GALLERY_TYPES, self::JETPACK_GALLERY_TYPES ),
 					),
 				),
 			)
@@ -112,8 +108,6 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_nextgen_galleries_to_gutenberg_gallery_blocks( $args, $assoc_args ) {
 		global $wpdb;
-
-		$from_shortcode = isset( $assoc_args['from-shortcode'] ) ? $assoc_args['from-shortcode'] : false;
 
 		// Make sure NGG DB tables are available.
 		$this->validate_db_tables_exist( array( $wpdb->prefix . 'ngg_album', $wpdb->prefix . 'ngg_gallery', $wpdb->prefix . 'ngg_pictures' ) );
@@ -161,7 +155,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		foreach ( $posts_ids as $key_post_id => $post_id ) {
 			echo sprintf( "%d/%d post ID %s\n", $key_post_id + 1, count( $posts_ids ), $post_id );
 			$post    = get_post( $post_id );
-			$updated = $this->convert_ngg_galleries_in_post_to_block_gallery( $post, $from_shortcode, $assoc_args['gallery-block-type'] );
+			$updated = $this->convert_ngg_galleries_in_post_to_block_gallery( $post, $assoc_args['gallery-block-type'] );
 			if ( is_wp_error( $updated ) ) {
 				echo sprintf( "%s\n", $updated->get_error_message() );
 				continue;
@@ -230,30 +224,21 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 * Updates all known NGG gallery syntax in this post shortcodes, blocks, etc) to Gutenberg Gallery blocks.
 	 * Expects all the images were already imported using $this->import_ngg_images_to_media_library().
 	 *
-	 * @param array   $ngg_options NGG Options value.
-	 * @param boolean $from_shortcode If NGG shortcode is escaped.
-	 * @param string  $gallery_block_type Block type to use as the new gallery (gutenberg-block, jetpack-block).
+	 * @param array  $ngg_options NGG Options value.
+	 * @param string $gallery_block_type Block type to use as the new gallery (gutenberg-block, jetpack-block).
 	 *
 	 * @return bool|\WP_Error
 	 */
-	public function convert_ngg_galleries_in_post_to_block_gallery( $post, $from_shortcode, $gallery_block_type ) {
+	public function convert_ngg_galleries_in_post_to_block_gallery( $post, $gallery_block_type ) {
 		global $wpdb;
 
-		if ( $from_shortcode ) {
-			// Convert NGG Gallery shortcode to pure Gutenberg or Jetpack Gallery blocks.
-			$post_content_updated = $this->convert_ngg_gallery_shortcode_to_gallery_blocks( $post->ID, $post->post_content, $gallery_block_type );
-		} else {
-			// Convert NGG Gallery blocks to pure Gutenberg Gallery blocks.
-			$post_content_updated = $this->convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post->ID, $post->post_content, $gallery_block_type );
-		}
-
-		if ( is_wp_error( $post_content_updated ) ) {
-			echo sprintf( "%s\n", $post_content_updated->get_error_message() );
-			return false;
-		}
+		// Convert NGG Gallery shortcode to pure Gutenberg or Jetpack Gallery blocks.
+		$post_content_updated = $this->convert_ngg_gallery_shortcode_to_gallery_blocks( $post->post_content, $gallery_block_type );
+		// Convert NGG Gallery blocks to pure Gutenberg Gallery blocks.
+		$post_content_updated = $this->convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_content_updated, $gallery_block_type );
 
 		// Persist updates.
-		if ( $post->post_content != $post_content_updated ) {
+		if ( $post->post_content !== $post_content_updated ) {
 			$updated = $wpdb->update( $wpdb->posts, array( 'post_content' => $post_content_updated ), array( 'ID' => $post->ID ) );
 			if ( $updated != 1 || false === $updated ) {
 				return new \WP_Error( 103, sprintf( 'ERR could not update post ID %d', $post->ID ) );
@@ -299,7 +284,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 *
 	 * @return string|\WP_Error Refreshed post_content with Gutenberg Gallery blocks instead of NGG, or \WP_Error on exceptions.
 	 */
-	public function convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_id, $post_content, $gallery_block_type ) {
+	public function convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_content, $gallery_block_type ) {
 		$post_content_updated = $post_content;
 
 		// Match the NGG Gallery block.
@@ -314,7 +299,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 			// Match the shortcode inside the NGG Gallery block.
 			$matches_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'ngg', $block_html );
 			if ( empty( $matches_shortcodes[0] ) ) {
-				return new \WP_Error( 103, sprintf( 'ERR [ngg] shortcode not found inside a wp:imagely/nextgen-gallery block in post ID %d', $post_id ) );
+				return $post_content_updated;
 			}
 
 			$att_ids = array();
@@ -333,17 +318,14 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 			}
 
 			if ( empty( $att_ids ) ) {
-				return new \WP_Error( 102, sprintf( 'ERR not found any Att IDs for gallery_ids %s in post ID %d', implode( ',', $gallery_ids ), $post_id ) );
+				return $post_content_updated;
 			}
 
 			// Replace NGG gallery block with Gutenberg or Jetpack Gallery block.
-			if ( 'gutenberg-gallery' === $gallery_block_type ) {
-				$gutenberg_gallery_block_html = $this->get_gutenberg_gallery_block_html( $att_ids );
-			} elseif ( 'jetpack-gallery' === $gallery_block_type ) {
-				$gutenberg_gallery_block_html = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( $att_ids );
+			$gutenberg_gallery_block_html = $this->posts_logic->generate_gutenberg_block_content_from_ngg_images( $gallery_block_type, $att_ids );
+			if ( $gutenberg_gallery_block_html ) {
+				$post_content_updated = str_replace( $block_html, $gutenberg_gallery_block_html, $post_content_updated );
 			}
-
-			$post_content_updated = str_replace( $block_html, $gutenberg_gallery_block_html, $post_content_updated );
 		}
 
 		return $post_content_updated;
@@ -360,13 +342,13 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 *
 	 * @return string|\WP_Error Refreshed post_content with Gutenberg Gallery blocks instead of NGG, or \WP_Error on exceptions.
 	 */
-	public function convert_ngg_gallery_shortcode_to_gallery_blocks( $post_id, $post_content, $gallery_block_type ) {
+	public function convert_ngg_gallery_shortcode_to_gallery_blocks( $post_content, $gallery_block_type ) {
 		$post_content_updated = $post_content;
 
 		// Match the shortcode inside the NGG Gallery block.
 		$matches_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'nggallery', $post_content );
 		if ( empty( $matches_shortcodes[0] ) ) {
-			return new \WP_Error( 103, sprintf( 'ERR [nggallery] shortcode not found in post ID %d', $post_id ) );
+			return $post_content_updated;
 		}
 
 		foreach ( $matches_shortcodes as $match_shortcode ) {
@@ -377,20 +359,35 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 				$att_ids = $this->get_attachment_ids_in_ngg_gallery( $gallery_id_match['gallery_id'] );
 
 				if ( empty( $att_ids ) ) {
-					return new \WP_Error( 102, sprintf( 'ERR not found any Att IDs for gallery_id %s in post ID %d', $gallery_id_match['gallery_id'], $post_id ) );
+					return $post_content_updated;
 				}
 
 				// Replace NGG gallery block with Gutenberg or Jetpack Gallery block.
-				if ( 'gutenberg-gallery' === $gallery_block_type ) {
-					$gutenberg_gallery_block_html = $this->get_gutenberg_gallery_block_html( $att_ids );
-				} elseif ( 'jetpack-gallery' === $gallery_block_type ) {
-					$gutenberg_gallery_block_html = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( $att_ids );
+				$gutenberg_gallery_block_html = $this->generate_gutenberg_block_content_from_ngg_images( $gallery_block_type, $att_ids );
+				if ( $gutenberg_gallery_block_html ) {
+					$post_content_updated = str_replace( $shortcode_html, $gutenberg_gallery_block_html, $post_content_updated );
 				}
-
-				$post_content_updated = str_replace( $shortcode_html, $gutenberg_gallery_block_html, $post_content_updated );
 			}
 		}
 		return $post_content_updated;
+	}
+
+	/**
+	 * Generate Gutenberg block content from NextGen Gallery images ids.
+	 *
+	 * @param string $gallery_block_type Block type to generate.
+	 * @param int[]  $images_ids Images IDs used to generate the gallery block.
+	 * @return string|false returns the generated block content, or false if the block type is not supported.
+	 */
+	public function generate_gutenberg_block_content_from_ngg_images( $gallery_block_type, $images_ids ) {
+		if ( in_array( $gallery_block_type, self::GUTENBERG_GALLERY_TYPES, true ) ) {
+			return $this->get_gutenberg_gallery_block_html( $gallery_block_type, $images_ids );
+		} elseif ( in_array( $gallery_block_type, self::JETPACK_GALLERY_TYPES, true ) ) {
+			return $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( $images_ids );
+		}
+
+		WP_CLI::warning( sprintf( "The block type '%s' is not supported.", $gallery_block_type ) );
+		return false;
 	}
 
 	/**
@@ -417,7 +414,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 				order by cast(sorting_order as unsigned) ; ",
 				self::META_NGG_PICTURE_SORTORDER,
 				self::META_NGG_PICTURE_GALLERYID,
-				$gallery_id,
+				$gallery_id
 			),
 			ARRAY_A
 		);
@@ -431,23 +428,24 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	/**
 	 * Creates a Gutenberg Gallery Block with specified images.
 	 *
-	 * @param array $att_ids Media Library attachment IDs.
+	 * @param string $gallery_block_type Block type to generate.
+	 * @param array  $att_ids Media Library attachment IDs.
 	 *
 	 * @return null|string Gutenberg Gallery Block HTML.
 	 */
-	public function get_gutenberg_gallery_block_html( $att_ids ) {
+	public function get_gutenberg_gallery_block_html( $gallery_block_type, $att_ids ) {
 		if ( empty( $att_ids ) ) {
 			return null;
 		}
 
 		$gallery_block_html_sprintf = <<<HTML
-<!-- wp:gallery {"linkTo":"none"} -->
+<!-- wp:gallery {"linkTo":"none"%s} -->
 <figure class="wp-block-gallery has-nested-images columns-default is-cropped">%s</figure>
 <!-- /wp:gallery -->
 HTML;
 		$image_block_html_sprintf   = <<<HTML
 <!-- wp:image {"id":%s,"sizeSlug":"large","linkDestination":"none"} -->
-<figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%s"/><figcaption>%s</figcaption></figure>
+<figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%s"/>%s</figure>
 <!-- /wp:image -->
 HTML;
 
@@ -456,12 +454,16 @@ HTML;
 		foreach ( $att_ids as $att_id ) {
 			$att_src             = wp_get_attachment_url( $att_id );
 			$att_caption         = wp_get_attachment_caption( $att_id );
+			$figure_caption      = empty( $att_caption ) ? '' : "<figcaption>$att_caption</figcaption>";
 			$images_blocks_html .= empty( $images_blocks_html ) ? '' : "\n\n";
-			$images_blocks_html .= sprintf( $image_block_html_sprintf, $att_id, $att_src, $att_id, $att_caption );
+			$images_blocks_html .= sprintf( $image_block_html_sprintf, $att_id, $att_src, $att_id, $figure_caption );
 		}
 
+		// Add block options.
+		$lightbox_images_option = 'gutenberg-gallery-with-lightbox' === $gallery_block_type ? ',"ampLightbox":true' : '';
+
 		// Inject Images Blocks into the Gallery Block.
-		$gallery_block_html = sprintf( $gallery_block_html_sprintf, $images_blocks_html );
+		$gallery_block_html = sprintf( $gallery_block_html_sprintf, $lightbox_images_option, $images_blocks_html );
 
 		return $gallery_block_html;
 	}
