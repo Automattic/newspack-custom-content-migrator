@@ -719,15 +719,22 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			$sanitized_guest_author_name = sanitize_title( $guest_author_name );
 
 			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $sanitized_guest_author_name );
+
 			if ( $guest_author ) {
 				$author_id = $guest_author->ID;
 			} else {
-				$author_id = $this->coauthorsplus_logic->create_guest_author(
-					[
-						'user_login' => $sanitized_guest_author_name,
-						'display_name' => sanitize_text_field( $guest_author_name ),
-					]
-				);
+				$user = get_user_by( 'login', $sanitized_guest_author_name );
+
+				if ( false === $user ) {
+					$author_id = $this->coauthorsplus_logic->create_guest_author(
+						[
+							'user_login'   => $sanitized_guest_author_name,
+							'display_name' => sanitize_text_field( $guest_author_name ),
+						]
+					);
+				} else {
+					$author_id = $user->ID;
+				}
 			}
 
 			$guest_author = ( new CoAuthors_Guest_Authors() )->get_guest_author_by( 'id', $author_id );
