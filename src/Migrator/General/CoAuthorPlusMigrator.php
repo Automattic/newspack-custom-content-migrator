@@ -220,19 +220,19 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			'newspack-content-migrator co-authors-split-to-multiple-coauthors',
 			[ $this, 'cmd_split_guest_author_to_multiple_authors' ],
 			[
-				'shortdesc' => 'Used to take a guest author and split to multiple different guest authors the user specifies',
+				'shortdesc' => 'Reassigns all posts currently associated to a specific Guest Author to different multiple (or single) Guest Author(s)',
 				'synopsis' => [
 					[
 						'type' => 'positional',
 						'name' => 'guest-author',
-						'description' => 'Target Guest Author (string)',
+						'description' => 'Target Guest Author (Guest Author Display Name e.g. Edward Carrasco with Newspack, and Ingrid Miller with HR)',
 						'optional' => false,
 						'repeating' => false,
 					],
 					[
 						'type' => 'assoc',
 						'name' => 'new-guest-author-names',
-						'description' => "The new guest author's to create (delimited values accepted). The original will be disassociated.",
+						'description' => "The new guest author's to create (e.g. Edward Carrasco,Ingrid Miller [delimited by comma]). The original GA will be disassociated.",
 						'optional' => false,
 						'repeating' => true,
 					],
@@ -696,7 +696,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		global $wpdb;
 		global $coauthors_plus;
 
-		$guest_author_posts = "SELECT tr.* FROM $wpdb->term_relationships tr 
+		$guest_author_posts_sql = "SELECT tr.* FROM $wpdb->term_relationships tr 
 			INNER JOIN $wpdb->posts p ON tr.object_id = p.ID
 			WHERE tr.term_taxonomy_id IN (
 	            SELECT wtt.term_taxonomy_id FROM $wpdb->term_taxonomy wtt
@@ -705,7 +705,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 	                SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'cap-display_name' AND meta_value = '$old_guest_author'
 	            )
 			) AND p.post_type = 'post'";
-		$results = $wpdb->get_results( $guest_author_posts );
+		$results = $wpdb->get_results( $wpdb->prepare( $guest_author_posts_sql ) );
 
 		if ( empty( $results ) ) {
 			WP_CLI::success('Target guest author not found.');
@@ -737,7 +737,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				}
 			}
 
-			$guest_author = ( new CoAuthors_Guest_Authors() )->get_guest_author_by( 'id', $author_id );
+			$guest_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'id', $author_id );
 			$guest_authors[] = $guest_author->user_nicename;
 		}
 
