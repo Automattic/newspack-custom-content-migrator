@@ -15,10 +15,11 @@ use \WP_CLI;
  */
 class DiarioElSolMigrator implements InterfaceMigrator {
 	// Logs.
-	const ADMINS_LOGS     = 'DES_authors.log';
-	const CATEGORIES_LOGS = 'DES_categories.log';
-	const TAGS_LOGS       = 'DES_tags.log';
-	const POSTS_LOGS      = 'DES_posts.log';
+	const ADMINS_LOGS        = 'DES_authors.log';
+	const CATEGORIES_LOGS    = 'DES_categories.log';
+	const TAGS_LOGS          = 'DES_tags.log';
+	const POSTS_LOGS         = 'DES_posts.log';
+	const POSTS_CHECKER_LOGS = 'DES_posts_checker.log';
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -136,6 +137,23 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 						'name'        => 'imported-cache-path',
 						'description' => 'Cache file containing the original_id of the imported notes (original_id per line).',
 						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator diario-el-sol-check-imported-posts',
+			array( $this, 'cmd_des_check_imported_posts' ),
+			array(
+				'shortdesc' => 'Check if we imported all Diario El Sol posts from a JSON export.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-json-path',
+						'description' => 'JSON file path that contains the posts to import.',
+						'optional'    => false,
 						'repeating'   => false,
 					),
 				),
@@ -582,6 +600,46 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d posts took %d mins.', $added_posts, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator diario-el-sol-check-imported-posts`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_des_check_imported_posts( $args, $assoc_args ) {
+		$posts_json_path = $assoc_args['posts-json-path'] ?? null;
+
+		if ( ! file_exists( $posts_json_path ) ) {
+			WP_CLI::error( sprintf( 'Posts export %s not found.', $posts_json_path ) );
+		}
+
+		global $wpdb;
+
+		$posts = Items::fromFile( $posts_json_path, array( 'decoder' => new ExtJsonDecoder( true ) ) );
+
+		$imported_original_ids_meta = $wpdb->get_results( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'original_id'", \ARRAY_A );
+		$imported_original_ids      = array_map(
+			function( $original_id_meta ) {
+				return $original_id_meta['meta_value'];
+			},
+			$imported_original_ids_meta
+		);
+
+		$missed_original_ids = array();
+		foreach ( $posts as $post_index => $post ) {
+			WP_CLI::line( sprintf( 'Checking index: %d.', $post_index + 1 ) );
+
+			$original_id = $post['_id']['$oid'];
+			if ( ! in_array( $original_id, $imported_original_ids, true ) ) {
+				$missed_original_ids[] = $original_id;
+			}
+		}
+
+		file_put_contents( self::POSTS_CHECKER_LOGS, implode( PHP_EOL, $missed_original_ids ) );
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Missed %d posts, missed Original IDs can be retrieved here: %s.', count( $missed_original_ids ), self::POSTS_CHECKER_LOGS ) );
 	}
 
 	/**
