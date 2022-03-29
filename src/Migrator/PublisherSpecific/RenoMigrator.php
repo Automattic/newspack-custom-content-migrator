@@ -53,10 +53,10 @@ class RenoMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_postgress_archive_import( $args, $assoc_args ) {
+		// Test Postgres connection.
 		try {
-			$pdo = new \PDO( 'pgsql:host=localhost;port=5432;dbname=renovvv;', 'postgres', 'root', [ \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION ] );
+			$pdo = new \PDO( 'pgsql:host=host.docker.internal;port=5432;dbname=renopsql;', 'root', 'root', [ \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION ] );
 		} catch ( \PDOException $e ) {
-			// Check whether Postgres is installed and creds are valid.
 			die( $e->getMessage() );
 		}
 
