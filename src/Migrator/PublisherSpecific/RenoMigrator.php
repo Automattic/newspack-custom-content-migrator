@@ -142,7 +142,7 @@ class RenoMigrator implements InterfaceMigrator {
 
 			// Start.
 			$i++;
-			\WP_CLI::Log( sprintf( '(%d)/(%d) %d', $i, $total, $article_id ) );
+			\WP_CLI::line( sprintf( '(%d)/(%d) %d', $i, $total, $article_id ) );
 			$post_metas = [];
 
 
@@ -164,7 +164,9 @@ class RenoMigrator implements InterfaceMigrator {
 				if ( isset( $article_cat_name ) && ! empty( $article_cat_name ) ) {
 					$cat_id = wp_create_category( $article_cat_name );
 					if ( is_wp_error( $cat_id ) ) {
-						$this->log( $log, sprintf( 'ERR creating category $article_id=%s $article_cat_id=%s $article_cat_name=%s : %s', $article_id, $article_cat_id, $article_cat_name, $cat_id->get_error_message() ) );
+						$msg = sprintf( 'ERR creating category $article_id=%s $article_cat_id=%s $article_cat_name=%s : %s', $article_id, $article_cat_id, $article_cat_name, $cat_id->get_error_message() );
+						$this->log( $log, $msg );
+						\WP_CLI::line( $msg );
 					} else {
 						$post_metas = array_merge(
 							$post_metas,
@@ -179,17 +181,30 @@ class RenoMigrator implements InterfaceMigrator {
 
 
 	        // Save Post.
-			$post_id = wp_insert_post( [
-				'post_status' => 'publish',
-				'post_title' => $post_title,
-				'post_content' => $post_content,
-				'post_date' => $post_date,
-				'post_excerpt' => $post_excerpt,
-				'post_name' => $post_slug,
-				'post_category' => [ $cat_id ],
-			] );
+			$post_data = [ 'post_status' => 'publish', ];
+			if ( ! empty( $post_title ) ) {
+				$post_data = array_merge( $post_data, [ 'post_title' => $post_title ] );
+			}
+			if ( ! empty( $post_content ) ) {
+				$post_data = array_merge( $post_data, [ 'post_content' => $post_content ] );
+			}
+			if ( ! empty( $post_excerpt ) ) {
+				$post_data = array_merge( $post_data, [ 'post_excerpt' => $post_excerpt ] );
+			}
+			if ( ! empty( $post_slug ) ) {
+				$post_data = array_merge( $post_data, [ 'post_name' => $post_slug ] );
+			}
+			if ( ! is_null( $cat_id ) && 0 != $cat_id ) {
+				$post_data = array_merge( $post_data, [ 'post_category' => [ $cat_id ] ] );
+			}
+			if ( ! empty( $post_date ) ) {
+				$post_data = array_merge( $post_data, [ 'post_date' => $post_date ] );
+			}
+			$post_id = wp_insert_post( $post_data );
 			if ( is_wp_error( $post_id ) ) {
-				$this->log( $log, sprintf( 'ERR saving post $article_id=%s : %s', $article_id, $post_id->get_error_message() ) );
+				$msg = sprintf( 'ERR saving post $article_id=%s : %s', $article_id, $post_id->get_error_message() );
+				$this->log( $log, $msg );
+				\WP_CLI::line( $msg );
 				continue;
 			}
 
@@ -277,7 +292,9 @@ class RenoMigrator implements InterfaceMigrator {
 			$featimage_att_id = $this->post_image_downloader->import_external_file( $featimg_full_path, null, $featimg_caption, $featimg_credit, $featimg_caption, $post_id );
 
 			if ( is_wp_error( $featimage_att_id ) ) {
-				$this->log( $log, sprintf( 'ERR importing featImg=%s $post_id=%d : %s', $featimg_full_path, $post_id, $featimage_att_id->get_error_message() ) );
+				$msg = sprintf( 'ERR importing featImg=%s $post_id=%d : %s', $featimg_full_path, $post_id, $featimage_att_id->get_error_message() );
+				$this->log( $log, $msg );
+				\WP_CLI::line( $msg );
 			} else {
 
 				// Set feat img.
@@ -294,7 +311,9 @@ class RenoMigrator implements InterfaceMigrator {
 				}
 			}
 		} else {
-			$this->log( $log, sprintf( 'ERR featImg not found, $post_id=%d, $img_path=%s', $post_id, $featimg_full_path ) );
+			$msg = sprintf( 'ERR featImg not found, $post_id=%d, $img_path=%s', $post_id, $featimg_full_path );
+			$this->log( $log, $msg );
+			\WP_CLI::line( $msg );
 		}
 	}
 
@@ -313,7 +332,9 @@ class RenoMigrator implements InterfaceMigrator {
 			return $ga_id;
 		} else {
 			if ( empty( $ga_fullname ) ) {
-				$this->log( $log, sprintf( 'ERR empty author name $post_id=%d $author_id=%d', $post_id, $author_id ) );
+				$msg = sprintf( 'ERR empty author name $post_id=%d $author_id=%d', $post_id, $author_id );
+				$this->log( $log, $msg );
+				\WP_CLI::line( $msg );
 
 				return null;
 			} else {
@@ -336,12 +357,16 @@ class RenoMigrator implements InterfaceMigrator {
 					if ( file_exists( $author_image_full_path ) ) {
 						$authorimg_att_id = $this->post_image_downloader->import_external_file( $author_image_full_path );
 						if ( is_wp_error( $authorimg_att_id ) ) {
-							$this->log( $log, sprintf( 'ERR importing author avatar image $post_id=%d $author_image=%s $author_image_full_path=%s : %s', $post_id, $author_image, $author_image_full_path, $authorimg_att_id->get_error_message() ) );
+							$msg = sprintf( 'ERR importing author avatar image $post_id=%d $author_image=%s $author_image_full_path=%s : %s', $post_id, $author_image, $author_image_full_path, $authorimg_att_id->get_error_message() );
+							$this->log( $log, $msg );
+							\WP_CLI::line( $msg );
 						} else {
 							$ga_data['avatar'] = $authorimg_att_id;
 						}
 					} else {
-						$this->log( $log, sprintf( 'ERR avatar img not found $post_id=%d $author_image=%s $author_image_full_path=%s', $post_id, $author_image, $author_image_full_path ) );
+						$msg = sprintf( 'ERR avatar img not found $post_id=%d $author_image=%s $author_image_full_path=%s', $post_id, $author_image, $author_image_full_path );
+						$this->log( $log, $msg );
+						\WP_CLI::line( $msg );
 					}
 				}
 
