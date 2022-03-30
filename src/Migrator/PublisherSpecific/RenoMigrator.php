@@ -138,12 +138,14 @@ class RenoMigrator implements InterfaceMigrator {
 			$post_excerpt = empty( $post_excerpt ) ? null : $post_excerpt;
 			$post_slug = $result['seo'];
 			$article_issue_id = $result['issue_id'];
+			$post_metas = [];
 
 
 			// Start.
 			$i++;
-			\WP_CLI::line( sprintf( '(%d)/(%d) %d', $i, $total, $article_id ) );
-			$post_metas = [];
+			$msg = sprintf( '(%d)/(%d) %d', $i, $total, $article_id );
+			\WP_CLI::line( $msg );
+			$this->log( $log, $msg );
 
 
 			// Category.
