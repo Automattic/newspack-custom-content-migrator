@@ -359,7 +359,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// Now import all related Post data.
 			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data );
 			if ( ! empty( $import_errors ) ) {
-				$this->log( $this->log_error, sprintf( 'import_posts error while importing post data for %s, id_old=%d, id_new=%d : %s', $post_type, $post_id_live, $post_id_new, implode( '; ', $import_errors ) ) );
+				$this->log( $this->log_error, sprintf( 'Following errors happened in import_posts() for post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new ) );
+				foreach ( $import_errors as $import_error ) {
+					$this->log( $this->log_error, sprintf( '- %s', $import_error ) );
+				}
 				echo "\n";
 				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (details in log file).', $post_type, $post_id_live, $post_id_new ) );
 			}
