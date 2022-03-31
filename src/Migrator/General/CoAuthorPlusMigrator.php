@@ -220,7 +220,7 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			'newspack-content-migrator co-authors-split-to-multiple-coauthors',
 			[ $this, 'cmd_split_guest_author_to_multiple_authors' ],
 			[
-				'shortdesc' => 'Reassigns all posts currently associated to a specific Guest Author to different multiple (or single) Guest Author(s)',
+				'shortdesc' => 'Reassigns all posts currently associated to a specific Guest Author to different multiple (or single) Guest Author(s). Example use: `wp newspack-content-migrator co-authors-split-to-multiple-coauthors "Chris Christofersson of NewsSource, with Adam Black of 100 Days in Appalachia" --new-guest-author-names="Chris Christofersson; Adam Black of 100 Days in Appalachia" --delimiter="; "',
 				'synopsis' => [
 					[
 						'type' => 'positional',
