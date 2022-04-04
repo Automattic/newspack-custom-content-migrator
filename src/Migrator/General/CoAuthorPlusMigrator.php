@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Migrator\General;
 
+use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts;
@@ -215,6 +216,37 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		WP_CLI::add_command( 'newspack-content-migrator co-authors-fix-non-unique-guest-slugs', array( $this, 'cmd_cap_fix_non_unique_guest_slugs'), [
 		    'shortdesc' => "Make unique any Guest Author Slug which matches a User's slug."
         ] );
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-split-to-multiple-coauthors',
+			[ $this, 'cmd_split_guest_author_to_multiple_authors' ],
+			[
+				'shortdesc' => 'Reassigns all posts currently associated to a specific Guest Author to different multiple (or single) Guest Author(s). Example use: `wp newspack-content-migrator co-authors-split-to-multiple-coauthors "Chris Christofersson of NewsSource, with Adam Black of 100 Days in Appalachia" --new-guest-author-names="Chris Christofersson; Adam Black of 100 Days in Appalachia" --delimiter="; "',
+				'synopsis' => [
+					[
+						'type' => 'positional',
+						'name' => 'guest-author',
+						'description' => 'Target Guest Author (Guest Author Display Name e.g. Edward Carrasco with Newspack, and Ingrid Miller with HR)',
+						'optional' => false,
+						'repeating' => false,
+					],
+					[
+						'type' => 'assoc',
+						'name' => 'new-guest-author-names',
+						'description' => "The new guest author's to create (e.g. Edward Carrasco,Ingrid Miller [delimited by comma]). The original GA will be disassociated.",
+						'optional' => false,
+						'repeating' => true,
+					],
+					[
+						'type' => 'assoc',
+						'name' => 'delimiter',
+						'description' => 'Delimiter to use to split new-guest-authors values.',
+						'optional' => true,
+						'repeating' => false,
+						'default' => ',',
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -648,6 +680,93 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
         foreach ( $updated_slugs as $slug ) {
             WP_CLI::line( $slug );
         }
+	}
+
+	/**
+	 * This command facilitates the creation of new guest author's in place of another.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Named arguments.
+	 */
+	public function cmd_split_guest_author_to_multiple_authors( $args, $assoc_args ) {
+		$old_guest_author = $args[0];
+		$delimiter = $assoc_args['delimiter'];
+		$new_guest_author_names = explode( $delimiter, $assoc_args['new-guest-author-names'] );
+
+		global $wpdb;
+		global $coauthors_plus;
+
+		$guest_author_posts_sql = "SELECT tr.* FROM $wpdb->term_relationships tr 
+			INNER JOIN $wpdb->posts p ON tr.object_id = p.ID
+			WHERE tr.term_taxonomy_id IN (
+	            SELECT wtt.term_taxonomy_id FROM $wpdb->term_taxonomy wtt
+	            INNER JOIN $wpdb->term_relationships wtr ON wtt.term_taxonomy_id = wtr.term_taxonomy_id
+	            WHERE wtr.object_id = (
+	                SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'cap-display_name' AND meta_value = '$old_guest_author'
+	            )
+			) AND p.post_type = 'post'";
+		$results = $wpdb->get_results( $wpdb->prepare( $guest_author_posts_sql ) );
+
+		if ( empty( $results ) ) {
+			WP_CLI::success('Target guest author not found.');
+			WP_CLI::halt(1);
+		}
+
+		WP_CLI::line("Found result for '$old_guest_author'");
+
+		$guest_authors = [];
+		foreach ( $new_guest_author_names as $guest_author_name ) {
+			$sanitized_guest_author_name = sanitize_title( $guest_author_name );
+
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $sanitized_guest_author_name );
+
+			if ( $guest_author ) {
+				$author_id = $guest_author->ID;
+			} else {
+				$user = get_user_by( 'login', $sanitized_guest_author_name );
+
+				if ( false === $user ) {
+					$author_id = $this->coauthorsplus_logic->create_guest_author(
+						[
+							'user_login'   => $sanitized_guest_author_name,
+							'display_name' => sanitize_text_field( $guest_author_name ),
+						]
+					);
+				} else {
+					$author_id = $user->ID;
+				}
+			}
+
+			$guest_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'id', $author_id );
+			$guest_authors[] = $guest_author->user_nicename;
+		}
+
+		foreach ( $results as $relationship ) {
+			WP_CLI::line("Adding Guest Authors to Post ID: $relationship->object_id ");
+			$coauthors_plus->add_coauthors( $relationship->object_id, $guest_authors, true );
+
+			$wpdb->delete(
+				$wpdb->term_relationships,
+				[
+					'term_taxonomy_id' => $relationship->term_taxonomy_id,
+					'object_id' => $relationship->object_id,
+				]
+			);
+		}
+
+		foreach ( $guest_authors as $guest_author ) {
+			$guest_author_term_taxonomy = $wpdb->get_row( "SELECT * FROM $wpdb->term_taxonomy 
+				WHERE taxonomy = 'author' AND description LIKE '%$guest_author%'" );
+
+			$wpdb->query("UPDATE $wpdb->term_taxonomy SET count = (
+    			SELECT COUNT(tr.object_id) FROM $wpdb->term_relationships AS tr
+    			INNER JOIN $wpdb->posts AS p ON tr.object_id = p.ID
+    			WHERE tr.term_taxonomy_id = $guest_author_term_taxonomy->term_taxonomy_id
+    			AND p.post_type = 'post'
+			) WHERE term_taxonomy_id = $guest_author_term_taxonomy->term_taxonomy_id");
+		}
+
+		WP_CLI::success('Done');
 	}
 
     /**
