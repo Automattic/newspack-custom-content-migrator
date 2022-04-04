@@ -82,6 +82,15 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_nextgen_galleries_to_gutenberg_gallery_blocks' ],
 			[
 				'shortdesc' => 'Import NextGen images to Media Library, and converts NextGen Galleries throughout all Posts and Pages to Gutenberg Gallery blocks. Before running this command, make sure NextGen DB tables are present locally, and that the gallery folder is found at the configured location and contains all the NextGen images and has correct file permissions.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'link-to',
+						'description' => "Image Block link setting to be used; possible values are 'attachment' (default, for Attachment Page), 'media' (for Media File), or 'none'. See https://wordpress.com/support/wordpress-editor/blocks/image-block/.",
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -94,6 +103,8 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_nextgen_galleries_to_gutenberg_gallery_blocks( $args, $assoc_args ) {
 		global $wpdb;
+
+		$link_to = $assoc_args[ 'link-to' ] ?? 'attachment';
 
 		// Make sure NGG DB tables are available.
 		$this->validate_db_tables_exist( [ $wpdb->prefix . 'ngg_album', $wpdb->prefix . 'ngg_gallery', $wpdb->prefix . 'ngg_pictures' ] );
@@ -142,7 +153,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		foreach ( $posts_ids as $key_post_id => $post_id ) {
 			echo sprintf( "%d/%d post ID %s\n", $key_post_id+1, count( $posts_ids ), $post_id );
 			$post = get_post( $post_id );
-			$updated = $this->convert_ngg_galleries_in_post_to_gutenberg_gallery( $post );
+			$updated = $this->convert_ngg_galleries_in_post_to_gutenberg_gallery( $post, $link_to );
 			if ( is_wp_error( $updated ) ) {
 				echo sprintf( "%s\n", $updated->get_error_message() );
 				continue;
@@ -212,15 +223,16 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 * Updates all known NGG gallery syntax in this post shortcodes, blocks, etc) to Gutenberg Gallery blocks.
 	 * Expects all the images were already imported using $this->import_ngg_images_to_media_library().
 	 *
-	 * @param array $ngg_options NGG Options value.
+	 * @param array  $ngg_options NGG Options value.
+	 * @param string $link_to     Image Block link setting; see https://wordpress.com/support/wordpress-editor/blocks/image-block/.
 	 *
 	 * @return bool|\WP_Error
 	 */
-	public function convert_ngg_galleries_in_post_to_gutenberg_gallery( $post ) {
+	public function convert_ngg_galleries_in_post_to_gutenberg_gallery( $post, $link_to ) {
 		global $wpdb;
 
 		// Convert NGG Gallery blocks to pure Gutenberg Gallery blocks.
-		$post_content_updated = $this->convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post->ID, $post->post_content );
+		$post_content_updated = $this->convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post->ID, $post->post_content, $link_to );
 		if ( is_wp_error( $post_content_updated ) ) {
 			echo sprintf( "%s\n", $post_content_updated->get_error_message() );
 			return false;
@@ -271,12 +283,13 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	 *      [ngg src="galleries" ids="3" display="pro_mosaic" captions_display_title="1" is_ecommerce_enabled="1"]
 	 *      <!-- /wp:imagely/nextgen-gallery -->
 	 *
-	 * @param int $post_id         Post ID.
+	 * @param int    $post_id      Post ID.
 	 * @param string $post_content HTML.
+	 * @param string $link_to      Image Block link setting; see https://wordpress.com/support/wordpress-editor/blocks/image-block/.
 	 *
 	 * @return string|\WP_Error Refreshed post_content with Gutenberg Gallery blocks instead of NGG, or \WP_Error on exceptions.
 	 */
-	public function convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_id, $post_content ) {
+	public function convert_ngg_gallery_blocks_to_gutenberg_gallery_blocks( $post_id, $post_content, $link_to ) {
 
 		$post_content_updated = $post_content;
 
@@ -315,7 +328,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 			}
 
 			// Replace NGG gallery block with Gutenberg Gallery block.
-			$gutenberg_gallery_block_html = $this->get_gutenberg_gallery_block_html( $att_ids );
+			$gutenberg_gallery_block_html = $this->get_gutenberg_gallery_block_html( $att_ids, $link_to );
 			$post_content_updated = str_replace( $block_html, $gutenberg_gallery_block_html, $post_content_updated );
 		}
 
@@ -359,17 +372,18 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 	/**
 	 * Creates a Gutenberg Gallery Block with specified images.
 	 *
-	 * @param array $att_ids Media Library attachment IDs.
+	 * @param array  $att_ids Media Library attachment IDs.
+	 * @param string $link_to Image Block link setting; see https://wordpress.com/support/wordpress-editor/blocks/image-block/.
 	 *
 	 * @return null|string Gutenberg Gallery Block HTML.
 	 */
-	public function get_gutenberg_gallery_block_html( $att_ids ) {
+	public function get_gutenberg_gallery_block_html( $att_ids, $link_to = 'none' ) {
 		if ( empty( $att_ids ) ) {
 			return null;
 		}
 
 		$gallery_block_html_sprintf = <<<HTML
-<!-- wp:gallery {"linkTo":"none"} -->
+<!-- wp:gallery {"linkTo":"$link_to"} -->
 <figure class="wp-block-gallery has-nested-images columns-default is-cropped">%s</figure>
 <!-- /wp:gallery -->
 HTML;
