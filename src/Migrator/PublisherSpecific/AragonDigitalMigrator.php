@@ -3,11 +3,24 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use WP_CLI;
 use WP_Post;
 
 class AragonDigitalMigrator implements InterfaceMigrator {
 	const GENERAL_LOG = 'tipi_content_converter.log';
+
+	/**
+	 * @var SquareBracketsElementManipulator.
+	 */
+	private $squarebracketselement_manipulator;
+
+	/**
+	 * NextgenGalleryMigrator constructor.
+	 */
+	private function __construct() {
+		$this->squarebracketselement_manipulator = new SquareBracketsElementManipulator();
+	}
 
 	/**
 	 * AragonDigitalMigrator Singleton.
@@ -76,6 +89,15 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array( $this, 'handle_fix_movies_YT_block' ),
 			array(
 				'shortdesc' => 'Set movies years as tags.',
+				'synopsis'  => array(),
+			),
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator convert-custom-accordion-solution-to-genesis',
+			array( $this, 'handle_custom_accordion_solution_to_genesis' ),
+			array(
+				'shortdesc' => 'Will convert shortcodes of a custom accordion solution to Genesis Accordion block',
 				'synopsis'  => array(),
 			),
 		);
@@ -564,6 +586,84 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				WP_CLI::success( sprintf( '(%d/%d) Post %d content updated.', $movie_index, $total_posts, $post->ID ) );
 			} else {
 				WP_CLI::success( sprintf( '(%d/%d) Post %d content not updated.', $movie_index, $total_posts, $post->ID ) );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator convert-custom-accordion-solution-to-genesis`.
+	 * Will hide movies's featured images.
+	 */
+	public function handle_custom_accordion_solution_to_genesis() {
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
+				'category'    => 46,
+			)
+		);
+
+		$total_posts = count( $posts );
+		foreach ( $posts as $accordion_index => $post ) {
+			$accordion_index++;
+			$updated = false;
+			$blocks  = array_map(
+				function( $block ) use ( &$updated ) {
+					if ( 'core/shortcode' === $block['blockName'] ) {
+						$su_accordion_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'su_spoiler', $block['innerHTML'] );
+						if ( empty( $su_accordion_shortcodes[0] ) ) {
+							return $block;
+						}
+
+						$accordion_content = $this->squarebracketselement_manipulator->get_shortcode_contents( $block['innerHTML'], array( 'su_spoiler' ) );
+						if ( ! $accordion_content ) {
+							return $block;
+						}
+
+						$updated = true;
+
+						return array(
+							'blockName'    => 'genesis-blocks/gb-accordion',
+							'attrs'        =>
+							array(),
+							'innerBlocks'  =>
+							array(
+								array(
+									'blockName'    => 'core/paragraph',
+									'attrs'        =>
+									array(),
+									'innerBlocks'  =>
+									array(),
+									'innerHTML'    => $accordion_content,
+									'innerContent' =>
+									array( $accordion_content ),
+								),
+							),
+							'innerHTML'    => '<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">Si no encuentras la solución PULSA AQUÍ</summary><div class="gb-accordion-text"></div></details></div>',
+							'innerContent' =>
+							array(
+								'<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">Si no encuentras la solución PULSA AQUÍ</summary><div class="gb-accordion-text">',
+								null,
+								'</div></details></div> ',
+							),
+						);
+					}
+
+					return $block;
+				},
+				parse_blocks( $post->post_content )
+			);
+
+			if ( $updated ) {
+				wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => serialize_blocks( $blocks ),
+					)
+				);
+				WP_CLI::success( sprintf( '(%d/%d) Post %d content updated.', $accordion_index, $total_posts, $post->ID ) );
+			} else {
+				WP_CLI::success( sprintf( '(%d/%d) Post %d content not updated.', $accordion_index, $total_posts, $post->ID ) );
 			}
 		}
 	}
