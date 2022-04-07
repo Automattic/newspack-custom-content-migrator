@@ -1,23 +1,33 @@
 <?php
+/**
+ * Content Diff migrator exports and imports the content differential from one site to the local site.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use \WP_CLI;
 use \WP_User;
 
+/**
+ * Class ContentDiffMigrator and main logic.
+ *
+ * @package NewspackCustomContentMigrator\MigrationLogic
+ */
 class ContentDiffMigrator {
 
 	// Data array keys.
-	const DATAKEY_POST = 'post';
-	const DATAKEY_POSTMETA = 'postmeta';
-	const DATAKEY_COMMENTS = 'comments';
-	const DATAKEY_COMMENTMETA = 'commentmeta';
-	const DATAKEY_USERS = 'users';
-	const DATAKEY_USERMETA = 'usermeta';
+	const DATAKEY_POST              = 'post';
+	const DATAKEY_POSTMETA          = 'postmeta';
+	const DATAKEY_COMMENTS          = 'comments';
+	const DATAKEY_COMMENTMETA       = 'commentmeta';
+	const DATAKEY_USERS             = 'users';
+	const DATAKEY_USERMETA          = 'usermeta';
 	const DATAKEY_TERMRELATIONSHIPS = 'term_relationships';
-	const DATAKEY_TERMTAXONOMY = 'term_taxonomy';
-	const DATAKEY_TERMS = 'terms';
-	const DATAKEY_TERMMETA = 'termmeta';
+	const DATAKEY_TERMTAXONOMY      = 'term_taxonomy';
+	const DATAKEY_TERMS             = 'terms';
+	const DATAKEY_TERMMETA          = 'termmeta';
 
 	const CORE_WP_TABLES = [
 		'commentmeta',
@@ -35,6 +45,8 @@ class ContentDiffMigrator {
 	];
 
 	/**
+	 * Global $wpdb.
+	 *
 	 * @var object Global $wpdb.
 	 */
 	private $wpdb;
@@ -56,22 +68,39 @@ class ContentDiffMigrator {
 	 * @return array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
+		$ids              = [];
 		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
-		$posts_table = $this->wpdb->prefix . 'posts';
-		$sql = "SELECT lwp.ID FROM {$live_posts_table} lwp
+		$posts_table      = $this->wpdb->prefix . 'posts';
+
+		// Get all Posts and Pages except revisions and trashed items.
+		$sql_posts = "SELECT lwp.ID FROM {$live_posts_table} lwp
 			LEFT JOIN {$posts_table} wp
 				ON wp.post_name = lwp.post_name
 				AND wp.post_title = lwp.post_title
 				AND wp.post_status = lwp.post_status
 				AND wp.post_date = lwp.post_date
-			WHERE lwp.post_type IN ( 'post', 'page', 'attachment' )
-			AND lwp.post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' )
+			WHERE lwp.post_type IN ( 'post', 'page' )
+			AND lwp.post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' )
 			AND wp.ID IS NULL;";
-		$results = $this->wpdb->get_results( $sql, ARRAY_A );
-
-		$ids = [];
+		// phpcs:ignore -- no SQL parameters used.
+		$results   = $this->wpdb->get_results( $sql_posts, ARRAY_A );
 		foreach ( $results as $result ) {
-			$ids[] = $result[ 'ID' ];
+			$ids[] = $result['ID'];
+		}
+
+		// Get attachments.
+		$sql_attachments = "SELECT lwp.ID FROM {$live_posts_table} lwp
+			LEFT JOIN {$posts_table} wp
+				ON wp.post_name = lwp.post_name
+				AND wp.post_title = lwp.post_title
+				AND wp.post_status = lwp.post_status
+				AND wp.post_date = lwp.post_date
+			WHERE lwp.post_type IN ( 'attachment' )
+			AND wp.ID IS NULL;";
+		// phpcs:ignore -- no SQL parameters used.
+		$results         = $this->wpdb->get_results( $sql_attachments, ARRAY_A );
+		foreach ( $results as $result ) {
+			$ids[] = $result['ID'];
 		}
 
 		return $ids;
@@ -80,8 +109,8 @@ class ContentDiffMigrator {
 	/**
 	 * Fetches a Post and all core WP relational objects belonging to the post. Can fetch from a custom table prefix.
 	 *
-	 * @param int    $post_id           Post ID.
-	 * @param string $live_table_prefix Table prefix to fetch from.
+	 * @param int    $post_id      Post ID.
+	 * @param string $table_prefix Table prefix to fetch from.
 	 *
 	 * @return array $args {
 	 *     Post and all core WP Post-related data.
@@ -97,70 +126,79 @@ class ContentDiffMigrator {
 	 *     @type array self::DATAKEY_TERMS             Post's `terms` rows.
 	 * }
 	 */
-	public function get_data( $post_id, $table_prefix ) {
+	public function get_post_data( $post_id, $table_prefix ) {
 
 		$data = $this->get_empty_data_array();
 
 		// Get Post.
-		$post_row = $this->select_post_row( $table_prefix, $post_id );
+		$post_row                   = $this->select_post_row( $table_prefix, $post_id );
 		$data[ self::DATAKEY_POST ] = $post_row;
 
 		// Get Post Metas.
 		$data[ self::DATAKEY_POSTMETA ] = $this->select_postmeta_rows( $table_prefix, $post_id );
 
 		// Get Post Author User.
-		$author_row = $this->select_user_row( $table_prefix, $data[ self::DATAKEY_POST ][ 'post_author' ] );
+		$author_row                    = $this->select_user_row( $table_prefix, $data[ self::DATAKEY_POST ]['post_author'] );
 		$data[ self::DATAKEY_USERS ][] = $author_row;
 
 		// Get Post Author User Metas.
 		$data[ self::DATAKEY_USERMETA ] = array_merge(
 			$data[ self::DATAKEY_USERMETA ],
-			$this->select_usermeta_rows( $table_prefix, $author_row[ 'ID' ] )
+			$this->select_usermeta_rows( $table_prefix, $author_row['ID'] )
 		);
 
 		// Get Comments.
-		if ( $post_row[ 'comment_count' ] > 0 ) {
-			$comment_rows = $this->select_comment_rows( $table_prefix, $post_id );
+		if ( $post_row['comment_count'] > 0 ) {
+			$comment_rows                   = $this->select_comment_rows( $table_prefix, $post_id );
 			$data[ self::DATAKEY_COMMENTS ] = $comment_rows;
 
 			// Get Comment Metas.
 			foreach ( $comment_rows as $key_comment => $comment ) {
 				$data[ self::DATAKEY_COMMENTMETA ] = array_merge(
 					$data[ self::DATAKEY_COMMENTMETA ],
-					$this->select_commentmeta_rows( $table_prefix, $comment[ 'comment_ID' ] )
+					$this->select_commentmeta_rows( $table_prefix, $comment['comment_ID'] )
 				);
 
 				// Get Comment User (if the same User was not already fetched).
-				if ( $comment[ 'user_id' ] > 0 && empty( $this->filter_array_elements( $data[ self::DATAKEY_USERS ], 'ID', $comment[ 'user_id' ] ) ) ) {
-					$comment_user_row = $this->select_user_row( $table_prefix, $comment[ 'user_id' ] );
+				if ( $comment['user_id'] > 0 && empty( $this->filter_array_elements( $data[ self::DATAKEY_USERS ], 'ID', $comment['user_id'] ) ) ) {
+					$comment_user_row              = $this->select_user_row( $table_prefix, $comment['user_id'] );
 					$data[ self::DATAKEY_USERS ][] = $comment_user_row;
 
 					// Get Get Comment User Metas.
 					$data[ self::DATAKEY_USERMETA ] = array_merge(
 						$data[ self::DATAKEY_USERMETA ],
-						$this->select_usermeta_rows( $table_prefix, $comment_user_row[ 'ID' ] )
+						$this->select_usermeta_rows( $table_prefix, $comment_user_row['ID'] )
 					);
 				}
 			}
 		}
 
 		// Get Term Relationships.
-		$term_relationships_rows = $this->select_term_relationships_rows( $table_prefix, $post_id );
+		$term_relationships_rows                 = $this->select_term_relationships_rows( $table_prefix, $post_id );
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = $term_relationships_rows;
 
 		// Get Term Taxonomies.
 		// Note -- a Term can be shared by multiple Taxonomies in WP, so it's only fetched once.
 		$queried_term_ids = [];
 		foreach ( $term_relationships_rows as $term_relationship_row ) {
-			$term_taxonomy_id = $term_relationship_row[ 'term_taxonomy_id' ];
-			$term_taxonomy = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
+			$term_taxonomy_id = $term_relationship_row['term_taxonomy_id'];
+			$term_taxonomy    = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
+			// Skip in case of a record missing in Live DB.
+			if ( is_null( $term_taxonomy ) ) {
+				continue;
+			}
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
 
 			// Get Terms.
-			$term_id = $term_taxonomy[ 'term_id' ];
+			$term_id = $term_taxonomy['term_id'];
 			if ( ! in_array( $term_id, $queried_term_ids ) ) {
-				$data[ self::DATAKEY_TERMS ][] = $this->select_term_row( $table_prefix, $term_id );
-				$queried_term_ids[] = $term_id;
+				$term = $this->select_term_row( $table_prefix, $term_id );
+				// Skip in case of a record missing in Live DB.
+				if ( is_null( $term ) ) {
+					continue;
+				}
+				$data[ self::DATAKEY_TERMS ][] = $term;
+				$queried_term_ids[]            = $term_id;
 
 				// Get Term Metas.
 				$data[ self::DATAKEY_TERMMETA ] = array_merge(
@@ -174,53 +212,50 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Creates all hierarchical and non-hierarchical taxonomies from Live to local, except for built-in 'post_tag' and 'post_format'.
+	 * Recreates all categories from Live to local.
 	 *
-	 * If hierarchical cats are used, the whole structure should be in place before they can get assigned to posts, and same goes
-	 * for any custom taxonomies which might be used.
+	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
 	 * @return array Newly inserted Terms Taxonomies. Keys are taxonomies, with term_ids as subarrays. In case of errors, will
 	 *               contain a key 'errors' with error messages.
 	 */
-	public function recreate_taxonomies( $live_table_prefix ) {
-		$table_prefix = $this->wpdb->prefix;
-		$live_terms_table = esc_sql( $live_table_prefix . 'terms' );
+	public function recreate_categories( $live_table_prefix ) {
+		$table_prefix             = $this->wpdb->prefix;
+		$live_terms_table         = esc_sql( $live_table_prefix . 'terms' );
 		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
-		$terms_table = esc_sql( $table_prefix . 'terms' );
-		$termstaxonomy_table = esc_sql( $table_prefix . 'term_taxonomy' );
+		$terms_table              = esc_sql( $table_prefix . 'terms' );
+		$termstaxonomy_table      = esc_sql( $table_prefix . 'term_taxonomy' );
 
-		// Temporarily register custom taxonomies to allow creation.
-		$custom_taxonomies = $this->wpdb->get_results(
-			"SELECT DISTINCT taxonomy
-			FROM $live_termstaxonomy_table
-			WHERE taxonomy NOT IN ( 'post_tag', 'post_format', 'category' );",
-			ARRAY_A
-		);
-		foreach ( $custom_taxonomies as $custom_taxonomy ) {
-			register_taxonomy( $custom_taxonomy[ 'taxonomy' ], [ 'post' ], [ 'hierarchical' => true, 'query_var' => true, ] );
-		}
-
-		// Get all live site's hiearchical taxonomies, ordered by parent for easy hierarchical reconstruction.
-		$live_taxonomies = $this->wpdb->get_results(
+		// Get all live site's hierarchical categories, ordered by parent for easy hierarchical reconstruction.
+		// phpcs:disable -- wpdb::prepare is used by wrapper.
+		$live_taxonomies             = $this->wpdb->get_results(
 			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 			FROM $live_terms_table t
 	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
-			WHERE tt.taxonomy NOT IN ( 'post_tag', 'post_format' )
+			WHERE tt.taxonomy IN ( 'category' )
 			ORDER BY tt.parent;",
 			ARRAY_A
 		);
-		$terms_updates = [];
+		// phpcs:enable
+		$terms_updates               = [];
 		$created_terms_in_taxonomies = [];
-		foreach ( $live_taxonomies as $live_taxonomy ) {
-			// Get or create taxonomy.
-			$parent_term_id = 0;
-			if ( 0 != $live_taxonomy[ 'parent' ] ) {
-				$parent_term_id = $terms_updates[ $live_taxonomy[ 'parent' ] ];
+		foreach ( $live_taxonomies as $key_live_taxonomy => $live_taxonomy ) {
+			// Output a '.' every 2000 objects to prevent process getting killed.
+			if ( 0 == $key_live_taxonomy % 2000 ) {
+				echo '.';
 			}
 
-			$existing_taxonomy = $this->wpdb->get_row( $this->wpdb->prepare(
+			// Get or create taxonomy.
+			$parent_term_id = 0;
+			if ( 0 != $live_taxonomy['parent'] ) {
+				$parent_term_id = $terms_updates[ $live_taxonomy['parent'] ];
+			}
+
+			// phpcs:disable -- wpdb::prepare is used by wrapper.
+			$existing_taxonomy = $this->wpdb->get_row(
+				$this->wpdb->prepare(
 					"SELECT t.term_id
 					FROM $terms_table t
 			        JOIN $termstaxonomy_table tt ON t.term_id = tt.term_id AND tt.parent = %s
@@ -228,34 +263,35 @@ class ContentDiffMigrator {
 					AND t.slug = %s
 					AND tt.taxonomy = %s;",
 					$parent_term_id,
-					$live_taxonomy[ 'name' ],
-					$live_taxonomy[ 'slug' ],
-					$live_taxonomy[ 'taxonomy' ]
+					$live_taxonomy['name'],
+					$live_taxonomy['slug'],
+					$live_taxonomy['taxonomy']
 				),
 				ARRAY_A
 			);
+			// phpcs:enable
 			if ( ! is_null( $existing_taxonomy ) ) {
-				$term_id_new = $existing_taxonomy[ 'term_id' ];
+				$term_id_new = $existing_taxonomy['term_id'];
 			} else {
 				$term_inserted = wp_insert_term(
-					$live_taxonomy[ 'name' ],
-					$live_taxonomy[ 'taxonomy' ],
+					$live_taxonomy['name'],
+					$live_taxonomy['taxonomy'],
 					[
-						'description' => $live_taxonomy[ 'description' ],
-						'parent' => $parent_term_id,
-						'slug' => $live_taxonomy[ 'slug' ],
+						'description' => $live_taxonomy['description'],
+						'parent'      => $parent_term_id,
+						'slug'        => $live_taxonomy['slug'],
 					]
 				);
 				if ( ! is_wp_error( $term_inserted ) ) {
-					$term_id_new = $term_inserted[ 'term_id' ] ?? null;
-					$created_terms_in_taxonomies[ $live_taxonomy[ 'taxonomy' ] ][] = $term_id_new;
+					$term_id_new = $term_inserted['term_id'] ?? null;
+					$created_terms_in_taxonomies[ $live_taxonomy['taxonomy'] ][] = $term_id_new;
 				} else {
-					$created_terms_in_taxonomies[ 'errors' ][] = sprintf( 'Error inserting term `%s` taxonomy `%s` -- %s', $live_taxonomy[ 'name' ], $live_taxonomy[ 'taxonomy' ], $term_inserted->get_error_message() );
-					$term_id_new = null;
+					$created_terms_in_taxonomies['errors'][] = sprintf( 'Error inserting term `%s` taxonomy `%s` -- %s', $live_taxonomy['name'], $live_taxonomy['taxonomy'], $term_inserted->get_error_message() );
+					$term_id_new                             = null;
 				}
 			}
 
-			$terms_updates[ $live_taxonomy[ 'term_id' ] ] = $term_id_new;
+			$terms_updates[ $live_taxonomy['term_id'] ] = $term_id_new;
 		}
 
 		return $created_terms_in_taxonomies;
@@ -276,20 +312,20 @@ class ContentDiffMigrator {
 		foreach ( $data[ self::DATAKEY_POSTMETA ] as $postmeta_row ) {
 			try {
 				$this->insert_postmeta_row( $postmeta_row, $post_id );
-			} catch ( \Exception $e) {
+			} catch ( \Exception $e ) {
 				$error_messages[] = $e->getMessage();
 			}
 		}
 
 		// Get existing Author User or insert a new one.
-		$author_id_old = $data[ self::DATAKEY_POST ][ 'post_author' ];
-		$author_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old );
-		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row[ 'ID' ] );
-		$user_existing = $this->get_user_by( 'login', $author_row[ 'user_login' ] );
+		$author_id_old = $data[ self::DATAKEY_POST ]['post_author'];
+		$author_row    = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old );
+		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row['ID'] );
+		$user_existing = $this->get_user_by( 'login', $author_row['user_login'] );
 		$author_id_new = null;
 		if ( $user_existing instanceof WP_User ) {
 			$author_id_new = (int) $user_existing->ID;
-		} else if ( is_null( $author_row ) ) {
+		} elseif ( is_null( $author_row ) ) {
 			// Some source posts might have author value 0.
 			$author_id_new = 0;
 		} else {
@@ -299,7 +335,7 @@ class ContentDiffMigrator {
 				foreach ( $usermeta_rows as $usermeta_row ) {
 					$this->insert_usermeta_row( $usermeta_row, $author_id_new );
 				}
-			} catch ( \Exception $e) {
+			} catch ( \Exception $e ) {
 				$error_messages[] = $e->getMessage();
 			}
 		}
@@ -308,7 +344,7 @@ class ContentDiffMigrator {
 		if ( ! is_null( $author_id_new ) && $author_id_new != $author_id_old ) {
 			try {
 				$this->update_post_author( $post_id, $author_id_new );
-			} catch ( \Exception $e) {
+			} catch ( \Exception $e ) {
 				$error_messages[] = $e->getMessage();
 			}
 		}
@@ -316,20 +352,20 @@ class ContentDiffMigrator {
 		// Insert Comments.
 		$comment_ids_updates = [];
 		foreach ( $data[ self::DATAKEY_COMMENTS ] as $comment_row ) {
-			$comment_id_old = (int) $comment_row[ 'comment_ID' ];
+			$comment_id_old = (int) $comment_row['comment_ID'];
 
 			// Insert the Comment User.
-			$comment_user_id_old = (int) $comment_row[ 'user_id' ];
+			$comment_user_id_old = (int) $comment_row['user_id'];
 			$comment_user_id_new = null;
 			if ( 0 === $comment_user_id_old ) {
 				$comment_user_id_new = 0;
 			} else {
 				// Get existing Comment User or insert a new one.
-				$comment_user_row = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_id_old );
+				$comment_user_row      = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $comment_user_id_old );
 				$comment_user_existing = null;
 				if ( ! is_null( $comment_user_row ) ) {
-					$comment_usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row[ 'ID' ] );
-					$comment_user_existing = $this->get_user_by( 'login', $comment_user_row[ 'user_login' ] );
+					$comment_usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row['ID'] );
+					$comment_user_existing = $this->get_user_by( 'login', $comment_user_row['user_login'] );
 				}
 				if ( $comment_user_existing instanceof WP_User ) {
 					$comment_user_id_new = (int) $comment_user_existing->ID;
@@ -340,66 +376,68 @@ class ContentDiffMigrator {
 						foreach ( $comment_usermeta_rows as $comment_usermeta_row ) {
 							$this->insert_usermeta_row( $comment_usermeta_row, $comment_user_id_new );
 						}
-					} catch ( \Exception $e) {
+					} catch ( \Exception $e ) {
 						$error_messages[] = $e->getMessage();
 					}
 				}
 			}
 
 			// Insert Comment and Comment Metas.
-			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id' , $comment_id_old );
-			$comment_id_new = null;
+			$commentmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_COMMENTMETA ], 'comment_id', $comment_id_old );
+			$comment_id_new   = null;
 			try {
-				$comment_id_new = $this->insert_comment( $comment_row, $post_id, $comment_user_id_new );
+				$comment_id_new                         = $this->insert_comment( $comment_row, $post_id, $comment_user_id_new );
 				$comment_ids_updates[ $comment_id_old ] = $comment_id_new;
 				foreach ( $commentmeta_rows as $commentmeta_row ) {
 						$this->insert_commentmeta_row( $commentmeta_row, $comment_id_new );
 				}
-			} catch ( \Exception $e) {
+			} catch ( \Exception $e ) {
 				$error_messages[] = $e->getMessage();
 			}
 		}
 
 		// Loop through all comments, and update their Parent IDs.
 		foreach ( $comment_ids_updates as $comment_id_old => $comment_id_new ) {
-			$comment_row = $this->filter_array_element( $data[ self::DATAKEY_COMMENTS ], 'comment_ID', $comment_id_old );
-			$comment_parent_old = $comment_row[ 'comment_parent' ];
+			$comment_row        = $this->filter_array_element( $data[ self::DATAKEY_COMMENTS ], 'comment_ID', $comment_id_old );
+			$comment_parent_old = $comment_row['comment_parent'];
 			$comment_parent_new = $comment_ids_updates[ $comment_parent_old ] ?? null;
 			if ( ( $comment_parent_old > 0 ) && $comment_parent_new && ( $comment_parent_old != $comment_parent_new ) ) {
 				try {
 					$this->update_comment_parent( $comment_id_new, $comment_parent_new );
-				} catch ( \Exception $e) {
+				} catch ( \Exception $e ) {
 					$error_messages[] = $e->getMessage();
 				}
 			}
 		}
 
 		// Insert Terms.
-		$terms_ids_updates = [];
+		$terms_ids_updates         = [];
 		$term_taxonomy_ids_updates = [];
 		foreach ( $data[ self::DATAKEY_TERMS ] as $term_row ) {
-			$term_id_existing = $this->term_exists( $term_row[ 'name' ] );
+			// Use existing term, or create a new one.
+			$term_id_existing = $this->term_exists( $term_row['name'], $term_row['slug'] );
 			$term_id_existing = is_numeric( $term_id_existing ) ? (int) $term_id_existing : $term_id_existing;
-			$term_id_old = $term_row[ 'term_id' ];
-			$term_id_new = null;
+			$term_id_old      = $term_row['term_id'];
+			$term_id_new      = null;
 			if ( ! is_null( $term_id_existing ) ) {
 				$term_id_new = $term_id_existing;
 			} else {
 				try {
-					$term_id_new = $this->insert_term( $term_row );
-					$termmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMMETA ], 'term_id' , $term_id_old );
+					$term_id_new   = $this->insert_term( $term_row );
+					$termmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMMETA ], 'term_id', $term_id_old );
 					foreach ( $termmeta_rows as $termmeta_row ) {
 						$this->insert_termmeta_row( $termmeta_row, $term_id_new );
 					}
-				} catch ( \Exception $e) {
+				} catch ( \Exception $e ) {
 					$error_messages[] = $e->getMessage();
 				}
 			}
-			if ( ! is_null( $term_id_new ) ){
+			if ( ! is_null( $term_id_new ) ) {
 				$terms_ids_updates[ $term_id_old ] = $term_id_new;
 			}
 
 			// Insert Term Taxonomy records.
+
 			/*
 			 * Note -- A Term can be shared by multiple Taxonomies in WP, e.g. the same Term "blue" can be used by the Taxonomies
 			 * "category" and "tag", and also a custom Taxonomy called "color".
@@ -407,15 +445,15 @@ class ContentDiffMigrator {
 			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id_old );
 			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
 				// Get term_taxonomy or insert new.
-				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( (int) $term_id_new, $term_taxonomy_row[ 'taxonomy' ] );
-				$term_taxonomy_id_old = $term_taxonomy_row[ 'term_taxonomy_id' ];
-				$term_taxonomy_id_new = null;
+				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( (int) $term_id_new, $term_taxonomy_row['taxonomy'] );
+				$term_taxonomy_id_old      = $term_taxonomy_row['term_taxonomy_id'];
+				$term_taxonomy_id_new      = null;
 				if ( $term_taxonomy_id_existing ) {
 					$term_taxonomy_id_new = $term_taxonomy_id_existing;
 				} else {
 					try {
 						$term_taxonomy_id_new = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id_new );
-					} catch ( \Exception $e) {
+					} catch ( \Exception $e ) {
 						$error_messages[] = $e->getMessage();
 					}
 				}
@@ -425,14 +463,15 @@ class ContentDiffMigrator {
 
 		// Insert Term Relationships.
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
-			$term_taxonomy_id_old = (int) $term_relationship_row[ 'term_taxonomy_id' ];
+			$term_taxonomy_id_old = (int) $term_relationship_row['term_taxonomy_id'];
 			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
 			if ( is_null( $term_taxonomy_id_new ) ) {
-				$error_messages[] = sprintf( 'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old %s', $term_taxonomy_id_old );
+				// Missing records in live DB.
+				$error_messages[] = sprintf( 'Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%s is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table', $data[ self::DATAKEY_POST ]['ID'], $post_id, $term_taxonomy_id_old );
 			} else {
 				try {
 					$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
-				} catch ( \Exception $e) {
+				} catch ( \Exception $e ) {
 					$error_messages[] = $e->getMessage();
 				}
 			}
@@ -442,15 +481,13 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates Post's parent ID.
+	 * Updates Post's post_parent ID.
 	 *
-	 * @param int   $post_id           Post ID to update its Parent.
-	 * @param array $imported_post_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param WP_Post $post          Post Object.
+	 * @param int     $new_parent_id New post_parent ID for this post.
 	 */
-	public function update_post_parent( $post_id, $imported_post_ids ) {
-		$post = $this->get_post( $post_id );
-		$new_parent_id = $imported_post_ids[ $post->post_parent ] ?? null;
-		if ( $post->post_parent > 0 && ! is_null( $new_parent_id ) ) {
+	public function update_post_parent( $post, $new_parent_id ) {
+		if ( 0 != $post->post_parent && ! is_null( $new_parent_id ) && ( $new_parent_id != $post->post_parent ) ) {
 			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
 		}
 	}
@@ -458,19 +495,44 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
+	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
+	 *                                        detailed output of all the changes made.
 	 */
-	public function update_featured_images( $imported_attachment_ids ) {
-		$old_attachment_ids = array_keys( $imported_attachment_ids );
-		$postmeta_table = $this->wpdb->postmeta;
-		$placeholders = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
-		$sql = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		$results = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
+	public function update_featured_images( $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
+		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
+			return [];
+		}
 
-		foreach ( $results as $result ) {
-			$new_id = $imported_attachment_ids[ $result[ 'meta_value' ] ] ?? null;
+		$postmeta_table = $this->wpdb->postmeta;
+		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
+		$sql            = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
+		// phpcs:ignore -- wpdb::prepare is used by wrapper.
+		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
+
+		foreach ( $results as $key_result => $result ) {
+			// Output a '.' every 2000 objects to prevent process getting killed.
+			if ( 0 == $key_result % 2000 ) {
+				echo '.';
+			}
+
+			$old_id = $result['meta_value'] ?? null;
+			$new_id = $imported_attachment_ids[ $result['meta_value'] ] ?? null;
 			if ( ! is_null( $new_id ) ) {
-				$this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result[ 'meta_id' ] ] );
+				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result['meta_id'] ] );
+				// Log.
+				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+					$this->log(
+						$log_file_path,
+						json_encode(
+							[
+								'id_old' => (int) $old_id,
+								'id_new' => (int) $new_id,
+							]
+						)
+					);
+				}
 			}
 		}
 	}
@@ -478,67 +540,356 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Gutenberg Blocks' attachment IDs with new attachment IDs in created `post_content` and `post_excerpt` fields.
 	 *
-	 * @param array $imported_post_ids       An array of imported Post IDs, keys are old IDs, values are new IDs.
-	 * @param array $imported_attachment_ids An array of imported Attachment IDs, keys are old IDs, values are new IDs.
-	 * @param string $log_file_path          Optional. Full path to a log file. If provided, the method will save and append a
-	 *                                       detailed output of all the changes made.
+	 * @param array  $imported_post_ids       An array of newly imported Post IDs. Will only fetch an do replacements in these.
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $log_file_path           Optional. Full path to a log file. If provided, will save and append a detailed
+	 *                                        output of all the changes made.
 	 */
 	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_path = null ) {
-		// Pattern for matching Gutenberg block's ID attribute value.
-		$pattern_id = '|
-			(\<\!--      # beginning of the block element
-			\s           # followed by a space
-			wp\:[^\s]+   # element name/designation
-			\s           # followed by a space
-			{            # opening brace
-			[^}]*        # zero or more characters except closing brace
-			"id"\:)      # id attribute
-			(%d)         # id value
-			([^\d\>]+)   # any following char except numeric and comment closing angle bracket
-		|xims';
-		// Pattern for matching <img> element's class value which contains the att. ID.
-		$pattern_class = '|
-			(\<img
-			[^\>]*                   # zero or more characters except closing angle bracket
-			class="wp-image-)(%d)("  # class image with id
-			[^\d"]*                  # zero or more characters except numeric and double quote
-			/\>)                     # closing angle bracket
-		|xims';
 
-		$patterns = [];
-		$replacements = [];
-		// Compose patterns and replacements for every attachment ID.
-		foreach ( $imported_attachment_ids as $att_id_old => $att_id_new ) {
-			$patterns[] = sprintf( $pattern_id, $att_id_old );
-			$replacements[] = '${1}' . $att_id_new . '${3}';
-			$patterns[] = sprintf( $pattern_class, $att_id_old );
-			$replacements[] = '${1}' . $att_id_new . '${3}';
-		}
-
+		// Fetch imported posts.
 		$post_ids_new = array_values( $imported_post_ids );
-		$posts_table = $this->wpdb->posts;
+		$posts_table  = $this->wpdb->posts;
 		$placeholders = implode( ',', array_fill( 0, count( $post_ids_new ), '%d' ) );
-		$results = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );", $post_ids_new ), ARRAY_A );
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$sql          = $this->wpdb->prepare(
+			"SELECT ID, post_content, post_excerpt FROM $posts_table pm WHERE ID IN ( $placeholders );",
+			$post_ids_new
+		);
+		$results      = $this->wpdb->get_results( $sql, ARRAY_A );
+		// phpcs:enable
+
+		// Loop through all imported posts, and do all the replacements.
 		foreach ( $results as $key_result => $result ) {
-			$id = $result[ 'ID' ];
-			$content_before = $result[ 'post_content' ];
-			$excerpt_before = $result[ 'post_excerpt' ];
-			$content_updated = preg_replace( $patterns, $replacements, $content_before );
-			$excerpt_updated = preg_replace( $patterns, $replacements, $excerpt_before );
+			$id              = $result['ID'];
+			$content_before  = $result['post_content'];
+			$content_updated = $result['post_content'];
+			$excerpt_before  = $result['post_excerpt'];
+			$excerpt_updated = $result['post_excerpt'];
+
+			// Do all replacements in content.
+			$content_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
+
+			// Do all replacements in excerpt.
+			$excerpt_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
+			$excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
+
+			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
-				$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_content' => $content_updated, 'post_excerpt' => $excerpt_updated, ], [ 'ID' => $id ] );
-				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$updates = [
-						'ID' => $id,
-						'post_content_before' => $content_before,
-						'post_excerpt_before' => $excerpt_before,
-						'post_content_after' => $content_updated,
-						'post_excerpt_after' => $excerpt_updated,
-					];
-					$this->log( $log_file_path, json_encode( $updates ) );
+				$updated = $this->wpdb->update(
+					$this->wpdb->posts,
+					[
+						'post_content' => $content_updated,
+						'post_excerpt' => $excerpt_updated,
+					],
+					[ 'ID' => $id ]
+				);
+			}
+
+			// Log updates.
+			if ( ! is_null( $log_file_path ) ) {
+				// Log the post ID that was checked.
+				$log_entry = [ 'id_new' => $id ];
+
+				// And if any updates were made, log them fully.
+				if ( $content_before != $content_updated ) {
+					$log_entry = array_merge(
+						$log_entry,
+						[
+							'post_content_before' => $content_before,
+							'post_content_after'  => $content_updated,
+						]
+					);
+				}
+
+				if ( $excerpt_before != $excerpt_updated ) {
+					$log_entry = array_merge(
+						$log_entry,
+						[
+							'post_excerpt_before' => $excerpt_before,
+							'post_excerpt_after'  => $excerpt_updated,
+						]
+					);
+				}
+
+				$this->log( $log_file_path, json_encode( $log_entry ) );
+			}
+		}
+	}
+
+	/**
+	 * Updates <img> element's data-id attribute value.
+	 *
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]
+	 */
+	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
+
+		$content_updated = $content;
+
+		// Pattern for matching any Gutenberg block with an "id" attribute with a numeric value.
+		$pattern_block_id = '|
+			(
+				\<img
+				[^\>]*        # zero or more characters except closing angle bracket
+				data-id="
+			)
+			(
+				\d+           # data-id ID value
+			)
+			(
+				"             # data-id value closing double quote
+				[^\>]*        # zero or more characters except closing angle bracket
+				/\>           # closing angle bracket
+			)
+		|xims';
+
+		$matches = [];
+		preg_match_all( $pattern_block_id, $content, $matches );
+		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
+
+			// Loop through all ID values in $matches[2].
+			foreach ( $matches[2] as $key_match => $id ) {
+				$id_new = null;
+				if ( isset( $imported_attachment_ids[ $id ] ) ) {
+					$id_new = $imported_attachment_ids[ $id ];
+				}
+
+				// Check if this ID was updated.
+				if ( ! is_null( $id_new ) ) {
+					// Update just this specific block's header where this ID was matched (by $key_match).
+					$matched_block_header         = $matches[0][ $key_match ];
+					$matched_block_header_updated = str_replace(
+						sprintf( 'data-id="%d"', $id ),
+						sprintf( 'data-id="%d"', $id_new ),
+						$matched_block_header
+					);
+
+					// Replace block with new ID in content.
+					$content_updated = str_replace(
+						$matched_block_header,
+						$matched_block_header_updated,
+						$content_updated
+					);
 				}
 			}
 		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Updates the ID in <img> element's class attribute, e.g. `class="wp-image-123"`.
+	 *
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]
+	 */
+	public function update_image_element_class_attribute( $imported_attachment_ids, $content ) {
+
+		$content_updated = $content;
+
+		// Pattern for matching <img> element's class value which contains the att.ID.
+		$pattern_img_class_id = '|
+			(
+				\<img
+				[^\>]*       # zero or more characters except closing angle bracket
+				class="
+				[^"]*        # zero or more characters except class closing double quote
+				wp-image-
+			)
+			(
+				\b(\d+)(?!\d).*?\b   # ID not followed by any other digits so that we dont replace a substring
+			)
+			(
+				[^\>]*       # zero or more characters except closing angle bracket
+				/\>          # closing angle bracket
+			)
+		|xims';
+
+		$matches = [];
+		preg_match_all( $pattern_img_class_id, $content, $matches );
+		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
+
+			// Loop through all ID values in $matches[2].
+			foreach ( $matches[2] as $key_match => $id ) {
+				$id_new = null;
+				if ( isset( $imported_attachment_ids[ $id ] ) ) {
+					$id_new = $imported_attachment_ids[ $id ];
+				}
+
+				// Check if this ID was updated.
+				if ( ! is_null( $id_new ) ) {
+					// Update just this specific block's header where this ID was matched (by $key_match).
+					$matched_block_header         = $matches[0][ $key_match ];
+					$matched_block_header_updated = str_replace(
+						sprintf( 'wp-image-%d', $id ),
+						sprintf( 'wp-image-%d', $id_new ),
+						$matched_block_header
+					);
+
+					// Replace block with new ID in content.
+					$content_updated = str_replace(
+						$matched_block_header,
+						$matched_block_header_updated,
+						$content_updated
+					);
+				}
+			}
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Updates IDs in Gutenberg blocks which contain single IDs.
+	 *
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]
+	 */
+	public function update_gutenberg_blocks_single_id( $imported_attachment_ids, $content ) {
+
+		$content_updated = $content;
+
+		// Pattern for matching any Gutenberg block's "id" attribute value.
+		$pattern_block_id = '|
+			(
+				\<\!--      # beginning of the block element
+				\s           # followed by a space
+				wp\:[^\s]+   # element name/designation
+				\s           # followed by a space
+				{            # opening brace
+				[^}]*        # zero or more characters except closing brace
+				"id"\:       # id attribute
+			)
+			(
+				\d+          # id value
+			)
+			(
+				[^\d\>]+     # any following char except numeric and comment closing angle bracket
+			)
+		|xims';
+
+		$matches = [];
+		preg_match_all( $pattern_block_id, $content, $matches );
+		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
+
+			// Loop through all ID values in $matches[2].
+			foreach ( $matches[2] as $key_match => $id ) {
+				$id_new = null;
+				if ( isset( $imported_attachment_ids[ $id ] ) ) {
+					$id_new = $imported_attachment_ids[ $id ];
+				}
+
+				// Check if this ID was updated.
+				if ( ! is_null( $id_new ) ) {
+					// Update just this specific block's header where this ID was matched (by $key_match).
+					$matched_block_header         = $matches[0][ $key_match ];
+					$matched_block_header_updated = str_replace(
+						sprintf( '"id":%d', $id ),
+						sprintf( '"id":%d', $id_new ),
+						$matched_block_header
+					);
+
+					// Replace block with new ID in content.
+					$content_updated = str_replace(
+						$matched_block_header,
+						$matched_block_header_updated,
+						$content_updated
+					);
+				}
+			}
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Updates IDs in Gutenberg blocks which contain multiple CSV IDs.
+	 *
+	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content                 HTML content.
+	 *
+	 * @return string|string[]|null
+	 */
+	public function update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content ) {
+
+		// Pattern for matching Gutenberg block's multiple CSV IDs attribute value.
+		$pattern_csv_ids = '|
+			(
+				\<\!--       # beginning of the block element
+				\s           # followed by a space
+				wp\:[^\s]+   # element name/designation
+				\s           # followed by a space
+				{            # opening brace
+				[^}]*        # zero or more characters except closing brace
+				"ids"\:      # ids attribute
+				\[           # opening square bracket containing CSV IDs
+			)
+			(
+				 [\d,]+      # coma separated IDs
+			)
+			(
+				\]           # closing square bracket containing CSV IDs
+				[^\d\>]+     # any following char except numeric and comment closing angle bracket
+			)
+		|xims';
+
+		// Loop through all CSV IDs matches, and prepare replacements.
+		preg_match_all( $pattern_csv_ids, $content, $matches );
+		$ids_csv_replacements = [];
+		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
+			// Loop through all $matches[2], which are the CSV IDs, and either update them, or leave them alone.
+			foreach ( $matches[2] as $key_match => $ids_csv ) {
+				$ids         = explode( ',', $ids_csv );
+				$ids_updated = [];
+				foreach ( $ids as $key_id => $id ) {
+					if ( isset( $imported_attachment_ids[ $id ] ) ) {
+						$ids_updated[ $key_id ] = $imported_attachment_ids[ $id ];
+					} else {
+						$ids_updated[ $key_id ] = $id;
+					}
+				}
+
+				// If IDs were updated, store the "before CSV IDs" and "after CSV IDs" in $ids_csv_replacements.
+				if ( $ids_updated != $ids ) {
+					$ids_csv_replacements[ $key_match ] = [
+						'before_csv_ids' => implode( ',', $ids ),
+						'after_csv_ids'  => implode( ',', $ids_updated ),
+					];
+				}
+			}
+		}
+
+		// Replace every CSV IDs string which was updated.
+		$content_updated = $content;
+		foreach ( $ids_csv_replacements as $key_match => $changes ) {
+			$ids_csv_before = $changes['before_csv_ids'];
+			$ids_csv_after  = $changes['after_csv_ids'];
+
+			// Make the replacement to just this specific WP Block header where these CSV IDs were found.
+			$matched_block_header         = $matches[0][ $key_match ];
+			$matched_block_header_updated = str_replace(
+				sprintf( '"ids":[%s]', $ids_csv_before ),
+				sprintf( '"ids":[%s]', $ids_csv_after ),
+				$matched_block_header
+			);
+
+			// Update the entire block in content.
+			$content_updated = str_replace( $matched_block_header, $matched_block_header_updated, $content_updated );
+		}
+
+		return $content_updated;
 	}
 
 	/**
@@ -560,16 +911,16 @@ class ContentDiffMigrator {
 	 */
 	private function get_empty_data_array() {
 		return [
-			self::DATAKEY_POST => [],
-			self::DATAKEY_POSTMETA => [],
-			self::DATAKEY_COMMENTS => [],
-			self::DATAKEY_COMMENTMETA => [],
-			self::DATAKEY_USERS => [],
-			self::DATAKEY_USERMETA => [],
+			self::DATAKEY_POST              => [],
+			self::DATAKEY_POSTMETA          => [],
+			self::DATAKEY_COMMENTS          => [],
+			self::DATAKEY_COMMENTMETA       => [],
+			self::DATAKEY_USERS             => [],
+			self::DATAKEY_USERMETA          => [],
 			self::DATAKEY_TERMRELATIONSHIPS => [],
-			self::DATAKEY_TERMTAXONOMY => [],
-			self::DATAKEY_TERMS => [],
-			self::DATAKEY_TERMMETA => [],
+			self::DATAKEY_TERMTAXONOMY      => [],
+			self::DATAKEY_TERMS             => [],
+			self::DATAKEY_TERMMETA          => [],
 		];
 	}
 
@@ -577,27 +928,32 @@ class ContentDiffMigrator {
 	 * Checks if a Term Taxonomy exists.
 	 *
 	 * @param int    $term_id  term_id.
-	 * @param string $taxonomy Taxonomy
+	 * @param string $taxonomy Taxonomy.
 	 *
 	 * @return int|null term_taxonomy_id or null.
 	 */
 	public function get_existing_term_taxonomy( $term_id, $taxonomy ) {
-		$var = $this->wpdb->get_var( $this->wpdb->prepare(
-			"SELECT tt.term_taxonomy_id
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$var = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT tt.term_taxonomy_id
 			FROM {$this->wpdb->term_taxonomy} tt
 			WHERE tt.term_id = %d
 			AND tt.taxonomy = %s;",
-			$term_id,
-			$taxonomy
-		) );
+				$term_id,
+				$taxonomy
+			)
+		);
+		// phpcs:enable
+
 		return is_numeric( $var ) ? (int) $var : $var;
 	}
 
 	/**
 	 * Selects a row from the posts table.
 	 *
-	 * @param string $table_prefix
-	 * @param int $post_id
+	 * @param string $table_prefix Table prefix.
+	 * @param int    $post_id      Post ID.
 	 *
 	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
@@ -609,7 +965,7 @@ class ContentDiffMigrator {
 	 * Selects rows from the postmeta table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $post_id Post ID.
+	 * @param int    $post_id      Post ID.
 	 *
 	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
@@ -645,7 +1001,7 @@ class ContentDiffMigrator {
 	 * Selects rows from the comments table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $post_id Post ID.
+	 * @param int    $post_id Post ID.
 	 *
 	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
@@ -657,7 +1013,7 @@ class ContentDiffMigrator {
 	 * Selects rows from the commentmeta table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $comment_id Comment ID.
+	 * @param int    $comment_id Comment ID.
 	 *
 	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
@@ -669,7 +1025,7 @@ class ContentDiffMigrator {
 	 * Selects rows from the term_relationships table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $post_id Post ID.
+	 * @param int    $post_id Post ID.
 	 *
 	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
@@ -681,7 +1037,7 @@ class ContentDiffMigrator {
 	 * Selects a row from the term_taxonomy table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $term_taxonomy_id term_taxonomy_id.
+	 * @param int    $term_taxonomy_id term_taxonomy_id.
 	 *
 	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
@@ -693,7 +1049,7 @@ class ContentDiffMigrator {
 	 * Selects a row from the terms table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $term_id Term ID.
+	 * @param int    $term_id Term ID.
 	 *
 	 * @return array|null Associative array return from $wpdb::get_row, or null if no results.
 	 */
@@ -705,7 +1061,7 @@ class ContentDiffMigrator {
 	 * Selects rows from the termmeta table.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param int $term_id Term ID.
+	 * @param int    $term_id Term ID.
 	 *
 	 * @return array Associative array with subarray rows from $wpdb::get_results.
 	 */
@@ -730,17 +1086,20 @@ class ContentDiffMigrator {
 			$where_sprintf = '';
 			foreach ( $where_conditions as $column => $value ) {
 				$where_sprintf .= ( ! empty( $where_sprintf ) ? ' AND' : '' )
-				                  . ' ' . esc_sql( $column ) . ' = %s';
+								  . ' ' . esc_sql( $column ) . ' = %s';
 			}
 			$where_sprintf = ' WHERE' . $where_sprintf;
-			$sql_sprintf = $sql . $where_sprintf;
+			$sql_sprintf   = $sql . $where_sprintf;
 
+			// phpcs:ignore -- $sql_sprintf is escaped.
 			$sql = $this->wpdb->prepare( $sql_sprintf, array_values( $where_conditions ) );
 		}
 
 		if ( true === $select_just_one_row ) {
+			// phpcs:ignore -- $wpdb::prepare was used above.
 			return $this->wpdb->get_row( $sql, ARRAY_A );
 		} else {
+			// phpcs:ignore -- $wpdb::prepare was used above.
 			return $this->wpdb->get_results( $sql, ARRAY_A );
 		}
 	}
@@ -756,7 +1115,7 @@ class ContentDiffMigrator {
 	 */
 	public function insert_post( $post_row ) {
 		$insert_post_row = $post_row;
-		$orig_id = $insert_post_row['ID'];
+		$orig_id         = $insert_post_row['ID'];
 		unset( $insert_post_row['ID'] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $insert_post_row );
@@ -768,8 +1127,10 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * @param array $postmeta_rows
-	 * @param int $post_id
+	 * Inserts a post_meta record.
+	 *
+	 * @param array $postmeta_row ARRAY_A formatted wp_postmeta row with values to be inserted.
+	 * @param int   $post_id      Post ID.
 	 *
 	 * @throws \RuntimeException In case insert fails.
 	 *
@@ -777,8 +1138,8 @@ class ContentDiffMigrator {
 	 */
 	public function insert_postmeta_row( $postmeta_row, $post_id ) {
 		$insert_postmeta_row = $postmeta_row;
-		unset( $insert_postmeta_row[ 'meta_id' ] );
-		$insert_postmeta_row[ 'post_id' ] = $post_id;
+		unset( $insert_postmeta_row['meta_id'] );
+		$insert_postmeta_row['post_id'] = $post_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $insert_postmeta_row );
 		if ( 1 != $inserted ) {
@@ -799,11 +1160,11 @@ class ContentDiffMigrator {
 	 */
 	public function insert_user( $user_row ) {
 		$insert_user_row = $user_row;
-		unset( $insert_user_row[ 'ID' ] );
+		unset( $insert_user_row['ID'] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->users, $insert_user_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row[ 'ID' ], json_encode( $user_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -821,8 +1182,8 @@ class ContentDiffMigrator {
 	 */
 	public function insert_usermeta_row( $usermeta_row, $user_id ) {
 		$insert_usermeta_row = $usermeta_row;
-		unset( $insert_usermeta_row[ 'umeta_id' ] );
-		$insert_usermeta_row[ 'user_id' ] = $user_id;
+		unset( $insert_usermeta_row['umeta_id'] );
+		$insert_usermeta_row['user_id'] = $user_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $insert_usermeta_row );
 		if ( 1 != $inserted ) {
@@ -845,9 +1206,9 @@ class ContentDiffMigrator {
 	 */
 	public function insert_comment( $comment_row, $new_post_id, $new_user_id ) {
 		$insert_comment_row = $comment_row;
-		unset( $insert_comment_row[ 'comment_ID' ] );
-		$insert_comment_row[ 'comment_post_ID' ] = $new_post_id;
-		$insert_comment_row[ 'user_id' ] = $new_user_id;
+		unset( $insert_comment_row['comment_ID'] );
+		$insert_comment_row['comment_post_ID'] = $new_post_id;
+		$insert_comment_row['user_id']         = $new_user_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->comments, $insert_comment_row );
 		if ( 1 != $inserted ) {
@@ -869,8 +1230,8 @@ class ContentDiffMigrator {
 	 */
 	public function insert_commentmeta_row( $commentmeta_row, $new_comment_id ) {
 		$insert_commentmeta_row = $commentmeta_row;
-		unset( $insert_commentmeta_row[ 'meta_id' ] );
-		$insert_commentmeta_row[ 'comment_id' ] = $new_comment_id;
+		unset( $insert_commentmeta_row['meta_id'] );
+		$insert_commentmeta_row['comment_id'] = $new_comment_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $insert_commentmeta_row );
 		if ( 1 != $inserted ) {
@@ -910,8 +1271,8 @@ class ContentDiffMigrator {
 	 */
 	public function insert_term( $term_row ) {
 		$insert_term_row = $term_row;
-		if ( isset( $insert_term_row[ 'term_id' ] ) ) {
-			unset( $insert_term_row[ 'term_id' ] );
+		if ( isset( $insert_term_row['term_id'] ) ) {
+			unset( $insert_term_row['term_id'] );
 		}
 
 		$inserted = $this->wpdb->insert( $this->wpdb->terms, $insert_term_row );
@@ -934,8 +1295,8 @@ class ContentDiffMigrator {
 	 */
 	public function insert_termmeta_row( $termmeta_row, $term_id ) {
 		$insert_termmeta_row = $termmeta_row;
-		unset( $insert_termmeta_row[ 'meta_id' ] );
-		$insert_termmeta_row[ 'term_id' ] = $term_id;
+		unset( $insert_termmeta_row['meta_id'] );
+		$insert_termmeta_row['term_id'] = $term_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->termmeta, $insert_termmeta_row );
 		if ( 1 != $inserted ) {
@@ -957,10 +1318,10 @@ class ContentDiffMigrator {
 	 */
 	public function insert_term_taxonomy( $term_taxonomy_row, $new_term_id ) {
 		$insert_term_taxonomy_row = $term_taxonomy_row;
-		if ( isset( $insert_term_taxonomy_row[ 'term_taxonomy_id' ] ) ) {
-			unset( $insert_term_taxonomy_row[ 'term_taxonomy_id' ] );
+		if ( isset( $insert_term_taxonomy_row['term_taxonomy_id'] ) ) {
+			unset( $insert_term_taxonomy_row['term_taxonomy_id'] );
 		}
-		$insert_term_taxonomy_row[ 'term_id' ] = $new_term_id;
+		$insert_term_taxonomy_row['term_id'] = $new_term_id;
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $insert_term_taxonomy_row );
 		if ( 1 != $inserted ) {
@@ -984,7 +1345,7 @@ class ContentDiffMigrator {
 		$inserted = $this->wpdb->insert(
 			$this->wpdb->term_relationships,
 			[
-				'object_id' => $object_id,
+				'object_id'        => $object_id,
 				'term_taxonomy_id' => $term_taxonomy_id,
 			]
 		);
@@ -1020,7 +1381,7 @@ class ContentDiffMigrator {
 	 * @return array List of all tables in DB.
 	 */
 	public function get_all_db_tables() {
-		$all_tables = [];
+		$all_tables        = [];
 		$all_tables_result = $this->wpdb->get_results( 'SHOW TABLES;', ARRAY_N );
 		foreach ( $all_tables_result as $table ) {
 			$all_tables[] = $table[0];
@@ -1065,14 +1426,29 @@ class ContentDiffMigrator {
 	/**
 	 * Wrapper for WP's native \term_exists(), for easier testing.
 	 *
-	 * @param int|string $term     The term to check. Accepts term ID, slug, or name..
-	 * @param string     $taxonomy Optional. The taxonomy name to use.
-	 * @param int        $parent   Optional. ID of parent term under which to confine the exists search.
+	 * @param string $term_name Term name.
+	 * @param string $term_slug Term slug.
 	 *
 	 * @return mixed @see term_exists.
 	 */
-	public function term_exists( $term, $taxonomy = '', $parent = null ) {
-		return term_exists( $term, $taxonomy, $parent );
+	public function term_exists( $term_name, $term_slug ) {
+
+		// Native WP's term_exists() is highly discouraged due to not being cached, so writing custom query.
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$term_id = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT term_id
+				FROM {$this->wpdb->terms}
+				WHERE name = %s
+				AND slug = %s ; ",
+				$term_name,
+				$term_slug
+			)
+		);
+		// phpcs:enable
+
+		return is_numeric( $term_id ) ? (int) $term_id : null;
 	}
 
 	/**
@@ -1096,8 +1472,9 @@ class ContentDiffMigrator {
 	/**
 	 * Filters a multidimensional array and searches for a subarray with a key and value.
 	 *
+	 * @param array $array Array being searched and filtered.
 	 * @param mixed $key   Array key to search for.
-	 * @param mixed $value Array value to search for
+	 * @param mixed $value Array value to search for.
 	 *
 	 * @return null|array The array which matches the $key $value filter, or null.
 	 */
@@ -1114,8 +1491,9 @@ class ContentDiffMigrator {
 	/**
 	 * Filters a multidimensional array and searches for all subarray elemens containing a key and value.
 	 *
+	 * @param array $array Array being searched and filtered.
 	 * @param mixed $key   Array key to search for.
-	 * @param mixed $value Array value to search for
+	 * @param mixed $value Array value to search for.
 	 *
 	 * @return array An array with sub-arrays which match the $key $value filter, or an empty array if nothing is found.
 	 */
@@ -1133,7 +1511,8 @@ class ContentDiffMigrator {
 	/**
 	 * Logs error message to file.
 	 *
-	 * @param string $msg Error message.
+	 * @param string $file Path to log file.
+	 * @param string $msg  Error message.
 	 */
 	public function log( $file, $msg ) {
 		file_put_contents( $file, $msg . "\n", FILE_APPEND );

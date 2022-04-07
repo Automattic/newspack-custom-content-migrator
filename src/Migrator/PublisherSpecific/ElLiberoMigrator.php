@@ -2,8 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
+use Exception;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use stdClass;
 use WP_CLI;
+use WP_Error;
+use WP_User;
 
 class ElLiberoMigrator implements InterfaceMigrator {
 
@@ -68,12 +72,20 @@ class ElLiberoMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-el-libero-posts',
+			'newspack-content-migrator el-libero-migrate-posts',
 			array( $this, 'handle_post_migration' ),
 			array(
 				'shortdesc' => 'Will handle post_type migration to categories',
 				'synopsis'  => array(),
 			),
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator el-libero-migrate-authors',
+			array( $this, 'handle_authors_migration' ),
+			array(
+				'shortdesc' => 'Will handle `autor` data migration to create Authors.',
+				'synopsis'  => array(),
+			)
 		);
 	}
 
@@ -124,5 +136,202 @@ class ElLiberoMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( 'Done' );
+	}
+
+	public function handle_authors_migration() {
+		global $wpdb;
+
+		$wpdb->query( "SET SESSION group_concat_max_len = 1000000" );
+
+		$list_of_authors_sql = "
+			SELECT 
+			       sub.meta_value, 
+			       GROUP_CONCAT(sub.post_id) as post_ids 
+			FROM (
+  				SELECT *
+  				FROM wp_postmeta pm
+  				WHERE pm.meta_key = 'autor'
+    			AND pm.post_id NOT IN (
+    			    SELECT 
+    			           object_id 
+    			    FROM wp_term_relationships 
+    			    WHERE term_taxonomy_id IN (
+      					SELECT wp_term_taxonomy.term_taxonomy_id
+      					FROM wp_term_taxonomy
+      					WHERE term_id IN (15406, 1590, 1392)
+  					)
+    			) 
+  				AND pm.post_id NOT IN (
+  				    SELECT wtr.object_id FROM wp_terms t
+                    LEFT JOIN wp_term_taxonomy wtt on t.term_id = wtt.term_id
+                    LEFT JOIN wp_term_relationships wtr on wtt.term_taxonomy_id = wtr.term_taxonomy_id
+                    WHERE t.term_id = 15392
+  				)
+			) AS sub GROUP BY sub.meta_value ORDER BY sub.meta_value";
+
+		$list_of_authors = $wpdb->get_results( $list_of_authors_sql );
+
+		$unprocesssable = [];
+
+		foreach ( $list_of_authors as $record ) {
+			if ( ! empty( $record->meta_value ) ) {
+				if ( intval( $record->meta_value ) ) {
+					try {
+						$user_id = $this->handle_author_via_post( $record->meta_value );
+
+						if ( ! empty( $record->post_ids ) ) {
+							$update_post_author_sql = "UPDATE $wpdb->posts SET post_author = $user_id WHERE ID IN ($record->post_ids)";
+							$wpdb->query( $update_post_author_sql );
+						}
+					} catch ( Exception $e ) {
+						$unprocesssable[] = $record;
+						continue;
+					}
+				} else {
+
+					$name = explode( ',', $record->meta_value );
+					$name = trim( array_shift( $name ) );
+					$name = explode(' y ', $name);
+					$name = trim( array_shift( $name ) );
+					$name = explode( ' e ', $name );
+					$name = trim( array_shift( $name ) );
+
+					if ( in_array( $name, [ 'C. Novoa', 'Carmen Novoa V.' ] ) ) {
+						$name = 'Carmen Novoa';
+					}
+
+					if ( in_array( $name, [ 'J.P. Lührs', 'J. P. L.'] ) ) {
+						$name = 'Juan Pedro Lührs';
+					}
+
+					if ( in_array( $name, [ 'R.G.', 'R. G.', 'R. Gaggero', 'Renato Gaggero L.' ] ) ) {
+						$name = 'Renato Gaggero';
+					}
+
+					if ( in_array( $name, [ 'El Líibero' ] ) ) {
+						$name = 'El Líbero';
+					}
+
+					if ( in_array( $name, [ 'Nicolás González S.' ] ) ) {
+						$name = 'Nicolás González';
+					}
+
+					if ( in_array( $name, [ 'Uziel Gómez  Padrón', 'Uziel Gómez P.', 'Uziel Gómez Padrón' ] ) ) {
+						$name = 'Uziel Gómez';
+					}
+
+					$user = username_exists( $this->nicename( $name ) );
+
+					if ( $user ) {
+						$update_post_author_sql = "UPDATE $wpdb->posts SET post_author = $user WHERE ID IN ($record->post_ids)";
+					} else {
+						$user_id = wp_insert_user(
+							[
+								'display_name'  => $name,
+								'user_nicename' => $this->nicename( $name ),
+								'user_login'    => $this->nicename( $name ),
+								'user_pass'     => wp_generate_password(),
+							]
+						);
+
+						if ( $user_id instanceof WP_Error ) {
+							$unprocesssable[] = $record;
+							continue;
+						}
+
+						$update_post_author_sql = "UPDATE $wpdb->posts SET post_author = $user_id WHERE ID IN ($record->post_ids)";
+					}
+					$wpdb->query( $update_post_author_sql );
+				}
+			}
+		}
+
+		if ( ! empty( $unprocesssable ) ) {
+			file_put_contents( __DIR__ . '/unprocessable_author_posts.json', json_encode( $unprocesssable ) );
+		}
+	}
+
+	/**
+	 * Function to handle the creation of an author via a post ID.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return int|void|WP_Error
+	 * @throws Exception
+	 */
+	private function handle_author_via_post( int $post_id ) {
+		global $wpdb;
+
+		$post_meta_sql = "SELECT REPLACE(meta_key, '-', '') as meta_key, meta_value FROM $wpdb->postmeta WHERE post_id = $post_id AND meta_key IN ('nombre', 'apellido', 'e-mail')";
+		$post_meta     = $wpdb->get_results( $post_meta_sql );
+
+		if ( empty( $post_meta ) ) {
+			throw new Exception( "Post doesn't exist." );
+		}
+
+		$user_object = $this->transpose_to_object( $post_meta );
+
+		$user_name_sql = "SELECT post_name FROM $wpdb->posts WHERE ID = $post_id";
+		$user_name     = $wpdb->get_results( $user_name_sql );
+		$user_name     = array_shift( $user_name );
+		$user_name     = $user_name->post_name;
+
+		$user = get_user_by( 'email', $user_object->email );
+
+		if ( $user instanceof WP_User ) {
+			return $user->ID;
+		}
+
+		if ( $user = username_exists( $user_name ) ) {
+			return $user;
+		}
+
+		$user_created = wp_insert_user(
+			[
+				'user_login'    => $user_name,
+				'user_email'    => $user_object->email,
+				'first_name'    => $user_object->nombre,
+				'last_name'     => $user_object->apellido,
+				'display_name'  => "$user_object->nombre $user_object->apellido",
+				'user_nicename' => $this->nicename( "$user_object->nombre $user_object->apellido" ),
+				'user_pass'     => wp_generate_password(),
+			]
+		);
+
+		if ( ! ( $user_created instanceof WP_Error ) ) {
+			return $user_created;
+		}
+	}
+
+	/**
+	 * Take array and convert to standard class/object.
+	 *
+	 * @param array $result Array.
+	 *
+	 * @return stdClass
+	 */
+	private function transpose_to_object( array $result ): stdClass {
+		$obj           = new stdClass();
+		$obj->email    = '';
+		$obj->nombre   = '';
+		$obj->apellido = '';
+
+		foreach ( $result as $property ) {
+			$prop       = $property->meta_key;
+			$obj->$prop = $property->meta_value;
+		}
+
+		return $obj;
+	}
+
+	/**
+	 * Takes a string and tries to create username.
+	 *
+	 * @param string $username Username.
+	 *
+	 * @return string
+	 */
+	private function nicename( string $username ): string {
+		return substr( str_replace( ' ', '-', strtolower( $username ) ), 0, 50 );
 	}
 }
