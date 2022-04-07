@@ -53,7 +53,16 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator verify-bylines',
-			array( $this, 'verify_bylines' ),
+			array( $this, 'vosd_verify_bylines' ),
+			array(
+				'shortdesc' => 'Verify migrated bylines from live site.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator remove-featured-images-from-post-body',
+			array( $this, 'vosd_remove_featured_images_from_post_body' ),
 			array(
 				'shortdesc' => 'Verify migrated bylines from live site.',
 				'synopsis'  => array(),
@@ -67,7 +76,7 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function verify_bylines( $args, $assoc_args ) {
+	public function vosd_verify_bylines( $args, $assoc_args ) {
 		$posts = get_posts(
 			array(
 				'numberposts' => 1000,
@@ -95,6 +104,57 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 
 			if ( $live_author !== $staging_author ) {
 				$this->log( self::BYLINES_LOGS, sprintf( 'Live author (%s), Staging author (%s), Post (%d)', $live_author, $staging_author, $post->ID ) );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator remove-featured-images-from-post-body`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function vosd_remove_featured_images_from_post_body( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_type'   => 'post',
+				'post_status' => array( 'publish' ),
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			if ( substr( $post->post_content, 0, strlen( '[caption' ) ) === '[caption' ) {
+				$start_with_images[] = $post->ID;
+
+				$pattern = get_shortcode_regex();
+				if ( preg_match_all( '/' . $pattern . '/s', $post->post_content, $matches ) && array_key_exists( 2, $matches ) && in_array( 'caption', $matches[2] ) ) {
+					$index = 0;
+					$count = 0;
+					// Remove the first image shortcode from the content.
+					foreach ( $matches[2] as $match ) {
+						if ( 'caption' === $match ) {
+							// Found our first image.
+							$index = $count;
+							break; // We've done enough.
+						}
+						$count++;
+					};
+					// Remove first gallery from content.
+					$content = str_replace( $matches[0][ $index ], '', $post->post_content );
+
+					if ( $content !== $post->post_content ) {
+						$wpdb->update(
+							$wpdb->prefix . 'posts',
+							array( 'post_content' => $content ),
+							array( 'ID' => $post->ID )
+						);
+
+						WP_CLI::line( sprintf( 'Updated post: %d', $post->ID ) );
+					}
+				}
 			}
 		}
 	}
