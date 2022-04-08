@@ -500,4 +500,40 @@ class PostsMigrator implements InterfaceMigrator {
 		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
 		return $content;
 	}
+
+	/**
+	 * Batch posts and execute a callback action on each one, with a wait time between the batches.
+	 *
+	 * @param array    $query_args Arguments to retrieve posts, the same as the ones for get_posts function.
+	 * @param callable $callback The callback function to execute on each post, get the post as parameter.
+	 * @param integer  $wait The waiting time between batches in seconds.
+	 * @param integer  $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer  $batch Current batch in the loop.
+	 * @return void
+	 */
+	public static function throttled_posts_loop( $query_args, $callback, $wait = 3, $posts_per_batch = 1000, $batch = 1 ) {
+		WP_CLI::line( sprintf( 'Batch #%d', $batch ) );
+
+		$args = array_merge(
+			array(
+				'posts_per_page' => $posts_per_batch,
+				'paged'          => $batch,
+			),
+			$query_args
+		);
+
+		$posts = get_posts( $args );
+
+		if ( empty( $posts ) ) {
+			return;
+		}
+
+		foreach ( $posts as $post ) {
+			$callback( $post );
+		}
+
+		sleep( $wait );
+
+		self::throttled_posts_loop( $query_args, $callback, $wait, $posts_per_batch, $batch + 1 );
+	}
 }
