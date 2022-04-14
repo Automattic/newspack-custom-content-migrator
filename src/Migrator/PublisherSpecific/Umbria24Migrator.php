@@ -3,7 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use \NewspackCustomContentMigrator\Migrator\General\PostsMigrator as PostsMigratorLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use \WP_CLI;
 
 /**
@@ -22,10 +22,15 @@ class Umbria24Migrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
+	 * @var PostsLogic.
+	 */
+	private $posts_migrator_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_migrator_logic = PostsMigratorLogic::get_instance();
+		$this->posts_migrator_logic = new PostsLogic();
 	}
 
 	/**
