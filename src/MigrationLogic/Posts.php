@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use WP_Query;
+use WP_CLI;
 
 class Posts {
 	/**
@@ -243,13 +244,51 @@ SQL;
 	 *
 	 * @return int[]|\WP_Post[]
 	 */
-	public function get_all_posts( $post_type = 'post', $post_status = [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ] ) {
-		return get_posts( [
-	        'posts_per_page' => -1,
-	        'post_type'      => $post_type,
-	        // `'post_status' => 'any'` doesn't work as expected.
-	        'post_status'    => $post_status,
-		] );
+	public function get_all_posts( $post_type = 'post', $post_status = array( 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ) ) {
+		return get_posts(
+			array(
+				'posts_per_page' => -1,
+				'post_type'      => $post_type,
+				// `'post_status' => 'any'` doesn't work as expected.
+				'post_status'    => $post_status,
+			)
+		);
+	}
+
+	/**
+	 * Batch posts and execute a callback action on each one, with a wait time between the batches.
+	 *
+	 * @param array    $query_args Arguments to retrieve posts, the same as the ones for get_posts function.
+	 * @param callable $callback The callback function to execute on each post, get the post as parameter.
+	 * @param integer  $wait The waiting time between batches in seconds.
+	 * @param integer  $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer  $batch Current batch in the loop.
+	 * @return void
+	 */
+	public function throttled_posts_loop( $query_args, $callback, $wait = 3, $posts_per_batch = 1000, $batch = 1 ) {
+		WP_CLI::line( sprintf( 'Batch #%d', $batch ) );
+
+		$args = array_merge(
+			array(
+				'posts_per_page' => $posts_per_batch,
+				'paged'          => $batch,
+			),
+			$query_args
+		);
+
+		$posts = get_posts( $args );
+
+		if ( empty( $posts ) ) {
+			return;
+		}
+
+		foreach ( $posts as $post ) {
+			$callback( $post );
+		}
+
+		sleep( $wait );
+
+		self::throttled_posts_loop( $query_args, $callback, $wait, $posts_per_batch, $batch + 1 );
 	}
 
 	/**
