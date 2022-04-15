@@ -12,6 +12,7 @@ use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 	const LOG_MAPS_NOT_DONE_IDS = 'ct_MAPS_NOT_DONE.log';
+	const LOG_SKIPPED = 'ct_skipped.log';
 	const LOG_EXCERPT = 'ct_excerpt.log';
 	const LOG_FEATIMG = 'ct_featimg.log';
 	const LOG_RELATEDARTICLES = 'ct_relatedarticles.log';
@@ -19,6 +20,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 	const LOG_PDF = 'ct_pdf.log';
 	const LOG_PDF_NOTFOUND = 'ct_pdf_notfound.log';
 	const LOG_WYSIWYG = 'ct_wysiwyg.log';
+	const LOG_BOXES = 'ct_boxes.log';
 	const LOG_LINK = 'ct_link.log';
 	const LOG_IMAGE = 'ct_image.log';
 	const LOG_IMAGE_NOT_FOUND = 'ct_image_notfound.log';
@@ -200,6 +202,28 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		 *      vc_fields_video_url
 		 */
 
+		$dev_examples__post_ids = [
+			// wysiwyg, audio_file
+			69143,
+			// file, related_articles, images
+			73049,
+			// boxes
+			74915,
+			// link
+			74317,
+			// image
+			49595,
+			// images
+			68990,
+			// infogram_embed_id
+			70309,
+			// pdf
+			74287,
+			// quote person person_title
+			49595,
+			// video
+			76074
+		];
 
 		$post_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -207,7 +231,8 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 			$post = get_post( $post_id );
 			if ( ! empty( $post->post_content ) ) {
-				\WP_CLI::line( "Skipping." );
+ 				\WP_CLI::line( "Skipping." );
+				$this->log( self::LOG_SKIPPED, $post_id );
 				continue;
 			}
 
@@ -421,7 +446,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 			}
 
 			if ( ! empty( $post_content ) ) {
-				// $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content ], [ 'ID' => $post_id ] );
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content ], [ 'ID' => $post_id ] );
 			}
 		}
 
