@@ -592,7 +592,6 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 
 	/**
 	 * Callable for `newspack-content-migrator convert-custom-accordion-solution-to-genesis`.
-	 * Will hide movies's featured images.
 	 */
 	public function handle_custom_accordion_solution_to_genesis() {
 		$posts = get_posts(
@@ -615,7 +614,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 							return $block;
 						}
 
-						$accordion_content = $this->squarebracketselement_manipulator->get_shortcode_contents( $block['innerHTML'], array( 'su_spoiler' ) );
+						$accordion_content = nl2br( trim( $this->squarebracketselement_manipulator->get_shortcode_contents( $block['innerHTML'], array( 'su_spoiler' ) ) ) );
 						if ( ! $accordion_content ) {
 							return $block;
 						}
