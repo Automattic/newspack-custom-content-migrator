@@ -54,7 +54,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Will handle Tipi Builder posts conversion to blocks',
 				'synopsis'  => array(),
-			),
+			)
 		);
 
 		WP_CLI::add_command(
@@ -63,7 +63,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Convert ',
 				'synopsis'  => array(),
-			),
+			)
 		);
 
 		WP_CLI::add_command(
@@ -72,7 +72,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Set movies years as tags.',
 				'synopsis'  => array(),
-			),
+			)
 		);
 
 		WP_CLI::add_command(
@@ -81,7 +81,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Set movies years as tags.',
 				'synopsis'  => array(),
-			),
+			)
 		);
 
 		WP_CLI::add_command(
@@ -90,7 +90,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Set movies years as tags.',
 				'synopsis'  => array(),
-			),
+			)
 		);
 
 		WP_CLI::add_command(
@@ -99,7 +99,16 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Will convert shortcodes of a custom accordion solution to Genesis Accordion block',
 				'synopsis'  => array(),
-			),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator revert-custom-accordion-solution-to-genesis',
+			array( $this, 'handle_revert_accordion_solution_to_genesis' ),
+			array(
+				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
+				'synopsis'  => array(),
+			)
 		);
 	}
 
@@ -663,6 +672,34 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				WP_CLI::success( sprintf( '(%d/%d) Post %d content updated.', $accordion_index, $total_posts, $post->ID ) );
 			} else {
 				WP_CLI::success( sprintf( '(%d/%d) Post %d content not updated.', $accordion_index, $total_posts, $post->ID ) );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator revert-custom-accordion-solution-to-genesis`.
+	 * Will hide movies's featured images.
+	 */
+	public function handle_revert_accordion_solution_to_genesis() {
+		global $wpdb;
+
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
+				'category'    => 46,
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$result = $wpdb->get_col( $wpdb->prepare( "SELECT post_content FROM {$wpdb->prefix}posts_old WHERE ID = %d", $post->ID ) );
+			if ( ! empty( $result ) ) {
+				$update_result = $wpdb->update( $wpdb->prefix . 'posts', array( 'post_content' => $result[0] ), array( 'ID' => $post->ID ) );
+				if ( ! $update_result ) {
+					WP_CLI::line( 'Error updating post ' . $post->ID );
+				} else {
+					WP_CLI::line( 'Updated post ' . $post->ID );
+				}
 			}
 		}
 	}
