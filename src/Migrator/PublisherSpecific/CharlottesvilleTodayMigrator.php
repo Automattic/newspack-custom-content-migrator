@@ -14,11 +14,14 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 	const LOG_MAPS_NOT_DONE_IDS = 'ct_MAPS_NOT_DONE.log';
 	const LOG_EXCERPT = 'ct_excerpt.log';
 	const LOG_FEATIMG = 'ct_featimg.log';
+	const LOG_RELATEDARTICLES = 'ct_relatedarticles.log';
 	const LOG_AUDIOFILE = 'ct_audiofile.log';
 	const LOG_PDF = 'ct_pdf.log';
+	const LOG_PDF_NOTFOUND = 'ct_pdf_notfound.log';
 	const LOG_WYSIWYG = 'ct_wysiwyg.log';
 	const LOG_LINK = 'ct_link.log';
 	const LOG_IMAGE = 'ct_image.log';
+	const LOG_IMAGE_NOT_FOUND = 'ct_image_notfound.log';
 	const LOG_IMAGES = 'ct_images.log';
 	const LOG_INFOGRAMEMBED = 'ct_infogramembed.log';
 	const LOG_QUOTE = 'ct_quote.log';
@@ -82,7 +85,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		 *      audio_title
 		 *      file (BUT NOT %audio_file)
 		 *      text - numbered list of boxes
-		 *      credit
+		 *      credit (belongs to link or audio)
 		 *      image
 		 *      images
 		 *      infogram_embed_id
@@ -197,6 +200,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		 *      vc_fields_video_url
 		 */
 
+
 		$post_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			\WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
@@ -208,18 +212,18 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 			}
 
 			// Import ACF excerpt.
-			$acf_excerpt_meta_row = $wpdb->get_results( $wpdb->prepare( "select * from $wpdb->postmeta where post_id = %d and meta_key like 'excerpt' ; ", $post_id ), ARRAY_A );
-			if ( $acf_excerpt_meta_row && isset( $acf_excerpt_meta_row['meta_value'] ) && ! empty( $acf_excerpt_meta_row['meta_value'] ) ) {
-				$wpdb->update( $wpdb->posts, [ 'post_excerpt' => $acf_excerpt_meta_row['meta_value'] ], [ 'ID' => $post_id ] );
+			$acf_excerpt_meta_value = $wpdb->get_var( $wpdb->prepare( "select meta_value from $wpdb->postmeta where post_id = %d and meta_key like 'excerpt' ; ", $post_id ) );
+			if ( $acf_excerpt_meta_value && ! empty( $acf_excerpt_meta_value ) ) {
+				$wpdb->update( $wpdb->posts, [ 'post_excerpt' => $acf_excerpt_meta_value ], [ 'ID' => $post_id ] );
 				$this->log( self::LOG_EXCERPT, $post_id );
 			}
 
 			// Import ACF featured image or override.
-			$acf_feat_img_meta_row = $wpdb->get_var( $wpdb->prepare( "select * from $wpdb->postmeta where post_id = %d and meta_key = 'featured_image' ; ", $post_id ), ARRAY_A );
-			$acf_feat_img_override_meta_row = $wpdb->get_var( $wpdb->prepare( "select * from $wpdb->postmeta where post_id = %d and meta_key = 'featured_image_override' ; ", $post_id ), ARRAY_A );
-			$featured_image_id = $acf_feat_img_override_meta_row ?? $acf_feat_img_meta_row;
+			$acf_feat_img_meta_value = $wpdb->get_var( $wpdb->prepare( "select meta_value from $wpdb->postmeta where post_id = %d and meta_key = 'featured_image' ; ", $post_id ) );
+			$acf_feat_img_override_meta_value = $wpdb->get_var( $wpdb->prepare( "select meta_value from $wpdb->postmeta where post_id = %d and meta_key = 'featured_image_override' ; ", $post_id ) );
+			$featured_image_id = $acf_feat_img_meta_value ?? $acf_feat_img_override_meta_value;
 			if ( ! is_null( $featured_image_id ) ) {
-				set_post_thumbnail( $post_id, $featured_image_id );
+				$is_set = set_post_thumbnail( $post_id, $featured_image_id );
 				$this->log( self::LOG_FEATIMG, $post_id );
 			}
 
@@ -245,30 +249,49 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 			// Convert $stripes_metas to actual HTML content.
 			$post_content = '';
-			foreach ( $stripes_metas as $stripes_meta ) {
+			foreach ( $stripes_metas as $key_stripes_meta => $stripes_meta ) {
 				$pre_linebreak = ! empty( $post_content ) ? "\n\n" : '';
 
 				if ( isset( $stripes_meta['map'] ) || isset( $stripes_meta['zoom'] ) ) {
 					// Just log these to be done manually.
 					$this->log( self::LOG_MAPS_NOT_DONE_IDS, $post_id );
+				} else if ( isset( $stripes_meta['related_articles'] ) ) {
+					$label = $stripes_meta['related_articles_label'] ?? null;
+					$related_post_ids = unserialize( $stripes_meta['related_articles'] ) ?? [];
+
+					if ( ! empty( $related_post_ids ) ) {
+						// Defaults for $label.
+						if ( empty( $label ) ) {
+							$label = 'Related articles';
+						}
+						if ( ! empty( $label ) && ! str_ends_with( $label , ':' ) ) {
+							$label .= ':';
+						}
+
+						$post_content .= $pre_linebreak . $this->render_related_articles( $label, $related_post_ids );
+
+						$this->log( self::LOG_RELATEDARTICLES, $post_id );
+					}
 				} else if ( isset( $stripes_meta['audio_file'] ) ) {
 					$audio_attachment_id = $stripes_meta['audio_file'];
-					$audio_title = $stripes_meta['audio_title'] ?? null;
-					$audio_credit = $stripes_meta['credit'] ?? null;
+					$audio_title = $stripes_meta['audio_title'] ?? '';
+					$audio_credit = $stripes_meta['credit'] ?? '';
 
-					$caption = $audio_title ? $audio_title : $audio_credit;
+					$caption = $audio_title
+					           . ( ! empty( $audio_title ) && ! empty( $audio_credit ) ? '. ' : '' )
+							   . 'Credit: ' . $audio_credit;
 					$post_content .= $pre_linebreak . $this->render_audio_block( $audio_attachment_id, $caption );
 
 					$this->log( self::LOG_AUDIOFILE, $post_id );
 				} else if ( isset( $stripes_meta['file'] ) ) {
-					// All 'file's are PDFs.
+					// All 'file's in Charlotteville's ACF are PDFs.
 					$file_attachment_id = $stripes_meta['file'];
-					$credit = $stripes_meta['credit'] ?? null;
-					$title = $stripes_meta['title'] ?? null;
+					$credit = $stripes_meta['credit'] ?? '';
+					$title = $stripes_meta['title'] ?? '';
 
 					$caption = $title
 					           . ( ! empty( $title ) && ! empty( $credit ) ? '. ' : '' )
-					           . $credit;
+					           . 'Credit: ' . $credit;
 					$post_content .= $pre_linebreak . $this->render_pdf_block( $file_attachment_id, $caption );
 
 					$this->log( self::LOG_PDF, $post_id );
@@ -276,6 +299,10 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 					// PDFs.
 					$file_attachment_id = $stripes_meta['pdf'];
 					$attachment = get_post( $file_attachment_id );
+					if ( ! $attachment ) {
+						$this->log( self::LOG_PDF_NOTFOUND, $post_id );
+						continue;
+					}
 					$caption = wp_get_attachment_caption( $file_attachment_id );
 					// 'Description' attachment field is used as Credit on Charlottesville Today.
 					$credit = $attachment->post_content;
@@ -301,13 +328,13 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 					// Numerated list.
 					unset( $stripes_meta['boxes'] );
 					$list_lines = [];
-					foreach ( $stripes_meta['boxes'] as $key_box => $box ) {
+					foreach ( $stripes_meta as $key_box => $box ) {
 						if ( str_ends_with( $key_box, '_text' ) ) {
 							$list_lines[] = $box;
 						}
 					}
 
-					if ( !empty( $list_lines ) ) {
+					if ( ! empty( $list_lines ) ) {
 						$post_content .= $pre_linebreak . $this->render_numerated_list( $list_lines );
 
 						$this->log( self::LOG_BOXES, $post_id );
@@ -315,11 +342,14 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				} else if ( isset( $stripes_meta['type'] ) && 'link' == $stripes_meta['type'] ) {
 					// A link consisting of title, caption and possibly an image.
 					$credit = $stripes_meta['credit'] ?? null;
+					if ( ! is_null( $credit ) ) {
+						$credit = 'Credit: ' . $credit;
+					}
 					$title = $stripes_meta['title'] ?? null;
 					$image_attachment_id = 'custom' == $stripes_meta['icon'] && isset( $stripes_meta['image'] ) ? $stripes_meta['image'] : null;
 					$unserialized_data = isset( $stripes_meta['link'] ) ? unserialize( $stripes_meta['link'] ) : null;
 					$url = null;
-					if ( is_array( $unserialized_data ) && ! empty( is_array( $unserialized_data ) )) {
+					if ( is_array( $unserialized_data ) && ! empty( $unserialized_data ) ) {
 						$title = $unserialized_data['title'];
 						$url = $unserialized_data['url'];
 					}
@@ -332,10 +362,16 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				} else if ( isset( $stripes_meta['image'] ) ) {
 					// Image.
 					$image_attachment_id = $stripes_meta['image'];
-					$attachment = get_post( $image_attachment_id );
+					$image = get_post( $image_attachment_id );
+					if ( ! $image ) {
+						$this->log( self::LOG_IMAGE_NOT_FOUND, $post_id );
+						continue;
+					}
+
 					$caption = wp_get_attachment_caption( $image_attachment_id );
+					$description = $wpdb->get_var( $wpdb->prepare( "select post_content from $wpdb->posts where ID = %d ;", $image_attachment_id ) );
 					// 'Description' attachment field is used as Credit on Charlottesville Today.
-					$credit = $attachment->post_content;
+					$credit = $description;
 
 					// Let's append "Credit" to image Caption.
 					if ( ! empty( $credit ) ) {
@@ -346,7 +382,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 					$this->log( self::LOG_IMAGE, $post_id );
 				} else if ( isset( $stripes_meta['images'] ) ) {
-					$image_ids = $stripes_meta['images'];
+					$image_ids = unserialize( $stripes_meta['images'] );
 
 					$post_content .= $pre_linebreak . $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( $image_ids );
 
@@ -362,6 +398,9 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 					$quote = $stripes_meta['quote'];
 					$person = $stripes_meta['person'] ?? null;
 					$person_title = $stripes_meta['person_title'] ?? null;
+					if ( ! is_null( $person_title ) ) {
+						$person_title = trim( $person_title, ' ' );
+					}
 
 					$post_content .= $pre_linebreak . $this->render_person_quote( $quote, $person, $person_title );
 
@@ -379,6 +418,10 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 						$this->log( self::LOG_VIDEO, $post_id );
 					}
 				}
+			}
+
+			if ( ! empty( $post_content ) ) {
+				// $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content ], [ 'ID' => $post_id ] );
 			}
 		}
 
@@ -446,7 +489,7 @@ BLOCK;
 		if ( $credit ) {
 		$block .= ( ! empty( $block ) ? "\n\n" : '') . <<<BLOCK
 <!-- wp:paragraph -->
-<p>Credit: $credit</p>
+<p>$credit</p>
 <!-- /wp:paragraph -->
 BLOCK;
 		}
@@ -505,6 +548,28 @@ BLOCK;
 <!-- wp:heading {"level":3} -->
 <h3>$text</h3>
 <!-- /wp:heading -->
+BLOCK;
+	}
+
+	public function render_related_articles( $label, $related_post_ids ) {
+		$a_elements = [];
+		foreach ( $related_post_ids as $related_post_id ) {
+			$related_post = get_post( $related_post_id );
+			$href = get_permalink( $related_post_id );
+			$title = $related_post->post_title;
+			$a_elements[] = sprintf ( '<a href="%s">%s</a>', $href, $title );
+		}
+
+		$li_separated_a_elements = implode( '</li><li>', $a_elements );
+
+		return <<<BLOCK
+<!-- wp:paragraph -->
+<p>$label</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:list -->
+<ul><li>$li_separated_a_elements</li></ul>
+<!-- /wp:list -->
 BLOCK;
 	}
 
