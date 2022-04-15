@@ -81,7 +81,8 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		 * Here's analyzing Charlotteville's DB and searching for unique 'stripes_\d_*' component names.
 		 *
 		 * The 'stripes_\d_*' we're migrating here are:
-		 *      excerpt
+		 *      post featured image
+		 *      post excerpt
 		 *      featured_image || featured_image_override
 		 *      stripes_%_audio_file (just 'audio_file' abbrev. for the next fields
 		 *      audio_title
@@ -92,10 +93,10 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		 *      images
 		 *      infogram_embed_id
 		 *      link
-         *      pdf
+		 *      pdf
 		 *      person
 		 *      person_title
-         *      title (BUT NOT person_title NOR audio_title)
+		 *      title (BUT NOT person_title NOR audio_title)
 		 *      quote
 		 *      type -- "link" or "file"
 		 *      video
@@ -202,6 +203,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		 *      vc_fields_video_url
 		 */
 
+		// Example IDs which contain and test all the migrated ACF fields.
 		$dev_examples__post_ids = [
 			// wysiwyg, audio_file
 			69143,
