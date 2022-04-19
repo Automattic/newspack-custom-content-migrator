@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use WP_CLI;
 use WP_Post;
 
@@ -16,10 +17,16 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 	private $squarebracketselement_manipulator;
 
 	/**
+	 * @var PostsLogic.
+	 */
+	private $posts_logic;
+
+	/**
 	 * NextgenGalleryMigrator constructor.
 	 */
 	private function __construct() {
 		$this->squarebracketselement_manipulator = new SquareBracketsElementManipulator();
+		$this->posts_logic                       = new PostsLogic();
 	}
 
 	/**
@@ -105,6 +112,24 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 		WP_CLI::add_command(
 			'newspack-content-migrator revert-custom-accordion-solution-to-genesis',
 			array( $this, 'handle_revert_accordion_solution_to_genesis' ),
+			array(
+				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator revert-custom-accordion-solution-to-genesis',
+			array( $this, 'handle_revert_accordion_solution_to_genesis' ),
+			array(
+				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator migrate-zeen-gallery-to-jetpack-gallery',
+			array( $this, 'migrate_zeen_gallery_to_jetpack_gallery' ),
 			array(
 				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
 				'synopsis'  => array(),
@@ -607,7 +632,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			array(
 				'numberposts' => -1,
 				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
-				'category'    => 46,
+				'category'    => 46, // DESAFÍA TU MENTE
 			)
 		);
 
@@ -674,6 +699,108 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				WP_CLI::success( sprintf( '(%d/%d) Post %d content not updated.', $accordion_index, $total_posts, $post->ID ) );
 			}
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator migrate-zeen-gallery-to-jetpack-gallery`.
+	 */
+	public function migrate_zeen_gallery_to_jetpack_gallery() {
+		$conversion_meta = '_newspack_with_jetpack_tiled_gallery';
+
+		$this->posts_logic->throttled_posts_loop(
+			array(
+				'category'   => 17, // FOTORREPORTAJES category.
+				'meta_query' => array(
+					array(
+						'key'     => $conversion_meta,
+						'compare' => 'NOT EXISTS',
+					),
+				),
+			),
+			function( $post ) use ( $conversion_meta ) {
+				$gallery_meta = get_post_meta( $post->ID, 'zeen_gallery', true );
+				if ( $gallery_meta && count( $gallery_meta ) > 0 ) {
+					$gallery_content = '
+					<div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular">
+						<div class="tiled-gallery__gallery">
+							<div class="tiled-gallery__row">
+					';
+
+					array_splice( $gallery_meta, 0, 4 );
+
+					$gallery_content .= join(
+						' ',
+						array_map(
+							function( $index, $attachment_id ) {
+								$attachment_url = wp_get_attachment_url( $attachment_id );
+								$tile_size      = $this->get_tile_image_size_by_index( $index );
+								return '
+								<div class="tiled-gallery__col" style="flex-basis: ' . $tile_size . '%">
+									<figure class="tiled-gallery__item">
+										<img
+											alt="' . get_the_title( $attachment_id ) . '"
+											data-id="' . $attachment_id . '"
+											data-link="' . $attachment_url . '"
+											data-url="' . $attachment_url . '"
+											src="' . $attachment_url . '"
+											data-amp-layout="responsive"
+										/>
+									</figure>
+								</div>';
+							},
+							array_keys( $gallery_meta ),
+							$gallery_meta
+						)
+					);
+
+					$gallery_content .= '
+								</div>
+							</div>
+						</div>
+					';
+
+					$gallery_block = array(
+						'blockName'    => 'jetpack/tiled-gallery',
+						'attrs'        => array(
+							'columnWidths' =>
+								array(
+									array(
+										$this->get_tile_image_size_by_index( 0 ),
+										$this->get_tile_image_size_by_index( 1 ),
+									),
+									array(
+										$this->get_tile_image_size_by_index( 2 ),
+										$this->get_tile_image_size_by_index( 3 ),
+										$this->get_tile_image_size_by_index( 4 ),
+									),
+									array(
+										$this->get_tile_image_size_by_index( 5 ),
+										$this->get_tile_image_size_by_index( 6 ),
+									),
+
+								),
+							'ids'          => $gallery_meta,
+						),
+						'innerBlocks'  => array(),
+						'innerHTML'    => $gallery_content,
+						'innerContent' => array( $gallery_content ),
+					);
+
+					wp_update_post(
+						array(
+							'ID'           => $post->ID,
+							'post_content' => $post->post_content . serialize_block( $gallery_block ),
+						)
+					);
+
+					update_post_meta( $post->ID, $conversion_meta, true );
+
+					WP_CLI::success( sprintf( 'Post %d content updated.', $post->ID ) );
+				} else {
+					WP_CLI::warning( sprintf( "The post #%d doesn't have the `zeen_gallery` meta.", $post->ID ) );
+				}
+			}
+		);
 	}
 
 	/**
@@ -1484,5 +1611,16 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
+	}
+
+	/**
+	 * Generate tile size based on its index.
+	 *
+	 * @param int $index Tile size.
+	 * @return string
+	 */
+	private function get_tile_image_size_by_index( $index ) {
+		$tile_image_sizes = array( '66.79014', '33.20986', '33.33333', '33.33333', '33.33333', '50.00000', '50.00000' );
+		return $tile_image_sizes[ $index % count( $tile_image_sizes ) ];
 	}
 }
