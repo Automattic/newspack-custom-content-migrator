@@ -53,7 +53,7 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator verify-bylines',
-			array( $this, 'verify_bylines' ),
+			array( $this, 'vosd_verify_bylines' ),
 			array(
 				'shortdesc' => 'Verify migrated bylines from live site.',
 				'synopsis'  => array(),
@@ -67,7 +67,7 @@ class VoiceOfSanDiegoMigrator implements InterfaceMigrator {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function verify_bylines( $args, $assoc_args ) {
+	public function vosd_verify_bylines( $args, $assoc_args ) {
 		$posts = get_posts(
 			array(
 				'numberposts' => 1000,

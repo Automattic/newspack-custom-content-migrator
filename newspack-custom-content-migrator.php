@@ -56,5 +56,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
 		Migrator\PublisherSpecific\CharlottesvilleTodayMigrator::class,
+		Migrator\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
 	)
 );
