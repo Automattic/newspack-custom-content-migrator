@@ -2,6 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
+use DateTime;
+use DateTimeZone;
 use Exception;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
@@ -47,7 +49,23 @@ class EnergeticCityMigrator implements InterfaceMigrator {
 			'newspack-content-migrator energetic-city-fix-missing-featured-images',
 			[ $this, 'fix_missing_featured_images' ],
 			[
-				'shortdesc' => 'Will handle migrating custom content from wp_postmeta to wp_post.post_content',
+				'shortdesc' => 'Will attempt to tie featured images to posts.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator energetic-city-update-posts',
+			[ $this, 'update_posts' ],
+			[
+				'shortdesc' => 'Will fix the metadata for posts that were brought in from an XML import.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator energetic-city-move-posts',
+			[ $this, 'move_posts' ],
+			[
+				'shortdesc' => 'Will copy and paste posts from missing data set to live data set.',
 				'synopsis'  => [],
 			]
 		);
@@ -109,4 +127,94 @@ class EnergeticCityMigrator implements InterfaceMigrator {
 		}
 	}
 
+	/**
+	 * THIS NOT SHOULD NOT BE RUN THE SITE. LOCAL ONLY.
+	 *
+	 * @throws Exception
+	 */
+	public function update_posts() {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			"SELECT p.*, IF(lu.user_nicename IS NOT NULL, lu.ID, 41) as live_post_author
+                  FROM $wpdb->posts p
+                           LEFT JOIN $wpdb->users u ON p.post_author = u.ID
+                           LEFT JOIN live_users lu ON u.user_nicename = lu.user_nicename"
+		);
+
+		foreach ( $posts as $post ) {
+			$post_date          = new DateTime( $post->post_date, new DateTimeZone( 'America/Edmonton' ) );
+			$post_modified_date = new DateTime( $post->post_modified, new DateTimeZone( 'America/Edmonton' ) );
+			$post_date->setTimezone( new DateTimeZone( 'GMT' ) );
+			$post_modified_date->setTimezone( new DateTimeZone( 'GMT' ) );
+
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_author'       => $post->live_post_author,
+					'post_date_gmt'     => $post_date->format( 'Y-m-d H:i:s' ),
+					'post_modified_gmt' => $post_date->format( 'Y-m-d H:i:s' ),
+					'post_name'         => sanitize_title_with_dashes( $post->post_title ),
+					'post_status'       => 'publish',
+					'comment_status'    => 'closed',
+					'ping_status'       => 'closed',
+					'guid'              => "https://energeticcity.ca/?p=$post->ID",
+				],
+				[
+					'ID' => $post->ID,
+				]
+			);
+		}
+	}
+
+	/**
+	 * Will copy posts that were recovered and inserted into missing_2_posts table into the main wp_posts table.
+	 */
+	public function move_posts() {
+		global $wpdb;
+
+		$missing_posts = $wpdb->get_results( 'SELECT * FROM missing_2_posts' );
+
+		foreach ( $missing_posts as $post ) {
+
+			$new_post_id = wp_insert_post(
+				[
+					'post_author'           => $post->post_author,
+					'post_date'             => $post->post_date,
+					'post_date_gmt'         => $post->post_date_gmt,
+					'post_content'          => $post->post_content,
+					'post_title'            => $post->post_title,
+					'post_excerpt'          => $post->post_excerpt,
+					'post_status'           => $post->post_status,
+					'comment_status'        => $post->comment_status,
+					'post_password'         => $post->post_password,
+					'post_name'             => $post->post_name,
+					'to_ping'               => $post->to_ping,
+					'pinged'                => $post->pinged,
+					'post_modified'         => $post->post_modified,
+					'post_modified_gmt'     => $post->post_modified_gmt,
+					'post_content_filtered' => $post->post_content_filtered,
+					'post_parent'           => $post->post_parent,
+					'guid'                  => $post->guid,
+					'menu_order'            => $post->menu_order,
+					'post_type'             => $post->post_type,
+					'post_mime_type'        => $post->post_mime_type,
+					'comment_count'         => $post->comment_count,
+				]
+			);
+
+			if ( $new_post_id ) {
+				WP_CLI::line( "Old Post ID: $post->ID New Post ID: $new_post_id" );
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'guid' => "https://energeticcity.ca/?p=$new_post_id",
+					],
+					[
+						'ID' => $new_post_id,
+					]
+				);
+			}
+		}
+	}
 }
