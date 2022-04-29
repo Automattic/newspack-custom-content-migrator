@@ -232,11 +232,6 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 			\WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$post = get_post( $post_id );
-			if ( ! empty( $post->post_content ) ) {
- 				\WP_CLI::line( "Skipping." );
-				$this->log( self::LOG_SKIPPED, $post_id );
-				continue;
-			}
 
 			// Import ACF excerpt.
 			$acf_excerpt_meta_value = $wpdb->get_var( $wpdb->prepare( "select meta_value from $wpdb->postmeta where post_id = %d and meta_key like 'excerpt' ; ", $post_id ) );
@@ -252,6 +247,13 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 			if ( ! is_null( $featured_image_id ) ) {
 				$is_set = set_post_thumbnail( $post_id, $featured_image_id );
 				$this->log( self::LOG_FEATIMG, $post_id );
+			}
+
+			// Will update Post's Featured Image and Excerpt even if there's no post_content.
+			if ( ! empty( $post->post_content ) ) {
+				\WP_CLI::line( "Skipping." );
+				$this->log( self::LOG_SKIPPED, $post_id );
+				continue;
 			}
 
 			// Import ACF "stripes_%" meta, which contains various types of content.
