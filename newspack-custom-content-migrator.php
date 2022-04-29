@@ -53,12 +53,10 @@ PluginSetup::register_migrators(
 
 		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,
-		Migrator\PublisherSpecific\ElLiberoMigrator::class,
-		Migrator\PublisherSpecific\ElLiberoCustomCategoriesMigrator::class,
-		Migrator\PublisherSpecific\ElLiberoContentMigrator::class,
-		Migrator\PublisherSpecific\ElLiberoMigrateMissingUsers::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
 		Migrator\PublisherSpecific\RenoMigrator::class,
+		Migrator\PublisherSpecific\CharlottesvilleTodayMigrator::class,
+		Migrator\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
 	)
 );

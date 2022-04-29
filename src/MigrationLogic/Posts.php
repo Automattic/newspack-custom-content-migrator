@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use WP_Query;
+use WP_CLI;
 
 class Posts {
 	/**
@@ -243,12 +244,113 @@ SQL;
 	 *
 	 * @return int[]|\WP_Post[]
 	 */
-	public function get_all_posts( $post_type = 'post', $post_status = [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ] ) {
-		return get_posts( [
-	        'posts_per_page' => -1,
-	        'post_type'      => $post_type,
-	        // `'post_status' => 'any'` doesn't work as expected.
-	        'post_status'    => $post_status,
-		] );
+	public function get_all_posts( $post_type = 'post', $post_status = array( 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ) ) {
+		return get_posts(
+			array(
+				'posts_per_page' => -1,
+				'post_type'      => $post_type,
+				// `'post_status' => 'any'` doesn't work as expected.
+				'post_status'    => $post_status,
+			)
+		);
+	}
+
+	/**
+	 * Batch posts and execute a callback action on each one, with a wait time between the batches.
+	 *
+	 * @param array    $query_args Arguments to retrieve posts, the same as the ones for get_posts function.
+	 * @param callable $callback The callback function to execute on each post, get the post as parameter.
+	 * @param integer  $wait The waiting time between batches in seconds.
+	 * @param integer  $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer  $batch Current batch in the loop.
+	 * @return void
+	 */
+	public function throttled_posts_loop( $query_args, $callback, $wait = 3, $posts_per_batch = 1000, $batch = 1 ) {
+		WP_CLI::line( sprintf( 'Batch #%d', $batch ) );
+
+		$args = array_merge(
+			array(
+				'posts_per_page' => $posts_per_batch,
+				'paged'          => $batch,
+			),
+			$query_args
+		);
+
+		$posts = get_posts( $args );
+
+		if ( empty( $posts ) ) {
+			return;
+		}
+
+		foreach ( $posts as $post ) {
+			$callback( $post );
+		}
+
+		sleep( $wait );
+
+		self::throttled_posts_loop( $query_args, $callback, $wait, $posts_per_batch, $batch + 1 );
+	}
+
+	/**
+	 * Generate Newspack Iframe Block code from HTML
+	 * By Creating an HTML file and uploading it to be set as the iframe source.
+	 *
+	 * @param string $html_to_embed HTML code to embed.
+	 * @param int    $post_id Post ID where to embed the HTML, used to generate unique Iframe source filename.
+	 * @return string Iframe block code to be add to the post content.
+	 */
+	public function embed_iframe_block_from_html( $html_to_embed, $post_id ) {
+		$iframe_folder      = "iframe-$post_id-" . wp_generate_password( 8, false );
+		$wp_upload_dir      = wp_upload_dir();
+		$iframe_upload_dir  = '/newspack_iframes/';
+		$iframe_upload_path = $wp_upload_dir['path'] . $iframe_upload_dir;
+		$iframe_path        = $iframe_upload_path . $iframe_folder;
+
+		// create iframe directory if not existing.
+		if ( ! file_exists( $iframe_path ) ) {
+			wp_mkdir_p( $iframe_path );
+		}
+
+		// Save iframe content in html file.
+		file_put_contents( "$iframe_path/index.html", $html_to_embed );
+		$iframe_src       = $wp_upload_dir['url'] . $iframe_upload_dir . $iframe_folder . DIRECTORY_SEPARATOR;
+		$iframe_directory = path_join( $wp_upload_dir['subdir'] . $iframe_upload_dir, $iframe_folder );
+
+		return '<!-- wp:newspack-blocks/iframe {"src":"' . $iframe_src . '","archiveFolder":"' . $iframe_directory . '"} /-->';
+	}
+
+	/**
+	 * Generate Newspack Iframe Block code from URL.
+	 *
+	 * @param string $src Iframe source URL.
+	 * @return string Iframe block code to be add to the post content.
+	 */
+	public function embed_iframe_block_from_src( $src ) {
+		return '<!-- wp:newspack-blocks/iframe {"src":"' . $src . '"} /-->';
+	}
+
+	/**
+	 * Generate Jetpack Slideshow Block code from Media Posts.
+	 *
+	 * @param int[] $post_ids Media Posts IDs.
+	 * @return string Jetpack Slideshow block code to be add to the post content.
+	 */
+	public function generate_jetpack_slideshow_block_from_media_posts( $post_ids ) {
+		$posts = [];
+		foreach ( $post_ids as $post_id ) {
+			$posts[] = get_post( $post_id );
+		}
+
+		if ( empty( $posts ) ) {
+			return '';
+		}
+
+		$content  = '<!-- wp:jetpack/slideshow {"ids":[' . join( ',', $post_ids ) . '],"sizeSlug":"large"} -->';
+		$content .= '<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">';
+		foreach ( $posts as $post ) {
+			$content .= '<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="' . $post->post_title . '" class="wp-block-jetpack-slideshow_image wp-image-' . $post->ID . '" data-id="' . $post->ID . '" src="' . wp_get_attachment_url( $post->ID ) . '"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">' . $post->post_title . '</figcaption></figure></li>';
+		}
+		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
+		return $content;
 	}
 }
