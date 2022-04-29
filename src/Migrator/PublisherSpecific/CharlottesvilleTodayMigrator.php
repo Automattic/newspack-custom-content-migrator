@@ -249,6 +249,8 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				$this->log( self::LOG_FEATIMG, $post_id );
 			}
 
+			$this->set_acf_categories( $post );
+
 			// Will update Post's Featured Image and Excerpt even if there's no post_content.
 			if ( ! empty( $post->post_content ) ) {
 				\WP_CLI::line( "Skipping." );
@@ -465,6 +467,31 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 		// For $wpdb->update to sink in.
 		wp_cache_flush();
+	}
+
+	public function set_acf_categories( $post ){
+		global $wpdb;
+
+		$acf_topics_meta = $wpdb->get_var( $wpdb->prepare( "select meta_value from $wpdb->postmeta where post_id = %d and meta_key = 'article_topics' ; ", $post->ID ) );
+		if ( ! $acf_topics_meta || empty( $acf_topics_meta ) ) {
+			return;
+		}
+
+		$term_ids = unserialize( $acf_topics_meta );
+		if ( empty( $term_ids ) ) {
+			return;
+		}
+
+		// Transform ACF Topics to Cats and assign them to Posts.
+		foreach ( $term_ids as $term_id ) {
+			// Can't use get_term -- WP Error "Invalid taxonomy.".
+			$term_name = $wpdb->get_var( $wpdb->prepare( "select name from wp_terms where term_id = %d ; ", $term_id ) );
+			$category_id = wp_create_category( $term_name );
+			$cat_set = wp_set_post_categories( $post->ID, [ $category_id ], true );
+		}
+
+		// Remove Uncategorized.
+		wp_remove_object_terms( $post->ID, 'uncategorized', 'category' );
 	}
 
 	public function render_audio_block( $attachment_id, $caption ) {
