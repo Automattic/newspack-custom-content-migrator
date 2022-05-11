@@ -58,5 +58,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\CharlottesvilleTodayMigrator::class,
 		Migrator\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
 		Migrator\PublisherSpecific\EnergeticCityMigrator::class,
+		Migrator\PublisherSpecific\BethesdaMagMigrator::class,
 	)
 );
