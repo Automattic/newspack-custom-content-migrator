@@ -3,6 +3,8 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use \WP_CLI;
 
 /**
@@ -10,6 +12,24 @@ use \WP_CLI;
  */
 class BethesdaMagMigrator implements InterfaceMigrator {
 	const DELETE_LOGS = 'bethesda_duplicate_posts_delete.log';
+
+	/**
+	 * @var PostsLogic.
+	 */
+	private $posts_migrator_logic;
+
+	/**
+	 * @var CoAuthorPlusLogic $coauthorsplus_logic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+		$this->posts_migrator_logic = new PostsLogic();
+		$this->coauthorsplus_logic  = new CoAuthorPlusLogic();
+	}
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -37,6 +57,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		WP_CLI::add_command(
 			'newspack-content-migrator bethesda-remove-duplicated-posts',
 			array( $this, 'bethesda_remove_duplicated_posts' ),
+			array(
+				'shortdesc' => 'Remove duplicated posts.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-migrate-co-authors-from-meta',
+			array( $this, 'bethesda_migrate_co_authors_from_meta' ),
 			array(
 				'shortdesc' => 'Remove duplicated posts.',
 				'synopsis'  => array(),
@@ -99,6 +128,137 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator bethesda-migrate-co-authors-from-meta`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function bethesda_migrate_co_authors_from_meta( $args, $assoc_args ) {
+		$this->posts_migrator_logic->throttled_posts_loop(
+			array(
+				'post_type'   => 'post',
+				'post_status' => array( 'publish' ),
+			),
+			function( $post ) {
+				$co_authors_ids       = array();
+				$author_meta          = get_post_meta( $post->ID, 'bm_author', true );
+				$authors_to_not_split = array(
+					'By Alicia Klaffky, Kensington',
+					'By Robert Karn, Boyds',
+					'By Carole Sugarman, @CaroleSugarman',
+				);
+
+				$co_authors_to_add = array();
+
+				if ( ! empty( $author_meta ) ) {
+					$cleaned_author_name = $this->clean_author_name( trim( wp_strip_all_tags( $author_meta ) ) );
+
+					// Skip splitting authors with 'School' as they contain only one author name and the name of the high school.
+					// Skip splitting specific author names.
+					// Skip splitting author names that starts with or ends with given words.
+					if (
+						! $this->str_contains( $cleaned_author_name, 'school' )
+						&& ! $this->str_contains( $cleaned_author_name, 'Adult Short Story Winner' )
+						&& ! $this->str_contains( $cleaned_author_name, 'Washington, D.C.' )
+						&& ! $this->str_contains( $cleaned_author_name, 'Academie de Cuisine' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Potomac' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Rockville' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Chevy Chase' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', MD' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Gaithersburg' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Bethesda' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Arlington, VA' )
+						&& ! $this->str_starts_with( 'Story and photos by', $author_meta )
+						&& ! $this->str_starts_with( 'Text and photos by', $author_meta )
+						&& ! in_array( $author_meta, $authors_to_not_split, true )
+						&& ( $this->str_contains( $cleaned_author_name, ' and ' ) || $this->str_contains( $cleaned_author_name, ', ' ) || $this->str_contains( $cleaned_author_name, 'Follow @' ) )
+					) {
+						$co_authors_names = preg_split( '/(, | and | & |Follow @[^\s]+)/', $cleaned_author_name );
+						foreach ( $co_authors_names as $ca ) {
+							$co_authors_to_add[] = $ca;
+						}
+					} else {
+						$co_authors_to_add = array( $cleaned_author_name );
+					}
+				}
+
+				if ( ! empty( $co_authors_to_add ) ) {
+					// add co-authors and link them to the post.
+					foreach ( $co_authors_to_add as $co_author_to_add ) {
+						$co_authors_ids[] = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $co_author_to_add ) );
+					}
+
+					// Assign co-atuhors to the post in question.
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors_ids, $post->ID );
+					WP_CLI::line( sprintf( 'Adding co-authors to the post %d: %s', $post->ID, join( ', ', $co_authors_to_add ) ) );
+				}
+			}
+		);
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Clean author name from prefixes.
+	 *
+	 * @param string $author Author name to clean.
+	 * @return string
+	 */
+	private function clean_author_name( $author ) {
+		$prefixes = array(
+			'By ',
+			'By: ',
+			'From Bethesda Now - By ',
+			'Compiled By ',
+		);
+
+		foreach ( $prefixes as $prefix ) {
+			if ( $this->str_starts_with( $author, $prefix ) ) {
+				return preg_replace( '/^' . preg_quote( $prefix, '/' ) . '/i', '', $author );
+			}
+		}
+
+		return $author;
+	}
+
+	/**
+	 * Checks if a string starts with a given substring
+	 *
+	 * @param string $haystack The string to search in.
+	 * @param string $needle The substring to search for in the haystack.
+	 * @return boolean
+	 */
+	private function str_starts_with( $haystack, $needle ) {
+		return substr( strtolower( $haystack ), 0, strlen( strtolower( $needle ) ) ) === strtolower( $needle );
+	}
+
+	/**
+	 * Checks if a string ends with a given substring
+	 *
+	 * @param string $haystack The string to search in.
+	 * @param string $needle The substring to search for in the haystack.
+	 * @return boolean
+	 */
+	private function str_ends_with( $haystack, $needle ) {
+		$length = strlen( $needle );
+		if ( ! $length ) {
+			return true;
+		}
+		return substr( strtolower( $haystack ), -$length ) === strtolower( $needle );
+	}
+
+	/**
+	 * Determine if a string contains a given substring
+	 *
+	 * @param string $haystack The string to search in.
+	 * @param string $needle The substring to search for in the haystack.
+	 * @return boolean
+	 */
+	private function str_contains( $haystack, $needle ) {
+		return strpos( strtolower( $haystack ), strtolower( $needle ) ) !== false;
 	}
 
 	/**
