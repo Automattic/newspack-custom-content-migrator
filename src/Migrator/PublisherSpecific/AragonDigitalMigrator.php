@@ -128,8 +128,8 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-zeen-gallery-to-jetpack-gallery',
-			array( $this, 'migrate_zeen_gallery_to_jetpack_gallery' ),
+			'newspack-content-migrator fix-featured-image-for-zeen-gallery-posts',
+			array( $this, 'fix_featured_image_for_zeen_gallery_posts' ),
 			array(
 				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
 				'synopsis'  => array(),
@@ -710,23 +710,23 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 		$this->posts_logic->throttled_posts_loop(
 			array(
 				'category'   => 17, // FOTORREPORTAJES category.
+				// 'post__in'   => array( 164859 ),
 				'meta_query' => array(
 					array(
 						'key'     => $conversion_meta,
-						'compare' => 'NOT EXISTS',
+						'compare' => 'EXISTS',
 					),
 				),
 			),
 			function( $post ) use ( $conversion_meta ) {
 				$gallery_meta = get_post_meta( $post->ID, 'zeen_gallery', true );
+
 				if ( $gallery_meta && count( $gallery_meta ) > 0 ) {
 					$gallery_content = '
 					<div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular">
 						<div class="tiled-gallery__gallery">
 							<div class="tiled-gallery__row">
 					';
-
-					array_splice( $gallery_meta, 0, 4 );
 
 					$gallery_content .= join(
 						' ',
@@ -763,22 +763,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 						'blockName'    => 'jetpack/tiled-gallery',
 						'attrs'        => array(
 							'columnWidths' =>
-								array(
-									array(
-										$this->get_tile_image_size_by_index( 0 ),
-										$this->get_tile_image_size_by_index( 1 ),
-									),
-									array(
-										$this->get_tile_image_size_by_index( 2 ),
-										$this->get_tile_image_size_by_index( 3 ),
-										$this->get_tile_image_size_by_index( 4 ),
-									),
-									array(
-										$this->get_tile_image_size_by_index( 5 ),
-										$this->get_tile_image_size_by_index( 6 ),
-									),
-
-								),
+								array(), // It will be filled after fixing the block manually from the backend.
 							'ids'          => $gallery_meta,
 						),
 						'innerBlocks'  => array(),
@@ -786,16 +771,45 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 						'innerContent' => array( $gallery_content ),
 					);
 
-					wp_update_post(
-						array(
-							'ID'           => $post->ID,
-							'post_content' => $post->post_content . serialize_block( $gallery_block ),
-						)
-					);
+					$post_blocks = parse_blocks( $post->post_content );
+					$last_block  = end( $post_blocks );
+					if ( $last_block && 'jetpack/tiled-gallery' === $last_block['blockName'] ) {
+						// remove previously added block.
+						array_pop( $post_blocks );
+						$post_blocks[] = $gallery_block;
 
-					update_post_meta( $post->ID, $conversion_meta, true );
+						wp_update_post(
+							array(
+								'ID'           => $post->ID,
+								'post_content' => serialize_blocks( $post_blocks ),
+							)
+						);
 
-					WP_CLI::success( sprintf( 'Post %d content updated.', $post->ID ) );
+						update_post_meta( $post->ID, $conversion_meta, true );
+
+						WP_CLI::success( sprintf( 'Post %d content updated.', $post->ID ) );
+					}
+				} else {
+					WP_CLI::warning( sprintf( "The post #%d doesn't have the `zeen_gallery` meta.", $post->ID ) );
+				}
+			}
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator fix-featured-image-for-zeen-gallery-posts`.
+	 */
+	public function fix_featured_image_for_zeen_gallery_posts() {
+		$this->posts_logic->throttled_posts_loop(
+			array(
+				'category' => 17, // FOTORREPORTAJES category.
+			),
+			function( $post ) {
+				$gallery_meta = get_post_meta( $post->ID, 'zeen_gallery', true );
+
+				if ( $gallery_meta && count( $gallery_meta ) > 0 ) {
+					set_post_thumbnail( $post, $gallery_meta[0] );
+					update_post_meta( $post->ID, 'newspack_featured_image_position', 'beside' );
 				} else {
 					WP_CLI::warning( sprintf( "The post #%d doesn't have the `zeen_gallery` meta.", $post->ID ) );
 				}
