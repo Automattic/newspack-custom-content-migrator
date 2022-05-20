@@ -67,19 +67,34 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 		// 	WP_CLI::error( 'Invalid output dir.' );
 		// }
 
-
 		$pmpro_orders_csv_file = '/var/www/afro2.test/public/wp-content/plugins/woocommerce-subscriptions-importer-exporter/pmpro-orders.csv';
 		$pmpro_members_csv_file = '/var/www/afro2.test/public/wp-content/plugins/woocommerce-subscriptions-importer-exporter/pmpro-members_list.csv';
+		$woocomm_subscriptions_csv_file = '/var/www/afro2.test/public/wp-content/plugins/woocommerce-subscriptions-importer-exporter/woocomm_subscriptions_from_pmp_orders.csv';
+
+		// Key is PMP product_id, and value is corresponding WooComm product_id.
+		$pmp_woocomm_product_map = [
+			// Corporate - Paid Annually ($250.00)
+			4 => 229945,
+			// Digital
+			3 => 229941,
+			// Digital - Annually
+			6 => 229942,
+			// Print &amp; Digital - Annually ($100.00)
+			5 => 229949,
+			// Print &amp; Digital Monthly
+			1 => 229948,
+		];
 
 		// Get associative arrays from CSV data files.
 		$pmpro_orders = $this->get_array_from_csv( $pmpro_orders_csv_file );
 		$pmpro_members = $this->get_array_from_csv( $pmpro_members_csv_file );
 
-		$woocomm_importer_data = $this->create_woocomm_importer_subscriptions_data( $pmpro_members, $pmpro_orders );
+		$woocomm_importer_data = $this->create_woocomm_subscriptions_importer_data( $pmpro_members, $pmpro_orders, $pmp_woocomm_product_map );
 
-		$woocomm_importer_csv;
+		$woocomm_importer_csv = $this->convert_array_to_csv( $woocomm_importer_data );
+		file_put_contents( $woocomm_subscriptions_csv_file, $woocomm_importer_csv );
 
-
+		\WP_CLI::log( sprintf( "Saved file %s", $woocomm_subscriptions_csv_file ) );
 	}
 
 	/**
@@ -95,11 +110,20 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 		$lines = explode( "\n", file_get_contents( $csv_file ) );
 		foreach ( $lines as $key_line => $line ) {
 			if ( 0 === $key_line ) {
-				$columns = explode( ',', $key_line );
+				$columns = explode( ',', $line );
 				continue;
 			}
 
-			$line_values = explode( ',', $key_line );
+			// Skip final empty line.
+			if ( empty( $line ) && ($key_line + 1 ) == count( $lines ) ) {
+				continue;
+			}
+
+			// Empty line values in PMP's CSVs can either be quoted, e.g. `"","",""` or unquoted `,,`, so let's quote them all first. Two replacements will update them all.
+			$line = str_replace( ',,', ',"",', $line );
+			$line = str_replace( ',,', ',"",', $line );
+
+			$line_values = explode( '","', $line );
 
 			// Number of columns should correspond to number of values.
 			if ( count( $columns ) !== count( $line_values ) ) {
@@ -108,10 +132,16 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 					count( $columns ),
 					$csv_file,
 					count( $line_values ),
-					$key_line
+					$key_line + 1
 				) );
 			}
 
+			$key_data = count( $data );
+			foreach ( $columns as $key_column => $column ) {
+				$value = $line_values[ $key_column ];
+				$value = trim( $value, '"' );
+				$data[ $key_data ][ $column ] = $value;
+			}
 		}
 
 		return $data;
@@ -125,7 +155,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 	 *
 	 * @return array
 	 */
-	public function create_woocomm_importer_subscriptions_data( $pmpro_members, $pmpro_orders ) {
+	public function create_woocomm_subscriptions_importer_data( $pmpro_members, $pmpro_orders, $pmp_woocomm_product_map ) {
 
 		/**
 		 * WooComm CSV structure overview -- https://github.com/woocommerce/woocommerce-subscriptions-importer-exporter
@@ -213,7 +243,17 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 
 			$subscription = [];
 
+
+			// Fetch this Order's Member record.
 			$pmp_order_member = $this->get_pmp_member_by_username( $pmpro_order[ 'username' ], $pmpro_members );
+			if ( is_null( $pmp_order_member ) ) {
+				throw new \RuntimeException( sprintf(
+					"Could not find PMP Member by username %s from Order ID %s.",
+					$pmpro_order[ 'username' ],
+					$pmpro_order[ 'id' ]
+				) );
+			}
+
 
 			// --- Customer User data.
 			// Takes either WP user ID, or username and email. We'll work with User IDs, so that we can also store other customer info.
@@ -290,13 +330,10 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 
 			$order_date = \DateTime::createFromFormat( 'F j, Y g:i A', $pmpro_order[ 'timestamp' ] );
 			$woocom_order_date = $order_date->format( 'Y-m-d H:i:s' );
-
-			$frequency_interval = \DateInterval::createFromDateString( sprintf( "1 %s", strtolower( $pmp_order_member[ 'term' ] ) ) );
+			$pmp_frequency_term = $pmp_order_member[ 'term' ];
+			$frequency_interval = \DateInterval::createFromDateString( sprintf( "1 %s", strtolower( $pmp_frequency_term ) ) );
 			$end_date = $order_date->add( $frequency_interval );
 			$end_date_format = $end_date->format( 'Y-m-d H:i:s' );
-
-			return;
-
 
 			// TODO
 			// PMP Member info
@@ -328,7 +365,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 					// 0
 					'next_payment_date' => $end_date_format,
 					// 2016-05-29 00:44:44
-					'last_payment_date' => $woocom_date_format,
+					'last_payment_date' => $woocom_order_date,
 					// 2016-04-29 00:44:46
 					'end_date' => $end_date_format,
 					// 2018-04-29 00:44:44
@@ -340,10 +377,10 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			$subscription = array_merge(
 				$subscription,
 				[
-					'billing_period',
+					'billing_period' => strtolower( $pmp_frequency_term ),
 					// month
 					// week
-					'billing_interval',
+					'billing_interval' => 1,
 					// 1
 					// 2
 				]
@@ -365,22 +402,26 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			// 	    SEEYOURSELF
 			// 	    SIMMONE
 			// 	    TEST
+			// TODO - check currency
+			$currency = 'USD';
+			// TODO - total should include all amounts
+			$total = $pmpro_order[ 'total' ];
 			$subscription = array_merge(
 				$subscription,
 				[
-					'order_shipping',
+					'order_shipping' => 0,
 					// 4.44
-					'order_shipping_tax',
+					'order_shipping_tax' => 0,
 					// 0.444
-					'order_tax',
+					'order_tax' => 0,
 					// 4.3
-					'cart_discount',
+					'cart_discount' => 0,
 					// 22
-					'cart_discount_tax',
+					'cart_discount_tax' => 0,
 					// 2.2
-					'order_total',
+					'order_total' => $total,
 					// 46.68
-					'order_currency',
+					'order_currency' => $currency,
 					// USD
 				]
 			);
@@ -420,17 +461,24 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 					// Manual
 					// or:
 					// Credit card (Stripe)
-					'payment_method_post_meta',
-					'payment_method_user_meta',
+					'payment_method_post_meta' => '',
+					'payment_method_user_meta' => '',
 				]
 			);
 
 
 			// --- Shipping method.
+			// TODO - check if shipping exists
+			$shipping_method = sprintf(
+				"method_id:%s|method_title:%s|total:%s",
+				'free_shipping',
+				'Free Shipping',
+				'0.00'
+			);
 			$subscription = array_merge(
 				$subscription,
 				[
-					'shipping_method',
+					'shipping_method' => $shipping_method,
 					// method_id:flat_rate|
 					// method_title:Flat Rate|
 					// total:4.44
@@ -445,11 +493,12 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			// --- Billing info.
 
 			// PMP has a single billing_name, while WooComm needs separate first and last.
-			$name = $pmpro_order[ 'name' ];
+			$name = $pmpro_order[ 'billing_name' ];
 			$name_exploded = explode( ' ', $name );
-			$name_last = $name_exploded[ count( $name ) - 1 ];
-			unset( $name_exploded[ count( $name ) - 1 ] );
+			$name_last = $name_exploded[ count( $name_exploded ) - 1 ];
+			unset( $name_exploded[ count( $name_exploded ) - 1 ] );
 			$names_before_last = implode( ' ', $name_exploded );
+			$billing_email = $pmp_order_member[ 'email' ] ?? '';
 
 			$subscription = array_merge(
 				$subscription,
@@ -458,7 +507,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 					// George
 					'billing_last_name' => $name_last,
 					// Washington
-					'billing_email' => '',
+					'billing_email' => $billing_email,
 					// george@example.com
 					'billing_phone' => $pmpro_order[ 'billing_phone' ],
 					// (555) 555-5555
@@ -480,25 +529,26 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 
 
 			// --- Shipping info.
+			// TODO - check if shipping exists.
 			$subscription = array_merge(
 				$subscription,
 				[
-					'shipping_first_name',
+					'shipping_first_name' => '',
 					// George
-					'shipping_last_name',
+					'shipping_last_name' => '',
 					// Washington
-					'shipping_address_1',
+					'shipping_address_1' => '',
 					// 969 Market
-					'shipping_address_2',
-					'shipping_postcode',
+					'shipping_address_2' => '',
+					'shipping_postcode' => '',
 					// 94103
-					'shipping_city',
+					'shipping_city' => '',
 					// San Francisco
-					'shipping_state',
+					'shipping_state' => '',
 					// CA
-					'shipping_country',
+					'shipping_country' => '',
 					// US
-					'shipping_company',
+					'shipping_company' => '',
 				]
 			);
 
@@ -507,7 +557,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			$subscription = array_merge(
 				$subscription,
 				[
-					'customer_note',
+					'customer_note' => '',
 				]
 			);
 
@@ -563,10 +613,11 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 
 
 			// --- Cupon items.
+			// TODO - check
 			$subscription = array_merge(
 				$subscription,
 				[
-					'coupon_items',
+					'coupon_items' => '',
 				]
 			);
 
@@ -575,7 +626,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			$subscription = array_merge(
 				$subscription,
 				[
-					'fee_items',
+					'fee_items' => '',
 					// name:Custom Fee|
 					// total:5.00|
 					// tax:0.50
@@ -584,10 +635,11 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 
 
 			// --- Tax items.
+			// TODO check
 			$subscription = array_merge(
 				$subscription,
 				[
-					'tax_items',
+					'tax_items' => '',
 					// id:4|
 					// code:Sales Tax|
 					// total:4.74
@@ -600,14 +652,21 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 
 
 			// --- Download permissions grants download permission for product (requires files to bet set on product). Can be 0 or 1.
+			// TODO check if should be set for all
 			$subscription = array_merge(
 				$subscription,
 				[
-					'download_permissions',
+					'download_permissions' => 1,
 				]
 			);
 
+
 			$woocomm_subscriptions_importer_data[] = $subscription;
+
+// TODO dev remove
+\WP_CLI::log( 'Exporting just the first order ' . $pmpro_order[ 'id' ] . ' for demo purposes then exiting.' );
+return $woocomm_subscriptions_importer_data;
+
 		}
 
 		return $woocomm_subscriptions_importer_data;
@@ -630,5 +689,30 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Converts an associative array into a CSV record with header column names in first line and values in following lines.
+	 *
+	 * @param $woocomm_importer_data
+	 *
+	 * @return string|null
+	 */
+	public function convert_array_to_csv( $woocomm_importer_data ) {
+
+		$csv = null;
+
+		foreach ( $woocomm_importer_data as $key_element => $element ) {
+			if ( 0 == $key_element ) {
+				$csv = implode( ',', array_keys( $element ) );
+			}
+
+			$csv .= "\n" . implode( ',', array_values( $element ) );
+		}
+
+		// Add empty line at the end.
+		$csv .= "\n";
+
+		return $csv;
 	}
 }
