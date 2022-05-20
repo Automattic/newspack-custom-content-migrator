@@ -57,7 +57,7 @@ class AfroMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_migrate( $args, $assoc_args ) {
-		$ids = $this->posts_logic->get_all_posts_ids( 'attachment' );
+		$ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $ids as $key_id => $id ) {
 			WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_id + 1, count( $ids ), $id ) );
 			wp_delete_post( $id, true );
