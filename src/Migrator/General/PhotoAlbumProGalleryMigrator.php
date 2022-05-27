@@ -9,9 +9,9 @@ use \NewspackPostImageDownloader\Downloader;
 use \WP_CLI;
 
 /**
- * Custom migration scripts for Photo Albums Plugins.
+ * Custom migration scripts for Photo Album Pro Gallery Plugins.
  */
-class PhotoAlbumsMigrator implements InterfaceMigrator {
+class PhotoAlbumProGalleryMigrator implements InterfaceMigrator {
 	const ALBUM_MIGRATION_LOG = 'ALBUM_MIGRATION.log';
 
 	/**
@@ -62,8 +62,8 @@ class PhotoAlbumsMigrator implements InterfaceMigrator {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator photo-albums-migration',
-			array( $this, 'photo_albums_migration' ),
+			'newspack-content-migrator photo-album-pro-gallery-migration',
+			array( $this, 'photo_album_pro_gallery_migration' ),
 			array(
 				'shortdesc' => 'Migrate photo albums from the Photo Album Pro plugin to Jetpack slideshow Block.',
 				'synopsis'  => array(),
@@ -72,12 +72,12 @@ class PhotoAlbumsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator photo-albums-migration`.
+	 * Callable for `newspack-content-migrator photo-album-pro-gallery-migration`.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function photo_albums_migration( $args, $assoc_args ) {
+	public function photo_album_pro_gallery_migration( $args, $assoc_args ) {
 		global $wpdb;
 
 		$wppa_tables     = array( 'wppa_albums', 'wppa_photos' );
