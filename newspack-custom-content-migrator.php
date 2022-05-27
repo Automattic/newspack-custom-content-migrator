@@ -50,6 +50,7 @@ PluginSetup::register_migrators(
 		Migrator\General\NextgenGalleryMigrator::class,
 		Migrator\General\TablePressMigrator::class,
 		Migrator\General\NinjaTablesMigrator::class,
+		Migrator\General\PhotoAlbumsMigrator::class,
 
 		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,
