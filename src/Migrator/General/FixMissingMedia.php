@@ -70,6 +70,12 @@ class FixMissingMedia implements InterfaceMigrator {
 				],
 			],
 		] );
+		WP_CLI::add_command( 'newspack-content-migrator fix-incomplete-sources',
+			[ $this, 'cmd_fix_incomplete_sources' ],
+			[
+				'shortdesc' => "Will load all post_content, look for <img> tags, and ensure they're src attributes are correct.",
+			]
+		);
 	}
 
 	/**
@@ -296,4 +302,164 @@ class FixMissingMedia implements InterfaceMigrator {
 		return $name;
 	}
 
+	/**
+	 * This function will look at a site's wp_posts table for any posts with <img> tags in
+	 * their post_content field. Out of the posts that it does find, it will load the
+	 * post_content as HTML and cycle through any <img> tags. If it cannot find the
+	 * indicated file in the src attribute, it will attempt to either look for it
+	 * locally in the wp-content/uploads folder, or attempt to download it. If
+	 * the image is downloaded, it will attach it to the post, and update
+	 * the HTML content. The HTML content is also updated if the file
+	 * is found locally as well.
+	 *
+	 * @param string[] $args CLI Positional Arguments.
+	 * @param string[] $assoc_args CLI Optional Arguments.
+	 */
+	public function cmd_fix_incomplete_sources( $args, $assoc_args ) {
+		global $wpdb;
+
+		$post_content_sql = "SELECT ID, post_title, post_content FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%<img%'";
+		$posts = $wpdb->get_results( $post_content_sql );
+
+		$home_path = get_home_path();
+		$exploded = explode( '/', $home_path );
+		$exploded = array_filter( $exploded );
+
+		$base_path = '';
+		$count = count( $exploded ) - 1;
+		foreach ( $exploded as $key => $particle ) {
+			$base_path .= "/$particle";
+
+			if ( file_exists( "$base_path/wp-content/uploads" ) ) {
+				break;
+			}
+
+			if ( $key === $count ) {
+				WP_CLI::error( 'Could not find correct base path.');
+				die();
+			}
+		}
+
+		$extensions = [
+			'jpg',
+			'jpeg',
+			'png',
+		];
+
+		$missing_post_images = [];
+		foreach ( $posts as $post ) {
+			WP_CLI::line( "$post->post_title");
+			$dom = new \DOMDocument();
+
+			@$dom->loadHTML( $post->post_content );
+
+			$images = $dom->getElementsByTagName( 'img' );
+
+			if ( $images->count() > 0 ) {
+				WP_CLI::warning( "Total <img> tags: {$images->count()}");
+			} else {
+				WP_CLI::line( "No <img> tags found.");
+			}
+
+			$images_replaced = 0;
+			foreach ( $images as $image ) {
+				/* @var \DOMElement $image */
+				$src = $image->getAttribute( 'src' );
+				$path = parse_url( $src, PHP_URL_PATH );
+
+				if ( str_starts_with( $path, '/' ) ) {
+					$path = substr( $path, 1 );
+				}
+
+				if ( file_exists( "$base_path/$path" ) ) {
+					continue;
+				}
+
+				echo WP_CLI::colorize( "%RMissing: $base_path/$path %n\n");
+				$exploded = explode( '/', $path );
+				$filename = array_pop( $exploded );
+				$has_extension = false;
+				if ( '.' === substr( $filename, - 3, 1 ) || '.' === substr( $filename, - 4, 1 ) ) {
+					$has_extension = true;
+				}
+
+				if ( $has_extension ) {
+					$result = media_sideload_image( $src, $post->ID );
+
+					if ( ! ( $result instanceof \WP_Error ) ) {
+						$new_image = new \DOMDocument();
+						$new_image->loadHTML( $result );
+						$new_image = $new_image->getElementsByTagName( 'body' )->item(0);
+
+						$dom->replaceChild( $new_image, $image );
+						$dom->saveHTML();
+					} else {
+						$missing_post_images[] = [
+							'Post ID'    => $post->ID,
+							'Post Title' => substr( $post->post_title, 0, 40 ),
+							'Images'     => $src
+						];
+					}
+					continue;
+				}
+
+				foreach ( $extensions as $extension ) {
+					$path_with_extension = "$path.$extension";
+
+					if ( file_exists( "$base_path/$path_with_extension" ) ) {
+						$image->setAttribute( 'src', get_site_url( null, $path_with_extension ) );
+						$dom->saveHTML();
+						$images_replaced++;
+						continue 2;
+					}
+				}
+
+				$missing_post_images[] = [
+					'Post ID'    => $post->ID,
+					'Post Title' => substr( $post->post_title, 0, 40 ),
+					'Images'     => $src
+				];
+			}
+
+			if ( $images_replaced > 0 ) {
+				echo WP_CLI::colorize( "%y$images_replaced were updated.%n\n" );
+
+				$content = $this->inner_html( $dom->lastChild->firstChild );
+
+				$result = wp_update_post([
+					'ID' => $post->ID,
+					'post_content' => $content,
+				], true );
+
+				if ( $result instanceof \WP_Error ) {
+					$missing_post_images[] = [
+						'Post ID'    => $post->ID,
+						'Post Title' => substr( $post->post_title, 0, 40 ),
+						'Images'     => "Unable to update",
+					];
+				}
+			}
+		}
+		WP_CLI\Utils\format_items( 'table', $missing_post_images, [ 'Post ID', 'Post Title', 'Images' ] );
+		WP_CLI::command('cache flush');
+	}
+
+	/**
+	 * A function which will take any DOMNode/DOMElement and
+	 * retrieve only the inner HTML of that element.
+	 *
+	 * @param \DOMNode $element Element with inner HTML.
+	 *
+	 * @return string
+	 */
+	private function inner_html( \DOMNode $element ) {
+		$inner_html = '';
+		$children = $element->childNodes;
+
+		foreach ( $children as $child ) {
+			$inner_html .= $element->ownerDocument->saveHTML( $child );
+		}
+
+		return $inner_html;
+	}
 }
