@@ -87,6 +87,7 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 			$author_bio = get_post_meta( $post->ID, 'newspackscraper_authorbio', true );
 			$author_avatar_src = get_post_meta( $post->ID, 'newspackscraper_authoravatarsrc', true );
 			$feat_img_caption = get_post_meta( $post->ID, 'newspackscraper_featimgcaption', true );
+			$original_url = get_post_meta( $post->ID, 'newspackscraper_url', true );
 
 			// Create GA with bio and avatar, link w/ WP User Author, and assign to Post.
 			if ( $author_bio || $author_avatar_src ) {
@@ -110,7 +111,7 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 				$d=1;
 			}
 
-			Feat img caption.
+			// Feat img caption.
 			if ( $feat_img_caption ) {
 				$post_thumbnail_id = get_post_thumbnail_id( $post );
 				$wpdb->update(
@@ -121,7 +122,6 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 			}
 
 			// Update categories.
-			$original_url = get_post_meta( $post->ID, 'newspackscraper_url', true );
 			$cat_urls_to_cat_names = [
 				'newsroom.co.nz/news' => 'News',
 				'newsroom.co.nz/politics' => 'Politics',
@@ -149,16 +149,29 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 				}
 			}
 
-			// update slugs
-			// TODO
-			// 'newspackscraper_url'
-			'newsroom.co.nz';
+			// Update permalink.
+			$original_url_parsed = parse_url( $original_url );
+			$path = $original_url_parsed[ 'path' ];
+			$path = ltrim( $path, '/' );
+			$no_slashes = substr_count( $original_url_parsed[ 'path' ], '/' );
+			if ( 2 == $no_slashes ) {
+				$path_exploded = explode( '/', $path );
+				$slug = $path_exploded[1];
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_name' => $slug ],
+					[ 'ID' => $post->ID ]
+				);
+			} else {
+				// TODO debug
+				$d=1;
+			}
 
 			// Delete the scraper postmeta.
 			// delete_post_meta( $post->ID, 'newspackscraper_authorbio' );
 			// delete_post_meta( $post->ID, 'newspackscraper_authoravatarsrc' );
 			// delete_post_meta( $post->ID, 'newspackscraper_featimgcaption' );
-
+			// delete_post_meta( $post->ID, 'newspackscraper_url' );
 		}
 
 		// Clean up empty categories.
