@@ -83,6 +83,8 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 		$posts = $this->posts_logic->get_all_posts( 'post', [ 'publish' ] );
 		foreach ( $posts as $key_post => $post ) {
 
+			WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_post + 1, count( $posts ), $post->ID ) );
+
 			// Get all scraper meta.
 			$author_bio = get_post_meta( $post->ID, 'newspackscraper_authorbio', true );
 			$author_avatar_src = get_post_meta( $post->ID, 'newspackscraper_authoravatarsrc', true );
@@ -178,7 +180,5 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 
 		// Required for the $wpdb->update() sink in.
 		wp_cache_flush();
-
-		$d=1;
 	}
 }
