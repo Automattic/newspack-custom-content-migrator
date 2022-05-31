@@ -88,37 +88,37 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 			$author_avatar_src = get_post_meta( $post->ID, 'newspackscraper_authoravatarsrc', true );
 			$feat_img_caption = get_post_meta( $post->ID, 'newspackscraper_featimgcaption', true );
 
-			// // Create GA with bio and avatar, link w/ WP User Author, and assign to Post.
-			// if ( $author_bio || $author_avatar_src ) {
-			// 	$author_name = get_the_author_meta( 'display_name', $post->post_author );
-			// 	$author_wp_user = get_user_by( 'id', $post->post_author );
-			// 	$ga_existing = $this->cap_logic->get_guest_author_by_user_login( $author_wp_user->user_nicename );
-			// 	if ( $ga_existing ) {
-			// 		$ga_id = $ga_existing->ID;
-			// 	} else {
-			// 		$avatar_att_id = $this->attachment_logic->import_external_file( $author_avatar_src );
-			// 		$ga_id = $this->cap_logic->create_guest_author( [
-			// 			'display_name' => $author_name,
-			// 			'description' => $author_bio,
-			// 			'avatar' => $avatar_att_id,
-			// 		] );
-			// 	}
-			// 	$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $author_wp_user );
-			// 	$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID );
-			// } else {
-			// 	// TODO debug
-			// 	$d=1;
-			// }
-			//
-			// // Feat img caption.
-			// if ( $feat_img_caption ) {
-			// 	$post_thumbnail_id = get_post_thumbnail_id( $post );
-			// 	$wpdb->update(
-			// 		$wpdb->posts,
-			// 		[ 'post_excerpt', $feat_img_caption ],
-			// 		[ 'ID' => $post_thumbnail_id ]
-			// 	);
-			// }
+			// Create GA with bio and avatar, link w/ WP User Author, and assign to Post.
+			if ( $author_bio || $author_avatar_src ) {
+				$author_name = get_the_author_meta( 'display_name', $post->post_author );
+				$author_wp_user = get_user_by( 'id', $post->post_author );
+				$ga_existing = $this->cap_logic->get_guest_author_by_user_login( $author_wp_user->user_nicename );
+				if ( $ga_existing ) {
+					$ga_id = $ga_existing->ID;
+				} else {
+					$avatar_att_id = $this->attachment_logic->import_external_file( $author_avatar_src );
+					$ga_id = $this->cap_logic->create_guest_author( [
+						'display_name' => $author_name,
+						'description' => $author_bio,
+						'avatar' => $avatar_att_id,
+					] );
+				}
+				$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $author_wp_user );
+				$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID );
+			} else {
+				// TODO debug
+				$d=1;
+			}
+
+			Feat img caption.
+			if ( $feat_img_caption ) {
+				$post_thumbnail_id = get_post_thumbnail_id( $post );
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_excerpt' => $feat_img_caption ],
+					[ 'ID' => $post_thumbnail_id ]
+				);
+			}
 
 			// Update categories.
 			$original_url = get_post_meta( $post->ID, 'newspackscraper_url', true );
@@ -140,20 +140,21 @@ class NewsroomCoNzMigrator implements InterfaceMigrator {
 					$current_categories = wp_get_post_categories( $post->ID );
 					$current_child_category_id = $current_categories[0];
 					$current_child_category = get_category( $current_child_category_id );
-					$child_category_name;
+					$child_category_name = $current_child_category->name;
 
-					$parent_category = wp_create_category( $parent_category_name, 0 );
-					$child_category = wp_create_category( $child_category_name, $parent_category->ID );
+					$parent_category_id = wp_create_category( $parent_category_name, 0 );
+					$child_category_id = wp_create_category( $child_category_name, $parent_category_id );
 
-					wp_set_post_categories( $post->ID, [ $child_category ], false );
+					wp_set_post_categories( $post->ID, [ $parent_category_id, $child_category_id ], false );
 				}
 			}
 
 			// update slugs
 			// TODO
 			// 'newspackscraper_url'
+			'newsroom.co.nz';
 
-			// Delete all scraper meta.
+			// Delete the scraper postmeta.
 			// delete_post_meta( $post->ID, 'newspackscraper_authorbio' );
 			// delete_post_meta( $post->ID, 'newspackscraper_authoravatarsrc' );
 			// delete_post_meta( $post->ID, 'newspackscraper_featimgcaption' );
