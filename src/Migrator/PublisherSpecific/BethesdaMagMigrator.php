@@ -71,6 +71,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'synopsis'  => array(),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-move-subtitle-to-excerpt',
+			[ $this, 'bethesda_move_subtitle' ],
+			[
+				'shortdesc' => 'Move ACF subtitles to excerpt field.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -199,6 +208,33 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		);
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Updating wp_posts.post_excerpt rows with content from bm_subtitle.
+	 *
+	 * @param string[] $args       WP_CLI positional arguments.
+	 * @param string[] $assoc_args WP_CLI optional arguments.
+	 */
+	public function bethesda_move_subtitle( $args, $assoc_args ) {
+		global $wpdb;
+
+		$subtitle_sql = "SELECT * FROM $wpdb->postmeta WHERE meta_key = 'bm_subtitle'";
+		$results      = $wpdb->get_results( $subtitle_sql );
+
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing subtitles.', count( $results ) );
+		foreach ( $results as $row ) {
+			wp_update_post(
+				[
+					'ID'           => $row->post_id,
+					'post_excerpt' => $row->meta_value,
+				]
+			);
+
+			$progress->tick();
+		}
+
+		$progress->finish();
 	}
 
 	/**
