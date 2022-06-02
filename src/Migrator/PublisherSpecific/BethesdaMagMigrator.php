@@ -219,14 +219,17 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	public function bethesda_move_subtitle( $args, $assoc_args ) {
 		global $wpdb;
 
-		$subtitle_sql = "SELECT * FROM $wpdb->postmeta WHERE meta_key = 'bm_subtitle'";
+		$subtitle_sql = "SELECT * FROM (
+    		SELECT p.ID, pm.meta_value, p.post_excerpt FROM $wpdb->postmeta pm LEFT JOIN  $wpdb->posts p ON p.ID = pm.post_id WHERE pm.meta_key = 'bm_subtitle'
+		) as sub WHERE sub.meta_value <> sub.post_excerpt";
 		$results      = $wpdb->get_results( $subtitle_sql );
 
-		$progress = WP_CLI\Utils\make_progress_bar( 'Processing subtitles.', count( $results ) );
-		foreach ( $results as $row ) {
+		$count = count( $results );
+		$progress = WP_CLI\Utils\make_progress_bar( "Processing subtitles. $count records.", $count );
+		while ( $row = array_shift( $results ) ) {
 			wp_update_post(
 				[
-					'ID'           => $row->post_id,
+					'ID'           => $row->ID,
 					'post_excerpt' => $row->meta_value,
 				]
 			);
