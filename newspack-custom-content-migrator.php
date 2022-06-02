@@ -63,5 +63,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\BethesdaMagMigrator::class,
 		Migrator\PublisherSpecific\SearchLightNMMigrator::class,
 		Migrator\PublisherSpecific\CalMattersMigrator::class,
+		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
 	)
 );
