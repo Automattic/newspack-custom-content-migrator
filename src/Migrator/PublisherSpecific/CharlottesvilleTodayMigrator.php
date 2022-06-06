@@ -107,17 +107,22 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id  ) );
+
+			// Get ACF author meta from postmeta and Terms.
 			$meta_acf_author = get_post_meta( $post_id, 'article_author' );
 			$author_term_id = $meta_acf_author[0][0] ?? null;
 			if ( is_null( $author_term_id ) || ! $author_term_id ) {
 				WP_CLI::log( '- skipping...' );
+				continue;
 			}
 
 			$author_name = $wpdb->get_var( $wpdb->prepare( "select name from $wpdb->terms where term_id = %d;", $author_term_id ) );
 			if ( ! $author_name ) {
 				WP_CLI::log( '- skipping 2...' );
+				continue;
 			}
 
+			// Create GA and assign to post.
 			$ga = $this->get_or_create_ga_by_name( $author_name );
 			$ga_id = $ga->ID ?? null;
 			if ( is_null( $ga_id ) ) {
