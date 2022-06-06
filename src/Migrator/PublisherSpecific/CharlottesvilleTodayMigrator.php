@@ -68,6 +68,26 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 			'newspack-content-migrator charlottesvilletoday-acf-migrate',
 			[ $this, 'cmd_acf_migrate' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-update-image-credits',
+			[ $this, 'cmd_update_image_credits' ],
+		);
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_image_credits( $args, $assoc_args ) {
+		$att_ids = $this->posts_logic->get_all_posts_ids( 'attachment' );
+		foreach ( $att_ids as $key_att_id => $att_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_att_id + 1, count( $att_ids ), $att_id  ) );
+			$post = get_post( $att_id );
+			$credits = $post->post_content;
+			update_post_meta( $att_id, '_media_credit', $credits );
+		}
+
+		WP_CLI::log( 'All done!' );
 	}
 
 	/**
