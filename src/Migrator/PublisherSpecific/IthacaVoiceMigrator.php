@@ -89,7 +89,6 @@ class IthacaVoiceMigrator implements InterfaceMigrator {
 			array(
 				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
-				'post__in'    => array( 88405 ),
 			),
 			function( $post ) use ( $wpdb ) {
 				if ( strpos( strtolower( $post->post_content ), strtolower( '[Best_Wordpress_Gallery' ) ) !== false ) {
