@@ -354,4 +354,47 @@ SQL;
 		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
 		return $content;
 	}
+
+	/**
+	 * Generate Jetpack Slideshow Block code from Media Posts.
+	 *
+	 * @param int[] $post_ids Media Posts IDs.
+	 * @return string Jetpack Slideshow block code to be add to the post content.
+	 */
+	public function generate_jetpack_slideshow_block_from_pictures( $images ) {
+		foreach ( $images as $key => $image ) {
+			$post          = get_page_by_title( $image['name'], OBJECT, 'attachment' );
+			$attachment_id = 0;
+
+			if ( ! $post ) {
+				$attachment = array(
+					'guid'           => $image['filename'],
+					'post_mime_type' => "image/{$image['filetype']}",
+					'post_title'     => $image['name'],
+					'post_content'   => '',
+					'post_status'    => 'inherit',
+				);
+
+				$attachment_id = wp_insert_attachment( $attachment, $image['filename'] );
+			}
+
+			$images[ $key ]['post_id'] = $post ? $post->ID : $attachment_id;
+		}
+
+		$images_posts_ids = array_map(
+			function( $image ) {
+				return $image['post_id'];
+			},
+			$images
+		);
+
+		$content  = '<!-- wp:jetpack/slideshow {"ids":[' . join( ',', $images_posts_ids ) . '],"sizeSlug":"large"} -->';
+		$content .= '<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">';
+		foreach ( $images as $image ) {
+			$caption  = ! empty( $image['description'] ) ? $image['description'] : $image['name'];
+			$content .= '<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="' . $image['name'] . '" class="wp-block-jetpack-slideshow_image wp-image-' . $image['post_id'] . '" data-id="' . $image['post_id'] . '" src="' . $image['filename'] . '"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">' . $caption . '</figcaption></figure></li>';
+		}
+		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
+		return $content;
+	}
 }
