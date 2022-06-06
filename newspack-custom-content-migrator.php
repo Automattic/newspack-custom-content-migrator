@@ -50,13 +50,20 @@ PluginSetup::register_migrators(
 		Migrator\General\NextgenGalleryMigrator::class,
 		Migrator\General\TablePressMigrator::class,
 		Migrator\General\NinjaTablesMigrator::class,
+		Migrator\General\PhotoAlbumProGalleryMigrator::class,
 
 		// Publisher specific:
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
+		Migrator\PublisherSpecific\RenoMigrator::class,
 		Migrator\PublisherSpecific\CharlottesvilleTodayMigrator::class,
 		Migrator\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
 		Migrator\PublisherSpecific\EnergeticCityMigrator::class,
+		Migrator\PublisherSpecific\BethesdaMagMigrator::class,
+		Migrator\PublisherSpecific\SearchLightNMMigrator::class,
+		Migrator\PublisherSpecific\CalMattersMigrator::class,
+		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
+		Migrator\PublisherSpecific\NewsroomCoNzMigrator::class,
 	)
 );
