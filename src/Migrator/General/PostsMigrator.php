@@ -19,6 +19,11 @@ class PostsMigrator implements InterfaceMigrator {
 	const STAGING_PAGES_EXPORT_FILE = 'newspack-staging_pages_all.xml';
 
 	/**
+	 * @var string Log file for shortcodes manipulation.
+	 */
+	const SHORTCODES_LOGS = 'posts_shorcodes_migrator.log';
+
+	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -149,6 +154,37 @@ class PostsMigrator implements InterfaceMigrator {
 			array(
 				'shortdesc' => 'Remove the first image from the post body, usefull to normalize the posts content in case some contains the featured image in their body and others not.',
 				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator remove-shortcodes-from-post-body',
+			array( $this, 'remove_shortcodes_from_post_body' ),
+			array(
+				'shortdesc' => 'Remove shortcodes from post body.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually edit the posts content.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'shortcodes',
+						'description' => 'List of shortcodes to delete from all the posts content separated by a comma (e.g. shortcode1,shortcode2)',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'post_ids',
+						'description' => 'IDs of posts and pages to remove shortcodes from their content separated by a comma (e.g. 123,456)',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
 			)
 		);
 	}
@@ -469,6 +505,113 @@ class PostsMigrator implements InterfaceMigrator {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator remove-shortcodes-from-post-body`.
+	 */
+	public function remove_shortcodes_from_post_body( $args, $assoc_args ) {
+		$shortcodes = isset( $assoc_args['shortcodes'] ) ? explode( ',', $assoc_args['shortcodes'] ) : null;
+		$post_ids   = isset( $assoc_args['post_ids'] ) ? explode( ',', $assoc_args['post_ids'] ) : null;
+		$dry_run    = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		if ( is_null( $shortcodes ) || empty( $shortcodes ) ) {
+			WP_CLI::error( 'Invalid shortcodes list.' );
+		}
+
+		if ( $dry_run ) {
+			WP_CLI::warning( 'Dry mode, no changes are going to affect the database' );
+		} else {
+			WP_CLI::confirm( 'This will remove all the shortcodes with their content from all the posts content, do you want to continue?' );
+		}
+
+		$this->posts_logic->throttled_posts_loop(
+			array(
+				'post_type'   => array( 'post', 'page' ),
+				'post_status' => array( 'publish' ),
+				'post__in'    => $post_ids,
+			),
+			function( $post ) use ( $shortcodes, $dry_run ) {
+				$post_content_blocks = array();
+
+				foreach ( parse_blocks( $post->post_content ) as $content_block ) {
+					// remove shortcodes from Core shortcode, Core HTML, Paragraph, and Classic blocks.
+					if (
+						'core/shortcode' === $content_block['blockName']
+						|| 'core/html' === $content_block['blockName']
+						|| ( 'core/paragraph' === $content_block['blockName'] )
+						|| ( ! $content_block['blockName'] )
+					) {
+						$pattern = get_shortcode_regex( $shortcodes );
+
+						if ( preg_match_all( '/' . $pattern . '/s', $content_block['innerHTML'], $matches )
+							&& array_key_exists( 2, $matches )
+						) {
+							$content_without_shortcodes = $this->strip_shortcodes( $shortcodes, $content_block['innerHTML'] );
+							// remove resulting empty paragraphs if any.
+							$cleaned_content = trim( preg_replace( '/<p[^>]*><\\/p[^>]*>/', '', $content_without_shortcodes ) );
+
+							if ( empty( $cleaned_content ) ) {
+								$content_block = null;
+								continue;
+							}
+
+							$content_block['innerHTML']    = $cleaned_content;
+							$content_block['innerContent'] = array_map(
+								function( $inner_content ) use ( $shortcodes ) {
+									return $this->strip_shortcodes( $shortcodes, $inner_content );
+								},
+								$content_block['innerContent']
+							);
+						}
+					}
+
+					$post_content_blocks[] = $content_block;
+				}
+
+				$post_content_without_shortcodes = serialize_blocks( $post_content_blocks );
+
+				if ( $post_content_without_shortcodes !== $post->post_content ) {
+					if ( ! $dry_run ) {
+						$update = wp_update_post(
+							array(
+								'ID'           => $post->ID,
+								'post_content' => $post_content_without_shortcodes,
+							)
+						);
+
+						if ( is_wp_error( $update ) ) {
+							$this->log( self::SHORTCODES_LOGS, sprintf( 'Failed to update post %d because %s', $post->ID, $update->get_error_message() ) );
+						} else {
+							$this->log( self::SHORTCODES_LOGS, sprintf( 'Post %d cleaned from shortcodes.', $post->ID ) );
+						}
+					} else {
+						WP_CLI::line( sprintf( 'Post %d cleaned from shortcodes.', $post->ID ) );
+						WP_CLI::line( $post_content_without_shortcodes );
+					}
+				}
+			}
+		);
+	}
+
+	/**
+	 * Strip shortcodes from content.
+	 *
+	 * @param string[] $shortcodes Shortcodes to strip.
+	 * @param string   $text Content to strip the shortcodes from.
+	 * @return string
+	 */
+	private function strip_shortcodes( $shortcodes, $text ) {
+		if ( ! ( empty( $shortcodes ) || ! is_array( $shortcodes ) ) ) {
+			$tagregexp = join( '|', array_map( 'preg_quote', $shortcodes ) );
+			$regex     = '\[(\[?)';
+			$regex    .= "($tagregexp)";
+			$regex    .= '\b([^\]\/]*(?:\/(?!\])[^\]\/]*)*?)(?:(\/)\]|\](?:([^\[]*+(?:\[(?!\/\2\])[^\[]*+)*+)\[\/\2\])?)(\]?)';
+
+			$text = preg_replace( "/$regex/s", '', $text );
+		}
+
+		return $text;
+	}
+
+	/**
 	 * When exporting objects, the PostsMigrator sets PostsMigrator::META_KEY_ORIGINAL_ID meta key with the ID they had at the
 	 * time. This function gets the new/current ID which changed when they were imported.
 	 *
@@ -492,5 +635,20 @@ class PostsMigrator implements InterfaceMigrator {
 		);
 
 		return isset( $new_id ) ? $new_id : null;
+	}
+
+	/**
+	 * Simple file logging.
+	 *
+	 * @param string  $file    File name or path.
+	 * @param string  $message Log message.
+	 * @param boolean $to_cli Display the logged message in CLI.
+	 */
+	private function log( $file, $message, $to_cli = true ) {
+		$message .= "\n";
+		if ( $to_cli ) {
+			WP_CLI::line( $message );
+		}
+		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
