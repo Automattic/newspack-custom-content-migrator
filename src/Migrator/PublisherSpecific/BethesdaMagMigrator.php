@@ -71,6 +71,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'synopsis'  => array(),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-create-terms-for-multiple-taxonomies',
+			[ $this, 'create_term_dupes_for_taxonomies' ],
+			[
+				'shortdesc' => 'Creates multiple terms for any term which has multiple taxonomies attached.',
+				'synopsis' => [],
+			]
+		);
 	}
 
 	/**
@@ -199,6 +208,97 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		);
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * This function will find any terms which have multiple taxonomies assigned.
+	 * In other words, there will be one taxonomy for every term.
+	 *
+	 * @param string[] $args WP CLI positional arguments.
+	 * @param string[] $assoc_args WP CLI optional argumemnts.
+	 */
+	public function create_term_dupes_for_taxonomies( $args, $assoc_args ) {
+		global $wpdb;
+
+		$terms_with_multiple_taxonomies_sql = "SELECT
+			    t.term_id,
+			    t.name,
+			    t.slug,
+			    COUNT(DISTINCT t.term_id) as term_counter,
+			    GROUP_CONCAT( DISTINCT tt.taxonomy ORDER BY tt.taxonomy ) as grouped,
+			    COUNT(DISTINCT tt.term_taxonomy_id) as tt_counter
+			FROM $wpdb->terms t
+			LEFT JOIN $wpdb->term_taxonomy tt on t.term_id = tt.term_id
+			WHERE tt.taxonomy IN (
+				'category',
+				'post_tag',
+				'nav_menu',
+				'newspack_lstngs_plc',
+				'newspack_popups_taxonomy',
+				'newspack_spnsrs_tax',
+				'wp_theme'
+			)
+			GROUP BY t.term_id
+			HAVING tt_counter > term_counter
+			ORDER BY tt_counter DESC";
+
+		$terms_with_multiple_taxonomies = $wpdb->get_results( $terms_with_multiple_taxonomies_sql );
+
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing terms...', count( $terms_with_multiple_taxonomies ) );
+		foreach ( $terms_with_multiple_taxonomies as $term ) {
+			$taxonomies = explode( ',', $term->grouped );
+			array_shift( $taxonomies );
+
+			foreach ( $taxonomies as $taxonomy ) {
+				$result = $wpdb->insert(
+					$wpdb->terms,
+					[
+						'name' => $term->name,
+						'slug' => $term->slug,
+					]
+				);
+
+				if ( false !== $result ) {
+
+					$latest_term_sql = "SELECT term_id FROM $wpdb->terms WHERE name = '$term->name' AND slug = '$term->slug' ORDER BY term_id DESC LIMIT 1";
+					$latest_term = $wpdb->get_row( $latest_term_sql );
+
+					$result = $wpdb->insert(
+						$wpdb->term_taxonomy,
+						[
+							'term_id' => $latest_term->term_id,
+							'taxonomy' => $taxonomy,
+						]
+					);
+
+					if ( false !== $result ) {
+						$new_term_taxonomy_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $latest_term->term_id AND taxonomy = '$taxonomy'";
+						$new_term_taxonomy = $wpdb->get_row( $new_term_taxonomy_sql );
+
+						$old_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term->term_id AND taxonomy = '$taxonomy'";
+						$old_taxonomy_id     = $wpdb->get_row( $old_taxonomy_id_sql );
+
+						$update_term_relationships_with_new_taxonomy_id_sql = "UPDATE 
+		                    $wpdb->term_relationships 
+						SET term_taxonomy_id = $new_term_taxonomy->term_taxonomy_id 
+						WHERE term_taxonomy_id = $old_taxonomy_id->term_taxonomy_id";
+						$num_of_rows_updated                                = $wpdb->query( $update_term_relationships_with_new_taxonomy_id_sql );
+
+						if ( $num_of_rows_updated > 1 ) {
+							$wpdb->delete(
+								$wpdb->term_taxonomy,
+								[
+									'term_taxonomy_id' => $old_taxonomy_id->term_taxonomy_id,
+								]
+							);
+						}
+					}
+				}
+			}
+
+			$progress->tick();
+		}
+		$progress->finish();
 	}
 
 	/**
