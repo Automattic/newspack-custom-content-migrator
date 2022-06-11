@@ -11,15 +11,23 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	/**
 	 * Safe limit of number of files in a folder to upload at once for S3-Uploads not to crash.
 	 */
-	const UPLOAD_FILES_LIMIT = 2;
-	// const UPLOAD_FILES_LIMIT = 700;
+	const UPLOAD_FILES_LIMIT = 700;
 
+	/**
+	 * Files to ignore and not upload.
+	 */
 	const IGNORE_UPLOADING_FILES = [
 		'.DS_Store',
 	];
 
-	private $cli_upload_directory_s3_uploads_prefix;
+	/**
+	 * @var string $cli_s3_uploads_prefix Will contain the value from 's3-uploads-prefix' associative argument.
+	 */
+	private $cli_s3_uploads_prefix;
 
+	/**
+	 * @var bool $confirmed_first_upload Internal flag used to prompt the User to confirm the accuracy of the CLI command before running it for the first time.
+	 */
 	private $confirmed_first_upload = false;
 
 	/**
@@ -76,8 +84,10 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * @param array $positional_args
-	 * @param array $assoc_args
+	 * Callable for `newspack-content-migrator s3uploads-upload-directories`.
+	 *
+	 * @param array $positional_args Positional args.
+	 * @param array $assoc_args      Associative args.
 	 */
 	public function cmd_upload_directories( $positional_args, $assoc_args ) {
 
@@ -87,7 +97,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		}
 
 		// Fetch arguments.
-		$this->cli_upload_directory_s3_uploads_prefix = isset( $assoc_args['s3-uploads-prefix'] ) ? $assoc_args['s3-uploads-prefix'] : null;
+		$this->cli_s3_uploads_prefix = isset( $assoc_args['s3-uploads-prefix'] ) ? $assoc_args['s3-uploads-prefix'] : null;
 		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
 			WP_CLI::error( 'WP_CONTENT_DIR is not defined.' );
 		}
@@ -110,7 +120,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	/**
 	 * Checks whether S3-Uploads Plus is installed and active.
 	 *
-	 * @return bool Is active.
+	 * @return bool Is S3-Uploads active.
 	 */
 	public function is_s3_uploads_plugin_active() {
 		$active = false;
@@ -124,7 +134,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * @param $directory_path
+	 * @param string $directory_path Full directory path to upload.
 	 *
 	 * @return void
 	 */
@@ -178,9 +188,9 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Uploads a batch of files in the same directory.
+	 * Uploads a batch of files from the same directory.
 	 *
-	 * @param $batch_of_files
+	 * @param array $batch_of_files Full path to files to be uploaded.
 	 *
 	 * @return void
 	 */
@@ -215,22 +225,25 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		unlink( $dir_name_tmp );
 	}
 
+	/**
+	 * Runs the S3-Uploads' upload-directory CLI command on a folder.
+	 *
+	 * @param string $dir Folder to upload
+	 *
+	 * @return void
+	 */
 	public function upload_folder_to_s3( $dir ) {
-		$cli_command = sprintf(
-			"wp s3-uploads upload-directory %s/ %suploads/2022/01_test",
-			$dir,
-			$this->cli_upload_directory_s3_uploads_prefix
-		);
+		$cli_command = sprintf( "wp s3-uploads upload-directory %s/ %suploads/2022/01_test", $dir, $this->cli_s3_uploads_prefix );
 
-		// Prompt the user before running the first command, just to double check the format of everything.
+		// Prompt the user before running the command for the first time, just to double-check the format of everything.
 		if ( false === $this->confirmed_first_upload ) {
-			WP_CLI::log( "\nPlease confirm that the first upload-directory command that's about to be executed uses the correct S3 destination:" );
+			WP_CLI::log( "\nPlease confirm that this first upload-directory command uses the correct S3 destination:" );
 			WP_CLI::log( '  $ ' . $cli_command );
 			WP_CLI::confirm( 'Do you want to proceed?' );
 			$this->confirmed_first_upload = true;
 		}
 
-		// Upload away...
+		// Run the upload-directory command.
 		$options = [
 			'return'     => true,
 			'launch'     => false,
