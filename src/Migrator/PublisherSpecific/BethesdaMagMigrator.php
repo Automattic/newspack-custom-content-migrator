@@ -70,6 +70,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Remove duplicated posts.',
 				'synopsis'  => array(),
 			)
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator bethesda-migrate-best-of-content',
@@ -351,7 +352,8 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 */
 	private function handle_xml_item( \DOMNode $item, int $best_of_term_id = 0, array $authors = [] ) {
 		$post                      = [
-			'post_type' => 'post',
+			'post_type'     => 'post',
+			'meta_input'    => [],
 		];
 		$categories                = [];
 		$tags                      = [];
@@ -464,6 +466,9 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 								'{content}' => $meta_value,
 							]
 						);
+						break;
+					case 'best_image':
+						$post['meta_input']['_thumbnail_id'] = $meta_value;
 						break;
 				}
 			}
