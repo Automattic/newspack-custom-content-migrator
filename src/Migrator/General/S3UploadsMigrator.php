@@ -29,7 +29,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	/**
 	 * Batches of files for upload will be temporarily copied to a temp folder with this suffix, e.g. wp-content/uploads/YYYY/MM{SUFFIX}.
 	 */
-	const TMP_MONTH_FOLDER_SUFFIX = '__TMPS3UPLOADBATCH';
+	const TMP_BATCH_FOLDER_SUFFIX = '__TMPS3UPLOADBATCH';
 
 	/**
 	 * Files to ignore while uploading.
@@ -224,7 +224,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		$file_dir_name = $file_pathinfo['dirname'];
 
 		// Prepare the tmp directory for the batch.
-		$dir_name_tmp = $file_dir_name . self::TMP_MONTH_FOLDER_SUFFIX;
+		$dir_name_tmp = $file_dir_name . self::TMP_BATCH_FOLDER_SUFFIX;
 		if ( file_exists( $dir_name_tmp ) ) {
 			$this->delete_directory( $dir_name_tmp );
 		}
