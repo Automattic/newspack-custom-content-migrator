@@ -8,6 +8,9 @@ use \WP_CLI;
 
 class S3UploadsMigrator implements InterfaceMigrator {
 
+	/**
+	 * Detailed logs file name.
+	 */
 	const LOG = 's3-uploads-migrator.log';
 
 	/**
@@ -98,49 +101,31 @@ class S3UploadsMigrator implements InterfaceMigrator {
 			WP_CLI::error( 'S3-Uploads plugin needs to be installed and active to run this command.' );
 		}
 
-		// Path to wp-content/.
-		$this->path_wp_content = WP_CONTENT_DIR;
-		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
-			WP_CLI::error( 'WP_CONTENT_DIR is not defined.' );
-		}
-
-		// Arguments.
+		// Arguments and variables.
 		$cli_s3_uploads_destination = isset( $assoc_args['s3-uploads-destination'] ) ? $assoc_args['s3-uploads-destination'] : null;
 		$directory_to_upload = $assoc_args[ 'directory-to-upload' ] ?? null;
 		if ( ! file_exists( $directory_to_upload ) || ! is_dir( $directory_to_upload ) ) {
 			WP_CLI::error( sprintf( "Incorrect uploads directory path %s.", $directory_to_upload ) );
 		}
+		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
+			WP_CLI::error( 'WP_CONTENT_DIR is not defined.' );
+		}
+		$this->path_wp_content = WP_CONTENT_DIR;
 
-		// Upload directory by directory.
-		$this->upload_contents_in_directory( $directory_to_upload, $cli_s3_uploads_destination );
+		// Upload directory.
+		$this->upload_directory( $directory_to_upload, $cli_s3_uploads_destination );
 
 		WP_CLI::success( 'Done. See log %s for full details.', self::LOG );
 	}
 
 	/**
-	 * Checks whether S3-Uploads Plus is installed and active.
-	 *
-	 * @return bool Is S3-Uploads active.
-	 */
-	public function is_s3_uploads_plugin_active() {
-		$active = false;
-		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
-			if ( false !== strrpos( strtolower( $plugin ), '/s3-uploads.php' ) ) {
-				$active = true;
-			}
-		}
-
-		return $active;
-	}
-
-	/**
-	 * Splits files in directory into smaller batches and runs upload of batches.
+	 * Recursive function. Splits files in directory into smaller batches and runs upload of batches.
 	 *
 	 * @param string $directory_path Full directory path to upload.
 	 *
 	 * @return void
 	 */
-	public function upload_contents_in_directory( $directory_path, $cli_s3_uploads_destination ) {
+	public function upload_directory( $directory_path, $cli_s3_uploads_destination ) {
 
 		// Get list of files in $directory_path.
 		$files = scandir( $directory_path );
@@ -164,7 +149,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 			// If it's a directory, run this method recursively.
 			if ( is_dir( $file_path ) ) {
 				$cli_s3_uploads_destination_subdirectory = $directory_path . '/' . $file;
-				$this->upload_contents_in_directory( $file_path, $cli_s3_uploads_destination_subdirectory );
+				$this->upload_directory( $file_path, $cli_s3_uploads_destination_subdirectory );
 			}
 
 			// Add file to batch, or upload the batch.
@@ -222,7 +207,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		}
 
 		// Upload the tmp batch directory.
-		$this->upload_folder_to_s3( $dir_name_tmp, $cli_s3_uploads_destination );
+		$this->run_cli_upload_directory( $dir_name_tmp, $cli_s3_uploads_destination );
 
 		// Clean up and delete the tmp batch directory.
 		$this->delete_directory( $dir_name_tmp );
@@ -235,15 +220,15 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 *
 	 * @return void
 	 */
-	public function upload_folder_to_s3( $dir_from, $cli_s3_uploads_destination ) {
+	public function run_cli_upload_directory( $dir_from, $cli_s3_uploads_destination ) {
 		// CLI upload-directory command.
 		$cli_command = sprintf( "wp s3-uploads upload-directory %s/ %s", $dir_from, $cli_s3_uploads_destination );
 
 		// Prompt the user before running the command for the first time, as an opportunity to double-check the correct format.
 		if ( false === $this->confirmed_first_upload ) {
-			WP_CLI::log( "\nPlease confirm that this first upload-directory command uses the correct S3 destination:" );
+			WP_CLI::log( "\nHere's the first command we're going to run now:" );
 			WP_CLI::log( '  $ ' . $cli_command );
-			WP_CLI::confirm( 'Do you want to proceed?' );
+			WP_CLI::confirm( 'Looks good?' );
 			$this->confirmed_first_upload = true;
 		}
 
@@ -256,7 +241,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		WP_CLI::log( sprintf( "running command: $ %s", $cli_command ) );
 		WP_CLI::runcommand( $cli_command, $options );
 
-		// Log command and list of files uploaded.
+		// Log the full command and list of the files uploaded.
 		$this->log_command_and_files( $dir_from, $cli_command );
 	}
 
@@ -269,13 +254,15 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 * @return void
 	 */
 	public function log_command_and_files( $dir_from, $cli_command ) {
+		// Get files in batch.
 		$files = scandir( $dir_from );
 		$ignore_files = array_merge( [ '.', '..', ], self::IGNORE_UPLOADING_FILES );
 		foreach ( $ignore_files as $file_ignore ) {
 			unset( $files[ array_search( $file_ignore, $files, true) ] ) ;
 		}
 		sort( $files );
-		$this->log( self::LOG, sprintf( "%s\n%s", $cli_command, implode( "\n", $files ) ) );
+
+		$this->log( self::LOG, sprintf( "%s\n%s", $cli_command, implode( "\n", $files ) ), false );
 	}
 
 	/**
@@ -295,6 +282,22 @@ class S3UploadsMigrator implements InterfaceMigrator {
 			}
 		}
 		rmdir( $dir );
+	}
+
+	/**
+	 * Checks whether S3-Uploads Plus is installed and active.
+	 *
+	 * @return bool Is S3-Uploads active.
+	 */
+	public function is_s3_uploads_plugin_active() {
+		$active = false;
+		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
+			if ( false !== strrpos( strtolower( $plugin ), '/s3-uploads.php' ) ) {
+				$active = true;
+			}
+		}
+
+		return $active;
 	}
 
 	/**
