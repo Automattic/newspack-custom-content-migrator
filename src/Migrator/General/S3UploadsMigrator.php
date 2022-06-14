@@ -21,7 +21,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	/**
 	 * Batches of files for upload will be temporarily copied to a temp folder with this suffix, e.g. wp-content/uploads/YYYY/MM{SUFFIX}.
 	 */
-	const TMP_MONTH_FOLDER_SUFFIX = '__S3UPLOAD';
+	const TMP_MONTH_FOLDER_SUFFIX = '__TMPS3UPLOAD';
 
 	/**
 	 * Files to ignore while uploading.
@@ -148,7 +148,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 
 			// If it's a directory, run this method recursively.
 			if ( is_dir( $file_path ) ) {
-				$cli_s3_uploads_destination_subdirectory = $directory_path . '/' . $file;
+				$cli_s3_uploads_destination_subdirectory = $cli_s3_uploads_destination . '/' . $file;
 				$this->upload_directory( $file_path, $cli_s3_uploads_destination_subdirectory );
 			}
 
@@ -215,6 +215,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 
 	/**
 	 * Runs the S3-Uploads' upload-directory CLI command on a folder.
+	 * Before running the first command, it outputs a prompt as a chance to confirm command accuracy.
 	 *
 	 * @param string $dir_from Folder to upload
 	 *
@@ -222,13 +223,13 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 */
 	public function run_cli_upload_directory( $dir_from, $cli_s3_uploads_destination ) {
 		// CLI upload-directory command.
-		$cli_command = sprintf( "wp s3-uploads upload-directory %s/ %s", $dir_from, $cli_s3_uploads_destination );
+		$cli_command = sprintf( "s3-uploads upload-directory %s/ %s", $dir_from, $cli_s3_uploads_destination );
 
 		// Prompt the user before running the command for the first time, as an opportunity to double-check the correct format.
 		if ( false === $this->confirmed_first_upload ) {
-			WP_CLI::log( "\nHere's the first command we're going to run now:" );
+			WP_CLI::log( "\nAbout to upload the first batch of files with this command:" );
 			WP_CLI::log( '  $ ' . $cli_command );
-			WP_CLI::confirm( 'Looks good?' );
+			WP_CLI::confirm( 'OK to run this?' );
 			$this->confirmed_first_upload = true;
 		}
 
@@ -243,6 +244,12 @@ class S3UploadsMigrator implements InterfaceMigrator {
 
 		// Log the full command and list of the files uploaded.
 		$this->log_command_and_files( $dir_from, $cli_command );
+
+		if ( false === $this->confirmed_first_upload ) {
+			WP_CLI::confirm( sprintf( "\nFirst batch of files completed. Feel free to check the log %s and contents of the bucket before continuing. All following commands will run without prompts. OK to continue?", self::LOG ) );
+			$this->confirmed_first_upload = true;
+		}
+
 	}
 
 	/**
