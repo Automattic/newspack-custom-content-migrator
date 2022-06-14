@@ -128,8 +128,8 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		}
 
 		// Arguments and variables.
-		$this->skip_prompt_before_first_upload = isset( $assoc_args['skip-prompt-before-first-upload'] ) ? $assoc_args['skip-prompt-before-first-upload'] : false;
-		$cli_s3_uploads_destination            = isset( $assoc_args['s3-uploads-destination'] ) ? $assoc_args['s3-uploads-destination'] : null;
+		$this->skip_prompt_before_first_upload = $assoc_args['skip-prompt-before-first-upload'] ?? false;
+		$cli_s3_uploads_destination            = $assoc_args['s3-uploads-destination'] ?? null;
 		$directory_to_upload                   = $assoc_args['directory-to-upload'] ?? null;
 		if ( ! file_exists( $directory_to_upload ) || ! is_dir( $directory_to_upload ) ) {
 			WP_CLI::error( sprintf( 'Incorrect uploads directory path %s.', $directory_to_upload ) );
