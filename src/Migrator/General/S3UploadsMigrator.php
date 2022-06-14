@@ -8,7 +8,6 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use \NewspackCustomContentMigrator\Migrator\General\PostsMigrator;
 use \WP_CLI;
 
 /**
