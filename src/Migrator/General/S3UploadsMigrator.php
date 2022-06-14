@@ -175,15 +175,15 @@ class S3UploadsMigrator implements InterfaceMigrator {
 
 				// Reset the loop.
 				$batch = [];
-			} else {
-				$batch[] = $file_path;
 			}
+
+			$batch[] = $file_path;
 		}
 
 		// Upload remaining files.
 		if ( ! empty( $batch ) ) {
 			$i_current_batch++;
-			WP_CLI::log( sprintf( "Uploading batch #%d in %s -- files from %s to %s...", $i_current_batch, $directory_path, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path  . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
+			WP_CLI::log( sprintf( "Uploading %s -- batch #%d, files from %s to %s...", $directory_path, $i_current_batch, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path  . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
 			$this->upload_a_batch_of_files( $batch, $cli_s3_uploads_destination );
 		}
 	}
