@@ -21,7 +21,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	/**
 	 * Batches of files for upload will be temporarily copied to a temp folder with this suffix, e.g. wp-content/uploads/YYYY/MM{SUFFIX}.
 	 */
-	const TMP_MONTH_FOLDER_SUFFIX = '__TMPS3UPLOAD';
+	const TMP_MONTH_FOLDER_SUFFIX = '__TMPS3UPLOADBATCH';
 
 	/**
 	 * Files to ignore while uploading.
@@ -34,6 +34,11 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 * @var bool $confirmed_first_upload Flag, used to prompt the User to confirm the accuracy of the CLI command before running it for the first time.
 	 */
 	private $confirmed_first_upload = false;
+
+	/**
+	 * @var bool $confirmed_first_upload Flag, used to skip the prompt before uploading the first batch.
+	 */
+	private $skip_prompt_before_first_upload = false;
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -84,6 +89,13 @@ class S3UploadsMigrator implements InterfaceMigrator {
 					'optional'    => false,
 					'repeating'   => false,
 				],
+				[
+					'type'        => 'flag',
+					'name'        => 'skip-prompt-before-first-upload',
+					'description' => "Use to skip prompting before uploading the first batch.",
+					'optional'    => true,
+					'repeating'   => false,
+				],
 			],
 		] );
 	}
@@ -102,6 +114,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		}
 
 		// Arguments and variables.
+		$this->skip_prompt_before_first_upload = isset( $assoc_args['skip-prompt-before-first-upload'] ) ? $assoc_args['skip-prompt-before-first-upload'] : false;
 		$cli_s3_uploads_destination = isset( $assoc_args['s3-uploads-destination'] ) ? $assoc_args['s3-uploads-destination'] : null;
 		$directory_to_upload = $assoc_args[ 'directory-to-upload' ] ?? null;
 		if ( ! file_exists( $directory_to_upload ) || ! is_dir( $directory_to_upload ) ) {
@@ -115,7 +128,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		// Upload directory.
 		$this->upload_directory( $directory_to_upload, $cli_s3_uploads_destination );
 
-		WP_CLI::success( 'Done. See log %s for full details.', self::LOG );
+		WP_CLI::success( sprintf( 'Done. See log %s for full details.', self::LOG ) );
 	}
 
 	/**
@@ -150,13 +163,14 @@ class S3UploadsMigrator implements InterfaceMigrator {
 			if ( is_dir( $file_path ) ) {
 				$cli_s3_uploads_destination_subdirectory = $cli_s3_uploads_destination . '/' . $file;
 				$this->upload_directory( $file_path, $cli_s3_uploads_destination_subdirectory );
+				continue;
 			}
 
 			// Add file to batch, or upload the batch.
 			if ( 0 !== count( $batch ) && 0 === ( count( $batch ) % self::UPLOAD_FILES_LIMIT ) ) {
 				// Upload batch.
 				$i_current_batch++;
-				WP_CLI::log( sprintf( "  - uploading batch #%d in %s -- from %s to %s...", $i_current_batch, $directory_path, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path  . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
+				WP_CLI::log( sprintf( "Uploading %s -- batch #%d, files from %s to %s...", $directory_path, $i_current_batch, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path  . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
 				$this->upload_a_batch_of_files( $batch, $cli_s3_uploads_destination );
 
 				// Reset the loop.
@@ -169,7 +183,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		// Upload remaining files.
 		if ( ! empty( $batch ) ) {
 			$i_current_batch++;
-			WP_CLI::log( sprintf( "  - uploading batch #%d in %s -- from %s to %s...", $i_current_batch, $directory_path, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path  . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
+			WP_CLI::log( sprintf( "Uploading batch #%d in %s -- files from %s to %s...", $i_current_batch, $directory_path, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path  . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
 			$this->upload_a_batch_of_files( $batch, $cli_s3_uploads_destination );
 		}
 	}
@@ -226,11 +240,10 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		$cli_command = sprintf( "s3-uploads upload-directory %s/ %s", $dir_from, $cli_s3_uploads_destination );
 
 		// Prompt the user before running the command for the first time, as an opportunity to double-check the correct format.
-		if ( false === $this->confirmed_first_upload ) {
+		if ( false == $this->skip_prompt_before_first_upload && false === $this->confirmed_first_upload ) {
 			WP_CLI::log( "\nAbout to upload the first batch of files with this command:" );
 			WP_CLI::log( '  $ ' . $cli_command );
 			WP_CLI::confirm( 'OK to run this?' );
-			$this->confirmed_first_upload = true;
 		}
 
 		// Run the CLI command.
@@ -239,14 +252,14 @@ class S3UploadsMigrator implements InterfaceMigrator {
 			'launch'     => false,
 			'exit_error' => true,
 		];
-		WP_CLI::log( sprintf( "running command: $ %s", $cli_command ) );
 		WP_CLI::runcommand( $cli_command, $options );
 
 		// Log the full command and list of the files uploaded.
 		$this->log_command_and_files( $dir_from, $cli_command );
 
-		if ( false === $this->confirmed_first_upload ) {
-			WP_CLI::confirm( sprintf( "\nFirst batch of files completed. Feel free to check the log %s and contents of the bucket before continuing. All following commands will run without prompts. OK to continue?", self::LOG ) );
+		if ( false == $this->skip_prompt_before_first_upload && false === $this->confirmed_first_upload ) {
+			WP_CLI::log( sprintf( "First batch of max %d files was uploaded. Feel free to check the log %s and contents of the bucket before continuing. All following commands will run without prompts.", self::UPLOAD_FILES_LIMIT, self::LOG ) );
+			WP_CLI::confirm( "OK to continue?" );
 			$this->confirmed_first_upload = true;
 		}
 
