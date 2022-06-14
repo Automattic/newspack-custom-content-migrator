@@ -134,10 +134,6 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		if ( ! file_exists( $directory_to_upload ) || ! is_dir( $directory_to_upload ) ) {
 			WP_CLI::error( sprintf( 'Incorrect uploads directory path %s.', $directory_to_upload ) );
 		}
-		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
-			WP_CLI::error( 'WP_CONTENT_DIR is not defined.' );
-		}
-		$this->path_wp_content = WP_CONTENT_DIR;
 
 		// Upload directory.
 		$this->upload_directory( $directory_to_upload, $cli_s3_uploads_destination );
