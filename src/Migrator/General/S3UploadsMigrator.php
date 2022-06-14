@@ -262,7 +262,12 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		if ( false == $this->skip_prompt_before_first_upload && false === $this->confirmed_first_upload ) {
 			WP_CLI::log( "\nAbout to upload the first batch of files with this command:" );
 			WP_CLI::log( '  $ ' . $cli_command );
-			WP_CLI::confirm( 'OK to run this?' );
+			$input = readline( 'OK to run this? [y/n] ' );
+			if ( 'y' != $input ) {
+				// Clean up the temporary directory with a batch of files.
+				$this->delete_directory( $dir_from );
+				exit;
+			}
 		}
 
 		// Run the CLI command.
@@ -278,7 +283,13 @@ class S3UploadsMigrator implements InterfaceMigrator {
 
 		if ( false == $this->skip_prompt_before_first_upload && false === $this->confirmed_first_upload ) {
 			WP_CLI::log( sprintf( 'First batch of max %d files was uploaded. Feel free to check the log %s and contents of the bucket before continuing. All following commands will run without prompts.', self::UPLOAD_FILES_LIMIT, self::LOG ) );
-			WP_CLI::confirm( 'OK to continue?' );
+			$input = readline( 'OK to run this? [y/n] ' );
+			if ( 'y' != $input ) {
+				// Clean up the temporary directory with a batch of files.
+				$this->delete_directory( $dir_from );
+				exit;
+			}
+
 			$this->confirmed_first_upload = true;
 		}
 
