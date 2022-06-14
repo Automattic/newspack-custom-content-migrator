@@ -68,19 +68,19 @@ class S3UploadsMigrator implements InterfaceMigrator {
 			'newspack-content-migrator s3uploads-upload-directories',
 			[ $this, 'cmd_upload_directories' ],
 		[
-			'shortdesc' => "Uses S3-Uploads' `upload-directory` CLI command by automatically splitting the contents of a folder in smaller, safer batches which won't cause S3-Uploads to break in error. You can provide one or more directories as positional arguments; for example, either provide individual full paths to uploads-years (recommended), or a single full path of the uploads. It uploads all the recursive contents in the folder, including subfolders if any.",
+			'shortdesc' => "Runs S3-Uploads' `upload-directory` CLI command by splitting the contents of a folder into smaller, safer batches which won't cause S3-Uploads to break in error. It uploads all the recursive contents in the folder, including subfolders if any.",
 			'synopsis'  => [
 				[
 					'type'        => 'assoc',
 					'name'        => 'directory-to-upload',
-					'description' => "Full path to a directory to be uploaded. For example, --directory-to-upload=/srv/htdocs/wp-content/uploads/2019",
+					'description' => "Full path to a directory to be uploaded. Recommended to upload one year folder at a time. For example, --directory-to-upload=/srv/htdocs/wp-content/uploads/2019",
 					'optional'    => false,
 					'repeating'   => false,
 				],
 				[
 					'type'        => 'assoc',
 					'name'        => 's3-uploads-destination',
-					'description' => "Destination root prefix. It used in the CLI command like this, `$ wp s3-uploads upload-directory --directory-to-upload=/srv/htdocs/wp-content/uploads/2019 --s3-uploads-destination=uploads/2019`. This value depends on the S3_UPLOADS_BUCKET constant, and whether it contains the '/wp-content' suffix as root destination or not. E.g. if we're uploading the folder --directory-to-upload=/srv/htdocs/wp-content/uploads/2019, and if the constant already contains wp-content suffix `define( 'S3_UPLOADS_BUCKET\', 'name-of-bucket/wp-content' );`, then this param whould be --s3-uploads-destination=uploads/2019.",
+					'description' => "S3 destination root. Used in the CLI command like this, `$ wp s3-uploads upload-directory --directory-to-upload=/srv/htdocs/wp-content/uploads/2019 --s3-uploads-destination=uploads/2019`. This value depends on the S3_UPLOADS_BUCKET constant and whether it contains the '/wp-content' suffix as root destination or not. E.g. if we're uploading the folder --directory-to-upload=/srv/htdocs/wp-content/uploads/2019, and the constant already contains the '/wp-content' `define( 'S3_UPLOADS_BUCKET\', 'name-of-bucket/wp-content' );`, then this param whould be --s3-uploads-destination=uploads/2019.",
 					'optional'    => false,
 					'repeating'   => false,
 				],
