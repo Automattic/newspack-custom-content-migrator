@@ -79,6 +79,8 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			3 => 229941,
 			// Digital - Annually
 			6 => 229942,
+				// Print &amp; Digital
+				// null => 229880,
 			// Print &amp; Digital - Annually ($100.00)
 			5 => 229949,
 			// Print &amp; Digital Monthly
@@ -367,6 +369,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 					// 2016-05-29 00:44:44
 					'last_payment_date' => $woocom_order_date,
 					// 2016-04-29 00:44:46
+					// TODO -- end_date must be +1 day from last_payment_day
 					'end_date' => $end_date_format,
 					// 2018-04-29 00:44:44
 				]
@@ -584,11 +587,15 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 					'order_items' => sprintf(
 						"product_id:%d|name:%s|quantity:%d|total:%f|meta:%s|tax:%f",
 						$product_id,
+						// TODO sanitize and replace `&amp;` => `&`
 						$product_name,
 						$product_quantity,
+						// TODO must be rounded to two decimal places
 						$product_total,
 						$product_meta,
+						// TODO must be rounded to two decimal places
 						$product_tax
+						// TODO check all other %f-s
 					),
 					// 229945 - corporate
 					// 229884 - digital, variants:
