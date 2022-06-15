@@ -152,12 +152,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	public function upload_directory( $directory_path, $cli_s3_uploads_destination ) {
 
 		// Get list of files in $directory_path.
-		$files        = scandir( $directory_path );
-		$ignore_files = array_merge( [ '.', '..' ], self::IGNORE_UPLOADING_FILES );
-		foreach ( $ignore_files as $file_ignore ) {
-			unset( $files[ array_search( $file_ignore, $files, true ) ] );
-		}
-		sort( $files );
+		$files = $this->get_files_for_upload( $directory_path );
 
 		// Return if empty.
 		if ( count( $files ) < 1 ) {
@@ -300,14 +295,28 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 */
 	public function log_command_and_files( $dir_from, $cli_command ) {
 		// Get files in batch.
-		$files        = scandir( $dir_from );
+		$files = $this->get_files_for_upload( $dir_from );
+
+		$this->log( self::LOG, sprintf( "%s\n%s", $cli_command, implode( "\n", $files ) ), false );
+	}
+
+	/**
+	 * Gets a list of sorted files from a directory.
+	 * Excludes files from self::IGNORE_UPLOADING_FILES.
+	 *
+	 * @param string $directory Directory path.
+	 *
+	 * @return array|false Array with file names or false.
+	 */
+	public function get_files_for_upload( $directory ) {
+		$files        = scandir( $directory );
 		$ignore_files = array_merge( [ '.', '..' ], self::IGNORE_UPLOADING_FILES );
 		foreach ( $ignore_files as $file_ignore ) {
 			unset( $files[ array_search( $file_ignore, $files, true ) ] );
 		}
 		sort( $files );
 
-		$this->log( self::LOG, sprintf( "%s\n%s", $cli_command, implode( "\n", $files ) ), false );
+		return $files;
 	}
 
 	/**
