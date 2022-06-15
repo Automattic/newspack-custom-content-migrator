@@ -53,8 +53,7 @@ PluginSetup::register_migrators(
 		Migrator\General\PhotoAlbumProGalleryMigrator::class,
 		Migrator\General\AttachmentsMigrator::class,
 
-		// Publisher specific:
-		Migrator\PublisherSpecific\HipertextualMigrator::class,
+		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,

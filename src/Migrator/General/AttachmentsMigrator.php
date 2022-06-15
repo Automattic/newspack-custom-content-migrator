@@ -1,13 +1,23 @@
 <?php
+/**
+ * AttachmentsMigrator class.
+ *
+ * @package newspack-custom-content-converter
+ */
 
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
 
+/**
+ * Attachments general Migrator command class.
+ */
 class AttachmentsMigrator implements InterfaceMigrator {
 
 	/**
+	 * Singleton instance.
+	 *
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -46,16 +56,16 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	 * Gets a list of attachment IDs by years for those attachments which have files on local in (/wp-content/uploads).
 	 *
 	 * @param array $pos_args   Positional arguments.
-	 * @param array $assoc_args Associative Arguments
+	 * @param array $assoc_args Associative Arguments.
 	 *
 	 * @return void
-	 * @throws WP_CLI\ExitException
 	 */
 	public function convert_get_atts_by_years( $pos_args, $assoc_args ) {
 		global $wpdb;
 		$ids_years  = [];
 		$ids_failed = [];
 
+		// phpcs:ignore
 		$att_ids = $wpdb->get_results( "select ID from {$wpdb->posts} where post_type = 'attachment' ; ", ARRAY_A );
 		foreach ( $att_ids as $key_att_id => $att_id_row ) {
 			$att_id = $att_id_row['ID'];
