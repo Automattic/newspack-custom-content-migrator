@@ -51,8 +51,10 @@ PluginSetup::register_migrators(
 		Migrator\General\TablePressMigrator::class,
 		Migrator\General\NinjaTablesMigrator::class,
 		Migrator\General\PhotoAlbumProGalleryMigrator::class,
+		Migrator\General\AttachmentsMigrator::class,
 
 		// Publisher specific:
+		Migrator\PublisherSpecific\HipertextualMigrator::class,
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
