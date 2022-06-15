@@ -142,7 +142,6 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-
 	 * Recursive function. Splits files in directory into smaller batches and runs upload of batches.
 	 *
 	 * @param string $directory_path Full directory path to upload.
