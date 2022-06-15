@@ -153,8 +153,6 @@ class S3UploadsMigrator implements InterfaceMigrator {
 
 		// Get list of files in $directory_path.
 		$files = $this->get_files_from_directory( $directory_path );
-
-		// Return if empty.
 		if ( count( $files ) < 1 ) {
 			return;
 		}
