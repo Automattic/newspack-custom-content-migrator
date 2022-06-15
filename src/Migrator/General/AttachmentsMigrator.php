@@ -48,7 +48,7 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-get-ids-by-years',
-			[ $this, 'convert_get_atts_by_years' ],
+			[ $this, 'cmd_get_atts_by_years' ],
 		);
 	}
 
@@ -60,7 +60,7 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	 *
 	 * @return void
 	 */
-	public function convert_get_atts_by_years( $pos_args, $assoc_args ) {
+	public function cmd_get_atts_by_years( $pos_args, $assoc_args ) {
 		global $wpdb;
 		$ids_years  = [];
 		$ids_failed = [];
