@@ -276,6 +276,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		// Log the full command and list of the files uploaded.
 		$this->log_command_and_files( $dir_from, $cli_command );
 
+		// Also prompt after completing the first command, to give one a chance to examine the results before continuing. No more prompts after this one.
 		if ( false == $this->skip_prompt_before_first_upload && false === $this->confirmed_first_upload ) {
 			WP_CLI::log( sprintf( 'First batch of max %d files was uploaded. Feel free to check the log %s and contents of the bucket before continuing. All following commands will run without prompts.', self::UPLOAD_FILES_LIMIT, self::LOG ) );
 			$input = readline( 'OK to run this? [y/n] ' );
