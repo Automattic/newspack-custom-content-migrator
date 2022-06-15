@@ -152,7 +152,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	public function upload_directory( $directory_path, $cli_s3_uploads_destination ) {
 
 		// Get list of files in $directory_path.
-		$files = $this->get_files_for_upload( $directory_path );
+		$files = $this->get_files_from_directory( $directory_path );
 
 		// Return if empty.
 		if ( count( $files ) < 1 ) {
@@ -295,7 +295,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 */
 	public function log_command_and_files( $dir_from, $cli_command ) {
 		// Get files in batch.
-		$files = $this->get_files_for_upload( $dir_from );
+		$files = $this->get_files_from_directory( $dir_from );
 
 		$this->log( self::LOG, sprintf( "%s\n%s", $cli_command, implode( "\n", $files ) ), false );
 	}
@@ -308,7 +308,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 	 *
 	 * @return array|false Array with file names or false.
 	 */
-	public function get_files_for_upload( $directory ) {
+	public function get_files_from_directory( $directory ) {
 		$files        = scandir( $directory );
 		$ignore_files = array_merge( [ '.', '..' ], self::IGNORE_UPLOADING_FILES );
 		foreach ( $ignore_files as $file_ignore ) {
