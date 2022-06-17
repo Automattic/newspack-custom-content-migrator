@@ -51,6 +51,7 @@ PluginSetup::register_migrators(
 		Migrator\General\TablePressMigrator::class,
 		Migrator\General\NinjaTablesMigrator::class,
 		Migrator\General\PhotoAlbumProGalleryMigrator::class,
+		Migrator\General\PDFEmbedderMigrator::class,
 		Migrator\General\ContentFixerMigrator::class,
 
 		// Publisher specific:
