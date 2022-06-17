@@ -15,9 +15,9 @@ class Posts {
 		$ids = array();
 
 		// Arguments in \WP_Query::parse_query .
-		$args = array(
-			'nopaging' => $nopaging,
-			'post_type' => $post_type,
+		$args  = array(
+			'nopaging'    => $nopaging,
+			'post_type'   => $post_type,
 			'post_status' => $post_status,
 		);
 		$query = new \WP_Query( $args );
@@ -92,7 +92,6 @@ SQL;
 		if ( ! empty( $results_names ) ) {
 			foreach ( $results_names as $results_name ) {
 				$names[] = $results_name['name'];
-
 			}
 		}
 
@@ -108,7 +107,7 @@ SQL;
 		global $wpdb;
 
 		$post_types = [];
-		$results = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
+		$results    = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
 		foreach ( $results as $result ) {
 			$post_types[] = $result->post_type;
 		}
@@ -125,48 +124,52 @@ SQL;
 	 *      }
 	 * ```
 	 *
-	 * @param array $post_types Post types.
+	 * @param array  $post_types Post types.
 	 * @param string $taxonomy Taxonomy.
-	 * @param int $term_id term_id.
+	 * @param int    $term_id term_id.
 	 *
 	 * @return \WP_Post[]
 	 */
 	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
-		return get_posts( [
-			'posts_per_page' => -1,
-			// Target all post_types.
-			'post_type'      => $post_types,
-			'tax_query'      => [
-				[
-					'taxonomy' => $taxonomy,
-					'field'    => 'term_id',
-					'terms'    => $term_id,
-				]
-			],
-		] );
+		return get_posts(
+            [
+				'posts_per_page' => -1,
+				// Target all post_types.
+				'post_type'      => $post_types,
+				'tax_query'      => [
+					[
+						'taxonomy' => $taxonomy,
+						'field'    => 'term_id',
+						'terms'    => $term_id,
+					],
+				],
+			]
+        );
 	}
 
 	/**
 	 * Gets taxonomy with custom meta.
 	 *
-	 * @param        $meta_key
-	 * @param        $meta_value
-	 * @param string $taxonomy
+	 * @param            $meta_key
+	 * @param            $meta_value
+	 * @param string     $taxonomy
 	 *
 	 * @return int|\WP_Error|\WP_Term[]
 	 */
 	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
-        return get_terms([
-            'hide_empty' => false,
-            'meta_query' => [
-                [
-                    'key'     => $meta_key,
-                    'value'   => $meta_value,
-                    'compare' => 'LIKE'
-                ],
-            ],
-            'taxonomy'  => $taxonomy,
-        ]);
+        return get_terms(
+            [
+				'hide_empty' => false,
+				'meta_query' => [
+					[
+						'key'     => $meta_key,
+						'value'   => $meta_value,
+						'compare' => 'LIKE',
+					],
+				],
+				'taxonomy'   => $taxonomy,
+			]
+        );
 	}
 
 	/**
@@ -184,7 +187,7 @@ SQL;
 
 		global $wpdb;
 
-		$post_types_placeholders = implode( ",", array_fill( 0, count( $post_types ), '%s' ) );
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
 
 		$args_prepare = [];
 		array_push( $args_prepare, $meta_key, $meta_value );
@@ -209,7 +212,7 @@ SQL;
 
 		$post_ids = [];
 		foreach ( $results_meta_post_ids as $result_meta_post_id ) {
-			$post_ids[] = (int) $result_meta_post_id[ 'post_id' ];
+			$post_ids[] = (int) $result_meta_post_id['post_id'];
 		}
 
 		return $post_ids;
