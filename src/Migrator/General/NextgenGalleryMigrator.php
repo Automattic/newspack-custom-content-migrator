@@ -346,7 +346,7 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		$post_content_updated = $post_content;
 
 		// Match the shortcode inside the NGG Gallery block.
-		$matches_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'nggallery', $post_content );
+		$matches_shortcodes = $this->get_ngg_shortcode_from_content( $post_content );
 		if ( empty( $matches_shortcodes[0] ) ) {
 			return $post_content_updated;
 		}
@@ -354,9 +354,10 @@ class NextgenGalleryMigrator implements InterfaceMigrator {
 		foreach ( $matches_shortcodes as $match_shortcode ) {
 			$shortcode_html = $match_shortcode[0];
 
-			preg_match( '/nggallery.*id=(?<gallery_id>\d+)/', $shortcode_html, $gallery_id_match );
-			if ( ! empty( $gallery_id_match ) ) {
-				$att_ids = $this->get_attachment_ids_in_ngg_gallery( $gallery_id_match['gallery_id'] );
+			$gallery_id = $this->get_gallery_id_from_shortcode( $shortcode_html );
+
+			if ( $gallery_id ) {
+				$att_ids = $this->get_attachment_ids_in_ngg_gallery( $gallery_id );
 
 				if ( empty( $att_ids ) ) {
 					return $post_content_updated;
@@ -483,5 +484,45 @@ HTML;
 		}
 
 		return null;
+	}
+
+	/**
+	 * Return NGG shorcode from the post content.
+	 *
+	 * @param string $post_content Post content from where we want to extract the NGG shortcode.
+	 * @return string[][]
+	 */
+	private function get_ngg_shortcode_from_content( $post_content ) {
+		$possible_shortcode_tags = array( 'nggallery', 'ngg' );
+		foreach ( $possible_shortcode_tags as $shortcode_tag ) {
+			$matches_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( $shortcode_tag, $post_content );
+			if ( ! empty( $matches_shortcodes[0] ) ) {
+				return $matches_shortcodes;
+			}
+		}
+
+		return array();
+	}
+
+	/**
+	 * Get the gallery ID from the NGG shortcode, returns false if not found.
+	 *
+	 * @param string $shortcode_html NGG shorcode content.
+	 * @return int|false
+	 */
+	private function get_gallery_id_from_shortcode( $shortcode_html ) {
+		// e.g.: [nggallery id=1].
+		preg_match( '/nggallery.*id=(?<gallery_id>\d+)/', $shortcode_html, $gallery_id_match );
+		if ( array_key_exists( 'gallery_id', $gallery_id_match ) ) {
+			return $gallery_id_match['gallery_id'];
+		}
+
+		// e.g.: [ngg src="galleries" ids="1" display="basic_slideshow" autoplay="0" arrows="1"].
+		$parsed_shortcode = shortcode_parse_atts( $shortcode_html );
+		if ( array_key_exists( 'ids', $parsed_shortcode ) ) {
+			return $parsed_shortcode['ids'];
+		}
+
+		return false;
 	}
 }

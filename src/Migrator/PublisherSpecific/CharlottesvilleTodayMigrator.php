@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
  * Custom migration scripts for CharlottesvilleToday.
@@ -40,10 +41,16 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 	private $posts_logic;
 
 	/**
+	 * @var CoAuthorPlusLogic
+	 */
+	private $coauthors_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->posts_logic = new PostsLogic();
+		$this->coauthors_logic = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -68,6 +75,95 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 			'newspack-content-migrator charlottesvilletoday-acf-migrate',
 			[ $this, 'cmd_acf_migrate' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-update-image-credits',
+			[ $this, 'cmd_update_image_credits' ],
+			[
+				'shortdesc' => 'Run additionally after cmd_acf_migrate to update image credits to Newspack Image Credits meta.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-migrate-acf-authors',
+			[ $this, 'cmd_use_acf_authors' ],
+			[
+				'shortdesc' => 'Run additionally after cmd_acf_migrate to use ACF authors field.',
+			]
+		);
+	}
+
+	/**
+	 * Uses ACF's custom author fields, and converts ACF's Term to GA and assigns these to all the Posts.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_use_acf_authors( $args, $assoc_args ) {
+		global $wpdb;
+
+		if ( ! $this->coauthors_logic->is_coauthors_active() ) {
+			WP_CLI::error( 'CAP must be active in order to run this command. Please fix then re run.' );
+		}
+
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id  ) );
+
+			// Get ACF author meta from postmeta and Terms.
+			$meta_acf_author = get_post_meta( $post_id, 'article_author' );
+			$author_term_id = $meta_acf_author[0][0] ?? null;
+			if ( is_null( $author_term_id ) || ! $author_term_id ) {
+				WP_CLI::log( '- skipping...' );
+				continue;
+			}
+
+			$author_name = $wpdb->get_var( $wpdb->prepare( "select name from $wpdb->terms where term_id = %d;", $author_term_id ) );
+			if ( ! $author_name ) {
+				WP_CLI::log( '- skipping 2...' );
+				continue;
+			}
+
+			// Create GA and assign to post.
+			$ga = $this->get_or_create_ga_by_name( $author_name );
+			$ga_id = $ga->ID ?? null;
+			if ( is_null( $ga_id ) ) {
+				throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+			}
+			$this->coauthors_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id );
+		}
+	}
+
+	/**
+	 * Gets or creates a GA by display name.
+	 *
+	 * @param $display_name
+	 *
+	 * @return false|object
+	 */
+	public function get_or_create_ga_by_name( $display_name ) {
+		$user_login = sanitize_title( $display_name );
+		$ga = $this->coauthors_logic->get_guest_author_by_user_login( $user_login );
+		if ( false == $ga ) {
+			$ga_id = $this->coauthors_logic->create_guest_author( [ 'display_name' => $display_name ] );
+			$ga = $this->coauthors_logic->get_guest_author_by_user_login( $user_login );
+		}
+
+		return $ga;
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_image_credits( $args, $assoc_args ) {
+		$att_ids = $this->posts_logic->get_all_posts_ids( 'attachment' );
+		foreach ( $att_ids as $key_att_id => $att_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_att_id + 1, count( $att_ids ), $att_id  ) );
+			$post = get_post( $att_id );
+			$credits = $post->post_content;
+			update_post_meta( $att_id, '_media_credit', $credits );
+		}
+
+		WP_CLI::log( 'All done!' );
 	}
 
 	/**
