@@ -258,7 +258,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 */
 	private function handle_xml_item_two( \DOMNode $item, int $best_of_term_id = 0, array $authors = [] ) {
 		global $wpdb;
-		$featured_images_sql = "SELECT ID FROM $wpdb->posts WHERE post_type = 'attachment'";
+		$featured_images_sql = "SELECT ID, guid FROM bak_wp_posts WHERE post_type = 'attachment'";
 		$featured_images = $wpdb->get_results( $featured_images_sql, OBJECT_K );
 
 		$post                      = [
@@ -358,8 +358,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				switch ( $meta_key ) {
 					case '_thumbnail_id':
 						if ( array_key_exists( $meta_value, $featured_images ) ) {
-							$post['meta_input']['_thumbnail_id'] = $meta_value;
-							$post['meta_input']['newspack_featured_image_position'] = 'above';
+							$guid = $featured_images[$meta_value]->guid;
+							$path = parse_url( $guid, PHP_URL_PATH );
+
+							$new_post_id = $wpdb->get_row( "SELECT ID FROM $wpdb->posts WHERE guid LIKE '%$path' LIMIT 1" );
+
+							if ( ! is_null( $new_post_id ) ) {
+								$post['meta_input']['_thumbnail_id'] = $new_post_id->ID;
+								$post['meta_input']['newspack_featured_image_position'] = 'above';
+							}
 						}
 						break;
 					case 'bm_specialty':
