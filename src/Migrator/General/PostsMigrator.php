@@ -147,6 +147,44 @@ class PostsMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Removes the postmeta with original ID which gets set on all exported posts/pages.',
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator switch-posts-type',
+			array( $this, 'switch_posts_type' ),
+			array(
+				'shortdesc' => 'Switch posts type from posts to pages or vice versa.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually switch the posts types.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'include_post_ids',
+						'description' => 'IDs of posts and pages to switch their types separated by a comma (e.g. 123,456)',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'exclude_post_ids',
+						'description' => 'IDs of posts and pages to not switch their types separated by a comma (e.g. 123,456)',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'positional',
+						'name'        => 'post-type',
+						'description' => 'The type to be set to the selected posts.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
 	}
 
 	/**
@@ -439,5 +477,73 @@ class PostsMigrator implements InterfaceMigrator {
 		);
 
 		return isset( $new_id ) ? $new_id : null;
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator switch-posts-type`.
+	 */
+	public function switch_posts_type( $args, $assoc_args ) {
+		$include_post_ids = isset( $assoc_args['include_post_ids'] ) ? explode( ',', $assoc_args['include_post_ids'] ) : [];
+		$exclude_post_ids = isset( $assoc_args['exclude_post_ids'] ) ? explode( ',', $assoc_args['exclude_post_ids'] ) : [];
+		$dry_run          = isset( $assoc_args['dry-run'] ) ? true : false;
+		$post_type        = isset( $args[0] ) ? $args[0] : false;
+
+		$possible_post_types_to_switch = array_filter(
+            [ 'post', 'page' ],
+            function( $pt ) use ( $post_type ) {
+				return $pt !== $post_type;
+			}
+        );
+
+		if ( empty( $include_post_ids ) && empty( $exclude_post_ids ) || ! empty( $include_post_ids ) && ! empty( $exclude_post_ids ) ) {
+			WP_CLI::error( 'Please select the posts to switch or not to switch their types. One of `--include_post_ids` or `--exclude_post_ids` parameters should be used.' );
+		}
+
+		if ( ! in_array( $post_type, [ 'post', 'page' ] ) ) {
+			WP_CLI::error( 'The post type should be one of the following: post, page.' );
+		}
+
+		if ( $dry_run ) {
+			WP_CLI::warning( 'Dry mode, no changes are going to affect the database' );
+		} else {
+			WP_CLI::confirm( 'This will switch the selected posts types, do you want to continue?' );
+		}
+
+		$args = array( 'post_type' => $possible_post_types_to_switch );
+
+		if ( count( $include_post_ids ) > 0 ) {
+			$args['post__in'] = $include_post_ids;
+		}
+
+		if ( count( $exclude_post_ids ) > 0 ) {
+			$args['post__not_in'] = $exclude_post_ids;
+		}
+
+		$this->posts_logic->throttled_posts_loop(
+			$args,
+			function( $post ) use ( $post_type, $dry_run ) {
+				if ( $post->post_type === $post_type ) {
+					WP_CLI::warning( sprintf( 'Skipping the post %d as it has the same post type `%s`', $post->ID, $post_type ) );
+					return;
+				}
+
+				if ( ! $dry_run ) {
+					$update = wp_update_post(
+						array(
+							'ID'        => $post->ID,
+							'post_type' => $post_type,
+						)
+					);
+
+					if ( is_wp_error( $update ) ) {
+						WP_CLI::line( sprintf( 'Failed to update post %d because %s', $post->ID, $update->get_error_message() ) );
+					} else {
+						WP_CLI::line( sprintf( 'Post %d switched from %s to %s.', $post->ID, $post->post_type, $post_type ) );
+					}
+				} else {
+					WP_CLI::line( sprintf( 'Post %d will be switched from %s to %s.', $post->ID, $post->post_type, $post_type ) );
+				}
+			}
+		);
 	}
 }
