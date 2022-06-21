@@ -55,6 +55,7 @@ PluginSetup::register_migrators(
 		Migrator\General\AttachmentsMigrator::class,
 		Migrator\General\PDFEmbedderMigrator::class,
 		Migrator\General\ContentFixerMigrator::class,
+		Migrator\General\XMLMigrator::class,
 
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
