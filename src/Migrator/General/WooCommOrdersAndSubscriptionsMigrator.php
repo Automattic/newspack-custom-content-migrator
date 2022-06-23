@@ -80,6 +80,44 @@ class WooCommOrdersAndSubscriptionsMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator wc-migrate-subscription-payment-type',
+			[ $this, 'cmd_wc_migrate_subscription_payment_type' ],
+			[
+				'shortdesc' => 'Migrate subscription payment types from a type to another.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually switch the subscriptions payment method.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'source-payment-type',
+						'description' => 'Payment type to switch from.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-payment-type',
+						'description' => 'Destination type to switch to.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'expiration-date',
+						'description' => 'Set an expiration date for the subscriptions, the date should be in the format `Y-m-d H:i:s`.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -131,6 +169,64 @@ class WooCommOrdersAndSubscriptionsMigrator implements InterfaceMigrator {
 				if ( self::EXCEPTION_CODE_SKIP_IMPORTING == $e->getCode() ) {
 					// Continue with the next ID.
 					continue;
+				}
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for newspack-content-migrator wc-migrate-subscription-payment-type command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_wc_migrate_subscription_payment_type( $args, $assoc_args ) {
+		$source_payment_type      = isset( $assoc_args['source-payment-type'] ) ? $assoc_args['source-payment-type'] : '';
+		$destination_payment_type = isset( $assoc_args['destination-payment-type'] ) ? $assoc_args['destination-payment-type'] : '';
+		$expiration_date          = isset( $assoc_args['expiration-date'] ) ? $assoc_args['expiration-date'] : null;
+		$dry_run                  = isset( $assoc_args['dry-run'] ) ? true : false;
+		$possible_payment_methods = [ 'paypal', 'bacs' ];
+
+		if ( ! $this->is_woo_subscription_plugin_active() ) {
+			WP_CLI::error( 'Please make sure that the WooCommerce Subscription plugin is installed and activated.' );
+		}
+
+		if ( ! in_array( $source_payment_type, $possible_payment_methods, true ) ) {
+			WP_CLI::error( sprintf( '%s is not a valid payment method, please select one of the following: %s', $source_payment_type, join( ', ', $possible_payment_methods ) ) );
+		}
+
+		if ( ! in_array( $destination_payment_type, $possible_payment_methods, true ) ) {
+			WP_CLI::error( sprintf( '%s is not a valid payment method, please select one of the following: %s', $destination_payment_type, join( ', ', $possible_payment_methods ) ) );
+		}
+
+		$subscriptions = \wcs_get_subscriptions( [ 'subscriptions_per_page' => -1 ] );
+
+		foreach ( $subscriptions as $subscription ) {
+			$subscription_payment_method = $subscription->get_payment_method();
+
+			// Skip subscription with:
+			// - different payment methods than the one needed to be changed.
+			// - same payment method as the new one.
+			if ( $source_payment_type !== $subscription_payment_method || $destination_payment_type === $subscription_payment_method ) {
+				continue;
+			}
+
+			// Skip canceled subscriptions.
+			if ( 'cancelled' === $subscription->get_status() ) {
+				continue;
+			}
+
+			if ( $dry_run ) {
+				WP_CLI::warning( sprintf( 'Changing the payment method for the user %s with subscription %d from %s to %s', $subscription->get_user()->user_email, $subscription->get_id(), $subscription_payment_method, $destination_payment_type ) );
+			} else {
+				$subscription->set_payment_method( $destination_payment_type );
+				WP_CLI::warning( sprintf( 'Changing the payment method for the subscription %d from %s to %s', $subscription->get_id(), $source_payment_type, $destination_payment_type ) );
+
+				if ( $expiration_date ) {
+					$subscription->update_dates( array( 'end' => $expiration_date ) );
+					WP_CLI::warning( sprintf( 'Changing the expiration date for the subscription %d to %s', $subscription->get_id(), $expiration_date ) );
 				}
 			}
 		}
@@ -675,6 +771,22 @@ class WooCommOrdersAndSubscriptionsMigrator implements InterfaceMigrator {
 		$msg = sprintf( '%s Product Lookup import done.', $object_name );
 		$this->log( self::GENERAL_LOG, $msg );
 		WP_CLI::success( $msg );
+	}
+
+	/**
+	 * Checks whether WooCommerce Subscriptions is installed and active.
+	 *
+	 * @return bool Is WooCommerce Subscriptions active.
+	 */
+	public function is_woo_subscription_plugin_active() {
+		$active = false;
+		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
+			if ( false !== strrpos( strtolower( $plugin ), '/woocommerce-subscriptions.php' ) ) {
+				$active = true;
+			}
+		}
+
+		return $active;
 	}
 
 	/**
