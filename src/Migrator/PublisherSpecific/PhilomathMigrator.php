@@ -112,9 +112,11 @@ class PhilomathMigrator implements InterfaceMigrator {
 
 		if ( ! empty( $ids ) ) {
 			$gallery = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( array_values( $ids ) );
+			$gallery_tiled = $this->posts_logic->generate_skeleton_jetpack_tiled_gallery_from_attachment_ids( array_values( $ids ) );
 
- 			// Tgus us tge full JP Slideshow gallery for use on live.
+ 			// These are the full JP Slideshow galleries for use on live.
 			$gallery_live = str_replace( '//philomath.test/', '//philomathnews.com/', $gallery );
+			$gallery_tiled_live = str_replace( '//philomath.test/', '//philomathnews.com/', $gallery_tiled );
 		} else {
 			// EMPTY
 			$d=1;
