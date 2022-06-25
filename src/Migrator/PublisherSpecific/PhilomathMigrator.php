@@ -58,123 +58,69 @@ class PhilomathMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_update_jp_blocks_ids' ],
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator philomath-get-jp-slideshow-from-urls',
-			[ $this, 'cmd_get_jp_slideshow_from_urls' ],
+			'newspack-content-migrator philomath-recreate-jp-slideshow-code',
+			[ $this, 'cmd_recreate_wp_jetpack_slideshow_code' ],
 		);
 	}
 
-	public function cmd_get_jp_slideshow_from_urls( $args, $assoc_args ) {
-		$urls = [
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2330.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0323.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0383.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0402.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0408.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0427.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0415.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0451.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0447.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0472.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0017.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0538.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0558.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0640.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0680.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0780.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0722.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0767.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0817.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0783.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0844.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0931.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0903.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0950.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1003.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1011.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0986.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1038.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1049.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1082.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1105.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1109.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1126.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1127.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1131.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1146.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1159.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1174.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1186.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0055.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1228.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1269.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1293.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1294.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1330.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-1991.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2013.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2020.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2061.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2070.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2086.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2073.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0102.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2112.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0105.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0114.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2145.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0143.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2134.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2182.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0164.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0173.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0188.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2197.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0207.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0203.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0215.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2206.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0225.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0234.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2212.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0237.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2214.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2237.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2247.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0252.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2267.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2283.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2278.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2307.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2361.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2365.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2411.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2419.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2438.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2460.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2447.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2477.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2469.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2489.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2487.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2509.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2615.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-0284.jpg',
-			'https://philomath.test/wp-content/uploads/2022/02/070821_frolic_day1-2621.jpg',
-		];
+	/**
+	 * Helper command used to manually fix Philomath JP Slideshow galleries.
+	 *
+	 * Certain JP Slideshow galleries on live needed to be recreated. This command reads block code from file (convenient for
+	 * manual processing) and pulls out all image URLs. It then takes these URLs and finds the actual attachment IDs in the DB
+	 * and recreates the whole Slideshow gallery. It also does an intermediary change of hostname (live VS local dev hostname).
+	 *
+	 * @return void
+	 */
+	public function cmd_recreate_wp_jetpack_slideshow_code() {
+
+		// Get wp:jetpack/slideshow block from local dev file.
+		$content = file_get_contents( '/var/www/philomath.test/public/0_philomathgals_geturls.txt' );
+
+		// Replace either data-url=" or src=" with \n.
+		$str_beginning_of_url = false != strpos( $content, 'data-url="' ) ? 'data-url="' : 'src="';
+		$content = str_replace( $str_beginning_of_url, "\n" . $str_beginning_of_url, $content );
+		$content_exploded = explode( "\n", $content );
+		foreach ( $content_exploded as $key_content_line => $content_line ) {
+			if ( 0 !== strpos( $content_line, $str_beginning_of_url ) ) {
+				unset( $content_exploded[$key_content_line] );
+			}
+		}
+		$content = implode( "\n", array_values( $content_exploded ) );
+		$content = str_replace( $str_beginning_of_url, '', $content );
+
+		// Remove everything after " and replace hostnames.
+		$content_exploded = explode( "\n", $content );
+		foreach ( $content_exploded as $key_content_line => $content_line ) {
+			$pos = strpos( $content_line, '"' );
+			$content_exploded[$key_content_line] = substr( $content_line, 0, $pos );
+			$content_exploded[$key_content_line] = str_replace( 'philomathnews.com', 'philomath.test', $content_exploded[$key_content_line] );
+		}
+
+		// All ourls.
+		$urls = array_values( $content_exploded );
+
 		$ids = [];
 		foreach ( $urls as $key => $url ) {
 			WP_CLI::log( sprintf( "%d/%d", $key + 1, count( $urls ) ) );
 			$ids[ $url ] = $this->get_attachment_id_from_url( $url );
 			if ( empty( $ids[ $url ] ) || is_null( $ids[ $url ] ) || 0 == $ids[ $url ] ) {
 				$d=1;
+				unset( $ids[ $url ] );
 			}
 		}
 
-		$gallery = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( array_values( $ids ) );
+		if ( ! empty( $ids ) ) {
+			$gallery = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( array_values( $ids ) );
 
-		$gallery_live = str_replace( '//philomath.test/', '//philomathnews.com/', $gallery );
+ 			// Tgus us tge full JP Slideshow gallery for use on live.
+			$gallery_live = str_replace( '//philomath.test/', '//philomathnews.com/', $gallery );
+		} else {
+			// EMPTY
+			$d=1;
+		}
 
-		$d=1;
+ 		return;
 	}
 
 	/**
