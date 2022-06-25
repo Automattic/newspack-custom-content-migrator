@@ -9,6 +9,10 @@ class Posts {
 	/**
 	 * Gets IDs of all the Pages.
 	 *
+	 * @param string $post_type   Post type.
+	 * @param array  $post_status Post status.
+	 * @param bool   $nopaging    nopaging $arg param for \WP_Query( $arg ).
+	 *
 	 * @return array Pages IDs.
 	 */
 	public function get_all_posts_ids( $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $nopaging = true ) {
@@ -124,15 +128,15 @@ SQL;
 	 *      }
 	 * ```
 	 *
+	 * @param string $taxonomy   Taxonomy.
+	 * @param int    $term_id    term_id.
 	 * @param array  $post_types Post types.
-	 * @param string $taxonomy Taxonomy.
-	 * @param int    $term_id term_id.
 	 *
 	 * @return \WP_Post[]
 	 */
 	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
 		return get_posts(
-            [
+			[
 				'posts_per_page' => -1,
 				// Target all post_types.
 				'post_type'      => $post_types,
@@ -144,21 +148,21 @@ SQL;
 					],
 				],
 			]
-        );
+		);
 	}
 
 	/**
 	 * Gets taxonomy with custom meta.
 	 *
-	 * @param            $meta_key
-	 * @param            $meta_value
-	 * @param string     $taxonomy
+	 * @param string $meta_key   Meta key.
+	 * @param string $meta_value Meta value.
+	 * @param string $taxonomy   Taxonomy.
 	 *
 	 * @return int|\WP_Error|\WP_Term[]
 	 */
 	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
-        return get_terms(
-            [
+		return get_terms(
+			[
 				'hide_empty' => false,
 				'meta_query' => [
 					[
@@ -169,14 +173,15 @@ SQL;
 				],
 				'taxonomy'   => $taxonomy,
 			]
-        );
+		);
 	}
 
 	/**
 	 * Gets all Posts which has the meta key and value.
 	 *
-	 * @param string $meta_key
-	 * @param string $meta_value
+	 * @param string $meta_key   Meta key.
+	 * @param string $meta_value Meta value.
+	 * @param array  $post_types Post types.
 	 *
 	 * @return array|null
 	 */
@@ -195,6 +200,7 @@ SQL;
 			array_push( $args_prepare, $post_type );
 		}
 
+		// phpcs:disable -- wpdb::prepare used with placeholders.
 		$results_meta_post_ids = $wpdb->get_results(
 			$wpdb->prepare(
 				"select post_id from {$wpdb->prefix}postmeta pm
@@ -205,6 +211,7 @@ SQL;
 			),
 			ARRAY_A
 		);
+		// phpcs:enable
 
 		if ( empty( $results_meta_post_ids ) ) {
 			return [];
@@ -224,26 +231,34 @@ SQL;
 	 * @return array
 	 */
 	public function get_all_existing_categories() {
-        $cats_ids_all = [];
-        $cats_parents = get_categories( [ 'hide_empty' => false, ] );
-        foreach ( $cats_parents as $cat_parent ) {
-            $cats_ids_all[] = $cat_parent->term_id;
-            $cats_children  = get_categories( [ 'parent' => $cat_parent->term_id, 'hide_empty' => false, ] );
-            if ( empty( $cats_children ) ) {
+		$cats_ids_all = [];
+		$cats_parents = get_categories( [ 'hide_empty' => false ] );
+		foreach ( $cats_parents as $cat_parent ) {
+			$cats_ids_all[] = $cat_parent->term_id;
+			$cats_children  = get_categories(
+				[
+					'parent'     => $cat_parent->term_id,
+					'hide_empty' => false,
+				]
+			);
+			if ( empty( $cats_children ) ) {
 				continue;
-            }
+			}
 
-            foreach ( $cats_children as $cat_child ) {
-                $cats_ids_all[] = $cat_child->term_id;
-            }
-        }
-        $cats_ids_all = array_unique( $cats_ids_all );
+			foreach ( $cats_children as $cat_child ) {
+				$cats_ids_all[] = $cat_child->term_id;
+			}
+		}
+		$cats_ids_all = array_unique( $cats_ids_all );
 
-        return $cats_ids_all;
+		return $cats_ids_all;
 	}
 
 	/**
 	 * Returns all posts' IDs.
+	 *
+	 * @param string $post_type  post_type.
+	 * @param array  $post_status Array of post statuses.
 	 *
 	 * @return int[]|\WP_Post[]
 	 */
@@ -333,6 +348,44 @@ SQL;
 	}
 
 	/**
+	 * Creates a skeleton version of the Jetpack Tiled Gallery block from attachment IDs.
+	 * Is meant to provide a block syntax which can be pasted to Gutenberg, than completed/salvaged by clicking "Attempt Block
+	 * Recovery".
+	 *
+	 * @param array $attachment_ids Attachment IDs.
+	 *
+	 * @return string Jetpack Tiled Gallery skeleton block content, which can be completed by clicking "Attempt Block Recovery"
+	 *                in Gutenberg.
+	 */
+	public function generate_skeleton_jetpack_tiled_gallery_from_attachment_ids( $attachment_ids ) {
+
+		$posts = [];
+		foreach ( $attachment_ids as $attachment_id ) {
+			$posts[] = get_post( $attachment_id );
+		}
+
+		if ( empty( $posts ) ) {
+			return '';
+		}
+
+		$content  = '<!-- wp:jetpack/tiled-gallery {"ids":[' . join( ',', $attachment_ids ) . ']} -->';
+		$content .= '<div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular"><div class="tiled-gallery__gallery"><div class="tiled-gallery__row">';
+		foreach ( $posts as $post ) {
+			$alt  = get_post_meta( $post->ID, '_wp_attachment_image_alt' );
+			$link = get_attachment_link( $post->ID );
+			$src  = wp_get_attachment_url( $post->ID );
+			// Single image syntax.
+			$content .= '<div class="tiled-gallery__col"><figure class="tiled-gallery__item">';
+			$content .= '<img alt="' . $alt . '" data-id="' . $post->ID . '" data-link="' . $link . '" data-url="' . $src . '" src="' . $src . '" data-amp-layout="responsive"/>';
+			$content .= '</figure></div>';
+		}
+		$content .= '</div></div></div>';
+		$content .= '<!-- /wp:jetpack/tiled-gallery -->';
+
+		return $content;
+	}
+
+	/**
 	 * Generate Jetpack Slideshow Block code from Media Posts.
 	 *
 	 * @param int[] $post_ids Media Posts IDs.
@@ -361,7 +414,7 @@ SQL;
 	/**
 	 * Generate Jetpack Slideshow Block code from Media Posts.
 	 *
-	 * @param int[] $post_ids Media Posts IDs.
+	 * @param int[] $images Media Posts IDs.
 	 * @return string Jetpack Slideshow block code to be add to the post content.
 	 */
 	public function generate_jetpack_slideshow_block_from_pictures( $images ) {
