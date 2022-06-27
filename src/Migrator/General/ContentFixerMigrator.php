@@ -86,6 +86,15 @@ class ContentFixerMigrator implements InterfaceMigrator {
 				),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator remove-duplicate-post-meta-rows',
+			array( $this, 'remove_duplicate_post_meta_rows' ),
+			array(
+				'shortdesc' => 'This will remove any duplicate data that may exist in wp_postmeta table.',
+				'synopsis' => array(),
+			)
+		);
 	}
 
 	/**
@@ -222,6 +231,69 @@ class ContentFixerMigrator implements InterfaceMigrator {
 				}
 			}
 		);
+	}
+
+	/**
+	 * This function was created to help automate the reduction of a large wp_postmeta table which could adversely
+	 * affect performance. It does this by looking at every Post ID in wp_postmeta and seeing if there's a
+	 * difference between the total row count and the unique meta_keys. If there is a difference, it
+	 * then creates a dynamic key by concatenating meta_key and meta_value, and deleting any
+	 * rows where the dynamic key has more than 1 row existing in the table.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function remove_duplicate_post_meta_rows( $args, $assoc_args ) {
+		global $wpdb;
+
+		$results         = $wpdb->get_results( "SELECT p.ID as post_id, count(pm.meta_id) as counter, count(distinct pm.meta_key) as unique_keys FROM $wpdb->posts p INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id GROUP BY p.ID HAVING counter <> unique_keys ORDER BY counter DESC" );
+		$progress_bar    = WP_CLI\Utils\make_progress_bar( "Removing potentially duplicate rows from `$wpdb->postmeta`...", count( $results ) );
+		$table_results   = [];
+		$total_rows      = 0;
+		$eliminated_rows = 0;
+		foreach ( $results as $result ) {
+			$total_rows         += $result->counter;
+			$table_result       = [
+				'post_id'     => $result->post_id,
+				'total_rows'  => $result->counter,
+				'unique_keys' => $result->unique_keys,
+			];
+			$duplicate_rows     = $wpdb->get_results( "SELECT CONCAT(meta_key, '.', IFNULL(meta_value, 'null')) as concat_key, COUNT(*) as counter, GROUP_CONCAT(meta_id) as meta_ids FROM $wpdb->postmeta WHERE post_id = $result->post_id GROUP BY concat_key HAVING counter > 1" );
+			$de_duplicated_rows = 0;
+			foreach ( $duplicate_rows as $duplicate_row ) {
+				$duplicate_meta_ids = explode( ',', $duplicate_row->meta_ids );
+				array_shift( $duplicate_meta_ids );
+				$duplicate_meta_ids = implode( ',', $duplicate_meta_ids );
+				$deleted_rows       = $wpdb->query( "DELETE FROM $wpdb->postmeta WHERE meta_id IN ( $duplicate_meta_ids )" );
+
+				if ( is_numeric( $deleted_rows ) ) {
+					$de_duplicated_rows += $deleted_rows;
+				}
+			}
+			$table_result['deleted_rows'] = $de_duplicated_rows;
+			$table_results[] = $table_result;
+			$eliminated_rows              += $de_duplicated_rows;
+			$progress_bar->tick();
+		}
+		$progress_bar->finish();
+
+		$results = $wpdb->get_results( "SELECT pm.meta_id, pm.post_id, p.ID FROM $wpdb->postmeta pm LEFT JOIN $wpdb->posts p ON pm.post_id = p.ID WHERE p.ID IS NULL" );
+		$loose_post_meta_ids = array_map( fn($result) => $result->meta_id, $results );
+		if ( ! empty( $loose_post_meta_ids ) ) {
+			$loose_post_meta_ids = implode( ',', $loose_post_meta_ids );
+			$deleted_rows = $wpdb->query( "DELETE FROM $wpdb->postmeta WHERE meta_id IN ($loose_post_meta_ids)" );
+
+			if ( is_numeric( $deleted_rows ) ) {
+				$total_rows += $deleted_rows;
+				$eliminated_rows += $deleted_rows;
+			}
+		}
+
+		$percent_reduction = ( $eliminated_rows / $total_rows ) * 100;
+		WP_CLI\Utils\format_items( 'table', $table_results, [ 'post_id', 'total_rows', 'unique_keys', 'deleted_rows' ] );
+		WP_CLI::log( "Total Rows: $total_rows" );
+		WP_CLI::log( "Total Eliminated Rows: $eliminated_rows" );
+		WP_CLI::log( "% Reduction: $percent_reduction" );
 	}
 
     /**
