@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts;
+use stdClass;
 use \WP_CLI;
 
 class TaxonomyMigrator implements InterfaceMigrator {
@@ -88,6 +89,48 @@ class TaxonomyMigrator implements InterfaceMigrator {
 				],
 			],
 		] );
+
+		WP_CLI::add_command(
+			'newspack-content-migrator sync-taxonomy-count-with-real-values',
+			[ $this, 'cmd_sync_taxonomy_count_column_with_actual_values' ],
+			[
+				'shortdesc' => 'This command will compare wp_term_taxonomy.count values with actual row counts in wp_term_relationships table.',
+				'synopsis' => [
+					[
+						'type' => 'flag',
+						'name' => 'update',
+						'description' => 'Optional flag which tells the command to update the wp_term_taxonomy.count column with the real number of corresponding rows in wp_term_relationships.',
+						'optional' => true,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator cull-low-value-tags',
+			[ $this, 'cmd_cull_low_value_tags' ],
+			[
+				'shortdesc' => 'This command will delete any tags which are below a certain threshold.',
+				'synopsis' => [
+					[
+						'type' => 'assoc',
+						'name' => 'threshold',
+						'description' => 'This is the upper threshold limit. Any tags below and equal to this value will be deleted.',
+						'optional' => true,
+						'default' => 3,
+						'repeating' => false,
+					],
+					[
+						'type' => 'flag',
+						'name' => 'sync-counts-first',
+						'description' => 'Tells the command to update the wp_term_taxonomy.count column first before proceeding.',
+						'optional' => true,
+						'repeating' => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -228,6 +271,220 @@ class TaxonomyMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * This function will display the comparison between the wp_term_taxonomy.count column and
+	 * the actual, real count of rows contained with the wp_term_relationships table
+	 * for that particular term_taxonomy_id.
+	 *
+	 * @param array $args       WP CLI Positional arguments.
+	 * @param array $assoc_args WP CLI Optional arguments.
+	 */
+	public function cmd_sync_taxonomy_count_column_with_actual_values( $args, $assoc_args ) {
+		$update = $assoc_args['update'] ?? null;
+
+		$results = $this->get_unsynced_taxonomy_rows();
+
+		$table = [];
+		foreach ( $results as $row ) {
+			$table[] = [
+				'term_taxonomy_id' => $row->term_taxonomy_id,
+				'term_id' => $row->term_id,
+				'name' => $row->name,
+				'slug' => $row->slug,
+				'taxonomy' => $row->taxonomy,
+				'current_count' => $row->count,
+				'actual_count' => $row->counter,
+			];
+		}
+
+		if ( ! empty( $results ) ) {
+			WP_CLI\Utils\format_items(
+				'table',
+				$table,
+				[
+					'term_taxonomy_id',
+					'term_id',
+					'name',
+					'slug',
+					'taxonomy',
+					'current_count',
+					'actual_count',
+				]
+			);
+
+			if ( $update ) {
+				$this->update_counts_for_taxonomies( $results );
+			}
+		} else {
+			WP_CLI::line( 'All counts are accurate!' );
+		}
+	}
+
+	/**
+	 * This function will execute the updates required to make the wp_term_taxonomy.count column
+	 * match the actual, real number of rows in wp_term_relationships table.
+	 *
+	 * @param array $rows Should be the results which show actual taxonomy counts (from wp_term_relationships)vs what is stored.
+	 */
+	protected function update_counts_for_taxonomies( array $rows ) {
+		global $wpdb;
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Updating counts for taxonomies...', count( $rows ) );
+
+		foreach ( $rows as $row ) {
+			$wpdb->update( $wpdb->term_taxonomy, [ 'count' => $row->counter ], [ 'term_taxonomy_id' => $row->term_taxonomy_id ] );
+			$progress_bar->tick();
+		}
+
+		$progress_bar->finish();
+	}
+
+	/**
+	 * Command which drives the elimination of Tags and Tag related data from the database.
+	 * Tables affected:
+	 * wp_term_taxonomy
+	 * wp_term_relationships
+	 * wp_terms
+	 *
+	 * The wp_term_taxonomy.count column is updated and synced with real
+	 * count values from wp_term_relationships table.
+	 *
+	 * @param string[] $args       WP CLI Positional Arguments.
+	 * @param string[] $assoc_args WP CLI Optional Arguments.
+	 */
+	public function cmd_cull_low_value_tags( $args, $assoc_args ) {
+		$sync_counts_first = $assoc_args['sync-counts-first'] ?? null;
+
+		if ( is_null( $sync_counts_first ) && ! empty( $this->get_unsynced_taxonomy_rows() ) ) {
+			$response = $this->ask_prompt( 'Proceed without first updating the wp_term_taxonomy.count column with actual row counts from wp_term_relationships table? [(y)es/(n)o/(e)xit]' );
+
+			if ( 'exit' === $response || 'e' === $response || ! in_array( $response, [ 'yes', 'y', 'no', 'n' ] ) ) {
+				WP_CLI::line( 'Exiting...' );
+				die();
+			}
+
+			if ( 'no' === $response || 'n' === $response ) {
+				$this->cmd_sync_taxonomy_count_column_with_actual_values( [], [ 'update' => true ] );
+			}
+		} else if ( $sync_counts_first ) {
+			$this->cmd_sync_taxonomy_count_column_with_actual_values( [], [ 'update' => true ] );
+		}
+
+		global $wpdb;
+		$tag_limit = $assoc_args['threshold'];
+
+		$results = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+       				term_taxonomy_id, 
+       				term_id 
+				FROM $wpdb->term_taxonomy 
+				WHERE taxonomy = 'post_tag' 
+				  AND count <= %d",
+				$tag_limit
+			)
+		);
+
+		$term_taxonomy_ids = [];
+		$term_ids          = [];
+
+		$term_taxonomy_count = 0;
+		foreach ( $results as $row ) {
+			$term_taxonomy_count ++;
+			$term_taxonomy_ids[] = $row->term_taxonomy_id;
+			$term_ids[]          = $row->term_id;
+		}
+
+		$term_relationship_rows_deleted = 0;
+		$term_taxonomy_rows_deleted = 0;
+		$term_rows_deleted = 0;
+		if ( ! empty( $results ) ) {
+			$term_taxonomy_ids              = implode( ',', $term_taxonomy_ids );
+			$term_relationship_rows_deleted = $wpdb->query( "DELETE FROM $wpdb->term_relationships WHERE term_taxonomy_id IN ($term_taxonomy_ids)" );
+
+			if ( ! is_numeric( $term_relationship_rows_deleted ) ) {
+				$term_relationship_rows_deleted = 0;
+			}
+
+			$term_taxonomy_rows_deleted = $wpdb->query( "DELETE FROM $wpdb->term_taxonomy WHERE term_taxonomy_id IN ($term_taxonomy_ids)" );
+
+			$term_ids           = implode( ',', $term_ids );
+			$affected_term_rows = $wpdb->get_results( "SELECT 
+                    t.term_id, 
+                    COUNT(tt.term_taxonomy_id) as counter
+				FROM $wpdb->terms t 
+				    LEFT JOIN $wpdb->term_taxonomy tt 
+				        ON t.term_id = tt.term_id 
+				WHERE t.term_id IN ($term_ids) 
+				GROUP BY t.term_id 
+				HAVING counter = 0"
+			);
+
+			$affected_term_ids = array_map( fn( $row ) => $row->term_id, $affected_term_rows );
+
+			$term_rows_deleted = 0;
+			if ( ! empty( $affected_term_ids ) ) {
+				$affected_term_ids = implode( ',', $affected_term_ids );
+
+				$term_rows_deleted = $wpdb->query( "DELETE FROM $wpdb->terms WHERE term_id IN ($affected_term_ids)" );
+
+				if ( ! is_numeric( $term_rows_deleted ) ) {
+					$term_rows_deleted = 0;
+				}
+			}
+		}
+
+		WP_CLI::line( "$term_taxonomy_count wp_term_taxonomy records <= $tag_limit." );
+		WP_CLI::line( "Deleted wp_term_relationships rows: $term_relationship_rows_deleted" );
+		WP_CLI::line( "Deleted wp_term_taxonomy rows: $term_taxonomy_rows_deleted" );
+		WP_CLI::line( "Deleted wp_terms rows: $term_rows_deleted" );
+	}
+
+	/**
+	 * Returns the list of term_taxonomy_id's which have count values
+	 * that don't match real values in wp_term_relationships.
+	 *
+	 * @return stdClass[]
+	 */
+	protected function get_unsynced_taxonomy_rows() {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			"SELECT 
+	            tt.term_taxonomy_id, 
+       			t.term_id,
+       			t.name,
+       			t.slug,
+       			tt.taxonomy,
+	            tt.count, 
+	            sub.counter 
+			FROM $wpdb->term_taxonomy tt LEFT JOIN (
+			    SELECT 
+			           term_taxonomy_id, 
+			           COUNT(object_id) as counter 
+			    FROM $wpdb->term_relationships 
+			    GROUP BY term_taxonomy_id
+			    ) as sub 
+			ON tt.term_taxonomy_id = sub.term_taxonomy_id 
+			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
+			WHERE sub.counter IS NOT NULL 
+			  AND tt.count <> sub.counter 
+			  AND tt.taxonomy IN ('category', 'post_tag')"
+		);
+	}
+	/**
+	 * Custom interactive prompt.
+	 *
+	 * @param string $question The question to present to the user.
+	 *
+	 * @return string
+	 */
+	private function ask_prompt( string $question ) {
+		fwrite( STDOUT, "$question: " );
+
+		return strtolower( trim( fgets( STDIN ) ) );
 	}
 
 	/**
