@@ -66,15 +66,6 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator searchlightnm-clean-post-content',
-			array( $this, 'searchlightnm_clean_post_content' ),
-			array(
-				'shortdesc' => 'Clean post content from shortcodes.',
-				'synopsis'  => array(),
-			)
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator searchlightnm-migrate-shortcodes',
 			array( $this, 'searchlightnm_migrate_shortcodes' ),
 			array(
@@ -88,6 +79,24 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 			array( $this, 'searchlightnm_copy_migrated_content' ),
 			array(
 				'shortdesc' => 'Copy migrated posts content from an SQL table.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator searchlight-remove-first-image-from-post-body',
+			array( $this, 'searchlight_remove_first_image_from_post_body' ),
+			array(
+				'shortdesc' => 'Remove the first image from the post body, usefull to normalize the posts content in case some contains the featured image in their body and others not.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator searchlight-set-featured-image-position',
+			array( $this, 'searchlight_set_featured_image_postition' ),
+			array(
+				'shortdesc' => '',
 				'synopsis'  => array(),
 			)
 		);
@@ -146,7 +155,7 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 		$posts = get_posts(
 			array(
 				'numberposts' => -1,
-				'post_type'   => 'post',
+				'post_type'   => 'page',
 				'post_status' => array( 'publish' ),
 			)
 		);
@@ -200,9 +209,9 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 		global $wpdb;
 		$migrated_content = $wpdb->get_results(
 			"SELECT ID, post_content
-			FROM {$wpdb->prefix}posts_migrated
-			WHERE ID in (90805,90794,90788,90779,90763,90755,90742,90719,90625,90537,90441,90371,90316,90286,90266,90250,90230,90188,90138,90129,90111,89738,89863,89853,89812,89795,89718,89627,89576,89532,89504,89476,89469,89446,89358,89343,89332,89272,89256,89223,89193,89180,89045,89028,88851,88834,88808,88785,88739,88657,88626,88558,88541,88520,88105,88027,87999,87963,87947,87917,87839,87806,87789,87753,87717,87700,87644,87661,87614,87565,87536,87499,87474,87411,87277,87263,87204,87187,87156,87144,87123,87105,87045,87015,86989,86875,86924,86717,86698,86652,86622,86596,86550,86449,86415,86335,86296,86154,85923,85846,84990,84762,86498,84777,84807,84847,84813,84822,84827,84835,84831,84837,84845,84852,83487,83342,84855,84858,84861,84863,84901,84916,84923,84934,84939,84942,84947,85047,85396,85074,85092,85095,85378,85108,83695,85135,85270,85283,83642,83644,83646,83648,85569,86084,86068,85892,83668,83676,86267,85897,85905,86212,86348,85303,85298,85289,43373,42447,41628,37420,37417,37291,34030,34024,33750,31371,83710,30471,27427,26100,26004,25268,24369,21886,21895,18836,18780,18772,18790,18755,17118,17946,16651,16590,14776,13993,13974,13966,13408,12497,12151,11935,11390,13446,10821,10285,9515,9512,9505,8456,8474,8479,8185,7753,7749,6290,6049,5815,5667,5594,5307,5137,83703,3511,2670)
-			;"
+		FROM {$wpdb->prefix}posts_migrated
+		WHERE ID in (91094,90838,90489,90471,90384,87778,89869,87905,87777,86691,86871,86788,86257,84998,85826,85806,85002,85000,84996,84964,84958,83803,83557,83114,83103,83098,83096,83093,83033,83031,82980,82831,82829,82827,82825,82823,82821,90805,90794,90788,90779,90763,90755,90742,90719,90625,90537,90441,90371,90316,90286,90266,90250,90230,90188,90138,90129,90111,89738,89863,89853,89812,89795,89718,89627,89576,89532,89504,89476,89469,89446,89358,89343,89332,89272,89256,89223,89193,89180,89045,89028,88851,88834,88808,88785,88739,88657,88626,88558,88541,88520,88105,88027,87999,87963,87947,87917,87839,87806,87789,87753,87717,87700,87644,87661,87614,87565,87536,87499,87474,87411,87277,87263,87204,87187,87156,87144,87123,87105,87045,87015,86989,86875,86924,86717,86698,86652,86622,86596,86550,86449,86415,86335,86296,86154,85923,85846,84990,84762,86498,84777,84807,84847,84813,84822,84827,84835,84831,84837,84845,84852,83487,83342,84855,84858,84861,84863,84901,84916,84923,84934,84939,84942,84947,85047,85396,85074,85092,85095,85378,85108,83695,85135,85270,85283,83642,83644,83646,83648,85569,86084,86068,85892,83668,83676,86267,85897,85905,86212,86348,85303,85298,85289,43373,42447,41628,37420,37417,37291,34030,34024,33750,31371,83710,30471,27427,26100,26004,25268,24369,21886,21895,18836,18780,18772,18790,18755,17118,17946,16651,16590,14776,13993,13974,13966,13408,12497,12151,11935,11390,13446,10821,10285,9515,9512,9505,8456,8474,8479,8185,7753,7749,6290,6049,5815,5667,5594,5307,5137,83703,3511,2670)
+		;"
 		);
 
 		foreach ( $migrated_content as $migrated_post ) {
@@ -217,6 +226,73 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 			} else {
 				WP_CLI::line( sprintf( '%d,%s,%s', $migrated_post->ID, str_replace( get_site_url(), 'https://searchlightnm.org', get_permalink( $migrated_post->ID ) ), get_permalink( $migrated_post->ID ) ) );
 			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator searchlight-remove-first-image-from-post-body`.
+	 */
+	public function searchlight_remove_first_image_from_post_body() {
+		global $wpdb;
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_type'   => 'post',
+				'post_status' => array( 'publish' ),
+				// 'post__in'    => array( 2670 ),
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$remove_first_block = false;
+			$blocks             = parse_blocks( $post->post_content );
+			$first_block        = current( $blocks );
+			$first_inner_block  = current( $first_block['innerBlocks'] );
+
+			if ( ! $first_inner_block ) {
+				continue;
+			}
+			if ( 'core/column' === $first_inner_block['blockName'] ) {
+				$possible_image_block = current( $first_inner_block['innerBlocks'] );
+				if ( 'core/image' === $possible_image_block['blockName'] ) {
+					$remove_first_block = true;
+				}
+			}
+
+			if ( $remove_first_block ) {
+				array_shift( $blocks );
+				$content = serialize_blocks( $blocks );
+
+				if ( $content !== $post->post_content ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$wpdb->update(
+						$wpdb->prefix . 'posts',
+						array( 'post_content' => $content ),
+						array( 'ID' => $post->ID )
+					);
+
+					WP_CLI::line( sprintf( 'Updated post: %d', $post->ID ) );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator searchlight-set-featured-image-position`.
+	 */
+	public function searchlight_set_featured_image_postition() {
+		global $wpdb;
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_type'   => 'post',
+				'post_status' => array( 'publish' ),
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			update_post_meta( $post->ID, 'newspack_featured_image_position', 'above' );
+			WP_CLI::warning( "Updated {$post->ID}" );
 		}
 	}
 
