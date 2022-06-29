@@ -110,25 +110,35 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 			// Get ACF author meta from postmeta and Terms.
 			$meta_acf_author = get_post_meta( $post_id, 'article_author' );
-			$author_term_id = $meta_acf_author[0][0] ?? null;
-			if ( is_null( $author_term_id ) || ! $author_term_id ) {
-				WP_CLI::log( '- skipping...' );
-				continue;
+			$acf_authors_term_ids = $meta_acf_author[0] ?? [];
+
+			// Get or create GAs from ACF Terms.
+			$ga_ids = [];
+			foreach ( $acf_authors_term_ids as $key_author_term_id => $author_term_id ) {
+				if ( is_null( $author_term_id ) || ! $author_term_id ) {
+					WP_CLI::log( '- skipping...' );
+					continue;
+				}
+
+				$author_name = $wpdb->get_var( $wpdb->prepare( "select name from $wpdb->terms where term_id = %d;", $author_term_id ) );
+				if ( ! $author_name ) {
+					WP_CLI::log( '- skipping 2...' );
+					continue;
+				}
+
+				// Create GA.
+				$ga = $this->get_or_create_ga_by_name( $author_name );
+				$ga_id = $ga->ID ?? null;
+				if ( is_null( $ga_id ) ) {
+					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+				}
+				$ga_ids[] = $ga_id;
 			}
 
-			$author_name = $wpdb->get_var( $wpdb->prepare( "select name from $wpdb->terms where term_id = %d;", $author_term_id ) );
-			if ( ! $author_name ) {
-				WP_CLI::log( '- skipping 2...' );
-				continue;
+			// Assign GAs to post.
+			if ( ! empty( $ga_ids ) ) {
+				$this->coauthors_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
 			}
-
-			// Create GA and assign to post.
-			$ga = $this->get_or_create_ga_by_name( $author_name );
-			$ga_id = $ga->ID ?? null;
-			if ( is_null( $ga_id ) ) {
-				throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
-			}
-			$this->coauthors_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id );
 		}
 	}
 
