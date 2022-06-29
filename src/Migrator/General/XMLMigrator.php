@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use XMLReader;
 use DOMDocument;
 
