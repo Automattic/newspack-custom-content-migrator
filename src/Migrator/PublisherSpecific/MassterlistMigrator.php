@@ -15,6 +15,11 @@ class MassterlistMigrator implements InterfaceMigrator {
 	const JOBS_LOGS     = 'Massterlist_jobs.log';
 	const EDITIONS_LOGS = 'Massterlist_editions.log';
 
+	const JOBS_COMPANY_ICON_MEDIA_ID  = 612;
+	const JOBS_LOCATION_ICON_MEDIA_ID = 610;
+	const JOBS_URL_ICON_MEDIA_ID      = 611;
+	const JOBS_FULLTIME_ICON_MEDIA_ID = 609;
+
 	/**
 	 * @var Downloader.
 	 */
@@ -60,12 +65,12 @@ class MassterlistMigrator implements InterfaceMigrator {
             'newspack-content-migrator massterlist-migrate-jobs',
             array( $this, 'massterlist_migrate_jobs' ),
             array(
-				'shortdesc' => 'Migrate jobs listings.',
+				'shortdesc' => 'Migrate jobs listings from the last 30 days.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'editions-ids',
-						'description' => 'Editions IDs to migrate.',
+						'name'        => 'jobs-ids',
+						'description' => 'Jobs IDs to migrate.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -78,7 +83,15 @@ class MassterlistMigrator implements InterfaceMigrator {
 			array( $this, 'massterlist_migrate_editions' ),
 			array(
 				'shortdesc' => 'Migrate editions posts.',
-				'synopsis'  => array(),
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'editions-ids',
+						'description' => 'Editions IDs to migrate.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			)
 		);
 	}
@@ -90,6 +103,53 @@ class MassterlistMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function massterlist_migrate_jobs( $args, $assoc_args ) {
+		global $wpdb;
+
+		$jobs_ids = isset( $assoc_args['jobs-ids'] ) ? $assoc_args['jobs-ids'] : null;
+
+		// Make sure NGG DB tables are available.
+		$this->validate_db_tables_exist( [ 'jobs_users', 'jobs_jobs' ] );
+
+		// Create or get the `Editions` category.
+		$cateogry_id = wp_create_category( 'Jobs' );
+
+		// Read the jobs from the old DB.
+		$jobs_sql = 'SELECT * FROM jobs_jobs';
+		if ( $jobs_ids ) {
+			$jobs_sql .= $wpdb->prepare( ' WHERE id IN (%s)', $jobs_ids );
+		}
+
+		if ( ! $jobs_ids ) {
+			$jobs_sql .= str_contains( $jobs_sql, 'WHERE' ) ? ' and ' : ' WHERE ';
+			$jobs_sql .= 'published_at BETWEEN CURDATE() - INTERVAL 30 DAY AND CURDATE()';
+		}
+
+		$jobs = $wpdb->get_results( $jobs_sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
+
+		foreach ( $jobs as $job ) {
+			$job_content = $this->generate_job_content_from_posts( $job );
+
+			$post_id = wp_insert_post(
+				array(
+					'post_title'     => $job['title'],
+					'post_content'   => $job_content,
+					'post_status'    => 1 === intval( $job['is_active'] ) ? 'publish' : 'draft',
+					'comment_status' => 'closed',
+					'ping_status'    => 'closed',
+					'post_name'      => $job['slug'],
+					'post_date'      => $job['published_at'],
+					'post_modified'  => $job['updated_at'],
+					'post_type'      => 'newspack_lst_mktplce',
+				)
+			);
+
+			if ( is_wp_error( $post_id ) ) {
+				WP_CLI::warning( sprintf( "Couldn't save the job with the ID %d: %s", $job['id'], $post_id->get_error_message() ) );
+			} else {
+				WP_CLI::success( sprintf( 'Edition %d was migrated successfully as a post %d', $job['id'], $post_id ) );
+				wp_set_post_categories( $post_id, [ $cateogry_id ] );
+			}
+		}
 	}
 
 	/**
@@ -120,15 +180,38 @@ class MassterlistMigrator implements InterfaceMigrator {
 		foreach ( $editions as $edition ) {
 			$posts = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM editions_posts WHERE edition_id = %d ORDER BY `order`;', $edition['id'] ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
 
-			$edition_content = $this->generate_edition_content_from_posts( $posts, $edition );
+			$edition_content = $this->generate_edition_content_from_posts( $posts );
 
-			print_r( $edition_content );
-			// print_r( $posts );
-			die();
+			$post_id = wp_insert_post(
+				array(
+					'post_title'     => $edition['title'],
+					'post_content'   => $edition_content,
+					'post_status'    => 1 === intval( $edition['status'] ) ? 'publish' : 'draft',
+					'comment_status' => 'closed',
+					'ping_status'    => 'closed',
+					'post_name'      => sanitize_title( $edition['title'] ),
+					'post_date'      => $edition['publish_date'],
+					'post_modified'  => $edition['updated_at'],
+					'post_type'      => 'post',
+				)
+			);
+
+			if ( is_wp_error( $post_id ) ) {
+				WP_CLI::warning( sprintf( "Couldn't save the edition with the ID %d: %s", $edition['id'], $post_id->get_error_message() ) );
+			} else {
+				WP_CLI::success( sprintf( 'Edition %d was migrated successfully as a post %d', $edition['id'], $post_id ) );
+				wp_set_post_categories( $post_id, [ $cateogry_id ] );
+			}
 		}
 	}
 
-	private function generate_edition_content_from_posts( $posts, $edition ) {
+	/**
+	 * Generate an edition content from its posts.
+	 *
+	 * @param mixed[] $posts Edition raw posts.
+	 * @return string
+	 */
+	private function generate_edition_content_from_posts( $posts ) {
 		$edition_content_blocks = [];
 
 		$kal_posts = array_filter(
@@ -162,24 +245,20 @@ class MassterlistMigrator implements InterfaceMigrator {
 		$other_posts = array_filter(
             $posts,
             function( $post ) {
-				return ! in_array( $post['type'], [ 4, 8, 6 ] ) || ( 6 === intval( $post['type'] ) && 2000 < $post['order'] );
+				// return ! in_array( $post['type'], [ 4, 8, 6 ] ) || ( 6 === intval( $post['type'] ) && 2000 < $post['order'] );
+				return ! in_array( $post['type'], [ 4, 8, 6 ] );
 			}
         );
 
 		$edition_content_blocks[] = $this->get_kal_content( $kal_posts );
 
-		$edition_content_blocks[] = $this->get_ads_before_body_content( $ads_before_first_section );
-
-		if ( 1 === ( new \DateTime( $edition['publish_date'] ) )->format( 'w' ) ) {
-			var_dump( $edition );
-			die();
-		}
+		// $edition_content_blocks[] = $this->get_ads_before_body_content( $ads_before_first_section );
 
 		$edition_content_blocks[] = $this->get_other_posts_content( $other_posts, $ads_before_second_section );
 
-		if ( 1 !== ( new \DateTime( $edition['publish_date'] ) )->format( 'w' ) ) {
-			$edition_content_blocks[] = $this->get_jobs_content( $job_posts );
-		}
+		// if ( 1 !== ( new \DateTime( $edition['publish_date'] ) )->format( 'w' ) ) {
+		// $edition_content_blocks[] = $this->get_jobs_content( $job_posts );
+		// }
 
 		$edition_content_blocks[] = $this->generate_title_block( 'How to Contact MASSterList' );
 		$edition_content_blocks[] = $this->generate_paragraph_block( "Send tips to Matt Murphy: Editor@MASSterList.com. For advertising inquiries and job board postings, please contact Dylan Rossiter: Publisher@MASSterList.com or (857) 370-1156. Follow <a href='https://twitter.com/massterlist'>@MASSterList</a> on Twitter." );
@@ -187,6 +266,34 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return join( "\n", $edition_content_blocks );
 	}
 
+	/**
+	 * Generate a job post content.
+	 *
+	 * @param mixed[] $job Raw job.
+	 * @return string
+	 */
+	private function generate_job_content_from_posts( $job ) {
+		$company_icon_url   = wp_get_attachment_url( self::JOBS_COMPANY_ICON_MEDIA_ID );
+		$location_icon_url  = wp_get_attachment_url( self::JOBS_LOCATION_ICON_MEDIA_ID );
+		$url_icon_url       = wp_get_attachment_url( self::JOBS_URL_ICON_MEDIA_ID );
+		$full_time_icon_url = wp_get_attachment_url( self::JOBS_FULLTIME_ICON_MEDIA_ID );
+
+		$company   = ( empty( $job['company_name'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $company_icon_url . '" alt="">  ' . $job['company_name'] . '<br>';
+		$locaiton  = ( empty( $job['location'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $location_icon_url . '" alt="">  ' . $job['location'] . '<br>';
+		$url       = ( empty( $job['url'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $url_icon_url . '" alt="">  ' . $job['url'] . '<br>';
+		$full_tile = ( 1 === intval( $job['is_fulltime'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $full_time_icon_url . '" alt="">  Full Time';
+
+		$details_content = "<!-- wp:paragraph --><p>$company$locaiton$url$full_tile</p><!-- /wp:paragraph -->";
+
+		return $details_content . $job['description'];
+	}
+
+	/**
+	 * Generate Keller at large content from raw posts.
+	 *
+	 * @param mixed[] $posts Raw posts.
+	 * @return string
+	 */
 	private function get_kal_content( $posts ) {
 		$blocks = count( $posts ) > 0 ? [ $this->generate_title_block( 'Keller at Large' ) ] : [];
 
@@ -197,6 +304,12 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return join( "\n", $blocks );
 	}
 
+	/**
+	 * Generate Ads content from raw posts.
+	 *
+	 * @param mixed[] $posts Raw posts.
+	 * @return string
+	 */
 	private function get_ads_before_body_content( $posts ) {
 		$blocks = [];
 
@@ -207,6 +320,13 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return join( "\n", $blocks );
 	}
 
+	/**
+	 * Generate posts content from raw posts.
+	 *
+	 * @param mixed[] $posts Raw posts.
+	 * @param mixed[] $ads_posts Ads raw posts.
+	 * @return string
+	 */
 	private function get_other_posts_content( $posts, $ads_posts ) {
 		$blocks        = [];
 		$grouped_posts = $this->group_posts_by( $posts, 'type' );
@@ -218,14 +338,16 @@ class MassterlistMigrator implements InterfaceMigrator {
 			}
 		}
 
-		$blocks[] = $this->get_ads_before_body_content( $ads_posts );
+		// $blocks[] = $this->get_ads_before_body_content( $ads_posts );
 
 		if ( array_key_exists( 2, $grouped_posts ) ) {
 			$blocks[] = $this->generate_title_block( "Today's Stories" );
 
 			foreach ( $grouped_posts[2] as $post ) {
 				$sponsored = $post['type'] == 5;
-				$blocks[]  = $this->generate_post_content( $post, $sponsored );
+				if ( ! $sponsored ) {
+					$blocks[] = $this->generate_post_content( $post, $sponsored );
+				}
 			}
 		}
 
@@ -246,6 +368,12 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return join( "\n", $blocks );
 	}
 
+	/**
+	 * Generate Jobs content from raw posts.
+	 *
+	 * @param mixed[] $posts Raw posts.
+	 * @return string
+	 */
 	private function get_jobs_content( $posts ) {
 		if ( empty( $posts ) ) {
 			return '';
@@ -262,6 +390,13 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return join( "\n", $blocks );
 	}
 
+	/**
+	 * Generate a post content from raw post.
+	 *
+	 * @param mixed[] $post Raw post.
+	 * @param boolean $sponsored If post is sponsored.
+	 * @return string
+	 */
 	private function generate_post_content( $post, $sponsored = false ) {
 		$is_image = 6 === intval( $post['type'] );
 		$content  = '';
@@ -282,6 +417,15 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return $content;
 	}
 
+	/**
+	 * Generate title block.
+	 *
+	 * @param string  $title Title content.
+	 * @param integer $level Title level.
+	 * @param boolean $is_italic If title is italic.
+	 * @param boolean $centered If title is centered.
+	 * @return string
+	 */
 	private function generate_title_block( $title, $level = 2, $is_italic = false, $centered = false ) {
 		if ( empty( $title ) ) {
 			return '';
@@ -293,6 +437,13 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return "<!-- wp:heading$level --><$tag" . ( $centered ? ' class="has-text-align-center"' : '' ) . ">$title</$tag><!-- /wp:heading -->";
 	}
 
+	/**
+	 * Generate a paragraph block
+	 *
+	 * @param string  $raw_content Paragraph content.
+	 * @param boolean $sponsored If the paragraph is sponsored.
+	 * @return string
+	 */
 	private function generate_paragraph_block( $raw_content, $sponsored = false ) {
 		$content = '';
 
@@ -309,6 +460,13 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return $content;
 	}
 
+	/**
+	 * Generate a link block.
+	 *
+	 * @param mixed[] $post Raw post.
+	 * @param boolean $with_title If we need to add title to the link.
+	 * @return string
+	 */
 	private function generate_link_block( $post, $with_title = false ) {
 		if (
 			! array_key_exists( 'linkurl', $post ) || empty( $post['linkurl'] )
@@ -319,6 +477,12 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return '<!-- wp:paragraph --><p><a href="' . $post['linkurl'] . '" data-type="URL">' . ( $with_title ? $post['title'] . ' - ' : '' ) . $post['linktext'] . '</a></p><!-- /wp:paragraph -->';
 	}
 
+	/**
+	 * Generate a job link.
+	 *
+	 * @param mixed[] $post Raw post.
+	 * @return string
+	 */
 	private function generate_job_link_block( $post ) {
 		if (
 			! array_key_exists( 'linkurl', $post ) || empty( $post['linkurl'] )
@@ -329,6 +493,12 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return '<!-- wp:paragraph --><p><a href="' . $post['linkurl'] . '" data-type="URL">' . $post['title'] . ', ' . $post['body'] . '</a></p><!-- /wp:paragraph -->';
 	}
 
+	/**
+	 * Generate an image block.
+	 *
+	 * @param mixed[] $post Raw post.
+	 * @return string
+	 */
 	private function generate_image_block( $post ) {
 		if ( ! array_key_exists( 'imageurl', $post ) || empty( $post['imageurl'] ) ) {
 			return '';
@@ -336,13 +506,18 @@ class MassterlistMigrator implements InterfaceMigrator {
 
 		$with_link = array_key_exists( 'linkurl', $post ) && ! empty( $post['linkurl'] );
 		$image_url = 'http://massterlist.com/images/' . $post['imageurl'];
-		$image_id  = $this->downloader->import_external_file(
-			$image_url,
-			$post['imageurl'],
-			null,
-			null,
-			$post['alttext']
-		);
+		try {
+			$image_id = $this->downloader->import_external_file(
+				$image_url,
+				$post['imageurl'],
+				null,
+				null,
+				$post['alttext']
+			);
+		} catch ( \Exception $e ) {
+			WP_CLI::warning( sprintf( "Can't download this image (%s) from the post %d: %s", $image_url, $post['id'], $e->getMessage() ) );
+			return '';
+		}
 
 		if ( is_wp_error( $image_id ) ) {
 			WP_CLI::warning( sprintf( "ERROR importing image %s : %s\n", $image_url, $image_id->get_error_message() ) );
@@ -361,10 +536,22 @@ class MassterlistMigrator implements InterfaceMigrator {
 		<!-- /wp:image -->' . $body;
 	}
 
+	/**
+	 * Generate a separator block.
+	 *
+	 * @return string
+	 */
 	private function generate_separator_block() {
 		return '<!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->';
 	}
 
+	/**
+	 * Group posts by an attribute
+	 *
+	 * @param mixed[] $posts Posts to group.
+	 * @param string  $attribute Attribute to group the posts with.
+	 * @return mixed[]
+	 */
 	private function group_posts_by( $posts, $attribute ) {
 		$grouped_posts = array();
 
@@ -378,6 +565,13 @@ class MassterlistMigrator implements InterfaceMigrator {
 		return $grouped_posts;
 	}
 
+	/**
+	 * Group headlines by an attribute.
+	 *
+	 * @param mixed[] $posts Headline posts to group.
+	 * @param string  $attribute Attributes to group the headline posts with.
+	 * @return mixed[]
+	 */
 	private function group_headlines_by( $posts, $attribute ) {
 		$grouped_posts = array();
 
@@ -410,20 +604,5 @@ class MassterlistMigrator implements InterfaceMigrator {
 		}
 
 		return true;
-	}
-
-	/**
-	 * Simple file logging.
-	 *
-	 * @param string  $file    File name or path.
-	 * @param string  $message Log message.
-	 * @param boolean $to_cli Display the logged message in CLI.
-	 */
-	private function log( $file, $message, $to_cli = true ) {
-		$message .= "\n";
-		if ( $to_cli ) {
-			WP_CLI::line( $message );
-		}
-		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
