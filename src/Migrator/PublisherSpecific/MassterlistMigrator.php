@@ -110,7 +110,7 @@ class MassterlistMigrator implements InterfaceMigrator {
 		// Make sure NGG DB tables are available.
 		$this->validate_db_tables_exist( [ 'jobs_users', 'jobs_jobs' ] );
 
-		// Create or get the `Editions` category.
+		// Create or get the `Jobs` category.
 		$cateogry_id = wp_create_category( 'Jobs' );
 
 		// Read the jobs from the old DB.
@@ -129,6 +129,11 @@ class MassterlistMigrator implements InterfaceMigrator {
 		foreach ( $jobs as $job ) {
 			$job_content = $this->generate_job_content_from_posts( $job );
 
+			if ( $this->post_exists( 'job_original_id', $job['id'] ) ) {
+				WP_CLI::warning( sprintf( "Skipping job %d as it's already imported!", $job['id'] ) );
+				continue;
+			}
+
 			$post_id = wp_insert_post(
 				array(
 					'post_title'     => $job['title'],
@@ -146,8 +151,9 @@ class MassterlistMigrator implements InterfaceMigrator {
 			if ( is_wp_error( $post_id ) ) {
 				WP_CLI::warning( sprintf( "Couldn't save the job with the ID %d: %s", $job['id'], $post_id->get_error_message() ) );
 			} else {
-				WP_CLI::success( sprintf( 'Edition %d was migrated successfully as a post %d', $job['id'], $post_id ) );
+				WP_CLI::success( sprintf( 'Job %d was migrated successfully as a post %d', $job['id'], $post_id ) );
 				wp_set_post_categories( $post_id, [ $cateogry_id ] );
+				update_post_meta( $post_id, 'job_original_id', $job['id'] );
 			}
 		}
 	}
@@ -178,6 +184,11 @@ class MassterlistMigrator implements InterfaceMigrator {
 		$editions = $wpdb->get_results( $editions_sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
 
 		foreach ( $editions as $edition ) {
+			if ( $this->post_exists( 'edition_original_id', $edition['id'] ) ) {
+				WP_CLI::warning( sprintf( "Skipping edition %d as it's already imported!", $edition['id'] ) );
+				continue;
+			}
+
 			$posts = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM editions_posts WHERE edition_id = %d ORDER BY `order`;', $edition['id'] ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
 
 			$edition_content = $this->generate_edition_content_from_posts( $posts );
@@ -201,6 +212,7 @@ class MassterlistMigrator implements InterfaceMigrator {
 			} else {
 				WP_CLI::success( sprintf( 'Edition %d was migrated successfully as a post %d', $edition['id'], $post_id ) );
 				wp_set_post_categories( $post_id, [ $cateogry_id ] );
+				update_post_meta( $post_id, 'edition_original_id', $edition['id'] );
 			}
 		}
 	}
@@ -280,7 +292,7 @@ class MassterlistMigrator implements InterfaceMigrator {
 
 		$company   = ( empty( $job['company_name'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $company_icon_url . '" alt="">  ' . $job['company_name'] . '<br>';
 		$locaiton  = ( empty( $job['location'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $location_icon_url . '" alt="">  ' . $job['location'] . '<br>';
-		$url       = ( empty( $job['url'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $url_icon_url . '" alt="">  ' . $job['url'] . '<br>';
+		$url       = ( empty( $job['url'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $url_icon_url . '" alt="">  <a href="' . $job['url'] . '">' . $job['url'] . '</a><br>';
 		$full_tile = ( 1 === intval( $job['is_fulltime'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $full_time_icon_url . '" alt="">  Full Time';
 
 		$details_content = "<!-- wp:paragraph --><p>$company$locaiton$url$full_tile</p><!-- /wp:paragraph -->";
@@ -604,5 +616,18 @@ class MassterlistMigrator implements InterfaceMigrator {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Check if posts exist by meta.
+	 *
+	 * @param string $meta_key Meta to check the existance of the post with.
+	 * @param mixed  $meta_value Meta value.
+	 * @return boolean
+	 */
+	private function post_exists( $meta_key, $meta_value ) {
+		$existing_posts = get_posts( [ 'meta_query' => [ ['key' => $meta_key, 'value' => $meta_value] ] ] ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+
+		return 0 < count( $existing_posts );
 	}
 }
