@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Migrator\General\SubtitleMigrator;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use Symfony\Component\DomCrawler\Crawler;
@@ -57,6 +58,11 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private $dom_crawler;
 
 	/**
+	 * @var PostsLogic.
+	 */
+	private $posts_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -65,6 +71,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
 		$this->coauthors_plus          = new CoAuthors_Plus();
 		$this->dom_crawler             = new Crawler();
+		$this->posts_logic             = new PostsLogic();
 	}
 
 	/**
@@ -166,6 +173,42 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			array( $this, 'cmd_nh_clean_co_authors_import' ),
 			array(
 				'shortdesc' => 'Remove imported co-authors from all posts.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-set-primary-category-from-meta',
+			array( $this, 'cmd_nh_set_primary_category_meta' ),
+			array(
+				'shortdesc' => 'Set Post primary category',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-set-coauthors',
+			array( $this, 'cmd_nh_set_coauthors' ),
+			array(
+				'shortdesc' => 'Set Post co-authors.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-import-featured-image',
+			array( $this, 'cmd_nh_import_featured_image' ),
+			array(
+				'shortdesc' => 'Set Post featured image.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-migrate-galleries',
+			array( $this, 'cmd_nh_migrate_galleries' ),
+			array(
+				'shortdesc' => 'Migrate posts galleries.',
 				'synopsis'  => array(),
 			)
 		);
@@ -600,7 +643,6 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				// }
 				// }
 
-
 				// if ( ! empty( $guest_authors_ids ) ) {
 				// $this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors_ids, $post->ID );
 				// $this->log( self::CO_AUTHORS_LOGS, sprintf( '(%d/%d) co-authors imported for the post: %d', $index, $total_posts, $post->ID ) );
@@ -662,6 +704,198 @@ class NoozhawkMigrator implements InterfaceMigrator {
 						WP_CLI::line( sprintf( "Setting '%s' as co-author for the post %d", $co_author_to_keep->display_name, $post->ID ) );
 					}
 				}
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-set-primary-category-from-meta`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_set_primary_category_meta( $args, $assoc_args ) {
+		$query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'meta_key'       => '_newspack_primary_category',
+			]
+		);
+
+		$posts = $query->get_posts();
+		foreach ( $posts as $post ) {
+			$primary_category = get_post_meta( $post->ID, '_newspack_primary_category', true );
+			$terms            = get_terms(
+				[
+					'taxonomy'   => 'category',
+					'name'       => $primary_category,
+					'hide_empty' => false,
+				]
+			);
+
+			if ( count( $terms ) !== 1 ) {
+				WP_CLI::warning( sprintf( "Can't find the category %s", $primary_category ) );
+			}
+
+			$category = $terms[0];
+
+			update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+			WP_CLI::success( sprintf( 'Primary category for the post %d is set to: %s', $post->ID, $primary_category ) );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-set-coauthors`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_set_coauthors( $args, $assoc_args ) {
+		$query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'meta_key'       => '_newspack_co_authors',
+			]
+		);
+
+		$posts = $query->get_posts();
+		foreach ( $posts as $post ) {
+			$co_authors       = [];
+			$co_authors_names = json_decode( get_post_meta( $post->ID, '_newspack_co_authors', true ), true );
+			if ( ! $co_authors_names ) {
+				WP_CLI::warning( sprintf( 'Post meta `_newspack_co_authors` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
+				continue;
+			}
+			foreach ( $co_authors_names as $co_author_name ) {
+				$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author_name ] );
+				if ( is_wp_error( $co_author_id ) ) {
+					WP_CLI::warning( sprintf( "Can't create co-author %s: %s", $co_author_name, $co_author_id ) );
+					continue;
+				}
+
+				$co_authors[] = $co_author_id;
+			}
+
+			if ( 0 < count( $co_authors ) ) {
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors, $post->ID );
+				WP_CLI::success( sprintf( 'Setting post %s co-authors: %s', $post->ID, implode( ', ', $co_authors_names ) ) );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-import-featured-image`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_import_featured_image( $args, $assoc_args ) {
+		$query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'meta_key'       => '_newspack_thumbnail',
+			]
+		);
+
+		$posts = $query->get_posts();
+		foreach ( $posts as $post ) {
+			$featured_image = json_decode( get_post_meta( $post->ID, '_newspack_thumbnail', true ), true );
+			if ( ! $featured_image ) {
+				WP_CLI::warning( sprintf( 'Post meta `_newspack_thumbnail` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
+				continue;
+			}
+
+			$existing_featured_image = $this->get_post_by_meta( '_newspack_imported_from_url', $featured_image['url'], 'attachment' );
+
+			$featured_image_id = $existing_featured_image ? $existing_featured_image->ID : $this->attachment_logic->import_external_file(
+				$featured_image['url'],
+                array_key_exists( 'title', $featured_image ) ? $featured_image['title'] : null,
+                null,
+                null,
+                array_key_exists( 'alt', $featured_image ) ? $featured_image['alt'] : null,
+                $post->ID
+			);
+
+			if ( is_wp_error( $featured_image_id ) ) {
+				WP_CLI::warning( sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $featured_image['url'], $featured_image_id ) );
+				continue;
+			}
+
+			set_post_thumbnail( $post->ID, $featured_image_id );
+			update_post_meta( $featured_image_id, '_newspack_imported_from_url', $featured_image['url'] );
+			WP_CLI::success( sprintf( 'Setting post %s featured image: %d', $post->ID, $featured_image_id ) );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-migrate-galleries`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_migrate_galleries( $args, $assoc_args ) {
+		$query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'meta_key'       => '_newspack_slideshow_images',
+			]
+		);
+
+		$posts = array_filter(
+            $query->get_posts(),
+            function( $post ) {
+				$gallery_already_migrated = get_post_meta( $post->ID, '_newspack_gallery_migrated', true );
+				if ( $gallery_already_migrated ) {
+					WP_CLI::warning( sprintf( 'Gallery migration for the post %d is already done, skipped.', $post->ID ) );
+				}
+				return ! $gallery_already_migrated;
+			}
+        );
+
+		foreach ( $posts as $post ) {
+			$gallery_images = json_decode( get_post_meta( $post->ID, '_newspack_slideshow_images', true ), true );
+			if ( ! $gallery_images ) {
+				WP_CLI::warning( sprintf( 'Post meta `_newspack_slideshow_images` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
+				continue;
+			}
+
+			$images = [];
+			foreach ( $gallery_images as $gallery_image ) {
+				$existing_gallery_image = $this->get_post_by_meta( '_newspack_imported_from_url', $gallery_image['url'], 'attachment' );
+				$gallery_image_id       = $existing_gallery_image ? $existing_gallery_image->ID : $this->attachment_logic->import_external_file(
+                    $gallery_image['url'],
+                    array_key_exists( 'title', $gallery_image ) ? $gallery_image['title'] : null,
+                    null,
+                    null,
+                    array_key_exists( 'alt', $gallery_image ) ? $gallery_image['alt'] : null,
+                    $post->ID
+				);
+
+				if ( is_wp_error( $gallery_image_id ) ) {
+					WP_CLI::warning( sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $gallery_image['url'], $featured_image_id ) );
+					continue;
+				}
+
+				$images[] = $gallery_image_id;
+				update_post_meta( $gallery_image_id, '_newspack_imported_from_url', $gallery_image['url'] );
+			}
+
+			if ( 0 < count( $images ) ) {
+				$gallery_block = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( $images );
+
+				wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => $gallery_block . $post->post_content,
+					)
+				);
+
+				update_post_meta( $post->ID, '_newspack_gallery_migrated', true );
+				WP_CLI::success( sprintf( 'Post %d galleries were migrated!', $post->ID ) );
 			}
 		}
 	}
@@ -810,6 +1044,26 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		}
 
 		fclose( $csv_output_file );
+	}
+
+	/**
+	 * Get one post by meta value.
+	 *
+	 * @param string      $meta_key Meta Key.
+	 * @param string      $meta_value Meta value.
+	 * @param string|null $post_type Post_type.
+	 * @return WP_Post|null
+	 */
+	private function get_post_by_meta( $meta_key, $meta_value, $post_type = 'post' ) {
+		$query = new \WP_Query(
+            [
+				'post_type'   => $post_type,
+				'post_status' => [ 'publish', 'inherit' ],
+				'meta_query'  => [ ['key' => $meta_key, 'value' => $meta_value, 'compare' => '='] ], // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			]
+        );
+		$posts = $query->get_posts();
+		return ( count( $posts ) > 0 ) ? current( $posts ) : null;
 	}
 
 	/**
