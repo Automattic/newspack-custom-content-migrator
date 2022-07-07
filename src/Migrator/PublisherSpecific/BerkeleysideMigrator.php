@@ -3,6 +3,8 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use Simple_Local_Avatars;
 use stdClass;
 use \WP_CLI;
@@ -15,6 +17,16 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 * @var BerkeleysideMigrator
 	 */
 	private static $instance;
+
+	/**
+	 * @var PostLogic.
+	 */
+	private $posts_logic;
+
+	/**
+	 * @var CoAuthorPlusMigrator.
+	 */
+	private $cap_logic;
 
 	/**
 	 * Template mapping, old postmeta value => new postmeta value.
@@ -55,6 +67,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	public function __construct() {
+		$this->posts_logic = new PostsLogic();
+		$this->cap_logic   = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -139,6 +153,43 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-acf-authors-to-cap',
+			[ $this, 'cmd_acf_authors_to_cap' ],
+		);
+	}
+
+	public function cmd_acf_authors_to_cap( $args, $assoc_args ) {
+		if ( ! $this->cap_logic->is_coauthors_active() ) {
+			WP_CLI::error( 'CAP plugin needs to be active to run this command.' );
+		}
+
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			$post = get_post( $post_id );
+			$meta_opinionator_author = get_post_meta( $post_id, 'opinionator_author', true );
+			$meta_opinionator_author_bio = get_post_meta( $post_id, 'opinionator_author_bio', true );
+			if ( empty( $meta_opinionator_author ) || empty( $meta_opinionator_author_bio )) {
+				// TODO log
+				continue;
+			}
+
+			// Get WP Author user.
+			$user = get_user_by( 'id', $post->post_author );
+
+			// Get/Create GA.
+			$ga_id = $this->cap_logic->create_guest_author([
+				'display_name' => $meta_opinionator_author,
+				'description' => $meta_opinionator_author_bio,
+			]);
+
+			// Link WP User and GA.
+			$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $user );
+
+			// Assign GA.
+			$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID );
+		}
 	}
 
 	public function cmd_import_postmeta_to_postcontent( $args, $assoc_args ) {
