@@ -165,13 +165,26 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			WP_CLI::error( 'CAP plugin needs to be active to run this command.' );
 		}
 
-		$post_ids = $this->posts_logic->get_all_posts_ids();
+		// $post_ids = $this->posts_logic->get_all_posts_ids();
+		$post_ids = [  ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
 			$post = get_post( $post_id );
 			$meta_opinionator_author = get_post_meta( $post_id, 'opinionator_author', true );
 			$meta_opinionator_author_bio = get_post_meta( $post_id, 'opinionator_author_bio', true );
-			if ( empty( $meta_opinionator_author ) || empty( $meta_opinionator_author_bio )) {
-				// TODO log
+
+			// If no GA user to create by name, skip.
+			if ( empty( $meta_opinionator_author ) ) {
+				$this->log( 'berkeleyside__meta_empty_authorname.log', sprintf( "%d %s %s", $post_id, $meta_opinionator_author, $meta_opinionator_author_bio ) , false );
+				WP_CLI::log( '  x skipped, empty author name' );
+				continue;
+			}
+
+			// If no bio, WP User Author should be enough as it is.
+			if ( empty( $meta_opinionator_author_bio ) ) {
+				$this->log( 'berkeleyside__meta_empty_authorbio.log', sprintf( "%d %s %s", $post_id, $meta_opinionator_author, $meta_opinionator_author_bio ) , false );
+				WP_CLI::log( '  x skipped, empty author bio' );
 				continue;
 			}
 
@@ -179,10 +192,10 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			$user = get_user_by( 'id', $post->post_author );
 
 			// Get/Create GA.
-			$ga_id = $this->cap_logic->create_guest_author([
+			$ga_id = $this->cap_logic->create_guest_author( [
 				'display_name' => $meta_opinionator_author,
 				'description' => $meta_opinionator_author_bio,
-			]);
+			] );
 
 			// Link WP User and GA.
 			$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $user );
@@ -190,6 +203,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			// Assign GA.
 			$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID );
 		}
+
+		WP_CLI::log( 'Done.' );
 	}
 
 	public function cmd_import_postmeta_to_postcontent( $args, $assoc_args ) {
@@ -706,5 +721,20 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 						WHERE sub.ID IS NOT NULL",
 			OBJECT_K
 		);
+	}
+
+	/**
+	 * Simple file logging.
+	 *
+	 * @param string  $file    File name or path.
+	 * @param string  $message Log message.
+	 * @param boolean $to_cli Display the logged message in CLI.
+	 */
+	private function log( $file, $message, $to_cli = true ) {
+		$message .= "\n";
+		if ( $to_cli ) {
+			WP_CLI::line( $message );
+		}
+		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
