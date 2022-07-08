@@ -723,24 +723,35 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				'Title'         => $user_and_title->meta_value,
 				'Previous_Meta' => $meta,
 			];
-			if ( empty( $meta ) ) {
-				$meta = [ 'jobTitle' => $user_and_title->meta_value ];
-			} else {
+
+			if ( is_array( $meta ) ) {
 				$meta['jobTitle'] = $user_and_title->meta_value;
+
+				$wpdb->update(
+					$wpdb->usermeta,
+					[
+						'meta_key'   => 'wpseo_user_schema',
+						'meta_value' => serialize( $meta ),
+					],
+					[
+						'user_id'  => $user_and_title->user_id,
+						'meta_key' => 'wpseo_user_schema',
+					]
+				);
+			} else {
+				$meta = [ 'jobTitle' => $user_and_title->meta_value ];
+
+				$wpdb->insert(
+					$wpdb->usermeta,
+					[
+						'user_id'    => $user_and_title->user_id,
+						'meta_key'   => 'wpseo_user_schema',
+						'meta_value' => serialize( $meta ),
+					]
+				);
 			}
 
 			$updated_user['Updated_Meta'] = $meta;
-			$wpdb->update(
-				$wpdb->usermeta,
-				[
-					'meta_key'   => 'wpseo_user_schema',
-					'meta_value' => serialize( $meta ),
-				],
-				[
-					'user_id'  => $user_and_title->user_id,
-					'meta_key' => 'wpseo_user_schema',
-				]
-			);
 			$updated_users[] = $updated_user;
 			$progress_bar->tick();
 		}
