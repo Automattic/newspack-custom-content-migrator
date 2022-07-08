@@ -63,7 +63,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->cap_logic   = new CoAuthorPlusLogic();
+		$this->cap_logic = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -152,6 +152,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		WP_CLI::add_command(
 			'newspack-content-migrator berkeleyside-acf-authors-to-cap',
 			[ $this, 'cmd_acf_authors_to_cap' ],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-add-user-title-to-yoast',
+			[ $this, 'cmd_add_user_title_to_yoast' ],
 		);
 	}
 
@@ -284,7 +289,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				}
 			}
 
-			$list_items = implode( "\n", array_filter( $links, fn ( $link ) => ! str_contains( $link, '{description}' ) ) );
+			$list_items = implode( "\n", array_filter( $links, fn( $link ) => ! str_contains( $link, '{description}' ) ) );
 
 			$html = strtr( $html_template, [ '{list_items}' => $list_items ] );
 
@@ -452,7 +457,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		$interval     = 300;
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Inserting Newspack Hide Updated Date data', count( $post_ids_without_updated_time ) );
 		while ( ! empty( $post_ids_without_updated_time ) ) {
-			$interval--;
+			$interval --;
 
 			if ( 0 == $interval ) {
 				sleep( 2 );
@@ -581,7 +586,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				);
 
 				if ( is_numeric( $result ) ) {
-					$updated++;
+					$updated ++;
 					$wpdb->delete(
 						$wpdb->postmeta,
 						[
@@ -696,6 +701,54 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		}
 	}
 
+	public function cmd_add_user_title_to_yoast( $args, $assoc_args ) {
+		global $wpdb;
+
+		$users_and_titles = $wpdb->get_results(
+			"SELECT 
+       			user_id, 
+       			meta_value 
+			FROM $wpdb->usermeta 
+			WHERE meta_key = 'berkeleyside_title' 
+			  AND meta_value != ''"
+		);
+
+		$progress_bar  = WP_CLI\Utils\make_progress_bar( 'Updating User Meta with Job Title', count( $users_and_titles ) );
+		$updated_users = [];
+		foreach ( $users_and_titles as $user_and_title ) {
+			$meta = get_user_meta( $user_and_title->user_id, 'wpseo_user_schema', true );
+
+			$updated_user = [
+				'User_ID'       => $user_and_title->user_id,
+				'Title'         => $user_and_title->meta_value,
+				'Previous_Meta' => $meta,
+			];
+			if ( empty( $meta ) ) {
+				$meta = [ 'jobTitle' => $user_and_title->meta_value ];
+			} else {
+				$meta['jobTitle'] = $user_and_title->meta_value;
+			}
+
+			$updated_user['Updated_Meta'] = $meta;
+			$wpdb->update(
+				$wpdb->usermeta,
+				[
+					'meta_key'   => 'wpseo_user_schema',
+					'meta_value' => serialize( $meta ),
+				],
+				[
+					'user_id'  => $user_and_title->user_id,
+					'meta_key' => 'wpseo_user_schema',
+				]
+			);
+			$updated_users[] = $updated_user;
+			$progress_bar->tick();
+		}
+		$progress_bar->finish();
+
+		WP_CLI\Utils\format_items( 'table', $updated_users, [ 'User_ID', 'Title', 'Previous_Meta', 'Updated_Meta' ] );
+	}
+
 	/**
 	 * Converts Post IDs from "live" tables to corresponding Post IDs from staging/production tables.
 	 *
@@ -739,7 +792,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	/**
 	 * Simple file logging.
 	 *
-	 * @param string  $file    File name or path.
+	 * @param string  $file File name or path.
 	 * @param string  $message Log message.
 	 * @param boolean $to_cli Display the logged message in CLI.
 	 */
