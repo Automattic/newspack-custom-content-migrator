@@ -3,7 +3,6 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use Simple_Local_Avatars;
 use stdClass;
@@ -19,11 +18,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	private static $instance;
 
 	/**
-	 * @var PostLogic.
-	 */
-	private $posts_logic;
-
-	/**
+	 * CoAuthorsPlus Helper Class.
+	 *
 	 * @var CoAuthorPlusMigrator.
 	 */
 	private $cap_logic;
@@ -35,7 +31,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 */
 	protected array $template_mapping = [
 		'page-templates/post_template-single-photo-lead.php' => 'single-wide.php',
-		'page-templates/post_template-single-wide.php' => 'single-wide.php',
+		'page-templates/post_template-single-wide.php'  => 'single-wide.php',
 		'page-templates/post_template-single-short.php' => 'default',
 	];
 
@@ -45,8 +41,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 * @var array|string[] $media_credit_mapping
 	 */
 	protected array $media_credit_mapping = [
-		'photo_credit_name' => 'media_credit',
-		'photo_credit_url' => 'media_credit_url',
+		'photo_credit_name'  => 'media_credit',
+		'photo_credit_url'   => 'media_credit_url',
 		'photo_organization' => 'navis_media_credit_or',
 	];
 
@@ -57,17 +53,16 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 */
 	protected array $postmeta_to_tag_mapping = [
 		'lead_story_front_page_article' => 'Home: Lead',
-		'lead_story_front_page_photo' => 'Home: Lead Photo',
-		'breaking_story' => 'Home: Breaking',
-		'highlight_story' => 'Home: Highlight',
-		'timeline_story' => 'Home: Timeline',
+		'lead_story_front_page_photo'   => 'Home: Lead Photo',
+		'breaking_story'                => 'Home: Breaking',
+		'highlight_story'               => 'Home: Highlight',
+		'timeline_story'                => 'Home: Timeline',
 	];
 
 	/**
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->posts_logic = new PostsLogic();
 		$this->cap_logic   = new CoAuthorPlusLogic();
 	}
 
@@ -119,7 +114,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator display-updated-date-correctly',
+			'newspack-content-migrator berkeleyside-display-updated-date-correctly',
 			[ $this, 'cmd_display_updated_date_correctly' ],
 			[
 				'shortdesc' => 'Looks for Berkeleyside metadata to display updated date correctly on staging site.',
@@ -128,7 +123,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator update-related-posts-block',
+			'newspack-content-migrator berkeleyside-update-related-posts-block',
 			[ $this, 'cmd_update_related_posts_block' ],
 			[
 				'shortdesc' => 'Looks at postmeta for related post information and attempts to recreate it using a post block',
@@ -137,7 +132,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-user-avatars',
+			'newspack-content-migrator berkeleyside-migrate-user-avatars',
 			[ $this, 'cmd_migrate_user_avatars' ],
 			[
 				'shortdesc' => 'Migrating data from User Profile Picture to Simple Local Avatars',
@@ -146,7 +141,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator replace-postmeta-with-tags',
+			'newspack-content-migrator berkeleyside-replace-postmeta-with-tags',
 			[ $this, 'cmd_replace_postmeta_with_tags' ],
 			[
 				'shortdesc' => 'Takes a list of custom postmeta types (article_type) and converts them to tags. Then associates posts with those tags.',
@@ -165,25 +160,40 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			WP_CLI::error( 'CAP plugin needs to be active to run this command.' );
 		}
 
-		// $post_ids = $this->posts_logic->get_all_posts_ids();
-		$post_ids = [  ];
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+		global $wpdb;
 
-			$post = get_post( $post_id );
-			$meta_opinionator_author = get_post_meta( $post_id, 'opinionator_author', true );
-			$meta_opinionator_author_bio = get_post_meta( $post_id, 'opinionator_author_bio', true );
+		$posts_with_opinion_category = $wpdb->get_results(
+			"SELECT 
+       				object_id as post_id 
+			FROM $wpdb->term_relationships 
+			WHERE term_taxonomy_id = (
+    			SELECT 
+    			       tt.term_taxonomy_id 
+    			FROM $wpdb->term_taxonomy tt 
+    			    INNER JOIN $wpdb->terms t ON tt.term_id = t.term_id 
+    			WHERE t.slug = 'opinion' 
+    			  AND tt.taxonomy = 'category'
+			)"
+		);
+
+		$count_of_posts = count( $posts_with_opinion_category );
+		foreach ( $posts_with_opinion_category as $key_post_id => $row ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, $count_of_posts, $row->post_id ) );
+
+			$post                        = get_post( $row->post_id );
+			$meta_opinionator_author     = get_post_meta( $row->post_id, 'opinionator_author', true );
+			$meta_opinionator_author_bio = get_post_meta( $row->post_id, 'opinionator_author_bio', true );
 
 			// If no GA user to create by name, skip.
 			if ( empty( $meta_opinionator_author ) ) {
-				$this->log( 'berkeleyside__meta_empty_authorname.log', sprintf( "%d %s %s", $post_id, $meta_opinionator_author, $meta_opinionator_author_bio ) , false );
+				$this->log( 'berkeleyside__meta_empty_authorname.log', sprintf( '%d %s %s', $row->post_id, $meta_opinionator_author, $meta_opinionator_author_bio ), false );
 				WP_CLI::log( '  x skipped, empty author name' );
 				continue;
 			}
 
 			// If no bio, WP User Author should be enough as it is.
 			if ( empty( $meta_opinionator_author_bio ) ) {
-				$this->log( 'berkeleyside__meta_empty_authorbio.log', sprintf( "%d %s %s", $post_id, $meta_opinionator_author, $meta_opinionator_author_bio ) , false );
+				$this->log( 'berkeleyside__meta_empty_authorbio.log', sprintf( '%d %s %s', $row->post_id, $meta_opinionator_author, $meta_opinionator_author_bio ), false );
 				WP_CLI::log( '  x skipped, empty author bio' );
 				continue;
 			}
@@ -192,10 +202,12 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			$user = get_user_by( 'id', $post->post_author );
 
 			// Get/Create GA.
-			$ga_id = $this->cap_logic->create_guest_author( [
-				'display_name' => $meta_opinionator_author,
-				'description' => $meta_opinionator_author_bio,
-			] );
+			$ga_id = $this->cap_logic->create_guest_author(
+				[
+					'display_name' => $meta_opinionator_author,
+					'description'  => $meta_opinionator_author_bio,
+				]
+			);
 
 			// Link WP User and GA.
 			$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $user );
@@ -238,7 +250,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 		$posts_associated_with_category = $wpdb->get_results( $posts_associated_with_category_sql );
 
-		$html_template = '<em>Heads up: We sometimes link to sites that limit access for non-subscribers.</em><ul class="wire-stories-list">{list_items}</ul>';
+		$html_template      = '<em>Heads up: We sometimes link to sites that limit access for non-subscribers.</em><ul class="wire-stories-list">{list_items}</ul>';
 		$list_item_template = '<li><a href="{url}" target="_blank">{description}</a> {source}</li>';
 		foreach ( $posts_associated_with_category as $post ) {
 			$links       = [];
@@ -259,9 +271,9 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 				if ( str_ends_with( $key, 'story_link' ) ) {
 					$attributes['{url}'] = $value;
-				} else if ( str_ends_with( $key, 'story_source' ) ) {
+				} elseif ( str_ends_with( $key, 'story_source' ) ) {
 					$attributes['{source}'] = "($value)";
-				} else if ( str_ends_with( $key, 'story_title' ) ) {
+				} elseif ( str_ends_with( $key, 'story_title' ) ) {
 					$attributes['{description}'] = $value;
 				}
 
@@ -292,7 +304,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				]
 			);
 
-//			update_post_meta( $post->ID, 'newspack_featured_image_position', 'large' );
+			// update_post_meta( $post->ID, 'newspack_featured_image_position', 'large' );
 		}
 	}
 
@@ -382,11 +394,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			}
 
 			$results[] = [
-				'old_key' => $old_key,
-				'old_key_count' => number_format( $old_key_count ),
-				'new_key' => $new_key,
-				'new_key_count' => number_format( $new_key_count ),
-				'updated_count' => number_format( $updated_count ),
+				'old_key'         => $old_key,
+				'old_key_count'   => number_format( $old_key_count ),
+				'new_key'         => $new_key,
+				'new_key_count'   => number_format( $new_key_count ),
+				'updated_count'   => number_format( $updated_count ),
 				'new_and_updated' => number_format( $new_key_count + $updated_count ),
 			];
 		}
@@ -433,11 +445,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 		if ( ! empty( $post_ids_with_updated_time ) ) {
 			$post_ids_with_updated_time_concatenated = implode( ',', $post_ids_with_updated_time );
-			$post_ids_without_updated_time_sql .= " AND p.ID NOT IN ($post_ids_with_updated_time_concatenated)";
+			$post_ids_without_updated_time_sql      .= " AND p.ID NOT IN ($post_ids_with_updated_time_concatenated)";
 		}
 		$post_ids_without_updated_time = $wpdb->get_results( $post_ids_without_updated_time_sql );
 
-		$interval = 300;
+		$interval     = 300;
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Inserting Newspack Hide Updated Date data', count( $post_ids_without_updated_time ) );
 		while ( ! empty( $post_ids_without_updated_time ) ) {
 			$interval--;
@@ -462,7 +474,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		$progress_bar->finish();
 
 		// This should only be run when the site is in production.
-		/*$result = $wpdb->query( "DELETE FROM $wpdb->postmeta WHERE meta_key = 'display_updated_date_and_time' AND post_id IN ($post_ids_with_updated_time_concatenated)" );
+		/*
+		$result = $wpdb->query( "DELETE FROM $wpdb->postmeta WHERE meta_key = 'display_updated_date_and_time' AND post_id IN ($post_ids_with_updated_time_concatenated)" );
 
 		if ( is_numeric( $result ) ) {
 			WP_CLI::line( "Count of deleted posts with old postmeta of updated time: $result" );
@@ -494,14 +507,14 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		);
 
 		$count_post_ids_with_related_posts = count( $post_ids_with_related_posts );
-		$old_related_post_ids = [];
-		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Processing related post data', $count_post_ids_with_related_posts );
+		$old_related_post_ids              = [];
+		$progress_bar                      = WP_CLI\Utils\make_progress_bar( 'Processing related post data', $count_post_ids_with_related_posts );
 		foreach ( $post_ids_with_related_posts as &$post ) {
 			$separator = ', ';
 
 			if ( str_contains( $post->meta_value, ',' ) ) {
 				$separator = ',';
-			} else if ( str_contains( $post->meta_value, '. ' ) ) {
+			} elseif ( str_contains( $post->meta_value, '. ' ) ) {
 				$separator = '. ';
 			}
 
@@ -538,7 +551,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		} /-->';
 
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Inserting homepage block to posts', $count_post_ids_with_related_posts );
-		$updated = 0;
+		$updated      = 0;
 		foreach ( $post_ids_with_related_posts as $post ) {
 			$new_post_ids = [];
 			foreach ( $post->meta_value as $old_post_id ) {
@@ -549,7 +562,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 			if ( ! empty( $new_post_ids ) ) {
 				$new_post_ids_concatenated = implode( ',', $new_post_ids );
-				$block = strtr(
+				$block                     = strtr(
 					$block_template,
 					[
 						'post_ids' => $new_post_ids_concatenated,
