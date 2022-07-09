@@ -155,7 +155,7 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 		$posts = get_posts(
 			array(
 				'numberposts' => -1,
-				'post_type'   => 'page',
+				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
 			)
 		);
@@ -174,6 +174,8 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 			foreach ( parse_blocks( $post_content ) as $content_block ) {
 				// remove shortcodes from classic blocks that starts with a shortcode.
 				if ( ! $content_block['blockName'] && substr( $content_block['innerHTML'], 0, 1 ) === '[' ) {
+					// print_r( $content_block['innerHTML'] );
+					// die();
 					$post_content_blocks = array_merge( $post_content_blocks, $this->parseShortcodeContentToBlock( $post->ID, $content_block['innerHTML'] ) );
 					$migrated            = true;
 					continue;
@@ -581,7 +583,34 @@ HTML;
 			die();
 		}
 
-		$stripped_paragraph = str_ireplace( '</p><br />', '</p>', nl2br( preg_replace( '/[\r\n]+/', "\n", $paragraph_content ) ) );
+		$stripped_paragraph = nl2br(
+			strip_tags(
+				$paragraph_content,
+				array(
+					'strong',
+					'h2',
+					'b',
+					'a',
+					'i',
+					'em',
+					'li',
+					'ol',
+					'ul',
+					'audio',
+					'figure',
+					'blockquote',
+					'h1',
+					'h3',
+					'dt',
+					'dd',
+					'dl',
+					'h4',
+					'u',
+					'iframe',
+				)
+			)
+		);
+		$stripped_paragraph = str_ireplace( array( '<b>', '</b>' ), array( '<br><b>', '</b><br>' ), $stripped_paragraph );
 		$stripped_paragraph = str_ireplace( array( 'text-align: right;', 'color: #ffffff;', 'color: white !important;', 'color: white;' ), '', $stripped_paragraph );
 
 		return array(
