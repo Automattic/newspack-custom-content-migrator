@@ -100,6 +100,15 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 				'synopsis'  => array(),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator searchlightnm-fix-column-size-to-full-size',
+			array( $this, 'searchlightnm_fix_column_size_to_full_size' ),
+			array(
+				'shortdesc' => 'Clean post content from shortcodes.',
+				'synopsis'  => array(),
+			)
+		);
 	}
 
 	/**
@@ -295,6 +304,62 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 		foreach ( $posts as $post ) {
 			update_post_meta( $post->ID, 'newspack_featured_image_position', 'above' );
 			WP_CLI::warning( "Updated {$post->ID}" );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator searchlightnm-fix-column-size-to-full-size`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function searchlightnm_fix_column_size_to_full_size( $args, $assoc_args ) {
+		$posts = get_posts(
+			array(
+				'numberposts' => -1,
+				'post_type'   => 'post',
+				'post_status' => array( 'publish' ),
+				'post__in'    => array( 91094, 90838, 90489, 90471, 90384, 87778, 89869, 87905, 87777, 86691, 86871, 86788, 86257, 84998, 85826, 85806, 85002, 85000, 84996, 84964, 84958, 83803, 83557, 83114, 83103, 83098, 83096, 83093, 83033, 83031, 82980, 82831, 82829, 82827, 82825, 82823, 82821, 90805, 90794, 90788, 90779, 90763, 90755, 90742, 90719, 90625, 90537, 90441, 90371, 90316, 90286, 90266, 90250, 90230, 90188, 90138, 90129, 90111, 89738, 89863, 89853, 89812, 89795, 89718, 89627, 89576, 89532, 89504, 89476, 89469, 89446, 89358, 89343, 89332, 89272, 89256, 89223, 89193, 89180, 89045, 89028, 88851, 88834, 88808, 88785, 88739, 88657, 88626, 88558, 88541, 88520, 88105, 88027, 87999, 87963, 87947, 87917, 87839, 87806, 87789, 87753, 87717, 87700, 87644, 87661, 87614, 87565, 87536, 87499, 87474, 87411, 87277, 87263, 87204, 87187, 87156, 87144, 87123, 87105, 87045, 87015, 86989, 86875, 86924, 86717, 86698, 86652, 86622, 86596, 86550, 86449, 86415, 86335, 86296, 86154, 85923, 85846, 84990, 84762, 86498, 84777, 84807, 84847, 84813, 84822, 84827, 84835, 84831, 84837, 84845, 84852, 83487, 83342, 84855, 84858, 84861, 84863, 84901, 84916, 84923, 84934, 84939, 84942, 84947, 85047, 85396, 85074, 85092, 85095, 85378, 85108, 83695, 85135, 85270, 85283, 83642, 83644, 83646, 83648, 85569, 86084, 86068, 85892, 83668, 83676, 86267, 85897, 85905, 86212, 86348, 85303, 85298, 85289, 43373, 42447, 41628, 37420, 37417, 37291, 34030, 34024, 33750, 31371, 83710, 30471, 27427, 26100, 26004, 25268, 24369, 21886, 21895, 18836, 18780, 18772, 18790, 18755, 17118, 17946, 16651, 16590, 14776, 13993, 13974, 13966, 13408, 12497, 12151, 11935, 11390, 13446, 10821, 10285, 9515, 9512, 9505, 8456, 8474, 8479, 8185, 7753, 7749, 6290, 6049, 5815, 5667, 5594, 5307, 5137, 83703, 3511, 2670 ),
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$post_content_blocks = array();
+
+			foreach ( parse_blocks( $post->post_content ) as $content_block ) {
+				// remove shortcodes from classic blocks that starts with a shortcode.
+				if ( $content_block['blockName'] === 'core/columns' ) {
+					foreach ( $content_block['innerBlocks'] as $column_index => $column ) {
+						if ( 'core/column' !== $column['blockName'] ) {
+							continue;
+						}
+
+						if ( array_key_exists( 'width', $column['attrs'] ) && str_ends_with( $column['attrs']['width'], '%' ) && floatval( current( explode( '%', $column['attrs']['width'] ) ) ) > 75 ) {
+							$serialized_column = serialize_block( $content_block['innerBlocks'][ $column_index ] );
+							$fixed_column      = str_replace( $column['attrs']['width'], '100%', $serialized_column );
+
+							$content_block['innerBlocks'][ $column_index ] = current( parse_blocks( $fixed_column ) );
+						}
+					}
+				}
+
+				$post_content_blocks[] = $content_block;
+			}
+
+			$post_content_with_fixed_columns_width = serialize_blocks( $post_content_blocks );
+			if ( $post_content_with_fixed_columns_width !== $post->post_content ) {
+				$update = wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => $post_content_with_fixed_columns_width,
+					)
+				);
+				if ( is_wp_error( $update ) ) {
+					$this->log( self::SHORTCODES_LOGS, sprintf( 'Failed to update post %d because %s', $post->ID, $update->get_error_message() ) );
+				} else {
+					$this->log( self::SHORTCODES_LOGS, sprintf( 'Post %d cleaned from shortcodes.', $post->ID ) );
+				}
+			}
 		}
 	}
 
