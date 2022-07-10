@@ -364,9 +364,7 @@ class TownNewsMigrator implements InterfaceMigrator {
 			$media_type   = (string) $media_element->attributes()->{'media-type'};
 			$media_source = (string) $media_element->{'media-reference'}[0]->attributes()->source;
 			if ( 'image' !== $media_type && ! str_ends_with( $media_source, '.jpg' ) && ! str_ends_with( $media_source, '.png' ) ) {
-				// print_r( $media_element );
-				$this->log( self::GALLERIES_MEDIA_NOT_SUPPORTED_LOG, "Media type not supported: $media_source" );
-				// die();
+				$this->log( self::GALLERIES_MEDIA_NOT_SUPPORTED_LOG, "Post $original_id with media type not supported: $media_source" );
 			}
 
 			$media_caption_item = $media_element->{'media-caption'};
@@ -377,7 +375,7 @@ class TownNewsMigrator implements InterfaceMigrator {
 				$media_id = $this->downloader->import_external_file( $media_path, $media_source, $media_caption );
 
 				if ( is_wp_error( $media_id ) ) {
-					$this->log( self::GALLERIES_LOG, sprintf( "Can't create a media from %s: %s", $media_source, $media_id ) );
+					$this->log( self::GALLERIES_LOG, sprintf( "Can't create a media from %s: %s", $media_source, $media_id->get_error_message() ) );
 					continue;
 				}
 
@@ -386,7 +384,6 @@ class TownNewsMigrator implements InterfaceMigrator {
 		}
 
 		if ( empty( $gallery_images ) ) {
-			$this->log( self::GALLERIES_LOG, sprintf( 'Gallery empty for %s', $xml_path ) );
 			return false;
 		}
 
@@ -407,7 +404,7 @@ class TownNewsMigrator implements InterfaceMigrator {
         );
 
 		if ( is_wp_error( $post_id ) ) {
-			$this->log( self::GALLERIES_LOG, sprintf( "Can't add colleciton from %s: %s", $xml_path, $post_id ) );
+			$this->log( self::GALLERIES_LOG, sprintf( "Can't add colleciton from %s: %s", $xml_path, $post_id->get_error_message() ) );
 			return false;
 		}
 
