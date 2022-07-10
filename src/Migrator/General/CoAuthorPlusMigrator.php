@@ -271,6 +271,25 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-merge-coauthors',
+			[ $this, 'cmd_merge_coauthors_into_one' ],
+			[
+				'shortdesc' => 'Merge co-authors into one coauthor and reassign their posts to this author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'guest-author-id',
+						'description' => 'Target Guest Author ID to keep.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'guest-authors-to-remove-ids',
+						'description' => 'Guest authors IDs to be removed by the merge action separated by a comma (e.g. 123,345,567).',
+						'optional'    => false,
+						'repeating'   => false,
 					],
 				],
 			]
@@ -803,9 +822,38 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		WP_CLI::success( 'Done' );
 	}
 
+	/**
+	 * Callable for the `newspack-content-migrator co-authors-merge-coauthors` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_merge_coauthors_into_one( $args, $assoc_args ) {
+		$co_author_id             = $assoc_args['guest-author-id'];
+		$co_authors_to_remove_ids = explode( ',', $assoc_args['guest-authors-to-remove-ids'] );
+
+		$co_author = $this->coauthorsplus_logic->get_guest_author_by_id( $co_author_id );
+
+		if ( ! $co_author ) {
+			WP_CLI::error( sprintf( 'There is no co-author with this ID %d.', $co_author_id ) );
 		}
 
-		WP_CLI::success('Done');
+		foreach ( $co_authors_to_remove_ids as $co_author_to_remove_id ) {
+			$co_author_to_remove = $this->coauthorsplus_logic->get_guest_author_by_id( $co_author_to_remove_id );
+
+			if ( ! $co_author_to_remove ) {
+				WP_CLI::error( sprintf( 'There is no co-author with this ID %d.', $co_author_to_remove_id ) );
+			}
+
+			$result = $this->coauthorsplus_logic->coauthors_guest_authors->delete( $co_author_to_remove_id, $co_author->user_login );
+			if ( $result ) {
+				WP_CLI::success( sprintf( 'Co-author %s deleted and their posts are reassigned to %s (%d)', $co_author_to_remove->display_name, $co_author->display_name, $co_author_id ) );
+			} else {
+				WP_CLI::warning( sprintf( 'Co-author %s cannot be deleted and: %s', $result ) );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
     /**
