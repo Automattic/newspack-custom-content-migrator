@@ -9,12 +9,12 @@ use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLo
 use \WP_Query;
 use \WP_CLI;
 use \DirectoryIterator;
-use Exception;
 use \SimpleXMLElement;
 
 class TownNewsMigrator implements InterfaceMigrator {
-	const GALLERIES_LOG = 'townnews_galleries_migration.log';
-	const AUTHORS_LOG   = 'townnews_authors_migration.log';
+	const GALLERIES_MEDIA_NOT_SUPPORTED_LOG = 'townnews_galleries_media_not_supported.log';
+	const GALLERIES_LOG                     = 'townnews_galleries_migration.log';
+	const AUTHORS_LOG                       = 'townnews_authors_migration.log';
 
 	/**
 	 * @var Downloader.
@@ -364,9 +364,9 @@ class TownNewsMigrator implements InterfaceMigrator {
 			$media_type   = (string) $media_element->attributes()->{'media-type'};
 			$media_source = (string) $media_element->{'media-reference'}[0]->attributes()->source;
 			if ( 'image' !== $media_type && ! str_ends_with( $media_source, '.jpg' ) && ! str_ends_with( $media_source, '.png' ) ) {
-				print_r( $media_element );
-				$this->log( self::GALLERIES_LOG, 'Media type not supported' );
-				die();
+				// print_r( $media_element );
+				$this->log( self::GALLERIES_MEDIA_NOT_SUPPORTED_LOG, "Media type not supported: $media_source" );
+				// die();
 			}
 
 			$media_caption_item = $media_element->{'media-caption'};
