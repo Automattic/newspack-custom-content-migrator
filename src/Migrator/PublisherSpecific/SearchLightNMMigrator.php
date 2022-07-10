@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 
 /**
@@ -26,11 +27,17 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 	private $posts_logic;
 
 	/**
+	 * @var Crawler
+	 */
+	private $dom_crawler;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->squarebracketselement_manipulator = new SquareBracketsElementManipulator();
 		$this->posts_logic                       = new PostsLogic();
+		$this->dom_crawler                       = new Crawler();
 	}
 
 	/**
@@ -166,6 +173,7 @@ class SearchLightNMMigrator implements InterfaceMigrator {
 				'numberposts' => -1,
 				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
+				// 'post__in'    => array( 90805 ),
 			)
 		);
 
