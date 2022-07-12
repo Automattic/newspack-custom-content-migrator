@@ -59,6 +59,9 @@ PluginSetup::register_migrators(
 
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
+		Migrator\PublisherSpecific\NoozhawkMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
 		Migrator\PublisherSpecific\RenoMigrator::class,
