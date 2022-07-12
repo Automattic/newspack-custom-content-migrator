@@ -73,5 +73,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\CalMattersMigrator::class,
 		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
 		Migrator\PublisherSpecific\NewsroomCoNzMigrator::class,
+		Migrator\PublisherSpecific\MassterlistMigrator::class,
 	)
 );
