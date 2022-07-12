@@ -65,7 +65,7 @@ class MassterlistMigrator implements InterfaceMigrator {
             'newspack-content-migrator massterlist-migrate-jobs',
             array( $this, 'massterlist_migrate_jobs' ),
             array(
-				'shortdesc' => 'Migrate jobs listings from the last 30 days.',
+				'shortdesc' => 'Migrate jobs listings from the last 30 days. To use this command you need the tables from the editions and jobs databases of the publisher, that you need to import locally, prefix the editions tables with editions_, and the jobs tables with _jobs, and then import them to the WP site where you\'re going to execute the commands',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -82,7 +82,7 @@ class MassterlistMigrator implements InterfaceMigrator {
 			'newspack-content-migrator massterlist-migrate-editions',
 			array( $this, 'massterlist_migrate_editions' ),
 			array(
-				'shortdesc' => 'Migrate editions posts.',
+				'shortdesc' => 'Migrate editions posts. To use this command you need the tables from the editions and jobs databases of the publisher, that you need to import locally, prefix the editions tables with editions_, and the jobs tables with _jobs, and then import them to the WP site where you\'re going to execute the commands',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
