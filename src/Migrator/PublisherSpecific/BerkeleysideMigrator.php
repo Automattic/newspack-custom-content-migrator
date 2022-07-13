@@ -309,7 +309,28 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				]
 			);
 
-			// update_post_meta( $post->ID, 'newspack_featured_image_position', 'large' );
+			$row = $wpdb->get_row( "SELECT meta_id FROM $wpdb->postmeta WHERE meta_key = 'newspack_featured_image_position' AND post_id = $post->ID" ) ;
+
+			if ( is_null( $row ) ) {
+				$wpdb->insert(
+					$wpdb->postmeta,
+					[
+						'meta_key' => 'newspack_featured_image_position',
+						'meta_value' => 'large',
+						'post_id' => $post->ID,
+					]
+				);
+			} else {
+				$wpdb->update(
+					$wpdb->postmeta,
+					[
+						'meta_value' => 'large',
+					],
+					[
+						'meta_id' => $row->meta_id,
+					]
+				);
+			}
 		}
 	}
 
@@ -359,16 +380,52 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 				if ( ! is_null( $corresponding_post ) ) {
 					WP_CLI::line( "$post->ID => $corresponding_post->ID" );
-					update_post_meta(
-						$corresponding_post->ID,
-						'_wp_page_template',
-						$new_template
-					);
-					update_post_meta(
-						$corresponding_post->ID,
-						'newspack_featured_image_position',
-						'above'
-					);
+
+					$row = $wpdb->get_row( "SELECT meta_id FROM $wpdb->postmeta WHERE meta_key = '_wp_page_template' AND post_id = $corresponding_post->ID" );
+
+					if ( is_null( $row ) ) {
+						$wpdb->insert(
+							$wpdb->postmeta,
+							[
+								'meta_key' => '_wp_page_template',
+								'meta_value' => $new_template,
+								'post_id' => $corresponding_post->ID,
+							]
+						);
+					} else {
+						$wpdb->update(
+							$wpdb->postmeta,
+							[
+								'meta_value' => $new_template,
+							],
+							[
+								'meta_id' => $row->meta_Id,
+							]
+						);
+					}
+
+					$row2 = $wpdb->get_row( "SELECT meta_id FROM $wpdb->postmeta WHERE meta_key = 'newspack_featured_image_position' AND post_id = $corresponding_post->ID" );
+
+					if ( is_null( $row2 ) ) {
+						$wpdb->insert(
+							$wpdb->postmeta,
+							[
+								'meta_key' => 'newspack_featured_image_position',
+								'meta_value' => 'above',
+								'post_id' => $corresponding_post->ID,
+							]
+						);
+					} else {
+						$wpdb->update(
+							$wpdb->postmeta,
+							[
+								'meta_value' => 'above',
+							],
+							[
+								'meta_id' => $row2->meta_id,
+							]
+						);
+					}
 				} else {
 					WP_CLI::line( "$posts_with_old_template->ID X" );
 				}
@@ -657,12 +714,14 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 		$meta_values = [];
 
-		foreach ( $this->postmeta_to_tag_mapping as $meta_value => &$tag ) {
+		foreach ( $this->postmeta_to_tag_mapping as $meta_value => $tag ) {
 			$meta_values[] = "'$meta_value'";
 
 			$tag = wp_create_tag( $tag );
 
 			$tag = $tag['term_taxonomy_id'];
+
+			$this->postmeta_to_tag_mapping[ $meta_value ] = $tag;
 		}
 
 		if ( ! empty( $meta_values ) ) {
@@ -696,6 +755,10 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 						'meta_id' => $postmeta->meta_id,
 					]
 				);
+
+				if ( 'lead_story_front_page_photo' === $postmeta->meta_value ) {
+					update_post_meta( $postmeta->post_id, 'newspack_featured_image_position', 'above' );
+				}
 
 				$progress_bar->tick();
 			}
