@@ -384,15 +384,15 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 		$results = [];
 		foreach ( $this->media_credit_mapping as $old_key => $new_key ) {
-			$old_key_count = $wpdb->get_row( "SELECT COUNT(*) AS counter, GROUP_CONCAT( meta_id ) as meta_ids FROM $wpdb->postmeta WHERE meta_key LIKE '%$old_key'" );
+			$old_key_count = $wpdb->get_row( "SELECT COUNT(*) AS counter, GROUP_CONCAT( meta_id ) as meta_ids FROM $wpdb->postmeta WHERE meta_key = '$old_key'" );
 			file_put_contents( $file_path, "$old_key: $old_key_count->meta_ids\n", FILE_APPEND );
 			$old_key_count = $old_key_count->counter;
 
-			$new_key_count = $wpdb->get_row( "SELECT COUNT(*) AS counter, GROUP_CONCAT( meta_id ) as meta_ids FROM $wpdb->postmeta WHERE meta_key LIKE '%$new_key'" );
+			$new_key_count = $wpdb->get_row( "SELECT COUNT(*) AS counter, GROUP_CONCAT( meta_id ) as meta_ids FROM $wpdb->postmeta WHERE meta_key = '_$new_key'" );
 			file_put_contents( $file_path, "$new_key: $new_key_count->meta_ids\n", FILE_APPEND );
 			$new_key_count = $new_key_count->counter;
 
-			$updated_count = $wpdb->query( "UPDATE $wpdb->postmeta SET meta_key = REPLACE( meta_key, '$old_key', '$new_key') WHERE meta_key LIKE '%$old_key'" );
+			$updated_count = $wpdb->query( "UPDATE $wpdb->postmeta SET meta_key = REPLACE( meta_key, '$old_key', '_$new_key') WHERE meta_key = '$old_key'" );
 			if ( is_numeric( $updated_count ) ) {
 				$formatted_updated_count = number_format( $updated_count );
 				file_put_contents( $file_path, "Updated: $formatted_updated_count\n", FILE_APPEND );
@@ -526,7 +526,10 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			$old_post_ids = explode( $separator, $post->meta_value );
 
 			foreach ( $old_post_ids as $key => $old_post_id ) {
+				$old_post_id = trim( $old_post_id );
 				if ( is_numeric( $old_post_id ) ) {
+					$old_post_id = (int) $old_post_id;
+					$old_post_ids[ $key ] = $old_post_id;
 					$old_related_post_ids[ $old_post_id ] = null;
 				} else {
 					unset( $old_post_ids[ $key ] );
@@ -561,7 +564,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			$new_post_ids = [];
 			foreach ( $post->meta_value as $old_post_id ) {
 				if ( is_numeric( $old_post_id ) && array_key_exists( $old_post_id, $old_to_new_post_ids ) ) {
-					$new_post_ids[] = '"' . $old_to_new_post_ids[ $old_post_id ]->new_post_id . '"';
+					$new_post_ids[] = $old_to_new_post_ids[ (int) $old_post_id ]->new_post_id;
 				}
 			}
 
@@ -570,7 +573,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				$block                     = strtr(
 					$block_template,
 					[
-						'post_ids' => $new_post_ids_concatenated,
+						'{post_ids}' => $new_post_ids_concatenated,
 					]
 				);
 
