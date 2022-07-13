@@ -520,7 +520,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 								'meta_value' => $new_template,
 							],
 							[
-								'meta_id' => $row->meta_Id,
+								'meta_id' => $row->meta_id,
 							]
 						);
 					}
@@ -732,7 +732,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			"showAvatar":false,
 			"postLayout":"grid",
 			"specificPosts":[{post_ids}],
-			"typeScale":1,
+			"typeScale":2,
+			"sectionHeader":"Related stories",
 			"specificMode":true
 		} /-->';
 
