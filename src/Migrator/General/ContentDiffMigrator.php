@@ -720,6 +720,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$live_posts_table = $this->live_table_prefix . 'posts';
 		$posts_table      = $wpdb->posts;
 
+		// phpcs:disable -- wpdb::prepare is used correctly.
 		$parent_id_new = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT wp.ID
@@ -734,6 +735,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$id_live
 			)
 		);
+		// phpcs:enable
 
 		return $parent_id_new;
 	}
