@@ -203,22 +203,143 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				continue;
 			}
 
-			// Get WP Author user.
+			WP_CLI::log( "  Author: $meta_opinionator_author" );
+
+			$exploded = explode( ',', $meta_opinionator_author );
+
+			$leaders = [
+				'and ',
+				'by ',
+			];
+
+			$full_names_to_process = [];
+			while ( $particle = array_shift( $exploded ) ) {
+				$particle = trim( $particle );
+
+				$obliterated = explode( ' and ', $particle );
+				if ( count( $obliterated ) > 1 ) {
+					$particle = array_shift( $obliterated );
+					$exploded = array_merge( $exploded, $obliterated );
+				}
+
+				foreach ( $leaders as $leader ) {
+					if ( str_starts_with( $particle, $leader ) ) {
+						$particle = substr( $particle, strlen( $leader ) );
+						$particle = trim( $particle );
+					}
+
+					if ( str_ends_with( $particle, '.' ) ) {
+						$particle = substr( $particle, -1 );
+					}
+				}
+
+				$particle = preg_replace( '/\s\s+/', ' ', $particle );
+
+				if ( ! empty( $particle ) ) {
+					$full_names_to_process[] = $particle;
+				}
+			}
+
+			foreach ( $full_names_to_process as $key => $full_name ) {
+				WP_CLI::log( "    full_name: $full_name" );
+				$exploded_name = explode( ' ', $full_name );
+				$last_name     = array_pop( $exploded_name );
+				$first_name    = implode( ' ', $exploded_name );
+
+				if ( ! empty( $first_name ) && ! empty( $last_name ) ) {
+					$user = $wpdb->get_row(
+						$wpdb->prepare(
+							"SELECT 
+	                            sub.user_id
+							FROM (
+				                  SELECT 
+				                        GROUP_CONCAT(DISTINCT user_id) as user_id, 
+				                         COUNT(umeta_id) as counter
+				                  FROM $wpdb->usermeta
+				                  WHERE (meta_key = 'first_name' AND meta_value = '%s')
+				                     OR (meta_key = 'last_name' AND meta_value = '%s')
+				                  GROUP BY user_id
+				                  HAVING counter = 2
+						) as sub WHERE LOCATE( sub.user_id, ',' ) = 0",
+							$first_name,
+							$last_name
+						)
+					);
+
+					if ( ! is_null( $user ) ) {
+						WP_CLI::log( '      USER EXISTS!' );
+						$user_description = $wpdb->get_row(
+							"SELECT 
+       						umeta_id, 
+       						meta_value 
+						FROM $wpdb->usermeta 
+						WHERE user_id = $user->user_id 
+						  AND meta_key = 'description' 
+						  AND meta_value = ''"
+						);
+
+						if ( is_null( $user_description ) ) {
+							$wpdb->insert(
+								$wpdb->usermeta,
+								[
+									'user_id'    => $user->user_id,
+									'meta_key'   => 'description',
+									'meta_value' => $meta_opinionator_author_bio
+								]
+							);
+						} else {
+							$wpdb->update(
+								$wpdb->usermeta,
+								[
+									'meta_value' => $meta_opinionator_author_bio,
+								],
+								[
+									'umeta_id' => $user_description->umeta_id,
+								]
+							);
+						}
+					} else {
+						WP_CLI::log( '      CREATING GUEST AUTHOR.' );
+						// Get/Create GA.
+						$ga_id = $this->cap_logic->create_guest_author(
+							[
+								'display_name' => $full_name,
+								'description'  => $meta_opinionator_author_bio,
+								'first_name'   => $first_name,
+								'last_name'    => $last_name,
+							]
+						);
+
+						// Assign GA.
+						$append = 0 !== $key;
+						$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID, $append );
+					}
+				}
+			}
+
+			/*// Get WP Author user.
 			$user = get_user_by( 'id', $post->post_author );
 
+			$guest_author_data = [
+				'display_name' => $meta_opinionator_author,
+				'description'  => $meta_opinionator_author_bio,
+			];
+
+
+			$user_avatar = get_user_meta( $user->ID, 'simple_local_avatar', true );
+
+			if ( ! empty( $user_avatar ) ) {
+				$guest_author_data['avatar'] = $user_avatar['media_id'];
+			}
+
 			// Get/Create GA.
-			$ga_id = $this->cap_logic->create_guest_author(
-				[
-					'display_name' => $meta_opinionator_author,
-					'description'  => $meta_opinionator_author_bio,
-				]
-			);
+			$ga_id = $this->cap_logic->create_guest_author( $guest_author_data );
 
 			// Link WP User and GA.
 			$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $user );
 
 			// Assign GA.
-			$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID );
+			$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post->ID );*/
 		}
 
 		WP_CLI::log( 'Done.' );

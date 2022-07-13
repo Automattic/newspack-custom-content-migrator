@@ -119,14 +119,15 @@ class CoAuthorPlus {
 	 *
 	 * @param array $guest_author_ids Guest Author IDs.
 	 * @param int   $post_id          Post IDs.
+	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
 	 */
-	public function assign_guest_authors_to_post( array $guest_author_ids, $post_id ) {
+	public function assign_guest_authors_to_post( array $guest_author_ids, $post_id, bool $append_to_existing_users = false ) {
 		$coauthors = [];
 		foreach ( $guest_author_ids as $guest_author_id ) {
 			$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
 			$coauthors[]  = $guest_author->user_nicename;
 		}
-		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users = false );
+		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users );
 	}
 
 	/**
