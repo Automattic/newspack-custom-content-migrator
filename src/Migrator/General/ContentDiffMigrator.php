@@ -527,6 +527,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function update_featured_image_ids( $imported_posts_data ) {
 
 		/**
+		 * Helper map of imported Posts and Pages.
+		 *
+		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
+		 */
+		$imported_post_ids_map    = [];
+		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
+		foreach ( $imported_posts_data_post as $entry ) {
+			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
+		}
+
+		/**
 		 * Helper map of imported Attachments.
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
@@ -557,7 +568,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
 			echo "\n" . sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) );
 		}
-		self::$logic->update_featured_images( $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
+		self::$logic->update_featured_images( $imported_post_ids_map, $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
 
 	/**
@@ -709,6 +720,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$live_posts_table = $this->live_table_prefix . 'posts';
 		$posts_table      = $wpdb->posts;
 
+		// phpcs:disable -- wpdb::prepare is used correctly.
 		$parent_id_new = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT wp.ID
@@ -723,6 +735,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$id_live
 			)
 		);
+		// phpcs:enable
 
 		return $parent_id_new;
 	}
