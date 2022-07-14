@@ -230,7 +230,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$this->recreate_categories();
 		echo "\nDone!\n";
 
-		echo sprintf( 'Importing %d post objects, hold tight..', count( $all_live_posts_ids ) );
+		echo sprintf( 'Importing %d objects, hold tight..', count( $all_live_posts_ids ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids );
 		echo "\nDone!\n";
 
