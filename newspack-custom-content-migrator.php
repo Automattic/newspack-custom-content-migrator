@@ -59,6 +59,9 @@ PluginSetup::register_migrators(
 
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
+		Migrator\PublisherSpecific\NoozhawkMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
 		Migrator\PublisherSpecific\RenoMigrator::class,
@@ -70,5 +73,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\CalMattersMigrator::class,
 		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
 		Migrator\PublisherSpecific\NewsroomCoNzMigrator::class,
+		Migrator\PublisherSpecific\MassterlistMigrator::class,
 	)
 );
