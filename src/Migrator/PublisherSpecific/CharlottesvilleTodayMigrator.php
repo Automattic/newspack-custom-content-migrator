@@ -126,6 +126,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 		// Loop through all posts, and get image blocks.
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+// $post_ids = [ 49728 ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$post = get_post( $post_id );
@@ -175,18 +176,21 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				$figcaption_text_cleaned = $figcaption_text;
 				//      - if figcaption ends with Credit, remove it
 				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, $img_credit );
-				//       - remove the trailing double dot -- replace ".. Credit:" > ". Credit:" -- if this one is performed after
-				//         the Credit trimming, it shouldn't even occur. Still, here just in case.
-				$figcaption_text_cleaned = str_replace( ".. Credit:", ". Credit:", $figcaption_text_cleaned );
+				//       - remove the trailing "Credit:".
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, 'Credit:' );
+				//       - more cleanup.
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+				$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
 
 				// Continue updating the whole img block and post_content.
 				if ( $figcaption_text_cleaned != $figcaption_text ) {
 					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
 					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, 'Credit:' );
 					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+					$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
 
 					// Update image block's figcaption.
-					$img_block_updated = $img_block;
 					$img_block_updated = str_replace(
 						sprintf( "<figcaption>%s</figcaption>", $figcaption_text ),
 						sprintf( "<figcaption>%s</figcaption>", $figcaption_text_cleaned ),
@@ -217,6 +221,20 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		wp_cache_flush();
 
 		WP_CLI::log( 'Done.' );
+	}
+
+	public function replace_double_dot_from_end_of_string_w_single_dot( $string ) {
+		$string_trimmed = $string;
+
+		// If ends with "..", but not with "...", replace ending ".." w/ ".".
+		if (
+			( 0 === strpos( strrev( $string ), '..' ) )
+			&& ( 0 !== strpos( strrev( $string ), '...' ) )
+		) {
+			$string_trimmed = substr( $string, 0, strlen( $string ) - 1 );
+		}
+
+		return $string_trimmed;
 	}
 
 	/**
