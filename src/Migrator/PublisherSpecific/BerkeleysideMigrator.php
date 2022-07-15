@@ -212,6 +212,15 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 				'by ',
 			];
 
+			$bio_html = '<div class="opinion-bio">' . $meta_opinionator_author_bio . '</div>';
+			$wpdb->query(
+				$wpdb->prepare(
+					"UPDATE $wpdb->posts SET post_content = CONCAT(post_content, '<br>', %s) WHERE ID = %d",
+					$bio_html,
+					$post->ID
+				)
+			);
+
 			$full_names_to_process = [];
 			while ( $particle = array_shift( $exploded ) ) {
 				$particle = trim( $particle );
@@ -278,7 +287,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 						  AND meta_value = ''"
 						);
 
-						if ( is_null( $user_description ) ) {
+						/*if ( is_null( $user_description ) ) {
 							$wpdb->insert(
 								$wpdb->usermeta,
 								[
@@ -297,14 +306,13 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 									'umeta_id' => $user_description->umeta_id,
 								]
 							);
-						}
+						}*/
 					} else {
 						WP_CLI::log( '      CREATING GUEST AUTHOR.' );
 						// Get/Create GA.
 						$ga_id = $this->cap_logic->create_guest_author(
 							[
 								'display_name' => $full_name,
-								'description'  => $meta_opinionator_author_bio,
 								'first_name'   => $first_name,
 								'last_name'    => $last_name,
 							]
