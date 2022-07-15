@@ -112,6 +112,21 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		);
 	}
 
+	public function replace_string_ending( $string, $ending_current, $ending_new ) {
+		// Confirm string ending.
+		if ( 0 !== strpos( strrev( $string ), strrev( $ending_current ) ) ) {
+			return $string;
+		}
+
+		// Remove current ending.
+		$string_trimmed = strrev( substr( strrev( $string ), strlen( $ending_current ) ) );
+
+		// Append new ending.
+		$string_trimmed .= $ending_new;
+
+		return $string_trimmed;
+	}
+
 	public function cmd_fix_image_captions( $args, $assoc_args ) {
 		global $wpdb;
 
@@ -126,7 +141,6 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 		// Loop through all posts, and get image blocks.
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
-// $post_ids = [ 73439 ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$post = get_post( $post_id );
@@ -174,6 +188,8 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 				// Do several updates to the figcaption text.
 				$figcaption_text_cleaned = $figcaption_text;
+				//      - first straighten/normalize some faulty Credit typos.
+				$figcaption_text_cleaned = str_replace( '. . Credit:', '. Credit:', $figcaption_text_cleaned );
 				//      - if figcaption ends with Credit, remove it
 				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, $img_credit );
 				//       - remove the trailing "Credit:".
@@ -182,7 +198,12 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				//       - more cleanup.
 				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
 				$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
-				$figcaption_text_cleaned = str_replace( '. . Credit:', '. Credit:', $figcaption_text_cleaned );
+
+				// Clean up typo sentence endings.
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ', .', '.' );
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, '?.', '?' );
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
 
 				// Continue updating the whole img block and post_content.
 				if ( $figcaption_text_cleaned != $figcaption_text ) {
@@ -191,12 +212,21 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
 					$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
 
+					// Clean up typo sentence endings.
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ', .', '.' );
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, '?.', '?' );
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+
 					// Update image block's figcaption.
 					$img_block_updated = str_replace(
 						sprintf( "<figcaption>%s</figcaption>", $figcaption_text ),
 						sprintf( "<figcaption>%s</figcaption>", $figcaption_text_cleaned ),
 						$img_block
 					);
+
+					// Log just the figcaption changes.
+					$this->log( 'imgcap__figcaptions_replaced.txt', sprintf( "%d\n%s\n%s", $post_id, $figcaption_text, $figcaption_text_cleaned ) );
 
 					// Update post_content.
 					$post_content_updated = str_replace(
