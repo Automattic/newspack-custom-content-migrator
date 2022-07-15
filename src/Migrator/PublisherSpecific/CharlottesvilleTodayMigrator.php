@@ -126,7 +126,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 		// Loop through all posts, and get image blocks.
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
-// $post_ids = [ 49728 ];
+// $post_ids = [ 73439 ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$post = get_post( $post_id );
@@ -182,6 +182,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				//       - more cleanup.
 				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
 				$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
+				$figcaption_text_cleaned = str_replace( '. . Credit:', '. Credit:', $figcaption_text_cleaned );
 
 				// Continue updating the whole img block and post_content.
 				if ( $figcaption_text_cleaned != $figcaption_text ) {
@@ -203,6 +204,11 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 						$img_block_updated,
 						$post_content_updated
 					);
+
+					// And if this image has been cleaned up, make sure that its Credit field starts with literal "Credit:".
+					if ( 0 !== strpos( $img_credit, "Credit:" ) ) {
+						update_post_meta( $att_id, '_media_credit', "Credit: " . $img_credit );
+					}
 				}
 			}
 
