@@ -5,6 +5,8 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
@@ -46,11 +48,23 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 	private $coauthors_logic;
 
 	/**
+	 * @var WpBlockManipulator
+	 */
+	private $wpb_lock_manipulator;
+
+	/**
+	 * @var HtmlElementManipulator
+	 */
+	private $html_element_manipulator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->posts_logic = new PostsLogic();
 		$this->coauthors_logic = new CoAuthorPlusLogic();
+		$this->wpb_lock_manipulator = new WpBlockManipulator();
+		$this->html_element_manipulator = new HtmlElementManipulator();
 	}
 
 	/**
@@ -89,6 +103,120 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Run additionally after cmd_acf_migrate to use ACF authors field.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-fix-image-captions',
+			[ $this, 'cmd_fix_image_captions' ],
+			[
+				'shortdesc' => 'Remove stray double dots from image descriptions.',
+			]
+		);
+	}
+
+	public function cmd_fix_image_captions( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Credit field gets appended dynamically at the end of the image description. We need to remove it from image block's figcaption.
+		// e.g. https://charlottesville.test/wp-admin/post.php?post=81361&action=edit ; https://charlottesville.test/new-clothing-store-provides-positive-vibez-at-stonefield/
+		/**
+			<!-- wp:image {"id":81372,"sizeSlug":"large","linkDestination":"none"} -->
+			<figure class="wp-block-image size-large"><img src="https://charlottesville.test.com/new-clothing-store-provides-positive-vibez-at-stonefield/kulture-vibe-4/" alt="" class="wp-image-81372"/><figcaption>Ronnie Megginson checks in on renovations at his new Kulture Vibez location before the grand opening. Credit: Patty Medina</figcaption></figure>
+			<!-- /wp:image -->
+		 */
+		// Since the image's Credit field is "Credit: Patty Medina", which will be appended automatically, we need to remove it from the figcaption in image block.
+
+		// Loop through all posts, and get image blocks.
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			$post = get_post( $post_id );
+
+			// Get image blocks.
+			$matches = $this->wpb_lock_manipulator->match_wp_block( 'wp:image', $post->post_content );
+			if ( ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			// Loop through all img blocks and update their figcaption texts.
+			foreach ( $matches[0] as $match_img_block ) {
+				$img_block = $match_img_block[0];
+
+				// Get image attachment ID.
+				preg_match( '|wp:image\s{"id":(\d+),|', $img_block, $matches_att_id );
+				$att_id = $matches_att_id[1] ?? null;
+				if ( is_null( $att_id ) ) {
+					$this->log( 'imgcap__err_att_id_not_found.txt', sprintf( '%d imgblock %s', $post_id, $img_block ) );
+					continue;
+				}
+
+				// Get image attachment obj.
+				$attachment = get_post( $att_id );
+				if ( is_null( $attachment ) ) {
+					$this->log( 'imgcap__err_att_id_not_found_in_db.txt', sprintf( '%d %d %s', $post_id, $att_id, $img_block ) );
+					continue;
+				}
+
+				// Get image's Credit and Caption field.
+				$img_caption = $post->post_excerpt;
+				$img_credit = get_post_meta( $att_id, '_media_credit', true );
+
+				$matches_figcaption = $this->html_element_manipulator->match_elements_with_closing_tags( 'figcaption', $img_block );
+				$figcaption_element = $matches_figcaption[0][0][0] ?? null;
+				if ( is_null( $figcaption_element ) ) {
+					$this->log( 'imgcap__err_figcaption_not_found.txt', sprintf( '%d imgblock %s', $post_id, $img_block ) );
+					continue;
+				}
+
+				// Get figcaption text.
+				$figcaption_text = str_replace( [ '<figcaption>', '</figcaption>' ], [ '',''], $figcaption_element );
+
+				// Do several updates to the figcaption text.
+				$figcaption_text_cleaned = $figcaption_text;
+				//      - if figcaption ends with Credit, remove it
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, $img_credit );
+				//       - remove the trailing double dot -- replace ".. Credit:" > ". Credit:" -- if this one is performed after
+				//         the Credit trimming, it shouldn't even occur. Still, here just in case.
+				$figcaption_text_cleaned = str_replace( ".. Credit:", ". Credit:", $figcaption_text_cleaned );
+
+				// Continue updating the whole img block and post_content.
+				if ( $figcaption_text_cleaned != $figcaption_text ) {
+					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, 'Credit:' );
+					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+
+					// Update image block's figcaption.
+					$img_block_updated = $img_block;
+					$img_block_updated = str_replace(
+						sprintf( "<figcaption>%s</figcaption>", $figcaption_text ),
+						sprintf( "<figcaption>%s</figcaption>", $figcaption_text_cleaned ),
+						$img_block
+					);
+
+					// Update post_content.
+					$post_content_updated = str_replace(
+						$img_block,
+						$img_block_updated,
+						$post_content_updated
+					);
+				}
+			}
+
+			// Save post.
+			if ( $post_content_updated != $post->post_content ) {
+				$this->log( 'imgcap__saved_post'. $post_id .'_01_before.txt', $post->post_content );
+				$this->log( 'imgcap__saved_post'. $post_id .'_02_after.txt', $post_content_updated );
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+			}
+		}
+
+		wp_cache_flush();
+
+		WP_CLI::log( 'Done.' );
 	}
 
 	/**
