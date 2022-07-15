@@ -30,8 +30,8 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 * @var int[] $template_mapping
 	 */
 	protected array $template_mapping = [
-		'page-templates/post_template-single-photo-lead.php' => 'single-wide.php',
-		'page-templates/post_template-single-wide.php'  => 'single-wide.php',
+		'page-templates/post_template-single-photo-lead.php' => 'single.php',
+		'page-templates/post_template-single-wide.php'  => 'single.php',
 		'page-templates/post_template-single-short.php' => 'default',
 	];
 
