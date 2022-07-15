@@ -24,23 +24,23 @@ class EnergeticCityMigrator implements InterfaceMigrator {
 	 */
 	private static $instance;
 
-    /**
-     * Log File Path.
-     *
-     * @var string $log_file_path
-     */
-    private string $log_file_path = '';
+	/**
+	 * Log File Path.
+	 *
+	 * @var string $log_file_path
+	 */
+	private string $log_file_path = '';
 
-    /**
-     * @var Attachments $attachments_logic
-     */
-    protected Attachments $attachments_logic;
+	/**
+	 * @var Attachments $attachments_logic
+	 */
+	protected Attachments $attachments_logic;
 
 	/**
 	 * Constructor.
 	 */
 	public function __construct() {
-        $this->attachments_logic = new Attachments();
+		$this->attachments_logic = new Attachments();
 	}
 
 	/**
@@ -86,22 +86,22 @@ class EnergeticCityMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
-        WP_CLI::add_command(
-            'newspack-content-migrator energetic-city-reimport-authors',
-            [ $this, 'cmd_reimport_authors' ],
-            [
-                'shortdesc' => 'This script will handle a custom XML the pub provided to attempt to reimport content with Authors properly created',
-                'synopsis'  => []
-            ]
-        );
-        WP_CLI::add_command(
-            'newspack-content-migrator energetic-city-handle-extra-xml-export',
-            [ $this, 'cmd_handle_extra_xml_export' ],
-            [
-                'shortdesc' => 'This script will handle another XML import that was given to us by the pub.',
-                'synopsis'  => [],
-            ]
-        );
+		WP_CLI::add_command(
+			'newspack-content-migrator energetic-city-reimport-authors',
+			[ $this, 'cmd_reimport_authors' ],
+			[
+				'shortdesc' => 'This script will handle a custom XML the pub provided to attempt to reimport content with Authors properly created',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator energetic-city-handle-extra-xml-export',
+			[ $this, 'cmd_handle_extra_xml_export' ],
+			[
+				'shortdesc' => 'This script will handle another XML import that was given to us by the pub.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -251,57 +251,56 @@ class EnergeticCityMigrator implements InterfaceMigrator {
 		}
 	}
 
-    public function cmd_reimport_authors()
-    {
-        $xml_path = get_home_path() . 'Posts-Export-2014-2020_fixed.formatted.xml';
-        $xml = new \DOMDocument();
-        $xml->loadXML( file_get_contents( $xml_path ) );
+	public function cmd_reimport_authors() {
+		$xml_path = get_home_path() . 'Posts-Export-2014-2020_fixed.formatted.xml';
+		$xml      = new \DOMDocument();
+		$xml->loadXML( file_get_contents( $xml_path ) );
 
-        $posts = $xml->getElementsByTagName('post');
+		$posts = $xml->getElementsByTagName( 'post' );
 
-        foreach ($posts as $post) {
-            $title = $content = $excerpt = $date = $post_type = $guid = $author_email = $modified_date = '';
-            /* @var DOMNode $post */
-            foreach ($post->childNodes as $childNode) {
-                switch ($childNode->nodeName) {
-                    case 'Title':
-                        $title = $childNode->nodeValue;
-                        break;
-                    case 'Content':
-                        $content = $childNode->nodeValue;
-                        break;
-                    case 'Excerpt':
-                        $excerpt = $childNode->nodeValue;
-                        break;
-                    case 'Date':
-                        $date = date_create_from_format( 'Y-m-d H:i:s', $childNode->nodeValue );
-                        break;
-                    case 'PostType':
-                        $post_type = $childNode->nodeValue;
-                        break;
-                    case 'Permalink':
-                        $guid = $childNode->nodeValue;
-                        break;
-                    case 'AuthorEmail':
-                        $author_email = $childNode->nodeValue;
-                        break;
-                    case 'PostModifiedDate':
-                        $modified_date = date_create_from_format( 'Y-m-d H:i:s', $childNode->nodeValue );
-                        break;
-                }
-            }
+		foreach ( $posts as $post ) {
+			$title = $content = $excerpt = $date = $post_type = $guid = $author_email = $modified_date = '';
+			/* @var DOMNode $post */
+			foreach ( $post->childNodes as $childNode ) {
+				switch ( $childNode->nodeName ) {
+					case 'Title':
+						$title = $childNode->nodeValue;
+						break;
+					case 'Content':
+						$content = $childNode->nodeValue;
+						break;
+					case 'Excerpt':
+						$excerpt = $childNode->nodeValue;
+						break;
+					case 'Date':
+						$date = date_create_from_format( 'Y-m-d H:i:s', $childNode->nodeValue );
+						break;
+					case 'PostType':
+						$post_type = $childNode->nodeValue;
+						break;
+					case 'Permalink':
+						$guid = $childNode->nodeValue;
+						break;
+					case 'AuthorEmail':
+						$author_email = $childNode->nodeValue;
+						break;
+					case 'PostModifiedDate':
+						$modified_date = date_create_from_format( 'Y-m-d H:i:s', $childNode->nodeValue );
+						break;
+				}
+			}
 
-            $url_path = parse_url( $guid, PHP_URL_PATH );
-            $exploded = array_filter( explode( '/', $url_path ) );
-            $last_path = array_pop( $exploded );
+			$url_path  = parse_url( $guid, PHP_URL_PATH );
+			$exploded  = array_filter( explode( '/', $url_path ) );
+			$last_path = array_pop( $exploded );
 
-            $this->log( "$title\t$last_path\t$author_email" );
+			$this->log( "$title\t$last_path\t$author_email" );
 
-            $formatted_date = $date->format( 'Y-m-d H:i:s' );
-            global $wpdb;
+			$formatted_date = $date->format( 'Y-m-d H:i:s' );
+			global $wpdb;
 
-            $db_post = $wpdb->get_row(
-                "SELECT 
+			$db_post = $wpdb->get_row(
+				"SELECT 
                     p.ID as post_id,
                     u.*
                 FROM $wpdb->posts p
@@ -310,11 +309,11 @@ class EnergeticCityMigrator implements InterfaceMigrator {
                   AND post_date = '$formatted_date' 
                   AND post_type = '$post_type'
                   AND post_status = 'publish'"
-            );
+			);
 
-            if ( is_null( $db_post ) ) {
-                $db_post = $wpdb->get_row(
-                    "SELECT 
+			if ( is_null( $db_post ) ) {
+				$db_post = $wpdb->get_row(
+					"SELECT 
                     p.ID as post_id,
                     u.*
                 FROM $wpdb->posts p
@@ -323,101 +322,100 @@ class EnergeticCityMigrator implements InterfaceMigrator {
                   AND post_date = '$formatted_date' 
                   AND post_type = '$post_type'
                   AND post_status = 'publish'"
-                );
-            }
+				);
+			}
 
-            $found_post = ! is_null( $db_post ) ? 'YES' : 'NO';
-            $this->log( "FOUND POST? $found_post" );
-            if ( is_null( $db_post ) ) {
+			$found_post = ! is_null( $db_post ) ? 'YES' : 'NO';
+			$this->log( "FOUND POST? $found_post" );
+			if ( is_null( $db_post ) ) {
 
-                $user_id = $this->get_or_create_user_id( $author_email );
+				$user_id = $this->get_or_create_user_id( $author_email );
 
-                $post_data = [
-                    'post_author' => $user_id,
-                    'post_date' => $formatted_date,
-                    'post_date_gmt' => $formatted_date,
-                    'post_content' => $content,
-                    'post_title' => $title,
-                    'post_excerpt' => $excerpt,
-                    'post_status' => 'publish',
-                    'post_type' => $post_type,
-                    'comment_status' => 'closed',
-                    'ping_status' => 'closed',
-                    'post_name' => $last_path,
-                    'post_modified' => $modified_date->format( 'Y-m-d H:i:s' ),
-                    'guid' => $guid,
-                ];
+				$post_data = [
+					'post_author'    => $user_id,
+					'post_date'      => $formatted_date,
+					'post_date_gmt'  => $formatted_date,
+					'post_content'   => $content,
+					'post_title'     => $title,
+					'post_excerpt'   => $excerpt,
+					'post_status'    => 'publish',
+					'post_type'      => $post_type,
+					'comment_status' => 'closed',
+					'ping_status'    => 'closed',
+					'post_name'      => $last_path,
+					'post_modified'  => $modified_date->format( 'Y-m-d H:i:s' ),
+					'guid'           => $guid,
+				];
 
-                $result = wp_insert_post( $post_data );
+				$result = wp_insert_post( $post_data );
 
-                if ( 0 === $result ) {
-                    $this->log( 'UNABLE TO CREATE POST' );
-                } else if ( $result instanceof WP_Error ) {
-                    $this->log( 'UNABLE TO CREATE POST:' . $result->get_error_message() );
-                } else {
-                    $this->log( "POST CREATED: $result" );
-                }
-            } else {
-                $authors_match = $author_email === $db_post->user_email ? 'YES' : 'NO';
+				if ( 0 === $result ) {
+					$this->log( 'UNABLE TO CREATE POST' );
+				} elseif ( $result instanceof WP_Error ) {
+					$this->log( 'UNABLE TO CREATE POST:' . $result->get_error_message() );
+				} else {
+					$this->log( "POST CREATED: $result" );
+				}
+			} else {
+				$authors_match = $author_email === $db_post->user_email ? 'YES' : 'NO';
 
-                $this->log( "AUTHOR'S MATCH?: $authors_match\t$author_email\t$db_post->user_email" );
+				$this->log( "AUTHOR'S MATCH?: $authors_match\t$author_email\t$db_post->user_email" );
 
-                if ( ! $author_email !== $db_post->user_email ) {
-                    $user_id = $this->get_or_create_user_id( $author_email );
+				if ( ! $author_email !== $db_post->user_email ) {
+					$user_id = $this->get_or_create_user_id( $author_email );
 
-                    $wpdb->update(
-                        $wpdb->posts,
-                        [
-                            'post_author' => $user_id,
-                        ],
-                        [
-                            'ID' => $db_post->post_id,
-                        ]
-                    );
-                }
-            }
-        }
-    }
+					$wpdb->update(
+						$wpdb->posts,
+						[
+							'post_author' => $user_id,
+						],
+						[
+							'ID' => $db_post->post_id,
+						]
+					);
+				}
+			}
+		}
+	}
 
-    public function cmd_handle_extra_xml_export()
-    {
-        $xml_path = get_home_path() . 'energetic_city_export.xml';
-        $xml = new \DOMDocument();
-        $xml->loadXML( file_get_contents( $xml_path ) );
+	public function cmd_handle_extra_xml_export() {
+		$xml_path = get_home_path() . 'energetic_city_export.xml';
+		$xml      = new \DOMDocument();
+		$xml->loadXML( file_get_contents( $xml_path ) );
 
-        $rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
 
-        /* @var DOMNodeList $channel_children */
-        $channel_children = $rss->childNodes->item( 1 )->childNodes;
+		/* @var DOMNodeList $channel_children */
+		$channel_children = $rss->childNodes->item( 1 )->childNodes;
 
-        $posts = [];
-        $authors = [];
-        foreach ( $channel_children as $child ) {
-            /* @var DOMNode $child */
-            if ( 'wp:author' === $child->nodeName ) {
-                try {
-                    $author = $this->handle_xml_author($child);
-                    $authors[ $author->user_login ] = $author;
-                } catch ( Exception $e ) {
-                    // Continue.
-                }
-            } else if ( 'item' === $child->nodeName ) {
-                $posts[] = $this->handle_xml_item( $child, $authors );
-            }
-        }
+		$posts   = [];
+		$authors = [];
+		foreach ( $channel_children as $child ) {
+			/* @var DOMNode $child */
+			if ( 'wp:author' === $child->nodeName ) {
+				try {
+					$author                         = $this->handle_xml_author( $child );
+					$authors[ $author->user_login ] = $author;
+				} catch ( Exception $e ) {
+					// Continue.
+				}
+			} elseif ( 'item' === $child->nodeName ) {
+				$posts[] = $this->handle_xml_item( $child, $authors );
+			}
+		}
 
-        global $wpdb;
-        foreach ( $posts as $post ) {
-            $categories = $post['categories'];
-            /* @var WP_USER $author */
-            $author = $post['author'];
-            $post = $post['post'];
+		global $wpdb;
+		foreach ( $posts as $post ) {
+			$categories = $post['categories'];
+			/* @var WP_USER $author */
+			$author = $post['author'];
+			$post   = $post['post'];
 
-            $date = date_create_from_format( 'Y-m-d H:i:s', $post['post_date'] );
-            $date_string = $date->format( 'Y-m-d' );
-            $hour_string = $date->format( 'H' );
-            $result = $wpdb->get_row(
-                "SELECT 
+			$date        = date_create_from_format( 'Y-m-d H:i:s', $post['post_date'] );
+			$date_string = $date->format( 'Y-m-d' );
+			$hour_string = $date->format( 'H' );
+			$result      = $wpdb->get_row(
+				"SELECT 
                     p.ID as post_id,
                     u.ID as author_id,
                     u.user_email
@@ -427,256 +425,266 @@ class EnergeticCityMigrator implements InterfaceMigrator {
                   AND post_type = 'post' 
                   AND DATE(post_date) = '$date_string'
                   AND HOUR(post_date) = '$hour_string'"
-            );
+			);
 
-            if ( is_null( $result ) ) {
-                WP_CLI::line( "CREATING: {$post['post_name']}\t{$post['post_date']}" );
-                $post_id = wp_insert_post($post);
+			if ( is_null( $result ) ) {
+				WP_CLI::line( "CREATING: {$post['post_name']}\t{$post['post_date']}" );
+				$post_id = wp_insert_post( $post );
 
-                foreach ($categories as &$category) {
-                    $exists = category_exists($category['cat_name']);
+				foreach ( $categories as &$category ) {
+					$exists = category_exists( $category['cat_name'] );
 
-                    if (is_null($exists)) {
-                        $result = wp_insert_category($category);
+					if ( is_null( $exists ) ) {
+						$result = wp_insert_category( $category );
 
-                        if (is_int($result) && $result > 0) {
-                            $category = $result;
-                        }
-                    } else {
-                        $category = (int)$exists;
-                    }
-                }
+						if ( is_int( $result ) && $result > 0 ) {
+							$category = $result;
+						}
+					} else {
+						$category = (int) $exists;
+					}
+				}
 
-                wp_set_post_categories($post_id, $categories);
-            } else {
-                WP_CLI::line( "POST ALREADY EXISTS: {$post['post_name']}\t{$post['post_date']}" );
-                WP_CLI::line( "POST AUTHOR: $result->user_email" );
-                if ( ! is_null( $author ) ) {
-                    WP_CLI::line( "INTENDED AUTHOR: $author->user_email" );
-                }
-                if ( ! is_null( $author ) && $result->user_email != $author->user_email ) {
-                    $update = wp_update_post(
-                        [
-                            'ID'          => $result->post_id,
-                            'post_author' => $author->ID,
-                        ]
-                    );
+				wp_set_post_categories( $post_id, $categories );
+			} else {
+				WP_CLI::line( "POST ALREADY EXISTS: {$post['post_name']}\t{$post['post_date']}" );
+				WP_CLI::line( "POST AUTHOR: $result->user_email" );
+				if ( ! is_null( $author ) ) {
+					WP_CLI::line( "INTENDED AUTHOR: $author->user_email" );
+				}
+				if ( ! is_null( $author ) && $result->user_email != $author->user_email ) {
+					$update = wp_update_post(
+						[
+							'ID'          => $result->post_id,
+							'post_author' => $author->ID,
+						]
+					);
 
-                    if ( ! ( $update instanceof WP_Error ) ) {
-                        WP_CLI::line( 'UPDATED' );
-                    }
-                }
-            }
-        }
-    }
+					if ( ! ( $update instanceof WP_Error ) ) {
+						WP_CLI::line( 'UPDATED' );
+					}
+				}
+			}
+		}
+	}
 
-    /**
-     * @param DOMNode $author
-     *
-     * @return false|WP_User
-     * @throws Exception
-     */
-    private function handle_xml_author(DOMNode $author ) {
-        $author_data = [
-            'user_login'   => '',
-            'user_email'   => '',
-            'display_name' => '',
-            'first_name'   => '',
-            'last_name'    => '',
-            'role'         => 'author',
-            'user_pass'    => wp_generate_password( 24 ),
-        ];
+	/**
+	 * @param DOMNode $author
+	 *
+	 * @return false|WP_User
+	 * @throws Exception
+	 */
+	private function handle_xml_author( DOMNode $author ) {
+		$author_data = [
+			'user_login'   => '',
+			'user_email'   => '',
+			'display_name' => '',
+			'first_name'   => '',
+			'last_name'    => '',
+			'role'         => 'author',
+			'user_pass'    => wp_generate_password( 24 ),
+		];
 
-        foreach ( $author->childNodes as $node ) {
-            /* @var DOMNode $node */
-            $nodeName = $node->nodeName;
+		foreach ( $author->childNodes as $node ) {
+			/* @var DOMNode $node */
+			$nodeName = $node->nodeName;
 
-            switch ( $nodeName ) {
-                case 'wp:author_login':
-                    $author_data['user_login'] = $node->nodeValue;
-                    break;
-                case 'wp:author_email':
-                    if ( str_contains( $node->nodeValue, 'socastdigital.com' ) ) {
-                        throw new Exception( 'Avoiding socast emails' );
-                    }
-                    $author_data['user_email'] = $node->nodeValue;
-                    break;
-                case 'wp:author_display_name':
-                    $author_data['display_name'] = $node->nodeValue;
-                    break;
-                case 'wp:author_first_name':
-                    $author_data['first_name'] = $node->nodeValue;
-                    break;
-                case 'wp:author_last_name':
-                    $author_data['last_name'] = $node->nodeValue;
-                    break;
-            }
-        }
+			switch ( $nodeName ) {
+				case 'wp:author_login':
+					$author_data['user_login'] = $node->nodeValue;
+					break;
+				case 'wp:author_email':
+					if ( str_contains( $node->nodeValue, 'socastdigital.com' ) ) {
+						throw new Exception( 'Avoiding socast emails' );
+					}
+					$author_data['user_email'] = $node->nodeValue;
+					break;
+				case 'wp:author_display_name':
+					$author_data['display_name'] = $node->nodeValue;
+					break;
+				case 'wp:author_first_name':
+					$author_data['first_name'] = $node->nodeValue;
+					break;
+				case 'wp:author_last_name':
+					$author_data['last_name'] = $node->nodeValue;
+					break;
+			}
+		}
 
-        $user = get_user_by( 'login', $author_data['user_login'] );
+		$user = get_user_by( 'login', $author_data['user_login'] );
 
-        if ( false === $user ) {
-            $user_id = wp_insert_user( $author_data );
+		if ( false === $user ) {
+			$user_id = wp_insert_user( $author_data );
 
-            if ( $user_id instanceof WP_Error ) {
-                throw new Exception( 'Could not create user' );
-            }
+			if ( $user_id instanceof WP_Error ) {
+				throw new Exception( 'Could not create user' );
+			}
 
-            $user = get_user_by( 'id', $user_id );
-        }
+			$user = get_user_by( 'id', $user_id );
+		}
 
-        return $user;
-    }
+		return $user;
+	}
 
-    /**
-     * Handles XML <item>'s from provided file to import as Posts.
-     *
-     * @param DOMNode $item XML <item>.
-     * @param array $authors Recently imported authors.
-     *
-     * @return array
-     */
-    private function handle_xml_item( DOMNode $item, array $authors = [] ) {
-        $post                      = [
-            'post_type'     => 'post',
-            'meta_input'    => [],
-        ];
-        $categories = [];
-        $tags       = [];
-        $author     = null;
+	/**
+	 * Handles XML <item>'s from provided file to import as Posts.
+	 *
+	 * @param DOMNode $item XML <item>.
+	 * @param array   $authors Recently imported authors.
+	 *
+	 * @return array
+	 */
+	private function handle_xml_item( DOMNode $item, array $authors = [] ) {
+		$post       = [
+			'post_type'  => 'post',
+			'meta_input' => [],
+		];
+		$categories = [];
+		$tags       = [];
+		$author     = null;
 
-        foreach ( $item->childNodes as $child ) {
-            /* @var DOMNode $child */
-            if ( 'title' === $child->nodeName ) {
-                $post['post_title'] = $child->nodeValue;
-            }
+		foreach ( $item->childNodes as $child ) {
+			/* @var DOMNode $child */
+			if ( 'title' === $child->nodeName ) {
+				$post['post_title'] = $child->nodeValue;
+			}
 
-            if ( 'dc:creator' === $child->nodeName ) {
-                $post['post_author'] = $authors[ $child->nodeValue ]->ID ?? 0;
-                $author = $authors[ $child->nodeValue ] ?? null;
-            }
+			if ( 'dc:creator' === $child->nodeName ) {
+				$post['post_author'] = $authors[ $child->nodeValue ]->ID ?? 0;
+				$author              = $authors[ $child->nodeValue ] ?? null;
+			}
 
-            if ( 'guid' === $child->nodeName ) {
-                $post['guid'] = $child->nodeValue;
-            }
+			if ( 'guid' === $child->nodeName ) {
+				$post['guid'] = $child->nodeValue;
+			}
 
-            if ( 'content:encoded' === $child->nodeName ) {
-                $post['post_content'] = $child->nodeValue;
-            }
+			if ( 'content:encoded' === $child->nodeName ) {
+				$post['post_content'] = $child->nodeValue;
+			}
 
-            if ( 'excerpt:encoded' === $child->nodeName ) {
-                $post['post_excerpt'] = $child->nodeValue;
-            }
+			if ( 'excerpt:encoded' === $child->nodeName ) {
+				$post['post_excerpt'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_date' === $child->nodeName ) {
-                $post['post_date'] = $child->nodeValue;
-            }
+			if ( 'wp:post_date' === $child->nodeName ) {
+				$post['post_date'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_date_gmt' === $child->nodeName ) {
-                $post['post_date_gmt'] = $child->nodeValue;
-            }
+			if ( 'wp:post_date_gmt' === $child->nodeName ) {
+				$post['post_date_gmt'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_modified' === $child->nodeName ) {
-                $post['post_modified'] = $child->nodeValue;
-            }
+			if ( 'wp:post_modified' === $child->nodeName ) {
+				$post['post_modified'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_modified_gmt' === $child->nodeName ) {
-                $post['post_modified_gmt'] = $child->nodeValue;
-            }
+			if ( 'wp:post_modified_gmt' === $child->nodeName ) {
+				$post['post_modified_gmt'] = $child->nodeValue;
+			}
 
-            if ( 'wp:comment_status' === $child->nodeName ) {
-                $post['comment_status'] = $child->nodeValue;
-            }
+			if ( 'wp:comment_status' === $child->nodeName ) {
+				$post['comment_status'] = $child->nodeValue;
+			}
 
-            if ( 'wp:ping_status' === $child->nodeName ) {
-                $post['ping_status'] = $child->nodeValue;
-            }
+			if ( 'wp:ping_status' === $child->nodeName ) {
+				$post['ping_status'] = $child->nodeValue;
+			}
 
-            if ( 'wp:status' === $child->nodeName ) {
-                $post['post_status'] = $child->nodeValue;
-            }
+			if ( 'wp:status' === $child->nodeName ) {
+				$post['post_status'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_name' === $child->nodeName ) {
-                $post['post_name'] = $child->nodeValue;
-            }
+			if ( 'wp:post_name' === $child->nodeName ) {
+				$post['post_name'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_parent' === $child->nodeName ) {
-                $post['post_parent'] = $child->nodeValue;
-            }
+			if ( 'wp:post_parent' === $child->nodeName ) {
+				$post['post_parent'] = $child->nodeValue;
+			}
 
-            if ( 'wp:menu_order' === $child->nodeName ) {
-                $post['menu_order'] = $child->nodeValue;
-            }
+			if ( 'wp:menu_order' === $child->nodeName ) {
+				$post['menu_order'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_type' === $child->nodeName ) {
-                $post['post_type'] = $child->nodeValue;
-            }
+			if ( 'wp:post_type' === $child->nodeName ) {
+				$post['post_type'] = $child->nodeValue;
+			}
 
-            if ( 'wp:post_password' === $child->nodeName ) {
-                $post['post_password'] = $child->nodeValue;
-            }
+			if ( 'wp:post_password' === $child->nodeName ) {
+				$post['post_password'] = $child->nodeValue;
+			}
 
-            if ( 'wp:postmeta' === $child->nodeName ) {
-                $meta_key   = $child->childNodes->item( 1 )->nodeValue;
-                $meta_value = trim( $child->childNodes->item( 3 )->nodeValue );
+			if ( 'wp:postmeta' === $child->nodeName ) {
+				$meta_key   = $child->childNodes->item( 1 )->nodeValue;
+				$meta_value = trim( $child->childNodes->item( 3 )->nodeValue );
 
-                if ( empty( $meta_value ) || str_starts_with( $meta_value, 'field_' ) ) {
-                    continue;
-                }
+				if ( empty( $meta_value ) || str_starts_with( $meta_value, 'field_' ) ) {
+					continue;
+				}
 
-                switch ( $meta_key ) {
-                    case '_thumbnail_url';
-                        $attachment_id = $this->attachments_logic->import_external_file( $meta_value );
+				switch ( $meta_key ) {
+					case '_thumbnail_url':
+						$attachment_id = $this->attachments_logic->import_external_file( $meta_value );
 
-                        if ( is_int( $attachment_id ) ) {
-                            $post['meta_input']['_thumbnail_id'] = $attachment_id;
-                        }
-                        break;
-                }
-            }
+						if ( is_int( $attachment_id ) ) {
+							$post['meta_input']['_thumbnail_id'] = $attachment_id;
+						}
+						break;
+				}
+			}
 
-            if ( 'category' === $child->nodeName ) {
-                $categories[] = [
-                    'cat_name'          => htmlspecialchars_decode( $child->nodeValue ),
-                    'category_nicename' => $child->attributes->getNamedItem( 'nicename' )->nodeValue,
-                ];
-            }
-        }
+			if ( 'category' === $child->nodeName ) {
+				$categories[] = [
+					'cat_name'          => htmlspecialchars_decode( $child->nodeValue ),
+					'category_nicename' => $child->attributes->getNamedItem( 'nicename' )->nodeValue,
+				];
+			}
+		}
 
-        return [
-            'post'       => $post,
-            'author'     => $author,
-            'tags'       => $tags,
-            'categories' => $categories,
-        ];
-    }
+		return [
+			'post'       => $post,
+			'author'     => $author,
+			'tags'       => $tags,
+			'categories' => $categories,
+		];
+	}
 
-    private function log(string $message)
-    {
-        if ( empty( $this->log_file_path ) ) {
-            $timestamp = date( 'Ymd_His', time() );
-            $this->log_file_path = get_home_path() . "author_fix_$timestamp.log";
-            file_put_contents( $this->log_file_path, '' );
-        }
+	/**
+	 * Convenience function to help with logging.
+	 *
+	 * @param string $message Message to log.
+	 */
+	private function log( string $message ) {
+		if ( empty( $this->log_file_path ) ) {
+			$timestamp           = date( 'Ymd_His', time() );
+			$this->log_file_path = get_home_path() . "author_fix_$timestamp.log";
+			file_put_contents( $this->log_file_path, '' );
+		}
 
-        WP_CLI::log( $message );
-        file_put_contents( $this->log_file_path, "$message\n", FILE_APPEND );
-    }
+		WP_CLI::log( $message );
+		file_put_contents( $this->log_file_path, "$message\n", FILE_APPEND );
+	}
 
-    private function get_or_create_user_id( string $email )
-    {
-        $user = get_user_by( 'email', $email );
+	/**
+	 * Convenience function to search for user via email, and create if the user doesn't exist.
+	 *
+	 * @param string $email User email.
+	 *
+	 * @return int|WP_Error
+	 */
+	private function get_or_create_user_id( string $email ) {
+		$user = get_user_by( 'email', $email );
 
-        if ( $user instanceof WP_User) {
-            $this->log( "USER EXISTS: $user->ID" );
-            return $user->ID;
-        }
+		if ( $user instanceof WP_User ) {
+			$this->log( "USER EXISTS: $user->ID" );
+			return $user->ID;
+		}
 
-        $this->log( "CREATING USER: $email" );
-        return wp_create_user(
-            substr( $email, 0, strpos( $email, '@' ) ),
-            wp_generate_password( 32 ),
-            $email
-        );
-    }
+		$this->log( "CREATING USER: $email" );
+		return wp_create_user(
+			substr( $email, 0, strpos( $email, '@' ) ),
+			wp_generate_password( 32 ),
+			$email
+		);
+	}
 }
