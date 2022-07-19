@@ -681,10 +681,13 @@ class EnergeticCityMigrator implements InterfaceMigrator {
 		}
 
 		$this->log( "CREATING USER: $email" );
-		return wp_create_user(
-			substr( $email, 0, strpos( $email, '@' ) ),
-			wp_generate_password( 32 ),
-			$email
+		return wp_insert_user(
+			[
+				'user_nicename' => substr( $email, 0, strpos( $email, '@' ) ),
+				'user_pass'     => wp_generate_password( 32 ),
+				'user_email'    => $email,
+				'role'          => 'Author',
+			]
 		);
 	}
 }
