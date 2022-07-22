@@ -3,7 +3,8 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use WP_CLI;
 use XMLReader;
 use DOMDocument;
 
