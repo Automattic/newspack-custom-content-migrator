@@ -471,7 +471,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			$parent_id_old = $post->post_parent;
 			$parent_id_new = $imported_post_ids_map[ $post->post_parent ] ?? null;
-			$parent_id_new = is_null( $parent_id_new ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
+			$parent_id_new = is_null( $parent_id_new ) & array_key_exists( $post->post_parent, $imported_attachment_ids_map ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
 			// it won't be present in the list of the posts we imported, $all_live_posts_ids. So let's try and search for this
