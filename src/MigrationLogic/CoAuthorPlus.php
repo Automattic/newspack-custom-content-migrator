@@ -27,8 +27,8 @@ class CoAuthorPlus {
 
 		$plugin_path = defined( 'WP_PLUGIN_DIR' ) ? WP_PLUGIN_DIR : ABSPATH . 'wp-content/plugins';
 
-		$file_1 = $plugin_path . '/co-authors-plus/co-authors-plus.php';
-		$file_2 = $plugin_path . '/co-authors-plus/php/class-coauthors-guest-authors.php';
+		$file_1     = $plugin_path . '/co-authors-plus/co-authors-plus.php';
+		$file_2     = $plugin_path . '/co-authors-plus/php/class-coauthors-guest-authors.php';
 		$included_1 = is_file( $file_1 ) && include_once $file_1;
 		$included_2 = is_file( $file_2 ) && include_once $file_2;
 
@@ -95,16 +95,16 @@ class CoAuthorPlus {
 	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
 	 */
 	public function create_guest_author( array $args ) {
-		if ( ! isset( $args[ 'display_name' ] ) ) {
+		if ( ! isset( $args['display_name'] ) ) {
 			throw new \UnexpectedValueException( 'The `display_name` param is mandatory for Guest Author creation.' );
 		}
 
 		// If not provided, automatically set `user_login` from display_name.
-		if ( ! isset( $args[ 'user_login' ] ) ) {
-			$args[ 'user_login' ] = sanitize_title( $args[ 'display_name' ] );
+		if ( ! isset( $args['user_login'] ) ) {
+			$args['user_login'] = sanitize_title( $args['display_name'] );
 		}
 
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args[ 'user_login' ] );
+		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args['user_login'] );
 		if ( false === $guest_author ) {
 			$coauthor_id = $this->coauthors_guest_authors->create( $args );
 		} else {
@@ -132,7 +132,7 @@ class CoAuthorPlus {
 	/**
 	 * Links a Guest Author to an existing WP User.
 	 *
-	 * @param int $ga_id Guest Author ID.
+	 * @param int     $ga_id Guest Author ID.
 	 * @param \WPUser $user
 	 */
 	public function link_guest_author_to_wp_user( $ga_id, $user ) {
