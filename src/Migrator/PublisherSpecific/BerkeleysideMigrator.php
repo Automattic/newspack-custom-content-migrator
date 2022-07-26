@@ -155,6 +155,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-acf-authors-to-cap-2',
+			[ $this, 'cmd_process_extra_guest_authors' ],
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator berkeleyside-add-user-title-to-yoast',
 			[ $this, 'cmd_add_user_title_to_yoast' ],
 		);
@@ -351,6 +356,124 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::log( 'Done.' );
+	}
+
+	public function cmd_process_extra_guest_authors() {
+		global $wpdb;
+
+		$posts_with_guest_authors = $wpdb->get_results(
+			"SELECT
+				       sub.post_id,
+				       GROUP_CONCAT(sub.meta_value ORDER BY meta_key SEPARATOR '|' ) as guest_authors
+				FROM (
+				    SELECT 
+				           * 
+				    FROM $wpdb->postmeta 
+				    WHERE meta_key IN (
+                          'guest_contributors_0_guest_contributor_full_name',
+                          'guest_contributors_1_guest_contributor_full_name',
+                          'guest_contributors_2_guest_contributor_full_name'
+				    ) AND meta_value != '') as sub
+				LEFT JOIN $wpdb->posts p ON sub.post_id = p.ID
+				WHERE p.ID IS NOT NULL
+				GROUP BY sub.post_id"
+		);
+
+		foreach ( $posts_with_guest_authors as $row ) {
+			WP_CLI::log( 'POST ID: ' . $row->post_id );
+			$leaders = [
+				'and ',
+				'by ',
+			];
+
+			$exploded = explode( '|', $row->guest_authors );
+
+			$full_names_to_process = [];
+			while ( $particle = array_shift( $exploded ) ) {
+				$particle = trim( $particle );
+
+				$obliterated = explode( ' and ', $particle );
+				if ( count( $obliterated ) > 1 ) {
+					$particle = array_shift( $obliterated );
+					$exploded = array_merge( $exploded, $obliterated );
+				}
+
+				foreach ( $leaders as $leader ) {
+					if ( str_starts_with( $particle, $leader ) ) {
+						$particle = substr( $particle, strlen( $leader ) );
+						$particle = trim( $particle );
+					}
+
+					if ( str_ends_with( $particle, '.' ) ) {
+						$particle = substr( $particle, -1 );
+					}
+				}
+
+				$particle = preg_replace( '/\s\s+/', ' ', $particle );
+
+				if ( ! empty( $particle ) ) {
+					$full_names_to_process[] = $particle;
+				}
+			}
+
+			foreach ( $full_names_to_process as $key => $full_name ) {
+				WP_CLI::log( "    full_name: $full_name" );
+				$exploded_name = explode( ' ', $full_name );
+				$last_name     = array_pop( $exploded_name );
+				$first_name    = implode( ' ', $exploded_name );
+
+				if ( ! empty( $first_name ) && ! empty( $last_name ) ) {
+					$user = $wpdb->get_row(
+						$wpdb->prepare(
+							"SELECT 
+	                            sub.user_id
+							FROM (
+				                  SELECT 
+				                        GROUP_CONCAT(DISTINCT user_id) as user_id, 
+				                         COUNT(umeta_id) as counter
+				                  FROM $wpdb->usermeta
+				                  WHERE (meta_key = 'first_name' AND meta_value = '%s')
+				                     OR (meta_key = 'last_name' AND meta_value = '%s')
+				                  GROUP BY user_id
+				                  HAVING counter = 2
+						) as sub WHERE LOCATE( sub.user_id, ',' ) = 0",
+							$first_name,
+							$last_name
+						)
+					);
+
+					if ( ! is_null( $user ) ) {
+						WP_CLI::log( '      USER EXISTS!' );
+					} else {
+						WP_CLI::log( '      CREATING GUEST AUTHOR.' );
+						// Get/Create GA.
+						$ga_id = $this->cap_logic->create_guest_author(
+							[
+								'display_name' => $full_name,
+								'first_name'   => $first_name,
+								'last_name'    => $last_name,
+							]
+						);
+
+						// Assign GA.
+						$append = 0 !== $key;
+						$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $row->post_id, $append );
+					}
+				}
+			}
+
+			$wpdb->query(
+				"UPDATE 
+    				$wpdb->postmeta 
+				SET meta_key = CONCAT( '0.', meta_key) 
+				WHERE post_id = $row->post_id 
+				  AND meta_key IN (
+				        'guest_contributors_0_guest_contributor_full_name',
+				        'guest_contributors_1_guest_contributor_full_name',
+				        'guest_contributors_2_guest_contributor_full_name'
+				)"
+			);
+		}
 	}
 
 	public function cmd_import_postmeta_to_postcontent( $args, $assoc_args ) {
@@ -766,9 +889,9 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 
 				$result = $wpdb->query(
 					$wpdb->prepare(
-						"UPDATE $wpdb->posts 
-							SET post_content = CONCAT(post_content, %s, %s) 
-							WHERE ID = %d",
+						'UPDATE $wpdb->posts 
+							SET post_content = CONCAT(post_content, %1$s, %2$s) 
+							WHERE ID = %3$d',
 						'<br>',
 						$block,
 						$post->post_id
