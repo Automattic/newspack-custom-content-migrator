@@ -270,6 +270,25 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-migrate-molongui-author-box-to-coauthors-plus',
+            [ $this, 'cmd_migrate_molongui_author_box_to_coauthors_plus' ],
+			[
+				'shortdesc' => "Migrate co-authors from Molongui's Author Box plugin to CAP.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'Post IDs to migrate their authors, separated by a comma (e.g. 123,456).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'force-author-from-meta',
+						'description' => 'Force importing authors from the plugin meta, this will override the author set to the post if they are not the same.',
+						'optional'    => true,
+						'repeating'   => false,
 					],
 				],
 			]
@@ -802,8 +821,104 @@ class CoAuthorPlusMigrator implements InterfaceMigrator {
 		WP_CLI::success( 'Done' );
 	}
 
+	/**
+	 * Callable for `newspack-content-migrator co-authors-migrate-molongui-author-box-to-coauthors-plus`.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Named arguments.
+	 */
+	public function cmd_migrate_molongui_author_box_to_coauthors_plus( $args, $assoc_args ) {
+		global $coauthors_plus;
 
-		WP_CLI::success('Done');
+		$post_ids               = isset( $assoc_args['post-ids'] ) ? explode( ',', $assoc_args['post-ids'] ) : array();
+		$force_author_from_meta = isset( $assoc_args['force-author-from-meta'] ) ? true : false;
+
+		$posts = get_posts(
+            [
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post__in'       => $post_ids,
+			]
+        );
+
+		foreach ( $posts as $post ) {
+			$co_authors_meta = get_post_meta( $post->ID, '_molongui_author' );
+			if ( ! $co_authors_meta || empty( $co_authors_meta ) ) {
+				WP_CLI::warning( sprintf( "Post #%d doesn't have co-authors meta (_molongui_author).", $post->ID ) );
+				continue;
+			}
+
+			$co_author_user_ids = array_map(
+                function( $co_author_meta ) {
+					// Meta value is in the format: user-{user_id} (e.g. user-11).
+					return intval( ltrim( $co_author_meta, 'user-' ) );
+				},
+                array_filter(
+                    $co_authors_meta,
+                    function( $co_author_meta ) {
+						return str_starts_with( $co_author_meta, 'user-' );
+					}
+                )
+            );
+
+			$co_author_guest_ids = array_map(
+                function( $co_author_meta ) {
+					// Meta value is in the format: guest-{guest_id} (e.g. guest-11).
+					return intval( ltrim( $co_author_meta, 'guest-' ) );
+				},
+                array_filter(
+                    $co_authors_meta,
+                    function( $co_author_meta ) {
+						return str_starts_with( $co_author_meta, 'guest-' );
+					}
+                )
+            );
+
+			// Check posts with only one author, if the author assigned to the post is not the same from the meta.
+			if ( 1 === count( $co_author_user_ids ) && intval( $post->post_author ) !== current( $co_author_user_ids ) ) {
+				if ( ! $force_author_from_meta ) {
+					WP_CLI::warning( sprintf( 'The post %d has the user %d as assigned author and the user %d as author from the plugin meta, to force setting the author from the meta use the --force-author-from-meta flag.', $post->ID, $post->post_author, current( $co_author_user_ids ) ) );
+					continue;
+				}
+			}
+
+			$co_authors_logins = array_map(
+                function( $co_author_id ) use ( $post ) {
+					$co_author_user = get_user_by( 'ID', $co_author_id );
+					if ( ! $co_author_user ) {
+						WP_CLI::warning( sprintf( 'There is no user with the ID %d for the post #%d', $co_author_id, $post->ID ) );
+						return null;
+					}
+					return $co_author_user->user_login;
+				},
+                $co_author_user_ids
+            );
+
+			$guest_co_authors = array_map(
+                function( $co_author_id ) use ( $post ) {
+					$guest_co_author_display_name = get_post_meta( $co_author_id, '_molongui_guest_author_display_name', true );
+					if ( ! $guest_co_author_display_name ) {
+						WP_CLI::warning( sprintf( 'There is no guest author with the ID %d for the post #%d', $co_author_id, $post->ID ) );
+						return null;
+					}
+
+					// Make sure the guest co-author exists.
+					$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $guest_co_author_display_name ] );
+					$guest_author    = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
+
+					return $guest_author->user_nicename;
+				},
+                $co_author_guest_ids
+            );
+
+			if ( in_array( null, $co_authors_logins, true ) || in_array( null, $guest_co_authors, true ) ) {
+				WP_CLI::warning( sprintf( 'Skipping the post #%d as its authors meta is missing some authors.', $post->ID ) );
+				continue;
+			}
+
+			$coauthors_plus->add_coauthors( $post->ID, array_merge( $co_authors_logins, $guest_co_authors ) );
+			WP_CLI::success( sprintf( 'Assigning users %s as authors for the post #%d instead of %d', implode( ', ', $co_author_user_ids ), $post->ID, $post->post_author ) );
+		}
 	}
 
     /**
