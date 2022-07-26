@@ -51,9 +51,17 @@ PluginSetup::register_migrators(
 		Migrator\General\TablePressMigrator::class,
 		Migrator\General\NinjaTablesMigrator::class,
 		Migrator\General\PhotoAlbumProGalleryMigrator::class,
+		Migrator\General\S3UploadsMigrator::class,
+		Migrator\General\AttachmentsMigrator::class,
+		Migrator\General\PDFEmbedderMigrator::class,
+		Migrator\General\ContentFixerMigrator::class,
+		Migrator\General\XMLMigrator::class,
 
-		// Publisher specific:
+		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\WashingtonMonthlyMigrator::class,
+		Migrator\PublisherSpecific\NoozhawkMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
 		Migrator\PublisherSpecific\PhilomathMigrator::class,
 		Migrator\PublisherSpecific\RenoMigrator::class,
@@ -63,5 +71,8 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\BethesdaMagMigrator::class,
 		Migrator\PublisherSpecific\SearchLightNMMigrator::class,
 		Migrator\PublisherSpecific\CalMattersMigrator::class,
+		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
+		Migrator\PublisherSpecific\NewsroomCoNzMigrator::class,
+		Migrator\PublisherSpecific\MassterlistMigrator::class,
 	)
 );

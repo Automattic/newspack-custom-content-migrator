@@ -495,15 +495,22 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
+	 * @param array  $imported_post_ids_map   Keys are Post IDs on Live Site, values are Post IDs of imported posts on Local Site.
+	 *                                        Will only update attachments for these Posts (e.g. an existing Post could
+	 *                                        legitimately have an att.ID 123, and then another newly imported Post could also have
+	 *                                        had att.ID 123 which has changed to 456 after import. We only want to update the
+	 *                                        newly imported Post's att.ID from 123 to 456, not the existing Post's.
 	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
 	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
 	 *                                        detailed output of all the changes made.
 	 */
-	public function update_featured_images( $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
+	public function update_featured_images( $imported_post_ids_map, $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
 		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
 			return [];
 		}
+
+		$newly_imported_post_ids = array_values( $imported_post_ids_map );
 
 		$postmeta_table = $this->wpdb->postmeta;
 		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
@@ -515,6 +522,12 @@ class ContentDiffMigrator {
 			// Output a '.' every 2000 objects to prevent process getting killed.
 			if ( 0 == $key_result % 2000 ) {
 				echo '.';
+			}
+
+			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
+			$post_id = $result['post_id'] ?? null;
+			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
+				continue;
 			}
 
 			$old_id = $result['meta_value'] ?? null;

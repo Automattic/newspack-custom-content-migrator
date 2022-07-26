@@ -15,9 +15,9 @@ class Posts {
 		$ids = array();
 
 		// Arguments in \WP_Query::parse_query .
-		$args = array(
-			'nopaging' => $nopaging,
-			'post_type' => $post_type,
+		$args  = array(
+			'nopaging'    => $nopaging,
+			'post_type'   => $post_type,
 			'post_status' => $post_status,
 		);
 		$query = new \WP_Query( $args );
@@ -92,7 +92,6 @@ SQL;
 		if ( ! empty( $results_names ) ) {
 			foreach ( $results_names as $results_name ) {
 				$names[] = $results_name['name'];
-
 			}
 		}
 
@@ -108,7 +107,7 @@ SQL;
 		global $wpdb;
 
 		$post_types = [];
-		$results = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
+		$results    = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
 		foreach ( $results as $result ) {
 			$post_types[] = $result->post_type;
 		}
@@ -125,48 +124,52 @@ SQL;
 	 *      }
 	 * ```
 	 *
-	 * @param array $post_types Post types.
+	 * @param array  $post_types Post types.
 	 * @param string $taxonomy Taxonomy.
-	 * @param int $term_id term_id.
+	 * @param int    $term_id term_id.
 	 *
 	 * @return \WP_Post[]
 	 */
 	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
-		return get_posts( [
-			'posts_per_page' => -1,
-			// Target all post_types.
-			'post_type'      => $post_types,
-			'tax_query'      => [
-				[
-					'taxonomy' => $taxonomy,
-					'field'    => 'term_id',
-					'terms'    => $term_id,
-				]
-			],
-		] );
+		return get_posts(
+            [
+				'posts_per_page' => -1,
+				// Target all post_types.
+				'post_type'      => $post_types,
+				'tax_query'      => [
+					[
+						'taxonomy' => $taxonomy,
+						'field'    => 'term_id',
+						'terms'    => $term_id,
+					],
+				],
+			]
+        );
 	}
 
 	/**
 	 * Gets taxonomy with custom meta.
 	 *
-	 * @param        $meta_key
-	 * @param        $meta_value
-	 * @param string $taxonomy
+	 * @param            $meta_key
+	 * @param            $meta_value
+	 * @param string     $taxonomy
 	 *
 	 * @return int|\WP_Error|\WP_Term[]
 	 */
 	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
-        return get_terms([
-            'hide_empty' => false,
-            'meta_query' => [
-                [
-                    'key'     => $meta_key,
-                    'value'   => $meta_value,
-                    'compare' => 'LIKE'
-                ],
-            ],
-            'taxonomy'  => $taxonomy,
-        ]);
+        return get_terms(
+            [
+				'hide_empty' => false,
+				'meta_query' => [
+					[
+						'key'     => $meta_key,
+						'value'   => $meta_value,
+						'compare' => 'LIKE',
+					],
+				],
+				'taxonomy'   => $taxonomy,
+			]
+        );
 	}
 
 	/**
@@ -184,7 +187,7 @@ SQL;
 
 		global $wpdb;
 
-		$post_types_placeholders = implode( ",", array_fill( 0, count( $post_types ), '%s' ) );
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
 
 		$args_prepare = [];
 		array_push( $args_prepare, $meta_key, $meta_value );
@@ -209,7 +212,7 @@ SQL;
 
 		$post_ids = [];
 		foreach ( $results_meta_post_ids as $result_meta_post_id ) {
-			$post_ids[] = (int) $result_meta_post_id[ 'post_id' ];
+			$post_ids[] = (int) $result_meta_post_id['post_id'];
 		}
 
 		return $post_ids;
@@ -350,6 +353,49 @@ SQL;
 		foreach ( $posts as $post ) {
 			$caption  = ! empty( $post->post_excerpt ) ? $post->post_excerpt : $post->post_title;
 			$content .= '<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="' . $post->post_title . '" class="wp-block-jetpack-slideshow_image wp-image-' . $post->ID . '" data-id="' . $post->ID . '" src="' . wp_get_attachment_url( $post->ID ) . '"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">' . $caption . '</figcaption></figure></li>';
+		}
+		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
+		return $content;
+	}
+
+	/**
+	 * Generate Jetpack Slideshow Block code from Media Posts.
+	 *
+	 * @param int[] $post_ids Media Posts IDs.
+	 * @return string Jetpack Slideshow block code to be add to the post content.
+	 */
+	public function generate_jetpack_slideshow_block_from_pictures( $images ) {
+		foreach ( $images as $key => $image ) {
+			$post          = get_page_by_title( $image['name'], OBJECT, 'attachment' );
+			$attachment_id = 0;
+
+			if ( ! $post ) {
+				$attachment = array(
+					'guid'           => $image['filename'],
+					'post_mime_type' => "image/{$image['filetype']}",
+					'post_title'     => $image['name'],
+					'post_content'   => '',
+					'post_status'    => 'inherit',
+				);
+
+				$attachment_id = wp_insert_attachment( $attachment, $image['filename'] );
+			}
+
+			$images[ $key ]['post_id'] = $post ? $post->ID : $attachment_id;
+		}
+
+		$images_posts_ids = array_map(
+			function( $image ) {
+				return $image['post_id'];
+			},
+			$images
+		);
+
+		$content  = '<!-- wp:jetpack/slideshow {"ids":[' . join( ',', $images_posts_ids ) . '],"sizeSlug":"large"} -->';
+		$content .= '<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">';
+		foreach ( $images as $image ) {
+			$caption  = ! empty( $image['description'] ) ? $image['description'] : $image['name'];
+			$content .= '<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="' . $image['name'] . '" class="wp-block-jetpack-slideshow_image wp-image-' . $image['post_id'] . '" data-id="' . $image['post_id'] . '" src="' . $image['filename'] . '"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">' . $caption . '</figcaption></figure></li>';
 		}
 		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
 		return $content;

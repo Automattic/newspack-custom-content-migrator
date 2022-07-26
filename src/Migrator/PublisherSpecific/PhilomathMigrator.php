@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
+use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use WP_CLI;
 
 /**
@@ -27,6 +28,7 @@ class PhilomathMigrator implements InterfaceMigrator {
 	private function __construct() {
 		global $wpdb;
 		$this->content_diff = new ContentDiffMigrator( $wpdb );
+		$this->posts_logic = new PostsLogic();
 	}
 
 	/**
@@ -55,6 +57,137 @@ class PhilomathMigrator implements InterfaceMigrator {
 			'newspack-content-migrator philomath-update-jp-blocks-ids',
 			[ $this, 'cmd_update_jp_blocks_ids' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator philomath-recreate-jp-slideshow-code',
+			[ $this, 'cmd_recreate_wp_jetpack_slideshow_code' ],
+		);
+	}
+
+	/**
+	 * Helper command used to manually fix Philomath JP Slideshow galleries.
+	 *
+	 * Certain JP Slideshow galleries on live needed to be recreated. This command reads block code from file (convenient for
+	 * manual processing) and pulls out all image URLs. It then takes these URLs and finds the actual attachment IDs in the DB
+	 * and recreates the whole Slideshow gallery. It also does an intermediary change of hostname (live VS local dev hostname).
+	 *
+	 * @return void
+	 */
+	public function cmd_recreate_wp_jetpack_slideshow_code() {
+
+		// Get wp:jetpack/slideshow block from local dev file.
+		$content = file_get_contents( '/var/www/philomath.test/public/0_philomathgals_geturls.txt' );
+
+		// Replace either data-url=" or src=" with \n.
+		$str_beginning_of_url = false != strpos( $content, 'data-url="' ) ? 'data-url="' : 'src="';
+		$content = str_replace( $str_beginning_of_url, "\n" . $str_beginning_of_url, $content );
+		$content_exploded = explode( "\n", $content );
+		foreach ( $content_exploded as $key_content_line => $content_line ) {
+			if ( 0 !== strpos( $content_line, $str_beginning_of_url ) ) {
+				unset( $content_exploded[$key_content_line] );
+			}
+		}
+		$content = implode( "\n", array_values( $content_exploded ) );
+		$content = str_replace( $str_beginning_of_url, '', $content );
+
+		// Remove everything after " and replace hostnames.
+		$content_exploded = explode( "\n", $content );
+		foreach ( $content_exploded as $key_content_line => $content_line ) {
+			$pos = strpos( $content_line, '"' );
+			$content_exploded[$key_content_line] = substr( $content_line, 0, $pos );
+			$content_exploded[$key_content_line] = str_replace( 'philomathnews.com', 'philomath.test', $content_exploded[$key_content_line] );
+		}
+
+		// All ourls.
+		$urls = array_values( $content_exploded );
+
+		$ids = [];
+		foreach ( $urls as $key => $url ) {
+			WP_CLI::log( sprintf( "%d/%d", $key + 1, count( $urls ) ) );
+			$ids[ $url ] = $this->get_attachment_id_from_url( $url );
+			if ( empty( $ids[ $url ] ) || is_null( $ids[ $url ] ) || 0 == $ids[ $url ] ) {
+				$d=1;
+				unset( $ids[ $url ] );
+			}
+		}
+
+		if ( ! empty( $ids ) ) {
+			$gallery = $this->posts_logic->generate_jetpack_slideshow_block_from_media_posts( array_values( $ids ) );
+			$gallery_tiled = $this->posts_logic->generate_skeleton_jetpack_tiled_gallery_from_attachment_ids( array_values( $ids ) );
+
+ 			// These are the full JP Slideshow galleries for use on live.
+			$gallery_live = str_replace( '//philomath.test/', '//philomathnews.com/', $gallery );
+			$gallery_tiled_live = str_replace( '//philomath.test/', '//philomathnews.com/', $gallery_tiled );
+		} else {
+			// EMPTY
+			$d=1;
+		}
+
+ 		return;
+	}
+
+	/**
+	 * Taken from https://wordpress.stackexchange.com/a/7094 , custom extended with built-in WP function call attempt.
+	 *
+	 * @param string $url
+	 *
+	 * @return false|float|int|string|\WP_Post
+	 */
+	public function get_attachment_id_from_url( $url ) {
+
+		// try built in function
+		$att_id = attachment_url_to_postid( $url );
+		if ( is_numeric( $att_id ) && 0 != $att_id ) {
+			return $att_id;
+		}
+
+		$dir = wp_upload_dir();
+
+		// baseurl never has a trailing slash
+		if ( false === strpos( $url, $dir['baseurl'] . '/' ) ) {
+			// URL points to a place outside of upload directory
+			return false;
+		}
+
+		$file  = basename( $url );
+		$query = [
+			'post_type'  => 'attachment',
+			'fields'     => 'ids',
+			'meta_query' => [
+				[
+					'key'     => '_wp_attached_file',
+					'value'   => $file,
+					'compare' => 'LIKE',
+				],
+			]
+		];
+
+		// query attachments
+		$ids = get_posts( $query );
+		if ( ! empty( $ids ) ) {
+			foreach ( $ids as $id ) {
+				// first entry of returned array is the URL
+				if ( $url === array_shift( wp_get_attachment_image_src( $id, 'full' ) ) ) {
+					return $id;
+				}
+			}
+		}
+
+		$query['meta_query'][0]['key'] = '_wp_attachment_metadata';
+
+		// query attachments again
+		$ids = get_posts( $query );
+		if ( empty( $ids) ) {
+			return false;
+		}
+		foreach ( $ids as $id ) {
+			$meta = wp_get_attachment_metadata( $id );
+			foreach ( $meta['sizes'] as $size => $values ) {
+				if ( $values['file'] === $file && $url === array_shift( wp_get_attachment_image_src( $id, $size ) ) )
+					return $id;
+			}
+		}
+
+		return false;
 	}
 
 	/**
