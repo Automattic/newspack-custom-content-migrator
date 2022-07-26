@@ -163,6 +163,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			'newspack-content-migrator berkeleyside-add-user-title-to-yoast',
 			[ $this, 'cmd_add_user_title_to_yoast' ],
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-remove-dup-content',
+			[ $this, 'cmd_remove_duplicate_content' ],
+		);
 	}
 
 	public function cmd_acf_authors_to_cap( $args, $assoc_args ) {
@@ -1017,6 +1022,53 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			}
 
 			$progress_bar->finish();
+		}
+	}
+
+	public function cmd_remove_duplicate_content(  ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results( "SELECT ID, post_content FROM wp_fp7b3e_posts WHERE post_content LIKE '%\"specificPosts\":%'" );
+
+		foreach ( $posts as $post ) {
+			WP_CLI::log( "POST ID: $post->ID" );
+			$dom = new \DOMDocument();
+			@$dom->loadHTML( $post->post_content );
+
+			$count = 0;
+			$body = $dom->lastChild->firstChild;
+			foreach ( $body->childNodes as $child ) {
+				/* @var \DOMNode $child */
+				if ( '#comment' === $child->nodeName && str_contains( $child->nodeValue, 'specificPosts' ) ) {
+					$count ++;
+
+					if ( $count > 1 ) {
+						WP_CLI::log( 'FOUND DUPE' );
+						$body->removeChild( $child );
+					}
+				}
+			}
+
+			if ( $count > 1 ) {
+				$content = $dom->saveHTML( $body );
+
+				if ( str_starts_with( $content, '<body>' ) ) {
+					$content = substr( $content, 6 );
+				}
+
+				if ( str_ends_with( $content, '</body>' ) ) {
+					$content = substr( $content, 0, -7 );
+				}
+
+				WP_CLI::log( 'UPDATING POST CONTENT' );
+				var_dump($content);
+				$result = $wpdb->query( "UPDATE $wpdb->posts SET post_content = '$content' WHERE ID = $post->ID" );
+				if ( $result >= 1 ) {
+					WP_CLI::colorize('%gSuccess!%n');
+				} else {
+					WP_CLI::colorize('%rFailed%n');
+				}
+			}
 		}
 	}
 
