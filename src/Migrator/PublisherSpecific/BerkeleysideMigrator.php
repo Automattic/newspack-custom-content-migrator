@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use Simple_Local_Avatars;
 use stdClass;
 use \WP_CLI;
@@ -23,6 +24,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 * @var CoAuthorPlusMigrator.
 	 */
 	private $cap_logic;
+	private $posts_logic;
 
 	/**
 	 * Template mapping, old postmeta value => new postmeta value.
@@ -64,6 +66,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 	 */
 	public function __construct() {
 		$this->cap_logic = new CoAuthorPlusLogic();
+		$this->posts_logic = new PostsLogic();
 	}
 
 	/**
@@ -168,6 +171,612 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			'newspack-content-migrator berkeleyside-remove-dup-content',
 			[ $this, 'cmd_remove_duplicate_content' ],
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-get-specialchars-imgs-and-posts',
+			[ $this, 'cmd_get_specialchars_images_and_posts' ],
+		);
+	}
+
+	public function cmd_get_specialchars_images_and_posts( $args, $assoc_args ) {
+		global $wpdb;
+
+		$files = [
+			'2013/01/BKGD-How-we-got-here-«-Berkeley-Animal-Welfare-Fund.pdf',
+			'2013/11/Gmail-La-Peña-Craft-Fair-Dec-14-Calling-Craftspeople-and-Crafts-Lovers.pdf',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-160x120.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-180x120.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-200x148.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-200x150.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-220x165.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-300x225.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-340x240.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-360x267.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-460x310.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-620x400.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo-720x533.png',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo.png',
+			'2015/11/Veteranís-Administration-Building-160x120.jpg',
+			'2015/11/Veteranís-Administration-Building-180x120.jpg',
+			'2015/11/Veteranís-Administration-Building-200x132.jpg',
+			'2015/11/Veteranís-Administration-Building-200x150.jpg',
+			'2015/11/Veteranís-Administration-Building-220x165.jpg',
+			'2015/11/Veteranís-Administration-Building-300x225.jpg',
+			'2015/11/Veteranís-Administration-Building-340x240.jpg',
+			'2015/11/Veteranís-Administration-Building-360x238.jpg',
+			'2015/11/Veteranís-Administration-Building-460x310.jpg',
+			'2015/11/Veteranís-Administration-Building-620x400.jpg',
+			'2015/11/Veteranís-Administration-Building-720x476.jpg',
+			'2015/11/Veteranís-Administration-Building.jpg',
+			'2017/06/Arreguín-Urban-Shield-statement-.rtf',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-1200x900.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-1600x900.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-200x150.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-360x270.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-400x225.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-400x400.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-405x300.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-480x320.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-720x405.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-720x480.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-768x576.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-800x600.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park-900x675.jpg',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-100x150.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-1200x900.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-1600x900.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-240x360.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-400x225.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-400x400.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-405x300.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-480x320.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-720x405.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-720x480.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-768x1151.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-800x600.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli-900x1349.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-1200x630.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-1200x900.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-1600x900.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-200x150.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-360x270.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-400x225.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-400x400.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-405x300.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-480x320.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-720x405.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-720x480.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-768x576.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-800x600.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-900x675.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-e1522184759445.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-1044x783.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-1080x630.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-200x150.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-24x24.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-354x472.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-360x270.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-400x225.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-400x400.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-405x300.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-414x552.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-470x470.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-480x320.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-48x48.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-536x402.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-550x550.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-632x474.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-687x810.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-720x405.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-720x480.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-768x576.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-800x600.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-840x810.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-900x675.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-912x810.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley-96x96.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-1024x630.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-200x133.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-24x24.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-354x472.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-360x239.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-400x225.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-400x400.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-405x300.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-414x552.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-470x470.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-480x320.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-48x48.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-536x402.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-550x550.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-632x474.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-687x680.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-720x405.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-720x480.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-768x510.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-800x600.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-840x680.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-900x598.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-912x680.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680-96x96.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680.jpg',
+			'2019/05/Quince-Café-150x150.jpg',
+			'2019/05/Quince-Café-200x133.jpg',
+			'2019/05/Quince-Café-24x24.jpg',
+			'2019/05/Quince-Café-300x300.jpg',
+			'2019/05/Quince-Café-354x472.jpg',
+			'2019/05/Quince-Café-360x240.jpg',
+			'2019/05/Quince-Café-400x225.jpg',
+			'2019/05/Quince-Café-400x400.jpg',
+			'2019/05/Quince-Café-405x300.jpg',
+			'2019/05/Quince-Café-414x552.jpg',
+			'2019/05/Quince-Café-45x45.jpg',
+			'2019/05/Quince-Café-470x470.jpg',
+			'2019/05/Quince-Café-480x270.jpg',
+			'2019/05/Quince-Café-480x320.jpg',
+			'2019/05/Quince-Café-48x48.jpg',
+			'2019/05/Quince-Café-536x402.jpg',
+			'2019/05/Quince-Café-550x550.jpg',
+			'2019/05/Quince-Café-632x474.jpg',
+			'2019/05/Quince-Café-640x360.jpg',
+			'2019/05/Quince-Café-687x600.jpg',
+			'2019/05/Quince-Café-720x480.jpg',
+			'2019/05/Quince-Café-768x512.jpg',
+			'2019/05/Quince-Café-800x450.jpg',
+			'2019/05/Quince-Café-800x600.jpg',
+			'2019/05/Quince-Café-840x600.jpg',
+			'2019/05/Quince-Café-900x600.jpg',
+			'2019/05/Quince-Café-96x96.jpg',
+			'2019/05/Quince-Café.jpg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-1044x783.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-1104x900.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-1122x900.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-1200x630.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-1200x900.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-150x150.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-200x150.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-24x24.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-300x300.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-354x472.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-360x270.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-400x225.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-400x400.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-405x300.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-414x552.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-45x45.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-470x470.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-480x270.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-480x320.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-48x48.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-536x402.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-550x550.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-632x474.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-640x360.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-687x900.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-720x480.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-768x576.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-800x450.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-800x600.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-840x900.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-900x675.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-912x900.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel-96x96.jpeg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel.jpeg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1044x783.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1104x1104.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1122x1208.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1200x630.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1200x900.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1376x1032.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1472x1208.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-150x150.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1600x900.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-1832x1208.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-200x81.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-24x24.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-2800x1208.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-300x300.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-354x472.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-360x145.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-400x400.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-405x300.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-414x552.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-470x470.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-480x270.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-480x320.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-48x48.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-536x402.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-550x550.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-632x474.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-687x916.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-720x480.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-768x309.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-800x450.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-800x600.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-840x1120.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-900x362.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-912x912.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café-96x96.jpg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café.jpg',
+			'2019/11/Dorothée-Mitrani-150x150.jpg',
+			'2019/11/Dorothée-Mitrani-24x24.jpg',
+			'2019/11/Dorothée-Mitrani-48x48.jpg',
+			'2019/11/Dorothée-Mitrani-96x96.jpg',
+			'2019/11/Dorothée-Mitrani.jpg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-1024x630.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-150x150.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-200x133.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-24x24.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-300x300.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-354x472.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-360x240.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-400x400.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-405x300.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-414x552.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-470x470.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-480x270.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-480x320.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-48x48.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-536x402.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-550x550.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-632x474.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-687x683.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-720x405.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-720x480.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-768x512.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-800x600.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-840x683.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-912x683.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos-96x96.jpeg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-1024x630.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-150x150.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-200x133.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-24x24.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-300x300.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-354x472.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-360x240.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-400x400.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-405x300.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-414x552.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-470x470.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-480x270.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-480x320.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-48x48.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-536x402.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-550x550.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-632x474.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-687x683.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-720x405.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-720x480.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-768x512.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-800x600.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-840x683.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-912x683.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos-96x96.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos.jpeg',
+			'2020/12/Fat-Gold-Renée-Vargas-1044x783.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1104x1104.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1122x1496.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-112x150.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1152x1536.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1200x630.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1200x900.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1226x1032.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1226x1374.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1226x1472.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1226x1575.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-1226x900.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-150x150.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-24x24.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-270x360.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-300x300.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-354x472.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-400x400.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-405x300.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-414x552.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-470x470.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-480x270.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-480x320.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-48x48.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-536x402.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-550x550.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-632x474.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-687x916.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-720x405.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-720x480.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-720x960.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-768x1024.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-800x600.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-840x1120.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-912x912.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas-96x96.jpg',
+			'2020/12/Fat-Gold-Renée-Vargas.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1044x783.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1104x1080.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1122x1080.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1200x630.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1200x900.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1376x1032.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1472x1080.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-150x150.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1536x864.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1600x900.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-1832x1080.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-200x113.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-24x24.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-300x300.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-354x472.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-360x203.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-400x400.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-405x300.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-414x552.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-470x470.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-480x270.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-480x320.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-48x48.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-536x402.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-550x550.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-632x474.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-687x916.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-720x405.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-720x480.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-768x432.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-800x600.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-840x1080.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-912x912.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy-96x96.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy.jpg',
+			'2021/09/Jeunée-Simon-Headshot-107x150.jpg',
+			'2021/09/Jeunée-Simon-Headshot-150x150.jpg',
+			'2021/09/Jeunée-Simon-Headshot-24x24.jpg',
+			'2021/09/Jeunée-Simon-Headshot-257x360.jpg',
+			'2021/09/Jeunée-Simon-Headshot-300x300.jpg',
+			'2021/09/Jeunée-Simon-Headshot-354x472.jpg',
+			'2021/09/Jeunée-Simon-Headshot-400x400.jpg',
+			'2021/09/Jeunée-Simon-Headshot-405x300.jpg',
+			'2021/09/Jeunée-Simon-Headshot-414x552.jpg',
+			'2021/09/Jeunée-Simon-Headshot-470x470.jpg',
+			'2021/09/Jeunée-Simon-Headshot-480x270.jpg',
+			'2021/09/Jeunée-Simon-Headshot-480x320.jpg',
+			'2021/09/Jeunée-Simon-Headshot-48x48.jpg',
+			'2021/09/Jeunée-Simon-Headshot-536x402.jpg',
+			'2021/09/Jeunée-Simon-Headshot-550x550.jpg',
+			'2021/09/Jeunée-Simon-Headshot-600x405.jpg',
+			'2021/09/Jeunée-Simon-Headshot-600x474.jpg',
+			'2021/09/Jeunée-Simon-Headshot-600x480.jpg',
+			'2021/09/Jeunée-Simon-Headshot-600x600.jpg',
+			'2021/09/Jeunée-Simon-Headshot-600x630.jpg',
+			'2021/09/Jeunée-Simon-Headshot-600x783.jpg',
+			'2021/09/Jeunée-Simon-Headshot-96x96.jpg',
+			'2021/09/Jeunée-Simon-Headshot.jpg',
+			'2022/05/Lappé-Cover-Photo-150x150.jpeg',
+			'2022/05/Lappé-Cover-Photo-227x270.jpeg',
+			'2022/05/Lappé-Cover-Photo-227x300.jpeg',
+			'2022/05/Lappé-Cover-Photo-227x320.jpeg',
+			'2022/05/Lappé-Cover-Photo-24x24.jpeg',
+			'2022/05/Lappé-Cover-Photo-48x48.jpeg',
+			'2022/05/Lappé-Cover-Photo-96x96.jpeg',
+			'2022/05/Lappé-Cover-Photo-97x150.jpeg',
+			'2022/05/Lappé-Cover-Photo.jpeg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-1044x783.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-1104x800.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-1122x800.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-1200x630.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-150x150.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-200x133.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-24x24.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-300x300.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-354x472.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-360x240.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-400x400.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-405x300.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-414x552.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-470x470.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-480x270.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-480x320.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-48x48.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-536x402.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-550x550.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-632x474.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-687x800.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-720x405.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-720x480.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-768x512.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-800x600.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-840x800.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-912x800.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315-96x96.jpg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1044x783.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1104x933.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1122x933.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1200x630.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1200x800.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1200x900.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1376x933.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-1400x900.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-150x150.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-200x133.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-24x24.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-300x300.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-354x472.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-360x240.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-400x400.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-405x300.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-414x552.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-470x470.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-480x270.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-480x320.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-48x48.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-536x402.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-550x550.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-632x474.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-687x916.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-720x405.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-720x480.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-768x512.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-800x600.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-840x933.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-912x912.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114-96x96.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114.jpg',
+			'wpforms/303610-ccef9db127fbef8e0abdc73ffc9dae14/ChristinaStapransRésumé-212fb3c0a1a771aa512419e43473f8e6.pdf',
+		];
+
+		$files = [
+			'2013/01/BKGD-How-we-got-here-«-Berkeley-Animal-Welfare-Fund.pdf',
+			'2013/11/Gmail-La-Peña-Craft-Fair-Dec-14-Calling-Craftspeople-and-Crafts-Lovers.pdf',
+			'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo.png',
+			'2015/11/Veteranís-Administration-Building.jpg',
+			'2017/06/Arreguín-Urban-Shield-statement-.rtf',
+			'2017/06/Sunday-Morning-Nature-César-Chavez-Park.jpg',
+			'2017/08/spok-solo-1-fotógrafo-Edson-Acioli.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-e1522184759445.jpg',
+			'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart.jpg',
+			'2019/03/Alegio-Chocolaté-Berkeley.jpg',
+			'2019/04/grégoire_jacquet-5-1024x680.jpg',
+			'2019/05/Quince-Café.jpg',
+			'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel.jpeg',
+			'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café.jpg',
+			'2019/11/Dorothée-Mitrani.jpg',
+			'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos.jpeg',
+			'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos.jpeg',
+			'2020/12/Fat-Gold-Renée-Vargas.jpg',
+			'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy.jpg',
+			'2021/09/Jeunée-Simon-Headshot.jpg',
+			'2022/05/Lappé-Cover-Photo.jpeg',
+			'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315.jpg',
+			'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114.jpg',
+			'wpforms/303610-ccef9db127fbef8e0abdc73ffc9dae14/ChristinaStapransRésumé-212fb3c0a1a771aa512419e43473f8e6.pdf',
+		];
+
+		$files_ids = [];
+		$files_ids_not_found = [];
+
+		// get att ids
+		foreach ( $files as $key_file => $filepath ) {
+			// get att id
+			// $filepath = '2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy.jpg';
+
+			WP_CLI::log( sprintf( "(%d)/(%d) %s", $key_file + 1, count( $files ), $filepath ) );
+
+			// replace special chars w/ search char
+			$filepath_query = $filepath;
+			$filepath_query = str_replace( 'é', '%', $filepath_query );
+			$filepath_query = str_replace( 'É', '%', $filepath_query );
+			$filepath_query = str_replace( 'Á', '%', $filepath_query );
+			$filepath_query = str_replace( 'á', '%', $filepath_query );
+			$filepath_query = str_replace( 'í', '%', $filepath_query );
+			$filepath_query = str_replace( 'Í', '%', $filepath_query );
+			$filepath_query = str_replace( 'ñ', '%', $filepath_query );
+			$filepath_query = str_replace( 'Ñ', '%', $filepath_query );
+			$filepath_query = str_replace( 'ó', '%', $filepath_query );
+			$filepath_query = str_replace( 'Ó', '%', $filepath_query );
+			$filepath_query = str_replace( 'ú', '%', $filepath_query );
+			$filepath_query = str_replace( 'Ú', '%', $filepath_query );
+			$filepath_query = str_replace( 'ü', '%', $filepath_query );
+			$filepath_query = str_replace( 'Ü', '%', $filepath_query );
+			$filepath_query = str_replace( '¿', '%', $filepath_query );
+			$filepath_query = str_replace( '¡', '%', $filepath_query );
+			$filepath_query = str_replace( '«', '%', $filepath_query );
+			$filepath_query = str_replace( '»', '%', $filepath_query );
+
+			$att_id = $wpdb->get_var(
+				"select post_id from $wpdb->postmeta
+					where meta_key = '_wp_attached_file'
+					and meta_value like '$filepath_query'; "
+			);
+			if ( null == $att_id ) {
+				$d = 1;
+				$files_ids_not_found[] = $filepath;
+				WP_CLI::log( 'not found' );
+				continue;
+			}
+
+			$files_ids[ $filepath ] = $att_id;
+		}
+
+		foreach ( $files_ids_not_found as $file_not_found ) {
+			$log .= "fileNotFoundProgrammatically $file_not_found" . "\n";
+		}
+
+// $files_ids = array (
+// 	'2013/01/BKGD-How-we-got-here-«-Berkeley-Animal-Welfare-Fund.pdf' => '105488',
+// 	'2013/11/Gmail-La-Peña-Craft-Fair-Dec-14-Calling-Craftspeople-and-Crafts-Lovers.pdf' => '146613',
+// 	'2015/09/Giovanni-García-and-Raymundo-Coronado-of-Mariachi-Mexicanisimo.png' => '203208',
+// 	'2015/11/Veteranís-Administration-Building.jpg' => '208299',
+// 	'2017/06/Arreguín-Urban-Shield-statement-.rtf' => '262715',
+// 	'2017/06/Sunday-Morning-Nature-César-Chavez-Park.jpg' => '261501',
+// 	'2017/08/spok-solo-1-fotógrafo-Edson-Acioli.jpg' => '269144',
+// 	'2018/03/Fresh-Morning-César-Chávez-Park-Berkeley.-By-Melinda-Stuart-e1522184759445.jpg' => '292471',
+// 	'2019/03/Alegio-Chocolaté-Berkeley.jpg' => '327795',
+// 	'2019/04/grégoire_jacquet-5-1024x680.jpg' => '331606',
+// 	'2019/05/Quince-Café.jpg' => '336955',
+// 	'2019/05/Yalis-Café-owners-Leah-and-Ayal-Amzel.jpeg' => '337699',
+// 	'2019/07/Dreyers-Grand-Ice-Cream-Parlor-Café.jpg' => '342214',
+// 	'2019/11/Dorothée-Mitrani.jpg' => '355237',
+// 	'2020/03/Inside-the-closed-Café-Roma-on-College-and-Ashby.-Photo-Pete-Rosos.jpeg' => '364638',
+// 	'2020/03/La-Mediterranée-is-open-for-take-out-only-no-seating-March-17-Photo-Pete-Rosos.jpeg' => '364640',
+// 	'2020/12/Fat-Gold-Renée-Vargas.jpg' => '398196',
+// 	'2021/04/Poly-Styrene_-I-Am-A-Cliché-Search_Still1-Courtesy-of-SFFILM-copy.jpg' => '408764',
+// 	'2021/09/Jeunée-Simon-Headshot.jpg' => '430172',
+// 	'2022/05/Lappé-Cover-Photo.jpeg' => '453727',
+// 	'2022/07/Elena-Estér-Credit-Robbie-Sweeny-A9_03315.jpg' => '461980',
+// 	'2022/07/Libby-Oberlin-and-Elena-Estér-and-Linda-Maria-Girón-Credit-Robbie-Sweeny-A9_03114.jpg' => '461981',
+// );
+
+		$files_ids;
+		$files_ids_not_found;
+
+		$log = '';
+
+		// get posts
+// $post_ids = [ 408758 ];
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$post = get_post( $post_id );
+
+			$key_file = 0;
+			foreach ( $files_ids as $filepath => $att_id ) {
+
+				// WP_CLI::log( sprintf( "   ... (%d)/(%d)", $key_file + 1, count( $files_ids ) ) );
+
+				// search file in post
+				$filename_pathinfo     = pathinfo( $filepath );
+				$filename_no_extension = $filename_pathinfo['filename'];
+
+				$pos = strpos( $post->post_content, $filename_no_extension );
+				if ( false !== $pos ) {
+					$log .= "attID $att_id $filepath" . "\n";
+					$log .= "  => usedInPostID $post->ID" . "\n";
+				}
+
+				// search if it's featured image
+				$post_id_used_featured = $wpdb->get_var(
+					"select post_id from $wpdb->postmeta
+		               where meta_key = '_thumbnail_id' and meta_value = $att_id and post_id = $post_id ; "
+				);
+				if ( null != $post_id_used_featured ) {
+					$log .= "attID $att_id $filepath" . "\n";
+					$log .= "  => isFeatImgInPostID $post->ID" . "\n";
+				}
+
+				$key_file++;
+			}
+
+		}
+
+		file_put_contents( 'special_chars_atts_and_posts.txt', $log );
+
+		$d=1;
 	}
 
 	public function cmd_acf_authors_to_cap( $args, $assoc_args ) {
