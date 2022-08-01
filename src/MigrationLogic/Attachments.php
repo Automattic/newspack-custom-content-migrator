@@ -54,24 +54,24 @@ class Attachments {
 			copy( $path, $tmpfname );
 		}
 		$file_array = [
-			'name' => wp_basename( $path ),
+			'name'     => wp_basename( $path ),
 			'tmp_name' => $tmpfname,
 		];
 
 		if ( $title ) {
-			$args[ 'post_title' ] = $title;
+			$args['post_title'] = $title;
 		}
 		if ( $caption ) {
-			$args[ 'post_excerpt' ] = $caption;
+			$args['post_excerpt'] = $caption;
 		}
 		if ( $description ) {
-			$args[ 'post_content' ] = $description;
+			$args['post_content'] = $description;
 		}
 		$att_id = media_handle_sideload( $file_array, $post_id, $title, $args );
 
 		// If this was a download and there was an error then clean up the temp file.
 		if ( is_wp_error( $att_id ) && $is_http ) {
-			@unlink( $file_array[ 'tmp_name' ] );
+			@unlink( $file_array['tmp_name'] );
 		}
 
 		if ( $alt ) {
