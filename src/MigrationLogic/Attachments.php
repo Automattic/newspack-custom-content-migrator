@@ -88,17 +88,30 @@ class Attachments {
 	 *
 	 * @return mixed[] Array of the broken URLs indexed by the post IDs.
 	 */
-	public function get_broken_attachment_urls_from_posts( $post_ids = [] ) {
+	public function get_broken_attachment_urls_from_posts( $post_ids = [], $after_post_id = 0 ) {
+		$timestamp = date('Ymd_His', time() );
+		$filename = "missing_images_$timestamp.txt";
+		$file_path = "/tmp/$filename";
+		file_put_contents( $file_path, '' );
 		$broken_images = [];
 
-		$posts = get_posts(
+		/*$posts = get_posts(
             [
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
-				'post__in'       => $post_ids,
+//				'post__in'       => $post_ids,
 			]
-        );
+        );*/
+		global $wpdb;
+
+		$query = "SELECT ID, post_content FROM $wpdb->posts WHERE post_status IN ('publish', 'future', 'draft', 'pending', 'private', 'inherit' ) AND post_type = 'post'";
+
+		if ( 0 !== $after_post_id ) {
+			$query .= " AND ID > $after_post_id";
+		}
+
+		$posts = $wpdb->get_results( $query );
 
 		$total_posts = count( $posts );
 		foreach ( $posts as $index => $post ) {
@@ -118,6 +131,7 @@ class Attachments {
                             $image_request->get_error_message()
                         )
                     );
+					continue;
 				}
 
 				if ( 200 !== $image_request['response']['code'] ) {
@@ -140,13 +154,16 @@ class Attachments {
 									$image_request->get_error_message()
 								)
 							);
+							continue;
 						}
 
 						if ( 200 !== $image_request_from_s3['response']['code'] ) {
 							$broken_post_images[] = $image_source_match;
+							file_put_contents( $file_path, "$post->ID: $image_source_match\n", FILE_APPEND );
 						}
 					} else {
 						$broken_post_images[] = $image_source_match;
+						file_put_contents( $file_path, "$post->ID: $image_source_match\n", FILE_APPEND );
 					}
 				}
 			}
