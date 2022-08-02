@@ -122,7 +122,7 @@ class Attachments {
 
 				if ( 200 !== $image_request['response']['code'] ) {
 					// Check if the URL is managed by s3_uploads plugin.
-					if ( class_exists( S3_Uploads_Plugin::class ) ) {
+					if ( class_exists( \S3_Uploads\Plugin::class ) ) {
 						$bucket       = \S3_Uploads\Plugin::get_instance()->get_s3_bucket();
 						$exploded_url = explode( '/', $image_source_match );
 						$filename     = end( $exploded_url );
