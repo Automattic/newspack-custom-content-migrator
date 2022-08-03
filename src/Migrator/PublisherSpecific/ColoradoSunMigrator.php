@@ -79,6 +79,10 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			'newspack-content-migrator coloradosun-refactor-lede-common-iframe-block-into-newspack-iframe-block',
 			[ $this, 'cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-migrate-authors-to-cap',
+			[ $this, 'cmd_migrate_authors_to_cap' ],
+		);
 	}
 
 	public function cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block( $positional_args, $assoc_args ) {
@@ -246,6 +250,10 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 		WP_CLI::log( sprintf( 'Additional found blocks: %s', implode( ',', $post_ids_where_additional_blocks_are_found ) ) );
 
 		wp_cache_flush();
+	}
+
+	public function cmd_migrate_authors_to_cap( $subject, $remove ) {
+		
 	}
 
 	public function remove_string_from_end_of_string( $subject, $remove ) {
