@@ -139,7 +139,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 				}
 
 				// Save and log.
-				// $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $id ] );
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $id ] );
 				$this->log( 'cs_reusableblocksremovedfromendofcontent.log', $id );
 				$this->log( 'cs_'.$id.'_1_before.log', $post_content );
 				$this->log( 'cs_'.$id.'_2_after.log', $post_content_updated );
