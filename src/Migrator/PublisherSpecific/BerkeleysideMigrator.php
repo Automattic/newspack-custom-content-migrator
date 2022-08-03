@@ -1795,7 +1795,6 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			} else {
 				$this->log( $log_file_path, "PROD: $row->prod_post_id\tOLD: $row->old_post_id\tURL: " . site_url( "wp-admin/post.php?post=$row->prod_post_id&action=edit" ) );
 			}
-			die();
 		}
 	}
 
