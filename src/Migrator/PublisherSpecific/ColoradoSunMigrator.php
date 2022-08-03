@@ -80,7 +80,6 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 		$reusable_block_html = '<!-- wp:block {"ref":14458} /-->';
 		$reusable_block_additional_search = 'wp:block {"ref":14458}';
 		$results = $wpdb->get_results( "select ID, post_content from $wpdb->posts where post_type in ( 'post', 'page' ) and post_status in ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ) ; ", ARRAY_A );
-// $results = $wpdb->get_results( "select ID, post_content from $wpdb->posts where ID = 717 ; ", ARRAY_A );
 
 		$post_ids_where_additional_blocks_are_found = [];
 		foreach ( $results as $key_result => $result ) {
@@ -126,9 +125,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 			// Double check if this block is still used anywhere else in this content.
 			if ( false !== strpos( $post_content_updated, $reusable_block_additional_search ) ) {
-// if ( ! in_array( $id, [ 15504, 18095 ] ) ) {
 				$post_ids_where_additional_blocks_are_found[] = $id;
-// }
 			}
 
 			if ( $post_content_updated != $post_content ) {
