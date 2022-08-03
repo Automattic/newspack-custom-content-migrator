@@ -69,11 +69,38 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator coloradosun-remove-reusable-block-from-end-of-content',
-			[ $this, 'cmd_acf_remove_reusable_block_from_end_of_content' ],
+			[ $this, 'cmd_remove_reusable_block_from_end_of_content' ],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-move-custom-subtitle-meta-to-newspack-subtitle',
+			[ $this, 'cmd_move_custom_subtitle_meta_to_newspack_subtitle' ],
 		);
 	}
 
-	public function cmd_acf_remove_reusable_block_from_end_of_content( $args, $assoc_args ) {
+	public function cmd_move_custom_subtitle_meta_to_newspack_subtitle( $positional_args, $assoc_args ) {
+		global $wpdb;
+
+		$rows = $wpdb->get_results( "select meta_id, post_id, meta_key, meta_value from $wpdb->postmeta where meta_key = 'dek' ;", ARRAY_A );
+		foreach ( $rows as $key_row => $row ) {
+			$meta_id = $row['meta_id'];
+			$post_id = $row['post_id'];
+			$meta_value = $row['meta_value'];
+
+			WP_CLI::log( sprintf( '(%d)/(%d) meta_id %d', $key_row + 1, count( $rows ), $meta_id ) );
+
+			if ( empty( $meta_value ) ) {
+				WP_CLI::log( 'Empty, skipping.' );
+				continue;
+			}
+
+			update_post_meta( $post_id, 'newspack_post_subtitle', $meta_value );
+			delete_post_meta( $post_id, 'dek' );
+
+			$this->log( 'cs_subtitlesmoved.log', $post_id );
+		}
+	}
+
+	public function cmd_remove_reusable_block_from_end_of_content( $positional_args, $assoc_args ) {
 		global $wpdb;
 
 		// e.g. <!-- wp:block {"ref":14458} /-->
