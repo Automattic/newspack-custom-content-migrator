@@ -176,6 +176,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			'newspack-content-migrator berkeleyside-get-specialchars-imgs-and-posts',
 			[ $this, 'cmd_get_specialchars_images_and_posts' ],
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-copy-latest-post-content',
+			[ $this, 'cmd_copy_latest_post_content' ]
+		);
 	}
 
 	public function cmd_get_specialchars_images_and_posts( $args, $assoc_args ) {
@@ -1738,6 +1743,60 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		$progress_bar->finish();
 
 		WP_CLI\Utils\format_items( 'table', $updated_users, [ 'User_ID', 'Title', 'Previous_Meta', 'Updated_Meta' ] );
+	}
+
+	public function cmd_copy_latest_post_content() {
+		global $wpdb;
+
+		$results = $wpdb->get_results(
+			"SELECT
+			       prod_posts.ID as prod_post_id,
+			       old_posts.ID as old_post_id,
+			       prod_posts.post_date as prod_post_date,
+			       old_posts.post_date as old_post_date,
+			       prod_posts.post_modified as prod_post_modified,
+			       old_posts.post_modified as old_post_modified,
+			       prod_posts.post_content as prod_post_content,
+			       old_posts.post_content as old_post_content
+			FROM (
+			    SELECT
+			           *
+			    FROM $wpdb->posts
+			    WHERE post_type = 'post'
+			      AND post_status = 'publish'
+			    ) prod_posts
+			    LEFT JOIN (
+			        SELECT
+			               *
+			        FROM wp_live_posts
+			        WHERE post_type = 'post'
+			          AND post_status = 'publish'
+			        ) as old_posts
+			        ON prod_posts.post_name = old_posts.post_name
+			WHERE prod_posts.post_content != old_posts.post_content
+			  AND old_posts.post_modified > prod_posts.post_modified"
+		);
+
+		$timestamp     = date( 'Ymd_His', time() );
+		$log_file_path = "copy_post_content_$timestamp.log";
+
+		foreach ( $results as $row ) {
+
+			$result = wp_update_post(
+				[
+					'ID' => $row->prod_post_id,
+					'post_content' => $row->old_post_content,
+					'post_modified' => $row->old_post_modified,
+				]
+			);
+
+			if ( is_wp_error( $result ) ) {
+				$this->log( $log_file_path, "FAILED - PROD: $row->prod_post_id\tOLD: $row->old_post_id" );
+			} else {
+				$this->log( $log_file_path, "PROD: $row->prod_post_id\tOLD: $row->old_post_id\tURL: " . site_url( "wp-admin/post.php?post=$row->prod_post_id&action=edit" ) );
+			}
+			die();
+		}
 	}
 
 	/**
