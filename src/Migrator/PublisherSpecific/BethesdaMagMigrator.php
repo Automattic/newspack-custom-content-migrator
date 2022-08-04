@@ -80,6 +80,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-move-subtitle-to-excerpt',
+			[ $this, 'bethesda_move_subtitle' ],
+			[
+				'shortdesc' => 'Move ACF subtitles to excerpt field.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator bethesda-guest-author-audit',
 			array( $this, 'cmd_guest_author_audit' ),
 			array(
@@ -1248,6 +1257,36 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'term_id' => $term_id,
 			]
 		);
+	}
+
+	/**
+	 * Updating wp_posts.post_excerpt rows with content from bm_subtitle.
+	 *
+	 * @param string[] $args       WP_CLI positional arguments.
+	 * @param string[] $assoc_args WP_CLI optional arguments.
+	 */
+	public function bethesda_move_subtitle( $args, $assoc_args ) {
+		global $wpdb;
+
+		$subtitle_sql = "SELECT * FROM (
+    		SELECT p.ID, pm.meta_value, p.post_excerpt FROM $wpdb->postmeta pm LEFT JOIN  $wpdb->posts p ON p.ID = pm.post_id WHERE pm.meta_key = 'bm_subtitle'
+		) as sub WHERE sub.meta_value <> sub.post_excerpt";
+		$results      = $wpdb->get_results( $subtitle_sql );
+
+		$count = count( $results );
+		$progress = WP_CLI\Utils\make_progress_bar( "Processing subtitles. $count records.", $count );
+		while ( $row = array_shift( $results ) ) {
+			wp_update_post(
+				[
+					'ID'           => $row->ID,
+					'post_excerpt' => $row->meta_value,
+				]
+			);
+
+			$progress->tick();
+		}
+
+		$progress->finish();
 	}
 
 	/**
