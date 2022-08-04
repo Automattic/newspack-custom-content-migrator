@@ -105,6 +105,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-migrate-profile-content',
+			[ $this, 'bethesda_migrate_profile_content' ],
+			[
+				'shortdesc' => 'Profile content which needs to be migrated.',
+				'synopsis' => [],
+			]
+		);
 	}
 
 	/**
@@ -233,6 +242,268 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		);
 
 		wp_cache_flush();
+	}
+
+	public function bethesda_migrate_profile_content( $args, $assoc_args ) {
+		$xml_path = get_home_path() . 'bethesdamagazine.formatted.WordPress.2022-06-01.xml';
+		$xml = new \DOMDocument();
+		$xml->loadXML( file_get_contents( $xml_path ) );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		$profiles_term_id = wp_create_category( 'profiles' );
+
+		$posts = [];
+		$authors = [];
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing XML items', $channel_children->count() );
+		foreach ( $channel_children as $child ) {
+			/* @var \DOMNode $child */
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = $this->handle_xml_author( $child );
+				$authors[ $author->user_login ] = $author;
+			} else if ( 'item' === $child->nodeName ) {
+				$posts[] = $this->handle_xml_item_two( $child, $profiles_term_id, $authors );
+			}
+			$progress->tick();
+		}
+		$progress->finish();
+
+		$this->process_posts( $posts, [ $profiles_term_id ] );
+	}
+	/**
+	 * Handles XML <item>'s from file to import as Posts.
+	 *
+	 * @param \DOMNode $item XML <item>.
+	 * @param int $best_of_term_id Parent category ID.
+	 * @param array $authors Recently imported authors.
+	 *
+	 * @return array
+	 */
+	private function handle_xml_item_two( \DOMNode $item, int $best_of_term_id = 0, array $authors = [] ) {
+		global $wpdb;
+		$featured_images_sql = "SELECT ID, guid FROM bak_wp_posts WHERE post_type = 'attachment'";
+		$featured_images = $wpdb->get_results( $featured_images_sql, OBJECT_K );
+
+		$post                      = [
+			'post_type'     => 'post',
+			'meta_input'    => [
+				'newspack_listings_hide_author' => 1,
+				'newspack_listings_hide_publish_date' => 1,
+				'newspack_listings_hide_parents' => '',
+				'newspack_listings_hide_children' => '',
+			],
+		];
+		$categories                = [];
+		$tags                      = [];
+		$post_content_template     = '{specialty}{full_address}{phone}{email}{link}{description}{other}';
+		$specialty_template        = '<h4>{content}</h4><br>';
+		$full_address_template     = '<address>{address}{city}{zipcode}</address><br>';
+		$address_template          = '{content}<br>';
+		$city_template             = '{content} ';
+		$description_template      = '</p>{content}</p><br>';
+		$phone_template            = '{content}<br>';
+		$email_template            = '<a href="mailto:{email}">{email}</a>';
+		$link_template             = '<a href="{url}" target=_blank>{url}</a><br>';
+		$other_template            = '<p>{content}</p><br>';
+		$specialty                 = '';
+		$full_address              = '';
+		$address                   = '';
+		$city                      = '';
+		$zipcode                   = '';
+		$description               = '';
+		$phone                     = '';
+		$email                     = '';
+		$link                      = '';
+		$other                     = '';
+
+		foreach ( $item->childNodes as $child ) {
+			/* @var \DOMNode $child */
+			if ( 'title' === $child->nodeName ) {
+				$post['post_title'] = $child->nodeValue;
+			}
+
+			if ( 'dc:creator' === $child->nodeName ) {
+				$post['post_author'] = $authors[ $child->nodeValue ]->ID ?? 0;
+			}
+
+			if ( 'wp:post_date' === $child->nodeName ) {
+				$post['post_date'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_date_gmt' === $child->nodeName ) {
+				$post['post_date_gmt'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_modified' === $child->nodeName ) {
+				$post['post_modified'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_modified_gmt' === $child->nodeName ) {
+				$post['post_modified_gmt'] = $child->nodeValue;
+			}
+
+			if ( 'wp:comment_status' === $child->nodeName ) {
+				$post['comment_status'] = $child->nodeValue;
+			}
+
+			if ( 'wp:ping_status' === $child->nodeName ) {
+				$post['ping_status'] = $child->nodeValue;
+			}
+
+			if ( 'wp:status' === $child->nodeName ) {
+				$post['post_status'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_name' === $child->nodeName ) {
+				$post['post_name'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_parent' === $child->nodeName ) {
+				$post['post_parent'] = $child->nodeValue;
+			}
+
+			if ( 'wp:menu_order' === $child->nodeName ) {
+				$post['menu_order'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_password' === $child->nodeName ) {
+				$post['post_password'] = $child->nodeValue;
+			}
+
+			if ( 'wp:postmeta' === $child->nodeName ) {
+				$meta_key   = $child->childNodes->item( 1 )->nodeValue;
+				$meta_value = trim( $child->childNodes->item( 3 )->nodeValue );
+
+				if ( empty( $meta_value ) || str_starts_with( $meta_value, 'field_' ) ) {
+					continue;
+				}
+
+				switch ( $meta_key ) {
+					case '_thumbnail_id':
+						if ( array_key_exists( $meta_value, $featured_images ) ) {
+							$guid = $featured_images[$meta_value]->guid;
+							$path = parse_url( $guid, PHP_URL_PATH );
+
+							$new_post_id = $wpdb->get_row( "SELECT ID FROM $wpdb->posts WHERE guid LIKE '%$path' LIMIT 1" );
+
+							if ( ! is_null( $new_post_id ) ) {
+								$post['meta_input']['_thumbnail_id'] = $new_post_id->ID;
+								$post['meta_input']['newspack_featured_image_position'] = 'above';
+							}
+						}
+						break;
+					case 'bm_specialty':
+						$specialty = strtr(
+							$specialty_template,
+							[
+								'{content}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_address':
+						$address = strtr(
+							$address_template,
+							[
+								'{content}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_city':
+						$city = strtr(
+							$city_template,
+							[
+								'{content}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_zipcode':
+						$zipcode = $meta_value;
+						break;
+					case 'bm_phone':
+						$phone = strtr(
+							$phone_template,
+							[
+								'{content}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_email':
+						$email = strtr(
+							$email_template,
+							[
+								'{email}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_url':
+						$link = strtr(
+							$link_template,
+							[
+								'{url}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_description':
+						$text = explode( "\n", $meta_value );
+						$post['post_excerpt'] = array_shift( $text );
+						$description = strtr(
+							$description_template,
+							[
+								'{content}' => $meta_value,
+							]
+						);
+						break;
+					case 'bm_other':
+						$other = strtr(
+							$other_template,
+							[
+								'{content}' => $meta_value,
+							]
+						);
+						break;
+				}
+			}
+
+			if ( ! empty( $address ) || ! empty( $city ) || ! empty( $zipcode ) ) {
+				$full_address = strtr(
+					$full_address_template,
+					[
+						'{address}' => $address,
+						'{city}' => $city,
+						'{zipcode}' => $zipcode,
+					]
+				);
+			}
+
+			$post['post_content'] = strtr(
+				$post_content_template,
+				[
+					'{specialty}' => $specialty,
+					'{full_address}' => $full_address,
+					'{phone}' => $phone,
+					'{email}' => $email,
+					'{link}' => $link,
+					'{description}' => $description,
+					'{other}'     => $other,
+				]
+			);
+
+			if ( 'category' === $child->nodeName ) {
+				$categories[] = [
+					'cat_name'          => htmlspecialchars_decode( $child->nodeValue ),
+					'category_nicename' => $child->attributes->getNamedItem( 'nicename' )->nodeValue,
+					'category_parent'   => $best_of_term_id,
+				];
+			}
+		}
+
+		return [
+			'post'       => $post,
+			'tags'       => $tags,
+			'categories' => $categories,
+		];
 	}
 
 	public function cmd_guest_author_audit() {
@@ -437,6 +708,21 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			}
 		}
 
+		$this->process_posts( $posts, [ $best_of_term_id, $best_of_bethesda_term_id ] );
+	}
+
+	/**
+	 * Processes and creates an array of posts created from an XML file.
+	 *
+	 * @param array $posts Array of post objects. {
+	 *     @type array $categories
+	 *     @type array $tags
+	 *     @type array $post
+	 * }
+	 */
+	public function process_posts( array $posts, array $merge_term_ids ) {
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing posts...', count( $posts ) );
+
 		foreach ( $posts as $post ) {
 			$categories = $post['categories'];
 			$tags = $post['tags'];
@@ -458,7 +744,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				}
 			}
 
-			$categories = array_merge( $categories, [ $best_of_term_id, $best_of_bethesda_term_id ] );
+			$categories = array_merge( $categories, $merge_term_ids );
 
 			wp_set_post_categories( $post_id, $categories );
 
@@ -475,7 +761,10 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			}
 
 			wp_set_object_terms( $post_id, $tags, 'post_tag' );
+
+			$progress->tick();
 		}
+		$progress->finish();
 	}
 
 	/**
