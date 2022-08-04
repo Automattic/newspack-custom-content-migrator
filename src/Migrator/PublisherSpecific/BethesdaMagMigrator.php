@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
+use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
@@ -24,11 +25,17 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var CoAuthors_Guest_Authors $coauthors_guest_authors
+	 */
+	private $coauthors_guest_authors;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->posts_migrator_logic = new PostsLogic();
 		$this->coauthorsplus_logic  = new CoAuthorPlusLogic();
+		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
 	}
 
 	/**
@@ -68,6 +75,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			array( $this, 'bethesda_migrate_co_authors_from_meta' ),
 			array(
 				'shortdesc' => 'Remove duplicated posts.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-guest-author-audit',
+			array( $this, 'cmd_guest_author_audit' ),
+			array(
+				'shortdesc' => 'Replaces Guest Authors based on a mapping provided by the publisher',
 				'synopsis'  => array(),
 			)
 		);
@@ -217,6 +233,76 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		);
 
 		wp_cache_flush();
+	}
+
+	public function cmd_guest_author_audit() {
+		$path = get_home_path() . 'guest_author_audit.csv';
+		$handle = fopen( $path, 'r' );
+
+		$header = fgetcsv( $handle, 0 );
+
+		while ( ! feof( $handle ) ) {
+			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
+
+			$destination_guest_author_id = $this->get_or_create_guest_author( $row['new_name_1'] );
+
+			$original_guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $row['existing_name'] ) );
+
+			if ( false === $original_guest_author ) {
+				WP_CLI::log( "GUEST AUTHOR NOT FOUND: {$row['existing_name']}" );
+				continue;
+			}
+
+			WP_CLI::log( "EXISTING AUTHOR NAME: {$row['existing_name']}\t$original_guest_author->ID" );
+			$post_ids = $this->coauthorsplus_logic->get_all_posts_for_guest_author( $original_guest_author->ID );
+
+			$additional_guest_author_id = null;
+
+			if ( ! empty( $row['new_name_2'] ) ) {
+				$additional_guest_author_id = $this->get_or_create_guest_author( $row['new_name_2'] );
+			}
+
+			foreach ( $post_ids as $post_id ) {
+				$guest_authors = [ $destination_guest_author_id ];
+
+				if ( ! is_null( $additional_guest_author_id ) ) {
+					$guest_authors[] = $additional_guest_author_id;
+				}
+
+				WP_CLI::log( 'REASSIGNING: ' . implode( ',', $guest_authors ) . ' Post ID: ' . $post_id );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors, $post_id );
+			}
+
+			$this->coauthors_guest_authors->delete( $original_guest_author->ID );
+		}
+	}
+
+	/**
+	 * @param string $full_name
+	 *
+	 * @return int
+	 */
+	private function get_or_create_guest_author( string $full_name ) {
+		WP_CLI::log( "GUEST AUTHOR NAME: $full_name" );
+		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $full_name ) );
+
+		if ( false !== $guest_author ) {
+			WP_CLI::log( "EXISTS! $guest_author->ID" );
+			return $guest_author->ID;
+		}
+
+		$exploded = explode( ' ', $full_name );
+		$last_name = array_pop( $exploded );
+		$first_name = implode( ' ', $exploded );
+
+		WP_CLI::log( 'CREATING' );
+		return $this->coauthorsplus_logic->create_guest_author(
+			[
+				'display_name' => $full_name,
+				'first_name' => $first_name,
+				'last_name' => $last_name,
+			]
+		);
 	}
 
 	/**
