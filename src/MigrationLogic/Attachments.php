@@ -136,8 +136,8 @@ class Attachments {
 							WP_CLI::warning(
 								sprintf(
 									'Image ID (%s) from S3 returned an error: %s',
-									$image_request_from_s3,
-									$image_request->get_error_message()
+									$s3_url,
+									$image_request_from_s3->get_error_message()
 								)
 							);
 						}
