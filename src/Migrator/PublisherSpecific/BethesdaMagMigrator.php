@@ -33,8 +33,8 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_migrator_logic = new PostsLogic();
-		$this->coauthorsplus_logic  = new CoAuthorPlusLogic();
+		$this->posts_migrator_logic    = new PostsLogic();
+		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
 		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
 	}
 
@@ -102,7 +102,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			[ $this, 'create_term_dupes_for_taxonomies' ],
 			[
 				'shortdesc' => 'Creates multiple terms for any term which has multiple taxonomies attached.',
-				'synopsis' => [],
+				'synopsis'  => [],
 			]
 		);
 
@@ -120,7 +120,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			[ $this, 'bethesda_migrate_profile_content' ],
 			[
 				'shortdesc' => 'Profile content which needs to be migrated.',
-				'synopsis' => [],
+				'synopsis'  => [],
 			]
 		);
 
@@ -129,7 +129,24 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			[ $this, 'bethesda_update_categories' ],
 			[
 				'shortdesc' => 'Updating categories according to a CSV list provided by the Pub.',
-				'synopsis' => [],
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-handle-content-refresh-xml',
+			[ $this, 'cmd_handle_content_refresh' ],
+			[
+				'shortdesc' => 'Repeatable command to handle refreshed post content via XML',
+				'synopsis' => [
+					[
+						'type'        => 'positional',
+						'name'        => 'xml',
+						'description' => 'Path to file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -262,9 +279,149 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		wp_cache_flush();
 	}
 
+	public function cmd_handle_content_refresh( $args, $assoc_args ) {
+		$xml_path = $args[0];
+		$xml      = new \DOMDocument();
+		$xml->loadXML( file_get_contents( $xml_path ) );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		$posts    = [];
+		$authors  = [];
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing XML items', $channel_children->count() );
+		foreach ( $channel_children as $child ) {
+			/* @var \DOMNode $child */
+			if ( 'wp:author' === $child->nodeName ) {
+				$author                         = $this->handle_xml_author( $child );
+				$authors[ $author->user_login ] = $author;
+			} elseif ( 'item' === $child->nodeName ) {
+				$posts[] = $this->handle_xml_item_three( $child, $authors );
+			}
+			$progress->tick();
+		}
+		$progress->finish();
+
+		$this->process_posts( $posts, [] );
+	}
+
+	public function handle_xml_item_three( \DOMNode $item, array $authors ) {
+		global $wpdb;
+		$pages_and_media_slugs = $wpdb->get_results( "SELECT post_name, ID FROM $wpdb->posts WHERE post_type IN ('page', 'attachment') ", OBJECT_K );
+
+		$featured_images_sql = "SELECT ID, guid FROM bak_wp_posts WHERE post_type = 'attachment'";
+		$featured_images     = $wpdb->get_results( $featured_images_sql, OBJECT_K );
+
+		$post       = [
+			'meta_input' => [],
+		];
+		$categories = [];
+
+		foreach ( $item->childNodes as $child ) {
+			/* @var \DOMNode $child */
+			if ( 'title' === $child->nodeName ) {
+				$post['post_title'] = $child->nodeValue;
+			}
+
+			if ( 'dc:creator' === $child->nodeName ) {
+				$post['post_author'] = $authors[ $child->nodeValue ]->ID ?? 0;
+			}
+
+			if ( 'wp:post_date' === $child->nodeName ) {
+				$post['post_date'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_date_gmt' === $child->nodeName ) {
+				$post['post_date_gmt'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_modified' === $child->nodeName ) {
+				$post['post_modified'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_modified_gmt' === $child->nodeName ) {
+				$post['post_modified_gmt'] = $child->nodeValue;
+			}
+
+			if ( 'wp:comment_status' === $child->nodeName ) {
+				$post['comment_status'] = $child->nodeValue;
+			}
+
+			if ( 'wp:ping_status' === $child->nodeName ) {
+				$post['ping_status'] = $child->nodeValue;
+			}
+
+			if ( 'wp:status' === $child->nodeName ) {
+				$post['post_status'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_name' === $child->nodeName ) {
+				if ( array_key_exists( $child->nodeValue, $pages_and_media_slugs ) ) {
+					continue;
+				}
+				$post['post_name'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_parent' === $child->nodeName ) {
+				$post['post_parent'] = $child->nodeValue;
+			}
+
+			if ( 'wp:menu_order' === $child->nodeName ) {
+				$post['menu_order'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_password' === $child->nodeName ) {
+				$post['post_password'] = $child->nodeValue;
+			}
+
+			if ( 'wp:postmeta' === $child->nodeName ) {
+				$meta_key   = $child->childNodes->item( 1 )->nodeValue;
+				$meta_value = trim( $child->childNodes->item( 3 )->nodeValue );
+
+				if ( empty( $meta_value ) || str_starts_with( $meta_value, 'field_' ) ) {
+					continue;
+				}
+
+				switch ( $meta_key ) {
+					case '_thumbnail_id':
+						if ( array_key_exists( $meta_value, $featured_images ) ) {
+							$guid = $featured_images[ $meta_value ]->guid;
+							$path = parse_url( $guid, PHP_URL_PATH );
+
+							$new_post_id = $wpdb->get_row( "SELECT ID FROM $wpdb->posts WHERE guid LIKE '%$path' LIMIT 1" );
+
+							if ( ! is_null( $new_post_id ) ) {
+								$post['meta_input']['_thumbnail_id'] = $new_post_id->ID;
+								// $post['meta_input']['newspack_featured_image_position'] = 'above';
+							}
+						}
+						break;
+					default:
+						$post['meta_input'][ $meta_key ] = $meta_value;
+						break;
+				}
+			}
+
+			if ( 'category' === $child->nodeName ) {
+				$categories[] = [
+					'cat_name'          => htmlspecialchars_decode( $child->nodeValue ),
+					'category_nicename' => $child->attributes->getNamedItem( 'nicename' )->nodeValue,
+					'category_parent'   => 0,
+				];
+			}
+		}
+
+		return [
+			'post'       => $post,
+			'tags'       => [],
+			'categories' => $categories,
+		];
+	}
+
 	public function bethesda_migrate_profile_content( $args, $assoc_args ) {
 		$xml_path = get_home_path() . 'bethesdamagazine.formatted.WordPress.2022-06-01.xml';
-		$xml = new \DOMDocument();
+		$xml      = new \DOMDocument();
 		$xml->loadXML( file_get_contents( $xml_path ) );
 
 		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
@@ -273,15 +430,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 
 		$profiles_term_id = wp_create_category( 'profiles' );
 
-		$posts = [];
-		$authors = [];
+		$posts    = [];
+		$authors  = [];
 		$progress = WP_CLI\Utils\make_progress_bar( 'Processing XML items', $channel_children->count() );
 		foreach ( $channel_children as $child ) {
 			/* @var \DOMNode $child */
 			if ( 'wp:author' === $child->nodeName ) {
-				$author = $this->handle_xml_author( $child );
+				$author                         = $this->handle_xml_author( $child );
 				$authors[ $author->user_login ] = $author;
-			} else if ( 'item' === $child->nodeName ) {
+			} elseif ( 'item' === $child->nodeName ) {
 				$posts[] = $this->handle_xml_item_two( $child, $profiles_term_id, $authors );
 			}
 			$progress->tick();
@@ -294,47 +451,47 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 * Handles XML <item>'s from file to import as Posts.
 	 *
 	 * @param \DOMNode $item XML <item>.
-	 * @param int $best_of_term_id Parent category ID.
-	 * @param array $authors Recently imported authors.
+	 * @param int      $best_of_term_id Parent category ID.
+	 * @param array    $authors Recently imported authors.
 	 *
 	 * @return array
 	 */
 	private function handle_xml_item_two( \DOMNode $item, int $best_of_term_id = 0, array $authors = [] ) {
 		global $wpdb;
 		$featured_images_sql = "SELECT ID, guid FROM bak_wp_posts WHERE post_type = 'attachment'";
-		$featured_images = $wpdb->get_results( $featured_images_sql, OBJECT_K );
+		$featured_images     = $wpdb->get_results( $featured_images_sql, OBJECT_K );
 
-		$post                      = [
-			'post_type'     => 'post',
-			'meta_input'    => [
-				'newspack_listings_hide_author' => 1,
+		$post                  = [
+			'post_type'  => 'post',
+			'meta_input' => [
+				'newspack_listings_hide_author'       => 1,
 				'newspack_listings_hide_publish_date' => 1,
-				'newspack_listings_hide_parents' => '',
-				'newspack_listings_hide_children' => '',
+				'newspack_listings_hide_parents'      => '',
+				'newspack_listings_hide_children'     => '',
 			],
 		];
-		$categories                = [];
-		$tags                      = [];
-		$post_content_template     = '{specialty}{full_address}{phone}{email}{link}{description}{other}';
-		$specialty_template        = '<h4>{content}</h4><br>';
-		$full_address_template     = '<address>{address}{city}{zipcode}</address><br>';
-		$address_template          = '{content}<br>';
-		$city_template             = '{content} ';
-		$description_template      = '</p>{content}</p><br>';
-		$phone_template            = '{content}<br>';
-		$email_template            = '<a href="mailto:{email}">{email}</a>';
-		$link_template             = '<a href="{url}" target=_blank>{url}</a><br>';
-		$other_template            = '<p>{content}</p><br>';
-		$specialty                 = '';
-		$full_address              = '';
-		$address                   = '';
-		$city                      = '';
-		$zipcode                   = '';
-		$description               = '';
-		$phone                     = '';
-		$email                     = '';
-		$link                      = '';
-		$other                     = '';
+		$categories            = [];
+		$tags                  = [];
+		$post_content_template = '{specialty}{full_address}{phone}{email}{link}{description}{other}';
+		$specialty_template    = '<h4>{content}</h4><br>';
+		$full_address_template = '<address>{address}{city}{zipcode}</address><br>';
+		$address_template      = '{content}<br>';
+		$city_template         = '{content} ';
+		$description_template  = '</p>{content}</p><br>';
+		$phone_template        = '{content}<br>';
+		$email_template        = '<a href="mailto:{email}">{email}</a>';
+		$link_template         = '<a href="{url}" target=_blank>{url}</a><br>';
+		$other_template        = '<p>{content}</p><br>';
+		$specialty             = '';
+		$full_address          = '';
+		$address               = '';
+		$city                  = '';
+		$zipcode               = '';
+		$description           = '';
+		$phone                 = '';
+		$email                 = '';
+		$link                  = '';
+		$other                 = '';
 
 		foreach ( $item->childNodes as $child ) {
 			/* @var \DOMNode $child */
@@ -401,13 +558,13 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				switch ( $meta_key ) {
 					case '_thumbnail_id':
 						if ( array_key_exists( $meta_value, $featured_images ) ) {
-							$guid = $featured_images[$meta_value]->guid;
+							$guid = $featured_images[ $meta_value ]->guid;
 							$path = parse_url( $guid, PHP_URL_PATH );
 
 							$new_post_id = $wpdb->get_row( "SELECT ID FROM $wpdb->posts WHERE guid LIKE '%$path' LIMIT 1" );
 
 							if ( ! is_null( $new_post_id ) ) {
-								$post['meta_input']['_thumbnail_id'] = $new_post_id->ID;
+								$post['meta_input']['_thumbnail_id']                    = $new_post_id->ID;
 								$post['meta_input']['newspack_featured_image_position'] = 'above';
 							}
 						}
@@ -464,9 +621,9 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 						);
 						break;
 					case 'bm_description':
-						$text = explode( "\n", $meta_value );
+						$text                 = explode( "\n", $meta_value );
 						$post['post_excerpt'] = array_shift( $text );
-						$description = strtr(
+						$description          = strtr(
 							$description_template,
 							[
 								'{content}' => $meta_value,
@@ -489,7 +646,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 					$full_address_template,
 					[
 						'{address}' => $address,
-						'{city}' => $city,
+						'{city}'    => $city,
 						'{zipcode}' => $zipcode,
 					]
 				);
@@ -498,13 +655,13 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			$post['post_content'] = strtr(
 				$post_content_template,
 				[
-					'{specialty}' => $specialty,
+					'{specialty}'    => $specialty,
 					'{full_address}' => $full_address,
-					'{phone}' => $phone,
-					'{email}' => $email,
-					'{link}' => $link,
-					'{description}' => $description,
-					'{other}'     => $other,
+					'{phone}'        => $phone,
+					'{email}'        => $email,
+					'{link}'         => $link,
+					'{description}'  => $description,
+					'{other}'        => $other,
 				]
 			);
 
@@ -525,7 +682,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	}
 
 	public function cmd_guest_author_audit() {
-		$path = get_home_path() . 'guest_author_audit.csv';
+		$path   = get_home_path() . 'guest_author_audit.csv';
 		$handle = fopen( $path, 'r' );
 
 		$header = fgetcsv( $handle, 0 );
@@ -580,16 +737,16 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			return $guest_author->ID;
 		}
 
-		$exploded = explode( ' ', $full_name );
-		$last_name = array_pop( $exploded );
+		$exploded   = explode( ' ', $full_name );
+		$last_name  = array_pop( $exploded );
 		$first_name = implode( ' ', $exploded );
 
 		WP_CLI::log( 'CREATING' );
 		return $this->coauthorsplus_logic->create_guest_author(
 			[
 				'display_name' => $full_name,
-				'first_name' => $first_name,
-				'last_name' => $last_name,
+				'first_name'   => $first_name,
+				'last_name'    => $last_name,
 			]
 		);
 	}
@@ -645,19 +802,19 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				if ( false !== $result ) {
 
 					$latest_term_sql = "SELECT term_id FROM $wpdb->terms WHERE name = '$term->name' AND slug = '$term->slug' ORDER BY term_id DESC LIMIT 1";
-					$latest_term = $wpdb->get_row( $latest_term_sql );
+					$latest_term     = $wpdb->get_row( $latest_term_sql );
 
 					$result = $wpdb->insert(
 						$wpdb->term_taxonomy,
 						[
-							'term_id' => $latest_term->term_id,
+							'term_id'  => $latest_term->term_id,
 							'taxonomy' => $taxonomy,
 						]
 					);
 
 					if ( false !== $result ) {
 						$new_term_taxonomy_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $latest_term->term_id AND taxonomy = '$taxonomy'";
-						$new_term_taxonomy = $wpdb->get_row( $new_term_taxonomy_sql );
+						$new_term_taxonomy     = $wpdb->get_row( $new_term_taxonomy_sql );
 
 						$old_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term->term_id AND taxonomy = '$taxonomy'";
 						$old_taxonomy_id     = $wpdb->get_row( $old_taxonomy_id_sql );
@@ -719,9 +876,9 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		$authors = [];
 		foreach ( $channel_children as $child ) {
 			if ( 'wp:author' === $child->nodeName ) {
-				$author = $this->handle_xml_author( $child );
+				$author                         = $this->handle_xml_author( $child );
 				$authors[ $author->user_login ] = $author;
-			} else if ( 'item' === $child->nodeName ) {
+			} elseif ( 'item' === $child->nodeName ) {
 				$posts[] = $this->handle_xml_item( $child, $best_of_term_id, $authors );
 			}
 		}
@@ -743,8 +900,8 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 
 		foreach ( $posts as $post ) {
 			$categories = $post['categories'];
-			$tags = $post['tags'];
-			$post = $post['post'];
+			$tags       = $post['tags'];
+			$post       = $post['post'];
 
 			$post_id = wp_insert_post( $post );
 
@@ -827,7 +984,18 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		$user = get_user_by( 'login', $author_data['user_login'] );
 
 		if ( false === $user ) {
+			// Try email.
+			$user = get_user_by( 'email', $author_data['user_email'] );
+		}
+
+		if ( false === $user ) {
 			$user_id = wp_insert_user( $author_data );
+
+			if ( is_wp_error( $user_id ) ) {
+				var_dump( $author_data );
+				WP_CLI::error( $user_id->get_error_message() );
+			}
+
 			$user    = get_user_by( 'id', $user_id );
 		}
 
@@ -838,15 +1006,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 * Handles XML <item>'s from provided file to import as Posts.
 	 *
 	 * @param \DOMNode $item XML <item>.
-	 * @param int $best_of_term_id Parent category ID.
-	 * @param array $authors Recently imported authors.
+	 * @param int      $best_of_term_id Parent category ID.
+	 * @param array    $authors Recently imported authors.
 	 *
 	 * @return array
 	 */
 	private function handle_xml_item( \DOMNode $item, int $best_of_term_id = 0, array $authors = [] ) {
 		$post                      = [
-			'post_type'     => 'post',
-			'meta_input'    => [],
+			'post_type'  => 'post',
+			'meta_input' => [],
 		];
 		$categories                = [];
 		$tags                      = [];
@@ -931,7 +1099,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 					case 'best_selection':
 						if ( 'editor' === $meta_value ) {
 							$tags[] = "Editor's Pick";
-						} else if ( 'reader' === $meta_value ) {
+						} elseif ( 'reader' === $meta_value ) {
 							$tags[] = "Reader's Pick";
 						}
 						break;
@@ -999,104 +1167,109 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 */
 	public function bethesda_update_categories( $args, $assoc_args ) {
 		global $wpdb;
-		$handle = fopen( get_home_path() . 'bethesda_categories.csv', 'r' );
+		$handle = fopen( get_home_path() . 'bethesda_categories_20220804.csv', 'r' );
 		$header = fgetcsv( $handle, 0 );
 
-		$merger = new ElLiberoCustomCategoriesMigrator();
-		$erase_taxonomies = [];
+		$merger              = new ElLiberoCustomCategoriesMigrator();
+		$erase_taxonomies    = [];
 		$affected_categories = [];
 		while ( ! feof( $handle ) ) {
 			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
 
 			WP_CLI::log( "Slug: {$row['slug']}" );
 			$affected_category = [
-				'slug' => $row['slug'],
-				'action' => $row['action'],
-				'target' => $row['target'],
-				'tag' => $row['tag'],
-				'term_id' => null,
-				'term_taxonomy_id' => null,
-				'rel_count' => 0,
-				'dup_cat_count' => 0,
+				'slug'              => $row['slug'],
+				'action'            => $row['action'],
+				'target'            => $row['target'],
+				'tag'               => $row['tag'],
+				'term_id'           => null,
+				'term_taxonomy_id'  => null,
+				'rel_count'         => 0,
+				'dup_cat_count'     => 0,
 				'already_exist_cat' => 0,
-				'dup_tag_count' => 0,
+				'dup_tag_count'     => 0,
 				'already_exist_tag' => 0,
 			];
 
 			if ( ! empty( $row['action'] ) ) {
 				$current_term_and_term_taxonomy_id_sql = "SELECT t.term_id, tt.term_taxonomy_id FROM $wpdb->term_taxonomy tt 
     				INNER JOIN $wpdb->terms t ON tt.term_id = t.term_id WHERE t.slug = '{$row['slug']}' AND tt.taxonomy = 'category'";
-				$current_term_and_term_taxonomy_id = $wpdb->get_row( $current_term_and_term_taxonomy_id_sql );
-				$relationship_count_sql = "SELECT COUNT(object_id) as counter FROM $wpdb->term_relationships WHERE term_taxonomy_id = $current_term_and_term_taxonomy_id->term_taxonomy_id";
-				$relationship_count = $wpdb->get_row( $relationship_count_sql );
-				$affected_category['term_id'] = $current_term_and_term_taxonomy_id->term_id;
-				$affected_category['term_taxonomy_id'] = $current_term_and_term_taxonomy_id->term_taxonomy_id;
-				$affected_category['rel_count'] = $relationship_count->counter;
+				$current_term_and_term_taxonomy_id     = $wpdb->get_row( $current_term_and_term_taxonomy_id_sql );
+				if ( $current_term_and_term_taxonomy_id ) {
+					$relationship_count_sql                = "SELECT COUNT(object_id) as counter FROM $wpdb->term_relationships WHERE term_taxonomy_id = $current_term_and_term_taxonomy_id->term_taxonomy_id";
+					$relationship_count                    = $wpdb->get_row( $relationship_count_sql );
+					$affected_category['term_id']          = $current_term_and_term_taxonomy_id->term_id;
+					$affected_category['term_taxonomy_id'] = $current_term_and_term_taxonomy_id->term_taxonomy_id;
+					$affected_category['rel_count']        = $relationship_count->counter;
 
-				$erase_taxonomies[] = [ $current_term_and_term_taxonomy_id->term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id ];
+					$erase_taxonomies[] = [
+						$current_term_and_term_taxonomy_id->term_id,
+						$current_term_and_term_taxonomy_id->term_taxonomy_id,
+					];
 
-				switch ( strtolower( trim( $row['action'] ) ) ) {
-					case 'remove':
-						if ( ! empty( $row['target'] ) ) {
-							$term_id = wp_create_category( $row['target'] );
-							$result = $this->duplicate_relationships( $term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id );
-							$affected_category['dup_cat_count'] = $result['successful_inserts'];
-							$affected_category['already_exist_cat'] = $result['already_exist'];
-						}
-
-						if ( ! empty( $row['tag'] ) ) {
-							$term_id = wp_create_tag( $row['tag'] )['term_id'];
-							$result = $this->duplicate_relationships( $term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
-							$affected_category['dup_tag_count'] = $result['successful_inserts'];
-							$affected_category['already_exist_tag'] = $result['already_exist'];
-						}
-						break;
-					case 'rename':
-						if ( ! empty( $row['target'] ) ) {
-
-							$category_exists = category_exists( $row['target'] );
-
-							if ( is_null( $category_exists ) ) {
-								$category_id = wp_create_category( $row['target'] );
-								$result = $this->duplicate_relationships( $category_id, $current_term_and_term_taxonomy_id->term_taxonomy_id );
-								$affected_category['dup_cat_count'] = $result['successful_inserts'];
+					switch ( strtolower( trim( $row['action'] ) ) ) {
+						case 'remove':
+							if ( ! empty( $row['target'] ) ) {
+								$term_id                                = wp_create_category( $row['target'] );
+								$result                                 = $this->duplicate_relationships( $term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id );
+								$affected_category['dup_cat_count']     = $result['successful_inserts'];
 								$affected_category['already_exist_cat'] = $result['already_exist'];
-							} else {
-								// Category already exists, and a merge is required instead.
-								$category_exists = (int) $category_exists;
-
-								$merger->merge_terms( $category_exists, [ $current_term_and_term_taxonomy_id->term_id ] );
 							}
-						}
 
-						if ( ! empty( $row['tag'] ) ) {
-							$tag_id = wp_create_tag( $row['tag'] )['term_id'];
-							$result = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
-							$affected_category['dup_tag_count'] = $result['successful_inserts'];
-							$affected_category['already_exist_tag'] = $result['already_exist'];
-						}
-						break;
-					case 'change to tag':
-						if ( ! empty( $row['tag'] ) ) {
-							$tag_id = wp_create_tag( $row['tag'] )['term_id'];
+							if ( ! empty( $row['tag'] ) ) {
+								$term_id                                = wp_create_tag( $row['tag'] )['term_id'];
+								$result                                 = $this->duplicate_relationships( $term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+								$affected_category['dup_tag_count']     = $result['successful_inserts'];
+								$affected_category['already_exist_tag'] = $result['already_exist'];
+							}
+							break;
+						case 'rename':
+							if ( ! empty( $row['target'] ) ) {
 
-							$result = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
-							$affected_category['dup_tag_count'] = $result['successful_inserts'];
-							$affected_category['already_exist_tag'] = $result['already_exist'];
-						} else {
-							$tag_name_without_dashes = str_replace( '-', ' ', $row['slug'] );
-							$tag_name_without_dashes = ucwords( $tag_name_without_dashes );
-							$tag_id = wp_create_tag( $tag_name_without_dashes )['term_id'];
-							$result = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
-							$affected_category['dup_tag_count'] = $result['successful_inserts'];
-							$affected_category['already_exist_tag'] = $result['already_exist'];
-						}
-						break;
-					case 'merge':
-						$category_id = wp_create_category( $row['target'] );
+								$category_exists = category_exists( $row['target'] );
 
-						$merger->merge_terms( $category_id, [ $current_term_and_term_taxonomy_id->term_id ] );
-						break;
+								if ( is_null( $category_exists ) ) {
+									$category_id                            = wp_create_category( $row['target'] );
+									$result                                 = $this->duplicate_relationships( $category_id, $current_term_and_term_taxonomy_id->term_taxonomy_id );
+									$affected_category['dup_cat_count']     = $result['successful_inserts'];
+									$affected_category['already_exist_cat'] = $result['already_exist'];
+								} else {
+									// Category already exists, and a merge is required instead.
+									$category_exists = (int) $category_exists;
+
+									$merger->merge_terms( $category_exists, [ $current_term_and_term_taxonomy_id->term_id ] );
+								}
+							}
+
+							if ( ! empty( $row['tag'] ) ) {
+								$tag_id                                 = wp_create_tag( $row['tag'] )['term_id'];
+								$result                                 = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+								$affected_category['dup_tag_count']     = $result['successful_inserts'];
+								$affected_category['already_exist_tag'] = $result['already_exist'];
+							}
+							break;
+						case 'change to tag':
+							if ( ! empty( $row['tag'] ) ) {
+								$tag_id = wp_create_tag( $row['tag'] )['term_id'];
+
+								$result                                 = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+								$affected_category['dup_tag_count']     = $result['successful_inserts'];
+								$affected_category['already_exist_tag'] = $result['already_exist'];
+							} else {
+								$tag_name_without_dashes                = str_replace( '-', ' ', $row['slug'] );
+								$tag_name_without_dashes                = ucwords( $tag_name_without_dashes );
+								$tag_id                                 = wp_create_tag( $tag_name_without_dashes )['term_id'];
+								$result                                 = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+								$affected_category['dup_tag_count']     = $result['successful_inserts'];
+								$affected_category['already_exist_tag'] = $result['already_exist'];
+							}
+							break;
+						case 'merge':
+							$category_id = wp_create_category( $row['target'] );
+
+							$merger->merge_terms( $category_id, [ $current_term_and_term_taxonomy_id->term_id ] );
+							break;
+					}
 				}
 			}
 
@@ -1121,7 +1294,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		WHERE sub.counter IS NOT NULL 
 		  AND tt.count <> sub.counter 
 		  AND tt.taxonomy IN ('category', 'post_tag')";
-		$counts_which_need_updating = $wpdb->get_results( $counts_which_need_updating_sql );
+		$counts_which_need_updating     = $wpdb->get_results( $counts_which_need_updating_sql );
 
 		foreach ( $counts_which_need_updating as $item ) {
 			$wpdb->update(
@@ -1134,9 +1307,18 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				]
 			);
 		}
-		$result = [];
+		$result         = [];
 		$print_post_ids = [];
-		foreach ( $result as $post ) { if ( ! array_key_exists( $post->object_id, $print_post_ids ) ) { $wpdb->insert( $wpdb->term_relationships, [ 'object_id' => $post->object_id, 'term_taxonomy_id' => 58398 ] ); } }
+		foreach ( $result as $post ) {
+			if ( ! array_key_exists( $post->object_id, $print_post_ids ) ) {
+				$wpdb->insert(
+					$wpdb->term_relationships,
+					[
+						'object_id'        => $post->object_id,
+						'term_taxonomy_id' => 58398,
+					]
+				); }
+		}
 		WP_CLI\Utils\format_items(
 			'table',
 			$affected_categories,
@@ -1168,18 +1350,18 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	private function duplicate_relationships( int $term_id, int $current_term_taxonomy_id, string $taxonomy = 'category' ) {
 		global $wpdb;
 
-		$term_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term_id AND taxonomy = '$taxonomy'";
-		$term_taxonomy_id = $wpdb->get_row( $term_taxonomy_id_sql );
-		$term_taxonomy_id = $term_taxonomy_id->term_taxonomy_id;
+		$term_taxonomy_id_sql       = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term_id AND taxonomy = '$taxonomy'";
+		$term_taxonomy_id           = $wpdb->get_row( $term_taxonomy_id_sql );
+		$term_taxonomy_id           = $term_taxonomy_id->term_taxonomy_id;
 		$existing_relationships_sql = "SELECT object_id FROM $wpdb->term_relationships WHERE term_taxonomy_id = $term_taxonomy_id";
-		$existing_relationships = $wpdb->get_results( $existing_relationships_sql );
-		$existing_relationships = array_map( fn($rel) => $rel->object_id, $existing_relationships );
-		$existing_relationships = array_flip( $existing_relationships );
-		$current_relationships_sql = "SELECT object_id FROM $wpdb->term_relationships WHERE term_taxonomy_id = $current_term_taxonomy_id";
-		$current_relationships = $wpdb->get_results( $current_relationships_sql );
+		$existing_relationships     = $wpdb->get_results( $existing_relationships_sql );
+		$existing_relationships     = array_map( fn( $rel) => $rel->object_id, $existing_relationships );
+		$existing_relationships     = array_flip( $existing_relationships );
+		$current_relationships_sql  = "SELECT object_id FROM $wpdb->term_relationships WHERE term_taxonomy_id = $current_term_taxonomy_id";
+		$current_relationships      = $wpdb->get_results( $current_relationships_sql );
 
 		$successful_inserts = 0;
-		$already_exist = count( $existing_relationships );
+		$already_exist      = count( $existing_relationships );
 		foreach ( $current_relationships as $object ) {
 			if ( ! array_key_exists( $object->object_id, $existing_relationships ) ) {
 				$success = $wpdb->insert(
@@ -1198,7 +1380,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 
 		return [
 			'successful_inserts' => $successful_inserts,
-			'already_exist' => $already_exist,
+			'already_exist'      => $already_exist,
 		];
 	}
 
@@ -1216,8 +1398,8 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		if ( is_string( $term_id ) && ! is_numeric( $term_id ) ) {
 			// $term_id should be slug.
 			$term_id_sql = "SELECT term_id FROM $wpdb->terms WHERE slug = '$term_id'";
-			$term_id = $wpdb->get_row( $term_id_sql );
-			$term_id = $term_id->term_id;
+			$term_id     = $wpdb->get_row( $term_id_sql );
+			$term_id     = $term_id->term_id;
 		}
 
 		$term_id = (int) $term_id;
@@ -1227,14 +1409,14 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 
 		if ( 0 === $term_id ) {
 			$term_id_sql = "SELECT term_id FROM $wpdb->term_taxonomy WHERE term_taxonomy_id = $term_taxonomy_id";
-			$term_id = $wpdb->get_row( $term_id_sql );
-			$term_id = $term_id->term_id;
+			$term_id     = $wpdb->get_row( $term_id_sql );
+			$term_id     = $term_id->term_id;
 		}
 
 		if ( 0 === $term_taxonomy_id ) {
 			$term_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term_id AND taxonomy = 'category'";
-			$term_taxonomy_id = $wpdb->get_row( $term_taxonomy_id_sql );
-			$term_taxonomy_id = $term_taxonomy_id->term_taxonomy_id;
+			$term_taxonomy_id     = $wpdb->get_row( $term_taxonomy_id_sql );
+			$term_taxonomy_id     = $term_taxonomy_id->term_taxonomy_id;
 		}
 
 		$wpdb->delete(
@@ -1273,7 +1455,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		) as sub WHERE sub.meta_value <> sub.post_excerpt";
 		$results      = $wpdb->get_results( $subtitle_sql );
 
-		$count = count( $results );
+		$count    = count( $results );
 		$progress = WP_CLI\Utils\make_progress_bar( "Processing subtitles. $count records.", $count );
 		while ( $row = array_shift( $results ) ) {
 			wp_update_post(
