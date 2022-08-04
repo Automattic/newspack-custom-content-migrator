@@ -1756,8 +1756,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			       old_posts.post_date as old_post_date,
 			       prod_posts.post_modified as prod_post_modified,
 			       old_posts.post_modified as old_post_modified,
+       			   old_posts.post_title as old_post_title,
 			       prod_posts.post_content as prod_post_content,
-			       old_posts.post_content as old_post_content
+			       old_posts.post_content as old_post_content,
+				    u.ID as user_id,
+				    u.display_name as user_display_name
 			FROM (
 			    SELECT
 			           *
@@ -1773,6 +1776,7 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			          AND post_status = 'publish'
 			        ) as old_posts
 			        ON prod_posts.post_name = old_posts.post_name
+			LEFT JOIN wp_live_users u ON old_posts.post_author = u.ID
 			WHERE prod_posts.post_content != old_posts.post_content
 			  AND old_posts.post_modified > prod_posts.post_modified"
 		);
@@ -1780,22 +1784,41 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		$timestamp     = date( 'Ymd_His', time() );
 		$log_file_path = "copy_post_content_$timestamp.log";
 
+		$output_results = [];
 		foreach ( $results as $row ) {
+
+			$output_result = [
+				'PROD_ID' => $row->prod_post_id,
+				'OLD_ID' => $row->old_post_id,
+				'IDS_DIFF?' => $row->prod_post_id != $row->old_post_id ? "YES" : "NO",
+				'OLD_AUTHOR_ID' => $row->user_id,
+				'OLD_AUTHOR' => $row->user_display_name,
+				'LINK_PROD' => "https://berkeleyside.org/?p=$row->prod_post_id",
+				'LINK_STAGE' => "https://berkeleyside-staging-eddie.newspackstaging.com/?p=$row->prod_post_id",
+				'UPDATED' => 'NO',
+				'ERROR' => '',
+			];
 
 			$result = wp_update_post(
 				[
 					'ID' => $row->prod_post_id,
+					'post_title' => $row->old_post_title,
 					'post_content' => $row->old_post_content,
 					'post_modified' => $row->old_post_modified,
 				]
 			);
 
 			if ( is_wp_error( $result ) ) {
-				$this->log( $log_file_path, "FAILED - PROD: $row->prod_post_id\tOLD: $row->old_post_id" );
+				$output_result['ERROR'] = $result->get_error_message();
+				$this->log( $log_file_path, implode( "\t", $output_result ) );
 			} else {
-				$this->log( $log_file_path, "PROD: $row->prod_post_id\tOLD: $row->old_post_id\tURL: " . site_url( "wp-admin/post.php?post=$row->prod_post_id&action=edit" ) );
+				$output_result['UPDATED'] = 'YES';
+				$this->log( $log_file_path, implode( "\t", $output_result ) );
 			}
+			$output_results[] = $output_result;
+//			sleep(1);
 		}
+		WP_CLI\Utils\format_items( 'table', $output_results, [ 'PROD_ID', 'OLD_ID', 'IDS_DIFF?', 'OLD_AUTHOR_ID', 'OLD_AUTHOR', 'LINK_PROD', 'LINK_STAGE', 'UPDATED', 'ERROR' ] );
 	}
 
 	/**
