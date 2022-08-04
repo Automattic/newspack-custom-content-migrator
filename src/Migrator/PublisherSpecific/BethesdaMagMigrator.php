@@ -114,6 +114,15 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'synopsis' => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-update-categories',
+			[ $this, 'bethesda_update_categories' ],
+			[
+				'shortdesc' => 'Updating categories according to a CSV list provided by the Pub.',
+				'synopsis' => [],
+			]
+		);
 	}
 
 	/**
@@ -971,6 +980,274 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			'tags'       => $tags,
 			'categories' => $categories,
 		];
+	}
+
+	/**
+	 * This function takes the Publisher provied CSV and processes the changes to categories.
+	 *
+	 * @param array $args WP CLI positional args.
+	 * @param array $assoc_args WP CLI optional args.
+	 */
+	public function bethesda_update_categories( $args, $assoc_args ) {
+		global $wpdb;
+		$handle = fopen( get_home_path() . 'bethesda_categories.csv', 'r' );
+		$header = fgetcsv( $handle, 0 );
+
+		$merger = new ElLiberoCustomCategoriesMigrator();
+		$erase_taxonomies = [];
+		$affected_categories = [];
+		while ( ! feof( $handle ) ) {
+			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
+
+			WP_CLI::log( "Slug: {$row['slug']}" );
+			$affected_category = [
+				'slug' => $row['slug'],
+				'action' => $row['action'],
+				'target' => $row['target'],
+				'tag' => $row['tag'],
+				'term_id' => null,
+				'term_taxonomy_id' => null,
+				'rel_count' => 0,
+				'dup_cat_count' => 0,
+				'already_exist_cat' => 0,
+				'dup_tag_count' => 0,
+				'already_exist_tag' => 0,
+			];
+
+			if ( ! empty( $row['action'] ) ) {
+				$current_term_and_term_taxonomy_id_sql = "SELECT t.term_id, tt.term_taxonomy_id FROM $wpdb->term_taxonomy tt 
+    				INNER JOIN $wpdb->terms t ON tt.term_id = t.term_id WHERE t.slug = '{$row['slug']}' AND tt.taxonomy = 'category'";
+				$current_term_and_term_taxonomy_id = $wpdb->get_row( $current_term_and_term_taxonomy_id_sql );
+				$relationship_count_sql = "SELECT COUNT(object_id) as counter FROM $wpdb->term_relationships WHERE term_taxonomy_id = $current_term_and_term_taxonomy_id->term_taxonomy_id";
+				$relationship_count = $wpdb->get_row( $relationship_count_sql );
+				$affected_category['term_id'] = $current_term_and_term_taxonomy_id->term_id;
+				$affected_category['term_taxonomy_id'] = $current_term_and_term_taxonomy_id->term_taxonomy_id;
+				$affected_category['rel_count'] = $relationship_count->counter;
+
+				$erase_taxonomies[] = [ $current_term_and_term_taxonomy_id->term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id ];
+
+				switch ( strtolower( trim( $row['action'] ) ) ) {
+					case 'remove':
+						if ( ! empty( $row['target'] ) ) {
+							$term_id = wp_create_category( $row['target'] );
+							$result = $this->duplicate_relationships( $term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id );
+							$affected_category['dup_cat_count'] = $result['successful_inserts'];
+							$affected_category['already_exist_cat'] = $result['already_exist'];
+						}
+
+						if ( ! empty( $row['tag'] ) ) {
+							$term_id = wp_create_tag( $row['tag'] )['term_id'];
+							$result = $this->duplicate_relationships( $term_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+							$affected_category['dup_tag_count'] = $result['successful_inserts'];
+							$affected_category['already_exist_tag'] = $result['already_exist'];
+						}
+						break;
+					case 'rename':
+						if ( ! empty( $row['target'] ) ) {
+
+							$category_exists = category_exists( $row['target'] );
+
+							if ( is_null( $category_exists ) ) {
+								$category_id = wp_create_category( $row['target'] );
+								$result = $this->duplicate_relationships( $category_id, $current_term_and_term_taxonomy_id->term_taxonomy_id );
+								$affected_category['dup_cat_count'] = $result['successful_inserts'];
+								$affected_category['already_exist_cat'] = $result['already_exist'];
+							} else {
+								// Category already exists, and a merge is required instead.
+								$category_exists = (int) $category_exists;
+
+								$merger->merge_terms( $category_exists, [ $current_term_and_term_taxonomy_id->term_id ] );
+							}
+						}
+
+						if ( ! empty( $row['tag'] ) ) {
+							$tag_id = wp_create_tag( $row['tag'] )['term_id'];
+							$result = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+							$affected_category['dup_tag_count'] = $result['successful_inserts'];
+							$affected_category['already_exist_tag'] = $result['already_exist'];
+						}
+						break;
+					case 'change to tag':
+						if ( ! empty( $row['tag'] ) ) {
+							$tag_id = wp_create_tag( $row['tag'] )['term_id'];
+
+							$result = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+							$affected_category['dup_tag_count'] = $result['successful_inserts'];
+							$affected_category['already_exist_tag'] = $result['already_exist'];
+						} else {
+							$tag_name_without_dashes = str_replace( '-', ' ', $row['slug'] );
+							$tag_name_without_dashes = ucwords( $tag_name_without_dashes );
+							$tag_id = wp_create_tag( $tag_name_without_dashes )['term_id'];
+							$result = $this->duplicate_relationships( $tag_id, $current_term_and_term_taxonomy_id->term_taxonomy_id, 'post_tag' );
+							$affected_category['dup_tag_count'] = $result['successful_inserts'];
+							$affected_category['already_exist_tag'] = $result['already_exist'];
+						}
+						break;
+					case 'merge':
+						$category_id = wp_create_category( $row['target'] );
+
+						$merger->merge_terms( $category_id, [ $current_term_and_term_taxonomy_id->term_id ] );
+						break;
+				}
+			}
+
+			$affected_categories[] = $affected_category;
+		}
+
+		foreach ( $erase_taxonomies as $taxonomy ) {
+			$this->erase_category( $taxonomy[0], $taxonomy[1] );
+		}
+
+		$counts_which_need_updating_sql = "SELECT 
+       		tt.term_taxonomy_id,
+       		tt.count,
+       		sub.counter 
+		FROM $wpdb->term_taxonomy tt LEFT JOIN (
+    		SELECT 
+    		       term_taxonomy_id, 
+    		       COUNT(object_id) as counter 
+    		FROM $wpdb->term_relationships GROUP BY term_taxonomy_id
+		) as sub ON 
+		    tt.term_taxonomy_id = sub.term_taxonomy_id 
+		WHERE sub.counter IS NOT NULL 
+		  AND tt.count <> sub.counter 
+		  AND tt.taxonomy IN ('category', 'post_tag')";
+		$counts_which_need_updating = $wpdb->get_results( $counts_which_need_updating_sql );
+
+		foreach ( $counts_which_need_updating as $item ) {
+			$wpdb->update(
+				$wpdb->term_taxonomy,
+				[
+					'count' => $item->counter,
+				],
+				[
+					'term_taxonomy_id' => $item->term_taxonomy_id,
+				]
+			);
+		}
+		$result = [];
+		$print_post_ids = [];
+		foreach ( $result as $post ) { if ( ! array_key_exists( $post->object_id, $print_post_ids ) ) { $wpdb->insert( $wpdb->term_relationships, [ 'object_id' => $post->object_id, 'term_taxonomy_id' => 58398 ] ); } }
+		WP_CLI\Utils\format_items(
+			'table',
+			$affected_categories,
+			[
+				'slug',
+				'action',
+				'target',
+				'tag',
+				'term_id',
+				'term_taxonomy_id',
+				'rel_count',
+				'dup_cat_count',
+				'already_exist_cat',
+				'dup_tag_count',
+				'already_exist_tag',
+			]
+		);
+	}
+
+	/**
+	 * Convenience function to duplicate wp_term_relationships rows.
+	 *
+	 * @param int    $term_id wp_term.ID.
+	 * @param int    $current_term_taxonomy_id wp_term_taxonomy.term_taxonomy_id.
+	 * @param string $taxonomy wp_term.taxonomy.
+	 *
+	 * @return array
+	 */
+	private function duplicate_relationships( int $term_id, int $current_term_taxonomy_id, string $taxonomy = 'category' ) {
+		global $wpdb;
+
+		$term_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term_id AND taxonomy = '$taxonomy'";
+		$term_taxonomy_id = $wpdb->get_row( $term_taxonomy_id_sql );
+		$term_taxonomy_id = $term_taxonomy_id->term_taxonomy_id;
+		$existing_relationships_sql = "SELECT object_id FROM $wpdb->term_relationships WHERE term_taxonomy_id = $term_taxonomy_id";
+		$existing_relationships = $wpdb->get_results( $existing_relationships_sql );
+		$existing_relationships = array_map( fn($rel) => $rel->object_id, $existing_relationships );
+		$existing_relationships = array_flip( $existing_relationships );
+		$current_relationships_sql = "SELECT object_id FROM $wpdb->term_relationships WHERE term_taxonomy_id = $current_term_taxonomy_id";
+		$current_relationships = $wpdb->get_results( $current_relationships_sql );
+
+		$successful_inserts = 0;
+		$already_exist = count( $existing_relationships );
+		foreach ( $current_relationships as $object ) {
+			if ( ! array_key_exists( $object->object_id, $existing_relationships ) ) {
+				$success = $wpdb->insert(
+					$wpdb->term_relationships,
+					[
+						'object_id'        => $object->object_id,
+						'term_taxonomy_id' => $term_taxonomy_id,
+					]
+				);
+
+				if ( false !== $success ) {
+					$successful_inserts += $success;
+				}
+			}
+		}
+
+		return [
+			'successful_inserts' => $successful_inserts,
+			'already_exist' => $already_exist,
+		];
+	}
+
+	/**
+	 * Deletes any rows from wp_terms, wp_term_taxonomy, wp_term_relationships.
+	 *
+	 * @param string|int $term_id wp_terms.ID.
+	 * @param int        $term_taxonomy_id wp_term_taxonomy.term_taxonomy_id.
+	 *
+	 * @throws Exception Throws exception if both term_id and term_taxonomy_id = 0.
+	 */
+	private function erase_category( $term_id = 0, int $term_taxonomy_id = 0 ) {
+		global $wpdb;
+
+		if ( is_string( $term_id ) && ! is_numeric( $term_id ) ) {
+			// $term_id should be slug.
+			$term_id_sql = "SELECT term_id FROM $wpdb->terms WHERE slug = '$term_id'";
+			$term_id = $wpdb->get_row( $term_id_sql );
+			$term_id = $term_id->term_id;
+		}
+
+		$term_id = (int) $term_id;
+		if ( 0 === $term_id && 0 === $term_taxonomy_id ) {
+			throw new Exception( 'Both $term_id and $term_taxonomy_id cannot be 0.' );
+		}
+
+		if ( 0 === $term_id ) {
+			$term_id_sql = "SELECT term_id FROM $wpdb->term_taxonomy WHERE term_taxonomy_id = $term_taxonomy_id";
+			$term_id = $wpdb->get_row( $term_id_sql );
+			$term_id = $term_id->term_id;
+		}
+
+		if ( 0 === $term_taxonomy_id ) {
+			$term_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term_id AND taxonomy = 'category'";
+			$term_taxonomy_id = $wpdb->get_row( $term_taxonomy_id_sql );
+			$term_taxonomy_id = $term_taxonomy_id->term_taxonomy_id;
+		}
+
+		$wpdb->delete(
+			$wpdb->term_relationships,
+			[
+				'term_taxonomy_id' => $term_taxonomy_id,
+			]
+		);
+
+		$wpdb->delete(
+			$wpdb->term_taxonomy,
+			[
+				'term_taxonomy_id' => $term_taxonomy_id,
+			]
+		);
+
+		$wpdb->delete(
+			$wpdb->terms,
+			[
+				'term_id' => $term_id,
+			]
+		);
 	}
 
 	/**
