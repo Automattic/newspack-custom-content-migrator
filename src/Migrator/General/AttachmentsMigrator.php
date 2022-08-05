@@ -8,7 +8,6 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use \WP_CLI;
 
 /**
@@ -19,23 +18,11 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	const S3_ATTACHMENTS_URLS_LOG = 'S3_ATTACHMENTS_URLS.log';
 
 	/**
-	 * @var AttachmentsLogic
-	 */
-	private $attachments_logic = null;
-
-	/**
 	 * Singleton instance.
 	 *
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-		$this->attachments_logic = new AttachmentsLogic();
-	}
 
 	/**
 	 * Singleton get_instance().
@@ -82,11 +69,6 @@ class AttachmentsMigrator implements InterfaceMigrator {
 					],
 				],
 			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator attachments-get-broken-media-urls',
-			[ $this, 'cmd_get_broken_media_urls' ],
 		);
 	}
 
@@ -246,39 +228,6 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
-	}
-
-	/**
-	 * Gets a list of broken media.
-	 *
-	 * @param array $pos_args   Positional arguments.
-	 * @param array $assoc_args Associative Arguments.
-	 *
-	 * @return void
-	 */
-	public function cmd_get_broken_media_urls( $pos_args, $assoc_args ) {
-		$result = $this->attachments_logic->get_broken_attachment_urls_from_posts( [], true );
-		// $result = $this->attachments_logic->get_broken_attachment_urls_from_posts( [ 430184 ] );
-		print_r( $result );
-		die();
-		foreach ( $result as $post_id => $broken_urls ) {
-			$post                 = get_post( $post_id );
-			$updated_post_content = $post->post_content;
-
-			foreach ( $result as $post_id => $broken_urls ) {
-				foreach ( $broken_urls as $broken_url ) {
-					$fixed_url = $this->get_fixed_url( $broken_url );
-					if ( $fixed_url !== $broken_url ) {
-						$updated_post_content = str_replace( $broken_url, $fixed_url, $updated_post_content );
-					}
-				}
-			}
-
-			if ( $updated_post_content !== $post->post_content ) {
-				// update post
-			}
-		}
-		print_r( $result );
 	}
 
 	/**
