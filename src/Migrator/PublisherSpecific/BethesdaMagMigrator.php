@@ -333,7 +333,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			}
 
 			if ( 'excerpt:encoded' === $child->nodeName ) {
-				$post['post_excerpt'] = $child->nodeValue;
+				$post['meta_input']['newspack_post_subtitle'] = $child->nodeValue;
 			}
 
 			if ( 'wp:post_date' === $child->nodeName ) {
