@@ -328,6 +328,14 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				$post['post_author'] = $authors[ $child->nodeValue ]->ID ?? 0;
 			}
 
+			if ( 'content:encoded' === $child->nodeName ) {
+				$post['post_content'] = $child->nodeValue;
+			}
+
+			if ( 'excerpt:encoded' === $child->nodeName ) {
+				$post['post_excerpt'] = $child->nodeValue;
+			}
+
 			if ( 'wp:post_date' === $child->nodeName ) {
 				$post['post_date'] = $child->nodeValue;
 			}
@@ -363,12 +371,16 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				$post['post_name'] = $child->nodeValue;
 			}
 
-			if ( 'wp:post_parent' === $child->nodeName ) {
+			/*if ( 'wp:post_parent' === $child->nodeName ) {
 				$post['post_parent'] = $child->nodeValue;
-			}
+			}*/
 
 			if ( 'wp:menu_order' === $child->nodeName ) {
 				$post['menu_order'] = $child->nodeValue;
+			}
+
+			if ( 'wp:post_type' === $child->nodeName ) {
+				$post['post_type'] = $child->nodeValue;
 			}
 
 			if ( 'wp:post_password' === $child->nodeName ) {
