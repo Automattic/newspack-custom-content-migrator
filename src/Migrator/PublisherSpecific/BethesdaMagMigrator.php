@@ -149,6 +149,16 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-add-specific-tags-to-specific-posts',
+			[ $this, 'cmd_add_specific_tags_to_specific_posts' ]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bethesda-reassign_posts_to_staff',
+			[ $this, 'cmd_reassign_posts_to_staff' ]
+		);
 	}
 
 	/**
@@ -228,6 +238,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 					'By Robert Karn, Boyds',
 					'By Carole Sugarman, @CaroleSugarman',
 				);
+				$staff_guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( 'staff' );
 
 				$co_authors_to_add = array();
 
@@ -266,7 +277,11 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				if ( ! empty( $co_authors_to_add ) ) {
 					// add co-authors and link them to the post.
 					foreach ( $co_authors_to_add as $co_author_to_add ) {
-						$co_authors_ids[] = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $co_author_to_add ) );
+						if ( $this->str_contains( $co_author_to_add, 'staff' ) ) {
+							$co_authors_ids[] = $staff_guest_author->ID;
+						} else {
+							$co_authors_ids[] = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $co_author_to_add ) );
+						}
 					}
 
 					// Assign co-atuhors to the post in question.
@@ -1348,6 +1363,37 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				'already_exist_tag',
 			]
 		);
+	}
+
+	/**
+	 * Quick function to copy a specific tag to any posts with a specific category.
+	 *
+	 * @return void
+	 */
+	public function cmd_add_specific_tags_to_specific_posts() {
+		global $wpdb;
+		$print_term_id = $wpdb->get_row( "SELECT term_id FROM wp_terms WHERE slug = 'print' LIMIT 1" );
+		$print_term_id = $print_term_id->term_id;
+		$culture_term_taxonomy_id = $wpdb->get_row( "SELECT tt.term_taxonomy_id FROM wp_terms t LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id WHERE t.slug = 'culture' AND tt.taxonomy = 'category' LIMIT 1" );
+		$culture_term_taxonomy_id = $culture_term_taxonomy_id->term_taxonomy_id;
+		$this->duplicate_relationships( $print_term_id, $culture_term_taxonomy_id, 'post_tag' );
+	}
+
+	/**
+	 * Custom function to reassign Erin's post to the Staff account.
+	 *
+	 * @return void
+	 */
+	public function cmd_reassign_posts_to_staff() {
+		global $wpdb;
+		$erins_user = get_user_by( 'email', 'eakhill@gmail.com' );
+		$eris_posts = $wpdb->get_results( "SELECT ID FROM $wpdb->posts WHERE post_author = {$erins_user->ID} AND post_type = 'post' AND post_status = 'publish'" );
+		$staff_user = $this->coauthorsplus_logic->get_guest_author_by_user_login( 'staff' );
+		var_dump(["erin's user" => $erins_user, "erin's posts" => count($eris_posts), 'staff account' => $staff_user]);
+		foreach ( $eris_posts as $post ) {
+			WP_CLI::log( "{$post->ID}" );
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $staff_user->ID ], $post->ID );
+		}
 	}
 
 	/**
