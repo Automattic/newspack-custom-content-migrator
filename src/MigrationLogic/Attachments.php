@@ -108,6 +108,13 @@ class Attachments {
 			preg_match_all( '/<img[^>]+(?:src|data-orig-file)="([^">]+)"/', $post->post_content, $image_sources_match );
 
 			foreach ( $image_sources_match[1] as $image_source_match ) {
+				// Skip non-local URLs.
+				$local_domain = str_replace( [ 'http://', 'https://' ], '', get_site_url() );
+				if ( ! str_contains( $image_source_match, $local_domain ) ) {
+					WP_CLI::warning( sprintf( 'Skipping non-local URL: %s', $image_source_match ) );
+					continue;
+				}
+
 				$image_request = wp_remote_head( $image_source_match, [ 'redirection' => 5 ] );
 
 				if ( is_wp_error( $image_request ) ) {
