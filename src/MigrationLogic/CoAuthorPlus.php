@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\MigrationLogic;
 use \CoAuthors_Plus;
 use \CoAuthors_Guest_Authors;
 use \WP_CLI;
+use WP_Post;
 
 class CoAuthorPlus {
 
@@ -202,5 +203,49 @@ class CoAuthorPlus {
 	 */
 	public function create_guest_author_from_wp_user( $user_id ) {
 		return $this->coauthors_guest_authors->create_guest_author_from_user_id( $user_id );
+	}
+
+	/**
+	 * This function will facilitate obtaining all posts for a given Guest Author.
+	 *
+	 * @param int  $ga_id Guest Author ID (Post ID).
+	 * @param bool $get_post_objects Flag which determines whether to return array of Post IDs, or Post Objects.
+	 *
+	 * @return int[]|WP_Post[]
+	 */
+	public function get_all_posts_for_guest_author( int $ga_id, bool $get_post_objects = false ) {
+		global $wpdb;
+
+		$records = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+	                object_id
+				FROM $wpdb->term_relationships 
+				WHERE term_taxonomy_id = ( 
+				    SELECT 
+				           term_taxonomy_id 
+				    FROM $wpdb->term_relationships 
+				    WHERE object_id = %d )",
+				$ga_id
+			)
+		);
+
+		$post_ids = array_map( fn( $row ) => (int) $row->object_id, $records );
+		$post_ids = array_filter( $post_ids, fn( $post_id ) => $post_id !== $ga_id );
+
+		if ( ! empty( $post_ids ) ) {
+			if ( ! $get_post_objects ) {
+				return $post_ids;
+			}
+
+			return get_posts(
+				[
+					'numberposts' => -1,
+					'post__in'    => $post_ids,
+				]
+			);
+		}
+
+		return [];
 	}
 }
