@@ -84,11 +84,12 @@ class Attachments {
 	/**
 	 * Return broken attachment URLs from posts.
 	 *
-	 * @param int[] $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
+	 * @param int[]   $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
+	 * @param boolean $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
 	 *
 	 * @return mixed[] Array of the broken URLs indexed by the post IDs.
 	 */
-	public function get_broken_attachment_urls_from_posts( $post_ids = [] ) {
+	public function get_broken_attachment_urls_from_posts( $post_ids = [], $is_hosted_on_s3 = false ) {
 		$broken_images = [];
 
 		$posts = get_posts(
@@ -108,6 +109,13 @@ class Attachments {
 			preg_match_all( '/<img[^>]+(?:src|data-orig-file)="([^">]+)"/', $post->post_content, $image_sources_match );
 
 			foreach ( $image_sources_match[1] as $image_source_match ) {
+				// Skip non-local and non-S3 URLs.
+				$local_domain = str_replace( [ 'http://', 'https://' ], '', get_site_url() );
+				if ( ! str_contains( $image_source_match, $local_domain ) && ! str_contains( $image_source_match, '.s3.amazonaws.com' ) ) {
+					WP_CLI::warning( sprintf( 'Skipping non-local URL: %s', $image_source_match ) );
+					continue;
+				}
+
 				$image_request = wp_remote_head( $image_source_match, [ 'redirection' => 5 ] );
 
 				if ( is_wp_error( $image_request ) ) {
@@ -122,7 +130,7 @@ class Attachments {
 
 				if ( 200 !== $image_request['response']['code'] ) {
 					// Check if the URL is managed by s3_uploads plugin.
-					if ( class_exists( \S3_Uploads\Plugin::class ) ) {
+					if ( $is_hosted_on_s3 && class_exists( \S3_Uploads\Plugin::class ) ) {
 						$bucket       = \S3_Uploads\Plugin::get_instance()->get_s3_bucket();
 						$exploded_url = explode( '/', $image_source_match );
 						$filename     = end( $exploded_url );
