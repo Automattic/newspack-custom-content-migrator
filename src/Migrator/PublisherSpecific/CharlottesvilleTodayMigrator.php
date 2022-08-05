@@ -342,7 +342,6 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
 			}
 			$ga_ids[] = $ga_id;
-			$ga_ids = array_unique( $ga_ids );
 
 			// Get this author's (by term_taxonomy_id) Posts.
 			//      e.g. select * from wp_term_relationships wtr where term_taxonomy_id = 2;
@@ -382,6 +381,7 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 					// Add previously set GA too.
 					$ga_ids = array_merge( $ga_ids, $existing_ga_ids );
+					$ga_ids = array_unique( $ga_ids );
 
 					$this->coauthors_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
 				}
