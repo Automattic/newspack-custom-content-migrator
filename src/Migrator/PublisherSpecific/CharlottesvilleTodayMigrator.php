@@ -366,9 +366,22 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 					'ID' => $post_id,
 					'post_author' => $default_wp_author_user_id,
 				] );
-				
+
 				// Assign GAs to post.
 				if ( ! empty( $ga_ids ) ) {
+
+					// Get existing GAs.
+					$existing_gas = $this->coauthors_logic->get_guest_authors_for_post( $post_id );
+					$existing_ga_ids = [];
+					foreach ( $existing_gas as $existing_ga ) {
+						if ( 'guest-author' == $existing_ga->type ) {
+							$existing_ga_ids[] = $existing_ga->ID;
+						}
+					}
+
+					// Add previously set GA too.
+					$ga_ids = array_merge( $ga_ids, $existing_ga_ids );
+
 					$this->coauthors_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
 				}
 			}
