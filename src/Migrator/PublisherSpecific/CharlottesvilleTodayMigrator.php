@@ -296,96 +296,58 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		$default_wp_author_user = get_user_by( 'login', 'adminnewspack' );
 		$default_wp_author_user_id = $default_wp_author_user->ID;
 
-		// Get all Authors from custom taxonomies.
-		//      e.g. select * from wp_term_taxonomy wtt where taxonomy  = 'post_author' and term_id = 2;
-		$rows_termtaxonomy = $wpdb->get_results( "select * from wp_term_taxonomy wtt where taxonomy  = 'post_author' ;", ARRAY_A );
-		foreach ( $rows_termtaxonomy as $key_row_termtaxonomy => $row_termtaxonomy ) {
+		$post_ids = get_posts( [
+			'fields' => 'ids',
+			'posts_per_page' => -1,
+		] );
 
-			$term_id = $row_termtaxonomy['term_id'];
-			$term_taxonomy_id = $row_termtaxonomy['term_taxonomy_id'];
+		foreach ( $post_ids as $post_id ) {
+			$post_authors = $wpdb->get_col( $wpdb->prepare( "select k.name from wp_term_relationships i inner join wp_term_taxonomy j on i.term_taxonomy_id = j.term_taxonomy_id inner join wp_terms k on j.term_id = k.term_id where i.object_id = %d and j.taxonomy = 'post_author';", $post_id ) );
 
-			// Get author name
-			//      e.g. select * from wp_terms where term_id = 2;
-			$row_terms = $wpdb->get_row( $wpdb->prepare( "select * from wp_terms where term_id = %d;", $term_id ), ARRAY_A );
-
-			$author_name = $row_terms['name'];
-			$author_slug = $row_terms['slug'];
-
-			WP_CLI::log( sprintf( "(%d)/(%d) term_id %d -- %s", $key_row_termtaxonomy + 1, count( $rows_termtaxonomy ), $term_id, $author_name ) );
-
-			// Get author meta -- various info
-			//      e.g. select * from wp_termmeta wt where term_id = 2;
-			$row_termmeta = $wpdb->get_results( $wpdb->prepare( "select * from wp_termmeta wt where term_id = %d;", $term_id ), ARRAY_A );
-			// Looks like we're not reconstructing the author meta, just creating GAs with names for these types of authors.
-			// ( source : https://a8c.slack.com/archives/C013N9S2C7Q/p1659641314840219?thread_ts=1659612751.439709&cid=C013N9S2C7Q )
-			// But it would have been this data...
-			// $authorinfo_website_label = $row_termmeta['website_label'] ?? null;
-			// $authorinfo_website = $row_termmeta['website'] ?? null;
-			// $authorinfo_facebook_label = $row_termmeta['facebook_label'] ?? null;
-			// $authorinfo_facebook = $row_termmeta['facebook'] ?? null;
-			// $authorinfo_twitter_label = $row_termmeta['twitter_label'] ?? null;
-			// $authorinfo_twitter = $row_termmeta['twitter'] ?? null;
-			// $authorinfo_first_name = $row_termmeta['first_name'] ?? null;
-			// $authorinfo_last_name = $row_termmeta['last_name'] ?? null;
-			// $authorinfo_email = $row_termmeta['email'] ?? null;
-			// $authorinfo_title = $row_termmeta['title'] ?? null;
-			// $authorinfo_atype = $row_termmeta['atype'] ?? null;
-			// $authorinfo_photo_id = $row_termmeta['photo_id'] ?? null;
-			// $authorinfo_google = $row_termmeta['google'] ?? null;
-			// $authorinfo_google_label = $row_termmeta['google_label'] ?? null;
-
-			// Get or create GA.
-			$ga_ids = [];
-			$ga = $this->get_or_create_ga_by_name( $author_name );
-			$ga_id = $ga->ID ?? null;
-			if ( is_null( $ga_id ) ) {
-				throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+			if ( empty( $post_authors ) ) {
+				continue;
 			}
-			$ga_ids[] = $ga_id;
 
-			// Get this author's (by term_taxonomy_id) Posts.
-			//      e.g. select * from wp_term_relationships wtr where term_taxonomy_id = 2;
-			$rows_term_relationships = $wpdb->get_results( $wpdb->prepare( "select * from wp_term_relationships wtr where term_taxonomy_id = %d ;", $term_taxonomy_id ), ARRAY_A );
+			WP_CLI::warning( "Found authors for post " . $post_id . ": " . json_encode( $post_authors ) );
 
-			// Loop through Posts and assign the GA.
-			foreach ( $rows_term_relationships as $key_row_term_relationships => $row_term_relationships ) {
-				$post_id = $row_term_relationships['object_id'];
+			$guest_author_ids = [];
+			foreach ( $post_authors as $post_author ) {
+				$guest_author = $this->get_or_create_ga_by_name( $post_author );
+				$guest_author_id = $guest_author->ID ?? null;
+				if ( is_null( $guest_author_id ) ) {
+					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+				}
+				$guest_author_ids[] = $guest_author_id;
+			}
 
-				WP_CLI::log( sprintf( "(%d)/(%d) term_id %d -- %s  ;  (%d)/(%d) post_id %d", $key_row_termtaxonomy + 1, count( $rows_termtaxonomy ), $term_id, $author_name, $key_row_term_relationships + 1, count( $rows_term_relationships ), $post_id ) );
+			if ( empty( $guest_author_ids ) ) {
+				continue;
+			}
 
-				// GAs won't be assigned to the post if WP_User author is missing:
-				//   - see \CoAuthors_Plus::add_coauthors and the "Uh oh, no WP_Users assigned to the post" remark.
-				// So let's assign a default one if that's the case.
-				// 	    $post = get_post( $post_id );
-				// 	    $post_author = $post->post_author;
-				// 	    if ( 0 === $post_author || ! $post_author ) {
-				// 	    	$wpdb->update( $wpdb->posts, [ 'post_author' => $default_wp_author_user_id ], [ 'ID' => $post_id ] );
-				// 	    	wp_cache_flush();
-				// 	    }
-				$r = wp_update_post( [
+			// GAs won't be assigned to the post if WP_User author is missing:
+			//   - see \CoAuthors_Plus::add_coauthors and the "Uh oh, no WP_Users assigned to the post" remark.
+			// So let's assign a default one if that's the case.
+			if ( 0 === get_post_field( 'post_author', $post_id ) ) {
+				wp_update_post( [
 					'ID' => $post_id,
 					'post_author' => $default_wp_author_user_id,
 				] );
+			}
 
-				// Assign GAs to post.
-				if ( ! empty( $ga_ids ) ) {
-
-					// Get existing GAs.
-					$existing_gas = $this->coauthors_logic->get_guest_authors_for_post( $post_id );
-					$existing_ga_ids = [];
-					foreach ( $existing_gas as $existing_ga ) {
-						if ( 'guest-author' == $existing_ga->type ) {
-							$existing_ga_ids[] = $existing_ga->ID;
-						}
-					}
-
-					// Add previously set GA too.
-					$ga_ids = array_merge( $ga_ids, $existing_ga_ids );
-					$ga_ids = array_unique( $ga_ids );
-
-					$this->coauthors_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
+			// Get existing GAs.
+			$existing_guest_authors = $this->coauthors_logic->get_guest_authors_for_post( $post_id );
+			$existing_guest_author_ids = [];
+			foreach ( $existing_guest_authors as $existing_guest_author ) {
+				if ( 'guest-author' == $existing_guest_author->type ) {
+					$existing_guest_author_ids[] = $existing_guest_author->ID;
 				}
 			}
+
+			// Add previously set GA too.
+			$guest_author_ids = array_merge( $guest_author_ids, $existing_guest_author_ids );
+			$guest_author_ids = array_unique( $guest_author_ids );
+
+			$this->coauthors_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id );
 		}
 
 		wp_cache_flush();
