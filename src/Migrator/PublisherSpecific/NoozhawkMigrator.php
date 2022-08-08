@@ -209,7 +209,15 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			array( $this, 'cmd_nh_migrate_galleries' ),
 			array(
 				'shortdesc' => 'Migrate posts galleries.',
-				'synopsis'  => array(),
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'disable-popups',
+						'description' => 'Disable popups on the posts with galleries due to a campaigns\' bug',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			)
 		);
 	}
@@ -837,6 +845,8 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_nh_migrate_galleries( $args, $assoc_args ) {
+		$disable_popups = isset( $assoc_args['disable-popups'] ) ? true : false;
+
 		$query = new \WP_Query(
 			[
 				'posts_per_page' => -1,
@@ -895,6 +905,10 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				);
 
 				update_post_meta( $post->ID, '_newspack_gallery_migrated', true );
+
+				if ( $disable_popups ) {
+					update_post_meta( $post->ID, 'newspack_popups_has_disabled_popups', true );
+				}
 				WP_CLI::success( sprintf( 'Post %d galleries were migrated!', $post->ID ) );
 			}
 		}
