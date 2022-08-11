@@ -220,6 +220,12 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				],
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-copy-media-caption-from-titles',
+			array( $this, 'cmd_nh_copy_media_caption_from_titles' ),
+			array( 'shortdesc' => 'Migrate media captions from media titles.', )
+		);
 	}
 
 	/**
@@ -821,7 +827,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			$featured_image_id = $existing_featured_image ? $existing_featured_image->ID : $this->attachment_logic->import_external_file(
 				$featured_image['url'],
                 array_key_exists( 'title', $featured_image ) ? $featured_image['title'] : null,
-                null,
+                array_key_exists( 'caption', $featured_image ) ? $featured_image['caption'] : null,
                 null,
                 array_key_exists( 'alt', $featured_image ) ? $featured_image['alt'] : null,
                 $post->ID
@@ -879,7 +885,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				$gallery_image_id       = $existing_gallery_image ? $existing_gallery_image->ID : $this->attachment_logic->import_external_file(
                     $gallery_image['url'],
                     array_key_exists( 'title', $gallery_image ) ? $gallery_image['title'] : null,
-                    null,
+                    array_key_exists( 'caption', $gallery_image ) ? $gallery_image['caption'] : null,
                     null,
                     array_key_exists( 'alt', $gallery_image ) ? $gallery_image['alt'] : null,
                     $post->ID
@@ -910,6 +916,40 @@ class NoozhawkMigrator implements InterfaceMigrator {
 					update_post_meta( $post->ID, 'newspack_popups_has_disabled_popups', true );
 				}
 				WP_CLI::success( sprintf( 'Post %d galleries were migrated!', $post->ID ) );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-copy-media-caption-from-titles`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_copy_media_caption_from_titles( $args, $assoc_args ) {
+		global $wpdb;
+
+		$query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'attachment',
+				'post_status'    => 'any',
+			]
+		);
+
+		$media_posts = $query->get_posts();
+
+		foreach ( $media_posts as $media ) {
+			$media_alt = get_post_meta( $media->ID, '_wp_attachment_image_alt', true );
+			if ( empty( $media->post_excerpt ) && ! empty( $media_alt ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->update(
+					$wpdb->prefix . 'posts',
+					array( 'post_excerpt' => $media_alt ),
+					array( 'ID' => $media->ID )
+				);
+
+				WP_CLI::line( sprintf( 'Updated media: %d', $media->ID ) );
 			}
 		}
 	}
