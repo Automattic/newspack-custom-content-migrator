@@ -1543,7 +1543,7 @@ class ContentDiffMigrator {
 	 * @throws \RuntimeException
 	 */
 	public function copy_table_data_using_proper_collation( string $prefix, string $table, int $records_per_transaction = 5000, int $sleep_in_seconds = 1, string $prefix_for_backup = 'bak_' ) {
-		$backup_table = esc_sql( $prefix_for_backup . $table );
+		$backup_table = esc_sql( $prefix_for_backup . $prefix . $table );
 		$source_table = esc_sql( $prefix . $table );
 		$match_collation_for_table = esc_sql( $this->wpdb->prefix . $table );
 		$rename_sql = "RENAME TABLE $source_table TO $backup_table";
