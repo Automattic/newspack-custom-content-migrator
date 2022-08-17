@@ -728,7 +728,11 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		$tables = self::$logic->get_validated_collation_tables( $different_tables_only );
 
-		WP_CLI\Utils\format_items( 'table', $tables, array_keys( $tables[0] ) );
+		if ( ! empty( $tables ) ) {
+			WP_CLI\Utils\format_items( 'table', $tables, array_keys( $tables[0] ) );
+		} else {
+			WP_CLI::success( 'Live and Core WP DB table collations match!' );
+		}
 	}
 
 	/**
