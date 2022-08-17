@@ -74,5 +74,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
 		Migrator\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Migrator\PublisherSpecific\MassterlistMigrator::class,
+		Migrator\PublisherSpecific\MustangNewsMigrator::class	
 	)
 );
