@@ -4,15 +4,6 @@ This plugin is a set of WP CLI commands, and scripts used during Newspack sites 
 
 This Plugin consists of various Migrators (which perform reusable or publisher-specific content migration), and the "Content Diff" logic.
 
-## TOC
-
-- [Installation](https://github.com/Automattic/newspack-custom-content-migrator#installation)
-- [Usage](https://github.com/Automattic/newspack-custom-content-migrator#usage)
-- [Migrators](https://github.com/Automattic/newspack-custom-content-migrator#migrators)
-- [Content Diff](https://github.com/Automattic/newspack-custom-content-migrator#content-diff)
-- [Creating a Migrator](https://github.com/Automattic/newspack-custom-content-migrator#creating-a-migrator)
-- [Running the Content Diff](https://github.com/Automattic/newspack-custom-content-migrator#running-the-content-diff)
-
 ## Installation
 
 Run `composer install`.
