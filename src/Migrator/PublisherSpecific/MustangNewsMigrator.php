@@ -219,6 +219,7 @@ class MustangNewsMigrator implements InterfaceMigrator {
 			@$dom->loadHTML( $body );
 			$article = $dom->getElementsByTagName( 'article' )->item( 0 );
 
+            $this->stop = false;
 			$body = $this->traverse_tree( $article, '' );
 
 			$result = wp_update_post(
