@@ -66,11 +66,12 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
+	 * @throws \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
 	 * @return array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
 		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
-			throw new \RuntimeException( "Table collations do not match for some (or all) WP tables." );
+			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
 
 		$ids              = [];
@@ -1436,12 +1437,12 @@ class ContentDiffMigrator {
 	 * migration is necessary.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param array $skip_tables Core WP DB tables to skip (without prefix).
+	 * @param array  $skip_tables Core WP DB tables to skip (without prefix).
 	 *
-	 * @throws \RuntimeException
+	 * @throws \RuntimeException Throws exception if unable to find live tables with given prefix.
 	 * @return array
 	 */
-	public function validate_collation_on_content_diff_tables( string $table_prefix, array $skip_tables = [] ): array {
+	public function get_collation_comparison_of_live_and_core_wp_tables( string $table_prefix, array $skip_tables = [] ): array {
 		$validated_tables = [];
 
 		$core_tables = array_diff( self::CORE_WP_TABLES, $skip_tables );
@@ -1470,7 +1471,7 @@ class ContentDiffMigrator {
 		}
 
 		if ( empty( $validated_tables ) ) {
-			throw new \RuntimeException( "Unable to validate collation on content diff tables. Please verify live table prefix." );
+			throw new \RuntimeException( 'Unable to validate collation on content diff tables. Please verify live table prefix.' );
 		}
 
 		return $validated_tables;
@@ -1498,9 +1499,9 @@ class ContentDiffMigrator {
 	 * DB tables have matching collations with their corresponding Core WP DB tables.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param array $skip_tables Core WP DB tables to skip (without prefix).
+	 * @param array  $skip_tables Core WP DB tables to skip (without prefix).
 	 *
-	 * @throws \RuntimeException
+	 * @throws \RuntimeException Throws exception if unable to find live tables with given prefix.
 	 * @return bool
 	 */
 	public function are_table_collations_matching( string $table_prefix, array $skip_tables = [] ): bool {
@@ -1517,7 +1518,7 @@ class ContentDiffMigrator {
 	 * @param int    $sleep_in_seconds Delay in seconds between each DB transaction.
 	 * @param string $prefix_for_backup Custom prefix for table to be backed up to.
 	 *
-	 * @throws \RuntimeException
+	 * @throws \RuntimeException Throws various exceptions if unable to complete required SQL operations.
 	 */
 	public function copy_table_data_using_proper_collation( string $prefix, string $table, int $records_per_transaction = 5000, int $sleep_in_seconds = 1, string $prefix_for_backup = 'bak_' ) {
 		$backup_table = esc_sql( $prefix_for_backup . $prefix . $table );
