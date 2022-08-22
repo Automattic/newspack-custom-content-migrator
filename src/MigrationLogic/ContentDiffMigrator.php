@@ -53,14 +53,6 @@ class ContentDiffMigrator {
 	private $wpdb;
 
 	/**
-	 * These tables have been validated against the core WP tables
-	 * to have matching collations.
-	 *
-	 * @var array|null $validated_collation_tables
-	 */
-	private ?array $validated_collation_tables = null;
-
-	/**
 	 * ContentDiffMigrator constructor.
 	 *
 	 * @param object $wpdb Global $wpdb.
@@ -1481,31 +1473,24 @@ class ContentDiffMigrator {
 			throw new \RuntimeException( "Unable to validate collation on content diff tables. Please verify live table prefix." );
 		}
 
-		return $this->validated_collation_tables = $validated_tables;
+		return $validated_tables;
 	}
 
 	/**
-	 * Getter.
+	 * Convenience function that only returns tables which have a different collation
+	 * than the Core WP DB tables.
 	 *
-	 * @param bool $diff_collations_only Whether to get only tables with differing collations.
+	 * @param string $table_prefix Table prefix.
+	 * @param array  $skip_tables Core WP DB tables to skip (without prefix).
 	 *
+	 * @throws \RuntimeException Throws exception if unable to find live tables with given prefix.
 	 * @return array
 	 */
-	public function get_validated_collation_tables( bool $diff_collations_only = false ): array {
-		/*
-		 * This function will throw an exception if validate_collation_on_content_diff_tables hasn't
-		 * been called first. This is because $validated_collation_tables is null upon
-		 * class instantiation, and this function must return an array.
-		 *
-		 * This is fully intentional, otherwise this getter would give the false impression that
-		 * all tables match collations if the $diff_collations_only flag is used.
-		 * */
-
-		if ( $diff_collations_only ) {
-			return array_filter( $this->validated_collation_tables, fn( $validated_table ) => false === $validated_table['match_bool'] );
-		}
-
-		return $this->validated_collation_tables;
+	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
+		return array_filter(
+			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
+			fn( $validated_table ) => false === $validated_table['match_bool']
+		);
 	}
 
 	/**
@@ -1518,16 +1503,8 @@ class ContentDiffMigrator {
 	 * @throws \RuntimeException
 	 * @return bool
 	 */
-	public function are_table_collations_matching( string $table_prefix = '', array $skip_tables = [] ): bool {
-		if ( empty( $this->validated_collation_tables ) ) {
-			if ( empty( $table_prefix ) ) {
-				throw new \RuntimeException( 'Please supply the table prefix for Live tables.' );
-			}
-
-			$this->validate_collation_on_content_diff_tables( $table_prefix, $skip_tables );
-		}
-
-		return empty( $this->get_validated_collation_tables( true ) );
+	public function are_table_collations_matching( string $table_prefix, array $skip_tables = [] ): bool {
+		return empty( $this->filter_for_different_collated_tables( $table_prefix, $skip_tables ) );
 	}
 
 	/**

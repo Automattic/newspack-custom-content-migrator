@@ -724,9 +724,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
 		}
 
-		self::$logic->validate_collation_on_content_diff_tables( $live_table_prefix, $skip_tables );
+		$tables = [];
 
-		$tables = self::$logic->get_validated_collation_tables( $different_tables_only );
+		if ( $different_tables_only ) {
+			$tables = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+		} else {
+			$tables = self::$logic->get_collation_comparison_of_live_and_core_wp_tables( $live_table_prefix, $skip_tables );
+		}
 
 		if ( ! empty( $tables ) ) {
 			WP_CLI\Utils\format_items( 'table', $tables, array_keys( $tables[0] ) );
@@ -752,8 +756,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
 		}
 
-		self::$logic->validate_collation_on_content_diff_tables( $live_table_prefix, $skip_tables );
-		$tables_with_differing_collations = self::$logic->get_validated_collation_tables( true );
+		$tables_with_differing_collations = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
 
 		if ( ! empty( $tables_with_differing_collations ) ) {
 			WP_CLI\Utils\format_items( 'table', $tables_with_differing_collations, array_keys( $tables_with_differing_collations[0] ) );
