@@ -336,13 +336,14 @@ $post_ids = [ 232150 ];
 
 
 				// Profile term_id.
-				$term_id = $atts['term_id'] ?? null;
-				$term_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_terms where term_id = %d ;", $term_id ), ARRAY_A );
-				// Validate.
-				if ( is_null( $term_id ) || ! $term_row ) {
-					WP_CLI::log( sprintf( "no term data: term_id=%s term_row=%s", $term_id, print_r( $term_row, true ) ) );
-					$debug=1;
-				}
+				// Actually, we don't need the Term. Commenting out but leaving the code.
+				// $term_id = $atts['term_id'] ?? null;
+				// $term_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_terms where term_id = %d ;", $term_id ), ARRAY_A );
+				// // Validate.
+				// if ( is_null( $term_id ) || ! $term_row ) {
+				// 	WP_CLI::log( sprintf( "no term data: term_id=%s term_row=%s", $term_id, print_r( $term_row, true ) ) );
+				// 	$debug=1;
+				// }
 
 
 				// Profile author post object ID.
@@ -378,6 +379,8 @@ $post_ids = [ 232150 ];
 				$local_attachment_url = sprintf( "https://%s/wp-content/uploads/%s", $this_hostname_parsed['host'], $live_attachment_wp_content_file_path );
 				$ga_avatar_att_id = attachment_url_to_postid( $local_attachment_url );
 				if ( 0 == $ga_avatar_att_id ) {
+					$debug=1;
+
 					// Import attachment if not exists.
 					// Get live attachment img URL.
 					$featured_img_live_url = sprintf( "https://lede-admin.coloradosun.com/wp-content/uploads/sites/15/%s", $live_attachment_wp_content_file_path );
@@ -385,7 +388,6 @@ $post_ids = [ 232150 ];
 
 					// Log downloading and importing avatar from their live site.
 					$this->log( 'cs_authorprofiles_downloaded_user_avatars.log', sprintf( "live_att_id=%d URL=%s post_ID=%d", $live_attachment_id, $live_attachment_wp_content_file_path, $post_id ) );
-					$debug=1;
 				}
 
 
@@ -455,8 +457,8 @@ $post_ids = [ 232150 ];
 
 
 				// Prepare GA bio text.
-				$ga_email_link = $email ? sprintf( "<a class=\"ga_email_link\" href=\"mailto:%s\">%s</a>", $email, $email ) : '';
-				$ga_twitter_link = $twitter_handle ? sprintf( "<a class=\"newspack-ga-twitter-link\" target=\"_blank\" href=\"https://twitter.com/%s\">@%s</a>", $twitter_handle, $twitter_handle ) : '';
+				$ga_email_link = $email ? sprintf( "Email: <a class=\"ga_email_link\" href=\"mailto:%s\">%s</a>", $email, $email ) : '';
+				$ga_twitter_link = $twitter_handle ? sprintf( "Twitter: <a class=\"newspack-ga-twitter-link\" target=\"_blank\" href=\"https://twitter.com/%s\">@%s</a>", $twitter_handle, $twitter_handle ) : '';
 				$ga_bio_connect_text = sprintf(
 					"%s%s%s",
 					// Start with email link.
