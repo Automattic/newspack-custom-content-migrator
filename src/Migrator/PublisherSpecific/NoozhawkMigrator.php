@@ -68,8 +68,8 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private function __construct() {
 		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
 		$this->attachment_logic        = new AttachmentsLogic();
-		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
-		$this->coauthors_plus          = new CoAuthors_Plus();
+		$this->coauthors_guest_authors = $this->coauthorsplus_logic->coauthors_guest_authors;
+		$this->coauthors_plus          = $this->coauthorsplus_logic->coauthors_plus;
 		$this->dom_crawler             = new Crawler();
 		$this->posts_logic             = new PostsLogic();
 	}

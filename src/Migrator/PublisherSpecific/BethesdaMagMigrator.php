@@ -35,7 +35,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	private function __construct() {
 		$this->posts_migrator_logic    = new PostsLogic();
 		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
-		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
+		$this->coauthors_guest_authors = $this->coauthorsplus_logic->coauthors_guest_authors;
 	}
 
 	/**
