@@ -95,8 +95,7 @@ class RenoMigrator implements InterfaceMigrator {
 		$log = 'reno.log';
 		// Make the image path publicly available.
 		$images_path = '/srv/htdocs/wp-content';
-		$images_path = '/var/www/reno.test/public/wp-content';
-
+		$images_path = '/var/www/reno2.test/public/wp-content';
 
 		// Test Postgres connection.
 		try {
@@ -209,6 +208,7 @@ class RenoMigrator implements InterfaceMigrator {
 				\WP_CLI::line( $msg );
 				continue;
 			}
+			$this->log( $log, sprintf( 'SAVED post_id=%d', $post_id ) );
 
 
 			// Import and attach a featured image.
