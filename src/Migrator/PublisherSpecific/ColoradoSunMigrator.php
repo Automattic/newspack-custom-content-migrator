@@ -304,8 +304,8 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 
 			// LOG this post ID, and number of its 'profile' authors.
-			$this->log( 'cs_authorprofiles_saved_GAs.log', sprintf( "ID=%d number_of_authors=%d", $post_id, count( $byline_meta['profiles'] ) ) );
-			WP_CLI::log( sprintf( "%d authors", count( $byline_meta['profiles'] ) ) );
+			$this->log( 'cs_authorprofiles_saved_GAs.log', sprintf( "ID=%d number_of_profiles=%d", $post_id, count( $byline_meta['profiles'] ) ) );
+			WP_CLI::log( sprintf( "%d number_of_profiles", count( $byline_meta['profiles'] ) ) );
 
 
 			// Loop through this post's profiles.
@@ -313,21 +313,20 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 				// Custom "profile type" variable.
 				$type = $profile['type'];
-
-
 				// Dev helper - check if type is known, distinct existing types are = [ 'byline', ]
 				if ( ! in_array( $type , $distinct_types ) ) {
 					$distinct_types = array_merge( $distinct_types, [ $type ] );
-					WP_CLI::log( sprintf( "new distinct profile type = %s", $type ) );
+					WP_CLI::log( sprintf( "distinct_profile_type = %s", $type ) );
+				}
+				// Skip if not 'byline_id' type.
+				if ( 'byline_id' != $type ) {
+					$this->log( 'cs_authorprofiles_profile_other_types.log', sprintf( "post_ID=%d type=%s profile:%s", $post_id, $type, print_r( $profile, true ) ) );
+					continue;
 				}
 
 
 				// Get profile "atts" which contains "term_id" (profile author term_id) and "post_id" (profile author post_id).
 				$atts = $profile['atts'];
-				// Dev helper check if $atts has more values than just 'term_id' and 'post_id'.
-				if ( count( $atts ) > 2 || ! isset( $atts['term_id'] ) || ! isset( $atts['post_id'] ) ) {
-					$debug=1;
-				}
 
 
 				// Profile term_id -- actually, looks like we don't need the Term. Commenting out but leaving the code.
@@ -366,6 +365,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 				$live_attachment_obj_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_posts where ID = %d", $live_attachment_id ), ARRAY_A );
 				// This avatar attachment file path, will be e.g. '2022/01/outcalt_01.jpg'.
 				$live_attachment_wp_content_file_path = $wpdb->get_var( $wpdb->prepare( "select meta_value from live_wp_postmeta where meta_key = '_live_wp_attached_file' and post_id = %d;", $live_attachment_id ) );
+				$ga_avatar_att_id = null;
 				if ( $live_attachment_wp_content_file_path ) {
 
 					// Check if local attachment exists.
@@ -384,7 +384,6 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 					} else {
 						$this->log( 'cs_authorprofiles_avatars_found.log', sprintf( "live_att_id=%d local_att_id=%s post_ID=%d", $live_attachment_id, $ga_avatar_att_id, $post_id ) );
 					}
-
 				}
 
 
@@ -483,7 +482,17 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 					$guest_author_id = $ga->ID;
 				} else {
 					// Create if not exists.
-					$guest_author_id = $this->coauthors_logic->create_guest_author( [ 'display_name' => $ga_name, 'description' => $ga_bio, 'avatar' => $ga_avatar_att_id ] );
+					// Mandatory name.
+					$ga_create_args = [ 'display_name' => $ga_name ];
+					// Bio.
+					if ( ! empty( $ga_bio ) ) {
+						$ga_create_args = array_merge( $ga_create_args, [ 'description' => $ga_bio ] );
+					}
+					// Avatar att ID.
+					if ( ! is_null( $ga_avatar_att_id ) ) {
+						$ga_create_args = array_merge( $ga_create_args, [ 'avatar' => $ga_avatar_att_id ] );
+					}
+					$guest_author_id = $this->coauthors_logic->create_guest_author( $ga_create_args );
 					// Log.
 					$this->log( 'cs_authorprofiles_created_gas.log', sprintf( "ga_id=%d", $guest_author_id ) );
 				}
