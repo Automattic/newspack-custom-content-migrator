@@ -283,12 +283,9 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 		$distinct_types = [];
 
 		// Get all posts.
-		// $post_ids = $this->posts_logic->get_all_posts_ids();
-
-// DEV test
-$post_ids = [ 232150 ];
-
-
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		// DEV test
+		// $post_ids = [ 232150 ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
@@ -323,7 +320,6 @@ $post_ids = [ 232150 ];
 				if ( ! in_array( $type , $distinct_types ) ) {
 					$distinct_types = array_merge( $distinct_types, [ $type ] );
 					WP_CLI::log( sprintf( "new distinct profile type = %s", $type ) );
-					$debug=1;
 				}
 
 
@@ -335,8 +331,7 @@ $post_ids = [ 232150 ];
 				}
 
 
-				// Profile term_id.
-				// Actually, we don't need the Term. Commenting out but leaving the code.
+				// Profile term_id -- actually, looks like we don't need the Term. Commenting out but leaving the code.
 				// $term_id = $atts['term_id'] ?? null;
 				// $term_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_terms where term_id = %d ;", $term_id ), ARRAY_A );
 				// // Validate.
@@ -346,7 +341,7 @@ $post_ids = [ 232150 ];
 				// }
 
 
-				// Profile author post object ID.
+				// Profile author post object.
 				$profile_post_id = $atts['post_id'] ?? null;
 				$profile_post_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_posts where ID = %d ;", $profile_post_id ), ARRAY_A );
 				// Validate.
@@ -357,7 +352,6 @@ $post_ids = [ 232150 ];
 						( ! $profile_post_row ? 'null' : 'OK' ),
 						$profile_post_row['post_type'] ?? 'null'
 					) );
-					$debug=1;
 				}
 
 
@@ -373,21 +367,25 @@ $post_ids = [ 232150 ];
 				$live_attachment_obj_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_posts where ID = %d", $live_attachment_id ), ARRAY_A );
 				// This avatar attachment file path, will be e.g. '2022/01/outcalt_01.jpg'.
 				$live_attachment_wp_content_file_path = $wpdb->get_var( $wpdb->prepare( "select meta_value from live_wp_postmeta where meta_key = '_live_wp_attached_file' and post_id = %d;", $live_attachment_id ) );
-				// Check if local attachment exists.
-				$this_hostname = get_site_url();
-				$this_hostname_parsed = parse_url( $this_hostname );
-				$local_attachment_url = sprintf( "https://%s/wp-content/uploads/%s", $this_hostname_parsed['host'], $live_attachment_wp_content_file_path );
-				$ga_avatar_att_id = attachment_url_to_postid( $local_attachment_url );
-				if ( 0 == $ga_avatar_att_id ) {
-					$debug=1;
+				if ( $live_attachment_wp_content_file_path ) {
 
-					// Import attachment if not exists.
-					// Get live attachment img URL.
-					$featured_img_live_url = sprintf( "https://lede-admin.coloradosun.com/wp-content/uploads/sites/15/%s", $live_attachment_wp_content_file_path );
-					$ga_avatar_att_id = $this->attachment_logic->import_external_file( $featured_img_live_url );
+					// Check if local attachment exists.
+					$this_hostname = get_site_url();
+					$this_hostname_parsed = parse_url( $this_hostname );
+					$local_attachment_url = sprintf( "https://%s/wp-content/uploads/%s", $this_hostname_parsed['host'], $live_attachment_wp_content_file_path );
+					$ga_avatar_att_id = attachment_url_to_postid( $local_attachment_url );
+					if ( 0 == $ga_avatar_att_id ) {
+						// Import attachment if not exists.
+						// Get live attachment img URL.
+						$featured_img_live_url = sprintf( "https://lede-admin.coloradosun.com/wp-content/uploads/sites/15/%s", $live_attachment_wp_content_file_path );
+						$ga_avatar_att_id = $this->attachment_logic->import_external_file( $featured_img_live_url );
 
-					// Log downloading and importing avatar from their live site.
-					$this->log( 'cs_authorprofiles_downloaded_user_avatars.log', sprintf( "live_att_id=%d URL=%s post_ID=%d", $live_attachment_id, $live_attachment_wp_content_file_path, $post_id ) );
+						// Log downloading and importing avatar from their live site.
+						$this->log( 'cs_authorprofiles_avatars_downloaded.log', sprintf( "live_att_id=%d URL=%s post_ID=%d", $live_attachment_id, $live_attachment_wp_content_file_path, $post_id ) );
+					} else {
+						$this->log( 'cs_authorprofiles_avatars_found.log', sprintf( "live_att_id=%d local_att_id=%s post_ID=%d", $live_attachment_id, $ga_avatar_att_id, $post_id ) );
+					}
+
 				}
 
 
@@ -396,15 +394,16 @@ $post_ids = [ 232150 ];
 				$live_wp_user_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_users where ID = %d", $live_wp_user_id ), ARRAY_A );
 				$live_wp_user_meta_rows = $wpdb->get_results( $wpdb->prepare( "select * from live_wp_usermeta where user_id = %d", $live_wp_user_id ), ARRAY_A );
 				// --- get the local user with same ID
+				//      --- first try and fetch WP author user from $post->post_author
 				$wp_user_id = $post->post_author;
 				$wp_user = get_user_by( 'ID', $wp_user_id );
-				if ( false == $wp_user ) {
-					// OK to skip, but dev help debug just the same.
-					$debug=1;
+				//      --- second try and fetch WP author user from profile's 'user_id' meta
+				if ( false == $wp_user || ( $live_wp_user_row['user_login'] != $wp_user->user_login ) ) {
+					$wp_user = get_user_by( 'ID', $live_wp_user_id );
 				}
 				// --- if this same user exists locally, use it, otherwise insert a new WP user.
 				$linked_wp_user_id = null;
-				if ( $wp_user->user_login == $live_wp_user_row['user_login'] ) {
+				if ( $live_wp_user_row['user_login'] == $wp_user->user_login ) {
 					// Use existing user.
 					$linked_wp_user_id = $wp_user_id;
 				} else {
@@ -426,7 +425,6 @@ $post_ids = [ 232150 ];
 						]
 					);
 					if (1 != $inserted ) {
-						$debug=1;
 						throw new \RuntimeException( sprintf( "Failed inserting user live_wp_users.ID = %d", $live_wp_user_id ) );
 					}
 					// Get newly inserted ID.
@@ -444,7 +442,6 @@ $post_ids = [ 232150 ];
 							]
 						);
 						if ( 1 != $inserted ) {
-							$debug=1;
 							throw new \RuntimeException( sprintf( "Failed inserting usermeta row live_wpusermeta.meta_id = %d", $live_wp_user_meta_row['meta_id'] ) );
 						}
 					}
@@ -452,7 +449,6 @@ $post_ids = [ 232150 ];
 					// Log user creation.
 					$this->log( 'cs_authorprofiles_inserted_new_user.log', sprintf( "ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
 					WP_CLI::log( sprintf( "iimported new User new_ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
-					$debug=1;
 				}
 
 
@@ -473,7 +469,7 @@ $post_ids = [ 232150 ];
 					// Author bio.
 					$profile_post_row['post_content'],
 					// Separator, new line break.
-					( ! empty( $ga_bio_connect_text ) ? "\n" : '' ),
+					( ( ! empty( $profile_post_row['post_content'] ) && ! empty( $ga_bio_connect_text ) ) ? "\n" : '' ),
 					// Connect text
 					$ga_bio_connect_text
 				);
@@ -487,7 +483,9 @@ $post_ids = [ 232150 ];
 					$guest_author_id = $ga->ID;
 				} else {
 					// Create if not exists.
-					$guest_author_id = $this->coauthors_logic->create_guest_author( [ 'display_name' => $ga_name, 'avatar' => $ga_avatar_att_id ] );
+					$guest_author_id = $this->coauthors_logic->create_guest_author( [ 'display_name' => $ga_name, 'description' => $ga_bio, 'avatar' => $ga_avatar_att_id ] );
+					// Log.
+					$this->log( 'cs_authorprofiles_created_gas.log', sprintf( "ga_id=%d", $guest_author_id ) );
 				}
 				if ( is_null( $guest_author_id ) ) {
 					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $ga_name ) );
@@ -495,8 +493,9 @@ $post_ids = [ 232150 ];
 
 
 				// Link this GA to the WP User (this will be repeated for every post, but OK...).
-				$linked_wp_user = get_user_by( 'ID', $linked_wp_user_id );
-				$this->coauthors_logic->link_guest_author_to_wp_user( $guest_author_id, $linked_wp_user );
+				if ( $wp_user ) {
+					$this->coauthors_logic->link_guest_author_to_wp_user( $guest_author_id, $wp_user );
+				}
 
 
 				// Merge existing GAs with this GA.
