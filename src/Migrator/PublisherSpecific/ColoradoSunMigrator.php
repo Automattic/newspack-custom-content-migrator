@@ -284,9 +284,8 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 		// Get all posts.
 		$post_ids = $this->posts_logic->get_all_posts_ids();
-		// DEV test
-		// $post_ids = [ 232150 ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
+
 
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$post = get_post( $post_id );
@@ -299,7 +298,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 				// LOG no authors.
 				$msg = sprintf( "ID=%d no_author_profiles", $post_id, count( $byline_meta['profiles'] ) );
 				$this->log( 'cs_authorprofiles_no_authors.log', $msg );
-				WP_CLI::log( $msg );
+				WP_CLI::log( 'No author profiles. Skipping.' );
 				continue;
 			}
 
@@ -420,15 +419,16 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 							'user_activation_key' => $live_wp_user_row['user_activation_key'],
 							'user_status' => $live_wp_user_row['user_status'],
 							'display_name' => $live_wp_user_row['display_name'],
-							'spam' => $live_wp_user_row['spam'],
-							'deleted' => $live_wp_user_row['deleted'],
+							// These two columns don't exist in our local native WP.
+							// 'spam' => $live_wp_user_row['spam'],
+							// 'deleted' => $live_wp_user_row['deleted'],
 						]
 					);
 					if (1 != $inserted ) {
 						throw new \RuntimeException( sprintf( "Failed inserting user live_wp_users.ID = %d", $live_wp_user_id ) );
 					}
 					// Get newly inserted ID.
-					$inserted_wp_user_id = $wpdb->get_var( sprintf( "select ID from live_wp_users where user_login = %s ; ", $live_wp_user_row['user_login'] ) );
+					$inserted_wp_user_id = $wpdb->get_var( $wpdb->prepare( "select ID from wp_users where user_login = %s ; ", $live_wp_user_row['user_login'] ) );
 					$linked_wp_user_id = $inserted_wp_user_id;
 
 					// Insert usermeta.
