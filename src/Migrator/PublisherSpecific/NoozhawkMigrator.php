@@ -11,8 +11,6 @@ use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 use \WP_Error;
 use \DOMDocument;
-use \CoAuthors_Guest_Authors;
-use \CoAuthors_Plus;
 
 /**
  * Custom migration scripts for Noozhawk.
@@ -38,16 +36,6 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private $attachment_logic;
 
 	/**
-	 * @var null|CoAuthors_Guest_Authors
-	 */
-	public $coauthors_guest_authors;
-
-	/**
-	 * @var null|CoAuthors_Plus
-	 */
-	public $coauthors_plus;
-
-	/**
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
@@ -68,8 +56,6 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	private function __construct() {
 		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
 		$this->attachment_logic        = new AttachmentsLogic();
-		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
-		$this->coauthors_plus          = new CoAuthors_Plus();
 		$this->dom_crawler             = new Crawler();
 		$this->posts_logic             = new PostsLogic();
 	}
@@ -596,7 +582,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				// );
 
 				// if ( $guest_author_id ) {
-				// $this->coauthors_guest_authors->delete( $guest_author_id );
+				// $this->coauthorsplus_logic->coauthors_guest_authors->delete( $guest_author_id );
 				// WP_CLI::line( sprintf( 'Co-author "%s" was deleted!', $co_author_name ) );
 				// }
 				// }
@@ -655,19 +641,19 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				foreach ( $post_co_authors as $post_co_author ) {
 					foreach ( $post_co_authors as $post_co_author_to_check ) {
 						if ( ( $post_co_author->display_name !== $post_co_author_to_check->display_name ) && ( strpos( $post_co_author->display_name, $post_co_author_to_check->display_name ) !== false ) ) {
-							$this->coauthors_guest_authors->delete( $post_co_author_to_check->ID );
+							$this->coauthorsplus_logic->coauthors_guest_authors->delete( $post_co_author_to_check->ID );
 							WP_CLI::line( sprintf( "Deleting '%s' (%d) from '%s'.", $post_co_author_to_check->display_name, $post_co_author_to_check->ID, $post_co_author->display_name ) );
 						}
 					}
 
 					// Remove {update} x:xx p.m. co-authors.
 					if ( substr( $post_co_author->display_name, 0, 8 ) === '{update}' || substr( strtolower( $post_co_author->display_name ), 0, 7 ) === 'updated' ) {
-						$this->coauthors_guest_authors->delete( $post_co_author->ID );
+						$this->coauthorsplus_logic->coauthors_guest_authors->delete( $post_co_author->ID );
 						WP_CLI::line( sprintf( "Deleting '%s'.", $post_co_author->display_name ) );
 					}
 
 					if ( preg_match( '/^[0-9]{1,2}:[0-9]{1,2}\s?(a|p)\.m\.$/', $post_co_author->display_name ) ) {
-						$this->coauthors_guest_authors->delete( $post_co_author->ID );
+						$this->coauthorsplus_logic->coauthors_guest_authors->delete( $post_co_author->ID );
 						WP_CLI::line( sprintf( "Deleting '%s'.", $post_co_author->display_name ) );
 					}
 				}
@@ -688,7 +674,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 							$co_author_to_keep->display_name = $co_author_to_keep->display_name . ', ' . $suffix;
 						}
 
-						$this->coauthors_plus->update_author_term( $co_author_to_keep );
+						$this->coauthorsplus_logic->coauthors_plus->update_author_term( $co_author_to_keep );
 
 						wp_update_post(
 							array(
@@ -699,7 +685,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 						update_post_meta( $co_author_to_keep->ID, 'cap-display_name', $co_author_to_keep->display_name );
 
-						// $this->coauthors_guest_authors->delete_guest_author_cache( $co_author_to_keep->ID );
+						// $this->coauthorsplus_logic->coauthors_guest_authors->delete_guest_author_cache( $co_author_to_keep->ID );
 						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_to_keep->ID ], $post->ID );
 						WP_CLI::line( sprintf( "Setting '%s' as co-author for the post %d", $co_author_to_keep->display_name, $post->ID ) );
 					}

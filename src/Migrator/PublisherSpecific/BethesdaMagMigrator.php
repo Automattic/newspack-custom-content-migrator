@@ -2,7 +2,6 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
@@ -25,17 +24,11 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
-	 * @var CoAuthors_Guest_Authors $coauthors_guest_authors
-	 */
-	private $coauthors_guest_authors;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->posts_migrator_logic    = new PostsLogic();
 		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
-		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
 	}
 
 	/**
@@ -719,7 +712,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 
 			$destination_guest_author_id = $this->get_or_create_guest_author( $row['new_name_1'] );
 
-			$original_guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $row['existing_name'] ) );
+			$original_guest_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $row['existing_name'] ) );
 
 			if ( false === $original_guest_author ) {
 				WP_CLI::log( "GUEST AUTHOR NOT FOUND: {$row['existing_name']}" );
@@ -746,7 +739,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors, $post_id );
 			}
 
-			$this->coauthors_guest_authors->delete( $original_guest_author->ID );
+			$this->coauthorsplus_logic->coauthors_guest_authors->delete( $original_guest_author->ID );
 		}
 	}
 
@@ -757,7 +750,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 */
 	private function get_or_create_guest_author( string $full_name ) {
 		WP_CLI::log( "GUEST AUTHOR NAME: $full_name" );
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $full_name ) );
+		$guest_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $full_name ) );
 
 		if ( false !== $guest_author ) {
 			WP_CLI::log( "EXISTS! $guest_author->ID" );
