@@ -296,7 +296,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			$byline_meta = $byline_meta_value ? unserialize( $byline_meta_value ) : null;
 			if ( is_null( $byline_meta ) ) {
 				// LOG no authors.
-				$msg = sprintf( "ID=%d no_author_profiles", $post_id, count( $byline_meta['profiles'] ) );
+				$msg = sprintf( "ID=%d no_author_profiles", $post_id );
 				$this->log( 'cs_authorprofiles_no_authors.log', $msg );
 				WP_CLI::log( 'No author profiles. Skipping.' );
 				continue;
