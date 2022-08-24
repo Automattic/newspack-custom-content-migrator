@@ -277,7 +277,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 		 */
 
 		// Import live site's wp_posts and wp_postmeta.
-		// \WP_CLI::confirm( "Make sure you've imported the lates live_wp_posts and live_wp_postmeta (with properly updated hostnames) before continuing with this command." );
+		\WP_CLI::confirm( "Make sure you've imported the latest live_wp_posts and live_wp_postmeta (with properly updated hostnames) before continuing with this command." );
 
 		// Dev helper variable.
 		$distinct_types = [];
