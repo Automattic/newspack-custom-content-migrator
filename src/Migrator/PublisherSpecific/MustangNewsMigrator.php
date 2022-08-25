@@ -32,6 +32,7 @@ class MustangNewsMigrator implements InterfaceMigrator {
 		'h4',
 		'h5',
 		'h6',
+		'table',
 	];
 
 	private $stop = false;
@@ -80,6 +81,11 @@ class MustangNewsMigrator implements InterfaceMigrator {
 		WP_CLI::add_command(
 			'newspack-content-migrator mustangnews-scrape-vc-posts',
 			[ $this, 'cmd_scrape_vc_posts' ],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator mustangnews-migrate-youtube-content',
+			[ $this, 'cmd_migrate_youtube_content' ],
 		);
 	}
 
@@ -210,7 +216,7 @@ class MustangNewsMigrator implements InterfaceMigrator {
 
 		foreach ( $posts_with_visual_composer_content as $key => $post ) {
 			$post_number = $key + 1;
-			$url         = "https://mustangnews.net/$post->post_name";
+			$url         = "https://mustangnews-vc.newspackstaging.com/?p=$post->ID";
 			WP_CLI::log( "Post $post_number out of $posts_count\t$url" );
 			$get  = wp_remote_get( $url );
 			$body = wp_remote_retrieve_body( $get );
@@ -219,8 +225,8 @@ class MustangNewsMigrator implements InterfaceMigrator {
 			@$dom->loadHTML( $body );
 			$article = $dom->getElementsByTagName( 'article' )->item( 0 );
 
-            $this->stop = false;
-			$body = $this->traverse_tree( $article, '' );
+			$this->stop = false;
+			$body       = $this->traverse_tree( $article, '' );
 
 			$result = wp_update_post(
 				[
@@ -230,7 +236,7 @@ class MustangNewsMigrator implements InterfaceMigrator {
 			);
 
 			if ( ! is_wp_error( $result ) ) {
-                WP_CLI::log( 'Updated' );
+				WP_CLI::log( 'Updated' );
 			}
 		}
 	}
@@ -252,6 +258,11 @@ class MustangNewsMigrator implements InterfaceMigrator {
 
 			if ( 'iframe' === $element->nodeName ) {
 				$body .= $element->ownerDocument->saveHTML( $element );
+			}
+
+			if ( 'table' === $element->nodeName ) {
+				$body .= '<!-- wp:table --><figure class="wp-block-table">' . $element->ownerDocument->saveHTML( $element ) .
+						 '</figure><!-- /wp:table -->';
 			}
 
 			if ( 'blockquote' === $element->nodeName ) {
@@ -474,6 +485,88 @@ class MustangNewsMigrator implements InterfaceMigrator {
 
 		return null;
 	}
+
+	public function cmd_migrate_youtube_content() {
+		global $wpdb;
+
+		$youtube_posts = $wpdb->get_results(
+			"SELECT 
+            post_id, 
+            meta_value 
+        FROM $wpdb->postmeta 
+        WHERE post_id IN (
+            SELECT 
+                   object_id 
+            FROM $wpdb->term_relationships 
+            WHERE term_taxonomy_id IN (
+                SELECT 
+                       tt.term_taxonomy_id 
+                FROM $wpdb->terms t 
+                    LEFT JOIN $wpdb->term_taxonomy tt 
+                        ON t.term_id = tt.term_id
+                WHERE t.slug = 'video-multimedia'
+            )
+        ) 
+          AND meta_key = 'post_video'"
+		);
+
+		$iframe_template = '<iframe src="https://www.youtube.com/embed/{code}?feature=oembed" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
+
+		foreach ( $youtube_posts as $post_id_and_link ) {
+
+			$code                         = '';
+			$post_id_and_link->meta_value = htmlspecialchars_decode( $post_id_and_link->meta_value );
+
+			if ( str_contains( $post_id_and_link->meta_value, '//youtu.be/' ) || str_contains( $post_id_and_link->meta_value, 'youtube.com/embed/' ) ) {
+				$code = substr( $post_id_and_link->meta_value, strrpos( $post_id_and_link->meta_value, '/' ) + 1 );
+			} elseif ( str_contains( $post_id_and_link->meta_value, 'youtube.com/watch?' ) ) {
+				$query          = substr( $post_id_and_link->meta_value, strpos( $post_id_and_link->meta_value, '?' ) + 1 );
+				$exploded_query = explode( '&', $query );
+
+				foreach ( $exploded_query as $query_part ) {
+					if ( str_starts_with( $query_part, 'v=' ) ) {
+						$code = substr( $query_part, 2 );
+						break;
+					}
+				}
+			}
+
+			if ( ! empty( $code ) ) {
+				$iframe  = strtr(
+					$iframe_template,
+					[
+						'{code}' => $code,
+					]
+				);
+				$iframe .= '<br>';
+
+				$result = $wpdb->query(
+					$wpdb->prepare(
+						"UPDATE $wpdb->posts SET post_content = CONCAT( %s, post_content) WHERE ID = %d",
+						$iframe,
+						$post_id_and_link->post_id
+					)
+				);
+
+				if ( is_wp_error( $result ) ) {
+					WP_CLI::warning( "Unable to update $post_id_and_link->post_id" );
+				} else {
+					WP_CLI::log( "Updated $post_id_and_link->post_id" );
+					$wpdb->update(
+						$wpdb->postmeta,
+						[
+							'meta_key' => '_post_video',
+						],
+						[
+							'post_id'  => $post_id_and_link->post_id,
+							'meta_key' => 'post_video',
+						]
+					);
+				}
+			}
+		}
+	}
+
 	/**
 	 * Get markup for a social icons block.
 	 *
