@@ -284,11 +284,31 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 		// Get all posts.
 		$post_ids = $this->posts_logic->get_all_posts_ids();
+
+		// DEV test cases:
+		// --- two authors
+		// $post_ids = [148861, 193411];
+		// --- single author
+		// $post_ids = [73099, 40794];
+		// // --- these use same WP user which exists in DB
+		// $post_ids = [ 193389];
+
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 
 
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$post = get_post( $post_id );
+
+
+			// Skip if already converted.
+			$authors_converted = get_post_meta( $post_id, '_newspack_profiles_to_cap_converted' );
+			if ( $authors_converted ) {
+				WP_CLI::log( 'Authors previously converted. Skipping.' );
+				continue;
+			}
+
+
+			$this->log( 'cs_authorprofiles_full_log.log', sprintf( "\npost_id=%d", $post_id ) );
 
 
 			// Get profiles/'byline' meta.
@@ -298,6 +318,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 				// LOG no authors.
 				$msg = sprintf( "ID=%d no_author_profiles", $post_id );
 				$this->log( 'cs_authorprofiles_no_authors.log', $msg );
+				$this->log( 'cs_authorprofiles_full_log.log', 'no_profiles' );
 				WP_CLI::log( 'No author profiles. Skipping.' );
 				continue;
 			}
@@ -305,6 +326,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 			// LOG this post ID, and number of its 'profile' authors.
 			$this->log( 'cs_authorprofiles_saved_GAs.log', sprintf( "ID=%d number_of_profiles=%d", $post_id, count( $byline_meta['profiles'] ) ) );
+			$this->log( 'cs_authorprofiles_full_log.log', sprintf( "number_of_profiles=%d", count( $byline_meta['profiles'] ) ) );
 			WP_CLI::log( sprintf( "%d number_of_profiles", count( $byline_meta['profiles'] ) ) );
 
 
@@ -313,6 +335,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 				// Custom "profile type" variable.
 				$type = $profile['type'];
+				$this->log( 'cs_authorprofiles_full_log.log', sprintf( "type=%s", $type ) );
 				// Dev helper - check if type is known, distinct existing types are = [ 'byline', ]
 				if ( ! in_array( $type , $distinct_types ) ) {
 					$distinct_types = array_merge( $distinct_types, [ $type ] );
@@ -361,33 +384,8 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 				$live_attachment_id = $wpdb->get_var( $wpdb->prepare( "select meta_value from live_wp_postmeta where meta_key = %s and post_id = %d ;", '_thumbnail_id', $profile_post_id ) );
 
 
-				// Get actual local avatar attachment ID.
-				$live_attachment_obj_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_posts where ID = %d", $live_attachment_id ), ARRAY_A );
-				// This avatar attachment file path, will be e.g. '2022/01/outcalt_01.jpg'.
-				$live_attachment_wp_content_file_path = $wpdb->get_var( $wpdb->prepare( "select meta_value from live_wp_postmeta where meta_key = '_live_wp_attached_file' and post_id = %d;", $live_attachment_id ) );
-				$ga_avatar_att_id = null;
-				if ( $live_attachment_wp_content_file_path ) {
-
-					// Check if local attachment exists.
-					$this_hostname = get_site_url();
-					$this_hostname_parsed = parse_url( $this_hostname );
-					$local_attachment_url = sprintf( "https://%s/wp-content/uploads/%s", $this_hostname_parsed['host'], $live_attachment_wp_content_file_path );
-					$ga_avatar_att_id = attachment_url_to_postid( $local_attachment_url );
-					if ( 0 == $ga_avatar_att_id ) {
-						// Import attachment if not exists.
-						// Get live attachment img URL.
-						$featured_img_live_url = sprintf( "https://lede-admin.coloradosun.com/wp-content/uploads/sites/15/%s", $live_attachment_wp_content_file_path );
-						$ga_avatar_att_id = $this->attachment_logic->import_external_file( $featured_img_live_url );
-
-						// Log downloading and importing avatar from their live site.
-						$this->log( 'cs_authorprofiles_avatars_downloaded.log', sprintf( "live_att_id=%d URL=%s post_ID=%d", $live_attachment_id, $live_attachment_wp_content_file_path, $post_id ) );
-					} else {
-						$this->log( 'cs_authorprofiles_avatars_found.log', sprintf( "live_att_id=%d local_att_id=%s post_ID=%d", $live_attachment_id, $ga_avatar_att_id, $post_id ) );
-					}
-				}
-
-
 				// Get the actual local WP author User ID.
+				$linked_wp_user_id = null;
 				// --- first get the live site user data
 				$live_wp_user_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_users where ID = %d", $live_wp_user_id ), ARRAY_A );
 				$live_wp_user_meta_rows = $wpdb->get_results( $wpdb->prepare( "select * from live_wp_usermeta where user_id = %d", $live_wp_user_id ), ARRAY_A );
@@ -397,57 +395,68 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 				$wp_user = get_user_by( 'ID', $wp_user_id );
 				//      --- second try and fetch WP author user from profile's 'user_id' meta
 				if ( false == $wp_user || ( $live_wp_user_row['user_login'] != $wp_user->user_login ) ) {
-					$wp_user = get_user_by( 'ID', $live_wp_user_id );
+					// Query manually because of caching in native WP function
+					$wp_user_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_users where user_login = %s", $live_wp_user_row['user_login'] ), ARRAY_A );
+					wp_cache_flush();
+					$wp_user = get_user_by( 'ID', $wp_user_row['ID'] );
 				}
-				// --- if this same user exists locally, use it, otherwise insert a new WP user.
-				$linked_wp_user_id = null;
-				if ( $live_wp_user_row['user_login'] == $wp_user->user_login ) {
-					// Use existing user.
-					$linked_wp_user_id = $wp_user_id;
+				// --- use found User ID, otherwise insert a new WP user.
+				if ( $wp_user && ( $live_wp_user_row['user_login'] == $wp_user->user_login ) ) {
+					$linked_wp_user_id = $wp_user->ID;
+					$this->log( 'cs_authorprofiles_full_log.log', sprintf( "found local user ID=%s user_login=%s", $wp_user->ID, $live_wp_user_row['user_login'] ) );
 				} else {
-					// Insert new user.
-					$inserted = $wpdb->insert(
-						$wpdb->users,
-						[
-							'user_login' => $live_wp_user_row['user_login'],
-							'user_pass' => $live_wp_user_row['user_pass'],
-							'user_nicename' => $live_wp_user_row['user_nicename'],
-							'user_email' => $live_wp_user_row['user_email'],
-							'user_url' => $live_wp_user_row['user_url'],
-							'user_registered' => $live_wp_user_row['user_registered'],
-							'user_activation_key' => $live_wp_user_row['user_activation_key'],
-							'user_status' => $live_wp_user_row['user_status'],
-							'display_name' => $live_wp_user_row['display_name'],
-							// These two columns don't exist in our local native WP.
-							// 'spam' => $live_wp_user_row['spam'],
-							// 'deleted' => $live_wp_user_row['deleted'],
-						]
-					);
-					if (1 != $inserted ) {
-						throw new \RuntimeException( sprintf( "Failed inserting user live_wp_users.ID = %d", $live_wp_user_id ) );
-					}
-					// Get newly inserted ID.
-					$inserted_wp_user_id = $wpdb->get_var( $wpdb->prepare( "select ID from wp_users where user_login = %s ; ", $live_wp_user_row['user_login'] ) );
-					$linked_wp_user_id = $inserted_wp_user_id;
-
-					// Insert usermeta.
-					foreach ( $live_wp_user_meta_rows as $live_wp_user_meta_row ) {
+					// Insert new user from live_wp_users, if exists because profiles can contain multiple users and live_wp_users will only match one user to the Post.
+					if ( $live_wp_user_row ) {
 						$inserted = $wpdb->insert(
-							$wpdb->usermeta,
+							$wpdb->users,
 							[
-								'user_id' => $inserted_wp_user_id,
-								'meta_key' => $live_wp_user_meta_row['meta_key'],
-								'meta_value' => $live_wp_user_meta_row['meta_value'],
+								'user_login' => $live_wp_user_row['user_login'],
+								'user_pass' => $live_wp_user_row['user_pass'],
+								'user_nicename' => $live_wp_user_row['user_nicename'],
+								'user_email' => $live_wp_user_row['user_email'],
+								'user_url' => $live_wp_user_row['user_url'],
+								'user_registered' => $live_wp_user_row['user_registered'],
+								'user_activation_key' => $live_wp_user_row['user_activation_key'],
+								'user_status' => $live_wp_user_row['user_status'],
+								'display_name' => $live_wp_user_row['display_name'],
+								// These two columns don't exist in our local native WP.
+								// 'spam' => $live_wp_user_row['spam'],
+								// 'deleted' => $live_wp_user_row['deleted'],
 							]
 						);
-						if ( 1 != $inserted ) {
-							throw new \RuntimeException( sprintf( "Failed inserting usermeta row live_wpusermeta.meta_id = %d", $live_wp_user_meta_row['meta_id'] ) );
+						if (1 != $inserted ) {
+							throw new \RuntimeException( sprintf( "Failed inserting user live_wp_users.ID = %d", $live_wp_user_id ) );
 						}
-					}
+						// Get newly inserted ID.
+						$inserted_wp_user_id = $wpdb->get_var( $wpdb->prepare( "select ID from wp_users where user_login = %s ; ", $live_wp_user_row['user_login'] ) );
+						$linked_wp_user_id = $inserted_wp_user_id;
 
-					// Log user creation.
-					$this->log( 'cs_authorprofiles_inserted_new_user.log', sprintf( "ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
-					WP_CLI::log( sprintf( "iimported new User new_ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
+						// Insert usermeta.
+						foreach ( $live_wp_user_meta_rows as $live_wp_user_meta_row ) {
+							$inserted = $wpdb->insert(
+								$wpdb->usermeta,
+								[
+									'user_id' => $inserted_wp_user_id,
+									'meta_key' => $live_wp_user_meta_row['meta_key'],
+									'meta_value' => $live_wp_user_meta_row['meta_value'],
+								]
+							);
+							if ( 1 != $inserted ) {
+								throw new \RuntimeException( sprintf( "Failed inserting usermeta row live_wpusermeta.meta_id = %d", $live_wp_user_meta_row['meta_id'] ) );
+							}
+
+							wp_cache_flush();
+						}
+
+						// Log user creation.
+						$this->log( 'cs_authorprofiles_inserted_new_user.log', sprintf( "ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
+						$this->log( 'cs_authorprofiles_full_log.log', sprintf( "inserted user new_ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
+						WP_CLI::log( sprintf( "inserted user new_ID=%d, user_login=%s", $inserted_wp_user_id, $live_wp_user_row['user_login'] ) );
+					} else {
+						// No user was found nor inserted.
+						$wp_user = null;
+						$this->log( 'cs_authorprofiles_full_log.log', sprintf( "not found nor inserted WP User from profile_post_row['post_title']=%s", $profile_post_row['post_title'] ) );
+					}
 				}
 
 
@@ -482,6 +491,34 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 					$guest_author_id = $ga->ID;
 				} else {
 					// Create if not exists.
+
+					// Get actual local avatar attachment ID.
+					$live_attachment_obj_row = $wpdb->get_row( $wpdb->prepare( "select * from live_wp_posts where ID = %d", $live_attachment_id ), ARRAY_A );
+					// This avatar attachment file path, will be e.g. '2022/01/outcalt_01.jpg'.
+					$live_attachment_wp_content_file_path = $wpdb->get_var( $wpdb->prepare( "select meta_value from live_wp_postmeta where meta_key = '_live_wp_attached_file' and post_id = %d;", $live_attachment_id ) );
+					$ga_avatar_att_id = null;
+					if ( $live_attachment_wp_content_file_path ) {
+
+						// Check if local avatar image attachment exists, create it if it doesn't.
+						$this_hostname = get_site_url();
+						$this_hostname_parsed = parse_url( $this_hostname );
+						$local_attachment_url = sprintf( "https://%s/wp-content/uploads/%s", $this_hostname_parsed['host'], $live_attachment_wp_content_file_path );
+						$ga_avatar_att_id = attachment_url_to_postid( $local_attachment_url );
+						if ( 0 == $ga_avatar_att_id ) {
+							// Import attachment if not exists.
+							// Get live attachment img URL.
+							$featured_img_live_url = sprintf( "https://lede-admin.coloradosun.com/wp-content/uploads/sites/15/%s", $live_attachment_wp_content_file_path );
+							$ga_avatar_att_id = $this->attachment_logic->import_external_file( $featured_img_live_url );
+
+							// Log downloading and importing avatar from their live site.
+							$this->log( 'cs_authorprofiles_avatars_downloaded.log', sprintf( "downloaded avatar img live_att_id=%d URL=%s post_ID=%d", $live_attachment_id, $live_attachment_wp_content_file_path, $post_id ) );
+							$this->log( 'cs_authorprofiles_full_log.log', sprintf( "downloaded avatar img live_att_id=%d URL=%s", $live_attachment_id, $live_attachment_wp_content_file_path ) );
+						} else {
+							$this->log( 'cs_authorprofiles_avatars_found.log', sprintf( "found local live_att_id=%d local_att_id=%s post_ID=%d", $live_attachment_id, $ga_avatar_att_id, $post_id ) );
+							$this->log( 'cs_authorprofiles_full_log.log', sprintf( "found local avatar img live_att_id=%d local_att_id=%s", $live_attachment_id, $ga_avatar_att_id ) );
+						}
+					}
+
 					// Mandatory name.
 					$ga_create_args = [ 'display_name' => $ga_name ];
 					// Bio.
@@ -492,9 +529,12 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 					if ( ! is_null( $ga_avatar_att_id ) ) {
 						$ga_create_args = array_merge( $ga_create_args, [ 'avatar' => $ga_avatar_att_id ] );
 					}
+
+					// Create
 					$guest_author_id = $this->coauthors_logic->create_guest_author( $ga_create_args );
 					// Log.
-					$this->log( 'cs_authorprofiles_created_gas.log', sprintf( "ga_id=%d", $guest_author_id ) );
+					$this->log( 'cs_authorprofiles_created_gas.log', sprintf( "created ga_id=%d", $guest_author_id ) );
+					$this->log( 'cs_authorprofiles_full_log.log', sprintf( "created ga_id=%d", $guest_author_id ) );
 				}
 				if ( is_null( $guest_author_id ) ) {
 					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $ga_name ) );
@@ -514,8 +554,14 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 				// Assign GAs to Post.
 				$this->coauthors_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id );
+
+
+				// Save meta that this was done to enable incremental runs (because this command takes time).
+				update_post_meta( $post_id, '_newspack_profiles_to_cap_converted', 1 );
 			}
 		}
+
+		wp_cache_flush();
 	}
 
 	public function remove_string_from_end_of_string( $subject, $remove ) {
