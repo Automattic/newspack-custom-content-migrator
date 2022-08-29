@@ -562,6 +562,30 @@ class MustangNewsMigrator implements InterfaceMigrator {
 							'meta_key' => 'post_video',
 						]
 					);
+
+					$featured_image_check = $wpdb->get_row( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'newspack_featured_image_position' AND post_id = $post_id_and_link->post_id LIMIT 1" );
+
+					if ( $featured_image_check ) {
+						$wpdb->update(
+							$wpdb->postmeta,
+							[
+								'meta_value' => 'hidden',
+							],
+							[
+								'meta_key' => 'newspack_featured_image_position',
+								'post_id'  => $post_id_and_link->post_id,
+							]
+						);
+					} else {
+						$wpdb->insert(
+							$wpdb->postmeta,
+							[
+								'meta_key'   => 'newspack_featured_image_position',
+								'post_id'    => $post_id_and_link->post_id,
+								'meta_value' => 'hidden',
+							]
+						);
+					}
 				}
 			}
 		}
