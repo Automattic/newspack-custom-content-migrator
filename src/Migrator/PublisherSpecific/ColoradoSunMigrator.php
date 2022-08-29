@@ -94,6 +94,14 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			'newspack-content-migrator coloradosun-migrate-over-reusable-blocks',
 			[ $this, 'cmd_migrate_over_reusable_blocks' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-get-reusable-blocks-id-changes',
+			[ $this, 'cmd_get_reusable_blocks_id_changes' ],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-replace-reusable-blocks-ids',
+			[ $this, 'cmd_replace_reusable_blocks_ids' ],
+		);
 	}
 
 	public function cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block( $positional_args, $assoc_args ) {
@@ -275,7 +283,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 		// Create JSON files for reusable blocks.
 		$blocks_data = [];
-		$live_reusable_rows = $wpdb->get_results( "SELECT * FROM live_wp_posts WHERE post_type = 'live_wp_block';" );
+		$live_reusable_rows = $wpdb->get_results( "SELECT * FROM live_wp_posts WHERE post_type = 'live_wp_block';", ARRAY_A );
 		foreach ( $live_reusable_rows as $key_live_reusable_row => $live_reusable_row ) {
 			$blocks_data[] = [
 				'ID' => $live_reusable_row['ID'],
@@ -284,30 +292,82 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			];
 			$json = json_encode( [
 				'__file' => 'wp_block',
-				  'title' => $live_reusable_row['post_title'],
-				  'content' => $live_reusable_row['post_content']
+				'title' => $live_reusable_row['post_title'],
+				'content' => $live_reusable_row['post_content']
 			] );
-			file_put_contents( sprintf( "%s_%s.json", 'liveID_', $live_reusable_row['ID'] ), $json );
 
-// <<<JSON
-// {
-//   "__file": "wp_block",
-//   "title": "%s",
-//   "content": "%s"
-// }
-// JSON;
-//
-// 			$live_reusable_row['post_title'];
-// 			$live_reusable_row['post_content'];
+			$json_filename = sprintf( "%s_%s.json", 'liveID_', $live_reusable_row['ID'] );
+			file_put_contents( $json_filename, $json );
+			WP_CLI::log( sprintf( "saved %s", $json_filename ) );
 		}
 
 		file_put_contents( '0_all_blocks.json', json_encode( $blocks_data ) );
+		WP_CLI::log( '0_all_blocks.json' );
+	}
 
-		// export jsons
-		// import
-		//      get max ID
-		//      try and import 2 blocks, and view results
-		// get ID mappings for these two
+	public function cmd_get_reusable_blocks_id_changes( $positional_args, $assoc_args ) {
+		$all_blocks = json_decode( file_get_contents( '0_all_blocks.json' ), true );
+		if ( ! $all_blocks ) {
+			WP_CLI::error( 'No 0_all_blocks.json' );
+		}
+
+		global $wpdb;
+
+		$mapping_key_old_id_value_new_id = [];
+		foreach ( $all_blocks as $key_block => $block ) {
+			WP_CLI::log( sprintf( "(%d)/(%d)", $key_block + 1, count( $all_blocks ) ) );
+
+			$new_id = $wpdb->get_var( $wpdb->prepare(
+				"select ID from $wpdb->posts where post_type = 'wp_block' and post_title = %s and post_content = %s ;",
+				$block['title'],
+				$block['content']
+			) );
+
+			if ( ! $new_id ) {
+				WP_CLI::log( sprintf( "old ID %d not found 🤔...", $block['ID'] ) );
+				continue;
+			}
+
+			$mapping_key_old_id_value_new_id[ $block['ID'] ] = $new_id;
+		}
+
+		file_put_contents( '0_blocks_id_mappings.log', print_r( $mapping_key_old_id_value_new_id, true ) );
+		WP_CLI::log( 'saved 0_blocks_id_mappings.log' );
+	}
+
+	public function cmd_replace_reusable_blocks_ids( $positional_args, $assoc_args ) {
+		$id_mappings = include '0_blocks_id_mappings.php';
+		if ( ! $id_mappings ) {
+			WP_CLI::error( 'No 0_blocks_id_mappings.php' );
+		}
+
+		global $wpdb;
+
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$post = get_post( $post_id );
+			$post_content_updated = $post->post_content;
+			foreach ( $id_mappings as $old_id => $new_id ) {
+				// It's super easy to search-replace reusable blocks! :) No need for regexes. E.g.
+				//      <!-- wp:block {"ref":276904} /-->
+				$old_block = sprintf( '<!-- wp:block {"ref":%d} /-->', $old_id );
+				$new_block = sprintf( '<!-- wp:block {"ref":%d} /-->', $new_id );
+				$post_content_updated = str_replace( $old_block, $new_block, $post_content_updated );
+			}
+			if ( $post_content_updated != $post->post_content ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+
+				WP_CLI::log( sprintf( "updated ID %d", $post_id ) );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
