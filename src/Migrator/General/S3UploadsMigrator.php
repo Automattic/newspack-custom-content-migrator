@@ -371,6 +371,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		$time_start = microtime( true );
 
 		$log_filename = 's3_subfoldersRemove.log';
+		$log_errors_filename = 's3_subfoldersRemove_errors.log';
 
 		$uploads_dir = wp_get_upload_dir()['basedir'] ?? null;
 		if ( is_null( $uploads_dir ) ) {
@@ -431,7 +432,7 @@ class S3UploadsMigrator implements InterfaceMigrator {
 						$new_file = $mm_full_path . '/' . $subdir_file;
 						$renamed  = rename( $old_file, $new_file );
 						if ( false === $renamed ) {
-							$this->log( 'ccp_subfoldersMoveError', $old_file . ' ' . $new_file );
+							$this->log( $log_errors_filename, $old_file . ' ' . $new_file );
 						}
 					}
 				}
