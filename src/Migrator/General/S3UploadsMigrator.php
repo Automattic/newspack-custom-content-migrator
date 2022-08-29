@@ -112,6 +112,13 @@ class S3UploadsMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator s3uploads-remove-subfolders-from-uploadsyyyymm',
+			[ $this, 'cmd_remove_subfolders_from_uploadsyyyymm' ],
+			[
+				'shortdesc' => "Some S3 integration plugin use a custom subfolder in e.g. '~/wp-content/uploads/YYYY/MM/SUBFOLDER/image.jpg'. This command removes all such subfolders, and moves all the images one level below to '~/wp-content/uploads/YYYY/MM/image.jpg'.",
+			]
+		);
 	}
 
 	/**
@@ -352,6 +359,87 @@ class S3UploadsMigrator implements InterfaceMigrator {
 		}
 
 		return $active;
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator s3uploads-remove-subfolders-from-uploadsyyyymm`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_remove_subfolders_from_uploadsyyyymm( $args, $assoc_args ) {
+		$time_start = microtime( true );
+
+		$log_filename = 's3_subfoldersRemove.log';
+
+		$uploads_dir = wp_get_upload_dir()['basedir'] ?? null;
+		if ( is_null( $uploads_dir ) ) {
+			WP_CLI::error( 'Could not get upload dir.' );
+		}
+
+		$uploads_subdirs = glob( $uploads_dir . '/*', GLOB_ONLYDIR );
+		foreach ( $uploads_subdirs as $key_uploads_subdirs => $uploads_subdir ) {
+			// Work only with valid `yyyy` subdirs.
+			$yyyy_name = pathinfo( $uploads_subdir )['basename'] ?? null;
+			if ( is_null( $yyyy_name ) ) {
+				continue;
+			}
+			if ( ! is_numeric( $yyyy_name ) ) {
+				continue;
+			}
+			$yyyy_numeric = (int) $yyyy_name;
+			if ( $yyyy_numeric < 2000 || $yyyy_numeric > 2022 ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '(%d/%d) yyyy %s', $key_uploads_subdirs + 1, count( $uploads_subdirs ), $yyyy_name ) );
+
+			// Work through `mm` folders.
+			$mms = glob( $uploads_dir . '/' . $yyyy_name . '/*', GLOB_ONLYDIR );
+			foreach ( $mms as $key_mms => $mm_dir ) {
+				$mm_name = pathinfo( $mm_dir )['basename'] ?? null;
+				if ( is_null( $mm_name ) ) {
+					continue;
+				}
+				if ( ! is_numeric( $mm_name ) ) {
+					continue;
+				}
+				$mm_numeric = (int) $mm_name;
+				if ( $mm_numeric < 0 || $mm_numeric > 12 ) {
+					continue;
+				}
+
+				WP_CLI::line( sprintf( '  [%d/%d] mm %s', $key_mms + 1, count( $mms ), $mm_name ) );
+
+				// Work through the subfolders.
+				$mm_full_path = $uploads_dir . '/' . $yyyy_name . '/' . $mm_name;
+				$mm_subdirs   = glob( $mm_full_path . '/*', GLOB_ONLYDIR );
+				$progress     = \WP_CLI\Utils\make_progress_bar( 'Moving...', count( $mm_subdirs ) );
+				foreach ( $mm_subdirs as $mm_subdir ) {
+					$progress->tick();
+
+					$subdir_files = array_diff( scandir( $mm_subdir ), [ '.', '..' ] );
+					if ( 0 == count( $subdir_files ) ) {
+						continue;
+					}
+
+					$msg = '{SUBDIRPATH}' . $mm_subdir;
+					$this->log( $log_filename, $msg );
+					foreach ( $subdir_files as $subdir_file ) {
+						$this->log( $log_filename, $subdir_file );
+						$old_file = $mm_subdir . '/' . $subdir_file;
+						$new_file = $mm_full_path . '/' . $subdir_file;
+						$renamed  = rename( $old_file, $new_file );
+						if ( false === $renamed ) {
+							$this->log( 'ccp_subfoldersMoveError', $old_file . ' ' . $new_file );
+						}
+					}
+				}
+				$progress->finish();
+			}
+		}
+
+		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
