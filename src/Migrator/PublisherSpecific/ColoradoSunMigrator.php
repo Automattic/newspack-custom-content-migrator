@@ -90,6 +90,10 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			'newspack-content-migrator coloradosun-migrate-authors-to-cap',
 			[ $this, 'cmd_migrate_authors_to_cap' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-migrate-over-reusable-blocks',
+			[ $this, 'cmd_migrate_over_reusable_blocks' ],
+		);
 	}
 
 	public function cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block( $positional_args, $assoc_args ) {
@@ -257,6 +261,53 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 		WP_CLI::log( sprintf( 'Additional found blocks: %s', implode( ',', $post_ids_where_additional_blocks_are_found ) ) );
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * @param $positional_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_migrate_over_reusable_blocks( $positional_args, $assoc_args ) {
+
+		global $wpdb;
+
+		// Create JSON files for reusable blocks.
+		$blocks_data = [];
+		$live_reusable_rows = $wpdb->get_results( "SELECT * FROM live_wp_posts WHERE post_type = 'live_wp_block';" );
+		foreach ( $live_reusable_rows as $key_live_reusable_row => $live_reusable_row ) {
+			$blocks_data[] = [
+				'ID' => $live_reusable_row['ID'],
+				'title' => $live_reusable_row['post_title'],
+			    'content' => $live_reusable_row['post_content']
+			];
+			$json = json_encode( [
+				'__file' => 'wp_block',
+				  'title' => $live_reusable_row['post_title'],
+				  'content' => $live_reusable_row['post_content']
+			] );
+			file_put_contents( sprintf( "%s_%s.json", 'liveID_', $live_reusable_row['ID'] ), $json );
+
+// <<<JSON
+// {
+//   "__file": "wp_block",
+//   "title": "%s",
+//   "content": "%s"
+// }
+// JSON;
+//
+// 			$live_reusable_row['post_title'];
+// 			$live_reusable_row['post_content'];
+		}
+
+		file_put_contents( '0_all_blocks.json', json_encode( $blocks_data ) );
+
+		// export jsons
+		// import
+		//      get max ID
+		//      try and import 2 blocks, and view results
+		// get ID mappings for these two
 	}
 
 	/**
