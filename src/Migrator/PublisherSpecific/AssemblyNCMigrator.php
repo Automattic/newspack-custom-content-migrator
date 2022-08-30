@@ -117,6 +117,114 @@ class AssemblyNCMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator assemblync-fix-guest-authors',
+			[ $this, 'cmd_fix_guest_authors' ]
+		);
+	}
+
+	public function cmd_fix_guest_authors() {
+		global $wpdb;
+
+		$guest_authors_sql = "SELECT ID, post_name, post_type FROM live_wp_posts WHERE post_type = 'guest-author'";
+		$guest_author_posts = $wpdb->get_results( $guest_authors_sql );
+
+		foreach ( $guest_author_posts as $guest_author ) {
+			WP_CLI::log( "Handling $guest_author->post_name" );
+
+			$insert_into_posts_table = $wpdb->query(
+				"INSERT INTO `$wpdb->posts` (`ID`, `post_author`, `post_date`, `post_date_gmt`, `post_content`, `post_title`, `post_excerpt`, `post_status`, `comment_status`, `ping_status`, `post_password`, `post_name`, `to_ping`, `pinged`, `post_modified`, `post_modified_gmt`, `post_content_filtered`, `post_parent`, `guid`, `menu_order`, `post_type`, `post_mime_type`, `comment_count`)
+                                        SELECT NULL as ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt, post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count FROM live_wp_posts WHERE ID = $guest_author->ID"
+			);
+
+			if ( ! is_int( $insert_into_posts_table ) ) {
+				WP_CLI::error( 'Could not insert guest-author post' );
+			}
+
+			$new_guest_author_post = $wpdb->get_row( "SELECT ID FROM $wpdb->posts WHERE post_name = '$guest_author->post_name' AND post_type = 'guest-author'" );
+
+			$select_guest_author_postmeta_sql = "SELECT * FROM live_wp_postmeta WHERE post_id = $guest_author->ID";
+			$guest_author_postmeta = $wpdb->get_results( $select_guest_author_postmeta_sql );
+
+			foreach ( $guest_author_postmeta as $postmeta ) {
+				WP_CLI::log( "Inserting Postmeta - post_id: $new_guest_author_post->ID meta_key: $postmeta->meta_key meta_value: $postmeta->meta_value" );
+				$result = $wpdb->insert(
+					$wpdb->postmeta,
+					[
+						'post_id' => $new_guest_author_post->ID,
+						'meta_key' => $postmeta->meta_key,
+						'meta_value' => $postmeta->meta_value,
+					]
+				);
+				WP_CLI::log( 'postmeta inserted successfully' );
+			}
+
+			$linked_account = array_filter( $guest_author_postmeta, fn( $postmeta ) => $postmeta->meta_key === 'cap-linked_account' );
+			$linked_account = array_shift( $linked_account );
+
+			$user_record = $wpdb->get_row( "SELECT * FROM live_wp_users WHERE user_login = '$linked_account->meta_value'" );
+
+			if ( $user_record ) {
+				WP_CLI::log( 'Found corresponding wp_user record: ' . $user_record->ID );
+
+				$insert_into_users_tables = $wpdb->query( "INSERT INTO `$wpdb->users` (`ID`, `user_login`, `user_pass`, `user_nicename`, `user_email`, `user_url`, `user_registered`, `user_activation_key`, `user_status`, `display_name`)  SELECT NULL as ID, user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_activation_key, user_status, display_name FROM live_wp_users WHERE ID = $user_record->ID" );
+
+				$new_user_record = $wpdb->get_row( "SELECT * FROM $wpdb->users WHERE user_login = '$user_record->user_login' ORDER BY ID DESC LIMIT 1 " );
+
+				if ( $new_user_record ) {
+					$user_meta = $wpdb->get_results( "SELECT * FROM live_wp_usermeta WHERE user_id = $user_record->ID" );
+					foreach ( $user_meta as $meta ) {
+						WP_CLI::log( "Inserting Usermeta - user_id: $new_user_record->ID meta_key: $meta->meta_key meta_value: $meta->meta_value" );
+						$result = $wpdb->insert(
+							$wpdb->usermeta,
+							[
+								'user_id' => $new_user_record->ID,
+								'meta_key' => $meta->meta_key,
+								'meta_value' => $meta->meta_value,
+							]
+						);
+
+						if ( is_int( $result ) ) {
+							WP_CLI::log( "usermeta created successfully" );
+
+							$wpdb->update(
+								'live_wp_posts',
+								[
+									'post_type' => '_guest-author',
+								],
+								[
+									'ID' => $guest_author->ID,
+								]
+							);
+						}
+					}
+				}
+			}
+
+			$term_taxonomy = $wpdb->get_row(
+				"SELECT * FROM $wpdb->terms as t 
+    			LEFT JOIN $wpdb->term_taxonomy as tt ON t.term_id = tt.term_id 
+					WHERE t.slug = '$guest_author->post_name'
+					LIMIT 1"
+			);
+
+			if ( $term_taxonomy ) {
+				WP_CLI::log( "Found term_taxonomy record - term_taxonomy_id: $term_taxonomy->term_taxonomy_id slug: $term_taxonomy->slug taxonomy: $term_taxonomy->taxonomy" );
+				$result = $wpdb->insert(
+					$wpdb->term_relationships,
+					[
+						'object_id' => $new_guest_author_post->ID,
+						'term_taxonomy_id' => $term_taxonomy->term_taxonomy_id,
+						'term_order' => 0,
+					]
+				);
+
+				if ( is_int( $result ) ) {
+					WP_CLI::log( "New relationship inserted successfully" );
+				}
+			}
+		}
 	}
 
 	/**
