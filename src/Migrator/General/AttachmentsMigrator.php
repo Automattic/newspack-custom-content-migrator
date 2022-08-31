@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
 use \WP_CLI;
 
 /**
@@ -15,7 +16,13 @@ use \WP_CLI;
  */
 class AttachmentsMigrator implements InterfaceMigrator {
 	// Logs.
-	const S3_ATTACHMENTS_URLS_LOG = 'S3_ATTACHMENTS_URLS.log';
+	const S3_ATTACHMENTS_URLS_LOG      = 'S3_ATTACHMENTS_URLS.log';
+	const MISSING_ATTACHMENTS_URLS_LOG = 'MISSING_ATTACHMENTS_URLS.log';
+
+	/**
+	 * @var AttachmentsLogic.
+	 */
+	private $attachment_logic;
 
 	/**
 	 * Singleton instance.
@@ -23,6 +30,13 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
+
+	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+		$this->attachment_logic = new AttachmentsLogic();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -65,6 +79,47 @@ class AttachmentsMigrator implements InterfaceMigrator {
 						'name'        => 'post_ids',
 						'description' => 'IDs of posts and pages to remove shortcodes from their content separated by a comma (e.g. 123,456)',
 						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator attachments-check-broken-images',
+			[ $this, 'cmd_check_broken_images' ],
+			[
+				'shortdesc' => 'Check images with broken URLs in-story.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'is-using-s3',
+						'description' => 'If the in-story images are hosted on Amazon S3. The S3-uploads plugin should be enabled if this flag is set.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts_per_batch',
+						'description' => 'Posts per batch, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => -1,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch number, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => 1,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'index',
+						'description' => 'Index to start from, in case the command is killed check the last index and start from it.',
+						'optional'    => true,
+						'default'     => 0,
 						'repeating'   => false,
 					],
 				],
@@ -228,6 +283,30 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator attachments-check-broken-images`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_check_broken_images( $args, $assoc_args ) {
+		$is_using_s3     = isset( $assoc_args['is-using-s3'] ) ? true : false;
+		$posts_per_batch = $assoc_args['posts_per_batch'];
+		$batch           = $assoc_args['batch'];
+		$index           = $assoc_args['index'];
+
+		$this->attachment_logic->get_broken_attachment_urls_from_posts(
+            [],
+            $is_using_s3,
+            $posts_per_batch,
+            $batch,
+            $index,
+            function( $post_id, $broken_url ) use ( $batch ) {
+				$this->log( "broken_media_urls_batch_$batch.log", sprintf( '%d,%s', $post_id, $broken_url ) );
+			}
+        );
 	}
 
 	/**

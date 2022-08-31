@@ -84,17 +84,22 @@ class Attachments {
 	/**
 	 * Return broken attachment URLs from posts.
 	 *
-	 * @param int[]   $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
-	 * @param boolean $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
+	 * @param int[]     $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
+	 * @param boolean   $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
+	 * @param integer   $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer   $batch Current batch in the loop.
+	 * @param integer   $start_index Index from where to start the loop.
+	 * @param func|null $logger Method to log results.
 	 *
 	 * @return mixed[] Array of the broken URLs indexed by the post IDs.
 	 */
-	public function get_broken_attachment_urls_from_posts( $post_ids = [], $is_hosted_on_s3 = false ) {
+	public function get_broken_attachment_urls_from_posts( $post_ids = [], $is_hosted_on_s3 = false, $posts_per_batch = -1, $batch = 1, $start_index = 0, $logger = false ) {
 		$broken_images = [];
 
 		$posts = get_posts(
             [
-				'posts_per_page' => -1,
+				'posts_per_page' => $posts_per_batch,
+				'paged'          => $batch,
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
 				'post__in'       => $post_ids,
@@ -102,37 +107,57 @@ class Attachments {
         );
 
 		$total_posts = count( $posts );
+		$logs        = file_exists( 'broken_media_urls_batch.log' ) ? file_get_contents( 'broken_media_urls_batch.log' ) : '';
+		$batch_logs  = file_exists( "broken_media_urls_batch_$batch.log" ) ? file_get_contents( "broken_media_urls_batch_$batch.log" ) : '';
+
 		foreach ( $posts as $index => $post ) {
+			if ( $start_index - 1 > $index ) {
+				continue;
+			}
+			if ( str_contains( $logs, $post->ID . '' ) || str_contains( $batch_logs, $post->ID . '' ) ) {
+				continue;
+			}
 			WP_CLI::line( sprintf( 'Checking Post(%d/%d): %d', $index + 1, $total_posts, $post->ID ) );
-			$broken_post_images = [];
+			$image_urls_to_check = [];
+			$broken_post_images  = [];
 
 			preg_match_all( '/<img[^>]+(?:src|data-orig-file)="([^">]+)"/', $post->post_content, $image_sources_match );
+			if ( array_key_exists( 1, $image_sources_match ) ) {
+				$image_urls_to_check = $image_sources_match[1];
+			}
 
-			foreach ( $image_sources_match[1] as $image_source_match ) {
+			// get responsive images.
+			$image_urls_to_check = array_merge( $image_urls_to_check, $this->get_responsive_images_sources_from_content( $post->post_content ) );
+
+			foreach ( $image_urls_to_check as $image_url_to_check ) {
 				// Skip non-local and non-S3 URLs.
 				$local_domain = str_replace( [ 'http://', 'https://' ], '', get_site_url() );
-				if ( ! str_contains( $image_source_match, $local_domain ) && ! str_contains( $image_source_match, '.s3.amazonaws.com' ) ) {
-					WP_CLI::warning( sprintf( 'Skipping non-local URL: %s', $image_source_match ) );
+				if ( ! str_contains( $image_url_to_check, $local_domain ) && ! str_contains( $image_url_to_check, '.s3.amazonaws.com' ) ) {
+					WP_CLI::warning( sprintf( 'Skipping non-local URL: %s', $image_url_to_check ) );
 					continue;
 				}
 
-				$image_request = wp_remote_head( $image_source_match, [ 'redirection' => 5 ] );
+				$image_request = wp_remote_head( $image_url_to_check, [ 'redirection' => 5 ] );
 
 				if ( is_wp_error( $image_request ) ) {
 					WP_CLI::warning(
                         sprintf(
                             'Local image ID (%s) returned an error: %s',
-                            $image_source_match,
+                            $image_url_to_check,
                             $image_request->get_error_message()
                         )
                     );
+
+					$broken_post_images[] = $image_url_to_check;
+
+					continue;
 				}
 
 				if ( 200 !== $image_request['response']['code'] ) {
 					// Check if the URL is managed by s3_uploads plugin.
 					if ( $is_hosted_on_s3 && class_exists( \S3_Uploads\Plugin::class ) ) {
 						$bucket       = \S3_Uploads\Plugin::get_instance()->get_s3_bucket();
-						$exploded_url = explode( '/', $image_source_match );
+						$exploded_url = explode( '/', $image_url_to_check );
 						$filename     = end( $exploded_url );
 						$month        = prev( $exploded_url );
 						$year         = prev( $exploded_url );
@@ -148,22 +173,55 @@ class Attachments {
 									$image_request_from_s3->get_error_message()
 								)
 							);
+
+							$broken_post_images[] = $image_url_to_check;
+							continue;
 						}
 
 						if ( 200 !== $image_request_from_s3['response']['code'] ) {
-							$broken_post_images[] = $image_source_match;
+							$broken_post_images[] = $image_url_to_check;
 						}
 					} else {
-						$broken_post_images[] = $image_source_match;
+						$broken_post_images[] = $image_url_to_check;
 					}
 				}
 			}
 
 			if ( ! empty( $broken_post_images ) ) {
 				$broken_images[ $post->ID ] = $broken_post_images;
+
+				if ( is_callable( $logger ) ) {
+					foreach ( $broken_post_images as $broken_post_image ) {
+						$logger( $post->ID, $broken_post_image );
+					}
+				}
 			}
 		}
 
 		return $broken_images;
+	}
+
+	/**
+	 * Retreive all the image sources from the srcset attribute in post content.
+	 *
+	 * @param string $post_content post content to look for the images sources on.
+	 * @return array
+	 */
+	private function get_responsive_images_sources_from_content( $post_content ) {
+		$image_urls = [];
+		preg_match_all( '/<img[^>]+(?:srcset)="([^">]+)"/', $post_content, $image_sources_match );
+		if ( array_key_exists( 1, $image_sources_match ) ) {
+			foreach ( $image_sources_match[1] as $srcset ) {
+				$srcset_array = explode( ',', $srcset );
+				foreach ( $srcset_array as $src_string ) {
+					// split on whitespace - optional descriptor.
+					$img_details = explode( ' ', trim( $src_string ) );
+					// cast w or x descriptor as an Integer.
+					$image_urls[] = $img_details[0];
+				}
+			}
+		}
+
+		return $image_urls;
 	}
 }
