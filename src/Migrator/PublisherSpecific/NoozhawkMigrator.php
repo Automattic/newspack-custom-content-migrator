@@ -1004,7 +1004,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				);
 
 				if ( is_wp_error( $gallery_image_id ) ) {
-					WP_CLI::warning( sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $gallery_image['url'], $featured_image_id ) );
+					WP_CLI::warning( sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $gallery_image['url'], $gallery_image_id ) );
 					continue;
 				}
 
