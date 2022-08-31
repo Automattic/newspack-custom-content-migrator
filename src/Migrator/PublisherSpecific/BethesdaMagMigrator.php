@@ -225,7 +225,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			),
 			function( $post ) {
 				$co_authors_ids       = array();
-				$author_meta          = get_post_meta( $post->ID, 'bm_author', true );
+				$author_meta          = trim( get_post_meta( $post->ID, 'bm_author', true ) );
 				$authors_to_not_split = array(
 					'By Alicia Klaffky, Kensington',
 					'By Robert Karn, Boyds',
