@@ -172,8 +172,20 @@ class LkldNowMigrator implements InterfaceMigrator {
 			'post_status'    => 'inherit',
 		);
 
-		$attachment_id = wp_insert_attachment( $attachment );
+		$attachment_id = wp_insert_attachment( $attachment, $this->get_filename_from_upload_url( $url ) );
 
 		return $attachment_id;
+	}
+
+	/** Convert a URL to a file name
+	 *  For example https://site.local/wp-content/uploads/2022/08/image.jpg to 2022/08/image.jpg
+	 */
+	public function get_filename_from_upload_url( $url ) {
+		$url_parsed = wp_parse_url( $url );
+		$file_path = $url_parsed['path'];
+
+		$relative_path = str_replace( '/wp-content/uploads/', '', $file_path );
+
+		return $relative_path;
 	}
 }
