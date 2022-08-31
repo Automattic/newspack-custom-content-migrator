@@ -19,9 +19,14 @@ use \CoAuthors_Plus;
  */
 class NoozhawkMigrator implements InterfaceMigrator {
 	// Logs.
-	const AUTHORS_LOGS    = 'NH_authors.log';
-	const EXCERPT_LOGS    = 'NH_authors.log';
-	const CO_AUTHORS_LOGS = 'NH_co_authors.log';
+	const AUTHORS_LOGS                  = 'NH_authors.log';
+	const EXCERPT_LOGS                  = 'NH_authors.log';
+	const CO_AUTHORS_LOGS               = 'NH_co_authors.log';
+	const IMPORT_POSTS_LOGS             = 'NH_import_posts.log';
+	const IMPORT_MEDIA_POSTS_LOGS       = 'NH_import_media_posts.log';
+	const IMPORT_POSTS_PATHS_LOGS       = 'NH_import_posts_paths.log';
+	const IMPORT_MEDIA_POSTS_PATHS_LOGS = 'NH_import_media_posts_paths.log';
+	const DELETING_POSTS_AND_MEDIA_LOGS = 'NH_delete_posts_and_media.log';
 	// Output filenames.
 	const VENUES_CSV_FILENAME     = 'nh-venues.csv';
 	const ORGANIZERS_CSV_FILENAME = 'nh-organizers.csv';
@@ -225,6 +230,57 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			'newspack-content-migrator noozhawk-copy-media-caption-from-titles',
 			array( $this, 'cmd_nh_copy_media_caption_from_titles' ),
 			array( 'shortdesc' => 'Migrate media captions from media titles.', )
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-import-posts-from-xmls',
+			array( $this, 'cmd_nh_import_posts_from_xmls' ),
+			array(
+				'shortdesc' => 'Import Noozhawk posts from XMLs.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'xmls-path',
+						'description' => 'Folder path where the XMLs are stored in the format folder_path/number/index.html, the index.html is actually an XML file received from the publisher.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-import-media-posts-from-xmls',
+			array( $this, 'cmd_nh_import_media_posts_from_xmls' ),
+			array(
+				'shortdesc' => 'Import Noozhawk media posts from XMLs.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'xmls-path',
+						'description' => 'Folder path where the XMLs are stored in the format folder_path/number.xml.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-delete-posts-and-media',
+			[ $this, 'cmd_nh_delete_posts_and_media' ],
+			[
+				'shortdesc' => 'Delete all posts and their media files.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
 		);
 	}
 
@@ -739,7 +795,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 		$posts = $query->get_posts();
 		foreach ( $posts as $post ) {
-			$primary_category = get_post_meta( $post->ID, '_newspack_primary_category', true );
+			$primary_category = $this->fix_primary_category_name( get_post_meta( $post->ID, '_newspack_primary_category', true ) );
 			$terms            = get_terms(
 				[
 					'taxonomy'   => 'category',
@@ -748,15 +804,55 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				]
 			);
 
-			if ( count( $terms ) !== 1 ) {
-				WP_CLI::warning( sprintf( "Can't find the category %s", $primary_category ) );
+			$category = null;
+
+			if ( 1 === count( $terms ) ) {
+				$category = $terms[0];
+			} elseif ( 1 < count( $terms ) ) {
+				foreach ( $terms as $term ) {
+					if ( 0 === $term->parent ) {
+						$category = $term;
+						break;
+					}
+				}
+			} else {
+				continue;
 			}
 
-			$category = $terms[0];
-
-			update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
-			WP_CLI::success( sprintf( 'Primary category for the post %d is set to: %s', $post->ID, $primary_category ) );
+			if ( $category ) {
+				update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+				WP_CLI::success( sprintf( 'Primary category for the post %d is set to: %s', $post->ID, $primary_category ) );
+			} else {
+				WP_CLI::error( sprintf( 'Couldn\'t set primary category for the post %d to: %s', $post->ID, $primary_category ) );
+			}
 		}
+	}
+
+	/**
+	 * Fix category names for importing the posts primary categories.
+	 *
+	 * @param string $primary_category
+	 * @return string
+	 */
+	private function fix_primary_category_name( $primary_category ) {
+		switch ( $primary_category ) {
+			case 'Lifestyle':
+				return 'Homes & Lifestyle';
+			case 'Coronavirus':
+				return 'Coronavirus Crisis';
+			case 'Arts':
+				return 'Arts & Entertainment';
+			case 'Health':
+				return 'Your Health';
+			case 'Four-Legged Friends and More':
+				return 'Four Legged Friends and More';
+			case 'Housing and Development':
+				return 'Housing & Development';
+			case 'Election':
+				return 'Elections';
+		}
+
+		return $primary_category;
 	}
 
 	/**
@@ -774,28 +870,35 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			]
 		);
 
-		$posts = $query->get_posts();
-		foreach ( $posts as $post ) {
-			$co_authors       = [];
-			$co_authors_names = json_decode( get_post_meta( $post->ID, '_newspack_co_authors', true ), true );
-			if ( ! $co_authors_names ) {
+		$posts       = $query->get_posts();
+		$total_posts = count( $posts );
+		foreach ( $posts as $index => $post ) {
+			WP_CLI::line( sprintf( 'Checking post %d/%d', $index + 1, $total_posts ) );
+
+			$co_author_name_raw = wp_strip_all_tags( get_post_meta( $post->ID, '_newspack_co_authors', true ) );
+			$is_fixed           = get_post_meta( $post->ID, '_newspack_fixed_co_authors', true );
+			if ( $is_fixed ) {
+				continue;
+			}
+
+			preg_match( '/.*(?<updated>\s*\|\s*upd?ated.*$)/i', $co_author_name_raw, $updated_matches );
+
+			$co_author_name = array_key_exists( 'updated', $updated_matches ) ? str_replace( $updated_matches['updated'], '', $co_author_name_raw ) : $co_author_name_raw;
+
+			if ( ! $co_author_name ) {
 				WP_CLI::warning( sprintf( 'Post meta `_newspack_co_authors` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
 				continue;
 			}
-			foreach ( $co_authors_names as $co_author_name ) {
-				$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author_name ] );
-				if ( is_wp_error( $co_author_id ) ) {
-					WP_CLI::warning( sprintf( "Can't create co-author %s: %s", $co_author_name, $co_author_id ) );
-					continue;
-				}
 
-				$co_authors[] = $co_author_id;
+			$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author_name ] );
+			if ( is_wp_error( $co_author_id ) ) {
+				WP_CLI::warning( sprintf( "Can't create co-author %s: %s", $co_author_name, $co_author_id ) );
+				continue;
 			}
 
-			if ( 0 < count( $co_authors ) ) {
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors, $post->ID );
-				WP_CLI::success( sprintf( 'Setting post %s co-authors: %s', $post->ID, implode( ', ', $co_authors_names ) ) );
-			}
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
+			WP_CLI::success( sprintf( 'Setting post %s co-authors: %s', $post->ID, $co_author_name ) );
+			update_post_meta( $post->ID, '_newspack_fixed_co_authors', true );
 		}
 	}
 
@@ -814,15 +917,23 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			]
 		);
 
-		$posts = $query->get_posts();
-		foreach ( $posts as $post ) {
-			$featured_image = json_decode( get_post_meta( $post->ID, '_newspack_thumbnail', true ), true );
-			if ( ! $featured_image ) {
-				WP_CLI::warning( sprintf( 'Post meta `_newspack_thumbnail` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
+		$posts       = $query->get_posts();
+		$posts_count = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			$thumbnail_meta = str_replace( PHP_EOL, '', get_post_meta( $post->ID, '_newspack_thumbnail', true ) );
+			$featured_image = json_decode( $thumbnail_meta, true );
+			if ( ! $featured_image || ! array_key_exists( 'url', $featured_image ) || empty( $featured_image['url'] ) ) {
+				$this->log( 'bad-newspack_thumbnail.log', sprintf( 'Post meta `_newspack_thumbnail` is not in JSON format and should be fixed for the post %d', $post->ID ) );
 				continue;
 			}
 
 			$existing_featured_image = $this->get_post_by_meta( '_newspack_imported_from_url', $featured_image['url'], 'attachment' );
+
+			if ( get_post_thumbnail_id( $post->ID ) === $existing_featured_image ) {
+				WP_CLI::line( sprintf( 'Skipping post %s (%d/%d) featured image already set: %d', $post->ID, $index + 1, $posts_count, $featured_image_id ) );
+				continue;
+			}
 
 			$featured_image_id = $existing_featured_image ? $existing_featured_image->ID : $this->attachment_logic->import_external_file(
 				$featured_image['url'],
@@ -834,13 +945,13 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			);
 
 			if ( is_wp_error( $featured_image_id ) ) {
-				WP_CLI::warning( sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $featured_image['url'], $featured_image_id ) );
+				$this->log( 'bad-newspack_thumbnail.log', sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $featured_image['url'], $featured_image_id ) );
 				continue;
 			}
 
 			set_post_thumbnail( $post->ID, $featured_image_id );
 			update_post_meta( $featured_image_id, '_newspack_imported_from_url', $featured_image['url'] );
-			WP_CLI::success( sprintf( 'Setting post %s featured image: %d', $post->ID, $featured_image_id ) );
+			WP_CLI::success( sprintf( 'Setting post %s (%d/%d) featured image: %d', $post->ID, $index + 1, $posts_count, $featured_image_id ) );
 		}
 	}
 
@@ -857,6 +968,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			[
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
+				'post_status'    => 'all',
 				'meta_key'       => '_newspack_slideshow_images',
 			]
 		);
@@ -952,6 +1064,154 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				WP_CLI::line( sprintf( 'Updated media: %d', $media->ID ) );
 			}
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-import-posts-from-xmls`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_import_posts_from_xmls( $args, $assoc_args ) {
+		$xmls_path = trim( $assoc_args['xmls-path'] );
+
+		$export_directories = new \DirectoryIterator( $xmls_path );
+		foreach ( $export_directories as $dir ) {
+			if ( ! $dir->isDot() && $dir->isDir() ) {
+				$dir_path   = $dir->getFileInfo()->getPathname();
+				$xmls_files = glob( $dir_path . '/index.html' );
+
+				foreach ( $xmls_files as $xml_file ) {
+					$imported_paths = file_exists( self::IMPORT_POSTS_PATHS_LOGS ) ? file_get_contents( self::IMPORT_POSTS_PATHS_LOGS ) : '';
+					if ( str_contains( $imported_paths, $xml_file ) ) {
+						file_put_contents( self::IMPORT_POSTS_LOGS, sprintf( 'Skipping path as already imported: %s', $xml_file ), FILE_APPEND );
+						continue;
+					}
+
+					WP_CLI::warning( sprintf( 'Importing %s', $xml_file ) );
+
+					$output = WP_CLI::runcommand(
+                        sprintf( 'import %s --authors=create', $xml_file ),
+                        [ 'return' => true ]
+                    );
+
+					file_put_contents( self::IMPORT_POSTS_LOGS, $output . "\n", FILE_APPEND );
+					file_put_contents( self::IMPORT_POSTS_PATHS_LOGS, $xml_file . "\n", FILE_APPEND );
+				}
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-import-media-posts-from-xmls`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_import_media_posts_from_xmls( $args, $assoc_args ) {
+		$xmls_path  = trim( $assoc_args['xmls-path'] );
+		$xmls_files = glob( $xmls_path . '/*.xml' );
+
+		usort(
+            $xmls_files,
+            function( $a, $b ) {
+				$a_order = intval( rtrim( basename( $a ), '.xml' ) );
+				$b_order = intval( rtrim( basename( $b ), '.xml' ) );
+
+				return $a_order <=> $b_order;
+			}
+        );
+
+		foreach ( $xmls_files as $xml_file ) {
+			$imported_paths = file_exists( self::IMPORT_MEDIA_POSTS_PATHS_LOGS ) ? file_get_contents( self::IMPORT_MEDIA_POSTS_PATHS_LOGS ) : '';
+			if ( str_contains( $imported_paths, $xml_file ) ) {
+				file_put_contents( self::IMPORT_MEDIA_POSTS_LOGS, sprintf( 'Skipping path as already imported: %s', $xml_file ), FILE_APPEND );
+				continue;
+			}
+
+			WP_CLI::warning( sprintf( 'Importing %s', $xml_file ) );
+
+			$output = WP_CLI::runcommand(
+				sprintf( 'import %s --authors=create', $xml_file ),
+				[ 'return' => true ]
+			);
+
+			file_put_contents( self::IMPORT_MEDIA_POSTS_LOGS, $output . "\n", FILE_APPEND );
+			file_put_contents( self::IMPORT_MEDIA_POSTS_PATHS_LOGS, $xml_file . "\n", FILE_APPEND );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-delete-posts-and-media`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_delete_posts_and_media( $args, $assoc_args ) {
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		// Delete posts.
+		$posts = get_posts(
+            [
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+            ]
+        );
+
+		$total_posts = count( $posts );
+		foreach ( $posts as $index => $post ) {
+			if ( ! $dry_run ) {
+				wp_delete_post( $post->ID, true );
+			}
+
+			$this->log( self::DELETING_POSTS_AND_MEDIA_LOGS, sprintf( 'Deleting post(%d/%d): %d', $index + 1, $total_posts, $post->ID ) );
+		}
+
+		// Delete media.
+		$pages = get_posts(
+            [
+				'posts_per_page' => -1,
+				'post_type'      => 'page',
+				'post_status'    => 'any',
+			]
+        );
+
+		$pages_content = array_reduce(
+            $pages,
+            function( $carry, $page ) {
+				return $carry . $page->post_content;
+			},
+            ''
+        );
+
+		$attachment_posts = get_posts(
+            [
+				'posts_per_page' => -1,
+				'post_type'      => 'attachment',
+				'post_status'    => 'any',
+			]
+        );
+
+		$total_attachment_posts = count( $attachment_posts );
+		foreach ( $attachment_posts as $index => $attachment_post ) {
+			$parsed_attachment_url = parse_url( wp_get_attachment_url( $attachment_post->ID ) );
+			if ( str_contains( $pages_content, $parsed_attachment_url['path'] ) ) {
+				$this->log( self::DELETING_POSTS_AND_MEDIA_LOGS, sprintf( 'Skipping media(%d/%d): %d', $index + 1, $total_attachment_posts, $attachment_post->ID ) );
+			} else {
+				if ( ! $dry_run ) {
+					wp_delete_post( $attachment_post->ID, true );
+				}
+
+				$this->log( self::DELETING_POSTS_AND_MEDIA_LOGS, sprintf( 'Deleting media(%d/%d): %d', $index + 1, $total_attachment_posts, $attachment_post->ID ) );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
