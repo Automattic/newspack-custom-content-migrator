@@ -1555,13 +1555,13 @@ class ContentDiffMigrator {
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
 			WP_CLI::log( "Iteration $i out of $iterations" );
-			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT * FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
+			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			$insert_result = $this->wpdb->query( $insert_sql );
 
-			if ( ! is_wp_error( $insert_result ) ) {
+			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
 				$limiter['start'] = $limiter['start'] + $limiter['limit'];
 			} else {
-				throw new \RuntimeException( "Got up to (not including) {$limiter['start']}" );
+				throw new \RuntimeException( sprintf( "Got up to (not including) %s. Failed running SQL '%s'.", $limiter['start'], $insert_sql ) );
 			}
 
 			if ( $sleep_in_seconds ) {
