@@ -9,6 +9,7 @@ namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use \WP_CLI;
 use \WP_User;
+use wpdb;
 
 /**
  * Class ContentDiffMigrator and main logic.
@@ -47,7 +48,7 @@ class ContentDiffMigrator {
 	/**
 	 * Global $wpdb.
 	 *
-	 * @var object Global $wpdb.
+	 * @var wpdb Global $wpdb.
 	 */
 	private $wpdb;
 
@@ -65,9 +66,14 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
+	 * @throws \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
 	 * @return array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
+		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
+			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
+		}
+
 		$ids              = [];
 		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
 		$posts_table      = $this->wpdb->prefix . 'posts';
@@ -1420,6 +1426,146 @@ class ContentDiffMigrator {
 			$tablename = $table_prefix . $table;
 			if ( ! in_array( $tablename, $all_tables ) ) {
 				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) );
+			}
+		}
+	}
+
+	/**
+	 * This function will compare Core WP Tables against the Live WP tables
+	 * brought in for a content migration/refresh. This will be
+	 * useful for determining whether a collation
+	 * migration is necessary.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param array  $skip_tables Core WP DB tables to skip (without prefix).
+	 *
+	 * @throws \RuntimeException Throws exception if unable to find live tables with given prefix.
+	 * @return array
+	 */
+	public function get_collation_comparison_of_live_and_core_wp_tables( string $table_prefix, array $skip_tables = [] ): array {
+		$validated_tables = [];
+
+		$core_tables = array_diff( self::CORE_WP_TABLES, $skip_tables );
+		foreach ( $core_tables as $table ) {
+			$core_table = esc_sql( $this->wpdb->prefix . $table );
+			$live_table = esc_sql( $table_prefix . $table );
+			$core_table_status = $this->wpdb->get_row( "SHOW TABLE STATUS WHERE name LIKE '$core_table'" );
+			$live_table_status = $this->wpdb->get_row( "SHOW TABLE STATUS WHERE name LIKE '$live_table'" );
+
+			if ( is_null( $live_table_status ) ) {
+				WP_CLI::warning( "Live table `$live_table` does not exist, skipping table." );
+				continue;
+			}
+
+			$match_test = $live_table_status->Collation === $core_table_status->Collation;
+
+			$validated_tables[] = [
+				'table'                => $table,
+				'core_table_name'      => $core_table,
+				'core_table_collation' => $core_table_status->Collation,
+				'live_table_name'      => $live_table,
+				'live_table_collation' => $live_table_status->Collation,
+				'match'                => $match_test ? 'YES' : 'NO',
+				'match_bool'           => $match_test,
+			];
+		}
+
+		if ( empty( $validated_tables ) ) {
+			throw new \RuntimeException( 'Unable to validate collation on content diff tables. Please verify live table prefix.' );
+		}
+
+		return $validated_tables;
+	}
+
+	/**
+	 * Convenience function that only returns tables which have a different collation
+	 * than the Core WP DB tables.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param array  $skip_tables Core WP DB tables to skip (without prefix).
+	 *
+	 * @throws \RuntimeException Throws exception if unable to find live tables with given prefix.
+	 * @return array
+	 */
+	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
+		return array_filter(
+			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
+			fn( $validated_table ) => false === $validated_table['match_bool']
+		);
+	}
+
+	/**
+	 * Convenience function which returns a simple boolean value indicating whether all Live
+	 * DB tables have matching collations with their corresponding Core WP DB tables.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param array  $skip_tables Core WP DB tables to skip (without prefix).
+	 *
+	 * @throws \RuntimeException Throws exception if unable to find live tables with given prefix.
+	 * @return bool
+	 */
+	public function are_table_collations_matching( string $table_prefix, array $skip_tables = [] ): bool {
+		return empty( $this->filter_for_different_collated_tables( $table_prefix, $skip_tables ) );
+	}
+
+	/**
+	 * This function will handle the operation to move data from the
+	 * incompatibly collated table to the new compatible table.
+	 *
+	 * @param string $prefix Live table prefix.
+	 * @param string $table The Core WP Table to address.
+	 * @param int    $records_per_transaction The amount of records to process per transaction.
+	 * @param int    $sleep_in_seconds Delay in seconds between each DB transaction.
+	 * @param string $prefix_for_backup Custom prefix for table to be backed up to.
+	 *
+	 * @throws \RuntimeException Throws various exceptions if unable to complete required SQL operations.
+	 */
+	public function copy_table_data_using_proper_collation( string $prefix, string $table, int $records_per_transaction = 5000, int $sleep_in_seconds = 1, string $prefix_for_backup = 'bak_' ) {
+		$backup_table = esc_sql( $prefix_for_backup . $prefix . $table );
+		$source_table = esc_sql( $prefix . $table );
+		$match_collation_for_table = esc_sql( $this->wpdb->prefix . $table );
+		$rename_sql = "RENAME TABLE $source_table TO $backup_table";
+		$rename_result = $this->wpdb->query( $rename_sql );
+
+		if ( is_wp_error( $rename_result ) ) {
+			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() );
+		}
+
+		$create_like_table_sql = "CREATE TABLE {$source_table} LIKE $match_collation_for_table";
+		$create_result = $this->wpdb->query( $create_like_table_sql );
+
+		if ( is_wp_error( $create_result ) ) {
+			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() );
+		}
+
+		$limiter = [
+			'start' => 0,
+			'limit' => $records_per_transaction,
+		];
+
+		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
+		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
+		$table_columns = implode( ',', array_map( fn($column_row) => "`$column_row->Field`", $table_columns_results ) );
+		$count = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
+
+		if ( 0 === $count ) {
+			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." );
+		}
+
+		$iterations = ceil( $count->counter / $limiter['limit'] );
+		for ( $i = 1; $i <= $iterations; $i++ ) {
+			WP_CLI::log( "Iteration $i out of $iterations" );
+			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
+			$insert_result = $this->wpdb->query( $insert_sql );
+
+			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
+				$limiter['start'] = $limiter['start'] + $limiter['limit'];
+			} else {
+				throw new \RuntimeException( sprintf( "Got up to (not including) %s. Failed running SQL '%s'.", $limiter['start'], $insert_sql ) );
+			}
+
+			if ( $sleep_in_seconds ) {
+				sleep( $sleep_in_seconds );
 			}
 		}
 	}
