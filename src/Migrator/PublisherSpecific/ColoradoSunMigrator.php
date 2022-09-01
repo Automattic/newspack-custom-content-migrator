@@ -102,6 +102,14 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			'newspack-content-migrator coloradosun-replace-reusable-blocks-ids',
 			[ $this, 'cmd_replace_reusable_blocks_ids' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-fix-image-ids-in-post-content',
+			[ $this, 'cmd_fix_image_ids_in_post_content' ],
+		);
+	}
+
+	public function cmd_fix_image_ids_in_post_content( $positional_args, $assoc_args ) {
+
 	}
 
 	public function cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block( $positional_args, $assoc_args ) {

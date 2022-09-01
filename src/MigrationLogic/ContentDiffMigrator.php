@@ -598,6 +598,15 @@ class ContentDiffMigrator {
 			$excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
 			$excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
 
+			/**
+			 * The fixes above updated only the newly imported Posts' content, and only fixed the newly imported Attachment IDs.
+			 * However if a new Post used an old Attachment file which had a different value on live than it has Staging (e.g. it
+			 * got changed during the initial Staging setup), it wasn't updated yet. So we now need to additionally scan all other
+			 * existing attachment blocks, too.
+			 **/
+
+			// TODO
+
 			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
 				$updated = $this->wpdb->update(
