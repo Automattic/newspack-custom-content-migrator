@@ -118,16 +118,10 @@ class Attachments {
 				continue;
 			}
 			WP_CLI::line( sprintf( 'Checking Post(%d/%d): %d', $index + 1, $total_posts, $post->ID ) );
-			$image_urls_to_check = [];
-			$broken_post_images  = [];
-
-			preg_match_all( '/<img[^>]+(?:src|data-orig-file)="([^">]+)"/', $post->post_content, $image_sources_match );
-			if ( array_key_exists( 1, $image_sources_match ) ) {
-				$image_urls_to_check = $image_sources_match[1];
-			}
+			$broken_post_images = [];
 
 			// get responsive images.
-			$image_urls_to_check = array_merge( $image_urls_to_check, $this->get_responsive_images_sources_from_content( $post->post_content ) );
+			$image_urls_to_check = $this->get_images_sources_from_content( $post->post_content );
 
 			foreach ( $image_urls_to_check as $image_url_to_check ) {
 				// Skip non-local and non-S3 URLs.
@@ -207,8 +201,16 @@ class Attachments {
 	 * @param string $post_content post content to look for the images sources on.
 	 * @return array
 	 */
-	private function get_responsive_images_sources_from_content( $post_content ) {
+	public function get_images_sources_from_content( $post_content ) {
 		$image_urls = [];
+
+		// Get URLs from src attribute.
+		preg_match_all( '/<img[^>]+(?:src)="([^">]+)"/', $post_content, $image_sources_match );
+		if ( array_key_exists( 1, $image_sources_match ) ) {
+			$image_urls = $image_sources_match[1];
+		}
+
+		// Get URLs from responsive sources.
 		preg_match_all( '/<img[^>]+(?:srcset)="([^">]+)"/', $post_content, $image_sources_match );
 		if ( array_key_exists( 1, $image_sources_match ) ) {
 			foreach ( $image_sources_match[1] as $srcset ) {
