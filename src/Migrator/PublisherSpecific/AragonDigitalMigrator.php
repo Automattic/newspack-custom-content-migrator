@@ -119,15 +119,6 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator revert-custom-accordion-solution-to-genesis',
-			array( $this, 'handle_revert_accordion_solution_to_genesis' ),
-			array(
-				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
-				'synopsis'  => array(),
-			)
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator fix-featured-image-for-zeen-gallery-posts',
 			array( $this, 'fix_featured_image_for_zeen_gallery_posts' ),
 			array(
@@ -501,9 +492,9 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 
 		$total_posts = count( $posts );
 		foreach ( $posts as $movie_index => $post ) {
-			$genres           = explode( ',', get_post_meta( $post->ID, '_wpmoly_movie_genres', true ) );
-			$directors        = explode( ',', get_post_meta( $post->ID, '_wpmoly_movie_director', true ) );
-			$actors           = explode( ',', get_post_meta( $post->ID, '_wpmoly_movie_cast', true ) );
+			$genres           = preg_split( '/(\||,)/', get_post_meta( $post->ID, '_wpmoly_movie_genres', true ) );
+			$directors        = preg_split( '/(\||,)/', get_post_meta( $post->ID, '_wpmoly_movie_director', true ) );
+			$actors           = preg_split( '/(\||,)/', get_post_meta( $post->ID, '_wpmoly_movie_cast', true ) );
 			$genre_categories = array_map(
 				function( $genre ) {
 					$category_id = get_cat_ID( trim( $genre ) );
@@ -633,6 +624,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				'numberposts' => -1,
 				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
 				'category'    => 46, // DESAFÍA TU MENTE
+				'post__in'    => array( 342151 ),
 			)
 		);
 
@@ -642,7 +634,7 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			$updated = false;
 			$blocks  = array_map(
 				function( $block ) use ( &$updated ) {
-					if ( 'core/shortcode' === $block['blockName'] ) {
+					if ( in_array( $block['blockName'], array( '', 'core/shortcode' ) ) ) {
 						$su_accordion_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'su_spoiler', $block['innerHTML'] );
 						if ( empty( $su_accordion_shortcodes[0] ) ) {
 							return $block;
