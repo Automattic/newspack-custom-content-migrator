@@ -70,10 +70,10 @@ function set_config() {
   # Atomic DB host.
   DB_HOST_LOCAL=127.0.0.1
   # Path to the public folder. No ending slash.
-  HTDOCS_PATH="/home/"$(whoami)"/htdocs"
+  HTDOCS_PATH=/srv/htdocs
   # Atomic WP CLI params.
   WP_CLI_BIN=/usr/local/bin/wp-cli
-  WP_CLI_PATH="/home/"$(whoami)"/htdocs/__wp__/"
+  WP_CLI_PATH=/srv/htdocs/__wp__/
 
   # Migrators' output dir.
   TEMP_DIR_MIGRATOR=$TEMP_DIR/migration_exports
