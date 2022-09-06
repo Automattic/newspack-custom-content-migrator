@@ -717,6 +717,10 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		while ( ! feof( $handle ) ) {
 			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
 
+			if ( empty( $row['new_name_1'] ) ) {
+				continue;
+			}
+
 			$destination_guest_author_id = $this->get_or_create_guest_author( $row['new_name_1'] );
 
 			$original_guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $row['existing_name'] ) );
