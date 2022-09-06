@@ -181,6 +181,11 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			'newspack-content-migrator berkeleyside-copy-latest-post-content',
 			[ $this, 'cmd_copy_latest_post_content' ]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-fix-primary-categories',
+			[ $this, 'cmd_fix_primary_categories' ]
+		);
 	}
 
 	public function cmd_get_specialchars_images_and_posts( $args, $assoc_args ) {
@@ -975,6 +980,182 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::log( 'Done.' );
+	}
+
+	public function cmd_fix_primary_categories() {
+		global $wpdb;
+
+		$child_categories = $wpdb->get_results(
+			"SELECT 
+       			parent
+				FROM wp_fp7b3e_terms t 
+			    LEFT JOIN wp_fp7b3e_term_taxonomy tt 
+			        ON t.term_id = tt.term_id 
+				WHERE tt.taxonomy = 'primary_category' 
+				  AND parent <> 0"
+		);
+
+		WP_CLI::log( 'Ensuring parent categories exist' );
+		foreach ( $child_categories as $child_category ) {
+			WP_CLI::log( "Handling $child_category->parent..." );
+			$parent = $wpdb->get_row( "SELECT * FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE t.term_id = $child_category->parent" );
+
+			if ( $parent ) {
+				WP_CLI::log( "Parent - name: $parent->name, slug: $parent->slug" );
+				$category_exists = $wpdb->get_row(
+					"SELECT *
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt 
+						        ON t.term_id = tt.term_id 
+						WHERE t.slug = '$parent->slug' 
+						  AND tt.taxonomy = 'category'"
+				);
+
+				if ( $category_exists ) {
+					WP_CLI::log( "Proper category exists - term_id: $category_exists->term_id term_taxonomy_id: $category_exists->term_taxonomy_id name: $category_exists->name slug: $category_exists->slug" );
+					$wpdb->update(
+						$wpdb->term_taxonomy,
+						[
+							'parent' => $category_exists->term_id,
+						],
+						[
+							'parent' => $child_category->parent,
+						]
+					);
+				} else {
+					WP_CLI::log( 'Creating proper category' );
+					wp_insert_term(
+						$parent->name,
+						'category',
+						[
+							'slug' => $parent->slug,
+						]
+					);
+				}
+			} else {
+				WP_CLI::log( 'Parent doesn\'t exist, removing parent info' );
+				$wpdb->update(
+					$wpdb->term_taxonomy,
+					[
+						'parent' => 0,
+					],
+					[
+						'parent' => $child_category->parent,
+					]
+				);
+			}
+		}
+		WP_CLI::log( 'Done with parents' );
+
+		$old_primary_category_taxonomies = $wpdb->get_results(
+			"SELECT 
+       		* 
+			FROM wp_fp7b3e_terms t 
+			    LEFT JOIN wp_fp7b3e_term_taxonomy tt 
+			        ON t.term_id = tt.term_id 
+			WHERE tt.taxonomy = 'primary_category'"
+		);
+
+		foreach ( $old_primary_category_taxonomies as $old_primary_category ) {
+			WP_CLI::log( "Handling $old_primary_category->name - $old_primary_category->slug - term_id: $old_primary_category->term_id - term_taxonomy_id: $old_primary_category->term_taxonomy_id" );
+			$actual_category = $wpdb->get_row( "SELECT * FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE t.slug = '$old_primary_category->slug' AND tt.taxonomy = 'category'" );
+
+			if ( $actual_category ) {
+				WP_CLI::log( "Found Actual Category: $actual_category->name, $actual_category->slug - $actual_category->term_id" );
+			} else {
+				WP_CLI::log( 'Actual Category not found, need to create new Category' );
+				$response = wp_insert_term(
+					$old_primary_category->name,
+					'category',
+					[
+						'slug' => $old_primary_category->slug,
+						'parent' => $old_primary_category->parent
+					]
+				);
+
+				if ( is_wp_error( $response ) ) {
+					WP_CLI::error( $response->get_error_message() );
+				}
+
+				$actual_category = $wpdb->get_row( "SELECT * FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE tt.term_taxonomy_id = {$response['term_taxonomy_id']}" );
+				WP_CLI::log( "New Category: $actual_category->name, $actual_category->slug - $actual_category->term_id" );
+			}
+
+			$posts = $wpdb->get_results( "SELECT object_id FROM $wpdb->term_relationships WHERE term_taxonomy_id = $old_primary_category->term_taxonomy_id" );
+
+			if ( ! empty( $posts ) ) {
+				$post_ids          = array_map( fn( $post ) => $post->object_id, $posts );
+				$imploded_post_ids = implode( ',', $post_ids );
+
+				$sql = "DELETE FROM $wpdb->postmeta WHERE meta_key = '_yoast_wpseo_primary_category' AND post_id IN ($imploded_post_ids)";
+				WP_CLI::log( "Executing: $sql" );
+				$result = $wpdb->query( $sql );
+
+				if ( is_int( $result ) && $result >= 0 ) {
+					WP_CLI::log( "Successfully deleted $result existing _yoast_wpseo_primary_category rows" );
+
+					$handled_postmeta_rows = 0;
+					WP_CLI::log( "Handling inserting new postmeta rows." );
+					foreach ( $post_ids as $post_id ) {
+						$result = $wpdb->insert(
+							$wpdb->postmeta,
+							[
+								'post_id'    => $post_id,
+								'meta_key'   => '_yoast_wpseo_primary_category',
+								'meta_value' => $actual_category->term_id,
+							]
+						);
+
+						if ( is_int( $result ) ) {
+							$handled_postmeta_rows++;
+						}
+					}
+
+					if ( $handled_postmeta_rows === count( $post_ids ) ) {
+						WP_CLI::log( "All posts were correctly handled." );
+						$wpdb->delete(
+							$wpdb->term_relationships,
+							[
+								'term_taxonomy_id' => $old_primary_category->term_taxonomy_id,
+							]
+						);
+						$wpdb->delete(
+							$wpdb->term_taxonomy,
+							[
+								'term_taxonomy_id' => $old_primary_category->term_taxonomy_id,
+							]
+						);
+						$wpdb->delete(
+							$wpdb->terms,
+							[
+								'term_id' => $old_primary_category->term_id,
+							]
+						);
+					}
+				}
+			} else {
+				WP_CLI::log( "No posts to handle, deleting taxonomy records" );
+				$wpdb->delete(
+					$wpdb->term_relationships,
+					[
+						'term_taxonomy_id' => $old_primary_category->term_taxonomy_id,
+					]
+				);
+				$wpdb->delete(
+					$wpdb->term_taxonomy,
+					[
+						'term_taxonomy_id' => $old_primary_category->term_taxonomy_id,
+					]
+				);
+				$wpdb->delete(
+					$wpdb->terms,
+					[
+						'term_id' => $old_primary_category->term_id,
+					]
+				);
+			}
+
+		}
 	}
 
 	public function cmd_process_extra_guest_authors() {
