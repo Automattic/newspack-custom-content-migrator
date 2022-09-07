@@ -9,6 +9,8 @@ namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use \WP_CLI;
 use \WP_User;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use Symfony\Component\DomCrawler\Crawler;
 use wpdb;
 
 /**
@@ -53,12 +55,28 @@ class ContentDiffMigrator {
 	private $wpdb;
 
 	/**
+	 * WpBlockManipulator.
+	 *
+	 * @var WpBlockManipulator.
+	 */
+	private $wp_block_manipulator;
+
+	/**
+	 * Crawler.
+	 *
+	 * @var Crawler.
+	 */
+	private $dom_crawler;
+
+	/**
 	 * ContentDiffMigrator constructor.
 	 *
 	 * @param object $wpdb Global $wpdb.
 	 */
 	public function __construct( $wpdb ) {
 		$this->wpdb = $wpdb;
+		$this->wp_block_manipulator = new WpBlockManipulator();
+		$this->dom_crawler = new Crawler();
 	}
 
 	/**
@@ -586,26 +604,58 @@ class ContentDiffMigrator {
 			$excerpt_before  = $result['post_excerpt'];
 			$excerpt_updated = $result['post_excerpt'];
 
-			// Do all replacements in content.
-			$content_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
+			// // Do all replacements in content.
+			// $content_updated = $this->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $content_updated );
+			// $content_updated = $this->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $content_updated );
+			// $content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
+			// $content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
+			//
+			// // Do all replacements in excerpt.
+			// $excerpt_updated = $this->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $excerpt_updated );
+			// $excerpt_updated = $this->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $excerpt_updated );
+			// $excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
+			// $excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
 
-			// Do all replacements in excerpt.
-			$excerpt_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
 
 			/**
-			 * The fixes above updated only the newly imported Posts' content, and only fixed the newly imported Attachment IDs.
-			 * However if a new Post used an old Attachment file which had a different value on live than it has Staging (e.g. it
-			 * got changed during the initial Staging setup), it wasn't updated yet. So we now need to additionally scan all other
-			 * existing attachment blocks, too.
-			 **/
+			 * Checks and updates attachment IDs in various Gutenberg Blocks. These methods search for the file name and fetch the
+			 * attachment ID from the Media Library, and then update it if necessary.
+			 *
+			 * These replacements are no longer using $imported_attachment_ids with mapping "old/live ID" => "new/Staging ID,
+			 * because fetching IDs from the Media Library should cover all cases. But we still do have the IDs mapping info,
+			 * perhaps some future cases will need to use it.
+			 */
+			// wp:image
+			$content_updated = $this->update_image_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated );
+			// // wp:gallery
+			// $content_updated = $this->update_gallery_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_gallery_blocks_ids( $excerpt_updated );
+			// // wp:audio
+			// $content_updated = $this->update_audio_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated );
+			// // wp:video
+			// $content_updated = $this->update_video_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated );
+			// // wp:cover
+			// $content_updated = $this->update_cover_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated );
+			// // wp:file
+			// $content_updated = $this->update_file_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated );
+			// // wp:media-text
+			// $content_updated = $this->update_media_text_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_media_text_blocks_ids( $excerpt_updated );
+			// // wp:jetpack/tiled-gallery
+			// $content_updated = $this->update_jetpack_tiled_gallery_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_jetpack_tiled_gallery_blocks_ids( $excerpt_updated );
+			// // wp:jetpack/slideshow
+			// $content_updated = $this->update_jetpack_slideshow_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_jetpack_slideshow_blocks_ids( $excerpt_updated );
+			// // wp:jetpack/image-compare
+			// $content_updated = $this->update_jetpack_image_compare_blocks_ids( $content_updated );
+			// $excerpt_updated = $this->update_jetpack_image_compare_blocks_ids( $excerpt_updated );
 
-			// TODO
 
 			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
@@ -650,6 +700,58 @@ class ContentDiffMigrator {
 		}
 	}
 
+	public function update_image_blocks_ids( string $content ): string {
+
+		// Match all wp:image blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:image', $content );
+		if ( is_null( $matches ) || 0 === $matches || false === $matches || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		$content_updated = $content;
+
+		// Loop through all image blocks and update their IDs.
+		foreach ( $matches[0] as $key_match => $match ) {
+			$img_block = $match[0];
+
+			// Get attachment ID from block header.
+			$img_id  = $this->wp_block_manipulator->get_attribute( $img_block, 'id' );
+
+			// Get image src from image HTML element.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $content_updated );
+			$images = $this->dom_crawler->filter( 'img' );
+			if ( empty( $images ) || 0 == $images->getIterator()->count() ) {
+				// No img, skipping.
+				// TODO log.
+				continue;
+			}
+			$image   = $images->getIterator()[0];
+			$img_src = $image->getAttribute( 'src' );
+
+			// Get this file's attachment ID from DB.
+			$new_id = $this->attachment_url_to_postid( $img_src );
+			if ( 0 === $new_id ) {
+				// Image attachment ID not found.
+				// TODO log.
+				continue;
+			}
+
+			$ids_updates = [ $img_id => $new_id ];
+
+			// Update ID in header.
+			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:image', $ids_updates, $content_updated );
+			// $content_updated = $this->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $content_updated );
+
+			// Update ID in image element `class` attribute.
+			$content_updated = $this->update_image_element_class_attribute( $ids_updates, $content_updated );
+
+			// Update image element `data-id` attribute.
+			$content_updated = $this->update_image_element_data_id_attribute( $ids_updates, $content_updated );
+		}
+
+		return $content_updated;
+	}
 	/**
 	 * Updates <img> element's data-id attribute value.
 	 *
@@ -778,23 +880,24 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates IDs in Gutenberg blocks which contain single IDs.
+	 * Updates attachment ID in Gutenberg blocks' headers which contain a single ID.
 	 *
 	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
 	 * @param string $content                 HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_gutenberg_blocks_single_id( $imported_attachment_ids, $content ) {
+	public function update_gutenberg_blocks_headers_single_id( $block_designation, $imported_attachment_ids, $content ) {
 
 		$content_updated = $content;
 
-		// Pattern for matching any Gutenberg block's "id" attribute value.
-		$pattern_block_id = '|
+		// Pattern for matching any Gutenberg block's "id" attribute value, uses sprintf for placeholder injection.
+		$block_designation_escaped = $this->escape_regex_pattern_string( $block_designation );
+		$pattern_block_id_sprintf = '|
 			(
-				\<\!--      # beginning of the block element
+				\<\!--       # beginning of the block element
 				\s           # followed by a space
-				wp\:[^\s]+   # element name/designation
+				%s           # element name/designation
 				\s           # followed by a space
 				{            # opening brace
 				[^}]*        # zero or more characters except closing brace
@@ -809,7 +912,7 @@ class ContentDiffMigrator {
 		|xims';
 
 		$matches = [];
-		preg_match_all( $pattern_block_id, $content, $matches );
+		preg_match_all( sprintf( $pattern_block_id_sprintf, $block_designation_escaped ), $content, $matches );
 		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
 
 			// Loop through all ID values in $matches[2].
@@ -843,14 +946,14 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates IDs in Gutenberg blocks which contain multiple CSV IDs.
+	 * Updates attachment ID in Gutenberg blocks' headers which contain multiple CSV IDs.
 	 *
 	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
 	 * @param string $content                 HTML content.
 	 *
 	 * @return string|string[]|null
 	 */
-	public function update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content ) {
+	public function update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $content ) {
 
 		// Pattern for matching Gutenberg block's multiple CSV IDs attribute value.
 		$pattern_csv_ids = '|
@@ -1638,6 +1741,17 @@ class ContentDiffMigrator {
 	}
 
 	/**
+	 * Wrapper for WP's native \attachment_url_to_postid(), for easier testing.
+	 *
+	 * @param string $url The URL to resolve.
+	 *
+	 * @return int The found post ID, or 0 on failure.
+	 */
+	public function attachment_url_to_postid( $url ) {
+		return attachment_url_to_postid( $url );
+	}
+
+	/**
 	 * Filters a multidimensional array and searches for a subarray with a key and value.
 	 *
 	 * @param array $array Array being searched and filtered.
@@ -1674,6 +1788,26 @@ class ContentDiffMigrator {
 		}
 
 		return $found;
+	}
+
+	/**
+	 * Escapes special characters in string to be used in PHP regex patterns/expressions.
+	 *
+	 * @param string $subject Subject.
+	 *
+	 * @return string
+	 */
+	private function escape_regex_pattern_string( string $subject ): string {
+		$special_chars = [ ".", "\\", "+", "*", "?", "[", "^", "]", "$", "(", ")", "{", "}", "=", "!", "<", ">", "|", ":", ];
+		$subject_escaped = $subject;
+		foreach ( $special_chars as $special_char ) {
+			$subject_escaped = str_replace( $special_char, '\\'. $special_char, $subject_escaped );
+		}
+
+		// Space.
+		$subject_escaped = str_replace( ' ', '\s', $subject_escaped );
+
+		return $subject_escaped;
 	}
 
 	/**
