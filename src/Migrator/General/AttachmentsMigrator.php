@@ -376,9 +376,9 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				$media_path = $this->get_trash_folder() . '/' . $attachment_file;
 				if ( file_exists( $media_path ) ) {
 					unlink( $media_path );
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Delting media (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID, $media_path ) );
+					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Deleting media (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID, $media_path ) );
 				} else {
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Media File not in trash folder (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID, $media_path ) );
+					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'File not exists, media file not in trash folder (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID, $media_path ) );
 				}
 
 				// Delete atatchment from database.
