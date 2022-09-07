@@ -25,6 +25,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                       = 'content-diff__err.log';
 
+	const SAVED_META_LIVE_POST_ID         = 'newspackcontentdiff_live_id';
+
 	/**
 	 * Instance.
 	 *
@@ -454,6 +456,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 					]
 				)
 			);
+
+			// Save some metas.
+			update_post_meta( $post_id_new, self::SAVED_META_LIVE_POST_ID, $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
