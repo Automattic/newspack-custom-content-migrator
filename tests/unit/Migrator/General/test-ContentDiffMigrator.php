@@ -2019,7 +2019,7 @@ HTML;
 		$html_expected           = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 );
 
 		$html_actual = $html;
-		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
 
@@ -2027,9 +2027,9 @@ HTML;
 	}
 
 	/**
-	 * Tests that update_gutenberg_blocks_single_id updates correctly different blocks' IDs in headers.
+	 * Tests that update_gutenberg_blocks_headers_single_id updates correctly different blocks' IDs in headers.
 	 */
-	public function test_update_gutenberg_blocks_single_id_should_update_id() {
+	public function test_update_gutenberg_blocks_headers_single_id_should_update_id() {
 		// Old IDs => new IDs.
 		$imported_attachment_ids = [
 			11111 => 11110,
@@ -2057,7 +2057,7 @@ HTML;
 		$html          = sprintf( $html_with_placeholders, 11111, 22222, 33333, 44444 );
 		$html_expected = sprintf( $html_with_placeholders, 11110, 22222, 33330, 44440 );
 
-		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html );
 
 		$this->assertEquals( $html_expected, $html_actual );
 	}
@@ -2065,7 +2065,7 @@ HTML;
 	/**
 	 * Tests if several different blocks which use CSV IDs in their headers get updated correctly.
 	 */
-	public function test_update_gutenberg_blocks_multiple_ids_should_update_multiple_csv_ids_in_block_definitions() {
+	public function test_update_gutenberg_blocks_headers_multiple_ids_should_update_multiple_csv_ids_in_block_definitions() {
 
 		// Old IDs => new IDs.
 		$imported_attachment_ids = [
@@ -2083,7 +2083,7 @@ HTML;
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 4444, 22220, 5555 );
 
 		$html_slideshow_actual = $html_slideshow;
-		$html_slideshow_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_slideshow_actual );
+		$html_slideshow_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_slideshow_actual );
 		$html_slideshow_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_slideshow_actual );
 		$html_slideshow_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_slideshow_actual );
 
@@ -2099,7 +2099,7 @@ HTML;
 										  . "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 555, 11110, 666 );
 
 		$html_jp_tiled_gallery_actual = $html_jp_tiled_gallery;
-		$html_jp_tiled_gallery_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
+		$html_jp_tiled_gallery_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
 		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
 		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
 
@@ -2136,11 +2136,48 @@ HTML;
 
 		$html_actual = $html;
 		// All the updates made in \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids.
-		$html_actual = $this->logic->update_gutenberg_blocks_single_id( $imported_attachment_ids, $html_actual );
-		$html_actual = $this->logic->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
 
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_image_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_image_blocks_ids
+	 */
+	public function test_update_image_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$id_old_live = 285110;
+		$url = 'https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg';
+		$html = $this->blocks_data_provider->get_gutenberg_image_block( $id_old_live, $url );
+		$id_new_staging = 200693;
+		$html_expected = $this->blocks_data_provider->get_gutenberg_image_block( $id_new_staging, $url );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods(
+			                           [
+				                           'attachment_url_to_postid',
+			                           ]
+		                           )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				[ $url, $id_new_staging ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_image_blocks_ids( $html );
+
+		// Assert.
 		$this->assertEquals( $html_expected, $html_actual );
 	}
 
