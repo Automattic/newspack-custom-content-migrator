@@ -2015,8 +2015,8 @@ HTML;
 			22222 => 22220,
 			33333 => 33330,
 		];
-		$html                    = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 );
-		$html_expected           = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 );
+		$html                    = $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 11111, 22222, 33333 );
+		$html_expected           = $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 11110, 22220, 33330 );
 
 		$html_actual = $html;
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
@@ -2121,16 +2121,16 @@ HTML;
 		];
 
 		// 1111111111, 2222222222, 3333333333 are just decoys, and should not be updated, checking proper substring matching.
-		$html          = $this->blocks_data_provider->get_gutenberg_gallery_block( 11111, 22222, 33333 )
+		$html          = $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11111, 22222, 33333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11111, 22222, 33333 )
-			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( 1111111111, 2222222222, 3333333333 )
+			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 1111111111, 2222222222, 3333333333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
-		$html_expected = $this->blocks_data_provider->get_gutenberg_gallery_block( 11110, 22220, 33330 )
+		$html_expected = $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 11110, 22220, 33330 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 11110, 22220, 33330 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 11110, 22220, 33330 )
-			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( 1111111111, 2222222222, 3333333333 )
+			. "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 1111111111, 2222222222, 3333333333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_slideshow_block( 1111111111, 2222222222, 3333333333 )
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
 
@@ -2151,26 +2151,56 @@ HTML;
 	 */
 	public function test_update_image_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
-		$id_old_live = 285110;
-		$url = 'https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg';
-		$html = $this->blocks_data_provider->get_gutenberg_image_block( $id_old_live, $url );
-		$id_new_staging = 200693;
-		$html_expected = $this->blocks_data_provider->get_gutenberg_image_block( $id_new_staging, $url );
+		// Image block content.
+		$img_block_id_old_live_1 = 285110;
+		$img_block_id_new_staging_1 = 200693;
+		$img_block_url_1 = 'https://host.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg';
+		$img_block_id_old_live_2 = 222222;
+		$img_block_id_new_staging_2 = 333333;
+		$img_block_url_2 = 'https://host.com/wp-content/uploads/2022/09/file_2.jpg';
+		$html = $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_old_live_1, $img_block_url_1 )
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_old_live_2, $img_block_url_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_new_staging_1, $img_block_url_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_new_staging_2, $img_block_url_2 );
+		// Add gallery block content, because update_image_blocks_ids method covers those too.
+		$gallery_block_img_ids_old_live_1 = [ 11111, 11112, 11113 ];
+		$gallery_block_img_ids_new_staging_1 = [ 22222, 22223, 22224 ];
+		$gallery_block_img_urls_old_live_1 = [
+			'https://host.com/wp-content/uploads/2022/09/img1.jpg',
+			'https://host.com/wp-content/uploads/2022/09/img2.jpg',
+			'https://host.com/wp-content/uploads/2022/09/img3.jpg',
+		];
+		$gallery_block_img_ids_old_live_2 = [ 44441, 44442, 44443 ];
+		$gallery_block_img_ids_new_staging_2 = [ 55552, 55553, 55554 ];
+		$gallery_block_img_urls_old_live_2 = [
+			'https://host.com/wp-content/uploads/2022/09/img1_2.jpg',
+			'https://host.com/wp-content/uploads/2022/09/img2_2.jpg',
+			'https://host.com/wp-content/uploads/2022/09/img3_2.jpg',
+		];
+		$html .= "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( $gallery_block_img_ids_old_live_1, $gallery_block_img_urls_old_live_1 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( $gallery_block_img_ids_old_live_2, $gallery_block_img_urls_old_live_2 );
+		$html_expected .= "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( $gallery_block_img_ids_new_staging_1, $gallery_block_img_urls_old_live_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( $gallery_block_img_ids_new_staging_2, $gallery_block_img_urls_old_live_2 );;
 
 		// Mock (do a partial mock of this one method).
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
 		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
-		                           ->setMethods(
-			                           [
-				                           'attachment_url_to_postid',
-			                           ]
-		                           )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
 		                           ->getMock();
 		$this->mock_consecutive_value_maps(
 			$logic_partial_mock,
 			'attachment_url_to_postid',
 			[
-				[ $url, $id_new_staging ],
+				// Will first process image blocks which are at the top of the post_content ($html).
+				[ $img_block_url_1, $img_block_id_new_staging_1 ],
+				[ $img_block_url_2, $img_block_id_new_staging_2 ],
+				// Two gallery blocks follow with their images.
+				[ $gallery_block_img_urls_old_live_1[0], $gallery_block_img_ids_new_staging_1[0] ],
+				[ $gallery_block_img_urls_old_live_1[1], $gallery_block_img_ids_new_staging_1[1] ],
+				[ $gallery_block_img_urls_old_live_1[2], $gallery_block_img_ids_new_staging_1[2] ],
+				[ $gallery_block_img_urls_old_live_2[0], $gallery_block_img_ids_new_staging_2[0] ],
+				[ $gallery_block_img_urls_old_live_2[1], $gallery_block_img_ids_new_staging_2[1] ],
+				[ $gallery_block_img_urls_old_live_2[2], $gallery_block_img_ids_new_staging_2[2] ],
 			]
 		);
 

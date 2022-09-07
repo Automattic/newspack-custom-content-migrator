@@ -625,12 +625,9 @@ class ContentDiffMigrator {
 			 * because fetching IDs from the Media Library should cover all cases. But we still do have the IDs mapping info,
 			 * perhaps some future cases will need to use it.
 			 */
-			// wp:image
+			// update_image_blocks_ids() covers both wp:image and wp:gallery, because wp:gallery block doesn't have any IDs in header
 			$content_updated = $this->update_image_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated );
-			// // wp:gallery
-			// $content_updated = $this->update_gallery_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_gallery_blocks_ids( $excerpt_updated );
 			// // wp:audio
 			// $content_updated = $this->update_audio_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated );
@@ -700,6 +697,13 @@ class ContentDiffMigrator {
 		}
 	}
 
+	/**
+	 * Searches for all wp:image blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
 	public function update_image_blocks_ids( string $content ): string {
 
 		// Match all wp:image blocks.
@@ -719,7 +723,7 @@ class ContentDiffMigrator {
 
 			// Get image src from image HTML element.
 			$this->dom_crawler->clear();
-			$this->dom_crawler->add( $content_updated );
+			$this->dom_crawler->add( $img_block );
 			$images = $this->dom_crawler->filter( 'img' );
 			if ( empty( $images ) || 0 == $images->getIterator()->count() ) {
 				// No img, skipping.
@@ -741,17 +745,15 @@ class ContentDiffMigrator {
 
 			// Update ID in header.
 			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:image', $ids_updates, $content_updated );
-			// $content_updated = $this->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $content_updated );
-
 			// Update ID in image element `class` attribute.
 			$content_updated = $this->update_image_element_class_attribute( $ids_updates, $content_updated );
-
 			// Update image element `data-id` attribute.
 			$content_updated = $this->update_image_element_data_id_attribute( $ids_updates, $content_updated );
 		}
 
 		return $content_updated;
 	}
+
 	/**
 	 * Updates <img> element's data-id attribute value.
 	 *

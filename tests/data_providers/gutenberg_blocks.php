@@ -46,15 +46,6 @@ HTML;
 	 */
 	public function get_all_coloradosun_blocks_examples() {
 		$blocks_examples = <<<HTML
-<!-- wp:image {"id":285110,"sizeSlug":"large","linkDestination":"none"} -->
-<figure class="wp-block-image size-large"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg" alt="" class="wp-image-285110"/><figcaption>Sarah Palin joins other candidates on stage during a forum for U.S. House candidates at the Alaska Oil and Gas Association annual conference at the Dena'ina Convention Center in Anchorage, Alaska, on Wednesday, Aug. 31, 2022. Democrat Mary Peltola, right, won the special election for Alaska’s only U.S. House seat on Wednesday, besting a field that included Palin, who was seeking a political comeback in the state where she was once governor. (Marc Lester/Anchorage Daily News via AP)</figcaption></figure>
-<!-- /wp:image -->
-
-<!-- wp:gallery {"linkTo":"none"} -->
-<figure class="wp-block-gallery has-nested-images columns-default is-cropped"><!-- wp:image {"id":285120,"sizeSlug":"large","linkDestination":"none"} -->
-<figure class="wp-block-image size-large"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg" alt="" class="wp-image-285120"/></figure>
-<!-- /wp:image -->
-
 <!-- wp:jetpack/tiled-gallery {"columnWidths":[["40.03600","59.96400"]],"ids":[285120,285111]} -->
 <div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular"><div class="tiled-gallery__gallery"><div class="tiled-gallery__row"><div class="tiled-gallery__col" style="flex-basis:40.03600%"><figure class="tiled-gallery__item"><img alt="" data-height="600" data-id="285120" data-link="https://coloradosun.com/2022/09/06/colorado-sun-media-journalism/larry-3/" data-url="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg" data-width="600" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg?ssl=1" data-amp-layout="responsive"/></figure></div><div class="tiled-gallery__col" style="flex-basis:59.96400%"><figure class="tiled-gallery__item"><img alt="" data-height="1707" data-id="285111" data-link="https://coloradosun.com/election-2022-house-alaska-8/" data-url="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg" data-width="2560" src="https://i0.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg?ssl=1" data-amp-layout="responsive"/></figure></div></div></div></div>
 <!-- /wp:jetpack/tiled-gallery -->
@@ -103,7 +94,7 @@ HTML;
 	 *
 	 * @return string HTML.
 	 */
-	public function get_gutenberg_gallery_block( $id1, $id2, $id3 ) {
+	public function get_gutenberg_gallery_block_w_3_images( $id1, $id2, $id3 ) {
 		$html_id_placeholder = <<<HTML
 <!-- wp:gallery {"linkTo":"none"} -->
 <figure class="wp-block-gallery has-nested-images columns-default is-cropped"><!-- wp:image {"id":%d,"sizeSlug":"large","linkDestination":"none"} -->
@@ -121,6 +112,38 @@ HTML;
 HTML;
 
 		return sprintf( $html_id_placeholder, $id1, $id1, $id2, $id2, $id3, $id3 );
+	}
+
+	/**
+	 * @param array $img_ids  Gallery image IDs.
+	 * @param array $img_srcs Gallery image src URLs.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_gallery_block( $img_ids, $img_srcs ) {
+		if ( count( $img_ids ) !== count( $img_srcs ) ) {
+			throw new \RuntimeException( 'Number of IDs given in first method argument must be equal to number of srcs in secong method argument.' );
+		}
+
+		$gallery_block_outer_placeholder_sprintf = <<<HTML
+<!-- wp:gallery {"linkTo":"none"} -->
+<figure class="wp-block-gallery has-nested-images columns-default is-cropped">%s</figure>
+<!-- /wp:gallery -->
+HTML;
+		$image_block_placeholder_sprintf = <<<HTML
+<!-- wp:image {"id":%d,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%d"/></figure>
+<!-- /wp:image -->
+HTML;
+		$img_blocks = [];
+		foreach ( $img_ids as $key => $img_id ) {
+			$img_src = $img_srcs[ $key ];
+			$img_blocks[] = sprintf( $image_block_placeholder_sprintf, $img_id, $img_src, $img_id );
+		}
+
+		$gallery_block = sprintf( $gallery_block_outer_placeholder_sprintf, implode( "\n\n", $img_blocks ) );
+
+		return $gallery_block;
 	}
 
 	/**
