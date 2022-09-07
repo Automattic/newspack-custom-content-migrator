@@ -20,6 +20,81 @@ HTML;
 	}
 
 	/**
+	 * @param int    $id  Image attachment ID.
+	 * @param string $src Optional.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_image_block( $id, $src = null ) {
+		if ( is_null( $src ) ) {
+			$src = "https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg";
+		}
+
+		$block_placeholder = <<<HTML
+<!-- wp:image {"id":%d,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%d"/><figcaption>Caption text</figcaption></figure>
+<!-- /wp:image -->
+HTML;
+
+		return sprintf( $block_placeholder, $id, $src, $id );
+	}
+
+	/**
+	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
+	 *
+	 * @return void
+	 */
+	public function get_all_coloradosun_blocks_examples() {
+		$blocks_examples = <<<HTML
+<!-- wp:image {"id":285110,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg" alt="" class="wp-image-285110"/><figcaption>Sarah Palin joins other candidates on stage during a forum for U.S. House candidates at the Alaska Oil and Gas Association annual conference at the Dena'ina Convention Center in Anchorage, Alaska, on Wednesday, Aug. 31, 2022. Democrat Mary Peltola, right, won the special election for Alaska’s only U.S. House seat on Wednesday, besting a field that included Palin, who was seeking a political comeback in the state where she was once governor. (Marc Lester/Anchorage Daily News via AP)</figcaption></figure>
+<!-- /wp:image -->
+
+<!-- wp:gallery {"linkTo":"none"} -->
+<figure class="wp-block-gallery has-nested-images columns-default is-cropped"><!-- wp:image {"id":285120,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg" alt="" class="wp-image-285120"/></figure>
+<!-- /wp:image -->
+
+<!-- wp:jetpack/tiled-gallery {"columnWidths":[["40.03600","59.96400"]],"ids":[285120,285111]} -->
+<div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular"><div class="tiled-gallery__gallery"><div class="tiled-gallery__row"><div class="tiled-gallery__col" style="flex-basis:40.03600%"><figure class="tiled-gallery__item"><img alt="" data-height="600" data-id="285120" data-link="https://coloradosun.com/2022/09/06/colorado-sun-media-journalism/larry-3/" data-url="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg" data-width="600" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg?ssl=1" data-amp-layout="responsive"/></figure></div><div class="tiled-gallery__col" style="flex-basis:59.96400%"><figure class="tiled-gallery__item"><img alt="" data-height="1707" data-id="285111" data-link="https://coloradosun.com/election-2022-house-alaska-8/" data-url="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg" data-width="2560" src="https://i0.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg?ssl=1" data-amp-layout="responsive"/></figure></div></div></div></div>
+<!-- /wp:jetpack/tiled-gallery -->
+
+<!-- wp:jetpack/slideshow {"ids":[285120,285111],"sizeSlug":"large"} -->
+<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper"><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285120" data-id="285120" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg"/></figure></li><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285111" data-id="285111" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">Mary Peltola is shown leaving a voting booth while early voting on Friday, Aug. 12, 2022, in Anchorage, Alaska. Peltola, a Democrat, faces Republicans Nick Begich and Sarah Palin Tuesday in a special election to fill the remainder of the U.S. House term left vacant by Don Young's death in March. Peltola is also a candidate in Tuesday's primary for a full two-year term for the House seat. (AP Photo/Mark Thiessen)</figcaption></figure></li></ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
+<!-- /wp:jetpack/slideshow -->
+
+<!-- wp:audio {"id":276070} -->
+<figure class="wp-block-audio"><audio controls src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/07/SC_0714_SunTwoWay.mp3"></audio></figure>
+<!-- /wp:audio -->
+
+<!-- wp:cover {"url":"https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-scaled.jpg","id":285111,"dimRatio":50,"isDark":false} -->
+<div class="wp-block-cover is-light"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><img class="wp-block-cover__image-background wp-image-285111" alt="" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-scaled.jpg" data-object-fit="cover"/><div class="wp-block-cover__inner-container"><!-- wp:paragraph {"align":"center","placeholder":"Write title…","fontSize":"large"} -->
+<p class="has-text-align-center has-large-font-size"></p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:cover -->
+
+<!-- wp:file {"id":285110,"href":"https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-scaled.jpg"} -->
+<div class="wp-block-file"><a id="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889" href="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-scaled.jpg">Election 2022 House Alaska</a><a href="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-scaled.jpg" class="wp-block-file__button" download aria-describedby="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889">Download</a></div>
+<!-- /wp:file -->
+
+<!-- wp:media-text {"mediaId":285110,"mediaLink":"https://coloradosun.com/election-2022-house-alaska-7/","mediaType":"image"} -->
+<div class="wp-block-media-text alignwide is-stacked-on-mobile"><figure class="wp-block-media-text__media"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg" alt="" class="wp-image-285110 size-full"/></figure><div class="wp-block-media-text__content"><!-- wp:paragraph {"placeholder":"Content…"} -->
+<p>blablatext</p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:media-text -->
+
+<!-- wp:video {"id":283412} -->
+<figure class="wp-block-video"><video controls src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/08/Headlines.mp4"></video></figure>
+<!-- /wp:video -->
+
+<!-- wp:jetpack/image-compare {"imageBefore":{"id":285109,"url":"https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707},"imageAfter":{"id":285108,"url":"https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707}} -->
+<figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="285109" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="285108" src="https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>
+<!-- /wp:jetpack/image-compare -->
+HTML;
+
+	}
+
+	/**
 	 * Gets a Gutenberg Gallery block with three images.
 	 *
 	 * @param int $id1 Att ID 1.
