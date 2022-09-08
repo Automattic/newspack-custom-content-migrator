@@ -634,12 +634,12 @@ class ContentDiffMigrator {
 			// wp:video
 			$content_updated = $this->update_video_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated );
+			// wp:file
+			$content_updated = $this->update_file_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated );
 			// // wp:cover
 			// $content_updated = $this->update_cover_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated );
-			// // wp:file
-			// $content_updated = $this->update_file_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated );
 			// // wp:media-text
 			// $content_updated = $this->update_media_text_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_media_text_blocks_ids( $excerpt_updated );
@@ -855,6 +855,60 @@ class ContentDiffMigrator {
 
 			// Update ID in header.
 			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:video', $ids_updates, $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:file blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_file_blocks_ids( string $content ): string {
+
+		// Match all wp:file blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:file', $content );
+		if ( is_null( $matches ) || 0 === $matches || false === $matches || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		$content_updated = $content;
+
+		// Loop through all file blocks and update their IDs.
+		foreach ( $matches[0] as $key_match => $match ) {
+			$file_block = $match[0];
+
+			// Get attachment ID from block header.
+			$att_id  = $this->wp_block_manipulator->get_attribute( $file_block, 'id' );
+
+			// Get file src from a HTML element.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $file_block );
+			$as = $this->dom_crawler->filter( 'a' );
+			if ( empty( $as ) || 0 == $as->getIterator()->count() ) {
+				// No img, skipping.
+				// TODO log.
+				continue;
+			}
+			$a   = $as->getIterator()[0];
+			// $a_raw_html = $a->ownerDocument->saveHTML( $a );
+			$a_src = $a->getAttribute( 'href' );
+
+			// Get this file's attachment ID from DB.
+			$new_id = $this->attachment_url_to_postid( $a_src );
+			if ( 0 === $new_id ) {
+				// File attachment ID not found.
+				// TODO log.
+				continue;
+			}
+
+			$ids_updates = [ $att_id => $new_id ];
+
+			// Update ID in header.
+			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:file', $ids_updates, $content_updated );
 		}
 
 		return $content_updated;

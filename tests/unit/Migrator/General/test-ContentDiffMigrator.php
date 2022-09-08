@@ -2267,7 +2267,7 @@ HTML;
 		$custom_block_w_same_id_sprintf = <<<BLOCK
 <!-- wp:somecustomblock {"id":%d} -->
 <figure class="wp-block-video"><video controls src="%s"></video></figure>
-<!-- /wp:video -->
+<!-- /wp:somecustomblock -->
 BLOCK;
 		$custom_block_w_same_id = sprintf( $custom_block_w_same_id_sprintf, $video_att_id_old_live_1, 'https://host.com/foo.bar' );
 
@@ -2296,6 +2296,56 @@ BLOCK;
 
 		// Run.
 		$html_actual = $logic_partial_mock->update_video_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_file_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_file_blocks_ids
+	 */
+	public function test_update_file_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$file_att_id_old_live_1 = 1111;
+		$file_att_id_new_staging_1 = 2222;
+		$file_href_1 = 'https://host.com/wp-content/uploads/2022/07/file_1.mp4';
+		$file_att_id_old_live_2 = 3333;
+		$file_att_id_new_staging_2 = 4444;
+		$file_href_2 = 'https://host.com/wp-content/uploads/2022/07/file_2.mp4';
+		$custom_block_w_same_id_sprintf = <<<BLOCK
+<!-- wp:somecustomblock {"id":%d} -->
+<div class="wp-block-file"><a id="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889" href="%s">link text</a><a href="%s" class="wp-block-file__button" download aria-describedby="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889">Download</a></div>
+<!-- /wp:somecustomblock -->
+BLOCK;
+		$custom_block_w_same_id = sprintf( $custom_block_w_same_id_sprintf, $file_att_id_old_live_1, 'https://host.com/foo.bar', 'https://host.com/foo.bar', 'https://host.com/foo.bar' );
+
+		$html = $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_old_live_1, $file_href_1 )
+		        // Let's throw in a different block which uses same ID values, but which mean something else than file Attachment ID, and should not be updated.
+		        . "\n\n" . $custom_block_w_same_id
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_old_live_2, $file_href_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_new_staging_1, $file_href_1 )
+		                 . "\n\n" . $custom_block_w_same_id
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_new_staging_2, $file_href_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice to get the files' attachment IDs on Staging.
+				[ $file_href_1, $file_att_id_new_staging_1 ],
+				[ $file_href_2, $file_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_file_blocks_ids( $html );
 
 		// Assert.
 		$this->assertEquals( $html_expected, $html_actual );

@@ -72,6 +72,22 @@ HTML;
 	}
 
 	/**
+	 * @param int    $id  File attachment ID.
+	 * @param string $src Optional.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_file_block( $id, $src ) {
+		$block_placeholder_sprintf = <<<HTML
+<!-- wp:file {"id":%d,"href":"%s"} -->
+<div class="wp-block-file"><a id="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889" href="%s">link text</a><a href="%s" class="wp-block-file__button" download aria-describedby="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889">Download</a></div>
+<!-- /wp:file -->
+HTML;
+
+		return sprintf( $block_placeholder_sprintf, $id, $src, $src, $src );
+	}
+
+	/**
 	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
 	 *
 	 * @return void
@@ -91,10 +107,6 @@ HTML;
 <p class="has-text-align-center has-large-font-size"></p>
 <!-- /wp:paragraph --></div></div>
 <!-- /wp:cover -->
-
-<!-- wp:file {"id":285110,"href":"https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-scaled.jpg"} -->
-<div class="wp-block-file"><a id="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889" href="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-scaled.jpg">Election 2022 House Alaska</a><a href="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-scaled.jpg" class="wp-block-file__button" download aria-describedby="wp-block-file--media-1b32a8dc-27e7-4af8-b4e3-f14348bb6889">Download</a></div>
-<!-- /wp:file -->
 
 <!-- wp:media-text {"mediaId":285110,"mediaLink":"https://coloradosun.com/election-2022-house-alaska-7/","mediaType":"image"} -->
 <div class="wp-block-media-text alignwide is-stacked-on-mobile"><figure class="wp-block-media-text__media"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg" alt="" class="wp-image-285110 size-full"/></figure><div class="wp-block-media-text__content"><!-- wp:paragraph {"placeholder":"Content…"} -->
