@@ -148,10 +148,12 @@ class ContentDiffMigrator {
 		$data[ self::DATAKEY_USERS ][] = $author_row;
 
 		// Get Post Author User Metas.
-		$data[ self::DATAKEY_USERMETA ] = array_merge(
-			$data[ self::DATAKEY_USERMETA ],
-			$this->select_usermeta_rows( $table_prefix, $author_row['ID'] )
-		);
+		if ( is_array( $author_row ) && array_key_exists( 'ID', $author_row ) ) {
+			$data[ self::DATAKEY_USERMETA ] = array_merge(
+				$data[ self::DATAKEY_USERMETA ],
+				$this->select_usermeta_rows( $table_prefix, $author_row['ID'] )
+			);
+		}
 
 		// Get Comments.
 		if ( $post_row['comment_count'] > 0 ) {
@@ -325,9 +327,9 @@ class ContentDiffMigrator {
 
 		// Get existing Author User or insert a new one.
 		$author_id_old = $data[ self::DATAKEY_POST ]['post_author'];
-		$author_row    = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old );
-		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row['ID'] );
-		$user_existing = $this->get_user_by( 'login', $author_row['user_login'] );
+		$author_row    = ! is_null( $author_id_old ) ? $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old ) : [];
+		$usermeta_rows = is_array( $author_row ) && array_key_exists( 'ID', $author_row ) ? $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row['ID'] ) : [];
+		$user_existing = is_array( $author_row ) && array_key_exists( 'user_login', $author_row ) ? $this->get_user_by( 'login', $author_row['user_login'] ) : false;
 		$author_id_new = null;
 		if ( $user_existing instanceof WP_User ) {
 			$author_id_new = (int) $user_existing->ID;
