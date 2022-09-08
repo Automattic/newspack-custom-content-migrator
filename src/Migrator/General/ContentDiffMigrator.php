@@ -25,6 +25,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                       = 'content-diff__err.log';
 
+	const SAVED_META_LIVE_POST_ID         = 'newspackcontentdiff_live_id';
+
 	/**
 	 * Instance.
 	 *
@@ -154,6 +156,82 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator display-collations-comparison',
+			[ $this, 'cmd_compare_collations_of_live_and_core_wp_tables' ],
+			[
+				'shortdesc' => 'Display a table comparing collations of Live and Core WP tables.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => 'Live site table prefix.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'skip-tables',
+						'description' => 'Skip checking a particular set of tables from the collation checks.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'different-collations-only',
+						'description' => 'This flag determines to only display tables with differing collations.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator correct-collations-for-live-wp-tables',
+			[ $this, 'cmd_correct_collations_for_live_wp_tables' ],
+			[
+				'shortdesc' => 'This command will handle the necessary operations to match collations across Live and Core WP tables',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => 'Live site table prefix.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'mode',
+						'description' => 'Determines how large the SQL insert transactions are and the latency between them.',
+						'optional'    => true,
+						'default'     => 'generous',
+						'options'     => [
+							'aggressive',
+							'generous',
+							'cautious',
+							'calm',
+						],
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'skip-tables',
+						'description' => 'Skip checking a particular set of tables from the collation checks.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'backup-table-prefix',
+						'description' => 'Prefix to use when backing up the Live tables.',
+						'optional'    => true,
+						'default'     => 'bak_',
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -230,7 +308,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$this->recreate_categories();
 		echo "\nDone!\n";
 
-		echo sprintf( 'Importing %d post objects, hold tight..', count( $all_live_posts_ids ) );
+		echo sprintf( 'Importing %d objects, hold tight..', count( $all_live_posts_ids ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids );
 		echo "\nDone!\n";
 
@@ -378,6 +456,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 					]
 				)
 			);
+
+			// Save some metas.
+			update_post_meta( $post_id_new, self::SAVED_META_LIVE_POST_ID, $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -527,6 +608,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function update_featured_image_ids( $imported_posts_data ) {
 
 		/**
+		 * Helper map of imported Posts and Pages.
+		 *
+		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
+		 */
+		$imported_post_ids_map    = [];
+		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
+		foreach ( $imported_posts_data_post as $entry ) {
+			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
+		}
+
+		/**
 		 * Helper map of imported Attachments.
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
@@ -557,7 +649,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
 			echo "\n" . sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) );
 		}
-		self::$logic->update_featured_images( $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
+		self::$logic->update_featured_images( $imported_post_ids_map, $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
 
 	/**
@@ -620,6 +712,84 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, $this->log_updated_blocks_ids );
+	}
+
+	/**
+	 * This function will display a table comparing the collations of Live and Core WP tables.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Optional arguments.
+	 */
+	public function cmd_compare_collations_of_live_and_core_wp_tables( $args, $assoc_args ) {
+		$live_table_prefix = $assoc_args['live-table-prefix'];
+		$skip_tables = [];
+		$different_tables_only = $assoc_args['different-collations-only'] ?? false;
+
+		if ( ! empty( $assoc_args['skip-tables'] ) ) {
+			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
+		}
+
+		$tables = [];
+
+		if ( $different_tables_only ) {
+			$tables = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+		} else {
+			$tables = self::$logic->get_collation_comparison_of_live_and_core_wp_tables( $live_table_prefix, $skip_tables );
+		}
+
+		if ( ! empty( $tables ) ) {
+			WP_CLI\Utils\format_items( 'table', $tables, array_keys( $tables[0] ) );
+		} else {
+			WP_CLI::success( 'Live and Core WP DB table collations match!' );
+		}
+	}
+
+	/**
+	 * This function will execute the necessary steps to get Live WP
+	 * tables to match the collation of Core WP tables.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Optional arguments.
+	 */
+	public function cmd_correct_collations_for_live_wp_tables( $args, $assoc_args ) {
+		$live_table_prefix = $assoc_args['live-table-prefix'];
+		$mode = $assoc_args['mode'];
+		$backup_prefix = $assoc_args['backup-table-prefix'];
+		$skip_tables = [];
+
+		if ( ! empty( $assoc_args['skip-tables'] ) ) {
+			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
+		}
+
+		$tables_with_differing_collations = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+
+		if ( ! empty( $tables_with_differing_collations ) ) {
+			WP_CLI\Utils\format_items( 'table', $tables_with_differing_collations, array_keys( $tables_with_differing_collations[0] ) );
+		}
+
+		switch ( $mode ) {
+			case 'aggressive':
+				$records_per_transaction = 15000;
+				$sleep_in_seconds = 1;
+				break;
+			case 'generous':
+				$records_per_transaction = 10000;
+				$sleep_in_seconds = 2;
+				break;
+			case 'calm':
+				$records_per_transaction = 1000;
+				$sleep_in_seconds = 3;
+				break;
+			default: // Cautious.
+				$records_per_transaction = 5000;
+				$sleep_in_seconds = 2;
+				break;
+		}
+
+		foreach ( $tables_with_differing_collations as $result ) {
+			echo 'Addressing ' . $result['table'] . "\n";
+			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
+		}
 	}
 
 	/**
@@ -709,6 +879,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$live_posts_table = $this->live_table_prefix . 'posts';
 		$posts_table      = $wpdb->posts;
 
+		// phpcs:disable -- wpdb::prepare is used correctly.
 		$parent_id_new = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT wp.ID
@@ -723,6 +894,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				$id_live
 			)
 		);
+		// phpcs:enable
 
 		return $parent_id_new;
 	}

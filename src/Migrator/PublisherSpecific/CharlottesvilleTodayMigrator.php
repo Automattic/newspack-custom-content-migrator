@@ -5,6 +5,8 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 
 /**
@@ -46,11 +48,23 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 	private $coauthors_logic;
 
 	/**
+	 * @var WpBlockManipulator
+	 */
+	private $wpb_lock_manipulator;
+
+	/**
+	 * @var HtmlElementManipulator
+	 */
+	private $html_element_manipulator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->posts_logic = new PostsLogic();
 		$this->coauthors_logic = new CoAuthorPlusLogic();
+		$this->wpb_lock_manipulator = new WpBlockManipulator();
+		$this->html_element_manipulator = new HtmlElementManipulator();
 	}
 
 	/**
@@ -89,6 +103,254 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Run additionally after cmd_acf_migrate to use ACF authors field.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-fix-image-captions',
+			[ $this, 'cmd_fix_image_captions' ],
+			[
+				'shortdesc' => 'Remove stray double dots from image descriptions.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-migrate-custom-taxonomy-authors',
+			[ $this, 'cmd_use_custom_taxonomy_authors' ],
+			[
+				'shortdesc' => 'Run additionally after cmd_acf_migrate to import authors from custom taxonomy.',
+			]
+		);
+	}
+
+	public function replace_string_ending( $string, $ending_current, $ending_new ) {
+		// Confirm string ending.
+		if ( 0 !== strpos( strrev( $string ), strrev( $ending_current ) ) ) {
+			return $string;
+		}
+
+		// Remove current ending.
+		$string_trimmed = strrev( substr( strrev( $string ), strlen( $ending_current ) ) );
+
+		// Append new ending.
+		$string_trimmed .= $ending_new;
+
+		return $string_trimmed;
+	}
+
+	public function cmd_fix_image_captions( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Credit field gets appended dynamically at the end of the image description. We need to remove it from image block's figcaption.
+		// e.g. https://charlottesville.test/wp-admin/post.php?post=81361&action=edit ; https://charlottesville.test/new-clothing-store-provides-positive-vibez-at-stonefield/
+		/**
+			<!-- wp:image {"id":81372,"sizeSlug":"large","linkDestination":"none"} -->
+			<figure class="wp-block-image size-large"><img src="https://charlottesville.test.com/new-clothing-store-provides-positive-vibez-at-stonefield/kulture-vibe-4/" alt="" class="wp-image-81372"/><figcaption>Ronnie Megginson checks in on renovations at his new Kulture Vibez location before the grand opening. Credit: Patty Medina</figcaption></figure>
+			<!-- /wp:image -->
+		 */
+		// Since the image's Credit field is "Credit: Patty Medina", which will be appended automatically, we need to remove it from the figcaption in image block.
+
+		// Loop through all posts, and get image blocks.
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			$post = get_post( $post_id );
+
+			// Get image blocks.
+			$matches = $this->wpb_lock_manipulator->match_wp_block( 'wp:image', $post->post_content );
+			if ( ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post->post_content;
+
+			// Loop through all img blocks and update their figcaption texts.
+			foreach ( $matches[0] as $match_img_block ) {
+				$img_block = $match_img_block[0];
+
+				// Get image attachment ID.
+				preg_match( '|wp:image\s{"id":(\d+),|', $img_block, $matches_att_id );
+				$att_id = $matches_att_id[1] ?? null;
+				if ( is_null( $att_id ) ) {
+					$this->log( 'imgcap__err_att_id_not_found.txt', sprintf( '%d imgblock %s', $post_id, $img_block ) );
+					continue;
+				}
+
+				// Get image attachment obj.
+				$attachment = get_post( $att_id );
+				if ( is_null( $attachment ) ) {
+					$this->log( 'imgcap__err_att_id_not_found_in_db.txt', sprintf( '%d %d %s', $post_id, $att_id, $img_block ) );
+					continue;
+				}
+
+				// Get image's Credit and Caption field.
+				$img_caption = $post->post_excerpt;
+				$img_credit = get_post_meta( $att_id, '_media_credit', true );
+
+				$matches_figcaption = $this->html_element_manipulator->match_elements_with_closing_tags( 'figcaption', $img_block );
+				$figcaption_element = $matches_figcaption[0][0][0] ?? null;
+				if ( is_null( $figcaption_element ) ) {
+					$this->log( 'imgcap__err_figcaption_not_found.txt', sprintf( '%d imgblock %s', $post_id, $img_block ) );
+					continue;
+				}
+
+				// Get figcaption text.
+				$figcaption_text = str_replace( [ '<figcaption>', '</figcaption>' ], [ '',''], $figcaption_element );
+
+				// Do several updates to the figcaption text.
+				$figcaption_text_cleaned = $figcaption_text;
+				//      - first straighten/normalize some faulty Credit typos.
+				$figcaption_text_cleaned = str_replace( '. . Credit:', '. Credit:', $figcaption_text_cleaned );
+				//      - if figcaption ends with Credit, remove it
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, $img_credit );
+				//       - remove the trailing "Credit:".
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, 'Credit:' );
+				//       - more cleanup.
+				$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+				$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
+
+				// Clean up typo sentence endings.
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ', .', '.' );
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, '?.', '?' );
+				$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+
+				// Continue updating the whole img block and post_content.
+				if ( $figcaption_text_cleaned != $figcaption_text ) {
+					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, 'Credit:' );
+					$figcaption_text_cleaned = rtrim( $figcaption_text_cleaned, ' ' );
+					$figcaption_text_cleaned = $this->replace_double_dot_from_end_of_string_w_single_dot( $figcaption_text_cleaned );
+
+					// Clean up typo sentence endings.
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ', .', '.' );
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, '?.', '?' );
+					$figcaption_text_cleaned = $this->replace_string_ending( $figcaption_text_cleaned, ' .', '.' );
+
+					// Update image block's figcaption.
+					$img_block_updated = str_replace(
+						sprintf( "<figcaption>%s</figcaption>", $figcaption_text ),
+						sprintf( "<figcaption>%s</figcaption>", $figcaption_text_cleaned ),
+						$img_block
+					);
+
+					// Log just the figcaption changes.
+					$this->log( 'imgcap__figcaptions_replaced.txt', sprintf( "%d\n%s\n%s", $post_id, $figcaption_text, $figcaption_text_cleaned ) );
+
+					// Update post_content.
+					$post_content_updated = str_replace(
+						$img_block,
+						$img_block_updated,
+						$post_content_updated
+					);
+
+					// And if this image has been cleaned up, make sure that its Credit field starts with literal "Credit:".
+					if ( 0 !== strpos( $img_credit, "Credit:" ) ) {
+						update_post_meta( $att_id, '_media_credit', "Credit: " . $img_credit );
+					}
+				}
+			}
+
+			// Save post.
+			if ( $post_content_updated != $post->post_content ) {
+				$this->log( 'imgcap__saved_post'. $post_id .'_01_before.txt', $post->post_content );
+				$this->log( 'imgcap__saved_post'. $post_id .'_02_after.txt', $post_content_updated );
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+			}
+		}
+
+		wp_cache_flush();
+
+		WP_CLI::log( 'Done.' );
+	}
+
+	public function replace_double_dot_from_end_of_string_w_single_dot( $string ) {
+		$string_trimmed = $string;
+
+		// If ends with "..", but not with "...", replace ending ".." w/ ".".
+		if (
+			( 0 === strpos( strrev( $string ), '..' ) )
+			&& ( 0 !== strpos( strrev( $string ), '...' ) )
+		) {
+			$string_trimmed = substr( $string, 0, strlen( $string ) - 1 );
+		}
+
+		return $string_trimmed;
+	}
+
+	/**
+	 * Imports authors from custom taxonomy.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_use_custom_taxonomy_authors( $args, $assoc_args ) {
+		global $wpdb;
+
+		if ( ! $this->coauthors_logic->is_coauthors_active() ) {
+			WP_CLI::error( 'CAP must be active in order to run this command. Please fix then re run.' );
+		}
+
+		$default_wp_author_user = get_user_by( 'login', 'adminnewspack' );
+		$default_wp_author_user_id = $default_wp_author_user->ID;
+
+		$post_ids = get_posts( [
+			'fields' => 'ids',
+			'posts_per_page' => -1,
+		] );
+
+		foreach ( $post_ids as $post_id ) {
+			$post_authors = $wpdb->get_col( $wpdb->prepare( "select k.name from wp_term_relationships i inner join wp_term_taxonomy j on i.term_taxonomy_id = j.term_taxonomy_id inner join wp_terms k on j.term_id = k.term_id where i.object_id = %d and j.taxonomy = 'post_author';", $post_id ) );
+
+			if ( empty( $post_authors ) ) {
+				continue;
+			}
+
+			WP_CLI::warning( "Found authors for post " . $post_id . ": " . json_encode( $post_authors ) );
+
+			$guest_author_ids = [];
+			foreach ( $post_authors as $post_author ) {
+				$guest_author = $this->get_or_create_ga_by_name( $post_author );
+				$guest_author_id = $guest_author->ID ?? null;
+				if ( is_null( $guest_author_id ) ) {
+					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+				}
+				$guest_author_ids[] = $guest_author_id;
+			}
+
+			if ( empty( $guest_author_ids ) ) {
+				continue;
+			}
+
+			// GAs won't be assigned to the post if WP_User author is missing:
+			//   - see \CoAuthors_Plus::add_coauthors and the "Uh oh, no WP_Users assigned to the post" remark.
+			// So let's assign a default one if that's the case.
+			if ( 0 === get_post_field( 'post_author', $post_id ) ) {
+				wp_update_post( [
+					'ID' => $post_id,
+					'post_author' => $default_wp_author_user_id,
+				] );
+			}
+
+			// Get existing GAs.
+			$existing_guest_authors = $this->coauthors_logic->get_guest_authors_for_post( $post_id );
+			$existing_guest_author_ids = [];
+			foreach ( $existing_guest_authors as $existing_guest_author ) {
+				if ( 'guest-author' == $existing_guest_author->type ) {
+					$existing_guest_author_ids[] = $existing_guest_author->ID;
+				}
+			}
+
+			// Add previously set GA too.
+			$guest_author_ids = array_merge( $guest_author_ids, $existing_guest_author_ids );
+			$guest_author_ids = array_unique( $guest_author_ids );
+
+			$this->coauthors_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id );
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -110,25 +372,35 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 
 			// Get ACF author meta from postmeta and Terms.
 			$meta_acf_author = get_post_meta( $post_id, 'article_author' );
-			$author_term_id = $meta_acf_author[0][0] ?? null;
-			if ( is_null( $author_term_id ) || ! $author_term_id ) {
-				WP_CLI::log( '- skipping...' );
-				continue;
+			$acf_authors_term_ids = $meta_acf_author[0] ?? [];
+
+			// Get or create GAs from ACF Terms.
+			$ga_ids = [];
+			foreach ( $acf_authors_term_ids as $key_author_term_id => $author_term_id ) {
+				if ( is_null( $author_term_id ) || ! $author_term_id ) {
+					WP_CLI::log( '- skipping...' );
+					continue;
+				}
+
+				$author_name = $wpdb->get_var( $wpdb->prepare( "select name from $wpdb->terms where term_id = %d;", $author_term_id ) );
+				if ( ! $author_name ) {
+					WP_CLI::log( '- skipping 2...' );
+					continue;
+				}
+
+				// Create GA.
+				$ga = $this->get_or_create_ga_by_name( $author_name );
+				$ga_id = $ga->ID ?? null;
+				if ( is_null( $ga_id ) ) {
+					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+				}
+				$ga_ids[] = $ga_id;
 			}
 
-			$author_name = $wpdb->get_var( $wpdb->prepare( "select name from $wpdb->terms where term_id = %d;", $author_term_id ) );
-			if ( ! $author_name ) {
-				WP_CLI::log( '- skipping 2...' );
-				continue;
+			// Assign GAs to post.
+			if ( ! empty( $ga_ids ) ) {
+				$this->coauthors_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
 			}
-
-			// Create GA and assign to post.
-			$ga = $this->get_or_create_ga_by_name( $author_name );
-			$ga_id = $ga->ID ?? null;
-			if ( is_null( $ga_id ) ) {
-				throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
-			}
-			$this->coauthors_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id );
 		}
 	}
 

@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     0.7.0
+ * Version:     1.0.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -55,19 +55,22 @@ PluginSetup::register_migrators(
 		Migrator\General\AttachmentsMigrator::class,
 		Migrator\General\PDFEmbedderMigrator::class,
 		Migrator\General\ContentFixerMigrator::class,
+		Migrator\General\XMLMigrator::class,
+		Migrator\General\PrelaunchSiteQAMigrator::class,
 
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
-		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
-		Migrator\PublisherSpecific\PhilomathMigrator::class,
-		Migrator\PublisherSpecific\RenoMigrator::class,
+		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\NoozhawkMigrator::class,
 		Migrator\PublisherSpecific\CharlottesvilleTodayMigrator::class,
 		Migrator\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
-		Migrator\PublisherSpecific\EnergeticCityMigrator::class,
 		Migrator\PublisherSpecific\BethesdaMagMigrator::class,
 		Migrator\PublisherSpecific\SearchLightNMMigrator::class,
 		Migrator\PublisherSpecific\CalMattersMigrator::class,
-		Migrator\PublisherSpecific\IthacaVoiceMigrator::class,
 		Migrator\PublisherSpecific\NewsroomCoNzMigrator::class,
+		Migrator\PublisherSpecific\MassterlistMigrator::class,
+		Migrator\PublisherSpecific\ColoradoSunMigrator::class,
+		Migrator\PublisherSpecific\MustangNewsMigrator::class,
+		Migrator\PublisherSpecific\LkldNowMigrator::class,
 	)
 );
