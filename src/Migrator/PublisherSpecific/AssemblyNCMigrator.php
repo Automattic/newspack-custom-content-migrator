@@ -5,6 +5,7 @@ use DOMAttr;
 use DOMDocument;
 use DOMElement;
 use DOMNode;
+use DOMNodeList;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \WP_CLI;
@@ -92,7 +93,9 @@ class AssemblyNCMigrator implements InterfaceMigrator {
 	 * AssemblyNC Constructor.
 	 */
 	private function __construct() {
-		$this->parsedown      = new Parsedown();
+		if ( class_exists( 'Parsedown' ) ) {
+			$this->parsedown      = new Parsedown();
+		}
 		$this->co_author_plus = new CoAuthorPlus();
 	}
 
@@ -121,6 +124,11 @@ class AssemblyNCMigrator implements InterfaceMigrator {
 		WP_CLI::add_command(
 			'newspack-content-migrator assemblync-fix-guest-authors',
 			[ $this, 'cmd_fix_guest_authors' ]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator assemblync-move-captions-to-figures',
+			[ $this, 'cmd_move_captions_to_figures' ]
 		);
 	}
 
@@ -225,6 +233,101 @@ class AssemblyNCMigrator implements InterfaceMigrator {
 				}
 			}
 		}
+	}
+
+	public function cmd_move_captions_to_figures() {
+		$post = get_post( 48 );
+
+		$dom = new DOMDocument();
+		$content = html_entity_decode( $post->post_content, ENT_QUOTES, 'UTF-8' );
+//		var_dump( $content );
+		@$dom->loadHTML( $content );
+//		echo "\n\n\n\n----\n\n\n\n";
+//		var_dump( utf8_decode( $this->get_inner_html( $dom->lastChild->firstChild ) ) );die();
+
+		$seen_header_at_top = false;
+		$seen_other_elements = false;
+		$figure = null;
+		$figure_id = null;
+
+		$remove_nodes = [];
+		foreach ( $dom->lastChild->firstChild->childNodes as $child_node ) {
+			/* @var DOMNode $child_node */
+			if ( '#comment' === $child_node->nodeName ) {
+				continue;
+			}
+
+			var_dump( [ $child_node->nodeName, 'seen_other_elements' => $seen_other_elements, 'seen_header_at_top' => $seen_header_at_top ]);
+
+			if ( ! $seen_other_elements ) {
+				if ( 'h5' !== $child_node->nodeName ) {
+					$seen_other_elements = true;
+				}
+			}
+
+			if ( ! $seen_other_elements && 'h5' === $child_node->nodeName && ! $seen_header_at_top ) {
+				// This header needs to be added as a caption to the featured image.
+				$attachment_id = get_metadata( 'post', 48, '_thumbnail_id', true );
+				wp_update_post(
+					[
+						'ID' => $attachment_id,
+						'post_excerpt' => $child_node->nodeValue,
+					]
+				);
+				//Need to remove comments before and after also.
+
+				$remove_nodes[] = $child_node->nextSibling->nextSibling;
+				$remove_nodes[] = $child_node->nextSibling;
+				$remove_nodes[] = $child_node;
+
+				$seen_other_elements = true;
+				$seen_header_at_top = true;
+				continue;
+			}
+
+			if ( 'figure' === $child_node->nodeName ) {
+				if ( '#comment' === $child_node->previousSibling->previousSibling->nodeName ) {
+					$tag_string = $child_node->previousSibling->previousSibling->nodeValue;
+					$substring = trim( substr( $tag_string, stripos( $tag_string, 'wp:image' ) + 8 ) );
+
+					$data = json_decode( $substring, true );
+					$figure = $child_node;
+					$figure_id = $data['id'];
+				}
+			}
+
+			if ( 'h5' === $child_node->nodeName && ! is_null( $figure ) ) {
+				wp_update_post(
+					[
+						'ID' => $figure_id,
+						'post_excerpt' => $child_node->nodeValue,
+					]
+				);
+
+				$fragment = $dom->createDocumentFragment();
+				$fragment->appendXML( "<figcaption>$child_node->nodeValue</figcaption>" );
+				$figure->appendChild( $fragment );
+
+				$remove_nodes[] = $child_node->previousSibling->previousSibling;
+				$remove_nodes[] = $child_node->previousSibling;
+				$remove_nodes[] = $child_node->nextSibling->nextSibling;
+				$remove_nodes[] = $child_node->nextSibling;
+				$remove_nodes[] = $child_node;
+				$figure_id = null;
+				$figure = null;
+			}
+		}
+
+		foreach ( $remove_nodes as $node ) {
+			$node->parentNode->removeChild( $node );
+		}
+
+		wp_update_post(
+			[
+				'ID' => 48,
+				'post_content' => utf8_decode( $this->get_inner_html( $dom->lastChild->firstChild ) ),
+			]
+		);
 	}
 
 	/**
