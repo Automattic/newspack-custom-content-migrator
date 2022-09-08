@@ -41,7 +41,7 @@ HTML;
 
 	/**
 	 * @param int    $id  Audio file attachment ID.
-	 * @param string $src Optional.
+	 * @param string $src src attribute.
 	 *
 	 * @return string
 	 */
@@ -57,7 +57,7 @@ HTML;
 
 	/**
 	 * @param int    $id  Video file attachment ID.
-	 * @param string $src Optional.
+	 * @param string $src src attribute.
 	 *
 	 * @return string
 	 */
@@ -73,7 +73,7 @@ HTML;
 
 	/**
 	 * @param int    $id  File attachment ID.
-	 * @param string $src Optional.
+	 * @param string $src src attribute.
 	 *
 	 * @return string
 	 */
@@ -85,6 +85,44 @@ HTML;
 HTML;
 
 		return sprintf( $block_placeholder_sprintf, $id, $src, $src, $src );
+	}
+
+	/**
+	 * @param int    $id  Cover image attachment ID.
+	 * @param string $src Cover image src.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_cover_block( $id, $src ) {
+		$block_placeholder_sprintf = <<<HTML
+<!-- wp:cover {"url":"%s","id":%d,"dimRatio":50,"isDark":false} -->
+<div class="wp-block-cover is-light"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><img class="wp-block-cover__image-background wp-image-%d" alt="" src="%s" data-object-fit="cover"/><div class="wp-block-cover__inner-container"><!-- wp:paragraph {"align":"center","placeholder":"Write title…","fontSize":"large"} -->
+<p class="has-text-align-center has-large-font-size"></p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:cover -->
+HTML;
+
+		return sprintf( $block_placeholder_sprintf, $src, $id, $id, $src );
+	}
+
+	/**
+	 * @param int    $mediaId   Block mediaId attribute.
+	 * @param string $mediaLink Block mediaLink attribute.
+	 * @param string $img_src   Image HTML element src attribute
+	 * @param string $text      Text.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_mediatext_block( $mediaId, $mediaLink, $img_src, $text ) {
+		$block_placeholder_sprintf = <<<HTML
+<!-- wp:media-text {"mediaId":%d,"mediaLink":"%s","mediaType":"image"} -->
+<div class="wp-block-media-text alignwide is-stacked-on-mobile"><figure class="wp-block-media-text__media"><img src="%s" alt="" class="wp-image-%d size-full"/></figure><div class="wp-block-media-text__content"><!-- wp:paragraph {"placeholder":"Content…"} -->
+<p>%s</p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:media-text -->
+HTML;
+
+		return sprintf( $block_placeholder_sprintf, $mediaId, $mediaLink, $img_src, $mediaId, $text );
 	}
 
 	/**
@@ -101,18 +139,6 @@ HTML;
 <!-- wp:jetpack/slideshow {"ids":[285120,285111],"sizeSlug":"large"} -->
 <div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper"><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285120" data-id="285120" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg"/></figure></li><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285111" data-id="285111" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">Mary Peltola is shown leaving a voting booth while early voting on Friday, Aug. 12, 2022, in Anchorage, Alaska. Peltola, a Democrat, faces Republicans Nick Begich and Sarah Palin Tuesday in a special election to fill the remainder of the U.S. House term left vacant by Don Young's death in March. Peltola is also a candidate in Tuesday's primary for a full two-year term for the House seat. (AP Photo/Mark Thiessen)</figcaption></figure></li></ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
 <!-- /wp:jetpack/slideshow -->
-
-<!-- wp:cover {"url":"https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-scaled.jpg","id":285111,"dimRatio":50,"isDark":false} -->
-<div class="wp-block-cover is-light"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><img class="wp-block-cover__image-background wp-image-285111" alt="" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-scaled.jpg" data-object-fit="cover"/><div class="wp-block-cover__inner-container"><!-- wp:paragraph {"align":"center","placeholder":"Write title…","fontSize":"large"} -->
-<p class="has-text-align-center has-large-font-size"></p>
-<!-- /wp:paragraph --></div></div>
-<!-- /wp:cover -->
-
-<!-- wp:media-text {"mediaId":285110,"mediaLink":"https://coloradosun.com/election-2022-house-alaska-7/","mediaType":"image"} -->
-<div class="wp-block-media-text alignwide is-stacked-on-mobile"><figure class="wp-block-media-text__media"><img src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg" alt="" class="wp-image-285110 size-full"/></figure><div class="wp-block-media-text__content"><!-- wp:paragraph {"placeholder":"Content…"} -->
-<p>blablatext</p>
-<!-- /wp:paragraph --></div></div>
-<!-- /wp:media-text -->
 
 <!-- wp:jetpack/image-compare {"imageBefore":{"id":285109,"url":"https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707},"imageAfter":{"id":285108,"url":"https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707}} -->
 <figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="285109" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="285108" src="https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>

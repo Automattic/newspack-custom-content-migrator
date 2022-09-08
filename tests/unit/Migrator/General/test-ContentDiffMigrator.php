@@ -2352,6 +2352,118 @@ BLOCK;
 	}
 
 	/**
+	 * Testings exact replacements which the update_cover_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_cover_blocks_ids
+	 */
+	public function test_update_cover_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$cover_att_id_old_live_1 = 1111;
+		$cover_att_id_new_staging_1 = 2222;
+		$cover_src_1 = 'https://host.com/wp-content/uploads/2022/07/img_1.jpg';
+		$cover_att_id_old_live_2 = 3333;
+		$cover_att_id_new_staging_2 = 4444;
+		$cover_src_2 = 'https://host.com/wp-content/uploads/2022/07/img_2.jpg';
+		$custom_block_w_same_id_sprintf = <<<BLOCK
+<!-- wp:somecustomblock {"id":%d} -->
+<div class="wp-block-cover is-light"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><img class="wp-block-cover__image-background wp-image-%d" alt="" src="%s" data-object-fit="cover"/><div class="wp-block-cover__inner-container"><!-- wp:paragraph {"align":"center","placeholder":"Write title…","fontSize":"large"} -->
+<p class="has-text-align-center has-large-font-size"></p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:somecustomblock -->
+BLOCK;
+		$custom_block_w_same_id = sprintf( $custom_block_w_same_id_sprintf, $cover_att_id_old_live_1, $cover_att_id_old_live_1, 'https://host.com/foo.bar' );
+
+		$html = $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_old_live_1, $cover_src_1 )
+		        // Let's throw in a different block which uses same ID values, but which mean something else than cover Attachment ID, and should not be updated.
+		        . "\n\n" . $custom_block_w_same_id
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_old_live_2, $cover_src_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_new_staging_1, $cover_src_1 )
+		                 . "\n\n" . $custom_block_w_same_id
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_new_staging_2, $cover_src_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice to get the cover files' attachment IDs on Staging.
+				[ $cover_src_1, $cover_att_id_new_staging_1 ],
+				[ $cover_src_2, $cover_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_cover_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_mediatext_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_mediatext_blocks_ids
+	 */
+	public function test_update_mediatext_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$mediaId_att_id_old_live_1 = 1111;
+		$mediaId_att_id_new_staging_1 = 2222;
+		$mediaLink_1 = 'https://host.com/election-2022-1/';
+		$img_src_1 = 'https://host.com/wp-content/uploads/2022/07/img_1.jpg';
+		$text_1 = 'foo bar 1';
+
+// TODO add ID1 old 111, ID1 new 222, ID2 old 222, ID2 new 333 -- this will also check if 2 overwrites 1.
+
+		$mediaId_att_id_old_live_2 = 3333;
+		$mediaId_att_id_new_staging_2 = 4444;
+		$mediaLink_2 = 'https://host.com/election-2022-2/';
+		$img_src_2 = 'https://host.com/wp-content/uploads/2022/07/img_2.jpg';
+		$text_2 = 'foo bar 3';
+
+		$custom_block_w_same_id_sprintf = <<<BLOCK
+<!-- wp:somecustomblock {"id":%d,"mediaId":%d,"mediaLink":"%s","mediaType":"image"} -->
+<div class="wp-block-media-text alignwide is-stacked-on-mobile"><figure class="wp-block-media-text__media"><img src="%s" alt="" class="wp-image-%d size-full"/></figure><div class="wp-block-media-text__content"><!-- wp:paragraph {"placeholder":"Content…"} -->
+<p>%s</p>
+<!-- /wp:paragraph --></div></div>
+<!-- /wp:somecustomblock -->
+BLOCK;
+		$custom_block_w_same_id = sprintf( $custom_block_w_same_id_sprintf, $mediaId_att_id_old_live_1, $mediaId_att_id_old_live_1, $mediaLink_1, $img_src_1, $mediaId_att_id_old_live_1, $text_1 );
+
+		$html = $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_old_live_1, $mediaLink_1, $img_src_1, $text_1 )
+		        // Let's throw in a different block which uses same ID values, but which mean something else than cover Attachment ID, and should not be updated.
+		        . "\n\n" . $custom_block_w_same_id
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_old_live_2, $mediaLink_2, $img_src_2, $text_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_new_staging_1, $mediaLink_1, $img_src_1, $text_1 )
+		                 . "\n\n" . $custom_block_w_same_id
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_new_staging_2, $mediaLink_2, $img_src_2, $text_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice to get the cover files' attachment IDs on Staging.
+				[ $img_src_1, $mediaId_att_id_new_staging_1 ],
+				[ $img_src_2, $mediaId_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_mediatext_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Checks that term_exists performs a correct query.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.

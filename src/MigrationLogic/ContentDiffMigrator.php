@@ -625,31 +625,31 @@ class ContentDiffMigrator {
 			 * because fetching IDs from the Media Library should cover all cases. But we still do have the IDs mapping info,
 			 * perhaps some future cases will need to use it.
 			 */
-			// update_image_blocks_ids() covers both wp:image and wp:gallery, because wp:gallery block doesn't have any IDs in header
+			// This one covers both wp:image and wp:gallery.
 			$content_updated = $this->update_image_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated );
-			// wp:audio
+			// wp:audio.
 			$content_updated = $this->update_audio_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated );
-			// wp:video
+			// wp:video.
 			$content_updated = $this->update_video_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated );
-			// wp:file
+			// wp:file.
 			$content_updated = $this->update_file_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated );
-			// // wp:cover
-			// $content_updated = $this->update_cover_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated );
-			// // wp:media-text
-			// $content_updated = $this->update_media_text_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_media_text_blocks_ids( $excerpt_updated );
-			// // wp:jetpack/tiled-gallery
+			// wp:cover.
+			$content_updated = $this->update_cover_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated );
+			// wp:media-text.
+			$content_updated = $this->update_mediatext_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_mediatext_blocks_ids( $excerpt_updated );
+			// // wp:jetpack/tiled-gallery.
 			// $content_updated = $this->update_jetpack_tiled_gallery_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_jetpack_tiled_gallery_blocks_ids( $excerpt_updated );
-			// // wp:jetpack/slideshow
+			// // wp:jetpack/slideshow.
 			// $content_updated = $this->update_jetpack_slideshow_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_jetpack_slideshow_blocks_ids( $excerpt_updated );
-			// // wp:jetpack/image-compare
+			// // wp:jetpack/image-compare.
 			// $content_updated = $this->update_jetpack_image_compare_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_jetpack_image_compare_blocks_ids( $excerpt_updated );
 
@@ -914,6 +914,134 @@ class ContentDiffMigrator {
 		return $content_updated;
 	}
 
+
+	/**
+	 * Searches for all wp:cover blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_cover_blocks_ids( string $content ): string {
+
+		// Match all wp:cover blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:cover', $content );
+		if ( is_null( $matches ) || 0 === $matches || false === $matches || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		$content_updated = $content;
+
+		// Loop through all cover blocks and update their IDs.
+		foreach ( $matches[0] as $key_match => $match ) {
+			$img_block = $match[0];
+
+			// Get attachment ID from block header.
+			$img_id  = $this->wp_block_manipulator->get_attribute( $img_block, 'id' );
+
+			// Get cover src from cover HTML element.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $img_block );
+			$images = $this->dom_crawler->filter( 'img' );
+			if ( empty( $images ) || 0 == $images->getIterator()->count() ) {
+				// No img, skipping.
+				// TODO log.
+				continue;
+			}
+			$image   = $images->getIterator()[0];
+			$img_src = $image->getAttribute( 'src' );
+
+			// Get this file's attachment ID from DB.
+			$new_id = $this->attachment_url_to_postid( $img_src );
+			if ( 0 === $new_id ) {
+				// Cover image attachment ID not found.
+				// TODO log.
+				continue;
+			}
+
+			$ids_updates = [ $img_id => $new_id ];
+
+			// Update ID in header.
+			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:cover', $ids_updates, $content_updated );
+			// Update ID in cover element `class` attribute.
+			$content_updated = $this->update_image_element_class_attribute( $ids_updates, $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:media-text blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_mediatext_blocks_ids( string $content ): string {
+
+		// Match all wp:media-text blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:media-text', $content );
+		if ( is_null( $matches ) || 0 === $matches || false === $matches || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		$content_updated = $content;
+
+		// Loop through all media-text blocks and update their IDs.
+		foreach ( $matches[0] as $key_match => $match ) {
+			$mediatext_block = $match[0];
+			$mediatext_block_updated = $mediatext_block;
+
+			// Get attachment ID from block header.
+			$img_id  = $this->wp_block_manipulator->get_attribute( $mediatext_block, 'mediaId' );
+
+			// Get src from img HTML element.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $mediatext_block );
+			$images = $this->dom_crawler->filter( 'img' );
+			if ( empty( $images ) || 0 == $images->getIterator()->count() ) {
+				// No img, skipping.
+				// TODO log.
+				continue;
+			}
+			$image   = $images->getIterator()[0];
+			$img_src = $image->getAttribute( 'src' );
+
+			// Get this file's attachment ID from DB.
+			$new_id = $this->attachment_url_to_postid( $img_src );
+			if ( 0 === $new_id ) {
+				// Media-text image attachment ID not found.
+				// TODO log.
+				continue;
+			}
+
+			// Get mediaId attribute.
+			$parsed_blocks = parse_blocks( $mediatext_block );
+			if ( count( $parsed_blocks ) != 1 || 'core/media-text' !== $parsed_blocks[0]['blockName'] ) {
+				// TODO log wrong parsed blocks.
+				continue;
+			}
+			$parsed_block_updated = $parsed_blocks[0];
+			$mediaId_current = $parsed_block_updated['attrs']['mediaId'];
+			if ( $img_id == $mediaId_current ) {
+				// Update mediaId block attribute.
+				$parsed_block_updated['attrs']['mediaId'] = $new_id;
+				$mediatext_block_updated = str_replace( serialize_block( $parsed_blocks[0] ), serialize_block( $parsed_block_updated ), $mediatext_block_updated );
+
+				// Update image element `class` attribute id value.
+				$ids_updates = [ $img_id => $new_id ];
+				$mediatext_block_updated = $this->update_image_element_class_attribute( $ids_updates, $mediatext_block_updated );
+			}
+
+			$content_updated = str_replace( $mediatext_block, $mediatext_block_updated, $content_updated );
+		}
+
+		// TODO update above blocks functions not to update the whole $content_updated, instead update just the $"img"_block, then do str_replace.
+		// TODO switch to using parse_blocks() and serialize_block() instead of wp_block_manipulator.
+
+		return $content_updated;
+	}
+
 	/**
 	 * Updates <img> element's data-id attribute value.
 	 *
@@ -1044,12 +1172,12 @@ class ContentDiffMigrator {
 	/**
 	 * Updates attachment ID in Gutenberg blocks' headers which contain a single ID.
 	 *
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content                 HTML content.
+	 * @param array  $id_update An array; key is old ID, value is new ID.
+	 * @param string $content   HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_gutenberg_blocks_headers_single_id( $block_designation, $imported_attachment_ids, $content ) {
+	public function update_gutenberg_blocks_headers_single_id( $block_designation, $id_update, $content ) {
 
 		$content_updated = $content;
 
@@ -1080,8 +1208,8 @@ class ContentDiffMigrator {
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $imported_attachment_ids[ $id ] ) ) {
-					$id_new = $imported_attachment_ids[ $id ];
+				if ( isset( $id_update[ $id ] ) ) {
+					$id_new = $id_update[ $id ];
 				}
 
 				// Check if this ID was updated.
