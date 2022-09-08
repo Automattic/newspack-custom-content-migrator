@@ -628,9 +628,9 @@ class ContentDiffMigrator {
 			// update_image_blocks_ids() covers both wp:image and wp:gallery, because wp:gallery block doesn't have any IDs in header
 			$content_updated = $this->update_image_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated );
-			// // wp:audio
-			// $content_updated = $this->update_audio_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated );
+			// wp:audio
+			$content_updated = $this->update_audio_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated );
 			// // wp:video
 			// $content_updated = $this->update_video_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated );
@@ -749,6 +749,59 @@ class ContentDiffMigrator {
 			$content_updated = $this->update_image_element_class_attribute( $ids_updates, $content_updated );
 			// Update image element `data-id` attribute.
 			$content_updated = $this->update_image_element_data_id_attribute( $ids_updates, $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:audio blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_audio_blocks_ids( string $content ): string {
+
+		// Match all wp:audio blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:audio', $content );
+		if ( is_null( $matches ) || 0 === $matches || false === $matches || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		$content_updated = $content;
+
+		// Loop through all audio blocks and update their IDs.
+		foreach ( $matches[0] as $key_match => $match ) {
+			$audio_block = $match[0];
+
+			// Get attachment ID from block header.
+			$att_id  = $this->wp_block_manipulator->get_attribute( $audio_block, 'id' );
+
+			// Get audio src from audio HTML element.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $audio_block );
+			$audios = $this->dom_crawler->filter( 'audio' );
+			if ( empty( $audios ) || 0 == $audios->getIterator()->count() ) {
+				// No img, skipping.
+				// TODO log.
+				continue;
+			}
+			$audio   = $audios->getIterator()[0];
+			$audio_src = $audio->getAttribute( 'src' );
+
+			// Get this file's attachment ID from DB.
+			$new_id = $this->attachment_url_to_postid( $audio_src );
+			if ( 0 === $new_id ) {
+				// Audio file attachment ID not found.
+				// TODO log.
+				continue;
+			}
+
+			$ids_updates = [ $att_id => $new_id ];
+
+			// Update ID in header.
+			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:audio', $ids_updates, $content_updated );
 		}
 
 		return $content_updated;

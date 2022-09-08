@@ -2212,6 +2212,46 @@ HTML;
 	}
 
 	/**
+	 * Testings exact replacements which the update_audio_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_audio_blocks_ids
+	 */
+	public function test_update_audio_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$audio_att_id_old_live_1 = 1111;
+		$audio_att_id_new_staging_1 = 2222;
+		$audio_src_1 = 'https://host.com/wp-content/uploads/2022/07/file_1.mp3';
+		$audio_att_id_old_live_2 = 3333;
+		$audio_att_id_new_staging_2 = 4444;
+		$audio_src_2 = 'https://host.com/wp-content/uploads/2022/07/file_2.mp3';
+		$html = $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_old_live_1, $audio_src_1 )
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_old_live_2, $audio_src_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_new_staging_1, $audio_src_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_new_staging_2, $audio_src_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice to get the audio files' attachment IDs on Staging.
+				[ $audio_src_1, $audio_att_id_new_staging_1 ],
+				[ $audio_src_2, $audio_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_audio_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Checks that term_exists performs a correct query.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.

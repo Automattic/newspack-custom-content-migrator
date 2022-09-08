@@ -40,6 +40,22 @@ HTML;
 	}
 
 	/**
+	 * @param int    $id  Audio file attachment ID.
+	 * @param string $src Optional.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_audio_block( $id, $src ) {
+		$block_placeholder_sprintf = <<<HTML
+<!-- wp:audio {"id":%d} -->
+<figure class="wp-block-audio"><audio controls src="%s"></audio></figure>
+<!-- /wp:audio -->
+HTML;
+
+		return sprintf( $block_placeholder_sprintf, $id, $src );
+	}
+
+	/**
 	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
 	 *
 	 * @return void
@@ -53,10 +69,6 @@ HTML;
 <!-- wp:jetpack/slideshow {"ids":[285120,285111],"sizeSlug":"large"} -->
 <div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper"><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285120" data-id="285120" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg"/></figure></li><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285111" data-id="285111" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">Mary Peltola is shown leaving a voting booth while early voting on Friday, Aug. 12, 2022, in Anchorage, Alaska. Peltola, a Democrat, faces Republicans Nick Begich and Sarah Palin Tuesday in a special election to fill the remainder of the U.S. House term left vacant by Don Young's death in March. Peltola is also a candidate in Tuesday's primary for a full two-year term for the House seat. (AP Photo/Mark Thiessen)</figcaption></figure></li></ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
 <!-- /wp:jetpack/slideshow -->
-
-<!-- wp:audio {"id":276070} -->
-<figure class="wp-block-audio"><audio controls src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/07/SC_0714_SunTwoWay.mp3"></audio></figure>
-<!-- /wp:audio -->
 
 <!-- wp:cover {"url":"https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-scaled.jpg","id":285111,"dimRatio":50,"isDark":false} -->
 <div class="wp-block-cover is-light"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><img class="wp-block-cover__image-background wp-image-285111" alt="" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-scaled.jpg" data-object-fit="cover"/><div class="wp-block-cover__inner-container"><!-- wp:paragraph {"align":"center","placeholder":"Write title…","fontSize":"large"} -->
