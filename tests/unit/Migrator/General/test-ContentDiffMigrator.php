@@ -2252,6 +2252,56 @@ HTML;
 	}
 
 	/**
+	 * Testings exact replacements which the update_video_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_video_blocks_ids
+	 */
+	public function test_update_video_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$video_att_id_old_live_1 = 1111;
+		$video_att_id_new_staging_1 = 2222;
+		$video_src_1 = 'https://host.com/wp-content/uploads/2022/07/file_1.mp4';
+			$video_att_id_old_live_2 = 3333;
+		$video_att_id_new_staging_2 = 4444;
+		$video_src_2 = 'https://host.com/wp-content/uploads/2022/07/file_2.mp4';
+		$custom_block_w_same_id_sprintf = <<<BLOCK
+<!-- wp:somecustomblock {"id":%d} -->
+<figure class="wp-block-video"><video controls src="%s"></video></figure>
+<!-- /wp:video -->
+BLOCK;
+		$custom_block_w_same_id = sprintf( $custom_block_w_same_id_sprintf, $video_att_id_old_live_1, 'https://host.com/foo.bar' );
+
+		$html = $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_old_live_1, $video_src_1 )
+		        // Let's throw in a different block which uses same ID values, but which mean something else than video Attachment ID, and should not be updated.
+		        . "\n\n" . $custom_block_w_same_id
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_old_live_2, $video_src_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_new_staging_1, $video_src_1 )
+		                 . "\n\n" . $custom_block_w_same_id
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_new_staging_2, $video_src_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice to get the video files' attachment IDs on Staging.
+				[ $video_src_1, $video_att_id_new_staging_1 ],
+				[ $video_src_2, $video_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_video_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Checks that term_exists performs a correct query.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.

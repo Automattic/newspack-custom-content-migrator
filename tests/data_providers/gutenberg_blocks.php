@@ -56,6 +56,22 @@ HTML;
 	}
 
 	/**
+	 * @param int    $id  Video file attachment ID.
+	 * @param string $src Optional.
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_video_block( $id, $src ) {
+		$block_placeholder_sprintf = <<<HTML
+<!-- wp:video {"id":%d} -->
+<figure class="wp-block-video"><video controls src="%s"></video></figure>
+<!-- /wp:video -->
+HTML;
+
+		return sprintf( $block_placeholder_sprintf, $id, $src );
+	}
+
+	/**
 	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
 	 *
 	 * @return void
@@ -85,10 +101,6 @@ HTML;
 <p>blablatext</p>
 <!-- /wp:paragraph --></div></div>
 <!-- /wp:media-text -->
-
-<!-- wp:video {"id":283412} -->
-<figure class="wp-block-video"><video controls src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/08/Headlines.mp4"></video></figure>
-<!-- /wp:video -->
 
 <!-- wp:jetpack/image-compare {"imageBefore":{"id":285109,"url":"https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707},"imageAfter":{"id":285108,"url":"https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707}} -->
 <figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="285109" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="285108" src="https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>

@@ -631,9 +631,9 @@ class ContentDiffMigrator {
 			// wp:audio
 			$content_updated = $this->update_audio_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated );
-			// // wp:video
-			// $content_updated = $this->update_video_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated );
+			// wp:video
+			$content_updated = $this->update_video_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated );
 			// // wp:cover
 			// $content_updated = $this->update_cover_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated );
@@ -802,6 +802,59 @@ class ContentDiffMigrator {
 
 			// Update ID in header.
 			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:audio', $ids_updates, $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:video blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_video_blocks_ids( string $content ): string {
+
+		// Match all wp:video blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:video', $content );
+		if ( is_null( $matches ) || 0 === $matches || false === $matches || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		$content_updated = $content;
+
+		// Loop through all video blocks and update their IDs.
+		foreach ( $matches[0] as $key_match => $match ) {
+			$video_block = $match[0];
+
+			// Get attachment ID from block header.
+			$att_id  = $this->wp_block_manipulator->get_attribute( $video_block, 'id' );
+
+			// Get video src from video HTML element.
+			$this->dom_crawler->clear();
+			$this->dom_crawler->add( $video_block );
+			$videos = $this->dom_crawler->filter( 'video' );
+			if ( empty( $videos ) || 0 == $videos->getIterator()->count() ) {
+				// No img, skipping.
+				// TODO log.
+				continue;
+			}
+			$video   = $videos->getIterator()[0];
+			$video_src = $video->getAttribute( 'src' );
+
+			// Get this file's attachment ID from DB.
+			$new_id = $this->attachment_url_to_postid( $video_src );
+			if ( 0 === $new_id ) {
+				// Video file attachment ID not found.
+				// TODO log.
+				continue;
+			}
+
+			$ids_updates = [ $att_id => $new_id ];
+
+			// Update ID in header.
+			$content_updated = $this->update_gutenberg_blocks_headers_single_id( 'wp:video', $ids_updates, $content_updated );
 		}
 
 		return $content_updated;
