@@ -94,7 +94,7 @@ class TaxonomyMigrator implements InterfaceMigrator {
 			'newspack-content-migrator sync-taxonomy-count-with-real-values',
 			[ $this, 'cmd_sync_taxonomy_count_column_with_actual_values' ],
 			[
-				'shortdesc' => 'This command will compare wp_term_taxonomy.count values with actual row counts in wp_term_relationships table.',
+				'shortdesc' => 'This command will compare and sync wp_term_taxonomy.count values with actual row counts in wp_term_relationships table.',
 				'synopsis' => [
 					[
 						'type' => 'flag',
