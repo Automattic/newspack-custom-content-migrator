@@ -126,6 +126,15 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				'synopsis'  => array(),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator migrate-zeen-gallery-to-jetpack-gallery',
+			array( $this, 'migrate_zeen_gallery_to_jetpack_gallery' ),
+			array(
+				'shortdesc' => 'Will revert the convertionof a custom accordion solution to Genesis Accordion block',
+				'synopsis'  => array(),
+			)
+		);
 	}
 
 	/**
@@ -624,7 +633,6 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				'numberposts' => -1,
 				'post_status' => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
 				'category'    => 46, // DESAFÍA TU MENTE
-				'post__in'    => array( 342151 ),
 			)
 		);
 
@@ -634,46 +642,57 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 			$updated = false;
 			$blocks  = array_map(
 				function( $block ) use ( &$updated ) {
-					if ( in_array( $block['blockName'], array( '', 'core/shortcode' ) ) ) {
-						$su_accordion_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'su_spoiler', $block['innerHTML'] );
+					$block_content = $block['innerHTML'];
+
+					if ( in_array( $block['blockName'], array( null, '', 'core/shortcode' ), true ) ) {
+						$su_accordion_shortcodes = $this->squarebracketselement_manipulator->match_elements_with_closing_tags( 'su_accordion', $block['innerHTML'] );
 						if ( empty( $su_accordion_shortcodes[0] ) ) {
 							return $block;
 						}
 
-						$accordion_content = nl2br( trim( $this->squarebracketselement_manipulator->get_shortcode_contents( $block['innerHTML'], array( 'su_spoiler' ) ) ) );
-						if ( ! $accordion_content ) {
-							return $block;
-						}
+						foreach ( $su_accordion_shortcodes[0] as $shortcode_match ) {
+							$shortcode         = current( $shortcode_match );
+							$accordion_content = nl2br( trim( $this->squarebracketselement_manipulator->get_shortcode_contents( $shortcode, array( 'su_spoiler' ) ) ) );
+							if ( ! $accordion_content ) {
+								continue;
+							}
 
-						$updated = true;
-
-						return array(
-							'blockName'    => 'genesis-blocks/gb-accordion',
-							'attrs'        =>
-							array(),
-							'innerBlocks'  =>
-							array(
+							$accordion_block_content = serialize_block(
 								array(
-									'blockName'    => 'core/paragraph',
+									'blockName'    => 'genesis-blocks/gb-accordion',
 									'attrs'        =>
 									array(),
 									'innerBlocks'  =>
-									array(),
-									'innerHTML'    => $accordion_content,
+									array(
+										array(
+											'blockName'    => 'core/paragraph',
+											'attrs'        =>
+											array(),
+											'innerBlocks'  =>
+											array(),
+											'innerHTML'    => $accordion_content,
+											'innerContent' => array( $accordion_content ),
+										),
+									),
+									'innerHTML'    => '<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">Si no encuentras la solución PULSA AQUÍ</summary><div class="gb-accordion-text"></div></details></div>',
 									'innerContent' =>
-									array( $accordion_content ),
-								),
-							),
-							'innerHTML'    => '<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">Si no encuentras la solución PULSA AQUÍ</summary><div class="gb-accordion-text"></div></details></div>',
-							'innerContent' =>
-							array(
-								'<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">Si no encuentras la solución PULSA AQUÍ</summary><div class="gb-accordion-text">',
-								null,
-								'</div></details></div> ',
-							),
-						);
+									array(
+										'<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">Si no encuentras la solución PULSA AQUÍ</summary><div class="gb-accordion-text">',
+										null,
+										'</div></details></div> ',
+									),
+								)
+							);
+
+							$block_content = str_replace( $shortcode, $accordion_block_content, $block_content );
+							$updated       = true;
+						}
 					}
 
+					if ( $block_content !== $block['innerHTML'] ) {
+						$block['innerHTML']       = $block_content;
+						$block['innerContent'][0] = $block_content;
+					}
 					return $block;
 				},
 				parse_blocks( $post->post_content )
@@ -702,11 +721,10 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 		$this->posts_logic->throttled_posts_loop(
 			array(
 				'category'   => 17, // FOTORREPORTAJES category.
-				// 'post__in'   => array( 164859 ),
 				'meta_query' => array(
 					array(
 						'key'     => $conversion_meta,
-						'compare' => 'EXISTS',
+						'compare' => 'NOT EXISTS',
 					),
 				),
 			),
@@ -723,7 +741,8 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 					$gallery_content .= join(
 						' ',
 						array_map(
-							function( $index, $attachment_id ) {
+							function( $index, $new_attachment_id ) {
+								$attachment_id  = $this->get_old_attachment_id( $new_attachment_id );
 								$attachment_url = wp_get_attachment_url( $attachment_id );
 								$tile_size      = $this->get_tile_image_size_by_index( $index );
 								return '
@@ -763,24 +782,16 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 						'innerContent' => array( $gallery_content ),
 					);
 
-					$post_blocks = parse_blocks( $post->post_content );
-					$last_block  = end( $post_blocks );
-					if ( $last_block && 'jetpack/tiled-gallery' === $last_block['blockName'] ) {
-						// remove previously added block.
-						array_pop( $post_blocks );
-						$post_blocks[] = $gallery_block;
+					wp_update_post(
+						array(
+							'ID'           => $post->ID,
+							'post_content' => $post->post_content . serialize_block( $gallery_block ),
+						)
+					);
 
-						wp_update_post(
-							array(
-								'ID'           => $post->ID,
-								'post_content' => serialize_blocks( $post_blocks ),
-							)
-						);
+					update_post_meta( $post->ID, $conversion_meta, true );
 
-						update_post_meta( $post->ID, $conversion_meta, true );
-
-						WP_CLI::success( sprintf( 'Post %d content updated.', $post->ID ) );
-					}
+					WP_CLI::success( sprintf( 'Post %d content updated.', $post->ID ) );
 				} else {
 					WP_CLI::warning( sprintf( "The post #%d doesn't have the `zeen_gallery` meta.", $post->ID ) );
 				}
@@ -800,8 +811,10 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				$gallery_meta = get_post_meta( $post->ID, 'zeen_gallery', true );
 
 				if ( $gallery_meta && count( $gallery_meta ) > 0 ) {
-					set_post_thumbnail( $post, $gallery_meta[0] );
+					$thumbnail_id = $this->get_old_attachment_id( $gallery_meta[0] );
+					set_post_thumbnail( $post, $thumbnail_id );
 					update_post_meta( $post->ID, 'newspack_featured_image_position', 'beside' );
+					WP_CLI::warning( sprintf( 'The thumbnail of the post #%d has been update: %d', $post->ID, $thumbnail_id ) );
 				} else {
 					WP_CLI::warning( sprintf( "The post #%d doesn't have the `zeen_gallery` meta.", $post->ID ) );
 				}
@@ -835,6 +848,22 @@ class AragonDigitalMigrator implements InterfaceMigrator {
 				}
 			}
 		}
+	}
+
+	private function get_old_attachment_id( $old_id ) {
+		global $wpdb;
+
+		$old_attachment_result = $wpdb->get_row( $wpdb->prepare( 'SELECT post_name, post_date, post_type FROM ad_posts_live WHERE ID = %d', $old_id ) );
+		if ( ! empty( $old_attachment_result ) ) {
+			$result = $wpdb->get_row( $wpdb->prepare( 'SELECT ID FROM ad_posts WHERE post_name = %s AND post_date = %s AND post_type = %s', $old_attachment_result->post_name, $old_attachment_result->post_date, $old_attachment_result->post_type ) );
+			if ( empty( $result ) ) {
+				WP_CLI::warning( sprintf( 'Media post not found: %d (%s)', $old_id, $old_attachment_result->post_name ) );
+			} else {
+				return $result->ID;
+			}
+		}
+
+		return $old_id;
 	}
 
 	/**
