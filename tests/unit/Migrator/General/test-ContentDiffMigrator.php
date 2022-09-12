@@ -2542,6 +2542,79 @@ BLOCK;
 	}
 
 	/**
+	 * Testings exact replacements which the update_jetpackslideshow_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
+	 */
+	public function test_update_jetpackslideshow_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$img_ids_old_live_1 = [ 1111, 2222 ];
+		$img_ids_new_staging_1 = [ 1119, 2229 ];
+		$img_srcs_1 = [
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img11.jpg?ssl=1',
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img12.jpg?ssl=1',
+		];
+		$img_caption_texts_1 = [
+			'caption text 11',
+			'caption text 12',
+		];
+		$img_ids_old_live_2 = [ 2222, 3333 ];
+		$img_ids_new_staging_2 = [ 2228, 3339 ];
+		$img_srcs_2 = [
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img21.jpg?ssl=1',
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img22.jpg?ssl=1',
+		];
+		$img_caption_texts_2 = [
+			'caption text 21',
+			'caption text 22',
+		];
+
+		$custom_block_w_same_ids_sprintf = <<<BLOCK
+<!-- wp:somecustomblock {"columnWidths":[["40.03600","59.96400"]],"ids":[%d,%d]} -->
+<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper"><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-%d" data-id="%d" src="%s"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">%s</figcaption></figure></li><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-%d" data-id="%d" src="%s"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">%s</figcaption></figure></li></ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
+<!-- /wp:somecustomblock -->
+BLOCK;
+		$custom_block_w_same_ids = sprintf( $custom_block_w_same_ids_sprintf,
+			$img_ids_old_live_1[0], $img_ids_old_live_1[1],
+			$img_ids_old_live_1[0], $img_ids_old_live_1[0], $img_srcs_1[0], $img_caption_texts_1[0],
+			$img_ids_old_live_2[0], $img_ids_old_live_2[0], $img_srcs_2[0], $img_caption_texts_2[0],
+		);
+
+		$html = $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( $img_ids_old_live_1, $img_srcs_1, $img_caption_texts_1 )
+		        // Let's throw in a different block which uses same ID values, but which mean something else than cover Attachment ID, and should not be updated.
+		        . "\n\n" . $custom_block_w_same_ids
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( $img_ids_old_live_2, $img_srcs_2, $img_caption_texts_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( $img_ids_new_staging_1, $img_srcs_1, $img_caption_texts_1 )
+                         // Let's throw in a different block which uses same ID values, but which mean something else than cover Attachment ID, and should not be updated.
+		                 . "\n\n" . $custom_block_w_same_ids
+                         . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( $img_ids_new_staging_2, $img_srcs_2, $img_caption_texts_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called for every image in first gallery.
+				[ $img_srcs_1[0], $img_ids_new_staging_1[0] ],
+				[ $img_srcs_1[1], $img_ids_new_staging_1[1] ],
+				// Will be called for every image in second gallery.
+				[ $img_srcs_2[0], $img_ids_new_staging_2[0] ],
+				[ $img_srcs_2[1], $img_ids_new_staging_2[1] ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_jetpackslideshow_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Checks that term_exists performs a correct query.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.

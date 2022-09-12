@@ -655,9 +655,9 @@ class ContentDiffMigrator {
 			// wp:jetpack/tiled-gallery.
 			$content_updated = $this->update_jetpacktiledgallery_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_jetpacktiledgallery_blocks_ids( $excerpt_updated );
-			// // wp:jetpack/slideshow.
-			// $content_updated = $this->update_jetpackslideshow_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_jetpackslideshow_blocks_ids( $excerpt_updated );
+			// wp:jetpack/slideshow.
+			$content_updated = $this->update_jetpackslideshow_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_jetpackslideshow_blocks_ids( $excerpt_updated );
 			// // wp:jetpack/image-compare.
 			// $content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated );
 			// $excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated );
@@ -1177,14 +1177,104 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates <img> element's data-id attribute value.
+	 * Searches for all jetpack/slideshow blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
 	 *
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content                 HTML content.
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_jetpackslideshow_blocks_ids( string $content ): string {
+
+		// Get all jetpack/slideshow blocks to $blocks.
+		$parsed_blocks = parse_blocks( $content );
+		$blocks = [];
+		foreach ( $parsed_blocks as $parsed_block ) {
+			if ( 'jetpack/slideshow' == $parsed_block['blockName'] ) {
+				$blocks[] = $parsed_block;
+			}
+		}
+
+		// Return if no blocks found.
+		if ( empty( $blocks ) ) {
+			return $content;
+		}
+
+		// Go through blocks and update image IDs.
+		$content_updated = $content;
+		foreach ( $blocks as $block ) {
+
+			// Vars.
+			$att_ids_updates = [];
+			$block_updated = $block;
+			$block_innerHTML_updated = $block['innerHTML'];
+			$block_innerContent_updated = $block['innerContent'][0];
+
+			// Get all <img> elements from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				// TODO -- log, no imgs.
+				continue;
+			}
+
+			// Loop through all <img> elements, update data-ids.
+			foreach ( $matches[0] as $match ) {
+				$img_html = $match[0];
+
+				// Get data-id and src attributes.
+				$img_data_id = $this->html_element_manipulator->get_attribute_value( 'data-id', $img_html );
+				$img_src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+				// Get this attachment's ID from src.
+				$new_id = $this->attachment_url_to_postid( $img_src );
+				if ( 0 === $new_id ) {
+					// Attachment ID not found.
+					// TODO log.
+					continue;
+				}
+				$att_ids_updates[ $img_data_id ] = $new_id;
+
+				$img_html_updated = $img_html;
+				$ids_updates = [ $img_data_id => $new_id ];
+				// Update `data-id` attribute.
+				$img_html_updated = $this->update_image_element_data_id_attribute( $ids_updates, $img_html_updated );
+				// Update ID in image element `class` attribute.
+				$img_html_updated = $this->update_image_element_class_attribute( $ids_updates, $img_html_updated );
+
+				// Update the whole img HTML element in Block HTML.
+				$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
+				$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+			}
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML'] = $block_innerHTML_updated;
+			$block_updated['innerContent'][0] = $block_innerContent_updated;
+
+			// Update IDs in block header.
+			$block_ids = $block_updated['attrs']['ids'];
+			$block_ids_updated = $block_ids;
+			foreach ( $block_ids as $key => $id ) {
+				$block_ids_updated[$key] = $att_ids_updates[$id];
+			}
+
+			// Apply block header changes to block.
+			$block_updated['attrs']['ids'] = $block_ids_updated;
+
+			// Update the actual content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Updates <img> element's data-id attribute value. Update to new ID is done only if old ID is found.
+	 *
+	 * @param array  $ids_updates An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content     HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
+	public function update_image_element_data_id_attribute( $ids_updates, $content ) {
 
 		$content_updated = $content;
 
@@ -1212,8 +1302,8 @@ class ContentDiffMigrator {
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $imported_attachment_ids[ $id ] ) ) {
-					$id_new = $imported_attachment_ids[ $id ];
+				if ( isset( $ids_updates[ $id ] ) ) {
+					$id_new = $ids_updates[ $id ];
 				}
 
 				// Check if this ID was updated.
@@ -1240,14 +1330,15 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates the ID in <img> element's class attribute, e.g. `class="wp-image-123"`.
+	 * Updates the ID in <img> element's class attribute, e.g. `class="wp-image-123"`. Update to new ID is only done if old ID is
+	 * used in class attribute value.
 	 *
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content                 HTML content.
+	 * @param array  $ids_updates An array of Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content     HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_image_element_class_attribute( $imported_attachment_ids, $content ) {
+	public function update_image_element_class_attribute( $ids_updates, $content ) {
 
 		$content_updated = $content;
 
@@ -1276,8 +1367,8 @@ class ContentDiffMigrator {
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $imported_attachment_ids[ $id ] ) ) {
-					$id_new = $imported_attachment_ids[ $id ];
+				if ( isset( $ids_updates[ $id ] ) ) {
+					$id_new = $ids_updates[ $id ];
 				}
 
 				// Check if this ID was updated.

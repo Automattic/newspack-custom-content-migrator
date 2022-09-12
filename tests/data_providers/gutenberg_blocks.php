@@ -27,7 +27,7 @@ HTML;
 	 */
 	public function get_gutenberg_image_block( $id, $src = null ) {
 		if ( is_null( $src ) ) {
-			$src = "https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg";
+			$src = "https://newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg";
 		}
 
 		$block_placeholder = <<<HTML
@@ -161,18 +161,49 @@ HTML;
 	}
 
 	/**
+	 * @param array $img_ids
+	 * @param array $img_srcs
+	 * @param array $img_caption_texts
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_jetpackslideshow_block( $img_ids, $img_srcs, $img_caption_texts ) {
+		if ( count( $img_ids ) !== count( $img_srcs ) || count( $img_ids ) !== count( $img_caption_texts ) ) {
+			throw new \RuntimeException( 'All arguments must be of same count.' );
+		}
+
+		$block_outer_placeholder_sprintf = <<<HTML
+<!-- wp:jetpack/slideshow {"ids":[%s],"sizeSlug":"large"} -->
+<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">%s</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
+<!-- /wp:jetpack/slideshow -->
+HTML;
+		$block_image = <<<HTML
+<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-%d" data-id="%d" src="%s"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">%s</figcaption></figure></li>
+HTML;
+
+
+		$block_images = '';
+		foreach ( $img_ids as $key => $img_id ) {
+			$img_src = $img_srcs[ $key ];
+			$img_caption_text = $img_caption_texts[ $key ];
+
+			$block_images .= sprintf( $block_image, $img_id, $img_id, $img_src, $img_caption_text );
+		}
+
+		$block = sprintf( $block_outer_placeholder_sprintf, implode( ',', $img_ids ), $block_images );
+
+		return $block;
+	}
+
+	/**
 	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
 	 *
 	 * @return void
 	 */
 	public function get_all_coloradosun_blocks_examples() {
 		$blocks_examples = <<<HTML
-<!-- wp:jetpack/slideshow {"ids":[285120,285111],"sizeSlug":"large"} -->
-<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper"><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285120" data-id="285120" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg"/></figure></li><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285111" data-id="285111" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">Mary Peltola is shown leaving a voting booth while early voting on Friday, Aug. 12, 2022, in Anchorage, Alaska. Peltola, a Democrat, faces Republicans Nick Begich and Sarah Palin Tuesday in a special election to fill the remainder of the U.S. House term left vacant by Don Young's death in March. Peltola is also a candidate in Tuesday's primary for a full two-year term for the House seat. (AP Photo/Mark Thiessen)</figcaption></figure></li></ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
-<!-- /wp:jetpack/slideshow -->
-
-<!-- wp:jetpack/image-compare {"imageBefore":{"id":285109,"url":"https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707},"imageAfter":{"id":285108,"url":"https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707}} -->
-<figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="285109" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="285108" src="https://i1.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>
+<!-- wp:jetpack/image-compare {"imageBefore":{"id":285109,"url":"https://i2.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707},"imageAfter":{"id":285108,"url":"https://i1.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707}} -->
+<figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="285109" src="https://i2.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="285108" src="https://i1.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>
 <!-- /wp:jetpack/image-compare -->
 HTML;
 
