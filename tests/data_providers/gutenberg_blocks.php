@@ -126,16 +126,47 @@ HTML;
 	}
 
 	/**
+	 * @param array $img_ids
+	 * @param array $img_data_links
+	 * @param array $img_data_urls
+	 * @param array $img_srcs
+	 *
+	 * @return string
+	 */
+	public function get_gutenberg_jetpacktiledgallery_block( $img_ids, $img_data_links, $img_data_urls, $img_srcs ) {
+		if ( count( $img_ids ) !== count( $img_srcs ) ) {
+			throw new \RuntimeException( '$img_ids and $img_srcs counts are different.' );
+		}
+
+		$block_outer_placeholder_sprintf = <<<HTML
+<!-- wp:jetpack/tiled-gallery {"columnWidths":[["40.03600","59.96400"]],"ids":[%s]} -->
+<div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular"><div class="tiled-gallery__gallery"><div class="tiled-gallery__row">%s</div></div></div>
+<!-- /wp:jetpack/tiled-gallery -->
+HTML;
+
+		$blocks_images = '';
+		foreach ( $img_ids as $key => $img_id ) {
+			$img_data_link = $img_data_links[ $key ];
+			$img_data_url = $img_data_urls[ $key ];
+			$img_src = $img_srcs[ $key ];
+			// sprintf() doesn't work here, reports unknown format specifiers, for Block's usage of "%".
+			$blocks_images .= <<<HTML
+<div class="tiled-gallery__col" style="flex-basis:40.03600%"><figure class="tiled-gallery__item"><img    bbbbbbb=""   alt="" data-height="600" data-id="$img_id" data-link="$img_data_link" data-url="$img_data_url" data-width="600" src="$img_src" data-amp-layout="responsive"/></figure></div>
+HTML;
+		}
+
+		$block = sprintf( $block_outer_placeholder_sprintf, implode( ',', $img_ids ), $blocks_images );
+
+		return $block;
+	}
+
+	/**
 	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
 	 *
 	 * @return void
 	 */
 	public function get_all_coloradosun_blocks_examples() {
 		$blocks_examples = <<<HTML
-<!-- wp:jetpack/tiled-gallery {"columnWidths":[["40.03600","59.96400"]],"ids":[285120,285111]} -->
-<div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular"><div class="tiled-gallery__gallery"><div class="tiled-gallery__row"><div class="tiled-gallery__col" style="flex-basis:40.03600%"><figure class="tiled-gallery__item"><img alt="" data-height="600" data-id="285120" data-link="https://coloradosun.com/2022/09/06/colorado-sun-media-journalism/larry-3/" data-url="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg" data-width="600" src="https://i2.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg?ssl=1" data-amp-layout="responsive"/></figure></div><div class="tiled-gallery__col" style="flex-basis:59.96400%"><figure class="tiled-gallery__item"><img alt="" data-height="1707" data-id="285111" data-link="https://coloradosun.com/election-2022-house-alaska-8/" data-url="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg" data-width="2560" src="https://i0.wp.com/newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg?ssl=1" data-amp-layout="responsive"/></figure></div></div></div></div>
-<!-- /wp:jetpack/tiled-gallery -->
-
 <!-- wp:jetpack/slideshow {"ids":[285120,285111],"sizeSlug":"large"} -->
 <div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper"><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285120" data-id="285120" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/Larry.jpg"/></figure></li><li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-285111" data-id="285111" src="https://newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/2022/09/AP22224706871232-2-1200x800.jpg"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">Mary Peltola is shown leaving a voting booth while early voting on Friday, Aug. 12, 2022, in Anchorage, Alaska. Peltola, a Democrat, faces Republicans Nick Begich and Sarah Palin Tuesday in a special election to fill the remainder of the U.S. House term left vacant by Don Young's death in March. Peltola is also a candidate in Tuesday's primary for a full two-year term for the House seat. (AP Photo/Mark Thiessen)</figcaption></figure></li></ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
 <!-- /wp:jetpack/slideshow -->
