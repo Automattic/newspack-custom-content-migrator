@@ -658,9 +658,9 @@ class ContentDiffMigrator {
 			// wp:jetpack/slideshow.
 			$content_updated = $this->update_jetpackslideshow_blocks_ids( $content_updated );
 			$excerpt_updated = $this->update_jetpackslideshow_blocks_ids( $excerpt_updated );
-			// // wp:jetpack/image-compare.
-			// $content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated );
-			// $excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated );
+			// wp:jetpack/image-compare.
+			$content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated );
+			$excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated );
 
 
 			// Persist.
@@ -757,7 +757,7 @@ class ContentDiffMigrator {
 			// Update ID in image element `class` attribute.
 			$content_updated = $this->update_image_element_class_attribute( $ids_updates, $content_updated );
 			// Update image element `data-id` attribute.
-			$content_updated = $this->update_image_element_data_id_attribute( $ids_updates, $content_updated );
+			$content_updated = $this->update_image_element_attribute( 'data-id', $ids_updates, $content_updated );
 		}
 
 		return $content_updated;
@@ -1148,7 +1148,7 @@ class ContentDiffMigrator {
 
 				// Update `data-id` attribute.
 				$img_html_updated = $img_html;
-				$img_html_updated = $this->update_image_element_data_id_attribute( [ $img_data_id => $new_id ], $img_html_updated );
+				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $img_data_id => $new_id ], $img_html_updated );
 
 				// Update the whole img HTML element in Block HTML.
 				$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
@@ -1236,7 +1236,7 @@ class ContentDiffMigrator {
 				$img_html_updated = $img_html;
 				$ids_updates = [ $img_data_id => $new_id ];
 				// Update `data-id` attribute.
-				$img_html_updated = $this->update_image_element_data_id_attribute( $ids_updates, $img_html_updated );
+				$img_html_updated = $this->update_image_element_attribute( 'data-id', $ids_updates, $img_html_updated );
 				// Update ID in image element `class` attribute.
 				$img_html_updated = $this->update_image_element_class_attribute( $ids_updates, $img_html_updated );
 
@@ -1267,43 +1267,129 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates <img> element's data-id attribute value. Update to new ID is done only if old ID is found.
+	 * Searches for all jetpack/image-compare blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
 	 *
-	 * @param array  $ids_updates An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content     HTML content.
+	 * @param string $content post_content.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_jetpackimagecompare_blocks_ids( string $content ): string {
+
+		// Get all jetpack/image-compare blocks to $blocks.
+		$parsed_blocks = parse_blocks( $content );
+		$blocks = [];
+		foreach ( $parsed_blocks as $parsed_block ) {
+			if ( 'jetpack/image-compare' == $parsed_block['blockName'] ) {
+				$blocks[] = $parsed_block;
+			}
+		}
+
+		// Return if no blocks found.
+		if ( empty( $blocks ) ) {
+			return $content;
+		}
+
+		// Go through blocks and update image IDs.
+		$content_updated = $content;
+		foreach ( $blocks as $block ) {
+
+			// Vars.
+			$att_ids_updates = [];
+			$block_updated = $block;
+			$block_innerHTML_updated = $block['innerHTML'];
+			$block_innerContent_updated = $block['innerContent'][0];
+
+			// Get all <img> elements from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				// TODO -- log, no imgs.
+				continue;
+			}
+
+			// Loop through all <img> elements, update data-ids.
+			foreach ( $matches[0] as $match ) {
+				$img_html = $match[0];
+
+				// Get id and src attributes.
+				$img_id = $this->html_element_manipulator->get_attribute_value( 'id', $img_html );
+				$img_src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+				// Get this attachment's ID from src.
+				$new_id = $this->attachment_url_to_postid( $img_src );
+				if ( 0 === $new_id ) {
+					// Attachment ID not found.
+					// TODO log.
+					continue;
+				}
+				$att_ids_updates[ $img_id ] = $new_id;
+
+				$img_html_updated = $img_html;
+				$ids_updates = [ $img_id => $new_id ];
+				// Update `id` attribute.
+				$img_html_updated = $this->update_image_element_attribute( 'id', $ids_updates, $img_html_updated );
+				// Update ID in image element `class` attribute.
+				$img_html_updated = $this->update_image_element_class_attribute( $ids_updates, $img_html_updated );
+
+				// Update the whole img HTML element in Block HTML.
+				$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
+				$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+			}
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML'] = $block_innerHTML_updated;
+			$block_updated['innerContent'][0] = $block_innerContent_updated;
+
+			// Update IDs in block header.
+			$block_updated['attrs']['imageBefore']['id'] = $att_ids_updates[$block_updated['attrs']['imageBefore']['id']];
+			$block_updated['attrs']['imageAfter']['id'] = $att_ids_updates[$block_updated['attrs']['imageAfter']['id']];
+
+			// Update the actual content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Updates <img> element's attribute value. Only for attributes which use double quotes for values. Update to the new value is
+	 * only done if the exact old value is found.
+	 *
+	 * @param string $attribute_name Name of attribute whose value is being updated.
+	 * @param array  $value_update   Key is old attribute value, value is new attribute value.
+	 * @param string $content        HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_image_element_data_id_attribute( $ids_updates, $content ) {
+	public function update_image_element_attribute( $attribute_name, $value_update, $content ) {
 
 		$content_updated = $content;
 
-		// Pattern for matching any Gutenberg block with an "id" attribute with a numeric value.
-		$pattern_block_id = '|
+		// Pattern for matching any Gutenberg block with the attribute using quotes for value.
+		$pattern = '|
 			(
 				\<img
 				[^\>]*        # zero or more characters except closing angle bracket
-				data-id="
+				'. $attribute_name .'="
 			)
 			(
-				\d+           # data-id ID value
+				\d+           # attribute value
 			)
 			(
-				"             # data-id value closing double quote
+				"             # value closing double quote
 				[^\>]*        # zero or more characters except closing angle bracket
 				\>            # closing angle bracket (can be either prepended with forward slash, or without)
 			)
 		|xims';
 
 		$matches = [];
-		preg_match_all( $pattern_block_id, $content, $matches );
+		preg_match_all( $pattern, $content, $matches );
 		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
 
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $ids_updates[ $id ] ) ) {
-					$id_new = $ids_updates[ $id ];
+				if ( isset( $value_update[ $id ] ) ) {
+					$id_new = $value_update[ $id ];
 				}
 
 				// Check if this ID was updated.
@@ -1311,8 +1397,8 @@ class ContentDiffMigrator {
 					// Update just this specific block's header where this ID was matched (by $key_match).
 					$matched_block_header         = $matches[0][ $key_match ];
 					$matched_block_header_updated = str_replace(
-						sprintf( 'data-id="%d"', $id ),
-						sprintf( 'data-id="%d"', $id_new ),
+						sprintf( '%s="%d"', $attribute_name, $id ),
+						sprintf( '%s="%d"', $attribute_name, $id_new ),
 						$matched_block_header
 					);
 

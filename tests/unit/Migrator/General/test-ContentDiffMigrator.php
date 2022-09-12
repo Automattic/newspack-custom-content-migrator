@@ -1999,7 +1999,7 @@ HTML;
 <img src="https://philomath.test/wp-content/uploads/2022/02/022822-haskell-sign.jpeg" alt="Haskell Indian Nations University entrance sign" data-id="11110" class="wp-image-11111"/>
 HTML;
 
-		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html );
+		$html_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html );
 
 		$this->assertEquals( $html_expected, $html_actual );
 	}
@@ -2021,7 +2021,7 @@ HTML;
 		$html_actual = $html;
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
-		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html_actual );
 
 		$this->assertEquals( $html_expected, $html_actual );
 	}
@@ -2085,7 +2085,7 @@ HTML;
 		$html_slideshow_actual = $html_slideshow;
 		$html_slideshow_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_slideshow_actual );
 		$html_slideshow_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_slideshow_actual );
-		$html_slideshow_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_slideshow_actual );
+		$html_slideshow_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html_slideshow_actual );
 
 		$this->assertEquals( $html_slideshow_expected, $html_slideshow_actual );
 
@@ -2101,7 +2101,7 @@ HTML;
 		$html_jp_tiled_gallery_actual = $html_jp_tiled_gallery;
 		$html_jp_tiled_gallery_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
 		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
-		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_jp_tiled_gallery_actual );
+		$html_jp_tiled_gallery_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html_jp_tiled_gallery_actual );
 
 		$this->assertEquals( $html_jp_tiled_gallery_expected, $html_jp_tiled_gallery_actual );
 	}
@@ -2139,7 +2139,7 @@ HTML;
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
-		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html_actual );
 
 		$this->assertEquals( $html_expected, $html_actual );
 	}
@@ -2609,6 +2609,69 @@ BLOCK;
 
 		// Run.
 		$html_actual = $logic_partial_mock->update_jetpackslideshow_blocks_ids( $html );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_jetpackimagecompare_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
+	 */
+	public function test_update_jetpackimagecompare_blocks_ids_should_update_all_ids_correctly() {
+		// Prepare.
+		$img_id_old_live_11 = 1111;
+		$img_id_new_staging_11 = 1119;
+		$img_src_11 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img11.jpg?ssl=1';
+		$img_id_old_live_12 = 222;
+		$img_id_new_staging_12 = 2229;
+		$img_src_12 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img12.jpg?ssl=1';
+		$img_id_old_live_21 = 1111;
+		$img_id_new_staging_21 = 1100;
+		$img_src_21 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img21.jpg?ssl=1';
+		$img_id_old_live_22 = 333;
+		$img_id_new_staging_22 = 3338;
+		$img_src_22 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img22.jpg?ssl=1';
+
+		$custom_block_w_same_ids_sprintf = <<<BLOCK
+<!-- wp:somecustomblock {"imageBefore":{"id":%d,"url":"%s","alt":"","width":2560,"height":1707},"imageAfter":{"id":%d,"url":"%s","alt":"","width":2560,"height":1707}} -->
+<figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="%d" src="%s" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="%d" src="%s" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>
+<!-- /wp:somecustomblock -->
+BLOCK;
+		$custom_block_w_same_ids = sprintf( $custom_block_w_same_ids_sprintf,
+			$img_id_old_live_11, $img_src_11, $img_id_old_live_21, $img_src_21, $img_id_old_live_11, $img_src_11, $img_id_old_live_21, $img_src_21
+		);
+
+		$html = $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_old_live_11, $img_src_11, $img_id_old_live_12, $img_src_12 )
+		        // Let's throw in a different block which uses same ID values, but which mean something else than cover Attachment ID, and should not be updated.
+		        . "\n\n" . $custom_block_w_same_ids
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_old_live_21, $img_src_21, $img_id_old_live_22, $img_src_22 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_new_staging_11, $img_src_11, $img_id_new_staging_12, $img_src_12 )
+                         // Let's throw in a different block which uses same ID values, but which mean something else than cover Attachment ID, and should not be updated.
+		                 . "\n\n" . $custom_block_w_same_ids
+                         . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_new_staging_21, $img_src_21, $img_id_new_staging_22, $img_src_22 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called for both images in the first block.
+				[ $img_src_11, $img_id_new_staging_11 ],
+				[ $img_src_12, $img_id_new_staging_12 ],
+				// Will be called for both images in the second block.
+				[ $img_src_21, $img_id_new_staging_21 ],
+				[ $img_src_22, $img_id_new_staging_22 ],
+			]
+		);
+
+		// Run.
+		$html_actual = $logic_partial_mock->update_jetpackimagecompare_blocks_ids( $html );
 
 		// Assert.
 		$this->assertEquals( $html_expected, $html_actual );

@@ -233,7 +233,7 @@ class PhilomathMigrator implements InterfaceMigrator {
 			$content_updated = $result[ 'post_content' ];
 			$content_updated = $this->content_diff->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $content_updated );
 			$content_updated = $this->content_diff->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->content_diff->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
+			$content_updated = $this->content_diff->update_image_element_attribute( 'data-id', $imported_attachment_ids, $content_updated );
 
 			if ( $result[ 'post_content' ] != $content_updated ) {
 				$wpdb->update(

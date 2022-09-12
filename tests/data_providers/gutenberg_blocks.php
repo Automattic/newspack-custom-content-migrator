@@ -196,17 +196,24 @@ HTML;
 	}
 
 	/**
-	 * Temporary content storage funcion, will be refactored into proper fixtures by the time the PR is submitted.
+	 * @param int    $id1
+	 * @param string $url1
+	 * @param int    $id2
+	 * @param string $url2
 	 *
-	 * @return void
+	 * @return string
 	 */
-	public function get_all_coloradosun_blocks_examples() {
-		$blocks_examples = <<<HTML
-<!-- wp:jetpack/image-compare {"imageBefore":{"id":285109,"url":"https://i2.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707},"imageAfter":{"id":285108,"url":"https://i1.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1","alt":"","width":2560,"height":1707}} -->
-<figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="285109" src="https://i2.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="285108" src="https://i1.wp.com/newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107146324-1-scaled.jpg?ssl=1" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>
+	public function get_gutenberg_jetpackimagecompare_block( $id1, $url1, $id2, $url2 ) : string {
+
+		$block_placeholder_sprintf = <<<HTML
+<!-- wp:jetpack/image-compare {"imageBefore":{"id":%d,"url":"%s","alt":"","width":2560,"height":1707},"imageAfter":{"id":%d,"url":"%s","alt":"","width":2560,"height":1707}} -->
+<figure class="wp-block-jetpack-image-compare"><div class="juxtapose" data-mode="horizontal"><img id="%d" src="%s" alt="" width="2560" height="1707" class="image-compare__image-before"/><img id="%d" src="%s" alt="" width="2560" height="1707" class="image-compare__image-after"/></div></figure>
 <!-- /wp:jetpack/image-compare -->
 HTML;
 
+		$block = sprintf( $block_placeholder_sprintf, $id1, $url1, $id2, $url2, $id1, $url1, $id2, $url2 );
+
+		return $block;
 	}
 
 	/**
