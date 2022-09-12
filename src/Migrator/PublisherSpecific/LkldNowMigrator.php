@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use Simple_Local_Avatars;
 use \WP_CLI;
@@ -67,6 +68,21 @@ class LkldNowMigrator implements InterfaceMigrator {
 			[
 				'shortdesc' => 'Append a hyperlink to the original article to the end of the article.',
 				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lkldnow-migrate-themify-box-shortcodes',
+			[ $this, 'cmd_lkld_migrate_themify_box' ],
+			[
+				'shortdesc' => 'Convert all themify_box shortcodes to Group Gutenberg block.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Run the migrator without making changes to the database.',
+						'optional'    => true,
+					],
+				],
 			]
 		);
 	}
@@ -258,6 +274,56 @@ class LkldNowMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( sprintf( 'Done! %d posts were updated.', $updated_posts_count ) );
+	}
+
+	public function cmd_lkld_migrate_themify_box( $pos_args, $assoc_args ) {
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		global $wpdb;
+
+		$args = array(
+			'post_type' => array( 'post', 'page' ),
+			'nopaging' => true,
+			'post_status' => 'any',
+		);
+		
+		$query = new WP_Query( $args );
+		
+		$block_wrapper = <<<HTML
+<!-- wp:group {"className":"newspack-text-block"} -->
+%s
+<!-- /wp:group -->
+HTML;
+		
+		$shortcode_pattern = '/<!-- wp:shortcode -->.*?\[themify_box.*?](.*?)\[\/themify_box].*?<!-- \/wp:shortcode -->/s';
+		
+		foreach ( $query->posts as $post ) {
+			preg_match_all( $shortcode_pattern, $post->post_content, $matches );
+
+			if ( isset( $matches[1] ) && count( $matches[1] ) > 0  ) {
+				$inner_texts = $matches[1];
+				
+				foreach ( $inner_texts as $index => $inner_text ) {
+					$inner_text_wrapped = sprintf( $block_wrapper, $inner_text );
+					$inner_texts[ $index ] = $inner_text_wrapped;
+				}
+
+				$new_post_content = str_replace( $matches[0], $inner_texts, $post->post_content );
+
+				$this->log( sprintf( '%d.txt', $post->ID ), sprintf( "Old content:\n%s\nNew content:\n%s\n", $post->post_content, $new_post_content ) );
+
+				if ( ! $dry_run && $new_post_content != $post->post_content ) {
+					$wpdb->update(
+						$wpdb->prefix . 'posts',
+						[ 'post_content' => $new_post_content ],
+						[ 'ID' => $post->ID ]
+					);
+					WP_CLI::log( sprintf( 'Updated post #%s', $post->ID ) );
+				}
+			} 
+		}
+
+		WP_CLI::success( 'Finished converting themify_box shortcodes to Group blocks.' );
 	}
 
 	/**
