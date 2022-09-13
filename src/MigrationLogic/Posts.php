@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use WP_Query;
+use WP_CLI;
 
 class Posts {
 	/**
@@ -14,9 +15,9 @@ class Posts {
 		$ids = array();
 
 		// Arguments in \WP_Query::parse_query .
-		$args = array(
-			'nopaging' => $nopaging,
-			'post_type' => $post_type,
+		$args  = array(
+			'nopaging'    => $nopaging,
+			'post_type'   => $post_type,
 			'post_status' => $post_status,
 		);
 		$query = new \WP_Query( $args );
@@ -91,7 +92,6 @@ SQL;
 		if ( ! empty( $results_names ) ) {
 			foreach ( $results_names as $results_name ) {
 				$names[] = $results_name['name'];
-
 			}
 		}
 
@@ -107,7 +107,7 @@ SQL;
 		global $wpdb;
 
 		$post_types = [];
-		$results = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
+		$results    = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
 		foreach ( $results as $result ) {
 			$post_types[] = $result->post_type;
 		}
@@ -124,48 +124,52 @@ SQL;
 	 *      }
 	 * ```
 	 *
-	 * @param array $post_types Post types.
+	 * @param array  $post_types Post types.
 	 * @param string $taxonomy Taxonomy.
-	 * @param int $term_id term_id.
+	 * @param int    $term_id term_id.
 	 *
 	 * @return \WP_Post[]
 	 */
 	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
-		return get_posts( [
-			'posts_per_page' => -1,
-			// Target all post_types.
-			'post_type'      => $post_types,
-			'tax_query'      => [
-				[
-					'taxonomy' => $taxonomy,
-					'field'    => 'term_id',
-					'terms'    => $term_id,
-				]
-			],
-		] );
+		return get_posts(
+            [
+				'posts_per_page' => -1,
+				// Target all post_types.
+				'post_type'      => $post_types,
+				'tax_query'      => [
+					[
+						'taxonomy' => $taxonomy,
+						'field'    => 'term_id',
+						'terms'    => $term_id,
+					],
+				],
+			]
+        );
 	}
 
 	/**
 	 * Gets taxonomy with custom meta.
 	 *
-	 * @param        $meta_key
-	 * @param        $meta_value
-	 * @param string $taxonomy
+	 * @param            $meta_key
+	 * @param            $meta_value
+	 * @param string     $taxonomy
 	 *
 	 * @return int|\WP_Error|\WP_Term[]
 	 */
 	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
-        return get_terms([
-            'hide_empty' => false,
-            'meta_query' => [
-                [
-                    'key'     => $meta_key,
-                    'value'   => $meta_value,
-                    'compare' => 'LIKE'
-                ],
-            ],
-            'taxonomy'  => $taxonomy,
-        ]);
+        return get_terms(
+            [
+				'hide_empty' => false,
+				'meta_query' => [
+					[
+						'key'     => $meta_key,
+						'value'   => $meta_value,
+						'compare' => 'LIKE',
+					],
+				],
+				'taxonomy'   => $taxonomy,
+			]
+        );
 	}
 
 	/**
@@ -183,7 +187,7 @@ SQL;
 
 		global $wpdb;
 
-		$post_types_placeholders = implode( ",", array_fill( 0, count( $post_types ), '%s' ) );
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
 
 		$args_prepare = [];
 		array_push( $args_prepare, $meta_key, $meta_value );
@@ -208,7 +212,7 @@ SQL;
 
 		$post_ids = [];
 		foreach ( $results_meta_post_ids as $result_meta_post_id ) {
-			$post_ids[] = (int) $result_meta_post_id[ 'post_id' ];
+			$post_ids[] = (int) $result_meta_post_id['post_id'];
 		}
 
 		return $post_ids;
@@ -243,12 +247,157 @@ SQL;
 	 *
 	 * @return int[]|\WP_Post[]
 	 */
-	public function get_all_posts( $post_type = 'post', $post_status = [ 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ] ) {
-		return get_posts( [
-	        'posts_per_page' => -1,
-	        'post_type'      => $post_type,
-	        // `'post_status' => 'any'` doesn't work as expected.
-	        'post_status'    => $post_status,
-		] );
+	public function get_all_posts( $post_type = 'post', $post_status = array( 'publish', 'pending', 'draft', 'auto-draft', 'future', 'private', 'inherit', 'trash' ) ) {
+		return get_posts(
+			array(
+				'posts_per_page' => -1,
+				'post_type'      => $post_type,
+				// `'post_status' => 'any'` doesn't work as expected.
+				'post_status'    => $post_status,
+			)
+		);
+	}
+
+	/**
+	 * Batch posts and execute a callback action on each one, with a wait time between the batches.
+	 *
+	 * @param array    $query_args Arguments to retrieve posts, the same as the ones for get_posts function.
+	 * @param callable $callback The callback function to execute on each post, get the post as parameter.
+	 * @param integer  $wait The waiting time between batches in seconds.
+	 * @param integer  $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer  $batch Current batch in the loop.
+	 * @return void
+	 */
+	public function throttled_posts_loop( $query_args, $callback, $wait = 3, $posts_per_batch = 1000, $batch = 1 ) {
+		WP_CLI::line( sprintf( 'Batch #%d', $batch ) );
+
+		$args = array_merge(
+			array(
+				'posts_per_page' => $posts_per_batch,
+				'paged'          => $batch,
+			),
+			$query_args
+		);
+
+		$posts = get_posts( $args );
+
+		if ( empty( $posts ) ) {
+			return;
+		}
+
+		foreach ( $posts as $post ) {
+			$callback( $post );
+		}
+
+		sleep( $wait );
+
+		self::throttled_posts_loop( $query_args, $callback, $wait, $posts_per_batch, $batch + 1 );
+	}
+
+	/**
+	 * Generate Newspack Iframe Block code from HTML
+	 * By Creating an HTML file and uploading it to be set as the iframe source.
+	 *
+	 * @param string $html_to_embed HTML code to embed.
+	 * @param int    $post_id Post ID where to embed the HTML, used to generate unique Iframe source filename.
+	 * @return string Iframe block code to be add to the post content.
+	 */
+	public function embed_iframe_block_from_html( $html_to_embed, $post_id ) {
+		$iframe_folder      = "iframe-$post_id-" . wp_generate_password( 8, false );
+		$wp_upload_dir      = wp_upload_dir();
+		$iframe_upload_dir  = '/newspack_iframes/';
+		$iframe_upload_path = $wp_upload_dir['path'] . $iframe_upload_dir;
+		$iframe_path        = $iframe_upload_path . $iframe_folder;
+
+		// create iframe directory if not existing.
+		if ( ! file_exists( $iframe_path ) ) {
+			wp_mkdir_p( $iframe_path );
+		}
+
+		// Save iframe content in html file.
+		file_put_contents( "$iframe_path/index.html", $html_to_embed );
+		$iframe_src       = $wp_upload_dir['url'] . $iframe_upload_dir . $iframe_folder . DIRECTORY_SEPARATOR;
+		$iframe_directory = path_join( $wp_upload_dir['subdir'] . $iframe_upload_dir, $iframe_folder );
+
+		return '<!-- wp:newspack-blocks/iframe {"src":"' . $iframe_src . '","archiveFolder":"' . $iframe_directory . '"} /-->';
+	}
+
+	/**
+	 * Generate Newspack Iframe Block code from URL.
+	 *
+	 * @param string $src Iframe source URL.
+	 * @return string Iframe block code to be add to the post content.
+	 */
+	public function embed_iframe_block_from_src( $src ) {
+		return '<!-- wp:newspack-blocks/iframe {"src":"' . $src . '"} /-->';
+	}
+
+	/**
+	 * Generate Jetpack Slideshow Block code from Media Posts.
+	 *
+	 * @param int[] $post_ids Media Posts IDs.
+	 * @return string Jetpack Slideshow block code to be add to the post content.
+	 */
+	public function generate_jetpack_slideshow_block_from_media_posts( $post_ids ) {
+		$posts = [];
+		foreach ( $post_ids as $post_id ) {
+			$posts[] = get_post( $post_id );
+		}
+
+		if ( empty( $posts ) ) {
+			return '';
+		}
+
+		$content  = '<!-- wp:jetpack/slideshow {"ids":[' . join( ',', $post_ids ) . '],"sizeSlug":"large"} -->';
+		$content .= '<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">';
+		foreach ( $posts as $post ) {
+			$caption  = ! empty( $post->post_excerpt ) ? $post->post_excerpt : $post->post_title;
+			$content .= '<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="' . $post->post_title . '" class="wp-block-jetpack-slideshow_image wp-image-' . $post->ID . '" data-id="' . $post->ID . '" src="' . wp_get_attachment_url( $post->ID ) . '"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">' . $caption . '</figcaption></figure></li>';
+		}
+		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
+		return $content;
+	}
+
+	/**
+	 * Generate Jetpack Slideshow Block code from Media Posts.
+	 *
+	 * @param int[] $post_ids Media Posts IDs.
+	 * @return string Jetpack Slideshow block code to be add to the post content.
+	 */
+	public function generate_jetpack_slideshow_block_from_pictures( $images ) {
+		foreach ( $images as $key => $image ) {
+			$post          = get_page_by_title( $image['name'], OBJECT, 'attachment' );
+			$attachment_id = 0;
+
+			if ( ! $post ) {
+				$attachment = array(
+					'guid'           => $image['filename'],
+					'post_mime_type' => "image/{$image['filetype']}",
+					'post_title'     => $image['name'],
+					'post_content'   => '',
+					'post_status'    => 'inherit',
+				);
+
+				$attachment_id = wp_insert_attachment( $attachment, $image['filename'] );
+			}
+
+			$images[ $key ]['post_id'] = $post ? $post->ID : $attachment_id;
+		}
+
+		$images_posts_ids = array_map(
+			function( $image ) {
+				return $image['post_id'];
+			},
+			$images
+		);
+
+		$content  = '<!-- wp:jetpack/slideshow {"ids":[' . join( ',', $images_posts_ids ) . '],"sizeSlug":"large"} -->';
+		$content .= '<div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">';
+		foreach ( $images as $image ) {
+			$caption  = ! empty( $image['description'] ) ? $image['description'] : $image['name'];
+			$content .= '<li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="' . $image['name'] . '" class="wp-block-jetpack-slideshow_image wp-image-' . $image['post_id'] . '" data-id="' . $image['post_id'] . '" src="' . $image['filename'] . '"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">' . $caption . '</figcaption></figure></li>';
+		}
+		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
+		return $content;
 	}
 }
