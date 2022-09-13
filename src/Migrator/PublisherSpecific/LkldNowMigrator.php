@@ -295,7 +295,7 @@ class LkldNowMigrator implements InterfaceMigrator {
 <!-- /wp:group -->
 HTML;
 		
-		$shortcode_pattern = '/<!-- wp:shortcode -->.*?\[themify_box.*?](.*?)\[\/themify_box].*?<!-- \/wp:shortcode -->/s';
+		$shortcode_pattern = '/<!-- wp:shortcode -->\n*\[themify_box.*?](.*?)\[\/themify_box]\n*<!-- \/wp:shortcode -->/s';
 		
 		foreach ( $query->posts as $post ) {
 			preg_match_all( $shortcode_pattern, $post->post_content, $matches );
