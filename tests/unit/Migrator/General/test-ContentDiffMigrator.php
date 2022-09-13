@@ -1931,9 +1931,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			// Term relationships rows.
 			'err insert_term_relationship',
 			// Inserts didn't happen here.
-			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 2',
-			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 3',
-			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 4',
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $data['post']['ID'], $new_post_id, $term_taxonomy_rows[1]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $data['post']['ID'], $new_post_id, $term_taxonomy_rows[2]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $data['post']['ID'], $new_post_id, $term_taxonomy_rows[3]['term_taxonomy_id'] ),
 		];
 		$this->assertEquals( $expected_errors, $import_errors );
 	}
@@ -2143,7 +2143,7 @@ HTML;
 
 		$html_actual = $html;
 		// All the updates made in \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids.
-		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:image', $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html_actual );
