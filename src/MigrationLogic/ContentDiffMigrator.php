@@ -785,7 +785,7 @@ class ContentDiffMigrator {
 			// Update IDs in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -867,7 +867,7 @@ class ContentDiffMigrator {
 			// Update IDs in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -951,7 +951,7 @@ class ContentDiffMigrator {
 			// Update ID in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -1033,7 +1033,7 @@ class ContentDiffMigrator {
 			// Update ID in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -1118,7 +1118,7 @@ class ContentDiffMigrator {
 			// Update IDs in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -1208,7 +1208,7 @@ class ContentDiffMigrator {
 			// Update mediaId in block header.
 			$block_updated['attrs']['mediaId'] = $new_att_id;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -1298,11 +1298,12 @@ class ContentDiffMigrator {
 			$block_ids = $block_updated['attrs']['ids'];
 			$block_ids_updated = $block_ids;
 			foreach ( $block_ids as $key => $id ) {
-				$block_ids_updated[$key] = $known_attachment_ids_updates[$id];
+				// Update ID, or leave it the same.
+				$block_ids_updated[$key] = $known_attachment_ids_updates[$id] ?? $id;
 			}
 			$block_updated['attrs']['ids'] = $block_ids_updated;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -1394,11 +1395,12 @@ class ContentDiffMigrator {
 			$block_ids = $block_updated['attrs']['ids'];
 			$block_ids_updated = $block_ids;
 			foreach ( $block_ids as $key => $id ) {
-				$block_ids_updated[$key] = $known_attachment_ids_updates[$id];
+				// Update ID, or leave it the same.
+				$block_ids_updated[$key] = $known_attachment_ids_updates[$id] ?? $id;
 			}
 			$block_updated['attrs']['ids'] = $block_ids_updated;
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
@@ -1486,11 +1488,11 @@ class ContentDiffMigrator {
 			$block_updated['innerHTML'] = $block_innerHTML_updated;
 			$block_updated['innerContent'][0] = $block_innerContent_updated;
 
-			// Update IDs in block header.
-			$block_updated['attrs']['imageBefore']['id'] = $known_attachment_ids_updates[$block_updated['attrs']['imageBefore']['id']];
-			$block_updated['attrs']['imageAfter']['id'] = $known_attachment_ids_updates[$block_updated['attrs']['imageAfter']['id']];
+			// Update IDs in block header, or leave them the same if they haven't changed.
+			$block_updated['attrs']['imageBefore']['id'] = $known_attachment_ids_updates[$block_updated['attrs']['imageBefore']['id']] ?? $block_updated['attrs']['imageBefore']['id'];
+			$block_updated['attrs']['imageAfter']['id'] = $known_attachment_ids_updates[$block_updated['attrs']['imageAfter']['id']] ?? $block_updated['attrs']['imageAfter']['id'];
 
-			// Update the actual content.
+			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
 		}
 
