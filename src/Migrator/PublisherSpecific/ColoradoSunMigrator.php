@@ -9,6 +9,7 @@ use NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
 
 /**
  * Custom migration scripts for Colorado Sun.
@@ -46,14 +47,22 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 	private $html_element_manipulator;
 
 	/**
+	 * @var ContentDiffMigrator
+	 */
+	private $content_diff_migrator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		global $wpdb;
+
 		$this->posts_logic = new PostsLogic();
 		$this->attachment_logic = new AttachmentsLogic();
 		$this->coauthors_logic = new CoAuthorPlusLogic();
 		$this->wp_block_manipulator = new WpBlockManipulator();
 		$this->html_element_manipulator = new HtmlElementManipulator();
+		$this->content_diff_migrator = new ContentDiffMigrator( $wpdb );
 	}
 
 	/**
@@ -109,6 +118,24 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 	}
 
 	public function cmd_fix_image_ids_in_post_content( $positional_args, $assoc_args ) {
+
+		$known_attachment_ids_updates = [];
+		$log_file_path = 'contentdiff_update_blocks_ids.log';
+
+		// $post_ids = $this->posts_logic->get_all_posts_ids();
+		$post_ids = [ 281319 ];
+		// old img ID 200693 > new img ID 267152
+
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			// Run the command on a single $post_id to control custom progress bar.
+			$this->content_diff_migrator->update_blocks_ids( [ $post_id ], $known_attachment_ids_updates, $log_file_path );
+		}
+
+		wp_cache_flush();
+
+		WP_CLI::log( sprintf( "Done. Check %s.", $log_file_path ) );
 
 	}
 
