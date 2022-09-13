@@ -9,6 +9,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic;
+use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use \WP_CLI;
 
 /**
@@ -29,10 +30,16 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	private $attachment_logic;
 
 	/**
+	 * @var PostsLogic.
+	 */
+	private $posts_logic = null;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->attachment_logic = new AttachmentsLogic();
+		$this->posts_logic      = new PostsLogic();
 	}
 
 	/**
@@ -90,15 +97,15 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator attachments-delete-posts-images',
-			[ $this, 'cmd_attachment_delete_posts_images' ],
+			'newspack-content-migrator attachments-delete-posts-attachments',
+			[ $this, 'cmd_attachment_delete_posts_attachments' ],
 			[
-				'shortdesc' => 'Delete all posts\' images.',
+				'shortdesc' => 'Delete all posts\' attachments.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
-						'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
+						'description' => 'Do a dry run simulation and don\'t actually delete attachments.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -112,14 +119,28 @@ class AttachmentsMigrator implements InterfaceMigrator {
 					[
 						'type'        => 'assoc',
 						'name'        => 'skip-from',
-						'description' => 'Skip the media uploaded from this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'description' => 'Skip the attachment uploaded from this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'skip-to',
-						'description' => 'Skip the media uploaded to this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'description' => 'Skip the attachment uploaded to this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachments-per-batch',
+						'description' => 'Attachments per batch to delete.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to delete.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -328,23 +349,24 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator attachments-delete-posts-images`.
+	 * Callable for `newspack-content-migrator attachments-delete-posts-attachments`.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_attachment_delete_posts_images( $args, $assoc_args ) {
-		$dry_run          = isset( $assoc_args['dry-run'] ) ? true : false;
-		$confirm_deletion = isset( $assoc_args['confirm-deletion'] ) ? true : false;
-		$skip_from        = isset( $assoc_args['skip-from'] ) ? $assoc_args['skip-from'] : null;
-		$skip_to          = isset( $assoc_args['skip-to'] ) ? $assoc_args['skip-to'] : null;
+	public function cmd_attachment_delete_posts_attachments( $args, $assoc_args ) {
+		$dry_run               = isset( $assoc_args['dry-run'] ) ? true : false;
+		$confirm_deletion      = isset( $assoc_args['confirm-deletion'] ) ? true : false;
+		$skip_from             = isset( $assoc_args['skip-from'] ) ? $assoc_args['skip-from'] : null;
+		$skip_to               = isset( $assoc_args['skip-to'] ) ? $assoc_args['skip-to'] : null;
+		$batch                 = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$attachments_per_batch = isset( $assoc_args['attachments-per-batch'] ) ? intval( $assoc_args['attachments-per-batch'] ) : 1000;
 
 		if ( $confirm_deletion ) {
 			$attachment_args = [
-				'posts_per_page' => -1,
-				'post_type'      => 'attachment',
-				'post_status'    => 'any',
-				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+				'post_type'   => 'attachment',
+				'post_status' => 'any',
+				'meta_query'  => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 					[
 						'key'     => self::ATTACHMENT_POST_TO_DELETE,
 						'value'   => true,
@@ -361,29 +383,31 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				];
 			}
 
-			$attachment_posts_to_be_deleted = get_posts( $attachment_args );
-			$total_attachment_posts         = count( $attachment_posts_to_be_deleted );
+			$this->posts_logic->throttled_posts_loop(
+				$attachment_args,
+				function( $attachment_post_to_be_deleted ) {
+					// Delete atatchment from filesystem.
+					$attachment_file = get_post_meta( $attachment_post_to_be_deleted->ID, '_wp_attached_file', true );
 
-			foreach ( $attachment_posts_to_be_deleted as $index => $attachment_post_to_be_deleted ) {
-				// Delete atatchment from filesystem.
-				$attachment_file = get_post_meta( $attachment_post_to_be_deleted->ID, '_wp_attached_file', true );
+					if ( ! $attachment_file ) {
+						$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping deleting media: %d Can\'t locate its file.', $attachment_post_to_be_deleted->ID ) );
+						return;
+					}
 
-				if ( ! $attachment_file ) {
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping deleting media (%d/%d): %d Can\'t locate its file.', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID ) );
-					continue;
-				}
+					$media_path = $this->get_trash_folder() . '/' . $attachment_file;
+					if ( file_exists( $media_path ) ) {
+						unlink( $media_path );
+						$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Deleting media: %d (%s)', $attachment_post_to_be_deleted->ID, $media_path ) );
+					} else {
+						$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'File not exists, media file not in trash folder: %d (%s)', $attachment_post_to_be_deleted->ID, $media_path ) );
+					}
 
-				$media_path = $this->get_trash_folder() . '/' . $attachment_file;
-				if ( file_exists( $media_path ) ) {
-					unlink( $media_path );
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Deleting media (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID, $media_path ) );
-				} else {
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'File not exists, media file not in trash folder (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post_to_be_deleted->ID, $media_path ) );
-				}
-
-				// Delete atatchment from database.
-				wp_delete_attachment( $attachment_post_to_be_deleted->ID );
-			}
+					// Delete atatchment from database.
+					wp_delete_attachment( $attachment_post_to_be_deleted->ID );
+				},
+				$batch,
+				$attachments_per_batch
+			);
 		} else {
 			// This is the first execution, we need to mark the attachments to be deleted and wait for the QA to be done.
 			// Get attachments to not delete.
@@ -405,9 +429,14 @@ class AttachmentsMigrator implements InterfaceMigrator {
 
 			// Get filtered by date attachments.
 			$attachment_args = [
-				'posts_per_page' => -1,
-				'post_type'      => 'attachment',
-				'post_status'    => 'any',
+				'post_type'   => 'attachment',
+				'post_status' => 'any',
+				'meta_query'  => [
+					[
+						'key'     => self::ATTACHMENT_POST_TO_DELETE,
+						'compare' => 'NOT EXISTS',
+					],
+				],
 			];
 
 			if ( $skip_from && $skip_to ) {
@@ -418,46 +447,48 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				];
 			}
 
-			$attachment_posts       = get_posts( $attachment_args );
-			$total_attachment_posts = count( $attachment_posts );
+			$this->posts_logic->throttled_posts_loop(
+				$attachment_args,
+				function( $attachment_post ) use ( $image_urls_to_not_delete, $dry_run ) {
+					$attachment_url      = wp_get_attachment_url( $attachment_post->ID );
+					$relative_media_path = $this->clean_images_url( $attachment_url );
 
-			foreach ( $attachment_posts as $index => $attachment_post ) {
-				$attachment_url      = wp_get_attachment_url( $attachment_post->ID );
-				$relative_media_path = $this->clean_images_url( $attachment_url );
+					if ( in_array( $relative_media_path, $image_urls_to_not_delete, true ) ) {
+						$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping media: %d', $attachment_post->ID ) );
+					} else {
+						if ( ! $dry_run ) {
+							$media_path = get_attached_file( $attachment_post->ID );
+							// Mark the media post to be deleted and move the media file to another path for QA, before a definitive delete operation.
+							update_post_meta( $attachment_post->ID, self::ATTACHMENT_POST_TO_DELETE, true );
+							update_post_meta( $attachment_post->ID, self::ATTACHMENT_FILE_OLD_PATH, $media_path );
 
-				if ( in_array( $relative_media_path, $image_urls_to_not_delete, true ) ) {
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping media(%d/%d): %d', $index + 1, $total_attachment_posts, $attachment_post->ID ) );
-				} else {
-					if ( ! $dry_run ) {
-						$media_path = get_attached_file( $attachment_post->ID );
-						// Mark the media post to be deleted and move the media file to another path for QA, before a definitive delete operation.
-						update_post_meta( $attachment_post->ID, self::ATTACHMENT_POST_TO_DELETE, true );
-						update_post_meta( $attachment_post->ID, self::ATTACHMENT_FILE_OLD_PATH, $media_path );
+							// Move the media file to trash, before deleting it after QA.
+							if ( file_exists( $media_path ) ) {
+								$attachment_file = get_post_meta( $attachment_post->ID, '_wp_attached_file', true );
+								if ( ! $attachment_file ) {
+									$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping media: %d Can\'t locate its file.)', $attachment_post->ID ) );
+									return;
+								}
 
-						// Move the media file to trash, before deleting it after QA.
-						if ( file_exists( $media_path ) ) {
-							$attachment_file = get_post_meta( $attachment_post->ID, '_wp_attached_file', true );
-							if ( ! $attachment_file ) {
-								$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping media (%d/%d): %d Can\'t locate its file.)', $index + 1, $total_attachment_posts, $attachment_post->ID ) );
-								continue;
+								$new_file_path = $this->get_trash_folder() . '/' . $attachment_file;
+								$new_file_dir  = dirname( $new_file_path );
+
+								if ( ! is_dir( $new_file_dir ) ) {
+									mkdir( $new_file_dir, 0777, true );
+								}
+
+								rename( $media_path, $new_file_path );
+							} else {
+								$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Warning: Media file not located: %d (%s)', $attachment_post->ID, $media_path ) );
 							}
-
-							$new_file_path = $this->get_trash_folder() . '/' . $attachment_file;
-							$new_file_dir  = dirname( $new_file_path );
-
-							if ( ! is_dir( $new_file_dir ) ) {
-								mkdir( $new_file_dir, 0777, true );
-							}
-
-							rename( $media_path, $new_file_path );
-						} else {
-							$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Warning: Media file not located (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post->ID, $media_path ) );
 						}
-					}
 
-					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Marking media to be deleted (%d/%d): %d (%s)', $index + 1, $total_attachment_posts, $attachment_post->ID, $media_path ) );
-				}
-			}
+						$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Marking media to be deleted: %d (%s)', $attachment_post->ID, $media_path ) );
+					}
+				},
+				$batch,
+				$attachments_per_batch
+			);
 		}
 
 		wp_cache_flush();
