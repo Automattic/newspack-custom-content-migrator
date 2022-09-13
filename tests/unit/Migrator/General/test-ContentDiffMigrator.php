@@ -2019,8 +2019,11 @@ HTML;
 		$html_expected           = $this->blocks_data_provider->get_gutenberg_gallery_block_w_3_images( 11110, 22220, 33330 );
 
 		$html_actual = $html;
-		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html_actual );
+		// Needs to update 'id' attribute in image block header.
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:image', $imported_attachment_ids, $html_actual );
+		// Needs to update attachment ID value used in <img> element class attribute.
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
+		// Needs to update <img> element's data-it.
 		$html_actual = $this->logic->update_image_element_attribute( 'data-id', $imported_attachment_ids, $html_actual );
 
 		$this->assertEquals( $html_expected, $html_actual );
@@ -2057,7 +2060,11 @@ HTML;
 		$html          = sprintf( $html_with_placeholders, 11111, 22222, 33333, 44444 );
 		$html_expected = sprintf( $html_with_placeholders, 11110, 22222, 33330, 44440 );
 
-		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $html );
+		$html_actual = $html;
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:blocka', $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:blockb', $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:blockc', $imported_attachment_ids, $html_actual );
+		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:blockd', $imported_attachment_ids, $html_actual );
 
 		$this->assertEquals( $html_expected, $html_actual );
 	}
