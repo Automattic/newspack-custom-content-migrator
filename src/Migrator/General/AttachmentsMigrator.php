@@ -661,7 +661,8 @@ class AttachmentsMigrator implements InterfaceMigrator {
 
 		// Match the relative path of the attachment (e.g. /wp-content/uploads/2019/01/image.jpeg).
 		preg_match( '~(?P<url>' . $uploads_dir . '/.*$)~', $url_without_query_param, $url_match );
-		return array_key_exists( 'url', $url_match ) ? $url_match['url'] : $url;
+		// Remove attachment size from filename.
+		return array_key_exists( 'url', $url_match ) ? preg_replace( '/-\d+x\d+\.(jpe?g|png|gif)$/', '.$1', $url_match['url'] ) : $url;
 	}
 
 	/**
