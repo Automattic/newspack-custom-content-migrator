@@ -275,6 +275,7 @@ SQL;
 			array(
 				'posts_per_page' => $posts_per_batch,
 				'paged'          => $batch,
+				'no_found_rows'  => true,
 			),
 			$query_args
 		);

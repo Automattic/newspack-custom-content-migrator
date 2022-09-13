@@ -90,15 +90,15 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator attachments-delete-posts-images',
-			[ $this, 'cmd_attachment_delete_posts_images' ],
+			'newspack-content-migrator attachments-delete-posts-attachments',
+			[ $this, 'cmd_attachment_delete_posts_attachments' ],
 			[
-				'shortdesc' => 'Delete all posts\' images.',
+				'shortdesc' => 'Delete all posts\' attachments.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
-						'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
+						'description' => 'Do a dry run simulation and don\'t actually delete attachments.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -112,14 +112,14 @@ class AttachmentsMigrator implements InterfaceMigrator {
 					[
 						'type'        => 'assoc',
 						'name'        => 'skip-from',
-						'description' => 'Skip the media uploaded from this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'description' => 'Skip the attachment uploaded from this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'skip-to',
-						'description' => 'Skip the media uploaded to this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'description' => 'Skip the attachment uploaded to this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -328,12 +328,12 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator attachments-delete-posts-images`.
+	 * Callable for `newspack-content-migrator attachments-delete-posts-attachments`.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_attachment_delete_posts_images( $args, $assoc_args ) {
+	public function cmd_attachment_delete_posts_attachments( $args, $assoc_args ) {
 		$dry_run          = isset( $assoc_args['dry-run'] ) ? true : false;
 		$confirm_deletion = isset( $assoc_args['confirm-deletion'] ) ? true : false;
 		$skip_from        = isset( $assoc_args['skip-from'] ) ? $assoc_args['skip-from'] : null;
@@ -408,6 +408,12 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				'posts_per_page' => -1,
 				'post_type'      => 'attachment',
 				'post_status'    => 'any',
+				'meta_query'     => [
+					[
+						'key'     => self::ATTACHMENT_POST_TO_DELETE,
+						'compare' => 'NOT EXISTS',
+					],
+				],
 			];
 
 			if ( $skip_from && $skip_to ) {
