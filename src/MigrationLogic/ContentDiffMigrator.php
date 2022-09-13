@@ -11,7 +11,6 @@ use \WP_CLI;
 use \WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
-use Symfony\Component\DomCrawler\Crawler;
 use wpdb;
 
 /**
@@ -85,7 +84,6 @@ class ContentDiffMigrator {
 		$this->wpdb = $wpdb;
 		$this->wp_block_manipulator = new WpBlockManipulator();
 		$this->html_element_manipulator = new HtmlElementManipulator();
-		$this->dom_crawler = new Crawler();
 	}
 
 	/**
