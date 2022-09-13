@@ -731,7 +731,8 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
-				$new_att_id = $this->attachment_url_to_postid( $src );
+				$src_cleaned = $this->clean_attachment_url_for_query( $src );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -815,7 +816,8 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
-				$new_att_id = $this->attachment_url_to_postid( $src );
+				$src_cleaned = $this->clean_attachment_url_for_query( $src );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -896,7 +898,8 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
-				$new_att_id = $this->attachment_url_to_postid( $src );
+				$src_cleaned = $this->clean_attachment_url_for_query( $src );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -977,7 +980,8 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
-				$new_att_id = $this->attachment_url_to_postid( $src );
+				$src_cleaned = $this->clean_attachment_url_for_query( $src );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1058,7 +1062,8 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
-				$new_att_id = $this->attachment_url_to_postid( $src );
+				$src_cleaned = $this->clean_attachment_url_for_query( $src );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1142,7 +1147,8 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
-				$new_att_id = $this->attachment_url_to_postid( $src );
+				$src_cleaned = $this->clean_attachment_url_for_query( $src );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1234,7 +1240,8 @@ class ContentDiffMigrator {
 				if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 					$new_att_id = $known_attachment_ids_updates[$att_id];
 				} else {
-					$new_att_id = $this->attachment_url_to_postid( $src );
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1328,7 +1335,8 @@ class ContentDiffMigrator {
 				if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 					$new_att_id = $known_attachment_ids_updates[$att_id];
 				} else {
-					$new_att_id = $this->attachment_url_to_postid( $src );
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1424,7 +1432,8 @@ class ContentDiffMigrator {
 				if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
 					$new_att_id = $known_attachment_ids_updates[$att_id];
 				} else {
-					$new_att_id = $this->attachment_url_to_postid( $src );
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -2455,6 +2464,26 @@ class ContentDiffMigrator {
 	 */
 	public function get_post( $post = null, $output = OBJECT, $filter = 'raw' ) {
 		return get_post( $post, $output, $filter );
+	}
+
+	/**
+	 * Cleans up the attachment file URL by just keeping scheme, host and path.
+	 *
+	 * @param string $url Attachment file URL.
+	 *
+	 * @return string Cleaned URL.
+	 */
+	public function clean_attachment_url_for_query( $url ) {
+		$parsed_url = parse_url( $url );
+
+		$url_cleaned = sprintf(
+			"%s://%s%s",
+			$parsed_url['scheme'],
+			$parsed_url['host'],
+			$parsed_url['path'],
+		);
+
+		return $url_cleaned;
 	}
 
 	/**
