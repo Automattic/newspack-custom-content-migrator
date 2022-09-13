@@ -2220,6 +2220,71 @@ HTML;
 	}
 
 	/**
+	 * Testings exact replacements which the update_image_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_image_blocks_ids
+	 */
+		public function test_update_image_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$img_block_id_old_live_1 = 111111;
+		$img_block_id_new_staging_1 = 0;
+		$img_block_url_1 = 'https://host.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg';
+		$img_block_id_old_live_2 = 222222;
+		$img_block_id_new_staging_2 = 222223;
+		$img_block_url_2 = 'https://host.com/wp-content/uploads/2022/09/file_2.jpg';
+		$html = $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_old_live_1, $img_block_url_1 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_old_live_2, $img_block_url_2 );
+		// First stays the same, second gets updated.
+		$html_expected = $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_old_live_1, $img_block_url_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_image_block( $img_block_id_new_staging_2, $img_block_url_2 );
+		// Add a couple of gallery blockc. Should replace all the images inside these too.
+		$gallery_block_img_ids_old_live_1 = [ 111111, 12, 13 ];
+		$gallery_block_img_ids_new_staging_1 = [ 0, 0, 133 ];
+		$gallery_block_img_urls_1 = [
+			'https://host.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg',
+			'https://host.com/wp-content/uploads/2022/09/img2.jpg',
+			'https://host.com/wp-content/uploads/2022/09/img3.jpg',
+		];
+		$html .= "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block( $gallery_block_img_ids_old_live_1, $gallery_block_img_urls_1 );
+		$html_expected .= "\n\n" . $this->blocks_data_provider->get_gutenberg_gallery_block(
+			[
+				// First two will stay the same.
+				$gallery_block_img_ids_old_live_1[0],
+				$gallery_block_img_ids_old_live_1[1],
+				// Third gets updated.
+				$gallery_block_img_ids_new_staging_1[2]
+			],
+			$gallery_block_img_urls_1
+			);
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// First image att ID should not be modified.
+				[ $img_block_url_1, 0 ],
+				[ $img_block_url_2, $img_block_id_new_staging_2 ],
+				// First two images in gallery should not be modified.
+				[ $gallery_block_img_urls_1[0], 0 ],
+				[ $gallery_block_img_urls_1[1], 0 ],
+				[ $gallery_block_img_urls_1[2], $gallery_block_img_ids_new_staging_1[2] ],
+			]
+		);
+
+		// Run.
+		$known_ids = [];
+		$html_actual = $logic_partial_mock->update_image_blocks_ids( $html, $known_ids );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Testings exact replacements which the update_audio_blocks_ids method should do.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_audio_blocks_ids
@@ -2255,6 +2320,47 @@ HTML;
 			[
 				// Will be called twice to get the audio files' attachment IDs on Staging.
 				[ $audio_src_1, $audio_att_id_new_staging_1 ],
+				[ $audio_src_2, $audio_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$known_ids = [];
+		$html_actual = $logic_partial_mock->update_audio_blocks_ids( $html, $known_ids );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_audio_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_audio_blocks_ids
+	 */
+	public function test_update_audio_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$audio_att_id_old_live_1 = 1111;
+		$audio_att_id_new_staging_1 = 0;
+		$audio_src_1 = 'https://host.com/wp-content/uploads/2022/07/file_1.mp3';
+		$audio_att_id_old_live_2 = 3333;
+		$audio_att_id_new_staging_2 = 4444;
+		$audio_src_2 = 'https://host.com/wp-content/uploads/2022/07/file_2.mp3';
+		$html = $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_old_live_1, $audio_src_1 )
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_old_live_2, $audio_src_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_old_live_1, $audio_src_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_audio_block( $audio_att_id_new_staging_2, $audio_src_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice, and won't make a change for the first one.
+				[ $audio_src_1, 0 ],
 				[ $audio_src_2, $audio_att_id_new_staging_2 ],
 			]
 		);
@@ -2324,6 +2430,48 @@ BLOCK;
 	}
 
 	/**
+	 * Testings exact replacements which the update_video_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_video_blocks_ids
+	 */
+	public function test_update_video_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$video_att_id_old_live_1 = 1111;
+		$video_att_id_new_staging_1 = 0;
+		$video_src_1 = 'https://host.com/wp-content/uploads/2022/07/file_1.mp4';
+			$video_att_id_old_live_2 = 3333;
+		$video_att_id_new_staging_2 = 4444;
+		$video_src_2 = 'https://host.com/wp-content/uploads/2022/07/file_2.mp4';
+
+		$html = $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_old_live_1, $video_src_1 )
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_old_live_2, $video_src_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_old_live_1, $video_src_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_video_block( $video_att_id_new_staging_2, $video_src_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice and won't make a change for the first one.
+				[ $video_src_1, 0 ],
+				[ $video_src_2, $video_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$known_ids = [];
+		$html_actual = $logic_partial_mock->update_video_blocks_ids( $html, $known_ids );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Testings exact replacements which the update_file_blocks_ids method should do.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_file_blocks_ids
@@ -2369,6 +2517,48 @@ BLOCK;
 				// Will be called twice to get the files' attachment IDs on Staging.
 				[ $file_href_1, $file_att_id_new_staging_1 ],
 				[ $file_href_2, $file_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$known_ids = [];
+		$html_actual = $logic_partial_mock->update_file_blocks_ids( $html, $known_ids );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_file_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_file_blocks_ids
+	 */
+		public function test_update_file_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$file_att_id_old_live_1 = 1111;
+		$file_att_id_new_staging_1 = 2222;
+		$file_href_1 = 'https://host.com/wp-content/uploads/2022/07/file_1.mp4';
+		$file_att_id_old_live_2 = 3333;
+		$file_att_id_new_staging_2 = 0;
+		$file_href_2 = 'https://host.com/wp-content/uploads/2022/07/file_2.mp4';
+
+		$html = $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_old_live_1, $file_href_1 )
+			    . "\n\n" . $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_old_live_2, $file_href_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_new_staging_1, $file_href_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_file_block( $file_att_id_old_live_2, $file_href_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice and won't make a change for the second one.
+				[ $file_href_1, $file_att_id_new_staging_1 ],
+				[ $file_href_2, 0 ],
 			]
 		);
 
@@ -2440,6 +2630,48 @@ BLOCK;
 	}
 
 	/**
+	 * Testings exact replacements which the update_cover_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_cover_blocks_ids
+	 */
+	public function test_update_cover_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$cover_att_id_old_live_1 = 1111;
+		$cover_att_id_new_staging_1 = 2222;
+		$cover_src_1 = 'https://host.com/wp-content/uploads/2022/07/img_1.jpg';
+		$cover_att_id_old_live_2 = 3333;
+		$cover_att_id_new_staging_2 = 0;
+		$cover_src_2 = 'https://host.com/wp-content/uploads/2022/07/img_2.jpg';
+
+		$html = $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_old_live_1, $cover_src_1 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_old_live_2, $cover_src_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_new_staging_1, $cover_src_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_cover_block( $cover_att_id_old_live_2, $cover_src_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice and won't make a change for the second one.
+				[ $cover_src_1, $cover_att_id_new_staging_1 ],
+				[ $cover_src_2, 0 ],
+			]
+		);
+
+		// Run.
+		$known_ids = [];
+		$html_actual = $logic_partial_mock->update_cover_blocks_ids( $html, $known_ids );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Testings exact replacements which the update_mediatext_blocks_ids method should do.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_mediatext_blocks_ids
@@ -2491,6 +2723,52 @@ BLOCK;
 			[
 				// Will be called twice to get the cover files' attachment IDs on Staging.
 				[ $img_src_1, $mediaId_att_id_new_staging_1 ],
+				[ $img_src_2, $mediaId_att_id_new_staging_2 ],
+			]
+		);
+
+		// Run.
+		$known_attachment_ids_updates = [];
+		$html_actual = $logic_partial_mock->update_mediatext_blocks_ids( $html, $known_attachment_ids_updates );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_mediatext_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_mediatext_blocks_ids
+	 */
+	public function test_update_mediatext_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$mediaId_att_id_old_live_1 = 1111;
+		$mediaId_att_id_new_staging_1 = 0;
+		$mediaLink_1 = 'https://host.com/election-2022-1/';
+		$img_src_1 = 'https://host.com/wp-content/uploads/2022/07/img_1.jpg';
+		$text_1 = 'foo bar 1';
+		$mediaId_att_id_old_live_2 = 3333;
+		$mediaId_att_id_new_staging_2 = 4444;
+		$mediaLink_2 = 'https://host.com/election-2022-2/';
+		$img_src_2 = 'https://host.com/wp-content/uploads/2022/07/img_2.jpg';
+		$text_2 = 'foo bar 3';
+
+		$html = $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_old_live_1, $mediaLink_1, $img_src_1, $text_1 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_old_live_2, $mediaLink_2, $img_src_2, $text_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_old_live_1, $mediaLink_1, $img_src_1, $text_1 )
+		                 . "\n\n" . $this->blocks_data_provider->get_gutenberg_mediatext_block( $mediaId_att_id_new_staging_2, $mediaLink_2, $img_src_2, $text_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called twice and won't make a change for the first one.
+				[ $img_src_1, 0 ],
 				[ $img_src_2, $mediaId_att_id_new_staging_2 ],
 			]
 		);
@@ -2588,6 +2866,83 @@ BLOCK;
 	}
 
 	/**
+	 * Testings exact replacements which the update_jetpacktiledgallery_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpacktiledgallery_blocks_ids
+	 */
+	public function test_update_jetpacktiledgallery_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$img_ids_old_live_1 = [ 1111, 2222 ];
+		$img_ids_new_staging_1 = [ 1119, 0 ];
+		$img_data_links_1 = [
+			'https://host.com/2022/09/06/path/link_11/',
+			'https://host.com/2022/09/06/path/link_12/',
+		];
+		$img_data_urls_1 = [
+			'https://host.s3.amazonaws.com/wp-content/uploads/2022/09/img11.jpg',
+			'https://host.s3.amazonaws.com/wp-content/uploads/2022/09/img12.jpg',
+		];
+		$img_srcs_1 = [
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img11.jpg?ssl=1',
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img12.jpg?ssl=1',
+		];
+		$img_ids_old_live_2 = [ 2222, 3333 ];
+		$img_ids_new_staging_2 = [ 0, 3339 ];
+		$img_data_links_2 = [
+			'https://host.com/2022/09/06/path/link_21/',
+			'https://host.com/2022/09/06/path/link_22/',
+		];
+		$img_data_urls_2 = [
+			'https://host.s3.amazonaws.com/wp-content/uploads/2022/09/img21.jpg',
+			'https://host.s3.amazonaws.com/wp-content/uploads/2022/09/img22.jpg',
+		];
+		$img_srcs_2 = [
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img21.jpg?ssl=1',
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img22.jpg?ssl=1',
+		];
+
+		$html = $this->blocks_data_provider->get_gutenberg_jetpacktiledgallery_block( $img_ids_old_live_1, $img_data_links_1, $img_data_urls_1, $img_srcs_1 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpacktiledgallery_block( $img_ids_old_live_2, $img_data_links_2, $img_data_urls_2, $img_srcs_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_jetpacktiledgallery_block(
+				[ $img_ids_new_staging_1[0], $img_ids_old_live_1[1] ],
+				$img_data_links_1,
+				$img_data_urls_1,
+				$img_srcs_1
+			)
+             . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpacktiledgallery_block(
+				 [ $img_ids_old_live_2[0], $img_ids_new_staging_2[1] ],
+				 $img_data_links_2,
+				 $img_data_urls_2,
+				 $img_srcs_2
+			);
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will not make a change for the second image.
+				[ $img_srcs_1[0], $img_ids_new_staging_1[0] ],
+				[ $img_srcs_1[1], 0 ],
+				// Will not make a change for the first image.
+				[ $img_srcs_2[0], 0 ],
+				[ $img_srcs_2[1], $img_ids_new_staging_2[1] ],
+			]
+		);
+
+		// Run.
+		$known_attachment_ids_updates = [];
+		$html_actual = $logic_partial_mock->update_jetpacktiledgallery_blocks_ids( $html, $known_attachment_ids_updates );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Testings exact replacements which the update_jetpackslideshow_blocks_ids method should do.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
@@ -2667,6 +3022,64 @@ BLOCK;
 	}
 
 	/**
+	 * Testings exact replacements which the update_jetpackslideshow_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
+	 */
+	public function test_update_jetpackslideshow_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$img_ids_old_live_1 = [ 1111, 2222 ];
+		$img_ids_new_staging_1 = [ 0, 2229 ];
+		$img_srcs_1 = [
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img11.jpg?ssl=1',
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img12.jpg?ssl=1',
+		];
+		$img_caption_texts_1 = [
+			'caption text 11',
+			'caption text 12',
+		];
+		$img_ids_old_live_2 = [ 2222, 3333 ];
+		$img_ids_new_staging_2 = [ 2229, 0 ];
+		$img_srcs_2 = [
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img21.jpg?ssl=1',
+			'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img22.jpg?ssl=1',
+		];
+		$img_caption_texts_2 = [
+			'caption text 21',
+			'caption text 22',
+		];
+
+		$html = $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( $img_ids_old_live_1, $img_srcs_1, $img_caption_texts_1 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( $img_ids_old_live_2, $img_srcs_2, $img_caption_texts_2 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( [ $img_ids_old_live_1[0], $img_ids_new_staging_1[1] ], $img_srcs_1, $img_caption_texts_1 )
+                         . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackslideshow_block( [ $img_ids_new_staging_2[0] , $img_ids_old_live_2[1] ], $img_srcs_2, $img_caption_texts_2 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// Will be called for every image in first gallery.
+				[ $img_srcs_1[0], 0 ],
+				[ $img_srcs_1[1], $img_ids_new_staging_1[1] ],
+				// Will be called just for the second image in the second gallery, because the first image's ID was already fetched in the first gallery.
+				[ $img_srcs_2[1], 0 ],
+			]
+		);
+
+		// Run.
+		$known_attachment_ids_updates = [];
+		$html_actual = $logic_partial_mock->update_jetpackslideshow_blocks_ids( $html, $known_attachment_ids_updates );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
 	 * Testings exact replacements which the update_jetpackimagecompare_blocks_ids method should do.
 	 *
 	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
@@ -2723,6 +3136,57 @@ BLOCK;
 				[ $img_src_11, $img_id_new_staging_11 ],
 				[ $img_src_12, $img_id_new_staging_12 ],
 				// Will be called for just the second image in the second gallery block, because the first image'd ID was aready queried in the first gallery.
+				[ $img_src_22, $img_id_new_staging_22 ],
+			]
+		);
+
+		// Run.
+		$known_attachment_ids_updates = [];
+		$html_actual = $logic_partial_mock->update_jetpackimagecompare_blocks_ids( $html, $known_attachment_ids_updates );
+
+		// Assert.
+		$this->assertEquals( $html_expected, $html_actual );
+	}
+
+	/**
+	 * Testings exact replacements which the update_jetpackimagecompare_blocks_ids method should do.
+	 *
+	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
+	 */
+	public function test_update_jetpackimagecompare_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
+		// Prepare.
+		$img_id_old_live_11 = 1111;
+		$img_id_new_staging_11 = 0;
+		$img_src_11 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img11.jpg?ssl=1';
+		$img_id_old_live_12 = 222;
+		$img_id_new_staging_12 = 2229;
+		$img_src_12 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img12.jpg?ssl=1';
+		$img_id_old_live_21 = 1111;
+		$img_id_new_staging_21 = 0;
+		$img_src_21 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img21.jpg?ssl=1';
+		$img_id_old_live_22 = 333;
+		$img_id_new_staging_22 = 3338;
+		$img_src_22 = 'https://i2.wp.com/host.s3.amazonaws.com/wp-content/uploads/2022/09/img22.jpg?ssl=1';
+
+		$html = $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_old_live_11, $img_src_11, $img_id_old_live_12, $img_src_12 )
+		        . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_old_live_21, $img_src_21, $img_id_old_live_22, $img_src_22 );
+		$html_expected = $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_old_live_11, $img_src_11, $img_id_new_staging_12, $img_src_12 )
+                         . "\n\n" . $this->blocks_data_provider->get_gutenberg_jetpackimagecompare_block( $img_id_old_live_21, $img_src_21, $img_id_new_staging_22, $img_src_22 );
+
+		// Mock (do a partial mock of this one method).
+		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
+		                           ->setConstructorArgs( [ $this->wpdb_mock ] )
+		                           ->setMethods( [ 'attachment_url_to_postid', ] )
+		                           ->getMock();
+		$this->mock_consecutive_value_maps(
+			$logic_partial_mock,
+			'attachment_url_to_postid',
+			[
+				// First gallery.
+				[ $img_src_11, 0 ],
+				[ $img_src_12, $img_id_new_staging_12 ],
+				// Second gallery.
+				[ $img_src_21, 0 ],
 				[ $img_src_22, $img_id_new_staging_22 ],
 			]
 		);
