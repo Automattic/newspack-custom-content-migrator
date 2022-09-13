@@ -147,6 +147,30 @@ class PostsMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Removes the postmeta with original ID which gets set on all exported posts/pages.',
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator delete-all-posts',
+			[ $this, 'cmd_delete_all_posts' ],
+			[
+				'shortdesc' => 'Delete all posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to delete per batch.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -413,6 +437,34 @@ class PostsMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator delete-all-posts`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_delete_all_posts( $args, $assoc_args ) {
+		$dry_run         = isset( $assoc_args['dry-run'] ) ? true : false;
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+
+		$this->posts_logic->throttled_posts_loop(
+			[
+				'post_type'   => 'post',
+				'post_status' => 'any',
+			],
+			function( $post ) use ( $dry_run ) {
+				WP_CLI::success( sprintf( 'Deleting post #%d', $post->ID ) );
+				if ( ! $dry_run ) {
+					wp_delete_post( $post->ID, true );
+				}
+			},
+            3,
+            $posts_per_batch
+		);
+
+		wp_cache_flush();
 	}
 
 	/**

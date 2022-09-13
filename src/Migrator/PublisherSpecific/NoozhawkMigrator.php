@@ -265,23 +265,6 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				),
 			)
 		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator noozhawk-delete-posts-and-media',
-			[ $this, 'cmd_nh_delete_posts_and_media' ],
-			[
-				'shortdesc' => 'Delete all posts and their media files.',
-				'synopsis'  => [
-					[
-						'type'        => 'flag',
-						'name'        => 'dry-run',
-						'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
-						'optional'    => true,
-						'repeating'   => false,
-					],
-				],
-			]
-		);
 	}
 
 	/**
@@ -1140,75 +1123,6 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 			file_put_contents( self::IMPORT_MEDIA_POSTS_LOGS, $output . "\n", FILE_APPEND );
 			file_put_contents( self::IMPORT_MEDIA_POSTS_PATHS_LOGS, $xml_file . "\n", FILE_APPEND );
-		}
-
-		wp_cache_flush();
-	}
-
-	/**
-	 * Callable for `newspack-content-migrator noozhawk-delete-posts-and-media`.
-	 *
-	 * @param $args
-	 * @param $assoc_args
-	 */
-	public function cmd_nh_delete_posts_and_media( $args, $assoc_args ) {
-		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
-
-		// Delete posts.
-		$posts = get_posts(
-            [
-				'posts_per_page' => -1,
-				'post_type'      => 'post',
-				'post_status'    => 'any',
-            ]
-        );
-
-		$total_posts = count( $posts );
-		foreach ( $posts as $index => $post ) {
-			if ( ! $dry_run ) {
-				wp_delete_post( $post->ID, true );
-			}
-
-			$this->log( self::DELETING_POSTS_AND_MEDIA_LOGS, sprintf( 'Deleting post(%d/%d): %d', $index + 1, $total_posts, $post->ID ) );
-		}
-
-		// Delete media.
-		$pages = get_posts(
-            [
-				'posts_per_page' => -1,
-				'post_type'      => 'page',
-				'post_status'    => 'any',
-			]
-        );
-
-		$pages_content = array_reduce(
-            $pages,
-            function( $carry, $page ) {
-				return $carry . $page->post_content;
-			},
-            ''
-        );
-
-		$attachment_posts = get_posts(
-            [
-				'posts_per_page' => -1,
-				'post_type'      => 'attachment',
-				'post_status'    => 'any',
-			]
-        );
-
-		$total_attachment_posts = count( $attachment_posts );
-		foreach ( $attachment_posts as $index => $attachment_post ) {
-			$parsed_attachment_url = parse_url( wp_get_attachment_url( $attachment_post->ID ) );
-			if ( str_contains( $pages_content, $parsed_attachment_url['path'] ) ) {
-				$this->log( self::DELETING_POSTS_AND_MEDIA_LOGS, sprintf( 'Skipping media(%d/%d): %d', $index + 1, $total_attachment_posts, $attachment_post->ID ) );
-			} else {
-				if ( ! $dry_run ) {
-					wp_delete_post( $attachment_post->ID, true );
-				}
-
-				$this->log( self::DELETING_POSTS_AND_MEDIA_LOGS, sprintf( 'Deleting media(%d/%d): %d', $index + 1, $total_attachment_posts, $attachment_post->ID ) );
-			}
 		}
 
 		wp_cache_flush();
