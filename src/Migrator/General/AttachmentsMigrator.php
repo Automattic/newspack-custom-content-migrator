@@ -429,6 +429,7 @@ class AttachmentsMigrator implements InterfaceMigrator {
 			// Get attachments to not delete.
 			$raw_image_urls_to_not_delete = array_merge(
 				$this->get_all_non_posts_images_urls(),
+				$this->get_all_widgets_images_urls(),
 				$this->get_all_themes_mods_logos_urls(),
 				$this->get_all_custom_css_urls(),
 				$this->get_all_co_authors_avatars_urls(),
@@ -525,6 +526,33 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				$non_posts,
 				function( $carry, $post ) {
 					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $post->post_content ) );
+				},
+				[]
+			)
+		);
+	}
+
+	/**
+	 * Get all non posts images URLs.
+	 *
+	 * @return string[]
+	 */
+	private function get_all_widgets_images_urls() {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$widgets         = $wpdb->get_results( "SELECT option_value FROM {$wpdb->options} WHERE option_name = 'widget_text';" );
+		$widgets_content = unserialize( $widgets[0]->option_value ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize
+
+		return array_unique(
+			array_reduce(
+				$widgets_content,
+				function( $carry, $widget ) use ( $widgets_content ) {
+					if ( ! is_array( $widget ) || ! array_key_exists( 'text', $widget ) ) {
+						return $carry;
+					}
+
+					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $widget['text'] ) );
 				},
 				[]
 			)
@@ -666,12 +694,21 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Get attashments trash folder path
+	 * Get attachments trash folder path
 	 *
 	 * @return string
 	 */
 	private function get_trash_folder() {
 		return wp_upload_dir()['basedir'] . '/../' . self::ATTACHMENT_TRASH_FOLDER;
+	}
+
+	/**
+	 * Get WP uploads dir
+	 *
+	 * @return string
+	 */
+	private function get_uploads_dir() {
+		return wp_upload_dir()['basedir'];
 	}
 
 
