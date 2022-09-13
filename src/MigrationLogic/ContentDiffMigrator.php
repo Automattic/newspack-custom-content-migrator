@@ -614,27 +614,6 @@ class ContentDiffMigrator {
 			$excerpt_before  = $result['post_excerpt'];
 			$excerpt_updated = $result['post_excerpt'];
 
-			// // Do all replacements in content.
-			// $content_updated = $this->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $content_updated );
-			// $content_updated = $this->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $content_updated );
-			// $content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
-			// $content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
-			//
-			// // Do all replacements in excerpt.
-			// $excerpt_updated = $this->update_gutenberg_blocks_headers_single_id( $imported_attachment_ids, $excerpt_updated );
-			// $excerpt_updated = $this->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $excerpt_updated );
-			// $excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
-			// $excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
-
-
-			/**
-			 * Checks and updates attachment IDs in various Gutenberg Blocks. These methods search for the file name and fetch the
-			 * attachment ID from the Media Library, and then update it if necessary.
-			 *
-			 * These replacements are no longer using $imported_attachment_ids with mapping "old/live ID" => "new/Staging ID,
-			 * because fetching IDs from the Media Library should cover all cases. But we still do have the IDs mapping info,
-			 * perhaps some future cases will need to use it.
-			 */
 			// wp:image and wp:gallery.
 			$content_updated = $this->update_image_blocks_ids( $content_updated, $known_attachment_ids_updates );
 			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
@@ -662,7 +641,6 @@ class ContentDiffMigrator {
 			// wp:jetpack/image-compare.
 			$content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated, $known_attachment_ids_updates );
 			$excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
-
 
 			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
@@ -740,7 +718,7 @@ class ContentDiffMigrator {
 			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
-				// TODO -- log, no imgs.
+				// No images.
 				continue;
 			}
 			$img_html = $matches[0][0][0];
@@ -756,7 +734,6 @@ class ContentDiffMigrator {
 				$new_att_id = $this->attachment_url_to_postid( $src );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
-					// TODO log.
 					continue;
 				}
 
@@ -825,7 +802,7 @@ class ContentDiffMigrator {
 			// Get the first <audio> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
-				// TODO -- log, no audio element.
+				// No audio element.
 				continue;
 			}
 			$audio_html = $matches[0][0][0];
@@ -841,7 +818,6 @@ class ContentDiffMigrator {
 				$new_att_id = $this->attachment_url_to_postid( $src );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
-					// TODO log.
 					continue;
 				}
 
@@ -907,7 +883,7 @@ class ContentDiffMigrator {
 			// Get the first <video> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
-				// TODO -- log, no imgs.
+				// No video element.
 				continue;
 			}
 			$video_html = $matches[0][0][0];
@@ -922,10 +898,7 @@ class ContentDiffMigrator {
 			} else {
 				$new_att_id = $this->attachment_url_to_postid( $src );
 				if ( 0 === $new_att_id ) {
-					// Video file attachment ID not found.
-					// TODO log.
-
-					// TODO test continue-ing from this place.
+					// Attachment ID not found.
 					continue;
 				}
 
@@ -991,7 +964,7 @@ class ContentDiffMigrator {
 			// Get the first <a> elementa from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
-				// TODO -- log, no as.
+				// No <a> elements.
 				continue;
 			}
 			$a_html = $matches[0][0][0];
@@ -1007,7 +980,6 @@ class ContentDiffMigrator {
 				$new_att_id = $this->attachment_url_to_postid( $src );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
-					// TODO log.
 					continue;
 				}
 
@@ -1073,7 +1045,7 @@ class ContentDiffMigrator {
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
-				// TODO -- log, no imgs.
+				// No <img>s.
 				continue;
 			}
 			$img_html = $matches[0][0][0];
@@ -1089,7 +1061,6 @@ class ContentDiffMigrator {
 				$new_att_id = $this->attachment_url_to_postid( $src );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
-					// TODO log.
 					continue;
 				}
 
@@ -1158,7 +1129,7 @@ class ContentDiffMigrator {
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
-				// TODO -- log, no imgs.
+				// No <img>s.
 				continue;
 			}
 			$img_html = $matches[0][0][0];
@@ -1174,7 +1145,6 @@ class ContentDiffMigrator {
 				$new_att_id = $this->attachment_url_to_postid( $src );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
-					// TODO log.
 					continue;
 				}
 
@@ -1245,7 +1215,7 @@ class ContentDiffMigrator {
 			// Get all <img> elements from innerHTML.
 			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
-				// TODO -- log, no imgs.
+				// No <img>s.
 				continue;
 			}
 
@@ -1267,7 +1237,6 @@ class ContentDiffMigrator {
 					$new_att_id = $this->attachment_url_to_postid( $src );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
-						// TODO log.
 						continue;
 					}
 
@@ -1340,7 +1309,7 @@ class ContentDiffMigrator {
 			// Get all <img> elements from innerHTML.
 			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
-				// TODO -- log, no imgs.
+				// No <img>s.
 				continue;
 			}
 
@@ -1362,7 +1331,6 @@ class ContentDiffMigrator {
 					$new_att_id = $this->attachment_url_to_postid( $src );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
-						// TODO log.
 						continue;
 					}
 
@@ -1437,7 +1405,7 @@ class ContentDiffMigrator {
 			// Get all <img> elements from innerHTML.
 			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
-				// TODO -- log, no imgs.
+				// No <img>s.
 				continue;
 			}
 
@@ -1459,7 +1427,6 @@ class ContentDiffMigrator {
 					$new_att_id = $this->attachment_url_to_postid( $src );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
-						// TODO log.
 						continue;
 					}
 
