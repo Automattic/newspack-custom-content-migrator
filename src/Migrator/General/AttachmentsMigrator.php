@@ -90,15 +90,15 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator attachments-delete-posts-images',
-			[ $this, 'cmd_attachment_delete_posts_images' ],
+			'newspack-content-migrator attachments-delete-posts-attachments',
+			[ $this, 'cmd_attachment_delete_posts_attachments' ],
 			[
-				'shortdesc' => 'Delete all posts\' images.',
+				'shortdesc' => 'Delete all posts\' attachments.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
-						'description' => 'Do a dry run simulation and don\'t actually create any Guest Authors.',
+						'description' => 'Do a dry run simulation and don\'t actually delete attachments.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -111,15 +111,22 @@ class AttachmentsMigrator implements InterfaceMigrator {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'restore-attachments',
+						'description' => 'A list of attachments IDs to be restored.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'skip-from',
-						'description' => 'Skip the media uploaded from this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'description' => 'Skip the attachment uploaded from this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'skip-to',
-						'description' => 'Skip the media uploaded to this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
+						'description' => 'Skip the attachment uploaded to this date. Format should be yyyy-mm-dd (e.g. 2022-11-17)',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -328,18 +335,51 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator attachments-delete-posts-images`.
+	 * Callable for `newspack-content-migrator attachments-delete-posts-attachments`.
 	 *
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_attachment_delete_posts_images( $args, $assoc_args ) {
-		$dry_run          = isset( $assoc_args['dry-run'] ) ? true : false;
-		$confirm_deletion = isset( $assoc_args['confirm-deletion'] ) ? true : false;
-		$skip_from        = isset( $assoc_args['skip-from'] ) ? $assoc_args['skip-from'] : null;
-		$skip_to          = isset( $assoc_args['skip-to'] ) ? $assoc_args['skip-to'] : null;
+	public function cmd_attachment_delete_posts_attachments( $args, $assoc_args ) {
+		$dry_run             = isset( $assoc_args['dry-run'] ) ? true : false;
+		$confirm_deletion    = isset( $assoc_args['confirm-deletion'] ) ? true : false;
+		$restore_attachments = isset( $assoc_args['restore-attachments'] ) ? explode( ',', $assoc_args['restore-attachments'] ) : false;
+		$skip_from           = isset( $assoc_args['skip-from'] ) ? $assoc_args['skip-from'] : null;
+		$skip_to             = isset( $assoc_args['skip-to'] ) ? $assoc_args['skip-to'] : null;
 
-		if ( $confirm_deletion ) {
+		if ( $confirm_deletion && $restore_attachments ) {
+			WP_CLI::error( 'Only one of the two options `confirm-deletion` and `restore-attachments` can be chosed!' );
+		}
+
+		if ( $restore_attachments ) {
+			$total_attachments = count( $restore_attachments );
+			foreach ( $restore_attachments as $index => $attachment_to_restore ) {
+				$attachment_file = get_post_meta( $attachment_to_restore, '_wp_attached_file', true );
+				if ( ! $attachment_file ) {
+					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Skipping restoring media (%d/%d): %d Can\'t locate its attachment in the database.', $index + 1, $total_attachments, $attachment_to_restore ) );
+					continue;
+				}
+
+				$media_path = $this->get_trash_folder() . '/' . $attachment_file;
+
+				if ( file_exists( $media_path ) ) {
+					$new_file_path = $this->get_uploads_dir() . '/' . $attachment_file;
+					$new_file_dir  = dirname( $new_file_path );
+
+					if ( ! is_dir( $new_file_dir ) ) {
+						mkdir( $new_file_dir, 0777, true );
+					}
+
+					rename( $media_path, $new_file_path );
+
+					// Delete atatchment from database.
+					delete_post_meta( $attachment_to_restore, self::ATTACHMENT_POST_TO_DELETE );
+					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'Restoring media (%d/%d): %d (%s)', $index + 1, $total_attachments, $attachment_to_restore, $media_path ) );
+				} else {
+					$this->log( self::DELETING_MEDIA_LOGS, sprintf( 'File not exists, media file not in trash folder (%d/%d): %d (%s)', $index + 1, $total_attachments, $attachment_to_restore, $media_path ) );
+				}
+			}
+		} elseif ( $confirm_deletion ) {
 			$attachment_args = [
 				'posts_per_page' => -1,
 				'post_type'      => 'attachment',
@@ -389,6 +429,7 @@ class AttachmentsMigrator implements InterfaceMigrator {
 			// Get attachments to not delete.
 			$raw_image_urls_to_not_delete = array_merge(
 				$this->get_all_non_posts_images_urls(),
+				$this->get_all_widgets_images_urls(),
 				$this->get_all_themes_mods_logos_urls(),
 				$this->get_all_custom_css_urls(),
 				$this->get_all_co_authors_avatars_urls(),
@@ -408,6 +449,12 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				'posts_per_page' => -1,
 				'post_type'      => 'attachment',
 				'post_status'    => 'any',
+				'meta_query'     => [
+					[
+						'key'     => self::ATTACHMENT_POST_TO_DELETE,
+						'compare' => 'NOT EXISTS',
+					],
+				],
 			];
 
 			if ( $skip_from && $skip_to ) {
@@ -479,6 +526,33 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				$non_posts,
 				function( $carry, $post ) {
 					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $post->post_content ) );
+				},
+				[]
+			)
+		);
+	}
+
+	/**
+	 * Get all non posts images URLs.
+	 *
+	 * @return string[]
+	 */
+	private function get_all_widgets_images_urls() {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$widgets         = $wpdb->get_results( "SELECT option_value FROM {$wpdb->options} WHERE option_name = 'widget_text';" );
+		$widgets_content = unserialize( $widgets[0]->option_value ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize
+
+		return array_unique(
+			array_reduce(
+				$widgets_content,
+				function( $carry, $widget ) use ( $widgets_content ) {
+					if ( ! is_array( $widget ) || ! array_key_exists( 'text', $widget ) ) {
+						return $carry;
+					}
+
+					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $widget['text'] ) );
 				},
 				[]
 			)
@@ -615,16 +689,26 @@ class AttachmentsMigrator implements InterfaceMigrator {
 
 		// Match the relative path of the attachment (e.g. /wp-content/uploads/2019/01/image.jpeg).
 		preg_match( '~(?P<url>' . $uploads_dir . '/.*$)~', $url_without_query_param, $url_match );
-		return array_key_exists( 'url', $url_match ) ? $url_match['url'] : $url;
+		// Remove attachment size from filename.
+		return array_key_exists( 'url', $url_match ) ? preg_replace( '/-\d+x\d+\.(jpe?g|png|gif)$/', '.$1', $url_match['url'] ) : $url;
 	}
 
 	/**
-	 * Get attashments trash folder path
+	 * Get attachments trash folder path
 	 *
 	 * @return string
 	 */
 	private function get_trash_folder() {
 		return wp_upload_dir()['basedir'] . '/../' . self::ATTACHMENT_TRASH_FOLDER;
+	}
+
+	/**
+	 * Get WP uploads dir
+	 *
+	 * @return string
+	 */
+	private function get_uploads_dir() {
+		return wp_upload_dir()['basedir'];
 	}
 
 
