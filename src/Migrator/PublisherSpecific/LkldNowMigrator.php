@@ -85,6 +85,21 @@ class LkldNowMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lkldnow-migrate-themify-icons-shortcodes',
+			[ $this, 'cmd_lkld_migrate_themify_icon' ],
+			[
+				'shortdesc' => 'Convert all themify_icon shortcodes to normal anchof links.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Run the migrator without making changes to the database.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -294,8 +309,14 @@ class LkldNowMigrator implements InterfaceMigrator {
 %s
 <!-- /wp:group -->
 HTML;
+
+		$comment_block_template = <<<HTML
+<!-- wp:shortcode -->
+%s
+<!-- /wp:shortcode -->
+HTML;
 		
-		$shortcode_pattern = '/<!-- wp:shortcode -->\n*\[themify_box.*?](.*?)\[\/themify_box]\n*<!-- \/wp:shortcode -->/s';
+		$shortcode_pattern = '/\[themify_box.*?](.*?)\[\/themify_box]/s';
 		
 		foreach ( $query->posts as $post ) {
 			preg_match_all( $shortcode_pattern, $post->post_content, $matches );
@@ -308,7 +329,12 @@ HTML;
 					$inner_texts[ $index ] = $inner_text_wrapped;
 				}
 
-				$new_post_content = str_replace( $matches[0], $inner_texts, $post->post_content );
+				$finds_with_comments = array_map( function( $shortcode) use( $comment_block_template) {
+					return sprintf( $comment_block_template, $shortcode );
+				}, $matches[0] );
+
+				$new_post_content = str_replace( $finds_with_comments, $inner_texts, $post->post_content );
+				$new_post_content = str_replace( $matches[0], $inner_texts, $new_post_content );
 
 				$this->log( sprintf( '%d.txt', $post->ID ), sprintf( "Old content:\n%s\nNew content:\n%s\n", $post->post_content, $new_post_content ) );
 
@@ -324,6 +350,90 @@ HTML;
 		}
 
 		WP_CLI::success( 'Finished converting themify_box shortcodes to Group blocks.' );
+	}
+
+	function cmd_lkld_migrate_themify_icon( $pos_args, $assoc_args ) {
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		global $wpdb;
+
+		$shortcodes_manipulator = new SquareBracketsElementManipulator();
+
+		$args = array(
+			'post_type' => array( 'post', 'page' ),
+			'nopaging' => true,
+		);
+
+		$query = new WP_Query( $args );
+
+		$shortcode_pattern = '\[themify_icon.*?]';
+
+		$link_template = '<a href="%s">%s</a>';
+		$comment_block_template = <<<HTML
+<!-- wp:shortcode -->
+%s
+<!-- /wp:shortcode -->
+HTML;
+
+		foreach ( $query->posts as $post ) {
+
+			$results = preg_match_all( '/' . $shortcode_pattern . '/s', $post->post_content, $matches );
+
+			if ( $results === false || $results === 0 ) {
+				continue;
+			}
+
+			$shortcodes = $matches[0];
+
+			$searches = array();
+			$replaces = array();
+
+			foreach ( $shortcodes as $shortcode ) {
+				// Make sure the attributes are wrapped in quotation marks
+				$fixed_shortcode = strtr(
+					$shortcode,
+					array(
+						'&#8243;' => '"',
+						'&#8221;' => '"',
+						'&#8220;' => '"',
+						'”' => '"',
+					),
+				);
+
+				$label = $shortcodes_manipulator->get_attribute_value( 'label', $fixed_shortcode );
+				$link = $shortcodes_manipulator->get_attribute_value( 'link', $fixed_shortcode );
+
+				$searches[] = $shortcode;
+
+				// If there is no link, remove the shortcode completely
+				if ( strlen( $link ) == 0 || strlen( $label ) == 0 ) {
+					$replaces[] = '';
+					continue;
+				}
+
+				$replaces[] = sprintf( $link_template, $link, $label );
+			}
+			
+			$searches_with_comments = array_map( function( $shortcode) use( $comment_block_template ) {
+				return sprintf( $comment_block_template, $shortcode );
+			}, $searches );
+
+			$new_post_content = str_replace( $searches_with_comments, $replaces, $post->post_content );
+			$new_post_content = str_replace( $searches, $replaces, $new_post_content );
+
+			$this->log( sprintf( '%d.txt', $post->ID ), sprintf( "Old content:\n%s\nNew content:\n%s\n", $post->post_content, $new_post_content ) );
+
+			if ( ! $dry_run && $new_post_content != $post->post_content ) {
+				$wpdb->update(
+					$wpdb->prefix . 'posts',
+					[ 'post_content' => $new_post_content ],
+					[ 'ID' => $post->ID ]
+				);
+				WP_CLI::log( sprintf( 'Updated post #%s', $post->ID ) );
+			}
+		}
+
+		WP_CLI::success( 'Finished converting themify_icon shortcodes to anchor links.' );
 	}
 
 	/**
