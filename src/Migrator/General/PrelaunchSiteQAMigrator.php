@@ -27,7 +27,11 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 	 */
 	private function __construct() {
 		$this->available_commands = [
-
+			[
+				'class' => AttachmentsMigrator::class,
+				'method' => 'cmd_check_broken_images',
+				'name' => 'Check broken images',
+			],
 		];
 	}
 
@@ -94,6 +98,8 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 
 		foreach ( $commands as $index => $command ) {
 
+			WP_CLI::log( sprintf( '----------%s----------', $command['name'] ) );
+
 			$result = $this->call_qa_command( $command, $dry_run );
 
 			if ( $result === false ) {
@@ -101,7 +107,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 			}
 
 			if ( $index < count( $commands ) - 1 && ! $skip_confirmation ) {
-				$this->warn_and_ask_to_continue( 'Would you like to continue running the other steps?' );
+				WP_CLI::confirm( 'Would you like to continue running the other steps?' );
 			}
 
 		}
@@ -161,8 +167,6 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 
 		$pos_args = array_merge( $command['pos_args'] ?? array(), $pos_args );
 		$assoc_args = array_merge( $command['assoc_args'] ?? array(), $assoc_args );
-
-		WP_CLI::log('Calling command');
 
 		// Check if the provided class exists and is loaded
 		if ( ! class_exists( $command['class' ] ) ) {
