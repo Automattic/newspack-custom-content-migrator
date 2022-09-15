@@ -149,7 +149,7 @@ class HipertextualMigrator implements InterfaceMigrator {
 	}
 
 	public function convert_compare_uploads_w_s3( $args1, $args2 ) {
-		$path_to_logs = '/var/www/bethesda.test/public/hipertextual_check_files/';
+		$path_to_logs = '/Users/ivanuravic/repositories/awscli/berkeleyside_s3_images_eddie/';
 		$local_log_sprintf = "%d_local.txt";
 		$s3_log_sprintf = "%d_s3.txt";
 		$notfound_log = "notfound.txt";
@@ -180,8 +180,19 @@ class HipertextualMigrator implements InterfaceMigrator {
 
 		foreach ( $years as $year ) {
 
-			$local_lines = explode( "\n", file_get_contents( sprintf( $path_to_logs . $local_log_sprintf, $year ) ) );
-			$s3_lines = explode( "\n", file_get_contents( sprintf( $path_to_logs . $s3_log_sprintf, $year ) ) );
+			$local_log_path = sprintf( $path_to_logs . $local_log_sprintf, $year );
+			$local_log_content = file_get_contents( $local_log_path );
+			if ( false === $local_log_content ) {
+				WP_CLI::error( $local_log_path . ' not found.' );
+			}
+			$s3_log_path = sprintf( $path_to_logs . $s3_log_sprintf, $year );
+			$s3_log_content = file_get_contents( $s3_log_path );
+			if ( false === $s3_log_content ) {
+				WP_CLI::error( $s3_log_path . ' not found.' );
+			}
+
+			$local_lines = explode( "\n", $local_log_content );
+			$s3_lines = explode( "\n", $s3_log_content );
 
 			if ( empty( $s3_lines ) || empty( $local_lines ) ) {
 				WP_CLI::error( $year . 'logs missing' );
