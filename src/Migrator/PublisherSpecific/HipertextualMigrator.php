@@ -141,6 +141,69 @@ class HipertextualMigrator implements InterfaceMigrator {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator hipertextual-compare-uploads-and-s3-contents-from-log-files',
+			[ $this, 'convert_compare_uploads_w_s3' ],
+		);
+
+	}
+
+	public function convert_compare_uploads_w_s3( $args1, $args2 ) {
+		$path_to_logs = '/var/www/bethesda.test/public/hipertextual_check_files/';
+		$local_log_sprintf = "%d_local.txt";
+		$s3_log_sprintf = "%d_s3.txt";
+		$notfound_log = "notfound.txt";
+		$years = [
+			2002,
+			2003,
+			2004,
+			2005,
+			2006,
+			2007,
+			2008,
+			2009,
+			2010,
+			2011,
+			2012,
+			2013,
+			2014,
+			2015,
+			2016,
+			2017,
+			2018,
+			2019,
+			2020,
+			2021,
+			2022,
+			2024,
+		];
+
+		foreach ( $years as $year ) {
+
+			$local_lines = explode( "\n", file_get_contents( sprintf( $path_to_logs . $local_log_sprintf, $year ) ) );
+			$s3_lines = explode( "\n", file_get_contents( sprintf( $path_to_logs . $s3_log_sprintf, $year ) ) );
+
+			if ( empty( $s3_lines ) || empty( $local_lines ) ) {
+				WP_CLI::error( $year . 'logs missing' );
+			}
+
+			foreach ( $s3_lines as $s3_line ) {
+				$pos_start = strpos( $s3_line, 'wp-content/uploads/' );
+				$s3_keys[ substr( $s3_line, $pos_start + strlen( 'wp-content/uploads/' ) ) ] = 1;
+			}
+
+			foreach ( $local_lines as $key_local_line => $local_line ) {
+
+				WP_CLI::log( sprintf( "%d (%d)/(%d)", $year, $key_local_line + 1, count( $local_lines ) ) );
+
+				if ( isset( $s3_keys[$local_line] ) ) {
+					unset( $s3_keys[$local_line] );
+				} else {
+					WP_CLI::log( sprintf( "NOTFOUND %s", $local_line ) );
+					file_put_contents( $path_to_logs . $notfound_log, $local_line . "\n", FILE_APPEND );
+				}
+			}
+		}
 	}
 
 	/**
