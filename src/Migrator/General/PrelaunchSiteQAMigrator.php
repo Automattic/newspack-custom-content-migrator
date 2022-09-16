@@ -4,7 +4,6 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use Exception;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use NewspackCustomContentMigrator\Migrator\PublisherSpecific\TestMigrator;
 use \WP_CLI;
 
 /**
@@ -19,6 +18,12 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 
 	/**
 	 * @var array Array of available commands
+	 * Each command is an associative array with with following keys:
+	 * - class (required): Fully qualified name of the class that has the method
+	 * - method (required): Name of the method to run
+	 * - name (required): The name of the step to show in the CLI
+	 * - pos_args (optional): An array of positional arguments to pass to the command
+	 * - assoc_args (optional): An associative array of arguments to pass to the command
 	 */
 	private $available_commands;
 
@@ -97,19 +102,15 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 		}
 
 		foreach ( $commands as $index => $command ) {
-
 			WP_CLI::log( sprintf( '----------%s----------', $command['name'] ) );
 
 			$result = $this->call_qa_command( $command, $dry_run );
 
-			if ( $result === false ) {
-				$this->warn_and_ask_to_continue( sprintf( 'The last command (%s) failed. ', $command['name'] ) );
-			}
-
-			if ( $index < count( $commands ) - 1 && ! $skip_confirmation ) {
+			$ask_for_confirmation = ! $skip_confirmation || $result === false;
+			
+			if ( $index < count( $commands ) - 1 && $ask_for_confirmation ) {
 				WP_CLI::confirm( 'Would you like to continue running the other steps?' );
 			}
-
 		}
 
 		WP_CLI::success( 'All PrelaunchQA steps were ran.' );
@@ -157,6 +158,21 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 		return $commands;
 	}
 
+	/**
+	 * Run a command that's of part of the PrelaunchSiteQAMigrator
+	 *
+	 * @param array $command {
+	 *     The command to run
+	 *
+	 *     @type class-string $class (required) Fully qualified name of the class that has the method
+	 *     @type string $method (required): Name of the method to run
+	 *     @type string $name (required): The name of the step to show in the CLI
+	 *     @type array $pos_args (optional): An array of positional arguments to pass to the command
+	 *     @type array $assoc_args (optional): An associative array of arguments to pass to the command
+	 * }
+	 * @param boolean $dry_run True if the command should be ran with the --dry-run flag
+	 * @return boolean
+	 */
 	public function call_qa_command( $command, $dry_run = false ) {
 		$pos_args = array();
 		$assoc_args = array();
@@ -180,16 +196,28 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 
 		$migrator_instance = $command['class']::get_instance();
 		
-		// Check fi the object has the provided method
+		// Check if the object has the provided method
 		if ( ! method_exists( $migrator_instance, $command['method'] ) ) {
 			$this->warn_and_ask_to_continue( sprintf( 'The class provided for "%s" does not have the provided method %s.', $command['name'], $command['method'] ) );
+		}
+
+		// If the command creates logs, create a directory for them
+		if ( isset( $assoc_args['log-file'] ) ) {
+			$folder = sprintf( '%s_logs', $assoc_args['log-file'] );
+			$folder_created = $this->maybe_create_folder( $folder );
+			if ( $folder_created ) {
+				$assoc_args['log-file'] = sprintf( '%s/%s', $folder, $assoc_args['log-file'] );
+			}
 		}
 
 		try {
 			call_user_func_array( [ $migrator_instance, $command['method'] ], [ $pos_args, $assoc_args ] );
 		} catch (Exception $e) {
+			WP_CLI::warning( sprintf( 'Command %s failed with error: %s', $command['method'], $e->getMessage() ) );
 			return false;
 		}
+
+		return true;
 	}
 
 	public function warn_and_ask_to_continue( $error_message = '' ) {
@@ -197,5 +225,20 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 			WP_CLI::warning( $error_message );
 		}
 		WP_CLI::confirm( 'Would you like to continue?' );
+	}
+
+	public function maybe_create_folder( $folder ) {
+		// Return true if the folder already exists (from previous command run with --dry-run for example)
+		if ( is_dir( $folder ) ) {
+			return true;
+		}
+
+		// Make sure we have permissions to create the folder
+		if ( is_writable( dirname( __FILE__ ) ) ) {
+			mkdir( $folder );
+			return true;
+		}
+
+		return false;
 	}
 }
