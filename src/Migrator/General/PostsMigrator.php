@@ -168,6 +168,13 @@ class PostsMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start deletion from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -448,6 +455,7 @@ class PostsMigrator implements InterfaceMigrator {
 	public function cmd_delete_all_posts( $args, $assoc_args ) {
 		$dry_run         = isset( $assoc_args['dry-run'] ) ? true : false;
 		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 
 		$this->posts_logic->throttled_posts_loop(
 			[
@@ -461,7 +469,8 @@ class PostsMigrator implements InterfaceMigrator {
 				}
 			},
             3,
-            $posts_per_batch
+            $posts_per_batch,
+			$batch
 		);
 
 		wp_cache_flush();
