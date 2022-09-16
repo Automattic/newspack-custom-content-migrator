@@ -720,9 +720,9 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_check_broken_images( $args, $assoc_args ) {
 		$is_using_s3     = isset( $assoc_args['is-using-s3'] ) ? true : false;
-		$posts_per_batch = $assoc_args['posts_per_batch'];
-		$batch           = $assoc_args['batch'];
-		$index           = $assoc_args['index'];
+		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
+		$batch           = $assoc_args['batch'] ?? null;
+		$index           = $assoc_args['index'] ?? null;
 
 		$this->attachment_logic->get_broken_attachment_urls_from_posts(
             [],
