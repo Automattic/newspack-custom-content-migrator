@@ -69,7 +69,7 @@ class LkldNowMigrator implements InterfaceMigrator {
 	 * Extract the old avatars from meta and migrate them to Simple Local Avatars.
 	 */
 	public function cmd_lkldnow_migrate_avatars() {
-		if ( $this->sla_logic->simple_local_avatars == null ) {
+		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
 			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
 			return;
 		}
