@@ -23,6 +23,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	const EXCERPT_LOGS                  = 'NH_authors.log';
 	const CO_AUTHORS_LOGS               = 'NH_co_authors.log';
 	const IMPORT_POSTS_LOGS             = 'NH_import_posts.log';
+	const IMPORT_GALLERIES_LOGS         = 'NH_import_galleries.log';
 	const IMPORT_MEDIA_POSTS_LOGS       = 'NH_import_media_posts.log';
 	const IMPORT_POSTS_PATHS_LOGS       = 'NH_import_posts_paths.log';
 	const IMPORT_MEDIA_POSTS_PATHS_LOGS = 'NH_import_media_posts_paths.log';
@@ -961,24 +962,29 @@ class NoozhawkMigrator implements InterfaceMigrator {
             function( $post ) {
 				$gallery_already_migrated = get_post_meta( $post->ID, '_newspack_gallery_migrated', true );
 				if ( $gallery_already_migrated ) {
-					WP_CLI::warning( sprintf( 'Gallery migration for the post %d is already done, skipped.', $post->ID ) );
+					$this->log( self::IMPORT_GALLERIES_LOGS, sprintf( 'Gallery migration for the post %d is already done, skipped.', $post->ID ) );
 				}
 				return ! $gallery_already_migrated;
 			}
         );
 
 		foreach ( $posts as $post ) {
-			$gallery_images = json_decode( get_post_meta( $post->ID, '_newspack_slideshow_images', true ), true );
+			$gallery_meta   = str_replace( PHP_EOL, '', get_post_meta( $post->ID, '_newspack_slideshow_images', true ) );
+			$gallery_images = json_decode( $gallery_meta, true );
 			if ( ! $gallery_images ) {
-				WP_CLI::warning( sprintf( 'Post meta `_newspack_slideshow_images` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
+				$this->log( self::IMPORT_GALLERIES_LOGS, sprintf( 'Post meta `_newspack_slideshow_images` is not in JSON format and should be fixed for the post %d.', $post->ID ) );
 				continue;
 			}
 
 			$images = [];
 			foreach ( $gallery_images as $gallery_image ) {
 				$existing_gallery_image = $this->get_post_by_meta( '_newspack_imported_from_url', $gallery_image['url'], 'attachment' );
-				$gallery_image_id       = $existing_gallery_image ? $existing_gallery_image->ID : $this->attachment_logic->import_external_file(
-                    $gallery_image['url'],
+				if ( ! array_key_exists( 'url', $gallery_image ) || empty( $gallery_image['url'] ) ) {
+					$this->log( self::IMPORT_GALLERIES_LOGS, sprintf( 'Skipping image from the post %d because the URL is empty.', $post->ID ) );
+					continue;
+				}
+				$gallery_image_id = $existing_gallery_image ? $existing_gallery_image->ID : $this->attachment_logic->import_external_file(
+                    str_replace( ' ', '', $gallery_image['url'] ),
                     array_key_exists( 'title', $gallery_image ) ? $gallery_image['title'] : null,
                     array_key_exists( 'caption', $gallery_image ) ? $gallery_image['caption'] : null,
                     null,
@@ -987,7 +993,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				);
 
 				if ( is_wp_error( $gallery_image_id ) ) {
-					WP_CLI::warning( sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $gallery_image['url'], $gallery_image_id ) );
+					$this->log( self::IMPORT_GALLERIES_LOGS, sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $gallery_image['url'], $gallery_image_id->get_error_message() ) );
 					continue;
 				}
 
@@ -1010,8 +1016,11 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				if ( $disable_popups ) {
 					update_post_meta( $post->ID, 'newspack_popups_has_disabled_popups', true );
 				}
-				WP_CLI::success( sprintf( 'Post %d galleries were migrated!', $post->ID ) );
+				$this->log( self::IMPORT_GALLERIES_LOGS, sprintf( 'Post %d galleries were migrated!', $post->ID ) );
 			}
+
+			// To not flood the live site with scrapping HTTP calls.
+			sleep( 5 );
 		}
 	}
 
