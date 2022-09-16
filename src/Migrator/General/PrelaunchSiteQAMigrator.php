@@ -23,7 +23,9 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 	 * - method (required): Name of the method to run
 	 * - name (required): The name of the step to show in the CLI
 	 * - pos_args (optional): An array of positional arguments to pass to the command
-	 * - assoc_args (optional): An associative array of arguments to pass to the command
+	 * - assoc_args (optional): An associative array of flags to pass to the command
+	 * - - dry-run: If this flag is set, the command won't make any changes
+	 * - - log-file: If the command creates log files, this flag specifies the prefix of the files
 	 */
 	private $available_commands;
 

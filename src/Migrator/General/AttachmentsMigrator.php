@@ -723,6 +723,7 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
 		$batch           = $assoc_args['batch'] ?? null;
 		$index           = $assoc_args['index'] ?? null;
+		$log_file        = $assoc_args['log-file'] ?? 'broken_media_urls_batch';
 
 		$this->attachment_logic->get_broken_attachment_urls_from_posts(
             [],
@@ -730,8 +731,8 @@ class AttachmentsMigrator implements InterfaceMigrator {
             $posts_per_batch,
             $batch,
             $index,
-            function( $post_id, $broken_url ) use ( $batch ) {
-				$this->log( "broken_media_urls_batch_$batch.log", sprintf( '%d,%s', $post_id, $broken_url ) );
+            function( $post_id, $broken_url ) use ( $batch, $log_file ) {
+				$this->log( sprintf( "%s_%s.log", $log_file, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
 			}
         );
 	}
