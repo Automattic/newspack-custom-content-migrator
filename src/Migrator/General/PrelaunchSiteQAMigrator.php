@@ -4,12 +4,13 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use Exception;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use NewspackCustomContentMigrator\Migrator\General\AttachmentsMigrator;
 use \WP_CLI;
 
 /**
  * General Prelaunch QA migrator
  */
-class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
+class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 
 	/**
 	 * @var null|InterfaceMigrator Instance.
@@ -17,17 +18,21 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 	private static $instance = null;
 
 	/**
-	 * @var array Array of available commands
-	 * Each command is an associative array with with following keys:
-	 * - class (required): Fully qualified name of the class that has the method
-	 * - method (required): Name of the method to run
-	 * - name (required): The name of the step to show in the CLI
-	 * - pos_args (optional): An array of positional arguments to pass to the command
-	 * - assoc_args (optional): An associative array of flags to pass to the command
-	 * - - dry-run: If this flag is set, the command won't make any changes
-	 * - - log-file: If the command creates log files, this flag specifies the prefix of the files
+	 * @var array {
+	 *     Array of available commands
+	 *
+	 *     @type array {
+	 *         @type func $method (required) A callable to run for the command
+	 *         @type string $name (required): The name of the step to show in the CLI
+	 *     }
+	 * }
 	 */
 	private $available_commands;
+
+	/**
+	 * @var array Associative array of flags provided to the QA command
+	 */
+	private $global_flags;
 
 	/**
 	 * Constructor.
@@ -35,9 +40,8 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 	private function __construct() {
 		$this->available_commands = [
 			[
-				'class' => AttachmentsMigrator::class,
-				'method' => 'cmd_check_broken_images',
-				'name' => 'Check broken images',
+				'name'   => 'Check broken images',
+				'method' => [ $this, 'call_check_broken_images' ],
 			],
 		];
 	}
@@ -93,11 +97,9 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 	}
 
 	public function cmd_run_qa( $pos_args, $assoc_args ) {
-		$dry_run           = isset( $assoc_args['dry-run'] ) ? true : false;
-		$run_all_steps     = isset( $assoc_args['run-all-steps'] ) ? true : false;
-		$skip_confirmation = isset( $assoc_args['skip-confirmation'] ) ? true : false;
+		$this->global_flags = $assoc_args;
 
-		if ( $run_all_steps ) {
+		if ( $this->should_run_all_steps() ) {
 			$commands = $this->available_commands;
 		} else {
 			$commands = $this->get_user_choice();
@@ -106,9 +108,9 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 		foreach ( $commands as $index => $command ) {
 			WP_CLI::log( sprintf( '----------%s----------', $command['name'] ) );
 
-			$result = $this->call_qa_command( $command, $dry_run );
+			$result = $this->call_qa_command( $command );
 
-			$ask_for_confirmation = ! $skip_confirmation || $result === false;
+			$ask_for_confirmation = ! $this->should_skip_confirmation() || $result === false;
 			
 			if ( $index < count( $commands ) - 1 && $ask_for_confirmation ) {
 				WP_CLI::confirm( 'Would you like to continue running the other steps?' );
@@ -126,24 +128,33 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 		}
 
 		// Read which commands to run
-		$commands = readline( 'Please enter the commands: ');
+		$commands = readline( 'Please enter the commands: ' );
 
 		// Put them in an array
 		$commands = explode( ',', $commands );
 
 		// Make the indexes zero based
-		$commands = array_map( function( $index ) {
-			return intval( $index ) - 1;
-		}, $commands);
+		$commands = array_map(
+			function( $index ) {
+				return intval( $index ) - 1;
+			},
+			$commands
+		);
 
 		// Make sure all indexes actually exist
-		$commands = array_filter( $commands, function( $index ) {
-			return isset( $this->available_commands[ $index ] );
-		});
+		$commands = array_filter(
+			$commands,
+			function( $index ) {
+				return isset( $this->available_commands[ $index ] );
+			}
+		);
 
-		$commands = array_map( function( $index ) {
-			return $this->available_commands[ $index ];
-		}, $commands );
+		$commands = array_map(
+			function( $index ) {
+				return $this->available_commands[ $index ];
+			},
+			$commands 
+		);
 
 		if ( empty( $commands ) ) {
 			die();
@@ -163,58 +174,21 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 	/**
 	 * Run a command that's of part of the PrelaunchSiteQAMigrator
 	 *
-	 * @param array $command {
-	 *     The command to run
+	 * @param array   $command {
+	 *       The command to run
 	 *
-	 *     @type class-string $class (required) Fully qualified name of the class that has the method
-	 *     @type string $method (required): Name of the method to run
+	 *     @type func $method (required) A callable to run for the command
 	 *     @type string $name (required): The name of the step to show in the CLI
-	 *     @type array $pos_args (optional): An array of positional arguments to pass to the command
-	 *     @type array $assoc_args (optional): An associative array of arguments to pass to the command
 	 * }
+	 * 
 	 * @param boolean $dry_run True if the command should be ran with the --dry-run flag
-	 * @return boolean
+	 * 
+	 * @return boolean False if thec command threw an Exceptionm, true otherwise
 	 */
-	public function call_qa_command( $command, $dry_run = false ) {
-		$pos_args = array();
-		$assoc_args = array();
-
-		if ( $dry_run ) {
-			$assoc_args['dry-run'] = true;
-		}
-
-		$pos_args = array_merge( $command['pos_args'] ?? array(), $pos_args );
-		$assoc_args = array_merge( $command['assoc_args'] ?? array(), $assoc_args );
-
-		// Check if the provided class exists and is loaded
-		if ( ! class_exists( $command['class' ] ) ) {
-			$this->warn_and_ask_to_continue( sprintf( 'The class provided for "%s" does not exist.', $command['name'] ) );
-		}
-
-		// Check if the class implements InterfaceMigrator, before trying to call get_instance()
-		if ( ! in_array( 'NewspackCustomContentMigrator\Migrator\InterfaceMigrator', class_implements( $command['class'] ) ) ) {
-			$this->warn_and_ask_to_continue( sprintf( 'The class provided for "%s" does not implement InterfaceMigrator', $command['name'] ) );
-		}
-
-		$migrator_instance = $command['class']::get_instance();
-		
-		// Check if the object has the provided method
-		if ( ! method_exists( $migrator_instance, $command['method'] ) ) {
-			$this->warn_and_ask_to_continue( sprintf( 'The class provided for "%s" does not have the provided method %s.', $command['name'], $command['method'] ) );
-		}
-
-		// If the command creates logs, create a directory for them
-		if ( isset( $assoc_args['log-file'] ) ) {
-			$folder = sprintf( '%s_logs', $assoc_args['log-file'] );
-			$folder_created = $this->maybe_create_folder( $folder );
-			if ( $folder_created ) {
-				$assoc_args['log-file'] = sprintf( '%s/%s', $folder, $assoc_args['log-file'] );
-			}
-		}
-
+	public function call_qa_command( $command ) {
 		try {
-			call_user_func_array( [ $migrator_instance, $command['method'] ], [ $pos_args, $assoc_args ] );
-		} catch (Exception $e) {
+			call_user_func( $command['method'] );
+		} catch ( Exception $e ) {
 			WP_CLI::warning( sprintf( 'Command %s failed with error: %s', $command['method'], $e->getMessage() ) );
 			return false;
 		}
@@ -222,13 +196,13 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 		return true;
 	}
 
-	public function warn_and_ask_to_continue( $error_message = '' ) {
-		if ( $error_message ) {
-			WP_CLI::warning( $error_message );
-		}
-		WP_CLI::confirm( 'Would you like to continue?' );
-	}
-
+	/**
+	 * Create a folder for the logs if possible
+	 * 
+	 * @param string $folder The name fo the folder
+	 * 
+	 * @return boolean True if the folder was created or if it already exists, false otherwise
+	 */
 	public function maybe_create_folder( $folder ) {
 		// Return true if the folder already exists (from previous command run with --dry-run for example)
 		if ( is_dir( $folder ) ) {
@@ -242,5 +216,66 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator  {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Check if we're running the QA in dry-run mode
+	 * 
+	 * @return boolean
+	 */
+	public function is_dry_run_mode() {
+		return isset( $this->global_flags['dry-run'] );
+	}
+
+	/**
+	 * Check if the script should skip asking for confirmation after each step
+	 * 
+	 * @return boolean
+	 */
+	public function should_skip_confirmation() {
+		return isset( $this->global_flags['skip-confirmation'] );
+	}
+
+	/**
+	 * Check if the script should run all the steps, instead of asking which commands to run
+	 * 
+	 * @return boolean
+	 */
+	public function should_run_all_steps() {
+		return isset( $this->global_flags['run-all-steps'] );
+	}
+
+	/**
+	 * Create a unified log file name prefix for the command, with a timestamp. Also creates a directory is possible
+	 * 
+	 * @param string $command_name The name of the commande.
+	 * 
+	 * @return string The log file name prefix, with the folder. For example: qa_check_broken_images_logs/qa_2022-08-28_00-00-00_check_broken_images
+	 */
+	public function get_log_file_name( $command_name ) {
+		$log_file_prefix = sprintf( 'qa_%s_%s', date( 'Y-m-d_H-i-s' ), $command_name );
+		$log_folder_name = sprintf( 'qa_%s_logs', $command_name );
+
+		// Create folder to store the logs for this command
+		$folder_created = $this->maybe_create_folder( $log_folder_name );
+
+		if ( $folder_created ) {
+			$log_file_prefix = $log_folder_name . '/' . $log_file_prefix;
+		}
+
+		return $log_file_prefix;
+	}
+
+	public function call_check_broken_images() {
+		$assoc_args = array(
+			'log-file-prefix' => $this->get_log_file_name( 'check_broken_images' ),
+		);
+
+		if ( $this->is_dry_run_mode() ) {
+			$assoc_args['dry-run'] = true;
+		}
+
+		$attachments_migrator = AttachmentsMigrator::get_instance();
+		$attachments_migrator->cmd_check_broken_images( array(), $assoc_args );
 	}
 }
