@@ -1,22 +1,37 @@
 <?php
+/**
+ * Logic for working with the Simple Local Avatars
+ * 
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\MigrationLogic;
+
 use Simple_Local_Avatars;
 
+/**
+ * SimpleLocalAvatars implements common migration logic that are used to work with the Simple Local Avatars plugin
+ */
 class SimpleLocalAvatars {
 
 	/**
-	 * @var string Avatar meta key
+	 * Avatar meta key
+	 * 
+	 * @var string
 	 */
 	const AVATAR_META_KEY = 'simple_local_avatar_rating';
 
 	/**
-	 * @var string Rating meta key
+	 * Rating meta key
+	 * 
+	 * @var string 
 	 */
 	const AVATAR_RATING_META_KEY = 'simple_local_avatar_rating';
 
 	/**
-	 * @var null|Simple_Local_Avatars Instance of Simple_Local_Avatars
+	 * Instance of Simple_Local_Avatars
+	 * 
+	 * @var null|Simple_Local_Avatars
 	 */
 	public $simple_local_avatars;
 
@@ -36,9 +51,9 @@ class SimpleLocalAvatars {
 	/**
 	 * Attach an avatar to a user through Simple Local Avatars
 	 * 
-	 * @param int $user_id The user ID
-	 * @param int $attachment_id The attachment ID that has the avatar
-	 * @param string $rating The avatar rating (G, PG, R, X)
+	 * @param int    $user_id The user ID.
+	 * @param int    $attachment_id The attachment ID that has the avatar.
+	 * @param string $rating The avatar rating (G, PG, R, X).
 	 *
 	 * @return boolean True on success, false otherwise
 	 */
@@ -56,7 +71,12 @@ class SimpleLocalAvatars {
 		return true;
 	}
 
+	/**
+	 * Check whether the Simple Local Avatars plugin is active or not
+	 * 
+	 * @return boolean True if SLA is active, false otherwise
+	 */
 	public function is_sla_plugin_active() {
-		return $this->simple_local_avatars !== null;
+		return null !== $this->simple_local_avatars;
 	}
 }
