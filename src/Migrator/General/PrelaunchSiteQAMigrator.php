@@ -1,4 +1,9 @@
 <?php
+/**
+ * PrelaunchSiteQAMigrator takes care of running QA commands prior to launching a site.
+ * 
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Migrator\General;
 
@@ -13,13 +18,16 @@ use \WP_CLI;
 class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 
 	/**
-	 * @var null|InterfaceMigrator Instance.
+	 * Instance of the class
+	 * 
+	 * @var null|InterfaceMigrator
 	 */
 	private static $instance = null;
 
 	/**
+	 * Array of available commands
+	 * 
 	 * @var array {
-	 *     Array of available commands
 	 *
 	 *     @type array {
 	 *         @type func $method (required) A callable to run for the command
@@ -30,9 +38,18 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	private $available_commands;
 
 	/**
-	 * @var array Associative array of flags provided to the QA command
+	 *  Array of positional arguments provided to the QA command
+	 * 
+	 * @var array
 	 */
-	private $global_flags;
+	private $global_pos_args;
+
+	/**
+	 * Associative array of associative arguments provided to the QA command
+	 * 
+	 * @var array
+	 */
+	private $global_assoc_args;
 
 	/**
 	 * Constructor.
@@ -96,8 +113,17 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 		);
 	}
 
+	/**
+	 * Run the Prelaunch Site QA command, which itself runs other commands
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative Arguments.
+	 *
+	 * @return void
+	 */
 	public function cmd_run_qa( $pos_args, $assoc_args ) {
-		$this->global_flags = $assoc_args;
+		$this->global_pos_args   = $assoc_args;
+		$this->global_assoc_args = $assoc_args;
 
 		if ( $this->should_run_all_steps() ) {
 			$commands = $this->available_commands;
@@ -110,7 +136,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 
 			$result = $this->call_qa_command( $command );
 
-			$ask_for_confirmation = ! $this->should_skip_confirmation() || $result === false;
+			$ask_for_confirmation = ! $this->should_skip_confirmation() || false === $result;
 			
 			if ( $index < count( $commands ) - 1 && $ask_for_confirmation ) {
 				WP_CLI::confirm( 'Would you like to continue running the other steps?' );
@@ -120,6 +146,11 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 		WP_CLI::success( 'All PrelaunchQA steps were ran.' );
 	}
 
+	/**
+	 * Show the user a menu of available QA commands and ask for their input
+	 * 
+	 * @return array Array of chosen commands
+	 */
 	public function get_user_choice() {
 		WP_CLI::log( 'Please choose which commands to run. You can separate multiple commands using a comma (,).' );
 
@@ -127,13 +158,13 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 			WP_CLI::log( sprintf( '%d. %s', $index + 1, $command['name'] ) );
 		}
 
-		// Read which commands to run
+		// Read which commands to run.
 		$commands = readline( 'Please enter the commands: ' );
 
-		// Put them in an array
+		// Put them in an array.
 		$commands = explode( ',', $commands );
 
-		// Make the indexes zero based
+		// Make the indexes zero based.
 		$commands = array_map(
 			function( $index ) {
 				return intval( $index ) - 1;
@@ -141,7 +172,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 			$commands
 		);
 
-		// Make sure all indexes actually exist
+		// Make sure all indexes actually exist.
 		$commands = array_filter(
 			$commands,
 			function( $index ) {
@@ -174,15 +205,13 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	/**
 	 * Run a command that's of part of the PrelaunchSiteQAMigrator
 	 *
-	 * @param array   $command {
-	 *       The command to run
+	 * @param array $command {
+	 *       The command to run.
 	 *
 	 *     @type func $method (required) A callable to run for the command
 	 *     @type string $name (required): The name of the step to show in the CLI
 	 * }
-	 * 
-	 * @param boolean $dry_run True if the command should be ran with the --dry-run flag
-	 * 
+	 *
 	 * @return boolean False if thec command threw an Exceptionm, true otherwise
 	 */
 	public function call_qa_command( $command ) {
@@ -199,17 +228,17 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	/**
 	 * Create a folder for the logs if possible
 	 * 
-	 * @param string $folder The name fo the folder
+	 * @param string $folder The name fo the folder.
 	 * 
 	 * @return boolean True if the folder was created or if it already exists, false otherwise
 	 */
 	public function maybe_create_folder( $folder ) {
-		// Return true if the folder already exists (from previous command run with --dry-run for example)
+		// Return true if the folder already exists (from previous command run with --dry-run for example).
 		if ( is_dir( $folder ) ) {
 			return true;
 		}
 
-		// Make sure we have permissions to create the folder
+		// Make sure we have permissions to create the folder.
 		if ( is_writable( dirname( __FILE__ ) ) ) {
 			mkdir( $folder );
 			return true;
@@ -224,7 +253,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 * @return boolean
 	 */
 	public function is_dry_run_mode() {
-		return isset( $this->global_flags['dry-run'] );
+		return isset( $this->global_assoc_args['dry-run'] );
 	}
 
 	/**
@@ -233,7 +262,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 * @return boolean
 	 */
 	public function should_skip_confirmation() {
-		return isset( $this->global_flags['skip-confirmation'] );
+		return isset( $this->global_assoc_args['skip-confirmation'] );
 	}
 
 	/**
@@ -242,7 +271,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 * @return boolean
 	 */
 	public function should_run_all_steps() {
-		return isset( $this->global_flags['run-all-steps'] );
+		return isset( $this->global_assoc_args['run-all-steps'] );
 	}
 
 	/**
@@ -253,10 +282,10 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 * @return string The log file name prefix, with the folder. For example: qa_check_broken_images_logs/qa_2022-08-28_00-00-00_check_broken_images
 	 */
 	public function get_log_file_name( $command_name ) {
-		$log_file_prefix = sprintf( 'qa_%s_%s', date( 'Y-m-d_H-i-s' ), $command_name );
+		$log_file_prefix = sprintf( 'qa_%s_%s', gmdate( 'Y-m-d_H-i-s' ), $command_name );
 		$log_folder_name = sprintf( 'qa_%s_logs', $command_name );
 
-		// Create folder to store the logs for this command
+		// Create folder to store the logs for this command.
 		$folder_created = $this->maybe_create_folder( $log_folder_name );
 
 		if ( $folder_created ) {
@@ -266,6 +295,9 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 		return $log_file_prefix;
 	}
 
+	/**
+	 * Wrapper function for calling the check_broken_images command
+	 */
 	public function call_check_broken_images() {
 		$assoc_args = array(
 			'log-file-prefix' => $this->get_log_file_name( 'check_broken_images' ),

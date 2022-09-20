@@ -72,6 +72,5 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\ColoradoSunMigrator::class,
 		Migrator\PublisherSpecific\MustangNewsMigrator::class,
 		Migrator\PublisherSpecific\LkldNowMigrator::class,
-		Migrator\PublisherSpecific\TestMigrator::class,
 	)
 );
