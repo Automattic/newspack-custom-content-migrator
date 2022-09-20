@@ -10,6 +10,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 use Exception;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\Migrator\General\AttachmentsMigrator;
+use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 /**
@@ -23,6 +24,13 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 * @var null|InterfaceMigrator
 	 */
 	private static $instance = null;
+
+	/**
+	 * Instance of Logger
+	 * 
+	 * @var Logger
+	 */
+	private $logger;
 
 	/**
 	 * Array of available commands
@@ -55,6 +63,8 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->logger = new Logger();
+
 		$this->available_commands = [
 			[
 				'name'   => 'Check broken images',
@@ -159,7 +169,7 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 		}
 
 		// Read which commands to run.
-		$commands = readline( 'Please enter the commands: ' );
+		$commands = $this->prompt( 'Please enter the commands: ' );
 
 		// Put them in an array.
 		$commands = explode( ',', $commands );
@@ -226,25 +236,21 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	}
 
 	/**
-	 * Create a folder for the logs if possible
+	 * Ask the user for input from the CLI
 	 * 
-	 * @param string $folder The name fo the folder.
+	 * @param string $question A question to show in the CLI.
 	 * 
-	 * @return boolean True if the folder was created or if it already exists, false otherwise
+	 * @return string The user's input
 	 */
-	public function maybe_create_folder( $folder ) {
-		// Return true if the folder already exists (from previous command run with --dry-run for example).
-		if ( is_dir( $folder ) ) {
-			return true;
+	public function prompt( $question ) {
+		echo $question;
+
+		$response = stream_get_line( STDIN, 1024, "\n" );
+		if ( "\r" === substr( $response, -1 ) ) {
+			$response = substr( $response, 0, -1 );
 		}
 
-		// Make sure we have permissions to create the folder.
-		if ( is_writable( dirname( __FILE__ ) ) ) {
-			mkdir( $folder );
-			return true;
-		}
-
-		return false;
+		return $response;
 	}
 
 	/**
@@ -283,15 +289,10 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 	 */
 	public function get_log_file_name( $command_name ) {
 		$log_file_prefix = sprintf( 'qa_%s_%s', gmdate( 'Y-m-d_H-i-s' ), $command_name );
-		$log_folder_name = sprintf( 'qa_%s_logs', $command_name );
+		$log_folder_name = $this->logger->get_le_log_path();
 
-		// Create folder to store the logs for this command.
-		$folder_created = $this->maybe_create_folder( $log_folder_name );
-
-		if ( $folder_created ) {
-			$log_file_prefix = $log_folder_name . '/' . $log_file_prefix;
-		}
-
+		// Append the LE log folder to the filename.
+		$log_file_prefix = $log_folder_name . '/' . $log_file_prefix;
 		return $log_file_prefix;
 	}
 
