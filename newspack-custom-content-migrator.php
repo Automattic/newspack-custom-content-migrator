@@ -19,6 +19,20 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
 }
 
+require_once 'src/Builder/GutenbergBlockBuilder.php';
+require_once 'src/ContentBuilder/Contracts/GutenbergBlockInterface.php';
+require_once 'src/ContentBuilder/Contracts/GutenbergDataBlockInterface.php';
+require_once 'src/ContentBuilder/AbstractGutenbergBlock.php';
+require_once 'src/ContentBuilder/AbstractGutenbergDataBlock.php';
+require_once 'src/ContentBuilder/JetPackAddressGutenbergBlock.php';
+require_once 'src/ContentBuilder/JetPackBusinessHoursGutenbergBlock.php';
+require_once 'src/ContentBuilder/JetPackContactInfoGutenbergBlock.php';
+require_once 'src/ContentBuilder/JetPackEmailGutenbergBlock.php';
+require_once 'src/ContentBuilder/JetPackPhoneGutenbergBlock.php';
+require_once 'src/ContentBuilder/JetPackMapGutenbergBlock.php';
+require_once 'src/ContentBuilder/Coordinates.php';
+require_once 'src/ContentBuilder/AbbreviatedCoordinates.php';
+
 require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::setup_wordpress_importer();
