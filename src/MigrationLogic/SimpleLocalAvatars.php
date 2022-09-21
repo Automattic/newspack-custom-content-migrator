@@ -57,10 +57,12 @@ class SimpleLocalAvatars {
 	 *
 	 * @return boolean True on success, false otherwise
 	 */
-	public function import_avatar( $user_id, $attachment_id, $rating ) {
+	public function import_avatar( $user_id, $attachment_id, $rating = '' ) {
 		$this->simple_local_avatars->assign_new_user_avatar( (int) $attachment_id, $user_id );
 
-		update_user_meta( $user_id, self::AVATAR_RATING_META_KEY, $rating );
+		if ( '' !== $rating ) {
+			update_user_meta( $user_id, self::AVATAR_RATING_META_KEY, $rating );
+		}
 
 		$avatar = get_user_meta( $user_id, self::AVATAR_META_KEY, true );
 
