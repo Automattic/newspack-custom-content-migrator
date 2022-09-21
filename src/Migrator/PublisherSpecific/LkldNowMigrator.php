@@ -305,9 +305,11 @@ class LkldNowMigrator implements InterfaceMigrator {
 		$query = new WP_Query( $args );
 		
 		$block_wrapper = <<<HTML
-<!-- wp:group {"className":"newspack-text-block"} -->
+<!-- wp:html -->
+<div class="newspack-box %s">
 %s
-<!-- /wp:group -->
+</div>
+<!-- /wp:html -->
 HTML;
 
 		$comment_block_template = <<<HTML
@@ -317,6 +319,8 @@ HTML;
 HTML;
 		
 		$shortcode_pattern = '/\[themify_box.*?](.*?)\[\/themify_box]/s';
+
+		$shortcodes_manipulator = new SquareBracketsElementManipulator();
 		
 		foreach ( $query->posts as $post ) {
 			preg_match_all( $shortcode_pattern, $post->post_content, $matches );
@@ -325,7 +329,12 @@ HTML;
 				$inner_texts = $matches[1];
 				
 				foreach ( $inner_texts as $index => $inner_text ) {
-					$inner_text_wrapped = sprintf( $block_wrapper, $inner_text );
+					$fixed_shortcode = $this->fix_shortcode( $matches[0][ $index ] );
+
+					$class = $shortcodes_manipulator->get_attribute_value( 'style', $fixed_shortcode ) ?? '';
+
+					$fixed_inner_text = $this->fix_shortcode( $inner_text );
+					$inner_text_wrapped = sprintf( $block_wrapper, $class, $fixed_inner_text );
 					$inner_texts[ $index ] = $inner_text_wrapped;
 				}
 
@@ -390,15 +399,7 @@ HTML;
 
 			foreach ( $shortcodes as $shortcode ) {
 				// Make sure the attributes are wrapped in quotation marks
-				$fixed_shortcode = strtr(
-					$shortcode,
-					array(
-						'&#8243;' => '"',
-						'&#8221;' => '"',
-						'&#8220;' => '"',
-						'”' => '"',
-					),
-				);
+				$fixed_shortcode = $this->fix_shortcode( $shortcode );
 
 				$label = $shortcodes_manipulator->get_attribute_value( 'label', $fixed_shortcode );
 				$link = $shortcodes_manipulator->get_attribute_value( 'link', $fixed_shortcode );
@@ -449,6 +450,19 @@ HTML;
 		$attachment_id = wp_insert_attachment( $attachment );
 
 		return $attachment_id;
+	}
+
+	/**
+	 * Make sure the shortcode is using quotation marks for attributes, instead of other special characters
+	 */
+	public function fix_shortcode( $shortcode ) {
+		return strtr(
+			html_entity_decode( $shortcode ),
+			array(
+				'”' => '"',
+				'″' => '"',
+			),
+		);
 	}
 
 	/**
