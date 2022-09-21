@@ -79,7 +79,7 @@ class SimpleLocalAvatars {
 	 * @return int Attachment ID. Returns 0 if not attachment is attached.
 	 */
 	public function get_avatar_attachment_id( $user_id ) {
-		$local_avatar = get_user_meta( $user_id, $this->user_key, true );
+		$local_avatar = get_user_meta( $user_id, self::AVATAR_META_KEY, true );
 
 		if ( ! isset( $local_avatar['media_id'] ) ) {
 			return 0;
