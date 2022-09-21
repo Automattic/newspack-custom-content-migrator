@@ -19,7 +19,7 @@ class SimpleLocalAvatars {
 	 * 
 	 * @var string
 	 */
-	const AVATAR_META_KEY = 'simple_local_avatar_rating';
+	const AVATAR_META_KEY = 'simple_local_avatar';
 
 	/**
 	 * Rating meta key
