@@ -72,6 +72,23 @@ class SimpleLocalAvatars {
 	}
 
 	/**
+	 * Get the attachment ID of the avatar of a specific user
+	 * 
+	 * @param int $user_id The user ID.
+	 * 
+	 * @return int Attachment ID. Returns 0 if not attachment is attached.
+	 */
+	public function get_avatar_attachment_id( $user_id ) {
+		$local_avatar = get_user_meta( $user_id, $this->user_key, true );
+
+		if ( ! isset( $local_avatar['media_id'] ) ) {
+			return 0;
+		}
+
+		return $local_avatar['media_id'];
+	}
+
+	/**
 	 * Check whether the Simple Local Avatars plugin is active or not
 	 * 
 	 * @return boolean True if SLA is active, false otherwise
