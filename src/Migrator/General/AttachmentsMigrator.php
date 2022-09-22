@@ -607,13 +607,13 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		}
 
 		return array_map(
-            function( $url ) {
+			function( $url ) {
 				return str_starts_with( $url, '/wp-content/uploads' )
 				? get_site_url() . $url
 				: $url;
 			},
-            $image_urls
-        );
+			$image_urls
+		);
 	}
 
 	/**
@@ -628,11 +628,11 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		$avatar_ids = $wpdb->get_results( "SELECT meta_value FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID WHERE post_type = 'guest-author' AND meta_key = '_thumbnail_id';" );
 
 		return array_map(
-            function( $avatar_id ) {
+			function( $avatar_id ) {
 				return wp_get_attachment_url( $avatar_id->meta_value );
 			},
-            $avatar_ids
-        );
+			$avatar_ids
+		);
 	}
 
 	/**
@@ -647,12 +647,12 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		$avatars = $wpdb->get_results( "SELECT meta_value FROM {$wpdb->usermeta} WHERE meta_key = 'simple_local_avatar';" );
 
 		return array_map(
-            function( $avatar ) {
+			function( $avatar ) {
 				$avatar_details = unserialize( $avatar->meta_value );
 				return wp_get_attachment_url( $avatar_details['media_id'] );
 			},
-            $avatars
-        );
+			$avatars
+		);
 	}
 
 	/**
@@ -667,14 +667,14 @@ class AttachmentsMigrator implements InterfaceMigrator {
 		$default_featured_images = $wpdb->get_results( "SELECT option_value FROM {$wpdb->options} WHERE option_name = 'wpseo_social';" );
 
 		return array_filter(
-            array_map(
-                function( $default_featured_image ) {
-                    $default_featured_image_details = unserialize( $default_featured_image->option_value ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize
-                    return empty( $default_featured_image_details['og_default_image_id'] ) ? '' : wp_get_attachment_url( $default_featured_image_details['og_default_image_id'] );
-                },
-                $default_featured_images
-            )
-        );
+			array_map(
+				function( $default_featured_image ) {
+					$default_featured_image_details = unserialize( $default_featured_image->option_value ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize
+					return empty( $default_featured_image_details['og_default_image_id'] ) ? '' : wp_get_attachment_url( $default_featured_image_details['og_default_image_id'] );
+				},
+				$default_featured_images
+			)
+		);
 	}
 
 	/**
@@ -720,20 +720,21 @@ class AttachmentsMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_check_broken_images( $args, $assoc_args ) {
 		$is_using_s3     = isset( $assoc_args['is-using-s3'] ) ? true : false;
-		$posts_per_batch = $assoc_args['posts_per_batch'];
-		$batch           = $assoc_args['batch'];
-		$index           = $assoc_args['index'];
+		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
+		$batch           = $assoc_args['batch'] ?? null;
+		$index           = $assoc_args['index'] ?? null;
+		$log_file_prefix = $assoc_args['log-file-prefix'] ?? 'broken_media_urls_batch';
 
 		$this->attachment_logic->get_broken_attachment_urls_from_posts(
-            [],
-            $is_using_s3,
-            $posts_per_batch,
-            $batch,
-            $index,
-            function( $post_id, $broken_url ) use ( $batch ) {
-				$this->log( "broken_media_urls_batch_$batch.log", sprintf( '%d,%s', $post_id, $broken_url ) );
+			[],
+			$is_using_s3,
+			$posts_per_batch,
+			$batch,
+			$index,
+			function( $post_id, $broken_url ) use ( $batch, $log_file_prefix ) {
+				$this->log( sprintf( '%s_%s.log', $log_file_prefix, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
 			}
-        );
+		);
 	}
 
 	/**
