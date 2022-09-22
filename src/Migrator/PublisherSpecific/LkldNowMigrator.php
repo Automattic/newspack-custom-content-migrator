@@ -3,8 +3,8 @@
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackCustomContentMigrator\MigrationLogic\SimpleLocalAvatars;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use Simple_Local_Avatars;
 use \WP_CLI;
 use WP_Query;
 
@@ -19,21 +19,15 @@ class LkldNowMigrator implements InterfaceMigrator {
 	private static $instance = null;
 
 	/**
-	 * @var null|Simple_Local_Avatars Instance of Simple_Local_Avatars
+	 * @var null|SimpleLocalAvatars Instance of \MigrationLogic\SimpleLocalAvatars
 	 */
-	private $simple_local_avatars;
+	private $sla_logic;
 
 	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$plugins_path = defined( 'WP_PLUGIN_DIR' ) ? WP_PLUGIN_DIR : ABSPATH . 'wp-content/plugins';
-
-		$simple_local_avatars_plugin_file = $plugins_path . '/simple-local-avatars/simple-local-avatars.php';
-		
-		if ( is_file( $simple_local_avatars_plugin_file ) && include_once $simple_local_avatars_plugin_file ) {
-			$this->simple_local_avatars = new Simple_Local_Avatars();
-		}
+		$this->sla_logic = new SimpleLocalAvatars();
 	}
 
 	/**
@@ -106,7 +100,7 @@ class LkldNowMigrator implements InterfaceMigrator {
 	 * Extract the old avatars from meta and migrate them to Simple Local Avatars.
 	 */
 	public function cmd_lkldnow_migrate_avatars() {
-		if ( $this->simple_local_avatars == null ) {
+		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
 			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
 			return;
 		}
@@ -115,7 +109,7 @@ class LkldNowMigrator implements InterfaceMigrator {
 		 * Simple Local Avatars already has a method for migrating from 'WP User Avatar', so we use it instead of rewriting it
 		 */
 
-		$first_migration_count = $this->simple_local_avatars->migrate_from_wp_user_avatar();
+		$first_migration_count = $this->sla_logic->simple_local_avatars->migrate_from_wp_user_avatar();
 
 		WP_CLI::log( sprintf( '%d avatars were migrated from WP User Avatar to Simple Local Avatars.', $first_migration_count ) );
 
@@ -125,9 +119,6 @@ class LkldNowMigrator implements InterfaceMigrator {
 		
 		$from_avatar_meta_key = 'wp_user_avatars';
 		$from_avatar_rating_meta_key = 'wp_user_avatars_rating';
-
-		$to_avatar_meta_key = 'simple_local_avatar';
-		$to_avatar_rating_meta_key = 'simple_local_avatar_rating';
 
 		$users = get_users(
 			array(
@@ -164,25 +155,14 @@ class LkldNowMigrator implements InterfaceMigrator {
 				WP_CLI::warning( sprintf( 'Could not get the avatar ID for User #%d', $user->ID ) );
 				continue;
 			}
-			
-			$this->simple_local_avatars->assign_new_user_avatar( (int) $avatar_id, $user->ID );
 
 			// If the avatar has a rating (G, PG, R etc.) attached to it, we migrate that too
 			$avatar_rating = get_user_meta( $user->ID, $from_avatar_rating_meta_key, true );
 
-			if ( ! empty( $avatar_rating ) ) {
-				update_user_meta( $user->ID, $to_avatar_rating_meta_key, $avatar_rating );
-			}
+			$result = $this->sla_logic->import_avatar( $user->ID, $avatar_id, $avatar_rating );
 
-			$is_migrated = get_user_meta( $user->ID, $to_avatar_meta_key, true );
-
-			if ( ! empty( $is_migrated ) ) {
-
-				$new_avatar = get_user_meta( $user->ID, $to_avatar_meta_key, true );
-
-				if ( ! empty( $new_avatar ) ) {
-					$second_migration_count++;
-				}
+			if ( $result ) {
+				$second_migration_count++;
 			}
 		}
 
