@@ -64,9 +64,6 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 		$this->wp_block_manipulator = new WpBlockManipulator();
 		$this->html_element_manipulator = new HtmlElementManipulator();
 		$this->content_diff_migrator = new ContentDiffMigrator( $wpdb );
-
-		// Register \readline() function if it's not available.
-		(new PHPUtil())->register_readline();
 	}
 
 	/**
@@ -176,7 +173,7 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 
 			// Display all found hostnames and prompt which local hostname aliases to use.
 			WP_CLI::log( sprintf( "Found following image hosts: \n- %s\n", implode( "\n- ", $all_hostnames ) ) );
-			$local_hostnames_aliases_csv = readline( "Enter additional local image hostname aliases -- CSV, no extra spaces: " );
+			$local_hostnames_aliases_csv = PHPUtil::readline( "Enter additional local image hostname aliases -- CSV, no extra spaces: " );
 			$local_hostname_aliases = explode( ',', $local_hostnames_aliases_csv );
 
 		}

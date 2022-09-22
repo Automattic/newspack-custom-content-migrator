@@ -2,31 +2,23 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
+/**
+ * PHP utilities class.
+ */
 class PHP {
 
 	/**
-	 * Defines \readline() function if it doesn't exist locally.
+	 * Taken from class-wp-cli.php function confirm() and simplified.
+	 *
+	 * @param string $question   Question to display before the prompt.
+	 * @param array  $assoc_args Skips prompt if 'yes' is provided.
+	 *
+	 * @return string CLI user input.
 	 */
-	public function register_readline() {
+	public static function readline( $question, $assoc_args = [] ) {
+		fwrite( STDOUT, $question );
+		$answer = strtolower( trim( fgets( STDIN ) ) );
 
-		// Function \readline() has gone missing from Atomic, so here's it is back.
-		if ( ! function_exists( 'readline' ) ) {
-
-			/**
-			 * Taken from class-wp-cli.php function confirm() and simplified.
-			 *
-			 * @param string $question   Question to display before the prompt.
-			 * @param array  $assoc_args Skips prompt if 'yes' is provided.
-			 *
-			 * @return string CLI user input.
-			 */
-			function readline( $question, $assoc_args = [] ) {
-				fwrite( STDOUT, $question );
-				$answer = strtolower( trim( fgets( STDIN ) ) );
-
-				return $answer;
-			}
-
-		}
+		return $answer;
 	}
 }
