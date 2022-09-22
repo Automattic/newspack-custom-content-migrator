@@ -75,7 +75,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
-                "reference": "3c78d16f257f5d829fe03fa7940df99037a2b5f8"
+                "reference": "bb39b41ab316dc4ecab3388a3e9a34d72cd7f326"
             },
             "require": {
                 "brainmaestro/composer-git-hooks": "^2.6",
@@ -115,7 +115,7 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Downloads all Post images hosted externally, or imports them from local files.",
-            "time": "2022-02-02T12:28:39+00:00"
+            "time": "2022-09-22T17:55:15+00:00"
         },
         {
             "name": "brainmaestro/composer-git-hooks",
