@@ -2518,7 +2518,7 @@ class ContentDiffMigrator {
 			$parsed_url = wp_parse_url( $url );
 			if ( in_array( $parsed_url['host'], $local_hostname_aliases ) ) {
 				$siteurl = get_option( 'siteurl' );
-				$siteurl_parsed = wp_parse_url( $siteurl )['host'];
+				$siteurl_parsed = wp_parse_url( $siteurl );
 
 				$url = str_replace( '//' . $parsed_url['host'], '//' . $siteurl_parsed['host'], $url );
 			}
