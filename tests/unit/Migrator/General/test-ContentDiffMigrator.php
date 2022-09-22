@@ -2205,16 +2205,16 @@ HTML;
 			'attachment_url_to_postid',
 			[
 				// Will first process image blocks which are at the top of the post_content ($html).
-				[ $this->logic->clean_attachment_url_for_query( $img_block_url_1 ), $img_block_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_block_url_2 ), $img_block_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_block_url_1 ), [], $img_block_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_block_url_2 ), [], $img_block_id_new_staging_2 ],
 				// Images in gallery block.
 				// The first image has already been queried and updated by the first block, and new ID should have been passed via the $known_attachment_ids_updates array.
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_1[1] ), $gallery_block_img_ids_new_staging_1[1] ],
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_1[2] ), $gallery_block_img_ids_new_staging_1[2] ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_1[1] ), [], $gallery_block_img_ids_new_staging_1[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_1[2] ), [], $gallery_block_img_ids_new_staging_1[2] ],
 				// Second gallery block.
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_2[0] ), $gallery_block_img_ids_new_staging_2[0] ],
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_2[1] ), $gallery_block_img_ids_new_staging_2[1] ],
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_2[2] ), $gallery_block_img_ids_new_staging_2[2] ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_2[0] ), [], $gallery_block_img_ids_new_staging_2[0] ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_2[1] ), [], $gallery_block_img_ids_new_staging_2[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_old_live_2[2] ), [], $gallery_block_img_ids_new_staging_2[2] ],
 			]
 		);
 
@@ -2274,12 +2274,12 @@ HTML;
 			'attachment_url_to_postid',
 			[
 				// First image att ID should not be modified.
-				[ $this->logic->clean_attachment_url_for_query( $img_block_url_1 ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_block_url_2 ), $img_block_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_block_url_1 ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_block_url_2 ), [], $img_block_id_new_staging_2 ],
 				// First two images in gallery should not be modified.
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_1[0] ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_1[1] ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_1[2] ), $gallery_block_img_ids_new_staging_1[2] ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_1[0] ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_1[1] ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $gallery_block_img_urls_1[2] ), [], $gallery_block_img_ids_new_staging_1[2] ],
 			]
 		);
 
@@ -2326,8 +2326,8 @@ HTML;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice to get the audio files' attachment IDs on Staging.
-				[ $this->logic->clean_attachment_url_for_query( $audio_src_1 ), $audio_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $audio_src_2 ), $audio_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $audio_src_1 ), [], $audio_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $audio_src_2 ), [], $audio_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2367,8 +2367,8 @@ HTML;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice, and won't make a change for the first one.
-				[ $this->logic->clean_attachment_url_for_query( $audio_src_1 ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $audio_src_2 ), $audio_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $audio_src_1 ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $audio_src_2 ), [], $audio_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2423,8 +2423,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice to get the video files' attachment IDs on Staging.
-				[ $this->logic->clean_attachment_url_for_query( $video_src_1 ), $video_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $video_src_2 ), $video_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $video_src_1 ), [], $video_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $video_src_2 ), [], $video_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2465,8 +2465,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice and won't make a change for the first one.
-				[ $this->logic->clean_attachment_url_for_query( $video_src_1 ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $video_src_2 ), $video_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $video_src_1 ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $video_src_2 ), [], $video_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2522,8 +2522,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice to get the files' attachment IDs on Staging.
-				[ $this->logic->clean_attachment_url_for_query( $file_href_1 ), $file_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $file_href_2 ), $file_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $file_href_1 ), [], $file_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $file_href_2 ), [], $file_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2564,8 +2564,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice and won't make a change for the second one.
-				[ $this->logic->clean_attachment_url_for_query( $file_href_1 ), $file_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $file_href_2 ), 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $file_href_1 ), [], $file_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $file_href_2 ), [], 0 ],
 			]
 		);
 
@@ -2623,8 +2623,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice to get the cover files' attachment IDs on Staging.
-				[ $this->logic->clean_attachment_url_for_query( $cover_src_1 ), $cover_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $cover_src_2 ), $cover_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $cover_src_1 ), [], $cover_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $cover_src_2 ), [], $cover_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2665,8 +2665,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice and won't make a change for the second one.
-				[ $this->logic->clean_attachment_url_for_query( $cover_src_1 ), $cover_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $cover_src_2 ), 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $cover_src_1 ), [], $cover_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $cover_src_2 ), [], 0 ],
 			]
 		);
 
@@ -2729,8 +2729,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice to get the cover files' attachment IDs on Staging.
-				[ $this->logic->clean_attachment_url_for_query( $img_src_1 ), $mediaId_att_id_new_staging_1 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_src_2 ), $mediaId_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_1 ), [], $mediaId_att_id_new_staging_1 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_2 ), [], $mediaId_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2775,8 +2775,8 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called twice and won't make a change for the first one.
-				[ $this->logic->clean_attachment_url_for_query( $img_src_1 ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_src_2 ), $mediaId_att_id_new_staging_2 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_1 ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_2 ), [], $mediaId_att_id_new_staging_2 ],
 			]
 		);
 
@@ -2857,10 +2857,10 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called for every image in first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), $img_ids_new_staging_1[0] ],
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), $img_ids_new_staging_1[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), [], $img_ids_new_staging_1[0] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), [], $img_ids_new_staging_1[1] ],
 				// Will be called just for the second image in the second gallery, because the first image's ID was the same as in the first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), $img_ids_new_staging_2[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), [], $img_ids_new_staging_2[1] ],
 			]
 		);
 
@@ -2933,11 +2933,11 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will not make a change for the second image.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), $img_ids_new_staging_1[0] ],
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), [], $img_ids_new_staging_1[0] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), [], 0 ],
 				// Will not make a change for the first image.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[0] ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), $img_ids_new_staging_2[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[0] ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), [], $img_ids_new_staging_2[1] ],
 			]
 		);
 
@@ -3013,10 +3013,10 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called for every image in first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), $img_ids_new_staging_1[0] ],
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), $img_ids_new_staging_1[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), [], $img_ids_new_staging_1[0] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), [], $img_ids_new_staging_1[1] ],
 				// Will be called just for the second image in the second gallery, because the first image's ID was already fetched in the first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), $img_ids_new_staging_2[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), [], $img_ids_new_staging_2[1] ],
 			]
 		);
 
@@ -3071,10 +3071,10 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called for every image in first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), $img_ids_new_staging_1[1] ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[0] ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_1[1] ), [], $img_ids_new_staging_1[1] ],
 				// Will be called just for the second image in the second gallery, because the first image's ID was already fetched in the first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_srcs_2[1] ), [], 0 ],
 			]
 		);
 
@@ -3140,10 +3140,10 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// Will be called for both images in the first block.
-				[ $this->logic->clean_attachment_url_for_query( $img_src_11 ), $img_id_new_staging_11 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_src_12 ), $img_id_new_staging_12 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_11 ), [], $img_id_new_staging_11 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_12 ), [], $img_id_new_staging_12 ],
 				// Will be called for just the second image in the second gallery block, because the first image'd ID was aready queried in the first gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_src_22 ), $img_id_new_staging_22 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_22 ), [], $img_id_new_staging_22 ],
 			]
 		);
 
@@ -3190,11 +3190,11 @@ BLOCK;
 			'attachment_url_to_postid',
 			[
 				// First gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_src_11 ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_src_12 ), $img_id_new_staging_12 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_11 ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_12 ), [], $img_id_new_staging_12 ],
 				// Second gallery.
-				[ $this->logic->clean_attachment_url_for_query( $img_src_21 ), 0 ],
-				[ $this->logic->clean_attachment_url_for_query( $img_src_22 ), $img_id_new_staging_22 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_21 ), [], 0 ],
+				[ $this->logic->clean_attachment_url_for_query( $img_src_22 ), [], $img_id_new_staging_22 ],
 			]
 		);
 
