@@ -585,12 +585,22 @@ class ContentDiffMigrator {
 	 * Updates Gutenberg Blocks' attachment IDs with new attachment IDs in created `post_content` and `post_excerpt` fields.
 	 *
 	 * @param array  $imported_post_ids            An array of newly imported Post IDs. Will only fetch an do replacements in these.
-	 * @param array $known_attachment_ids_updates  An array of known Attachment IDs which were updated; keys are old IDs, values are
+	 * @param array  $known_attachment_ids_updates An array of known Attachment IDs which were updated; keys are old IDs, values are
 	 *                                             new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local. Explanation and example --
+	 *                                             let's take hostname.com and a local image https://hostname.com/wp-content/2022/09/22/a.jpg
+	 *                                             as local image. Searching for this image's attachment ID will work just fine using
+	 *                                             the full URL. But perhaps if this site is using an S3 bucket, and if some of
+	 *                                             the URLs in post_content use https://hostname.s3.amazonaws.com/wp-content/uploads/2022/09/22/a.jpg
+	 *                                             we should then add value 'hostname.s3.amazonaws.com' in this array here, so that
+	 *                                             \attachment_url_to_postid can query the attachment ID by treating this S3 hostname
+	 *                                             as an alias of the local one.
 	 * @param string $log_file_path                Optional. Full path to a log file. If provided, will save and append a detailed
 	 *                                             output of all the changes made.
+	 *
+	 * @return void
 	 */
-	public function update_blocks_ids( $imported_post_ids, $known_attachment_ids_updates, $log_file_path = null ) {
+	public function update_blocks_ids( $imported_post_ids, array $known_attachment_ids_updates, array $local_hostname_aliases = [], $log_file_path = null ) {
 
 		// Fetch imported posts.
 		$post_ids_new = array_values( $imported_post_ids );
@@ -613,32 +623,32 @@ class ContentDiffMigrator {
 			$excerpt_updated = $result['post_excerpt'];
 
 			// wp:image and wp:gallery.
-			$content_updated = $this->update_image_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_image_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:audio.
-			$content_updated = $this->update_audio_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_audio_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:video.
-			$content_updated = $this->update_video_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_video_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:file.
-			$content_updated = $this->update_file_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_file_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:cover.
-			$content_updated = $this->update_cover_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_cover_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:media-text.
-			$content_updated = $this->update_mediatext_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_mediatext_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_mediatext_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_mediatext_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:jetpack/tiled-gallery.
-			$content_updated = $this->update_jetpacktiledgallery_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_jetpacktiledgallery_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_jetpacktiledgallery_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_jetpacktiledgallery_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:jetpack/slideshow.
-			$content_updated = $this->update_jetpackslideshow_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_jetpackslideshow_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_jetpackslideshow_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_jetpackslideshow_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 			// wp:jetpack/image-compare.
-			$content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated, $known_attachment_ids_updates );
-			$excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated, $known_attachment_ids_updates );
+			$content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 
 			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
@@ -688,10 +698,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content                      post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_image_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_image_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Get all blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:image', $content );
@@ -730,7 +741,7 @@ class ContentDiffMigrator {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -773,10 +784,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_audio_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_audio_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Match all wp:audio blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:audio', $content );
@@ -815,7 +827,7 @@ class ContentDiffMigrator {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -855,10 +867,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_video_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_video_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Match all wp:video blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:video', $content );
@@ -897,7 +910,7 @@ class ContentDiffMigrator {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -937,10 +950,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_file_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_file_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Match all wp:file blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:file', $content );
@@ -979,7 +993,7 @@ class ContentDiffMigrator {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1019,10 +1033,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_cover_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_cover_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Get all blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:cover', $content );
@@ -1061,7 +1076,7 @@ class ContentDiffMigrator {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1104,10 +1119,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_mediatext_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_mediatext_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Match all wp:media-text blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:media-text', $content );
@@ -1146,7 +1162,7 @@ class ContentDiffMigrator {
 				$new_att_id = $known_attachment_ids_updates[$att_id];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1194,10 +1210,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_jetpacktiledgallery_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_jetpacktiledgallery_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Get all blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:jetpack/tiled-gallery', $content );
@@ -1239,7 +1256,7 @@ class ContentDiffMigrator {
 					$new_att_id = $known_attachment_ids_updates[$att_id];
 				} else {
 					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+					$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1289,10 +1306,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_jetpackslideshow_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_jetpackslideshow_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Get all blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:jetpack/slideshow', $content );
@@ -1334,7 +1352,7 @@ class ContentDiffMigrator {
 					$new_att_id = $known_attachment_ids_updates[$att_id];
 				} else {
 					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+					$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1386,10 +1404,11 @@ class ContentDiffMigrator {
 	 *
 	 * @param string $content post_content.
 	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
 	 *
 	 * @return string Updated post_content.
 	 */
-	public function update_jetpackimagecompare_blocks_ids( string $content, array &$known_attachment_ids_updates ): string {
+	public function update_jetpackimagecompare_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
 
 		// Get all blocks.
 		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:jetpack/image-compare', $content );
@@ -1431,7 +1450,7 @@ class ContentDiffMigrator {
 					$new_att_id = $known_attachment_ids_updates[$att_id];
 				} else {
 					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id = $this->attachment_url_to_postid( $src_cleaned );
+					$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -2487,11 +2506,24 @@ class ContentDiffMigrator {
 	/**
 	 * Wrapper for WP's native \attachment_url_to_postid(), for easier testing.
 	 *
-	 * @param string $url The URL to resolve.
+	 * @param string $url                    The URL to resolve.
+	 * @param array  $local_hostname_aliases Array of hostnames to use as local hostname aliases
 	 *
 	 * @return int The found post ID, or 0 on failure.
 	 */
-	public function attachment_url_to_postid( $url ) {
+	public function attachment_url_to_postid( $url, $local_hostname_aliases = [] ) {
+
+		// If $url hostname has one of the given aliases, substitute its hostname with the local hostname.
+		if ( ! empty( $local_hostname_aliases ) ) {
+			$parsed_url = wp_parse_url( $url );
+			if ( in_array( $parsed_url['host'], $local_hostname_aliases ) ) {
+				$siteurl = get_option( 'siteurl' );
+				$siteurl_parsed = wp_parse_url( $siteurl )['host'];
+
+				$url = str_replace( '//' . $parsed_url['host'], '//' . $siteurl_parsed['host'], $url );
+			}
+		}
+
 		return attachment_url_to_postid( $url );
 	}
 

@@ -706,7 +706,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			echo "\n" . sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) );
 		}
 
-		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, $this->log_updated_blocks_ids );
+		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, [], $this->log_updated_blocks_ids );
 	}
 
 	/**
