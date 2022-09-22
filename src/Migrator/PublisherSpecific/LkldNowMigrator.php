@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
 use NewspackCustomContentMigrator\MigrationLogic\SimpleLocalAvatars;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use \WP_CLI;
 use WP_Query;
 
@@ -23,10 +24,18 @@ class LkldNowMigrator implements InterfaceMigrator {
 	private $sla_logic;
 
 	/**
+	 * CoAuthorPlusLogic instance
+	 * 
+	 * @var null|CoAuthorPlusLogic
+	 */
+	private $cap_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->sla_logic = new SimpleLocalAvatars();
+		$this->cap_logic = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -60,6 +69,14 @@ class LkldNowMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_lkldnow_republished_content' ],
 			[
 				'shortdesc' => 'Append a hyperlink to the original article to the end of the article.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lkldnow-copy-avatars-to-cap',
+			[ $this, 'cmd_lkldnow_copy_avatars_to_cap' ],
+			[
+				'shortdesc' => 'Copy the authors\' avatars from SLA to CAP.',
 				'synopsis'  => [],
 			]
 		);
@@ -238,6 +255,52 @@ class LkldNowMigrator implements InterfaceMigrator {
 		}
 
 		WP_CLI::success( sprintf( 'Done! %d posts were updated.', $updated_posts_count ) );
+	}
+
+	public function cmd_lkldnow_copy_avatars_to_cap() {
+		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
+			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+			return;
+		}
+
+		if ( ! $this->cap_logic->is_coauthors_active() ) {
+			WP_CLI::warning( 'CoAuthorsPlus not found. Install and activate it before using this command.' );
+			return;
+		}
+
+		global $wpdb;
+
+		$authors_with_guest_profiles = $wpdb->get_results( $wpdb->prepare(
+			"SELECT post_id as guest_author_id, meta_value as user_login FROM $wpdb->postmeta WHERE meta_key = %s and meta_value !=''",
+			'cap-linked_account'
+		), ARRAY_A );
+
+		$avatars_copied_count = 0;
+
+		foreach ( $authors_with_guest_profiles as $author) {
+			$user = get_user_by( 'login', $author['user_login'] );
+
+			if ( ! $user ) {
+				continue;
+			}
+			
+			$avatar_id = $this->sla_logic->get_avatar_attachment_id( $user->ID );
+			
+			if ( $avatar_id == 0 ) {
+				continue;
+			}
+
+			$guest_author_updated = set_post_thumbnail( $author['guest_author_id'], $avatar_id );
+
+			if ( $guest_author_updated ) {
+				$avatars_copied_count++;
+				WP_CLI::log( sprintf( 'Copied the avatar from SLA to CAP for User #%d', $user->ID ) );
+			} else {
+				WP_CLI::warning( sprintf( 'Could not update the avatar of Guest Author profile #d (User #d)', $author['guest_author_id'], $user->ID ) );
+			}
+		}
+		
+		WP_CLI::success( sprintf( 'Done! %d avatars were copied from SLA to CAP.', $avatars_copied_count ) );
 	}
 
 	/**
