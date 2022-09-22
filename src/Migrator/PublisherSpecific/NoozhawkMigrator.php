@@ -228,6 +228,15 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-turn-off-campaigns-for-galleries',
+			array( $this, 'cmd_nh_turn_off_campaigns_for_galleries' ),
+			array(
+				'shortdesc' => 'Turns off campaigns for galleries.',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator noozhawk-copy-media-caption-from-titles',
 			array( $this, 'cmd_nh_copy_media_caption_from_titles' ),
 			array( 'shortdesc' => 'Migrate media captions from media titles.', )
@@ -1021,6 +1030,30 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 			// To not flood the live site with scrapping HTTP calls.
 			sleep( 5 );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-turn-off-campaigns-for-galleries`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_turn_off_campaigns_for_galleries( $args, $assoc_args ) {
+		$query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'all',
+				'meta_key'       => '_newspack_gallery_migrated',
+			]
+		);
+
+		$migrated_media_posts = $query->get_posts();
+
+		foreach ( $migrated_media_posts as $post ) {
+			WP_CLI::success( sprintf( 'Disablign campaigns for the post %d', $post->ID ) );
+			update_post_meta( $post->ID, 'newspack_popups_has_disabled_popups', true );
 		}
 	}
 
