@@ -64,10 +64,12 @@ class ContentDiffMigrator {
 	/**
 	 * Gets a diff of new Posts, Pages and Attachments from the Live Site.
 	 *
+	 * @deprecated Deprecated in favor of get_live_diff_content_ids_programmatic, since large JOINs can time out on Atomic.
+	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
-	 * @throws \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
-	 * @return array Result from $wpdb->get_results.
+	 * @throws     \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
+	 * @return     array Result from $wpdb->get_results.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
 		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
@@ -107,6 +109,135 @@ class ContentDiffMigrator {
 		$results         = $this->wpdb->get_results( $sql_attachments, ARRAY_A );
 		foreach ( $results as $result ) {
 			$ids[] = $result['ID'];
+		}
+
+		return $ids;
+	}
+
+	/**
+	 * Finds unique IDs in live tables which don't exist in local Staging tables.
+	 * Uses programmatic search technique, since JOIN sometimes times out on Atomic.
+	 * Splits search into two post type groups -- attachments, and all other -- for memory usage reasons.
+	 *
+	 * @param string $live_table_prefix Live tables' prefix.
+	 * @param array  $post_types        Post types to search for.
+	 *
+	 * @throws \RuntimeException Thrown if collations don't match.
+	 *
+	 * @return array Unique IDs in live tables.
+	 */
+	public function get_live_diff_content_ids_programmatic( string $live_table_prefix, array $post_types ): array {
+		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
+			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
+		}
+
+		$ids              = [];
+		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
+		$posts_table      = $this->wpdb->prefix . 'posts';
+
+		// Split post types into two groups for memory usage reasons -- attachment and other types.
+		$post_type_attachment = null;
+		$key_attachment       = array_search( 'attachment', $post_types );
+		if ( false !== $key_attachment ) {
+			$post_type_attachment = 'attachment';
+			unset( $post_types[ $key_attachment ] );
+		}
+		$post_types_other = $post_types;
+
+
+		// Get post types except attachments.
+		if ( ! empty( $post_types_other ) ) {
+
+			// Get post type placeholders for $wpdb::prepare.
+			$post_types_other_placeholders     = array_fill( 0, count( $post_types_other ), '%s' );
+			$post_types_other_placeholders_csv = implode( ',', $post_types_other_placeholders );
+
+			WP_CLI::log( sprintf( 'Querying %s types ...', implode( ',', $post_types_other ) ) );
+			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
+			$sql_replace_table   = $this->wpdb->prepare(
+				"SELECT ID, post_name, post_title, post_status, post_date
+				FROM {TABLE}
+				WHERE post_type IN ( $post_types_other_placeholders_csv )
+				AND post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' );",
+				$post_types_other
+			);
+			// phpcs:disable
+			$results_live_posts  = $this->wpdb->get_results(  str_replace( '{TABLE}', $live_posts_table, $sql_replace_table), ARRAY_A );
+			$results_local_posts = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table), ARRAY_A );
+			// phpcs:enable
+
+			// Search unique on live.
+			foreach ( $results_live_posts as $key_live_post => $live_post ) {
+
+				WP_CLI::log( sprintf( 'Comparing %s (%d)/(%d)', implode( ',', $post_types_other ), $key_live_post + 1, count( $results_live_posts ) ) );
+
+				$found = false;
+				foreach ( $results_local_posts as $key_local_post => $local_post ) {
+					if (
+						$live_post['post_name'] == $local_post['post_name']
+						&& $live_post['post_title'] == $local_post['post_title']
+						&& $live_post['post_status'] == $local_post['post_status']
+						&& $live_post['post_date'] == $local_post['post_date']
+					) {
+						$found = true;
+						break;
+					}
+				}
+
+				if ( true === $found ) {
+					// Unset record that was just matched for faster following searches.
+					unset( $results_local_posts[ $key_local_post ] );
+				} else {
+					// Unique on live, add to $ids.
+					$ids[] = $live_post['ID'];
+				}
+			}
+
+			// Garbage collection should be faster for setting to null VS using \unset().
+			$results_live_posts  = null;
+			$results_local_posts = null;
+		}
+
+
+		// Get attachments.
+		if ( ! is_null( $post_type_attachment ) ) {
+
+			WP_CLI::log( 'Querying attachments ...' );
+			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
+			$sql_replace_table         = "SELECT ID, post_name, post_title, post_status, post_date
+				FROM {TABLE}
+				WHERE post_type = 'attachment';";
+			// phpcs:disable
+			$results_live_attachments  = $this->wpdb->get_results( str_replace( '{TABLE}', $live_posts_table, $sql_replace_table ), ARRAY_A );
+			$results_local_attachments = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table ), ARRAY_A );
+			// phpcs:enable
+
+			// Search unique attachments on live.
+			foreach ( $results_live_attachments as $key_live_attachment => $live_attachment ) {
+
+				WP_CLI::log( sprintf( 'Comparing attachments (%d)/(%d)', $key_live_attachment + 1, count( $results_live_attachments ) ) );
+
+				$found = false;
+				foreach ( $results_local_attachments as $key_local_attachment => $local_attachment ) {
+					if (
+						$live_attachment['post_name'] == $local_attachment['post_name']
+						&& $live_attachment['post_title'] == $local_attachment['post_title']
+						&& $live_attachment['post_status'] == $local_attachment['post_status']
+						&& $live_attachment['post_date'] == $local_attachment['post_date']
+					) {
+						$found = true;
+						break;
+					}
+				}
+
+				// Unset record that was just matched for faster following searches.
+				if ( true === $found ) {
+					unset( $results_local_attachments[ $key_local_attachment ] );
+				} else {
+					// Unset record that was just matched for faster following searches.
+					$ids[] = $live_attachment['ID'];
+				}
+			}
 		}
 
 		return $ids;
