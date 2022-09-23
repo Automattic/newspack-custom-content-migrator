@@ -81,8 +81,8 @@ class ContentDiffMigrator {
 	 * @param object $wpdb Global $wpdb.
 	 */
 	public function __construct( $wpdb ) {
-		$this->wpdb = $wpdb;
-		$this->wp_block_manipulator = new WpBlockManipulator();
+		$this->wpdb                     = $wpdb;
+		$this->wp_block_manipulator     = new WpBlockManipulator();
 		$this->html_element_manipulator = new HtmlElementManipulator();
 	}
 
@@ -602,6 +602,17 @@ class ContentDiffMigrator {
 	 */
 	public function update_blocks_ids( $imported_post_ids, array $known_attachment_ids_updates, array $local_hostname_aliases = [], $log_file_path = null ) {
 
+		// Filter the $local_hostname_aliases argument -- remove the local host if the user entered it, just leaving additional hostname aliases here.
+		if ( ! empty( $local_hostname_aliases ) ) {
+			$siteurl_parsed     = wp_parse_url( get_option( 'siteurl' ) );
+			$local_hostname     = $siteurl_parsed['host'];
+			$key_local_hostname = array_search( $local_hostname, $local_hostname_aliases );
+			if ( false !== $key_local_hostname ) {
+				unset( $local_hostname_aliases[ $key_local_hostname ] );
+				unset( $local_hostname_aliases[ $key_local_hostname ] );
+			}
+		}
+
 		// Fetch imported posts.
 		$post_ids_new = array_values( $imported_post_ids );
 		$posts_table  = $this->wpdb->posts;
@@ -715,33 +726,33 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id  = $block_updated['attrs']['id'];
+			$att_id = $block_updated['attrs']['id'];
 
 			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
-			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
 				// No images.
 				continue;
 			}
-			$img_html = $matches[0][0][0];
+			$img_html         = $matches[0][0][0];
 			$img_html_updated = $img_html;
 
 			// Get img src.
 			$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
 
 			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-				$new_att_id = $known_attachment_ids_updates[$att_id];
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -749,7 +760,7 @@ class ContentDiffMigrator {
 
 				// Add to known Att IDs updates.
 				if ( $new_att_id != $att_id ) {
-					$known_attachment_ids_updates[$att_id] = $new_att_id;
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 				}
 			}
 
@@ -762,12 +773,12 @@ class ContentDiffMigrator {
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
 
 			// Update the whole img HTML element in Block HTML.
-			$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
-			$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+			$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update IDs in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
@@ -801,33 +812,33 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $key_match => $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id  = $block_updated['attrs']['id'];
+			$att_id = $block_updated['attrs']['id'];
 
 			// Get the first <audio> element from innerHTML.
-			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerHTML_updated );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
 				// No audio element.
 				continue;
 			}
-			$audio_html = $matches[0][0][0];
+			$audio_html         = $matches[0][0][0];
 			$audio_html_updated = $audio_html;
 
 			// Get audio src.
 			$src = $this->html_element_manipulator->get_attribute_value( 'src', $audio_html );
 
 			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-				$new_att_id = $known_attachment_ids_updates[$att_id];
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -835,7 +846,7 @@ class ContentDiffMigrator {
 
 				// Add to known Att IDs updates.
 				if ( $new_att_id != $att_id ) {
-					$known_attachment_ids_updates[$att_id] = $new_att_id;
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 				}
 			}
 
@@ -845,12 +856,12 @@ class ContentDiffMigrator {
 			}
 
 			// Update the whole audio HTML element in Block HTML.
-			$block_innerHTML_updated = str_replace( $audio_html, $audio_html_updated, $block_innerHTML_updated );
-			$block_innerContent_updated = str_replace( $audio_html, $audio_html_updated, $block_innerContent_updated );
+			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $audio_html, $audio_html_updated, $block_innercontent_updated );
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update IDs in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
@@ -884,33 +895,33 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
 			$att_id = $block_updated['attrs']['id'];
 
 			// Get the first <video> element from innerHTML.
-			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerHTML_updated );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
 				// No video element.
 				continue;
 			}
-			$video_html = $matches[0][0][0];
+			$video_html         = $matches[0][0][0];
 			$video_html_updated = $video_html;
 
 			// Get video src.
 			$src = $this->html_element_manipulator->get_attribute_value( 'src', $video_html );
 
 			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-				$new_att_id = $known_attachment_ids_updates[$att_id];
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -918,7 +929,7 @@ class ContentDiffMigrator {
 
 				// Add to known Att IDs updates.
 				if ( $new_att_id != $att_id ) {
-					$known_attachment_ids_updates[$att_id] = $new_att_id;
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 				}
 			}
 
@@ -928,12 +939,12 @@ class ContentDiffMigrator {
 			}
 
 			// Update the whole video HTML element in Block HTML.
-			$block_innerHTML_updated = str_replace( $video_html, $video_html_updated, $block_innerHTML_updated );
-			$block_innerContent_updated = str_replace( $video_html, $video_html_updated, $block_innerContent_updated );
+			$block_innerhtml_updated    = str_replace( $video_html, $video_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $video_html, $video_html_updated, $block_innercontent_updated );
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update ID in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
@@ -967,33 +978,33 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $key_match => $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id  = $block_updated['attrs']['id'];
+			$att_id = $block_updated['attrs']['id'];
 
 			// Get the first <a> elementa from innerHTML.
-			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerHTML_updated );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
 				// No <a> elements.
 				continue;
 			}
-			$a_html = $matches[0][0][0];
+			$a_html         = $matches[0][0][0];
 			$a_html_updated = $a_html;
 
 			// Get a href/src.
 			$src = $this->html_element_manipulator->get_attribute_value( 'href', $a_html );
 
 			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-				$new_att_id = $known_attachment_ids_updates[$att_id];
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1001,7 +1012,7 @@ class ContentDiffMigrator {
 
 				// Add to known Att IDs updates.
 				if ( $new_att_id != $att_id ) {
-					$known_attachment_ids_updates[$att_id] = $new_att_id;
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 				}
 			}
 
@@ -1011,12 +1022,12 @@ class ContentDiffMigrator {
 			}
 
 			// Update the whole a HTML element in Block HTML.
-			$block_innerHTML_updated = str_replace( $a_html, $a_html_updated, $block_innerHTML_updated );
-			$block_innerContent_updated = str_replace( $a_html, $a_html_updated, $block_innerContent_updated );
+			$block_innerhtml_updated    = str_replace( $a_html, $a_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $a_html, $a_html_updated, $block_innercontent_updated );
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update ID in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
@@ -1050,33 +1061,33 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
 			$att_id = $block_updated['attrs']['id'];
 
 			// Get the first <img> element from innerHTML.
-			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
 				// No <img>s.
 				continue;
 			}
-			$img_html = $matches[0][0][0];
+			$img_html         = $matches[0][0][0];
 			$img_html_updated = $img_html;
 
 			// Get <img> src.
 			$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
 
 			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-				$new_att_id = $known_attachment_ids_updates[$att_id];
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1084,7 +1095,7 @@ class ContentDiffMigrator {
 
 				// Add to known Att IDs updates.
 				if ( $new_att_id != $att_id ) {
-					$known_attachment_ids_updates[$att_id] = $new_att_id;
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 				}
 			}
 
@@ -1097,12 +1108,12 @@ class ContentDiffMigrator {
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
 
 			// Update the whole img HTML element in Block HTML.
-			$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
-			$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+			$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update IDs in block header.
 			$block_updated['attrs']['id'] = $new_att_id;
@@ -1136,33 +1147,33 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $key_match => $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get mediaID (attachment ID) from block header.
-			$att_id  = $block_updated['attrs']['mediaId'];
+			$att_id = $block_updated['attrs']['mediaId'];
 
 			// Get the first <img> element from innerHTML.
-			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
 				// No <img>s.
 				continue;
 			}
-			$img_html = $matches[0][0][0];
+			$img_html         = $matches[0][0][0];
 			$img_html_updated = $img_html;
 
 			// Get img src.
 			$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
 
 			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-			if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-				$new_att_id = $known_attachment_ids_updates[$att_id];
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
 				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 				if ( 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
@@ -1170,7 +1181,7 @@ class ContentDiffMigrator {
 
 				// Add to known Att IDs updates.
 				if ( $new_att_id != $att_id ) {
-					$known_attachment_ids_updates[$att_id] = $new_att_id;
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 				}
 			}
 
@@ -1188,12 +1199,12 @@ class ContentDiffMigrator {
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
 
 			// Update the whole img HTML element in Block HTML.
-			$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
-			$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+			$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update mediaId in block header.
 			$block_updated['attrs']['mediaId'] = $new_att_id;
@@ -1227,14 +1238,14 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get all <img> elements from innerHTML.
-			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
 				// No <img>s.
 				continue;
@@ -1244,19 +1255,19 @@ class ContentDiffMigrator {
 			foreach ( $matches_images[0] as $match_image ) {
 
 				// Vars.
-				$img_html = $match_image[0];
+				$img_html         = $match_image[0];
 				$img_html_updated = $img_html;
 
 				// Get data-id and src attributes.
 				$att_id = $this->html_element_manipulator->get_attribute_value( 'data-id', $img_html );
-				$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+				$src    = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
 
 				// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-				if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-					$new_att_id = $known_attachment_ids_updates[$att_id];
+				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+					$new_att_id = $known_attachment_ids_updates[ $att_id ];
 				} else {
 					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1264,7 +1275,7 @@ class ContentDiffMigrator {
 
 					// Add to known Att IDs updates.
 					if ( $new_att_id != $att_id ) {
-						$known_attachment_ids_updates[$att_id] = $new_att_id;
+						$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 					}
 				}
 
@@ -1277,20 +1288,20 @@ class ContentDiffMigrator {
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
 
 				// Update the whole img HTML element in Block HTML.
-				$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
-				$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+				$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+				$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
 			}
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update 'ids' in gallery block header.
-			$block_ids = $block_updated['attrs']['ids'];
+			$block_ids         = $block_updated['attrs']['ids'];
 			$block_ids_updated = $block_ids;
 			foreach ( $block_ids as $key => $id ) {
 				// Update ID, or leave it the same.
-				$block_ids_updated[$key] = $known_attachment_ids_updates[$id] ?? $id;
+				$block_ids_updated[ $key ] = $known_attachment_ids_updates[ $id ] ?? $id;
 			}
 			$block_updated['attrs']['ids'] = $block_ids_updated;
 
@@ -1323,14 +1334,14 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get all <img> elements from innerHTML.
-			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
 				// No <img>s.
 				continue;
@@ -1340,19 +1351,19 @@ class ContentDiffMigrator {
 			foreach ( $matches_images[0] as $match_image ) {
 
 				// Vars.
-				$img_html = $match_image[0];
+				$img_html         = $match_image[0];
 				$img_html_updated = $img_html;
 
 				// Get data-id and src attributes.
 				$att_id = $this->html_element_manipulator->get_attribute_value( 'data-id', $img_html );
-				$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+				$src    = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
 
 				// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-				if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-					$new_att_id = $known_attachment_ids_updates[$att_id];
+				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+					$new_att_id = $known_attachment_ids_updates[ $att_id ];
 				} else {
 					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1360,7 +1371,7 @@ class ContentDiffMigrator {
 
 					// Add to known Att IDs updates.
 					if ( $new_att_id != $att_id ) {
-						$known_attachment_ids_updates[$att_id] = $new_att_id;
+						$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 					}
 				}
 
@@ -1375,20 +1386,20 @@ class ContentDiffMigrator {
 				$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
 
 				// Update the whole img HTML element in Block HTML.
-				$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
-				$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+				$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+				$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
 			}
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update 'ids' in gallery block header.
-			$block_ids = $block_updated['attrs']['ids'];
+			$block_ids         = $block_updated['attrs']['ids'];
 			$block_ids_updated = $block_ids;
 			foreach ( $block_ids as $key => $id ) {
 				// Update ID, or leave it the same.
-				$block_ids_updated[$key] = $known_attachment_ids_updates[$id] ?? $id;
+				$block_ids_updated[ $key ] = $known_attachment_ids_updates[ $id ] ?? $id;
 			}
 			$block_updated['attrs']['ids'] = $block_ids_updated;
 
@@ -1421,14 +1432,14 @@ class ContentDiffMigrator {
 		foreach ( $matches[0] as $match ) {
 
 			// Vars.
-			$block_html = $match[0];
-			$block = parse_blocks( $block_html )[0];
-			$block_updated = $block;
-			$block_innerHTML_updated = $block['innerHTML'];
-			$block_innerContent_updated = $block['innerContent'][0];
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get all <img> elements from innerHTML.
-			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerHTML_updated );
+			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
 				// No <img>s.
 				continue;
@@ -1438,19 +1449,19 @@ class ContentDiffMigrator {
 			foreach ( $matches_images[0] as $match_image ) {
 
 				// Vars.
-				$img_html = $match_image[0];
+				$img_html         = $match_image[0];
 				$img_html_updated = $img_html;
 
 				// Get id and src attributes.
 				$att_id = $this->html_element_manipulator->get_attribute_value( 'id', $img_html );
-				$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+				$src    = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
 
 				// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
-				if ( isset( $known_attachment_ids_updates[$att_id] ) ) {
-					$new_att_id = $known_attachment_ids_updates[$att_id];
+				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+					$new_att_id = $known_attachment_ids_updates[ $att_id ];
 				} else {
 					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
 					if ( 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
@@ -1458,7 +1469,7 @@ class ContentDiffMigrator {
 
 					// Add to known Att IDs updates.
 					if ( $new_att_id != $att_id ) {
-						$known_attachment_ids_updates[$att_id] = $new_att_id;
+						$known_attachment_ids_updates[ $att_id ] = $new_att_id;
 					}
 				}
 
@@ -1473,17 +1484,17 @@ class ContentDiffMigrator {
 				$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
 
 				// Update the whole img HTML element in Block HTML.
-				$block_innerHTML_updated = str_replace( $img_html, $img_html_updated, $block_innerHTML_updated );
-				$block_innerContent_updated = str_replace( $img_html, $img_html_updated, $block_innerContent_updated );
+				$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+				$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
 			}
 
 			// Apply innerHTML and innerContent changes to the block.
-			$block_updated['innerHTML'] = $block_innerHTML_updated;
-			$block_updated['innerContent'][0] = $block_innerContent_updated;
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
 
 			// Update IDs in block header, or leave them the same if they haven't changed.
-			$block_updated['attrs']['imageBefore']['id'] = $known_attachment_ids_updates[$block_updated['attrs']['imageBefore']['id']] ?? $block_updated['attrs']['imageBefore']['id'];
-			$block_updated['attrs']['imageAfter']['id'] = $known_attachment_ids_updates[$block_updated['attrs']['imageAfter']['id']] ?? $block_updated['attrs']['imageAfter']['id'];
+			$block_updated['attrs']['imageBefore']['id'] = $known_attachment_ids_updates[ $block_updated['attrs']['imageBefore']['id'] ] ?? $block_updated['attrs']['imageBefore']['id'];
+			$block_updated['attrs']['imageAfter']['id']  = $known_attachment_ids_updates[ $block_updated['attrs']['imageAfter']['id'] ] ?? $block_updated['attrs']['imageAfter']['id'];
 
 			// Update block with new content.
 			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
@@ -1511,7 +1522,7 @@ class ContentDiffMigrator {
 			(
 				\<img
 				[^\>]*        # zero or more characters except closing angle bracket
-				'. $attribute_name .'="
+				' . $attribute_name . '="
 			)
 			(
 				\d+           # attribute value
@@ -1625,8 +1636,9 @@ class ContentDiffMigrator {
 	/**
 	 * Updates attachment ID in Gutenberg blocks' headers which contain a single ID.
 	 *
-	 * @param array  $id_update An array; key is old ID, value is new ID.
-	 * @param string $content   HTML content.
+	 * @param string $block_designation Block name/designation.
+	 * @param array  $id_update         An array; key is old ID, value is new ID.
+	 * @param string $content           HTML content.
 	 *
 	 * @return string|string[]
 	 */
@@ -1636,7 +1648,7 @@ class ContentDiffMigrator {
 
 		// Pattern for matching any Gutenberg block's "id" attribute value, uses sprintf for placeholder injection.
 		$block_designation_escaped = $this->escape_regex_pattern_string( $block_designation );
-		$pattern_block_id_sprintf = '|
+		$pattern_block_id_sprintf  = '|
 			(
 				\<\!--       # beginning of the block element
 				\s           # followed by a space
@@ -2302,9 +2314,11 @@ class ContentDiffMigrator {
 
 		$core_tables = array_diff( self::CORE_WP_TABLES, $skip_tables );
 		foreach ( $core_tables as $table ) {
-			$core_table = esc_sql( $this->wpdb->prefix . $table );
-			$live_table = esc_sql( $table_prefix . $table );
+			$core_table        = esc_sql( $this->wpdb->prefix . $table );
+			$live_table        = esc_sql( $table_prefix . $table );
+			// phpcs:ignore
 			$core_table_status = $this->wpdb->get_row( "SHOW TABLE STATUS WHERE name LIKE '$core_table'" );
+			// phpcs:ignore
 			$live_table_status = $this->wpdb->get_row( "SHOW TABLE STATUS WHERE name LIKE '$live_table'" );
 
 			if ( is_null( $live_table_status ) ) {
@@ -2376,18 +2390,20 @@ class ContentDiffMigrator {
 	 * @throws \RuntimeException Throws various exceptions if unable to complete required SQL operations.
 	 */
 	public function copy_table_data_using_proper_collation( string $prefix, string $table, int $records_per_transaction = 5000, int $sleep_in_seconds = 1, string $prefix_for_backup = 'bak_' ) {
-		$backup_table = esc_sql( $prefix_for_backup . $prefix . $table );
-		$source_table = esc_sql( $prefix . $table );
+		$backup_table              = esc_sql( $prefix_for_backup . $prefix . $table );
+		$source_table              = esc_sql( $prefix . $table );
 		$match_collation_for_table = esc_sql( $this->wpdb->prefix . $table );
-		$rename_sql = "RENAME TABLE $source_table TO $backup_table";
-		$rename_result = $this->wpdb->query( $rename_sql );
+		$rename_sql                = "RENAME TABLE $source_table TO $backup_table";
+		// phpcs:ignore
+		$rename_result             = $this->wpdb->query( $rename_sql );
 
 		if ( is_wp_error( $rename_result ) ) {
 			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() );
 		}
 
 		$create_like_table_sql = "CREATE TABLE {$source_table} LIKE $match_collation_for_table";
-		$create_result = $this->wpdb->query( $create_like_table_sql );
+		// phpcs:ignore
+		$create_result         = $this->wpdb->query( $create_like_table_sql );
 
 		if ( is_wp_error( $create_result ) ) {
 			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() );
@@ -2398,10 +2414,12 @@ class ContentDiffMigrator {
 			'limit' => $records_per_transaction,
 		];
 
-		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
+		$table_columns_sql     = "SHOW COLUMNS FROM $source_table";
+		// phpcs:ignore
 		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
-		$table_columns = implode( ',', array_map( fn($column_row) => "`$column_row->Field`", $table_columns_results ) );
-		$count = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
+		$table_columns         = implode( ',', array_map( fn( $column_row) => "`$column_row->Field`", $table_columns_results ) );
+		// phpcs:ignore
+		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
 		if ( 0 === $count ) {
 			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." );
@@ -2410,7 +2428,8 @@ class ContentDiffMigrator {
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
 			WP_CLI::log( "Iteration $i out of $iterations" );
-			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
+			$insert_sql    = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
+			// phpcs:ignore
 			$insert_result = $this->wpdb->query( $insert_sql );
 
 			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
@@ -2494,7 +2513,7 @@ class ContentDiffMigrator {
 		$parsed_url = parse_url( $url );
 
 		$url_cleaned = sprintf(
-			"%s://%s%s",
+			'%s://%s%s',
 			$parsed_url['scheme'],
 			$parsed_url['host'],
 			$parsed_url['path'],
@@ -2507,7 +2526,7 @@ class ContentDiffMigrator {
 	 * Wrapper for WP's native \attachment_url_to_postid(), for easier testing.
 	 *
 	 * @param string $url                    The URL to resolve.
-	 * @param array  $local_hostname_aliases Array of hostnames to use as local hostname aliases
+	 * @param array  $local_hostname_aliases Array of hostnames to use as local hostname aliases.
 	 *
 	 * @return int The found post ID, or 0 on failure.
 	 */
@@ -2517,14 +2536,17 @@ class ContentDiffMigrator {
 		if ( ! empty( $local_hostname_aliases ) ) {
 			$parsed_url = wp_parse_url( $url );
 			if ( in_array( $parsed_url['host'], $local_hostname_aliases ) ) {
-				$siteurl = get_option( 'siteurl' );
+				$siteurl        = get_option( 'siteurl' );
 				$siteurl_parsed = wp_parse_url( $siteurl );
 
 				$url = str_replace( '//' . $parsed_url['host'], '//' . $siteurl_parsed['host'], $url );
 			}
 		}
 
-		return attachment_url_to_postid( $url );
+		// phpcs:ignore
+		$post_id = attachment_url_to_postid( $url );
+
+		return $post_id;
 	}
 
 	/**
@@ -2574,10 +2596,10 @@ class ContentDiffMigrator {
 	 * @return string
 	 */
 	private function escape_regex_pattern_string( string $subject ): string {
-		$special_chars = [ ".", "\\", "+", "*", "?", "[", "^", "]", "$", "(", ")", "{", "}", "=", "!", "<", ">", "|", ":", ];
+		$special_chars   = [ '.', '\\', '+', '*', '?', '[', '^', ']', '$', '(', ')', '{', '}', '=', '!', '<', '>', '|', ':' ];
 		$subject_escaped = $subject;
 		foreach ( $special_chars as $special_char ) {
-			$subject_escaped = str_replace( $special_char, '\\'. $special_char, $subject_escaped );
+			$subject_escaped = str_replace( $special_char, '\\' . $special_char, $subject_escaped );
 		}
 
 		// Space.

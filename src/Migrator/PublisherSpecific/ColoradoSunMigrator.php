@@ -10,7 +10,6 @@ use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManip
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
-use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 
 /**
  * Custom migration scripts for Colorado Sun.
@@ -113,35 +112,13 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_replace_reusable_blocks_ids' ],
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator coloradosun-fix-image-ids-in-post-content',
-			[ $this, 'cmd_fix_image_ids_in_post_content' ],
+			'newspack-content-migrator coloradosun-update-hostnames-in-posts',
+			[ $this, 'cmd_update_hostnames_in_posts' ],
 			[
-				'shortdesc' => 'Fix attachment IDs in block content.',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'post-id-from',
-						'description' => 'Post ID range minimum',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'post-id-to',
-						'description' => 'Post ID range maximum',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'local-hostname-aliases-csv',
-						'description' => 'CSV of image URL hostnames to be used as local hostname aliases when searching for image files',
-						'optional'    => true,
-						'repeating'   => false,
-					],
-				],
+				'shortdesc' => 'Updates hostnames for all posts.',
 			]
 		);
+
 	}
 
 	/**
@@ -150,75 +127,48 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 	 *
 	 * @return void
 	 */
-	public function cmd_fix_image_ids_in_post_content( $positional_args, $assoc_args ) {
-
+	public function cmd_update_hostnames_in_posts( $positional_args, $assoc_args ) {
 		global $wpdb;
-		$post_id_from          = $assoc_args['post-id-from'] ?? null;
-		$post_id_to            = $assoc_args['post-id-to'] ?? null;
-		$local_hostnames_aliases_csv = $assoc_args['local-hostname-aliases-csv'] ?? null;
+		$from = '//coloradosun-test-blockimgidfix.newspackstaging.com/wp-content/uploads/';
+		$to = '//newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/';
+		$log = 'coloradosun_updatedHostnames.log';
 
-
-		// Get local hostname aliases from associative argument, or search all the posts and ask which hostname aliases to use.
-		if ( ! is_null( $local_hostnames_aliases_csv ) ) {
-			$local_hostname_aliases = explode( ',', $local_hostnames_aliases_csv );
-		} else {
-			// Scan all local images hostnames.
-			WP_CLI::log( 'Searching all used image URL hostnames in all the posts and pages...' );
-			$downloader = new \NewspackPostImageDownloader\Downloader();
-			$posts = $downloader->get_posts_ids_and_contents();
-			$all_hostnames_with_ids = $downloader->get_all_image_hostnames_from_posts( $posts );
-			// Remove relative URLs, leave just ones with hostnames.
-			unset( $all_hostnames_with_ids[ "relative URL paths" ] );
-			$all_hostnames = array_keys( $all_hostnames_with_ids );
-
-			// Display all found hostnames and prompt which local hostname aliases to use.
-			WP_CLI::log( sprintf( "Found following image hosts: \n- %s\n", implode( "\n- ", $all_hostnames ) ) );
-			$local_hostnames_aliases_csv = PHPUtil::readline( "Enter additional local image hostname aliases -- CSV, no extra spaces: " );
-			$local_hostname_aliases = explode( ',', $local_hostnames_aliases_csv );
-
-		}
-
-		if ( ! empty( $local_hostname_aliases ) ) {
-			// Filter out local host if the user entered it, just leaving any additional hostname aliases.
-			$siteurl_parsed = wp_parse_url( get_option( 'siteurl' ) );
-			$local_hostname = $siteurl_parsed['host'];
-			$key_local_hostname = array_search( $local_hostname, $local_hostname_aliases );
-			if ( false !== $key_local_hostname ) {
-				unset( $local_hostname_aliases[$key_local_hostname] );
-				unset( $local_hostname_aliases[$key_local_hostname] );
-			}
-		}
-
-		$known_attachment_ids_updates = [];
-		$log_file_path = 'contentdiff_update_blocks_ids.log';
-
-		// $post_ids = $this->posts_logic->get_all_posts_ids();
-		$post_ids = $wpdb->get_col(
-			$wpdb->prepare(
-				"select ID
-				from $wpdb->posts
-				where post_type = 'post'
-				and post_status in ( 'publish', 'draft' ) 
-				and ID >= %d
-				and ID <= %d
-				order by ID asc",
-				$post_id_from,
-				$post_id_to
-			)
-		);
-
-		// E.g. DEV test: `$post_ids = [ 281319 ];` -- old img ID 200693 > new img ID 267152
+		$post_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
-			// Run the command on a single $post_id to control custom progress bar.
-			$this->content_diff_migrator->update_blocks_ids( [ $post_id ], $known_attachment_ids_updates, $local_hostname_aliases, $log_file_path );
+			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from $wpdb->posts where ID = %d;", $post_id ) );
+			if ( null === $post_content ) {
+				WP_CLI::confirm( sprintf( 'ID %d not found. Continue? ', $post_id ) );
+			}
+
+			$post_content_updated = $post_content;
+			$post_content_updated = str_replace( $from, $to, $post_content_updated );
+			if ( $post_content_updated != $post_content ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+				$this->log( $log, $post_id );
+				WP_CLI::log( 'Updated' );
+			}
 		}
 
 		wp_cache_flush();
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
 
-		WP_CLI::log( sprintf( "Done. Check %s.", $log_file_path ) );
-
+	public function cmd_tmp( $positional_args, $assoc_args ) {
+		$file = file_get_contents( '/var/www/coloradosun.test/log_updatedRecords.log' );
+		$lines = explode( "\n", $file );
+		foreach ( $lines as $line ) {
+			$line_decoded = json_decode( $line, true );
+			file_put_contents( sprintf( '/var/www/coloradosun.test/z_logs_beforeafter/%d_1_before.log', $line_decoded['id_new'] ), $line_decoded['post_content_before'] );
+			file_put_contents( sprintf( '/var/www/coloradosun.test/z_logs_beforeafter/%d_2_after.log', $line_decoded['id_new'] ), $line_decoded['post_content_after'] );
+			$d = 1;
+		}
+		return;
 	}
 
 	public function cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block( $positional_args, $assoc_args ) {
