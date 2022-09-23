@@ -9,6 +9,7 @@ use NewspackCustomContentMigrator\MigrationLogic\Attachments as AttachmentsLogic
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
 
 /**
  * Custom migration scripts for Colorado Sun.
@@ -46,14 +47,22 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 	private $html_element_manipulator;
 
 	/**
+	 * @var ContentDiffMigrator
+	 */
+	private $content_diff_migrator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		global $wpdb;
+
 		$this->posts_logic = new PostsLogic();
 		$this->attachment_logic = new AttachmentsLogic();
 		$this->coauthors_logic = new CoAuthorPlusLogic();
 		$this->wp_block_manipulator = new WpBlockManipulator();
 		$this->html_element_manipulator = new HtmlElementManipulator();
+		$this->content_diff_migrator = new ContentDiffMigrator( $wpdb );
 	}
 
 	/**
@@ -102,6 +111,64 @@ class ColoradoSunMigrator implements InterfaceMigrator {
 			'newspack-content-migrator coloradosun-replace-reusable-blocks-ids',
 			[ $this, 'cmd_replace_reusable_blocks_ids' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator coloradosun-update-hostnames-in-posts',
+			[ $this, 'cmd_update_hostnames_in_posts' ],
+			[
+				'shortdesc' => 'Updates hostnames for all posts.',
+			]
+		);
+
+	}
+
+	/**
+	 * @param $positional_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_update_hostnames_in_posts( $positional_args, $assoc_args ) {
+		global $wpdb;
+		$from = '//coloradosun-test-blockimgidfix.newspackstaging.com/wp-content/uploads/';
+		$to = '//newspack-coloradosun.s3.amazonaws.com/wp-content/uploads/';
+		$log = 'coloradosun_updatedHostnames.log';
+
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from $wpdb->posts where ID = %d;", $post_id ) );
+			if ( null === $post_content ) {
+				WP_CLI::confirm( sprintf( 'ID %d not found. Continue? ', $post_id ) );
+			}
+
+			$post_content_updated = $post_content;
+			$post_content_updated = str_replace( $from, $to, $post_content_updated );
+			if ( $post_content_updated != $post_content ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+				$this->log( $log, $post_id );
+				WP_CLI::log( 'Updated' );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
+	public function cmd_tmp( $positional_args, $assoc_args ) {
+		$file = file_get_contents( '/var/www/coloradosun.test/log_updatedRecords.log' );
+		$lines = explode( "\n", $file );
+		foreach ( $lines as $line ) {
+			$line_decoded = json_decode( $line, true );
+			file_put_contents( sprintf( '/var/www/coloradosun.test/z_logs_beforeafter/%d_1_before.log', $line_decoded['id_new'] ), $line_decoded['post_content_before'] );
+			file_put_contents( sprintf( '/var/www/coloradosun.test/z_logs_beforeafter/%d_2_after.log', $line_decoded['id_new'] ), $line_decoded['post_content_after'] );
+			$d = 1;
+		}
+		return;
 	}
 
 	public function cmd_refactor_lede_common_iframe_block_into_newspack_iframe_block( $positional_args, $assoc_args ) {
