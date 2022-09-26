@@ -751,9 +751,12 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
-				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-				if ( 0 === $new_att_id ) {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
 				}
@@ -837,9 +840,12 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
-				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-				if ( 0 === $new_att_id ) {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
 				}
@@ -920,9 +926,12 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
-				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-				if ( 0 === $new_att_id ) {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
 				}
@@ -1003,9 +1012,12 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
-				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-				if ( 0 === $new_att_id ) {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
 				}
@@ -1086,9 +1098,12 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
-				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-				if ( 0 === $new_att_id ) {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
 				}
@@ -1172,9 +1187,12 @@ class ContentDiffMigrator {
 			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 				$new_att_id = $known_attachment_ids_updates[ $att_id ];
 			} else {
-				$src_cleaned = $this->clean_attachment_url_for_query( $src );
-				$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-				if ( 0 === $new_att_id ) {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 					// Attachment ID not found.
 					continue;
 				}
@@ -1266,9 +1284,12 @@ class ContentDiffMigrator {
 				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 					$new_att_id = $known_attachment_ids_updates[ $att_id ];
 				} else {
-					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-					if ( 0 === $new_att_id ) {
+					$new_att_id = null;
+					if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+						$src_cleaned = $this->clean_attachment_url_for_query( $src );
+						$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					}
+					if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
 					}
@@ -1362,9 +1383,12 @@ class ContentDiffMigrator {
 				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 					$new_att_id = $known_attachment_ids_updates[ $att_id ];
 				} else {
-					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-					if ( 0 === $new_att_id ) {
+					$new_att_id = null;
+					if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+						$src_cleaned = $this->clean_attachment_url_for_query( $src );
+						$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					}
+					if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
 					}
@@ -1460,9 +1484,12 @@ class ContentDiffMigrator {
 				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
 					$new_att_id = $known_attachment_ids_updates[ $att_id ];
 				} else {
-					$src_cleaned = $this->clean_attachment_url_for_query( $src );
-					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
-					if ( 0 === $new_att_id ) {
+					$new_att_id = null;
+					if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+						$src_cleaned = $this->clean_attachment_url_for_query( $src );
+						$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					}
+					if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
 						// Attachment ID not found.
 						continue;
 					}
@@ -2520,6 +2547,26 @@ class ContentDiffMigrator {
 		);
 
 		return $url_cleaned;
+	}
+
+	/**
+	 * Checks if this $url should be queried as local attachment -- does it have the same hostname as 'siteurl', or is the hostname
+	 * one of $local_hostname_aliases.
+	 *
+	 * @param string $url                    Attachment file URL.
+	 * @param array  $local_hostname_aliases Array of hostnames to use as local hostname aliases.
+	 *
+	 * @return bool Should this URL be queried as local attachment.
+	 */
+	public function should_url_be_queried_as_local_attachment( $url, $local_hostname_aliases ) {
+		$url_parsed = parse_url( $url );
+		$url_host   = $url_parsed['host'];
+
+		$siteurl        = get_option( 'siteurl' );
+		$siteurl_parsed = wp_parse_url( $siteurl );
+		$siteurl_host   = $siteurl_parsed['host'];
+
+		return $siteurl_host == $url_host || in_array( $url_host, $local_hostname_aliases );
 	}
 
 	/**
