@@ -201,24 +201,31 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 		$authors    = Items::fromFile( $authors_json_path, array( 'decoder' => new ExtJsonDecoder( true ) ) );
 
 		$added_authors    = 0;
+		$updated_authors  = 0;
 		$added_co_authors = 0;
 		foreach ( $authors as $author ) {
-			// $authors keys: _id, email, name
+			// $authors keys: _id, email, displayName
 			if ( ! array_key_exists( '_id', $author ) || ! array_key_exists( '$oid', $author['_id'] ) ) {
 				$this->log( self::ADMINS_LOGS, printf( 'Skipped row: %s', wp_json_encode( $author ) ) );
 			}
 
 			$original_id  = $author['_id']['$oid'];
-			$author_email = trim( $author['email'] );
+			$author_email = array_key_exists( 'email', $author ) ? trim( $author['email'] ) : '';
+			$display_name = '';
+			if ( array_key_exists( 'display_name', $author ) ) {
+				$display_name = trim( $author['display_name'] );
+			} elseif ( array_key_exists( 'displayName', $author ) ) {
+				$display_name = trim( $author['displayName'] );
+			}
 
 			$author_data = array(
 				'user_email'    => $author_email,
-				'user_pass'     => '',
+				'user_pass'     => array_key_exists( 'password', $author ) ? $author['password'] : '',
 				'user_login'    => $author_email,
-				'user_nicename' => sanitize_title( $author['name'] ),
-				'nickname'      => $author['name'],
-				'display_name'  => $author['name'],
-				'role'          => 'authoristrator',
+				'user_nicename' => sanitize_title( $display_name ),
+				'nickname'      => $display_name,
+				'display_name'  => $display_name,
+				'role'          => array_key_exists( 'isRoot', $author ) && $author['isRoot'] ? 'administrator' : 'author',
 			);
 
 			if ( empty( $author_email ) ) {
@@ -230,12 +237,12 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 				try {
 					$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
 						array(
-							'display_name' => sanitize_title( $author['name'] ),
+							'display_name' => sanitize_title( $author['displayName'] ),
 						)
 					);
 					if ( is_wp_error( $guest_author_id ) ) {
-						WP_CLI::warning( sprintf( "Could not create GA full name '%s': %s", $author['name'], $guest_author_id->get_error_message() ) );
-						$this->log( self::ADMINS_LOGS, sprintf( "Could not create GA full name '%s': %s", $author['name'], $guest_author_id->get_error_message() ) );
+						WP_CLI::warning( sprintf( "Could not create GA full name '%s': %s", $author['displayName'], $guest_author_id->get_error_message() ) );
+						$this->log( self::ADMINS_LOGS, sprintf( "Could not create GA full name '%s': %s", $author['displayName'], $guest_author_id->get_error_message() ) );
 					}
 
 					// Set original ID.
@@ -244,17 +251,34 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 					$this->log( self::ADMINS_LOGS, sprintf( 'Imported co-author: %s', $original_id ) );
 					WP_CLI::line( sprintf( 'Imported co-author: %s', $original_id ) );
 				} catch ( \Exception $e ) {
-					WP_CLI::warning( sprintf( "Could not create GA full name '%s': %s", $author['name'], $e->getMessage() ) );
-					$this->log( self::ADMINS_LOGS, sprintf( "Could not create GA full name '%s': %s", $author['name'], $e->getMessage() ) );
+					WP_CLI::warning( sprintf( "Could not create GA full name '%s': %s", $author['displayName'], $e->getMessage() ) );
+					$this->log( self::ADMINS_LOGS, sprintf( "Could not create GA full name '%s': %s", $author['displayName'], $e->getMessage() ) );
 				}
 
 				continue;
 			}
 
 			// Check if we have already imported the author.
-			$existing_authors = $this->get_users_by_meta_data( 'original_id', $original_id );
+			$existing_authors = get_user_by( 'login', $author_data['user_email'] );
 
-			if ( empty( $existing_authors ) > 0 ) {
+			if ( $existing_authors ) {
+				// Update User.
+				$author_id = wp_update_user( array_merge( $author_data, [ 'ID' => $existing_authors->ID ] ) );
+				if ( is_wp_error( $author_id ) ) {
+					$this->log( self::ADMINS_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $author_id->get_error_message(), wp_json_encode( $author_data ) ) );
+					WP_CLI::warning( sprintf( 'Error updating user %s -- %s [%s]', $original_id, $author_id->get_error_message(), wp_json_encode( $author_data ) ) );
+					continue;
+				}
+
+				$updated_authors++;
+
+				$existing_original_ids = get_user_meta( $author_id, 'original_id' );
+				if ( ! in_array( $original_id, $existing_original_ids, true ) ) {
+					add_user_meta( $author_id, 'original_id', $original_id );
+				}
+
+				$this->log( self::ADMINS_LOGS, sprintf( 'Updated author: %s', $original_id ) );
+			} else {
 				// Create Author.
 				$author_id = wp_insert_user( $author_data );
 				if ( is_wp_error( $author_id ) ) {
@@ -266,13 +290,12 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 				$added_authors++;
 
 				// Set Author Meta.
-				update_user_meta( $author_id, 'original_id', $original_id );
+				add_user_meta( $author_id, 'original_id', $original_id );
 				$this->log( self::ADMINS_LOGS, sprintf( 'Imported author: %s', $original_id ) );
-				WP_CLI::line( sprintf( 'Imported author: %s', $original_id ) );
 			}
 		}
 
-		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d authors, and %d co-authors took %d mins.', $added_authors, $added_co_authors, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d authors, %d co-authors, and updating %d authors took %d mins.', $added_authors, $added_co_authors, $updated_authors, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
@@ -317,7 +340,7 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 			// Set Category Meta.
 			update_term_meta( $category_id, 'original_id', $original_id );
-			$this->log( self::CATEGORIES_LOGS, sprintf( 'Imported category: %s', $original_id ) );
+			$this->log( self::CATEGORIES_LOGS, sprintf( 'Imported/updated category: %s (%s)', $category['name'], $original_id ) );
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d categories took %d mins.', $added_categories, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
@@ -348,6 +371,10 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			$original_id = $tag['_id']['$oid'];
 
 			// Check if we have already imported the tag.
+			if ( term_exists( $tag['name'], 'post_tag' ) ) {
+				$this->log( self::TAGS_LOGS, sprintf( '[%s] Terms already imported: %s', $original_id, $tag['name'] ) );
+				continue;
+			}
 			$created_tag = wp_insert_term(
 				$tag['name'],
 				'post_tag',
@@ -355,8 +382,7 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			);
 
 			if ( is_wp_error( $created_tag ) ) {
-				$this->log( self::TAGS_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $created_tag->get_error_message(), wp_json_encode( $tag ) ), false );
-				WP_CLI::warning( sprintf( 'Error creating user %s -- %s [%s]', $original_id, $created_tag->get_error_message(), wp_json_encode( $tag ) ) );
+				$this->log( self::TAGS_LOGS, sprintf( '[%s]: %s [%s]', $original_id, $created_tag->get_error_message(), wp_json_encode( $tag ) ) );
 				continue;
 			}
 
@@ -440,7 +466,6 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 					'post_type'     => 'post',
 					'post_title'    => $post['title'],
 					'post_content'  => $post['body'],
-					'post_excerpt'  => $post['epigraph'] ? $post['epigraph'] : '',
 					'post_status'   => $post['isPublished'] ? 'publish' : 'draft',
 					'post_author'   => $author_id,
 					'post_date'     => $post['publishedAt']['$date'],
@@ -513,10 +538,8 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 					// Set attachment as featured image.
 					$result_featured_set = set_post_thumbnail( $post_id, $att_id );
 					if ( ! $result_featured_set ) {
-						WP_CLI::warning( sprintf( '❗ could not set att.ID %s as featured image', $att_id ) );
 						$this->log( self::POSTS_LOGS, sprintf( '❗ could not set att.ID %s as featured image', $att_id ) );
 					} else {
-						WP_CLI::line( sprintf( '👍 set att.ID %s as featured image', $att_id ) );
 						$this->log( self::POSTS_LOGS, sprintf( '👍 set att.ID %s as featured image', $att_id ) );
 					}
 				}
@@ -544,7 +567,7 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 									true
 								);
 								if ( is_wp_error( $created_category ) ) {
-									WP_CLI::error( sprintf( 'Error creating Category from Tag $s: %s', $category_from_tag->name, $created_category->get_error_message() ) );
+									$this->log( self::POSTS_LOGS, sprintf( 'Error creating Category from Tag $s: %s', $category_from_tag->name, $created_category->get_error_message() ) );
 								} else {
 									$created_categories[] = $created_category;
 								}
@@ -578,28 +601,28 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 					);
 					if ( is_wp_error( $result ) ) {
 						$this->log( self::POSTS_LOGS, sprintf( '%d %s %s', $post_id, wp_json_encode( $result ), $result->get_error_message() ) );
-						WP_CLI::warning( sprintf( 'Error setting post tags %s -- %s', wp_json_encode( $result ), $result->get_error_message() ) );
 					}
 
-					WP_CLI::warning( sprintf( 'Setting Post %d tags %s', $post_id, wp_json_encode( $result ) ) );
+					$this->log( self::POSTS_LOGS, sprintf( 'Setting Post %d tags %s', $post_id, wp_json_encode( $result ) ) );
 				}
+
+				// Set epigraph as subtitle.
+				update_post_meta( $post_id, 'newspack_post_subtitle', $post['epigraph'] ? $post['epigraph'] : '' );
 
 				// Set the rest of post meta.
 				update_post_meta( $post_id, 'original_id', $original_id );
-				foreach ( array( 'isPushDown', 'isHighlighted', 'articleRssLink', 'sendNotification', 'notShowOnLast', 'notShowOnRanking', 'isRss', 'isSponsored' ) as $post_meta_to_import ) {
+				foreach ( array( 'kicker', 'isPushDown', 'isHighlighted', 'articleRssLink', 'sendNotification', 'notShowOnLast', 'notShowOnRanking', 'isRss', 'isSponsored' ) as $post_meta_to_import ) {
 					if ( array_key_exists( $post_meta_to_import, $post ) && ! is_null( $post[ $post_meta_to_import ] ) ) {
 						update_term_meta( $post_id, "imported_$post_meta_to_import", $post[ $post_meta_to_import ] );
 					}
 				}
-				WP_CLI::line( sprintf( 'Imported Post %s with ID: %d.', $original_id, $post_id ) );
+				$this->log( self::POSTS_LOGS, sprintf( 'Imported Post %s with ID: %d.', $original_id, $post_id ) );
 
-				if ( file_exists( $cache_path ) ) {
-					file_put_contents( $cache_path, $original_id . PHP_EOL, FILE_APPEND | LOCK_EX );
-				}
+				file_put_contents( $cache_path, $original_id . PHP_EOL, FILE_APPEND | LOCK_EX );
 			}
 		}
 
-		WP_CLI::line( sprintf( 'All done! 🙌 Importing %d posts took %d mins.', $added_posts, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		$this->log( self::POSTS_LOGS, sprintf( 'All done! 🙌 Importing %d posts took %d mins.', $added_posts, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
