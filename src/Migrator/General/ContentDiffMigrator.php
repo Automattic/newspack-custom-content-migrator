@@ -25,6 +25,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                       = 'content-diff__err.log';
 
+	const SAVED_META_LIVE_POST_ID         = 'newspackcontentdiff_live_id';
+
 	/**
 	 * Instance.
 	 *
@@ -149,6 +151,82 @@ class ContentDiffMigrator implements InterfaceMigrator {
 						'name'        => 'live-table-prefix',
 						'description' => 'Live site table prefix.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator display-collations-comparison',
+			[ $this, 'cmd_compare_collations_of_live_and_core_wp_tables' ],
+			[
+				'shortdesc' => 'Display a table comparing collations of Live and Core WP tables.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => 'Live site table prefix.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'skip-tables',
+						'description' => 'Skip checking a particular set of tables from the collation checks.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'different-collations-only',
+						'description' => 'This flag determines to only display tables with differing collations.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator correct-collations-for-live-wp-tables',
+			[ $this, 'cmd_correct_collations_for_live_wp_tables' ],
+			[
+				'shortdesc' => 'This command will handle the necessary operations to match collations across Live and Core WP tables',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => 'Live site table prefix.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'mode',
+						'description' => 'Determines how large the SQL insert transactions are and the latency between them.',
+						'optional'    => true,
+						'default'     => 'generous',
+						'options'     => [
+							'aggressive',
+							'generous',
+							'cautious',
+							'calm',
+						],
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'skip-tables',
+						'description' => 'Skip checking a particular set of tables from the collation checks.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'backup-table-prefix',
+						'description' => 'Prefix to use when backing up the Live tables.',
+						'optional'    => true,
+						'default'     => 'bak_',
 						'repeating'   => false,
 					],
 				],
@@ -378,6 +456,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 					]
 				)
 			);
+
+			// Save some metas.
+			update_post_meta( $post_id_new, self::SAVED_META_LIVE_POST_ID, $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -471,7 +552,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			$parent_id_old = $post->post_parent;
 			$parent_id_new = $imported_post_ids_map[ $post->post_parent ] ?? null;
-			$parent_id_new = is_null( $parent_id_new ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
+			$parent_id_new = is_null( $parent_id_new ) & array_key_exists( $post->post_parent, $imported_attachment_ids_map ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
 			// it won't be present in the list of the posts we imported, $all_live_posts_ids. So let's try and search for this
@@ -631,6 +712,84 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, $this->log_updated_blocks_ids );
+	}
+
+	/**
+	 * This function will display a table comparing the collations of Live and Core WP tables.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Optional arguments.
+	 */
+	public function cmd_compare_collations_of_live_and_core_wp_tables( $args, $assoc_args ) {
+		$live_table_prefix = $assoc_args['live-table-prefix'];
+		$skip_tables = [];
+		$different_tables_only = $assoc_args['different-collations-only'] ?? false;
+
+		if ( ! empty( $assoc_args['skip-tables'] ) ) {
+			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
+		}
+
+		$tables = [];
+
+		if ( $different_tables_only ) {
+			$tables = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+		} else {
+			$tables = self::$logic->get_collation_comparison_of_live_and_core_wp_tables( $live_table_prefix, $skip_tables );
+		}
+
+		if ( ! empty( $tables ) ) {
+			WP_CLI\Utils\format_items( 'table', $tables, array_keys( $tables[0] ) );
+		} else {
+			WP_CLI::success( 'Live and Core WP DB table collations match!' );
+		}
+	}
+
+	/**
+	 * This function will execute the necessary steps to get Live WP
+	 * tables to match the collation of Core WP tables.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Optional arguments.
+	 */
+	public function cmd_correct_collations_for_live_wp_tables( $args, $assoc_args ) {
+		$live_table_prefix = $assoc_args['live-table-prefix'];
+		$mode = $assoc_args['mode'];
+		$backup_prefix = $assoc_args['backup-table-prefix'];
+		$skip_tables = [];
+
+		if ( ! empty( $assoc_args['skip-tables'] ) ) {
+			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
+		}
+
+		$tables_with_differing_collations = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+
+		if ( ! empty( $tables_with_differing_collations ) ) {
+			WP_CLI\Utils\format_items( 'table', $tables_with_differing_collations, array_keys( $tables_with_differing_collations[0] ) );
+		}
+
+		switch ( $mode ) {
+			case 'aggressive':
+				$records_per_transaction = 15000;
+				$sleep_in_seconds = 1;
+				break;
+			case 'generous':
+				$records_per_transaction = 10000;
+				$sleep_in_seconds = 2;
+				break;
+			case 'calm':
+				$records_per_transaction = 1000;
+				$sleep_in_seconds = 3;
+				break;
+			default: // Cautious.
+				$records_per_transaction = 5000;
+				$sleep_in_seconds = 2;
+				break;
+		}
+
+		foreach ( $tables_with_differing_collations as $result ) {
+			echo 'Addressing ' . $result['table'] . "\n";
+			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
+		}
 	}
 
 	/**

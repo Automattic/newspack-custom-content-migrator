@@ -110,6 +110,13 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Remove stray double dots from image descriptions.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlottesvilletoday-migrate-custom-taxonomy-authors',
+			[ $this, 'cmd_use_custom_taxonomy_authors' ],
+			[
+				'shortdesc' => 'Run additionally after cmd_acf_migrate to import authors from custom taxonomy.',
+			]
+		);
 	}
 
 	public function replace_string_ending( $string, $ending_current, $ending_new ) {
@@ -271,6 +278,79 @@ class CharlottesvilleTodayMigrator implements InterfaceMigrator {
 		}
 
 		return $string_trimmed;
+	}
+
+	/**
+	 * Imports authors from custom taxonomy.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_use_custom_taxonomy_authors( $args, $assoc_args ) {
+		global $wpdb;
+
+		if ( ! $this->coauthors_logic->is_coauthors_active() ) {
+			WP_CLI::error( 'CAP must be active in order to run this command. Please fix then re run.' );
+		}
+
+		$default_wp_author_user = get_user_by( 'login', 'adminnewspack' );
+		$default_wp_author_user_id = $default_wp_author_user->ID;
+
+		$post_ids = get_posts( [
+			'fields' => 'ids',
+			'posts_per_page' => -1,
+		] );
+
+		foreach ( $post_ids as $post_id ) {
+			$post_authors = $wpdb->get_col( $wpdb->prepare( "select k.name from wp_term_relationships i inner join wp_term_taxonomy j on i.term_taxonomy_id = j.term_taxonomy_id inner join wp_terms k on j.term_id = k.term_id where i.object_id = %d and j.taxonomy = 'post_author';", $post_id ) );
+
+			if ( empty( $post_authors ) ) {
+				continue;
+			}
+
+			WP_CLI::warning( "Found authors for post " . $post_id . ": " . json_encode( $post_authors ) );
+
+			$guest_author_ids = [];
+			foreach ( $post_authors as $post_author ) {
+				$guest_author = $this->get_or_create_ga_by_name( $post_author );
+				$guest_author_id = $guest_author->ID ?? null;
+				if ( is_null( $guest_author_id ) ) {
+					throw new \RuntimeException( sprintf( "GA with name %s not found or created.", $author_name ) );
+				}
+				$guest_author_ids[] = $guest_author_id;
+			}
+
+			if ( empty( $guest_author_ids ) ) {
+				continue;
+			}
+
+			// GAs won't be assigned to the post if WP_User author is missing:
+			//   - see \CoAuthors_Plus::add_coauthors and the "Uh oh, no WP_Users assigned to the post" remark.
+			// So let's assign a default one if that's the case.
+			if ( 0 === get_post_field( 'post_author', $post_id ) ) {
+				wp_update_post( [
+					'ID' => $post_id,
+					'post_author' => $default_wp_author_user_id,
+				] );
+			}
+
+			// Get existing GAs.
+			$existing_guest_authors = $this->coauthors_logic->get_guest_authors_for_post( $post_id );
+			$existing_guest_author_ids = [];
+			foreach ( $existing_guest_authors as $existing_guest_author ) {
+				if ( 'guest-author' == $existing_guest_author->type ) {
+					$existing_guest_author_ids[] = $existing_guest_author->ID;
+				}
+			}
+
+			// Add previously set GA too.
+			$guest_author_ids = array_merge( $guest_author_ids, $existing_guest_author_ids );
+			$guest_author_ids = array_unique( $guest_author_ids );
+
+			$this->coauthors_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id );
+		}
+
+		wp_cache_flush();
 	}
 
 	/**

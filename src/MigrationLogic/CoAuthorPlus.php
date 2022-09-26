@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\MigrationLogic;
 use \CoAuthors_Plus;
 use \CoAuthors_Guest_Authors;
 use \WP_CLI;
+use WP_Post;
 
 class CoAuthorPlus {
 
@@ -170,6 +171,21 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
+	 *
+	 * @param string $display_name Guest Author ID.
+	 *
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_display_name( $display_name ) {
+
+		// This class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'.
+		$user_login = sanitize_title( $display_name );
+
+		return $this->get_guest_author_by_user_login( $user_login );
+	}
+
+	/**
 	 * Gets Post's Guest Authors.
 	 *
 	 * @param int $post_id Post ID.
@@ -195,6 +211,27 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Returns a list of GA IDs assigned to Post.
+	 * It works off of self::get_guest_authors_for_post() and just filters the GA IDs.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array List of GA IDs.
+	 */
+	public function get_posts_existing_ga_ids( $post_id ) {
+		$existing_guest_author_ids = [];
+
+		$existing_guest_authors = $this->get_guest_authors_for_post( $post_id );
+		foreach ( $existing_guest_authors as $existing_guest_author ) {
+			if ( 'guest-author' == $existing_guest_author->type ) {
+				$existing_guest_author_ids[] = $existing_guest_author->ID;
+			}
+		}
+
+		return $existing_guest_author_ids;
+	}
+
+	/**
 	 * Creates a Guest Author user from an existing WP user.
 	 *
 	 * @param int $user_id WP User ID.
@@ -203,5 +240,49 @@ class CoAuthorPlus {
 	 */
 	public function create_guest_author_from_wp_user( $user_id ) {
 		return $this->coauthors_guest_authors->create_guest_author_from_user_id( $user_id );
+	}
+
+	/**
+	 * This function will facilitate obtaining all posts for a given Guest Author.
+	 *
+	 * @param int  $ga_id Guest Author ID (Post ID).
+	 * @param bool $get_post_objects Flag which determines whether to return array of Post IDs, or Post Objects.
+	 *
+	 * @return int[]|WP_Post[]
+	 */
+	public function get_all_posts_for_guest_author( int $ga_id, bool $get_post_objects = false ) {
+		global $wpdb;
+
+		$records = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+	                object_id
+				FROM $wpdb->term_relationships 
+				WHERE term_taxonomy_id = ( 
+				    SELECT 
+				           term_taxonomy_id 
+				    FROM $wpdb->term_relationships 
+				    WHERE object_id = %d )",
+				$ga_id
+			)
+		);
+
+		$post_ids = array_map( fn( $row ) => (int) $row->object_id, $records );
+		$post_ids = array_filter( $post_ids, fn( $post_id ) => $post_id !== $ga_id );
+
+		if ( ! empty( $post_ids ) ) {
+			if ( ! $get_post_objects ) {
+				return $post_ids;
+			}
+
+			return get_posts(
+				[
+					'numberposts' => -1,
+					'post__in'    => $post_ids,
+				]
+			);
+		}
+
+		return [];
 	}
 }
