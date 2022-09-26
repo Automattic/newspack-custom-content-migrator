@@ -923,8 +923,8 @@ class NoozhawkMigrator implements InterfaceMigrator {
 
 			$existing_featured_image = $this->get_post_by_meta( '_newspack_imported_from_url', $featured_image['url'], 'attachment' );
 
-			if ( get_post_thumbnail_id( $post->ID ) === $existing_featured_image ) {
-				WP_CLI::line( sprintf( 'Skipping post %s (%d/%d) featured image already set: %d', $post->ID, $index + 1, $posts_count, $featured_image_id ) );
+			if ( $existing_featured_image && get_post_thumbnail_id( $post->ID ) === $existing_featured_image->ID ) {
+				WP_CLI::line( sprintf( 'Skipping post %s (%d/%d) featured image already set: %d', $post->ID, $index + 1, $posts_count, $existing_featured_image->ID ) );
 				continue;
 			}
 
