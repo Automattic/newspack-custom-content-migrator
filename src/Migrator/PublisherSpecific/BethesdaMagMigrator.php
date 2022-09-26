@@ -2,7 +2,6 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use \NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
@@ -25,17 +24,11 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	private $coauthorsplus_logic;
 
 	/**
-	 * @var CoAuthors_Guest_Authors $coauthors_guest_authors
-	 */
-	private $coauthors_guest_authors;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_migrator_logic    = new PostsLogic();
-		$this->coauthorsplus_logic     = new CoAuthorPlusLogic();
-		$this->coauthors_guest_authors = new CoAuthors_Guest_Authors();
+		$this->posts_migrator_logic = new PostsLogic();
+		$this->coauthorsplus_logic  = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -138,7 +131,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_handle_content_refresh' ],
 			[
 				'shortdesc' => 'Repeatable command to handle refreshed post content via XML',
-				'synopsis' => [
+				'synopsis'  => [
 					[
 						'type'        => 'positional',
 						'name'        => 'xml',
@@ -232,13 +225,13 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			),
 			function( $post ) {
 				$co_authors_ids       = array();
-				$author_meta          = get_post_meta( $post->ID, 'bm_author', true );
+				$author_meta          = trim( get_post_meta( $post->ID, 'bm_author', true ) );
 				$authors_to_not_split = array(
 					'By Alicia Klaffky, Kensington',
 					'By Robert Karn, Boyds',
 					'By Carole Sugarman, @CaroleSugarman',
 				);
-				$staff_guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( 'staff' );
+				$staff_guest_author   = $this->coauthorsplus_logic->get_guest_author_by_user_login( 'staff' );
 
 				$co_authors_to_add = array();
 
@@ -255,19 +248,28 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 						&& ! $this->str_contains( $cleaned_author_name, 'Academie de Cuisine' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', Potomac' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', Rockville' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Takoma Park' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Brookeville' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Silver Spring' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', Chevy Chase' )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Gaithersburg' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', MD' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', Gaithersburg' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', Bethesda' )
 						&& ! $this->str_ends_with( $cleaned_author_name, ', Arlington, VA' )
-						&& ! $this->str_starts_with( 'Story and photos by', $author_meta )
-						&& ! $this->str_starts_with( 'Text and photos by', $author_meta )
-						&& ! in_array( $author_meta, $authors_to_not_split, true )
+						&& ! $this->str_ends_with( $cleaned_author_name, ', Arlington, Virginia' )
+						&& ! $this->str_ends_with( $cleaned_author_name, 'High School' )
+						&& ! $this->str_starts_with( 'Story and photos by', $cleaned_author_name )
+						&& ! $this->str_starts_with( 'Story and photos by', $cleaned_author_name )
+						&& ! $this->str_starts_with( 'Text and photos by', $cleaned_author_name )
+						&& ! in_array( $cleaned_author_name, $authors_to_not_split, true )
 						&& ( $this->str_contains( $cleaned_author_name, ' and ' ) || $this->str_contains( $cleaned_author_name, ', ' ) || $this->str_contains( $cleaned_author_name, 'Follow @' ) )
 					) {
 						$co_authors_names = preg_split( '/(, | and | & |Follow @[^\s]+)/', $cleaned_author_name );
 						foreach ( $co_authors_names as $ca ) {
-							$co_authors_to_add[] = $ca;
+							if ( ! empty( $ca ) ) {
+								$co_authors_to_add[] = $ca;
+							}
 						}
 					} else {
 						$co_authors_to_add = array( $cleaned_author_name );
@@ -280,7 +282,12 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 						if ( $this->str_contains( $co_author_to_add, 'staff' ) ) {
 							$co_authors_ids[] = $staff_guest_author->ID;
 						} else {
-							$co_authors_ids[] = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $co_author_to_add ) );
+							$guest_author_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $co_author_to_add ) );
+							if ( is_wp_error( $guest_author_id ) ) {
+								WP_CLI::warning( sprintf( 'Could not create GA for post %d with display name: %s', $post->ID, $co_author_to_add ) );
+							} else {
+								$co_authors_ids[] = $guest_author_id;
+							}
 						}
 					}
 
@@ -386,7 +393,8 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				$post['post_name'] = $child->nodeValue;
 			}
 
-			/*if ( 'wp:post_parent' === $child->nodeName ) {
+			/*
+			if ( 'wp:post_parent' === $child->nodeName ) {
 				$post['post_parent'] = $child->nodeValue;
 			}*/
 
@@ -723,7 +731,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 
 			$destination_guest_author_id = $this->get_or_create_guest_author( $row['new_name_1'] );
 
-			$original_guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $row['existing_name'] ) );
+			$original_guest_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $row['existing_name'] ) );
 
 			if ( false === $original_guest_author ) {
 				WP_CLI::log( "GUEST AUTHOR NOT FOUND: {$row['existing_name']}" );
@@ -750,7 +758,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_authors, $post_id );
 			}
 
-			$this->coauthors_guest_authors->delete( $original_guest_author->ID );
+			$this->coauthorsplus_logic->coauthors_guest_authors->delete( $original_guest_author->ID );
 		}
 	}
 
@@ -761,7 +769,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 */
 	private function get_or_create_guest_author( string $full_name ) {
 		WP_CLI::log( "GUEST AUTHOR NAME: $full_name" );
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $full_name ) );
+		$guest_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'post_name', sanitize_title( $full_name ) );
 
 		if ( false !== $guest_author ) {
 			WP_CLI::log( "EXISTS! $guest_author->ID" );
@@ -831,7 +839,6 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				);
 
 				if ( false !== $result ) {
-
 					$latest_term_sql = "SELECT term_id FROM $wpdb->terms WHERE name = '$term->name' AND slug = '$term->slug' ORDER BY term_id DESC LIMIT 1";
 					$latest_term     = $wpdb->get_row( $latest_term_sql );
 
@@ -850,9 +857,9 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 						$old_taxonomy_id_sql = "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = $term->term_id AND taxonomy = '$taxonomy'";
 						$old_taxonomy_id     = $wpdb->get_row( $old_taxonomy_id_sql );
 
-						$update_term_relationships_with_new_taxonomy_id_sql = "UPDATE 
-		                    $wpdb->term_relationships 
-						SET term_taxonomy_id = $new_term_taxonomy->term_taxonomy_id 
+						$update_term_relationships_with_new_taxonomy_id_sql = "UPDATE
+		                    $wpdb->term_relationships
+						SET term_taxonomy_id = $new_term_taxonomy->term_taxonomy_id
 						WHERE term_taxonomy_id = $old_taxonomy_id->term_taxonomy_id";
 						$num_of_rows_updated                                = $wpdb->query( $update_term_relationships_with_new_taxonomy_id_sql );
 
@@ -1027,7 +1034,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 				WP_CLI::error( $user_id->get_error_message() );
 			}
 
-			$user    = get_user_by( 'id', $user_id );
+			$user = get_user_by( 'id', $user_id );
 		}
 
 		return $user;
@@ -1223,7 +1230,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			];
 
 			if ( ! empty( $row['action'] ) ) {
-				$current_term_and_term_taxonomy_id_sql = "SELECT t.term_id, tt.term_taxonomy_id FROM $wpdb->term_taxonomy tt 
+				$current_term_and_term_taxonomy_id_sql = "SELECT t.term_id, tt.term_taxonomy_id FROM $wpdb->term_taxonomy tt
     				INNER JOIN $wpdb->terms t ON tt.term_id = t.term_id WHERE t.slug = '{$row['slug']}' AND tt.taxonomy = 'category'";
 				$current_term_and_term_taxonomy_id     = $wpdb->get_row( $current_term_and_term_taxonomy_id_sql );
 				if ( $current_term_and_term_taxonomy_id ) {
@@ -1256,7 +1263,6 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 							break;
 						case 'rename':
 							if ( ! empty( $row['target'] ) ) {
-
 								$category_exists = category_exists( $row['target'] );
 
 								if ( is_null( $category_exists ) ) {
@@ -1311,19 +1317,19 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 			$this->erase_category( $taxonomy[0], $taxonomy[1] );
 		}
 
-		$counts_which_need_updating_sql = "SELECT 
+		$counts_which_need_updating_sql = "SELECT
        		tt.term_taxonomy_id,
        		tt.count,
-       		sub.counter 
+       		sub.counter
 		FROM $wpdb->term_taxonomy tt LEFT JOIN (
-    		SELECT 
-    		       term_taxonomy_id, 
-    		       COUNT(object_id) as counter 
+    		SELECT
+    		       term_taxonomy_id,
+    		       COUNT(object_id) as counter
     		FROM $wpdb->term_relationships GROUP BY term_taxonomy_id
-		) as sub ON 
-		    tt.term_taxonomy_id = sub.term_taxonomy_id 
-		WHERE sub.counter IS NOT NULL 
-		  AND tt.count <> sub.counter 
+		) as sub ON
+		    tt.term_taxonomy_id = sub.term_taxonomy_id
+		WHERE sub.counter IS NOT NULL
+		  AND tt.count <> sub.counter
 		  AND tt.taxonomy IN ('category', 'post_tag')";
 		$counts_which_need_updating     = $wpdb->get_results( $counts_which_need_updating_sql );
 
@@ -1376,8 +1382,8 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_add_specific_tags_to_specific_posts() {
 		global $wpdb;
-		$print_term_id = $wpdb->get_row( "SELECT term_id FROM wp_terms WHERE slug = 'print' LIMIT 1" );
-		$print_term_id = $print_term_id->term_id;
+		$print_term_id            = $wpdb->get_row( "SELECT term_id FROM wp_terms WHERE slug = 'print' LIMIT 1" );
+		$print_term_id            = $print_term_id->term_id;
 		$culture_term_taxonomy_id = $wpdb->get_row( "SELECT tt.term_taxonomy_id FROM wp_terms t LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id WHERE t.slug = 'culture' AND tt.taxonomy = 'category' LIMIT 1" );
 		$culture_term_taxonomy_id = $culture_term_taxonomy_id->term_taxonomy_id;
 		$this->duplicate_relationships( $print_term_id, $culture_term_taxonomy_id, 'post_tag' );
@@ -1393,7 +1399,7 @@ class BethesdaMagMigrator implements InterfaceMigrator {
 		$erins_user = get_user_by( 'email', 'eakhill@gmail.com' );
 		$eris_posts = $wpdb->get_results( "SELECT ID FROM $wpdb->posts WHERE post_author = {$erins_user->ID} AND post_type = 'post' AND post_status = 'publish'" );
 		$staff_user = $this->coauthorsplus_logic->get_guest_author_by_user_login( 'staff' );
-		var_dump(["erin's user" => $erins_user, "erin's posts" => count($eris_posts), 'staff account' => $staff_user]);
+		var_dump( ["erin's user" => $erins_user, "erin's posts" => count( $eris_posts ), 'staff account' => $staff_user] );
 		foreach ( $eris_posts as $post ) {
 			WP_CLI::log( "{$post->ID}" );
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $staff_user->ID ], $post->ID );

@@ -170,6 +170,21 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
+	 *
+	 * @param string $display_name Guest Author ID.
+	 *
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_display_name( $display_name ) {
+
+		// This class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'.
+		$user_login = sanitize_title( $display_name );
+
+		return $this->get_guest_author_by_user_login( $user_login );
+	}
+
+	/**
 	 * Gets Post's Guest Authors.
 	 *
 	 * @param int $post_id Post ID.
@@ -192,6 +207,27 @@ class CoAuthorPlus {
 		}
 
 		return $guest_authors;
+	}
+
+	/**
+	 * Returns a list of GA IDs assigned to Post.
+	 * It works off of self::get_guest_authors_for_post() and just filters the GA IDs.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array List of GA IDs.
+	 */
+	public function get_posts_existing_ga_ids( $post_id ) {
+		$existing_guest_author_ids = [];
+
+		$existing_guest_authors = $this->get_guest_authors_for_post( $post_id );
+		foreach ( $existing_guest_authors as $existing_guest_author ) {
+			if ( 'guest-author' == $existing_guest_author->type ) {
+				$existing_guest_author_ids[] = $existing_guest_author->ID;
+			}
+		}
+
+		return $existing_guest_author_ids;
 	}
 
 	/**
