@@ -61,6 +61,7 @@ PluginSetup::register_migrators(
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
+		Migrator\PublisherSpecific\DiarioElSolMigrator::class,
 		Migrator\PublisherSpecific\NoozhawkMigrator::class,
 		Migrator\PublisherSpecific\CharlottesvilleTodayMigrator::class,
 		Migrator\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
