@@ -448,19 +448,20 @@ SQL;
 	 */
 	public function delete_post_revisions( $post_id, $chunk_size ) {
 		global $wpdb;
-		$ids     = $wpdb->get_col(
+		$ids          = $wpdb->get_col(
 			$wpdb->prepare(
 				"SELECT ID FROM $wpdb->posts WHERE post_type = 'revision' AND post_parent = %d ORDER BY post_date ASC LIMIT %d",
 				$post_id,
 				$chunk_size
 			)
 		);
-		$deleted = $wpdb->query(
-            sprintf(
-                "DELETE FROM $wpdb->posts WHERE ID IN (%s)",
-                implode( ',', $ids )
-            )
-        );
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$deleted      = $wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM $wpdb->posts WHERE ID IN ($placeholders)", // phpcs:ignore
+				$ids
+			)
+		);
 		return $deleted;
 	}
 }

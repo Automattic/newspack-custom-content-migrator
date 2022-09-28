@@ -534,6 +534,7 @@ class PostsMigrator implements InterfaceMigrator {
 	 * Gets a list of posts that have more than a certain number of revisions
 	 *
 	 * @param array $args The positional arguments passed to the command.
+	 * @param array $assoc_args Associative arguments.
 	 * @return void
 	 */
 	public function cmd_find_posts_by_number_of_revisions( $args, $assoc_args ) {
