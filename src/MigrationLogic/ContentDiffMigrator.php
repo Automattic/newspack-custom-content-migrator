@@ -148,10 +148,12 @@ class ContentDiffMigrator {
 		$data[ self::DATAKEY_USERS ][] = $author_row;
 
 		// Get Post Author User Metas.
-		$data[ self::DATAKEY_USERMETA ] = array_merge(
-			$data[ self::DATAKEY_USERMETA ],
-			$this->select_usermeta_rows( $table_prefix, $author_row['ID'] )
-		);
+		if ( is_array( $author_row ) && array_key_exists( 'ID', $author_row ) ) {
+			$data[ self::DATAKEY_USERMETA ] = array_merge(
+				$data[ self::DATAKEY_USERMETA ],
+				$this->select_usermeta_rows( $table_prefix, $author_row['ID'] )
+			);
+		}
 
 		// Get Comments.
 		if ( $post_row['comment_count'] > 0 ) {
@@ -325,9 +327,9 @@ class ContentDiffMigrator {
 
 		// Get existing Author User or insert a new one.
 		$author_id_old = $data[ self::DATAKEY_POST ]['post_author'];
-		$author_row    = $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old );
-		$usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row['ID'] );
-		$user_existing = $this->get_user_by( 'login', $author_row['user_login'] );
+		$author_row    = ! is_null( $author_id_old ) ? $this->filter_array_element( $data[ self::DATAKEY_USERS ], 'ID', $author_id_old ) : [];
+		$usermeta_rows = is_array( $author_row ) && array_key_exists( 'ID', $author_row ) ? $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $author_row['ID'] ) : [];
+		$user_existing = is_array( $author_row ) && array_key_exists( 'user_login', $author_row ) ? $this->get_user_by( 'login', $author_row['user_login'] ) : false;
 		$author_id_new = null;
 		if ( $user_existing instanceof WP_User ) {
 			$author_id_new = (int) $user_existing->ID;
@@ -1555,13 +1557,13 @@ class ContentDiffMigrator {
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
 			WP_CLI::log( "Iteration $i out of $iterations" );
-			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT * FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
+			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			$insert_result = $this->wpdb->query( $insert_sql );
 
-			if ( ! is_wp_error( $insert_result ) ) {
+			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
 				$limiter['start'] = $limiter['start'] + $limiter['limit'];
 			} else {
-				throw new \RuntimeException( "Got up to (not including) {$limiter['start']}" );
+				throw new \RuntimeException( sprintf( "Got up to (not including) %s. Failed running SQL '%s'.", $limiter['start'], $insert_sql ) );
 			}
 
 			if ( $sleep_in_seconds ) {
