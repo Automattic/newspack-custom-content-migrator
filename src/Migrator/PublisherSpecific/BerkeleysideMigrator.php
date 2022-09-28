@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use S3_Uploads\Plugin;
 use Simple_Local_Avatars;
 use stdClass;
 use \WP_CLI;
@@ -186,6 +187,136 @@ class BerkeleysideMigrator implements InterfaceMigrator {
 			'newspack-content-migrator berkeleyside-fix-primary-categories',
 			[ $this, 'cmd_fix_primary_categories' ]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator berkeleyside-attempt-fix-broken-images',
+			[ $this, 'cmd_attempt_fix_broken_images' ]
+		);
+	}
+
+	public function cmd_attempt_fix_broken_images() {
+		$file = get_home_path() . 'broken_media_urls.log';
+		$fixed_images_log_filename = get_home_path() . 'fixed_media_urls.log';
+		$fixed_images_log = file_put_contents( $fixed_images_log_filename, '' );
+		$s3 = Plugin::get_instance()->s3();
+		$missing_images = file_get_contents( $file );
+		$missing_images = explode( "\n", $missing_images );
+		foreach ( $missing_images as $missing_image ) {
+			if ( empty( $missing_image ) ) {
+				continue;
+			}
+
+			$info = explode( ',', $missing_image );
+			// 0 => post_id
+			// 1 => s3_url
+			$post_id = $info[0];
+			$url = $info[1];
+
+			$last_hyphen = strrpos( $url, '-' );
+			$last_period = strrpos( $url, '.' );
+
+			if ( false !== $last_hyphen && false !== $last_period ) {
+				$adjusted_url = substr_replace( $url, '', $last_hyphen, $last_period - $last_hyphen );
+
+				$s3_first_attempt = wp_remote_head( $adjusted_url, [ 'redirection' => 5 ] );
+
+				if ( is_wp_error( $s3_first_attempt ) ) {
+					WP_CLI::warning(
+						sprintf(
+							'FIRST_ATTEMPT: Image ID (%s) from S3 returned an error: %s',
+							$url,
+							$s3_first_attempt->get_error_message()
+						)
+					);
+
+					file_put_contents( $fixed_images_log_filename, "FIRST_ATTEMPT,$post_id,$url,{$s3_first_attempt->get_error_message()}\n", FILE_APPEND );
+					continue;
+				}
+
+				if ( 200 !== $s3_first_attempt['response']['code'] ) {
+
+					$exploded_url = explode( '/', $url );
+					$original_filename = array_pop( $exploded_url );
+					$month = array_pop( $exploded_url );
+					$year = array_pop( $exploded_url );
+
+					$last_hyphen = strrpos( $original_filename, '-' );
+
+					$adjusted_filename_without_hyphen = false !== $last_hyphen ?
+						substr( $original_filename, 0, $last_hyphen ) :
+						substr( $original_filename, 0, strrpos( $original_filename, '.' ) );
+
+					$adjusted_filename = false !== $last_hyphen ?
+						substr( $original_filename, 0, $last_hyphen + 2 ) :
+						substr( $original_filename, 0, strrpos( $original_filename, '.' ) );
+
+					$s3_files_in_directory = $s3->getIterator(
+						'ListObjects',
+						[
+							'Bucket' => strtok( S3_UPLOADS_BUCKET, '/' ),
+							'Prefix' => "wp-content/uploads/$year/$month"
+						]
+					);
+
+					$target_files = [];
+					foreach ( $s3_files_in_directory as $s3_file ) {
+						$file_path = $s3_file['Key'];
+						$filename = substr( $file_path, strrpos( $file_path, '/' ) + 1 );
+
+						if ( str_starts_with( $filename, $adjusted_filename_without_hyphen ) ) {
+							$target_files[] = $filename;
+						}
+					}
+
+					arsort( $target_files, SORT_NATURAL | SORT_FLAG_CASE );
+
+					foreach ( $target_files as $file ) {
+						if ( str_starts_with( $file, $adjusted_filename ) ) {
+							$new_url = str_replace( $original_filename, $file, $url );
+							$this->update_image_in_post( $post_id, $url, $new_url, $fixed_images_log_filename );
+							continue 2;
+						}
+					}
+
+					// If made it this far, couldn't find the closest matching image.
+					// Choose the largest image.
+					$new_url = str_replace( $original_filename, $target_files[0], $url );
+					$this->update_image_in_post( $post_id, $url, $new_url, $fixed_images_log_filename );
+				} else {
+					$this->update_image_in_post( $post_id, $url, $adjusted_url, $fixed_images_log_filename );
+				}
+			} else {
+				file_put_contents( $fixed_images_log_filename, "NO_ATTEMPT,$post_id,$url\n", FILE_APPEND );
+			}
+		}
+	}
+
+	private function update_image_in_post( $post_id, $url, $new_url, $log_file ) {
+		$message = "POST_ID: $post_id, URL: $url, NEW_URL: $new_url";
+		$same_url = $url == $new_url ? 'SAME_URL: YES' : 'SAME_URL: NO';
+		$message .= " $same_url";
+		WP_CLI::log( $message );
+
+		if ( $url != $new_url ) {
+			$post               = get_post( $post_id );
+
+			if ( null != $post ) {
+				$post->post_content = str_replace( $url, $new_url, $post->post_content );
+				$result             = wp_update_post( $post );
+
+				if ( $post_id == $result ) {
+					$message .= " UPDATED: YES";
+				} else {
+					$message .= " UPDATED: NO";
+				}
+			} else {
+				$message .= " UPDATED: NUN";
+			}
+		} else {
+			$message .= " UPDATED: NOPE";
+		}
+
+		file_put_contents( $log_file, "$message\n", FILE_APPEND );
 	}
 
 	public function cmd_get_specialchars_images_and_posts( $args, $assoc_args ) {
