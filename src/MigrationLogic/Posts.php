@@ -436,7 +436,7 @@ SQL;
 				$post_id
 			)
 		);
-		return $result;
+		return (int) $result;
 	}
 
 	/**
