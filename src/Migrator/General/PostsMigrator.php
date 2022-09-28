@@ -176,9 +176,9 @@ class PostsMigrator implements InterfaceMigrator {
 
 		$clear_revisions_arguments = [
 			array(
-				'type'        => 'positional',
-				'name'        => 'number-of-revisions',
-				'description' => 'The minimum number of revisions a post must have to have its revisions cleared.',
+				'type'        => 'assoc',
+				'name'        => 'keep',
+				'description' => 'The minimum number of revisions that should be kept and that a post must have to have its revisions cleared.',
 				'optional'    => true,
 				'repeating'   => false,
 				'default'     => 500,
@@ -189,7 +189,7 @@ class PostsMigrator implements InterfaceMigrator {
 				'description' => 'The number of revisions to be deleted in each step. Default 30.',
 				'optional'    => true,
 				'repeating'   => false,
-				'default'     => 50,
+				'default'     => 1000,
 			),
 			array(
 				'type'        => 'assoc',
@@ -197,7 +197,7 @@ class PostsMigrator implements InterfaceMigrator {
 				'description' => 'The time in miliseconds to sleep between each chunk. Default 100.',
 				'optional'    => true,
 				'repeating'   => false,
-				'default'     => 1000,
+				'default'     => 100,
 			),
 			array(
 				'type'        => 'flag',
@@ -225,7 +225,7 @@ class PostsMigrator implements InterfaceMigrator {
 				'synopsis'  => array_merge(
 					[
 						array(
-							'type'        => 'positional',
+							'type'        => 'assoc',
 							'name'        => 'post-id',
 							'description' => 'The ID of the post you want to clear the revisions of.',
 							'optional'    => false,
@@ -556,8 +556,8 @@ class PostsMigrator implements InterfaceMigrator {
 	 * @return void
 	 */
 	public function cmd_clear_post_revisions( $positional_args, $assoc_args ) {
-		$post_id = intval( $positional_args[0] );
-		$number  = intval( $positional_args[1] );
+		$post_id = intval( $assoc_args['post-id'] );
+		$number  = intval( $assoc_args['keep'] );
 		if ( ! $number || ! $post_id ) {
 			WP_CLI::error( 'Invalid argument for Number of revisions or Post ID. Integer are expected in both cases.' );
 		}
@@ -619,7 +619,7 @@ class PostsMigrator implements InterfaceMigrator {
 	 * @return void
 	 */
 	public function cmd_clear_revisions( $positional_args, $assoc_args ) {
-		$number = intval( $positional_args[0] );
+		$number = intval( $assoc_args['keep'] );
 		if ( ! $number ) {
 			WP_CLI::error( 'Invalid argument for Number of revisions. Integer expected.' );
 		}
@@ -628,8 +628,8 @@ class PostsMigrator implements InterfaceMigrator {
 		foreach ( $posts as $post ) {
 			WP_CLI::log( '' );
 			WP_CLI::log( "Processing post {$post->post_ID}" );
-			$args = [ $post->post_ID, $number ];
-			$this->cmd_clear_post_revisions( $args, $assoc_args );
+			$assoc_args['post-id'] = $post->post_ID;
+			$this->cmd_clear_post_revisions( $positional_args, $assoc_args );
 		}
 	}
 }
