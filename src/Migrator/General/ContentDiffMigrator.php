@@ -9,6 +9,7 @@ namespace NewspackCustomContentMigrator\Migrator\General;
 
 use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator as ContentDiffMigratorLogic;
+use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use WP_CLI;
 
 /**
@@ -151,6 +152,37 @@ class ContentDiffMigrator implements InterfaceMigrator {
 						'name'        => 'live-table-prefix',
 						'description' => 'Live site table prefix.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator content-diff-fix-image-ids-in-post-content',
+			[ $this, 'cmd_fix_image_ids_in_post_content' ],
+			[
+				'shortdesc' => 'Standalone command which fixes attachment IDs in Block content. It does so by loading all the posts, goes through post_content and gets all the WP Blocks which use attachments IDs (see \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids), then it takes every single attachment file and checks if its attachment ID has changed, and if it has it updates the IDs.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-from',
+						'description' => 'Optional. Post ID range minimum.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-to',
+						'description' => 'Optional. Post ID range maximum.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'local-hostname-aliases-csv',
+						'description' => "Optional. CSV of image URL hostnames to be used as local hostname aliases when searching for image attachment files. If, for example, the site uses S3, and some images' src hostnames use newspack-pubname.s3.amazonaws.com in URL hostnames, we should add this AWS hostname to the list here, to treat these URLs as local hostnames when searching for the files' attachment IDs in local DB -- in other words, the search for attachment ID will substitute these aliases for actual local hostname e.g. 'host.com' and search by a local URL instead.",
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -344,6 +376,86 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Fixes attachment IDs in Block content.
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args      Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_image_ids_in_post_content( $positional_args, $assoc_args ) {
+		// Params.
+		global $wpdb;
+		$post_id_from                = $assoc_args['post-id-from'] ?? null;
+		$post_id_to                  = $assoc_args['post-id-to'] ?? null;
+		$local_hostnames_aliases_csv = $assoc_args['local-hostname-aliases-csv'] ?? null;
+		$log_file_path               = 'contentdiff_update_blocks_ids.log';
+		if ( ( ! is_null( $post_id_from ) && is_null( $post_id_to ) ) || ( is_null( $post_id_from ) && ! is_null( $post_id_to ) ) ) {
+			WP_CLI::error( 'Both --post-id-from and --post-id-to must be provided' );
+		}
+
+		// Deactivate the S3-Uploads plugin because it changes how \attachment_url_to_postid() behaves.
+		WP_CLI::log( '' );
+		WP_CLI::confirm( 'In order to correctly update attachment IDs in Block content, S3-Uploads plugin will be deactivated. Continue' );
+		foreach ( wp_get_active_and_valid_plugins() as $plugin ) {
+			if ( false !== strrpos( strtolower( $plugin ), 's3-uploads.php' ) ) {
+				deactivate_plugins( $plugin );
+				WP_CLI::success( sprintf( 'Deactivated %s', $plugin ) );
+			}
+		}
+
+		// Either use --local-hostname-aliases-csv, or search all content for used image hostnames, then display those hostnames and prompt which to use as local hostname aliases.
+		if ( ! is_null( $local_hostnames_aliases_csv ) ) {
+			$local_hostname_aliases = explode( ',', $local_hostnames_aliases_csv );
+		} else {
+			// Scan all content for used images hostnames by using NewspackPostImageDownloader.
+			WP_CLI::log( 'Now searching all posts for used image URL hostnames...' );
+			$downloader             = new \NewspackPostImageDownloader\Downloader();
+			$posts                  = $downloader->get_posts_ids_and_contents();
+			$all_hostnames_with_ids = $downloader->get_all_image_hostnames_from_posts( $posts );
+			// Remove relative URLs, leave just ones with hostnames.
+			unset( $all_hostnames_with_ids['relative URL paths'] );
+			$all_hostnames = array_keys( $all_hostnames_with_ids );
+
+			// Display all found hostnames and prompt which local aliases to use.
+			WP_CLI::log( sprintf( "Found following image hosts: \n- %s\n", implode( "\n- ", $all_hostnames ) ) );
+			WP_CLI::log( "If any of these hostnames should be looked up as local attachments, add them next (e.g. if S3 hostname 'newspack-pubname.s3.amazonaws.com' is used in <img> srcs in post_content, it should be added as a local hostname alias)." );
+			$local_hostnames_aliases_csv = PHPUtil::readline( "Enter additional image hostnames to be treated as local, or leave blank for none (CSVs, don't use any extra spaces): " );
+			$local_hostname_aliases      = explode( ',', $local_hostnames_aliases_csv );
+		}
+
+		// Either use --post-id-to and --post-id-from, or get all post IDs.
+		if ( is_null( $post_id_to ) || is_null( $post_id_from ) ) {
+			WP_CLI::log( 'Getting a list of all the post IDs...' );
+			$post_ids = $this->posts_logic->get_all_posts_ids();
+		} else {
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select ID
+					from $wpdb->posts
+					where post_type = 'post'
+					and post_status in ( 'publish', 'draft' ) 
+					and ID >= %d
+					and ID <= %d
+					order by ID asc",
+					$post_id_from,
+					$post_id_to
+				)
+			);
+		}
+
+		// Run the command on a single $post_id at a time to control interruptions more easily.
+		$known_attachment_ids_updates = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			self::$logic->update_blocks_ids( [ $post_id ], $known_attachment_ids_updates, $local_hostname_aliases, $log_file_path );
+		}
+
+		wp_cache_flush();
+		WP_CLI::success( sprintf( 'Done. Check %s.', $log_file_path ) );
 	}
 
 	/**
@@ -711,7 +823,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			echo "\n" . sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) );
 		}
 
-		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, $this->log_updated_blocks_ids );
+		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, [], $this->log_updated_blocks_ids );
 	}
 
 	/**
@@ -721,8 +833,8 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @param array $assoc_args Optional arguments.
 	 */
 	public function cmd_compare_collations_of_live_and_core_wp_tables( $args, $assoc_args ) {
-		$live_table_prefix = $assoc_args['live-table-prefix'];
-		$skip_tables = [];
+		$live_table_prefix     = $assoc_args['live-table-prefix'];
+		$skip_tables           = [];
 		$different_tables_only = $assoc_args['different-collations-only'] ?? false;
 
 		if ( ! empty( $assoc_args['skip-tables'] ) ) {
@@ -753,9 +865,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_correct_collations_for_live_wp_tables( $args, $assoc_args ) {
 		$live_table_prefix = $assoc_args['live-table-prefix'];
-		$mode = $assoc_args['mode'];
-		$backup_prefix = $assoc_args['backup-table-prefix'];
-		$skip_tables = [];
+		$mode              = $assoc_args['mode'];
+		$backup_prefix     = $assoc_args['backup-table-prefix'];
+		$skip_tables       = [];
 
 		if ( ! empty( $assoc_args['skip-tables'] ) ) {
 			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
@@ -770,19 +882,19 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		switch ( $mode ) {
 			case 'aggressive':
 				$records_per_transaction = 15000;
-				$sleep_in_seconds = 1;
+				$sleep_in_seconds        = 1;
 				break;
 			case 'generous':
 				$records_per_transaction = 10000;
-				$sleep_in_seconds = 2;
+				$sleep_in_seconds        = 2;
 				break;
 			case 'calm':
 				$records_per_transaction = 1000;
-				$sleep_in_seconds = 3;
+				$sleep_in_seconds        = 3;
 				break;
 			default: // Cautious.
 				$records_per_transaction = 5000;
-				$sleep_in_seconds = 2;
+				$sleep_in_seconds        = 2;
 				break;
 		}
 
