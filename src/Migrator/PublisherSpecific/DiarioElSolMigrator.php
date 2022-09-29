@@ -620,6 +620,13 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				file_put_contents( $cache_path, $original_id . PHP_EOL, FILE_APPEND | LOCK_EX );
 			}
+
+			$memory_usage = memory_get_usage( false );
+
+			if ( $memory_usage > 966367641 ) { // 0.9 GB, since the limit on Atomic is 1GB.
+				print_r( 'Exit due to memory usage' );
+				exit( 1 );
+			}
 		}
 
 		$this->log( self::POSTS_LOGS, sprintf( 'All done! 🙌 Importing %d posts took %d mins.', $added_posts, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
