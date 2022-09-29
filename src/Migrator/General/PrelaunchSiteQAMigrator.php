@@ -168,37 +168,44 @@ class PrelaunchSiteQAMigrator implements InterfaceMigrator {
 			WP_CLI::log( sprintf( '%d. %s', $index + 1, $command['name'] ) );
 		}
 
+		WP_CLI::log( "\n0. Run all the steps " );
+
 		// Read which commands to run.
-		$commands = $this->prompt( 'Please enter the commands: ' );
+		$commands = $this->prompt( 'Please enter the commands, or 0 if you want to run all the steps: ' );
 
-		// Put them in an array.
-		$commands = explode( ',', $commands );
+		// The case where the user wants to run all commands.
+		if ( '0' == $commands ) {
+			$commands = $this->available_commands;
+		} else {
+			// Put them in an array.
+			$commands = explode( ',', $commands );
 
-		// Make the indexes zero based.
-		$commands = array_map(
-			function( $index ) {
-				return intval( $index ) - 1;
-			},
-			$commands
-		);
+			// Make the indexes zero based.
+			$commands = array_map(
+				function( $index ) {
+					return intval( $index ) - 1;
+				},
+				$commands
+			);
 
-		// Make sure all indexes actually exist.
-		$commands = array_filter(
-			$commands,
-			function( $index ) {
-				return isset( $this->available_commands[ $index ] );
+			// Make sure all indexes actually exist.
+			$commands = array_filter(
+				$commands,
+				function( $index ) {
+					return isset( $this->available_commands[ $index ] );
+				}
+			);
+
+			$commands = array_map(
+				function( $index ) {
+					return $this->available_commands[ $index ];
+				},
+				$commands 
+			);
+
+			if ( empty( $commands ) ) {
+				die();
 			}
-		);
-
-		$commands = array_map(
-			function( $index ) {
-				return $this->available_commands[ $index ];
-			},
-			$commands 
-		);
-
-		if ( empty( $commands ) ) {
-			die();
 		}
 
 		WP_CLI::log( 'The following commands are going to be executed:' );
