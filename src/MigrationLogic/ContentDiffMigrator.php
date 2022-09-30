@@ -154,14 +154,14 @@ class ContentDiffMigrator {
 
 			WP_CLI::log( sprintf( 'Querying %s types ...', implode( ',', $post_types_other ) ) );
 			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
-			$sql_replace_table   = $this->wpdb->prepare(
+			// phpcs:disable
+			$sql_replace_table = $this->wpdb->prepare(
 				"SELECT ID, post_name, post_title, post_status, post_date
 				FROM {TABLE}
 				WHERE post_type IN ( $post_types_other_placeholders_csv )
 				AND post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' );",
 				$post_types_other
 			);
-			// phpcs:disable
 			$results_live_posts  = $this->wpdb->get_results(  str_replace( '{TABLE}', $live_posts_table, $sql_replace_table), ARRAY_A );
 			$results_local_posts = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table), ARRAY_A );
 			// phpcs:enable
@@ -204,7 +204,7 @@ class ContentDiffMigrator {
 
 			WP_CLI::log( 'Querying attachments ...' );
 			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
-			$sql_replace_table         = "SELECT ID, post_name, post_title, post_status, post_date
+			$sql_replace_table = "SELECT ID, post_name, post_title, post_status, post_date
 				FROM {TABLE}
 				WHERE post_type = 'attachment';";
 			// phpcs:disable
@@ -622,13 +622,11 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Post's post_parent ID.
 	 *
-	 * @param WP_Post $post          Post Object.
-	 * @param int     $new_parent_id New post_parent ID for this post.
+	 * @param int $post_id       Post ID.
+	 * @param int $new_parent_id New post_parent ID for this post.
 	 */
-	public function update_post_parent( $post, $new_parent_id ) {
-		if ( 0 != $post->post_parent && ! is_null( $new_parent_id ) && ( $new_parent_id != $post->post_parent ) ) {
-			$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post->ID ] );
-		}
+	public function update_post_parent( $post_id, $new_parent_id ) {
+		$this->wpdb->update( $this->wpdb->posts, [ 'post_parent' => $new_parent_id ], [ 'ID' => $post_id ] );
 	}
 
 	/**
@@ -1582,7 +1580,10 @@ class ContentDiffMigrator {
 		foreach ( $core_tables as $table ) {
 			$core_table = esc_sql( $this->wpdb->prefix . $table );
 			$live_table = esc_sql( $table_prefix . $table );
+
+			// phpcs:ignore -- query fully sanitized.
 			$core_table_status = $this->wpdb->get_row( "SHOW TABLE STATUS WHERE name LIKE '$core_table'" );
+			// phpcs:ignore -- query fully sanitized.
 			$live_table_status = $this->wpdb->get_row( "SHOW TABLE STATUS WHERE name LIKE '$live_table'" );
 
 			if ( is_null( $live_table_status ) ) {
@@ -1590,13 +1591,16 @@ class ContentDiffMigrator {
 				continue;
 			}
 
+			// phpcs:ignore -- ignore CamelCase param.
 			$match_test = $live_table_status->Collation === $core_table_status->Collation;
 
 			$validated_tables[] = [
 				'table'                => $table,
 				'core_table_name'      => $core_table,
+				// phpcs:ignore -- ignore CamelCase param.
 				'core_table_collation' => $core_table_status->Collation,
 				'live_table_name'      => $live_table,
+				// phpcs:ignore -- ignore CamelCase param.
 				'live_table_collation' => $live_table_status->Collation,
 				'match'                => $match_test ? 'YES' : 'NO',
 				'match_bool'           => $match_test,
@@ -1654,18 +1658,21 @@ class ContentDiffMigrator {
 	 * @throws \RuntimeException Throws various exceptions if unable to complete required SQL operations.
 	 */
 	public function copy_table_data_using_proper_collation( string $prefix, string $table, int $records_per_transaction = 5000, int $sleep_in_seconds = 1, string $prefix_for_backup = 'bak_' ) {
-		$backup_table = esc_sql( $prefix_for_backup . $prefix . $table );
-		$source_table = esc_sql( $prefix . $table );
+		$backup_table              = esc_sql( $prefix_for_backup . $prefix . $table );
+		$source_table              = esc_sql( $prefix . $table );
 		$match_collation_for_table = esc_sql( $this->wpdb->prefix . $table );
+
 		$rename_sql = "RENAME TABLE $source_table TO $backup_table";
-		$rename_result = $this->wpdb->query( $rename_sql );
+		// phpcs:ignore -- query fully sanitized.
+		$rename_result             = $this->wpdb->query( $rename_sql );
 
 		if ( is_wp_error( $rename_result ) ) {
 			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() );
 		}
 
 		$create_like_table_sql = "CREATE TABLE {$source_table} LIKE $match_collation_for_table";
-		$create_result = $this->wpdb->query( $create_like_table_sql );
+		// phpcs:ignore -- query fully sanitized.
+		$create_result         = $this->wpdb->query( $create_like_table_sql );
 
 		if ( is_wp_error( $create_result ) ) {
 			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() );
@@ -1677,9 +1684,11 @@ class ContentDiffMigrator {
 		];
 
 		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
+		// phpcs:ignore -- query fully sanitized.
 		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
-		$table_columns = implode( ',', array_map( fn($column_row) => "`$column_row->Field`", $table_columns_results ) );
-		$count = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
+		$table_columns         = implode( ',', array_map( fn( $column_row) => "`$column_row->Field`", $table_columns_results ) );
+		// phpcs:ignore -- query fully sanitized.
+		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
 		if ( 0 === $count ) {
 			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." );
@@ -1689,6 +1698,7 @@ class ContentDiffMigrator {
 		for ( $i = 1; $i <= $iterations; $i++ ) {
 			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
+			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );
 
 			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
@@ -1741,6 +1751,66 @@ class ContentDiffMigrator {
 		// phpcs:enable
 
 		return is_numeric( $term_id ) ? (int) $term_id : null;
+	}
+
+
+	/**
+	 * Finds for current post ID by old live DB ID, by searching for the self::SAVED_META_LIVE_POST_ID post meta.
+	 *
+	 * @param int|string $id_live  Post ID from live DB.
+	 * @param string     $meta_key Name of postmeta which contains old post ID.
+	 *
+	 * @return string|null Current Post ID.
+	 */
+	public function get_current_post_id_by_custom_meta( $id_live, $meta_key ) {
+
+		// phpcs:disable -- wpdb::prepare is used correctly.
+		$post_id_new = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT post_id
+			FROM $this->wpdb->postmeta
+			WHERE meta_key = %s
+			AND meta_value = %s",
+				$meta_key,
+				$id_live
+			)
+		);
+		// phpcs:enable
+
+		return $post_id_new;
+	}
+
+	/**
+	 * Finds the current post ID by searching all the wp_posts and comparing them to the live DB record.
+	 *
+	 * @param int    $id_live           Old live site's post object ID.
+	 * @param string $live_table_prefix Live DB tables' prefix.
+	 *
+	 * @return int|null Current Post ID.
+	 */
+	public function get_current_post_id_by_comparing_with_live_db( $id_live, $live_table_prefix ) {
+
+		$live_posts_table = $live_table_prefix . 'posts';
+		$posts_table      = $this->wpdb->posts;
+
+		// phpcs:disable -- wpdb::prepare is used correctly.
+		$post_id_new = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT wp.ID
+			FROM {$live_posts_table} lwp
+			LEFT JOIN {$posts_table} wp
+				ON wp.post_name = lwp.post_name
+				AND wp.post_title = lwp.post_title
+				AND wp.post_status = lwp.post_status
+				AND wp.post_date = lwp.post_date
+				AND wp.post_type = lwp.post_type
+			WHERE lwp.ID = %d ;",
+				$id_live
+			)
+		);
+		// phpcs:enable
+
+		return $post_id_new;
 	}
 
 	/**

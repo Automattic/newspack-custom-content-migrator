@@ -50,7 +50,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	/**
 	 * Override setUp.
 	 */
-	public function setUp() {
+	public function setUp(): void {
 		global $wpdb;
 
 		parent::setUp();
@@ -992,11 +992,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_update_post_parent( $data ) {
 		// Prepare.
-		$post_id           = 123;
-		$new_post_parent   = 456;
-		$post              = new \stdClass();
-		$post->ID          = $post_id;
-		$post->post_parent = 145;
+		$post_id         = 123;
+		$new_post_parent = 456;
+		$old_post_parent = 145;
 
 		// Mock.
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
@@ -1014,7 +1012,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 						);
 
 		// Run.
-		$logic_partial_mock->update_post_parent( $post, $new_post_parent );
+		$logic_partial_mock->update_post_parent( $post_id, $new_post_parent );
 	}
 
 	/**
@@ -1931,9 +1929,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			// Term relationships rows.
 			'err insert_term_relationship',
 			// Inserts didn't happen here.
-			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 2',
-			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 3',
-			'Error could not insert term_relationship because the new updated term_taxonomy_id is not found, $term_taxonomy_id_old 4',
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $post_row['ID'], $new_post_id, $data['term_taxonomy'][1]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $post_row['ID'], $new_post_id, $data['term_taxonomy'][2]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $post_row['ID'], $new_post_id, $data['term_taxonomy'][3]['term_taxonomy_id'] ),
 		];
 		$this->assertEquals( $expected_errors, $import_errors );
 	}
