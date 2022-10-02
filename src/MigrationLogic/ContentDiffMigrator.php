@@ -167,9 +167,16 @@ class ContentDiffMigrator {
 			// phpcs:enable
 
 			// Search unique on live.
+			$percent_progress = null;
+			WP_CLI::log( sprintf( 'Searching for new %s from total %s...', implode( ',', $post_types_other ), count( $results_live_posts ) ) );
 			foreach ( $results_live_posts as $key_live_post => $live_post ) {
 
-				WP_CLI::log( sprintf( 'Comparing %s (%d)/(%d)', implode( ',', $post_types_other ), $key_live_post + 1, count( $results_live_posts ) ) );
+				// Get and output progress meter by 10%.
+				$last_percent_progress = $percent_progress;
+				$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
+				if ( $last_percent_progress !== $percent_progress ) {
+					WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
+				}
 
 				$found = false;
 				foreach ( $results_local_posts as $key_local_post => $local_post ) {
@@ -213,9 +220,16 @@ class ContentDiffMigrator {
 			// phpcs:enable
 
 			// Search unique attachments on live.
+			WP_CLI::log( sprintf( 'Searching for new attachments from total %s...', count( $results_live_attachments ) ) );
+			$percent_progress = null;
 			foreach ( $results_live_attachments as $key_live_attachment => $live_attachment ) {
 
-				WP_CLI::log( sprintf( 'Comparing attachments (%d)/(%d)', $key_live_attachment + 1, count( $results_live_attachments ) ) );
+				// Get and output progress meter by 10%.
+				$last_percent_progress = $percent_progress;
+				$this->get_progress_percentage( count( $results_live_attachments ), $key_live_attachment + 1, 10, $percent_progress );
+				if ( $last_percent_progress !== $percent_progress ) {
+					WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
+				}
 
 				$found = false;
 				foreach ( $results_local_attachments as $key_local_attachment => $local_attachment ) {
@@ -1868,6 +1882,36 @@ class ContentDiffMigrator {
 		}
 
 		return $found;
+	}
+
+	/**
+	 * A simple percentage counter. You get to tell it percentage increment, e.g. update status by every "10%" change.
+	 *
+	 * @param int $total_count       Total number of steps.
+	 * @param int $current_count     Current step, starts from 1.
+	 * @param int $percent_increment Every which percentage should progress update be displayed.
+	 * @param int $current_percent   Current percentage progress.
+	 *
+	 * @return void
+	 */
+	public function get_progress_percentage( $total_count, $current_count, $percent_increment, &$current_percent = null ) {
+
+		// Initialize 0%.
+		if ( is_null( $current_percent ) ) {
+			$current_percent = 0;
+		}
+
+		// Get what the next percentage increase will be.
+		$next_percent_increase = $current_percent + $percent_increment;
+		$next_percent_increase = $next_percent_increase >= 100 ? 100 : $next_percent_increase;
+
+		// Get what step number will make the percentage increase to that amount.
+		$required_current_count_for_increase = $next_percent_increase * $total_count / 100;
+
+		// Increase percentage if reached.
+		if ( $current_count >= $required_current_count_for_increase ) {
+			$current_percent = $next_percent_increase;
+		}
 	}
 
 	/**
