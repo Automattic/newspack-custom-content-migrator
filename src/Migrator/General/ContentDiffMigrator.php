@@ -312,10 +312,17 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
+		// Before we create categories, let's make sure categories have valid parents. If they don't they should be fixed first.
+		WP_CLI::log( 'Validating categories..' );
+		$this->validate_categories();
+
+		WP_CLI::log( 'EXIT.' );
+		exit;
+
 		WP_CLI::log( 'Recreating categories..' );
 		$this->recreate_categories();
-		WP_CLI::log( "Done!" );
-
+		WP_CLI::log( 'Done!' );
+		return;
 		WP_CLI::log( sprintf( 'Importing %d objects, hold tight..', count( $all_live_posts_ids ) ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids );
 		WP_CLI::log( 'Done!' );
@@ -351,6 +358,49 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Validates local DB and live DB categories. Checks if the categories' parent term_ids are correct and resets those if not.
+	 *
+	 * @return void
+	 */
+	public function validate_categories(): void {
+		global $wpdb;
+
+		// Check if any of the local categories have nonexistent wp_term_taxonomy.parent, and fix those before continuing.
+		$categories = self::$logic->get_categories_with_nonexistent_parents( $wpdb->prefix );
+		if ( ! empty( $categories ) ) {
+			$list              = '';
+			$term_taxonomy_ids = [];
+			foreach ( $categories as $category ) {
+				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $category );
+				$term_taxonomy_ids[] = $category['term_taxonomy_id'];
+			}
+
+			WP_CLI::warning( 'The following local DB categories have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::log( $list );
+
+			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
+			self::$logic->reset_categories_parents( $wpdb->prefix, $term_taxonomy_ids );
+		}
+
+		// Check the same for Live DB's categories, and fix those before continuing.
+		$categories = self::$logic->get_categories_with_nonexistent_parents( $this->live_table_prefix );
+		if ( ! empty( $categories ) ) {
+			$list              = '';
+			$term_taxonomy_ids = [];
+			foreach ( $categories as $category ) {
+				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $category );
+				$term_taxonomy_ids[] = $category['term_taxonomy_id'];
+			}
+
+			WP_CLI::warning( 'The following live DB categories have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::log( $list );
+
+			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
+			self::$logic->reset_categories_parents( $this->live_table_prefix, $term_taxonomy_ids );
+		}
 	}
 
 	/**

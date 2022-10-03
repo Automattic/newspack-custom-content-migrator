@@ -365,14 +365,69 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Recreates all categories from Live to local.
+	 * Checks local Categories, and returns those which might have wrong parent term_ids that don't exist.
 	 *
-	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
+	 * @param string $table_prefix DB table prefix which is to be used for this query.
+	 *
+	 * @return array $args {
+	 *     Categories which have nonexistent parent term_id.
+	 *
+	 *     @type string term_id          wp_terms.term_id.
+	 *     @type string name             wp_terms.name.
+	 *     @type string slug             wp_terms.slug.
+	 *     @type string term_taxonomy_id wp_termtaxonomy.term_taxonomy_id.
+	 *     @type string taxonomy         wp_termtaxonomy.taxonomy, will be 'category'.
+	 *     @type string parent           wp_termtaxonomy.parent which is not found in wp_terms and is wrong.
+	 * }
+	 */
+	public function get_categories_with_nonexistent_parents( $table_prefix ): array {
+
+		$terms         = esc_sql( $table_prefix . 'terms' );
+		$term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper and query fully sanitized.
+		$categories_with_nonexistent_parents = $this->wpdb->get_results(
+			"SELECT t.term_id, t.name, t.slug, tt.term_taxonomy_id, tt.term_id, tt.taxonomy, tt.parent
+			FROM {$terms} t
+	        JOIN {$term_taxonomy} tt
+				ON t.term_id = tt.term_id AND tt.taxonomy = 'category' AND parent <> 0
+	        LEFT JOIN {$terms} ttparent
+				ON ttparent.term_id = tt.parent
+			WHERE ttparent.term_id IS NULL;",
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $categories_with_nonexistent_parents;
+	}
+
+	/**
+	 * Sets these wp_term_taxnomy.term_taxonomy_ids' parents to 0.
+	 *
+	 * @param string $table_prefix      DB table prefix.
+	 * @param array  $term_taxonomy_ids term_taxonomy_ids.
+	 *
+	 * @return void
+	 */
+	public function reset_categories_parents( string $table_prefix, array $term_taxonomy_ids ): void {
+		$placeholders  = implode( ',', array_fill( 0, count( $term_taxonomy_ids ), '%d' ) );
+		$term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+		// phpcs:disable -- wpdb::prepare used by wrapper and query fully sanitized.
+		$this->wpdb->query(
+			$this->wpdb->prepare(
+				"UPDATE {$term_taxonomy} SET parent = 0 WHERE term_taxonomy_ID IN ( {$placeholders} );",
+				$term_taxonomy_ids
+			)
+		);
+		// phpcs:enable
+	}
+	/**
+	 * Recreates all categories from Live to local.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
-	 * @return array Newly inserted Terms Taxonomies. Keys are taxonomies, with term_ids as subarrays. In case of errors, will
-	 *               contain a key 'errors' with error messages.
+	 * @return array Newly inserted Terms Taxonomies. Keys are taxonomies, with term_ids as subarray values. In case of errors,
+	 *               will contain a key 'errors' with error messages.
 	 */
 	public function recreate_categories( $live_table_prefix ) {
 		$table_prefix             = $this->wpdb->prefix;
@@ -394,16 +449,16 @@ class ContentDiffMigrator {
 		// phpcs:enable
 		$terms_updates               = [];
 		$created_terms_in_taxonomies = [];
-		foreach ( $live_taxonomies as $key_live_taxonomy => $live_taxonomy ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_live_taxonomy % 2000 ) {
-				echo '.';
-			}
+		foreach ( $live_taxonomies as $live_taxonomy ) {
 
-			// Get or create taxonomy.
+			// Get this local category if it exists, or create it.
+
+			// First get category's parent.
 			$parent_term_id = 0;
 			if ( 0 != $live_taxonomy['parent'] ) {
-				$parent_term_id = $terms_updates[ $live_taxonomy['parent'] ];
+				// The only reason why $terms_updates[ $live_taxonomy['parent'] ] wouldn't exist is if 'parent' was invalid on
+				// live, in which case we'll correct it to 0 now.
+				$parent_term_id = $terms_updates[ $live_taxonomy['parent'] ] ?? 0;
 			}
 
 			// phpcs:disable -- wpdb::prepare is used by wrapper.
@@ -422,6 +477,14 @@ class ContentDiffMigrator {
 				),
 				ARRAY_A
 			);
+
+// TODO WIP.
+if ( ! is_null( $existing_taxonomy ) ) {
+				$d=1;
+} else {
+				$d=1;
+}
+continue;
 			// phpcs:enable
 			if ( ! is_null( $existing_taxonomy ) ) {
 				$term_id_new = $existing_taxonomy['term_id'];
@@ -1885,11 +1948,13 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * A simple percentage counter. You get to tell it percentage increment, e.g. update status by every "10%" change.
+	 * A simple progress meter which updates percentage progress of a counter in terms of a given percentage number increment. You
+	 * get to tell it the percentage increment, for example, update the status progress by every "5%" change, then it
+	 * updates the $current_percent at 0%, 5%, 10%, 15%, 20%, ..., 100%.
 	 *
 	 * @param int $total_count       Total number of steps.
-	 * @param int $current_count     Current step, starts from 1.
-	 * @param int $percent_increment Every which percentage should progress update be displayed.
+	 * @param int $current_count     Current step, starting from 1.
+	 * @param int $percent_increment The percentage increment by which the progress update should be done.
 	 * @param int $current_percent   Current percentage progress.
 	 *
 	 * @return void
