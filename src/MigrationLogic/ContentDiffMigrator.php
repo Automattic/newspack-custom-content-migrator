@@ -330,35 +330,61 @@ class ContentDiffMigrator {
 		$term_relationships_rows                 = $this->select_term_relationships_rows( $table_prefix, $post_id );
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = $term_relationships_rows;
 
-		// Get Term Taxonomies.
-		// Note -- a Term can be shared by multiple Taxonomies in WP, so it's only fetched once.
-		$queried_term_ids = [];
-		foreach ( $term_relationships_rows as $term_relationship_row ) {
+		// Get all wp_term_taxonomy records.
+		$term_ids                            = [];
+		$keys_with_missing_term_taxonomy_ids = [];
+		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $key_termrelationship_row => $term_relationship_row ) {
 			$term_taxonomy_id = $term_relationship_row['term_taxonomy_id'];
 			$term_taxonomy    = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
-			// Skip in case of a record missing in Live DB.
+
+			// In case that the term_taxonomy record is missing from Live DB for this $term_taxonomy_id.
 			if ( is_null( $term_taxonomy ) ) {
+				$keys_with_missing_term_taxonomy_ids[] = $key_termrelationship_row;
 				continue;
 			}
+
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
+			$term_ids[]                           = $term_taxonomy['term_id'];
+		}
 
-			// Get Terms.
-			$term_id = $term_taxonomy['term_id'];
-			if ( ! in_array( $term_id, $queried_term_ids ) ) {
-				$term = $this->select_term_row( $table_prefix, $term_id );
-				// Skip in case of a record missing in Live DB.
-				if ( is_null( $term ) ) {
-					continue;
-				}
-				$data[ self::DATAKEY_TERMS ][] = $term;
-				$queried_term_ids[]            = $term_id;
-
-				// Get Term Metas.
-				$data[ self::DATAKEY_TERMMETA ] = array_merge(
-					$data[ self::DATAKEY_TERMMETA ],
-					$this->select_termmeta_rows( $table_prefix, $term_id )
-				);
+		// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] in case some $term_taxonomy_id records are missing from live DB.
+		if ( ! empty( $keys_with_missing_term_taxonomy_ids ) ) {
+			foreach ( $keys_with_missing_term_taxonomy_ids as $key_with_missing_term_taxonomy_id ) {
+				unset( $data[ self::DATAKEY_TERMRELATIONSHIPS ][ $key_with_missing_term_taxonomy_id ] );
 			}
+			$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
+		}
+
+		// Get Terms.
+		$missing_term_ids = [];
+		foreach ( $term_ids as $term_id ) {
+			$term_row = $this->select_term_row( $table_prefix, $term_id );
+
+			// In case some terms records are missing in Live DB.
+			if ( is_null( $term_row ) || empty( $term_row ) ) {
+				$missing_term_ids[] = $term_id;
+				continue;
+			}
+
+			$data[ self::DATAKEY_TERMS ][] = $term_row;
+		}
+
+		// Get Term Metas.
+		foreach ( $term_ids as $term_id ) {
+			// Skip if term rows were missing.
+			if ( in_array( $term_id, $missing_term_ids ) ) {
+				continue;
+			}
+
+			$termmeta_rows = $this->select_termmeta_rows( $table_prefix, $term_id );
+			if ( is_null( $termmeta_rows ) || empty( $termmeta_rows ) ) {
+				continue;
+			}
+
+			$data[ self::DATAKEY_TERMMETA ] = array_merge(
+				$data[ self::DATAKEY_TERMMETA ],
+				$termmeta_rows
+			);
 		}
 
 		return $data;
@@ -421,24 +447,23 @@ class ContentDiffMigrator {
 		);
 		// phpcs:enable
 	}
+
 	/**
 	 * Recreates all categories from Live to local.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
-	 * @return array Newly inserted Terms Taxonomies. Keys are taxonomies, with term_ids as subarray values. In case of errors,
-	 *               will contain a key 'errors' with error messages.
+	 * @return array Map of all live to local categories. Keys are live category term_ids, and values are their corresponding
+	 *               local category term_ids.
 	 */
 	public function recreate_categories( $live_table_prefix ) {
 		$table_prefix             = $this->wpdb->prefix;
 		$live_terms_table         = esc_sql( $live_table_prefix . 'terms' );
 		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
-		$terms_table              = esc_sql( $table_prefix . 'terms' );
-		$termstaxonomy_table      = esc_sql( $table_prefix . 'term_taxonomy' );
 
 		// Get all live site's hierarchical categories, ordered by parent for easy hierarchical reconstruction.
 		// phpcs:disable -- wpdb::prepare is used by wrapper.
-		$live_taxonomies             = $this->wpdb->get_results(
+		$live_categories = $this->wpdb->get_results(
 			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 			FROM $live_terms_table t
 	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
@@ -447,81 +472,300 @@ class ContentDiffMigrator {
 			ARRAY_A
 		);
 		// phpcs:enable
-		$terms_updates               = [];
-		$created_terms_in_taxonomies = [];
-		foreach ( $live_taxonomies as $live_taxonomy ) {
 
-			// Get this local category if it exists, or create it.
+		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $category_term_id_updates.
+		$category_term_id_updates = [];
+		foreach ( $live_categories as $live_category ) {
+			$live_category_tree    = $this->get_category_tree( $live_table_prefix, $live_category );
+			$created_category_tree = $this->get_or_create_category_tree( $table_prefix, $live_category_tree );
 
-			// First get category's parent.
-			$parent_term_id = 0;
-			if ( 0 != $live_taxonomy['parent'] ) {
-				// The only reason why $terms_updates[ $live_taxonomy['parent'] ] wouldn't exist is if 'parent' was invalid on
-				// live, in which case we'll correct it to 0 now.
-				$parent_term_id = $terms_updates[ $live_taxonomy['parent'] ] ?? 0;
-			}
+			$category_term_id_updates[ $live_category['term_id'] ] = $created_category_tree['term_id'];
+		}
 
-			// phpcs:disable -- wpdb::prepare is used by wrapper.
-			$existing_taxonomy = $this->wpdb->get_row(
+		return $category_term_id_updates;
+	}
+
+	/**
+	 * Fetches the category's tree by retrieving all the parent categories down to the top parent.
+	 *
+	 * @param string $table_prefix DB table prefix.
+	 * @param array  $category {
+	 *    Category data array.
+	 *
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent term_id.
+	 * }
+	 *
+	 * @return array {
+	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 *
+	 *     @type string       term_id     Category term_id.
+	 *     @type string       taxonomy    Should always be 'category'.
+	 *     @type string       name        Category name.
+	 *     @type string       slug        Category slug.
+	 *     @type string       description Category description.
+	 *     @type string       count       Category count.
+	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 * }
+	 */
+	public function get_category_tree( $table_prefix, $category ) {
+
+		$category_tree = $category;
+
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		$parent_term_id = $category['parent'];
+		if ( 0 != $parent_term_id ) {
+			// phpcs:disable -- wpdb::prepare used by wrapper.
+			$parent_row = $this->wpdb->get_row(
 				$this->wpdb->prepare(
-					"SELECT t.term_id
-					FROM $terms_table t
-			        JOIN $termstaxonomy_table tt ON t.term_id = tt.term_id AND tt.parent = %s
-					WHERE t.name = %s
-					AND t.slug = %s
-					AND tt.taxonomy = %s;",
-					$parent_term_id,
-					$live_taxonomy['name'],
-					$live_taxonomy['slug'],
-					$live_taxonomy['taxonomy']
+					"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+					FROM {$table_terms} t
+			        JOIN {$table_term_taxonomy} tt ON t.term_id = tt.term_id
+					WHERE tt.taxonomy IN ( 'category' )
+					AND t.term_id = %s
+					ORDER BY tt.parent;",
+					$parent_term_id
 				),
 				ARRAY_A
 			);
-
-// TODO WIP.
-if ( ! is_null( $existing_taxonomy ) ) {
-				$d=1;
-} else {
-				$d=1;
-}
-continue;
 			// phpcs:enable
-			if ( ! is_null( $existing_taxonomy ) ) {
-				$term_id_new = $existing_taxonomy['term_id'];
-			} else {
-				$term_inserted = wp_insert_term(
-					$live_taxonomy['name'],
-					$live_taxonomy['taxonomy'],
-					[
-						'description' => $live_taxonomy['description'],
-						'parent'      => $parent_term_id,
-						'slug'        => $live_taxonomy['slug'],
-					]
-				);
-				if ( ! is_wp_error( $term_inserted ) ) {
-					$term_id_new = $term_inserted['term_id'] ?? null;
-					$created_terms_in_taxonomies[ $live_taxonomy['taxonomy'] ][] = $term_id_new;
-				} else {
-					$created_terms_in_taxonomies['errors'][] = sprintf( 'Error inserting term `%s` taxonomy `%s` -- %s', $live_taxonomy['name'], $live_taxonomy['taxonomy'], $term_inserted->get_error_message() );
-					$term_id_new                             = null;
-				}
-			}
 
-			$terms_updates[ $live_taxonomy['term_id'] ] = $term_id_new;
+			// This is either root category, or go level up recursively.
+			if ( 0 == $parent_row['parent'] ) {
+				$category_tree['parent'] = $parent_row;
+			} else {
+				$category_tree['parent'] = $this->get_category_tree( $table_prefix, $parent_row );
+			}
 		}
 
-		return $created_terms_in_taxonomies;
+		return $category_tree;
+	}
+
+	/**
+	 * Rebuilds the full category's tree. Either taxes an existing category, or creates it.
+	 *
+	 * @param string $table_prefix  DB table prefix.
+	 * @param array  $category_tree {
+	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 *     This is being read as a parameter and will be rebuilt node by node.
+	 *
+	 *     @type string       term_id     Category term_id.
+	 *     @type string       taxonomy    Should always be 'category'.
+	 *     @type string       name        Category name.
+	 *     @type string       slug        Category slug.
+	 *     @type string       description Category description.
+	 *     @type string       count       Category count.
+	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 * }
+	 *
+	 * @return array {
+	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 *     This is the resulting category tree, either existing categories fetched or new ones created.
+	 *
+	 *     @type string       term_id     Category term_id.
+	 *     @type string       taxonomy    Should always be 'category'.
+	 *     @type string       name        Category name.
+	 *     @type string       slug        Category slug.
+	 *     @type string       description Category description.
+	 *     @type string       count       Category count.
+	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 * }
+	 */
+	public function get_or_create_category_tree( $table_prefix, $category_tree ) {
+
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// If this is the top parent category, get or create it.
+		if ( 0 == $category_tree['parent'] ) {
+
+			// Get or create this top parent category.
+			$category_top_parent_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], 0 );
+			$category_top_parent_term_id = $category_top_parent_row['term_id'] ?? null;
+			if ( ! $category_top_parent_term_id ) {
+				// Insert it if it doesn't exist.
+				$category_top_parent_term_id = $this->wp_insert_category(
+					$table_prefix,
+					[
+						'cat_name'             => $category_tree['name'],
+						'category_description' => $category_tree['description'],
+						'category_parent'      => 0,
+					]
+				);
+			}
+			// Get this parent category's full array.
+			$category_top_parent = $this->get_category_array_by_term_id( $table_prefix, $category_top_parent_term_id );
+
+			return $category_top_parent;
+		}
+
+		// If this is not top parent category, keep going deeper recursively until reaching it.
+		if ( 0 != $category_tree['parent'] ) {
+			$current_parent_tree = $this->get_or_create_category_tree( $table_prefix, $category_tree['parent'] );
+		}
+
+		// For a non-top-parent category, get or create its tree and return.
+		$category_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], $current_parent_tree['term_id'] );
+		$category_term_id = $category_row['term_id'] ?? null;
+		if ( ! $category_term_id ) {
+			$category_term_id = $this->wp_insert_category(
+				$table_prefix,
+				[
+					'cat_name'             => $category_tree['name'],
+					'category_description' => $category_tree['description'],
+					'category_parent'      => $current_parent_tree['term_id'],
+				]
+			);
+		}
+		$category = $this->get_category_array_by_term_id( $table_prefix, $category_term_id );
+
+		// This is the reubuilt category tree.
+		$rebuilt_category_tree           = $category;
+		$rebuilt_category_tree['parent'] = $current_parent_tree;
+
+		return $rebuilt_category_tree;
+	}
+
+	/**
+	 * Gets a category array with all the related data by term_id.
+	 *
+	 * @param string $table_prefix DB table prefix.
+	 * @param string $term_id      term_id.
+	 *
+	 * @return array {
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent's term_id.
+	 * }
+	 */
+	public function get_category_array_by_term_id( $table_prefix, $term_id ) {
+
+		$category_data = $this->get_taxonomy_array_by_term_id( $table_prefix, $term_id, 'category' );
+
+		return $category_data;
+	}
+
+	/**
+	 * Gets taxonomy data array by term_id.
+	 *
+	 * @param string $table_prefix DB table prefix.
+	 * @param string $term_id      term_id.
+	 * @param string $taxonomy     Taxonomy.
+	 *
+	 * @return array {
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent's term_id.
+	 * }
+	 */
+	public function get_taxonomy_array_by_term_id( $table_prefix, $term_id, $taxonomy ) {
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$category_top_parent = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, tt.term_taxonomy_id, t.name, t.slug, tt.parent, tt.description, tt.count
+				FROM $table_terms t
+		        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
+				WHERE tt.taxonomy = %s
+				AND t.term_id = %s;",
+				$taxonomy,
+				$term_id
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $category_top_parent;
+	}
+
+	/**
+	 * Gets a category array with all the related data.
+	 *
+	 * @param string $table_prefix    DB table prefix.
+	 * @param string $cat_name        Category name.
+	 * @param string $cat_description Category description.
+	 * @param string $cat_parent      Category parent's term_id.
+	 *
+	 * @return array {
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent's term_id.
+	 * }
+	 */
+	public function get_category_array_by_name_description_and_parent( $table_prefix, $cat_name, $cat_description, $cat_parent ) {
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$category = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+					FROM $table_terms t
+			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
+					WHERE tt.taxonomy = 'category'
+					AND tt.parent = %s
+					AND t.name = %s
+					AND tt.description = %s;",
+				$cat_parent,
+				$cat_name,
+				$cat_description
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $category;
+	}
+
+	/**
+	 * A wrapper for \wp_insert_category().
+	 *
+	 * @param string $table_prefix DB table prefix.
+	 * @param array  $catarr       $catarr argument for \wp_insert_category(), see \wp_insert_category().
+	 *
+	 * @return int|\WP_Error The ID number of the new or updated Category on success. Zero or a WP_Error on failure,
+	 *                       depending on param `$wp_error`.
+	 */
+	public function wp_insert_category( $table_prefix, $catarr ) {
+		$category_top_parent_term_id = wp_insert_category( $catarr );
+
+		return $category_top_parent_term_id;
 	}
 
 	/**
 	 * Imports all the Post related data.
 	 *
-	 * @param int   $post_id Post Id.
-	 * @param array $data    Array containing all the data, @see ContentDiffMigrator::get_data for structure.
+	 * @param int   $post_id                  Post Id.
+	 * @param array $data                     Array containing all the data, @see
+	 *                                        \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::get_post_data
+	 *                                        for structure.
+	 * @param array $category_term_id_updates Category term_ids updates. Keys are old Live category term_ids, and values are
+	 *                                        corresponding Categories on local (Staging) term_ids.
 	 *
 	 * @return array List of errors which occurred.
 	 */
-	public function import_post_data( $post_id, $data ) {
+	public function import_post_data( $post_id, $data, $category_term_id_updates ) {
 		$error_messages = [];
 
 		// Insert Post Metas.
@@ -626,70 +870,55 @@ continue;
 			}
 		}
 
-		// Insert Terms.
-		$terms_ids_updates         = [];
-		$term_taxonomy_ids_updates = [];
-		foreach ( $data[ self::DATAKEY_TERMS ] as $term_row ) {
-			// Use existing term, or create a new one.
-			$term_id_existing = $this->term_exists( $term_row['name'], $term_row['slug'] );
-			$term_id_existing = is_numeric( $term_id_existing ) ? (int) $term_id_existing : $term_id_existing;
-			$term_id_old      = $term_row['term_id'];
-			$term_id_new      = null;
-			if ( ! is_null( $term_id_existing ) ) {
-				$term_id_new = $term_id_existing;
-			} else {
-				try {
-					$term_id_new   = $this->insert_term( $term_row );
-					$termmeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMMETA ], 'term_id', $term_id_old );
-					foreach ( $termmeta_rows as $termmeta_row ) {
-						$this->insert_termmeta_row( $termmeta_row, $term_id_new );
-					}
-				} catch ( \Exception $e ) {
-					$error_messages[] = $e->getMessage();
-				}
-			}
-			if ( ! is_null( $term_id_new ) ) {
-				$terms_ids_updates[ $term_id_old ] = $term_id_new;
-			}
-
-			// Insert Term Taxonomy records.
-
-			/*
-			 * Note -- A Term can be shared by multiple Taxonomies in WP, e.g. the same Term "blue" can be used by the Taxonomies
-			 * "category" and "tag", and also a custom Taxonomy called "color".
-			 */
-			$term_taxonomy_rows = $this->filter_array_elements( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_id', $term_id_old );
-			foreach ( $term_taxonomy_rows as $term_taxonomy_row ) {
-				// Get term_taxonomy or insert new.
-				$term_taxonomy_id_existing = $this->get_existing_term_taxonomy( (int) $term_id_new, $term_taxonomy_row['taxonomy'] );
-				$term_taxonomy_id_old      = $term_taxonomy_row['term_taxonomy_id'];
-				$term_taxonomy_id_new      = null;
-				if ( $term_taxonomy_id_existing ) {
-					$term_taxonomy_id_new = $term_taxonomy_id_existing;
-				} else {
-					try {
-						$term_taxonomy_id_new = $this->insert_term_taxonomy( $term_taxonomy_row, $term_id_new );
-					} catch ( \Exception $e ) {
-						$error_messages[] = $e->getMessage();
-					}
-				}
-				$term_taxonomy_ids_updates[ $term_taxonomy_id_old ] = $term_taxonomy_id_new;
-			}
-		}
-
-		// Insert Term Relationships.
+		// Import 'category' and 'post_tag' taxonomies.
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
-			$term_taxonomy_id_old = (int) $term_relationship_row['term_taxonomy_id'];
-			$term_taxonomy_id_new = $term_taxonomy_ids_updates[ $term_taxonomy_id_old ] ?? null;
-			if ( is_null( $term_taxonomy_id_new ) ) {
-				// Missing records in live DB.
-				$error_messages[] = sprintf( 'Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%s is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table', $data[ self::DATAKEY_POST ]['ID'], $post_id, $term_taxonomy_id_old );
-			} else {
-				try {
-					$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
-				} catch ( \Exception $e ) {
-					$error_messages[] = $e->getMessage();
+
+			$live_term_taxonomy_id  = $term_relationship_row['term_taxonomy_id'];
+			$live_term_taxonomy_row = $this->filter_array_element( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $live_term_taxonomy_id );
+			$live_term_id           = $live_term_taxonomy_row['term_id'];
+
+			// If it's a category, all of them have already been recreated on Staging -- see $category_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
+			if ( 'category' == $live_term_taxonomy_row['taxonomy'] ) {
+
+				$local_term_id           = $category_term_id_updates[ $live_term_id ];
+				$local_term_taxonomy_row = $this->get_term_taxonomy_row_by_term_id_and_taxonomy( $this->wpdb->prefix, $local_term_id, 'category' );
+				$local_term_taxonomy_id  = $local_term_taxonomy_row['term_taxonomy_id'];
+
+				// Insert Term Relationships record.
+				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
+
+			} elseif ( 'post_tag' == $live_term_taxonomy_row['taxonomy'] ) {
+
+				$live_term_row = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
+				$term_name     = $live_term_row['name'];
+
+				// Get or insert this Tag.
+				$local_term_row = $this->get_term_row_by_name_and_taxonomy( $this->wpdb->prefix, $term_name, 'post_tag' );
+				if ( is_null( $local_term_row ) || empty( $local_term_row ) ) {
+
+					// Create a new Tag.
+					$term_insert_result = $this->wp_insert_term( $term_name, 'post_tag' );
+					if ( is_wp_error( $term_insert_result ) ) {
+						$error_messages[] = sprintf(
+							"Error occurred while inserting post_tag '%s' live_term_id=%s at live_post_ID=%s :%s",
+							$term_name,
+							$live_term_id,
+							$post_id,
+							$term_insert_result->get_error_message()
+						);
+					} else {
+						$term_taxonomy_id_new = $term_insert_result['term_taxonomy_id'];
+						$term_id_new          = $term_insert_result['term_id'];
+					}
+				} else {
+					$term_data            = $this->get_taxonomy_array_by_term_id( $this->wpdb->prefix, $local_term_row['term_id'], 'post_tag' );
+					$term_taxonomy_id_new = $term_data['term_taxonomy_id'];
+					$term_id_new          = $term_data['term_id'];
 				}
+
+				// Insert the Term Relationship record.
+				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
+
 			}
 		}
 
@@ -1177,6 +1406,67 @@ continue;
 	}
 
 	/**
+	 * Gets a term_taxonomy table row by term_id and taxonomy.
+	 *
+	 * @param string     $table_prefix DB table prefix.
+	 * @param int|string $term_id      term_id.
+	 * @param string     $taxonomy     Term taxonomy.
+	 *
+	 * @return array|null Associative array containing the wp_term_taxonomy record.
+	 */
+	public function get_term_taxonomy_row_by_term_id_and_taxonomy( $table_prefix, $term_id, $taxonomy ) {
+
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT *
+				FROM {$table_term_taxonomy}
+				WHERE term_id = %d
+				AND taxonomy = %s;",
+				$term_id,
+				$taxonomy
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $row;
+	}
+
+	/**
+	 * Gets a term row by term name and taxonomy.
+	 *
+	 * @param string $table_prefix DB table prefix.
+	 * @param string $term_name    Term name.
+	 * @param string $taxonomy     Term taxonomy.
+	 *
+	 * @return array|null Associative array containing the wp_terms record.
+	 */
+	public function get_term_row_by_name_and_taxonomy( $table_prefix, $term_name, $taxonomy ) {
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT t.*
+				FROM {$table_terms} t
+				JOIN {$table_term_taxonomy} tt ON t.term_id = tt.term_id
+				WHERE t.name = %s
+				AND tt.taxonomy = %s;",
+				$term_name,
+				$taxonomy
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $row;
+	}
+
+	/**
 	 * Selects a row from the posts table.
 	 *
 	 * @param string $table_prefix Table prefix.
@@ -1508,6 +1798,32 @@ continue;
 		}
 
 		return $this->wpdb->insert_id;
+	}
+
+	/**
+	 * Wrapper of WP's native \wp_insert_term. @see \wp_insert_term.
+	 *
+	 * @param string       $term_name The term name to add.
+	 * @param string       $taxonomy  The taxonomy to which to add the term.
+	 * @param array|string $args {
+	 *     Optional. Array or query string of arguments for inserting a term.
+	 *
+	 *     @type string $alias_of    Slug of the term to make this term an alias of.
+	 *                               Default empty string. Accepts a term slug.
+	 *     @type string $description The term description. Default empty string.
+	 *     @type int    $parent      The id of the parent term. Default 0.
+	 *     @type string $slug        The term slug to use. Default empty string.
+	 * }
+	 *
+	 * @return array|WP_Error {
+	 *     An array of the new term data, WP_Error otherwise.
+	 *
+	 *     @type int        $term_id          The new term ID.
+	 *     @type int|string $term_taxonomy_id The new term taxonomy ID. Can be a numeric string.
+	 * }
+	 */
+	public function wp_insert_term( $term_name, $taxonomy, $args = [] ) {
+		return \wp_insert_term( $term_name, $taxonomy, $args );
 	}
 
 	/**
@@ -1845,7 +2161,7 @@ continue;
 		$post_id_new = $this->wpdb->get_var(
 			$this->wpdb->prepare(
 				"SELECT post_id
-			FROM $this->wpdb->postmeta
+			FROM {$this->wpdb->postmeta}
 			WHERE meta_key = %s
 			AND meta_value = %s",
 				$meta_key,
@@ -1966,16 +2282,27 @@ continue;
 			$current_percent = 0;
 		}
 
-		// Get what the next percentage increase will be.
+		// Get what the next regular increase in percentage will be.
 		$next_percent_increase = $current_percent + $percent_increment;
 		$next_percent_increase = $next_percent_increase >= 100 ? 100 : $next_percent_increase;
 
-		// Get what step number will make the percentage increase to that amount.
-		$required_current_count_for_increase = $next_percent_increase * $total_count / 100;
+		// Get actual precentage at this count.
+		$current_percent_actual = $current_count * 100 / $total_count;
 
-		// Increase percentage if reached.
-		if ( $current_count >= $required_current_count_for_increase ) {
-			$current_percent = $next_percent_increase;
+		// First check if $current_count ($current_percent_actual) has already exceeded the regular $next_percent_increase.
+		if ( $current_percent_actual > $next_percent_increase ) {
+			// Speed up to $current_percent_actual.
+			while ( ( $current_percent + $percent_increment ) <= $current_percent_actual ) {
+				$current_percent += $percent_increment;
+			}
+		} else {
+			// Get which "current count" number will make the percentage increase to the $next_percent_increase amount.
+			$required_current_count_for_increase = $next_percent_increase * $total_count / 100;
+
+			// Increase percentage if reached.
+			if ( $current_count >= $required_current_count_for_increase ) {
+				$current_percent = $next_percent_increase;
+			}
 		}
 	}
 
