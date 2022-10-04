@@ -24,6 +24,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
 	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                       = 'content-diff__err.log';
+	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
 
 	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
 
@@ -54,6 +55,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @var null|string Full path to file.
 	 */
 	private $log_error;
+
+	/**
+	 * Log containing recreated categories term_ids.
+	 *
+	 * @var null|string Full path to file.
+	 */
+	private $log_recreated_categories;
 
 	/**
 	 * Log containing imported post IDs.
@@ -299,6 +307,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Set constants.
 		$this->live_table_prefix             = $live_table_prefix;
 		$this->log_error                     = $import_dir . '/' . self::LOG_ERROR;
+		$this->log_recreated_categories      = $import_dir . '/' . self::LOG_RECREATED_CATEGORIES;
 		$this->log_imported_post_ids         = $import_dir . '/' . self::LOG_IMPORTED_POST_IDS;
 		$this->log_updated_posts_parent_ids  = $import_dir . '/' . self::LOG_UPDATED_PARENT_IDS;
 		$this->log_updated_featured_imgs_ids = $import_dir . '/' . self::LOG_UPDATED_FEATURED_IMAGES_IDS;
@@ -307,35 +316,33 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Timestamp the logs.
 		$ts = gmdate( 'Y-m-d h:i:s a', time() );
 		$this->log( $this->log_error, sprintf( 'Starting %s.', $ts ) );
+		$this->log( $this->log_recreated_categories, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_imported_post_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_posts_parent_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
 		// Before we create categories, let's make sure categories have valid parents. If they don't they should be fixed first.
-		WP_CLI::log( 'Validating categories..' );
+		WP_CLI::log( 'Validating categories...' );
 		$this->validate_categories();
 
-		WP_CLI::log( 'EXIT.' );
-		exit;
-
-		WP_CLI::log( 'Recreating categories..' );
-		$this->recreate_categories();
-		WP_CLI::log( 'Done!' );
-		return;
-		WP_CLI::log( sprintf( 'Importing %d objects, hold tight..', count( $all_live_posts_ids ) ) );
-		$imported_posts_data = $this->import_posts( $all_live_posts_ids );
+		WP_CLI::log( 'Recreating categories...' );
+		$category_term_id_updates = $this->recreate_categories();
 		WP_CLI::log( 'Done!' );
 
-		WP_CLI::log( 'Updating Post parent IDs..' );
+		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
+		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $category_term_id_updates );
+		WP_CLI::log( 'Done!' );
+
+		WP_CLI::log( 'Updating Post parent IDs...' );
 		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
 		WP_CLI::log( 'Done!' );
 
-		WP_CLI::log( 'Updating Featured images IDs..' );
+		WP_CLI::log( 'Updating Featured images IDs...' );
 		$this->update_featured_image_ids( $imported_posts_data );
 		WP_CLI::log( 'Done!' );
 
-		WP_CLI::log( 'Updating attachment IDs in block content..' );
+		WP_CLI::log( 'Updating attachment IDs in block content...' );
 		$this->update_attachment_ids_in_blocks( $imported_posts_data );
 		WP_CLI::log( 'Done!' );
 
@@ -405,24 +412,30 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 	/**
 	 * Recreates all categories from Live to local.
+	 *
 	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
+	 *
+	 * @return array Map of category term_id udpdates. Keys are categories' term_ids on Live and values are corresponding
+	 *               categories' term_ids on local (staging).
 	 */
 	public function recreate_categories() {
-		$created_terms_in_taxonomies = self::$logic->recreate_categories( $this->live_table_prefix );
+		$category_term_id_updates = self::$logic->recreate_categories( $this->live_table_prefix );
 
-		// Output and log errors.
-		if ( isset( $created_terms_in_taxonomies['errors'] ) && ! empty( $created_terms_in_taxonomies['errors'] ) ) {
-			foreach ( $created_terms_in_taxonomies['errors'] as $error ) {
-				WP_CLI::warning( $error );
-				$this->log( $this->log_error, 'recreate_categories error: ' . $error );
-			}
-		}
+		// Log category term_id updates.
+		$this->log(
+			$this->log_recreated_categories,
+			json_encode( [ 'category_term_id_updates' => $category_term_id_updates ] )
+		);
+
+		return $category_term_id_updates;
 	}
 
 	/**
 	 * Creates and imports posts and all related post data. Skips previously imported IDs found in $this->log_imported_post_ids.
 	 *
-	 * @param array $all_live_posts_ids Live IDs to be imported to local.
+	 * @param array $all_live_posts_ids       Live IDs to be imported to local.
+	 * @param array $category_term_id_updates Map of updated category term_ids. Keys are Categories' term_ids on live, and values
+	 *                                        are corresponding Categories' term_ids on local (staging).
 	 *
 	 * @return array $imported_posts_data {
 	 *     Array with subarray records for all the imported post objects.
@@ -434,7 +447,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 *     }
 	 * }
 	 */
-	public function import_posts( $all_live_posts_ids ) {
+	public function import_posts( $all_live_posts_ids, $category_term_id_updates ) {
 
 		$post_ids_for_import = $all_live_posts_ids;
 
@@ -457,10 +470,14 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		// Import Posts.
+		$percent_progress = null;
 		foreach ( $post_ids_for_import as $key_post_id => $post_id_live ) {
-			// Output a '.' every 2000 objects to let CLI know it's running.
-			if ( 0 == $key_post_id % 2000 ) {
-				echo '.';
+
+			// Get and output progress meter by 10%.
+			$last_percent_progress = $percent_progress;
+			self::$logic->get_progress_percentage( count( $post_ids_for_import ), $key_post_id + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
 			}
 
 			// Get all Post data from DB.
@@ -474,7 +491,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
 			}
 
-			// First just insert a new `wp_posts` record to get the new ID.
+			// First just insert a new blank `wp_posts` record to get the new ID.
 			try {
 				$post_id_new           = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
 				$imported_posts_data[] = [
@@ -492,7 +509,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 
 			// Now import all related Post data.
-			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data );
+			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $this->live_table_prefix, $category_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
 				$this->log( $this->log_error, sprintf( 'Following errors happened in import_posts() for post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new ) );
 				foreach ( $import_errors as $import_error ) {
@@ -588,13 +605,15 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		// Update parent IDs.
 		global $wpdb;
-		$i = 0;
+		$percent_progress = null;
 		foreach ( $parent_ids_for_update as $key_id_old => $id_old ) {
-			// Output a '.' every 2000 objects to let CLI know it's running.
-			if ( 0 == $i % 2000 ) {
-				echo '.';
+
+			// Get and output progress meter by 10%.
+			$last_percent_progress = $percent_progress;
+			self::$logic->get_progress_percentage( count( $parent_ids_for_update ), $key_id_old + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
 			}
-			$i++;
 
 			// Get Post ID.
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
@@ -644,7 +663,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Update.
 			if ( $parent_id_old != $parent_id_new ) {
-				WP_CLI::log( sprintf( 'update ID %d parent_id_new %d', $id_new, $parent_id_new ) );
 // TODO -- test
 				self::$logic->update_post_parent( $id_new, $parent_id_new );
 			}
