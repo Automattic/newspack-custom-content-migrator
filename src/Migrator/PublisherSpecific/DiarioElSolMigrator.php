@@ -139,6 +139,20 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
 				),
 			)
 		);
@@ -411,6 +425,8 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 	public function cmd_des_import_posts( $args, $assoc_args ) {
 		$posts_json_path = $assoc_args['posts-json-path'] ?? null;
 		$cache_path      = $assoc_args['imported-cache-path'] ?? null;
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 100000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 
 		if ( ! file_exists( $posts_json_path ) ) {
 			WP_CLI::error( sprintf( 'Posts export %s not found.', $posts_json_path ) );
@@ -429,7 +445,14 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 			$imported_notes = file( $cache_path, FILE_IGNORE_NEW_LINES );
 		}
 
-		foreach ( $posts as $post ) {
+		foreach ( $posts as $post_index => $post ) {
+			if ( $post_index < ( ( $batch - 1 ) * $posts_per_batch ) || $post_index >= ( $batch * $posts_per_batch ) ) {
+				WP_CLI::warning( sprintf( 'Skipped index %d', $post_index ) );
+				continue;
+			}
+
+			WP_CLI::line( sprintf( 'Migrating index %d', $post_index ) );
+
 			$original_id = $post['_id']['$oid'];
 			// Check if we have already imported the post.
 			if ( in_array( $original_id, $imported_notes ) ) {
