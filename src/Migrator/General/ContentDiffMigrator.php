@@ -326,7 +326,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		if ( ! file_exists( $file_ids_csv ) ) {
 			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_csv ) );
 		}
-		$all_live_posts_ids = explode( ',', file_get_contents( $file_ids_csv ) );
+		$all_live_posts_ids = explode( ',', trim( file_get_contents( $file_ids_csv ) ) );
 		if ( empty( $all_live_posts_ids ) ) {
 			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}

@@ -909,7 +909,8 @@ class ContentDiffMigrator {
 		}
 
 		// Import 'category' and 'post_tag' taxonomies.
-		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
+		$inserted_term_taxonomy_ids = [];
+		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $key_term_relationship_row => $term_relationship_row ) {
 
 			$live_term_taxonomy_id  = $term_relationship_row['term_taxonomy_id'];
 			$live_term_taxonomy_row = $this->filter_array_element( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $live_term_taxonomy_id );
@@ -922,6 +923,9 @@ class ContentDiffMigrator {
 			$local_term_id             = null;
 			$local_term_taxonomy_id    = null;
 			$local_term_taxonomy_count = null;
+			// Helper vars.
+			$local_term_taxonomy_data = null;
+			$local_term_name          = null;
 
 			// If it's a category, all of them have already been recreated on Staging -- see $category_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
 			if ( 'category' == $live_term_taxonomy_row['taxonomy'] ) {
@@ -929,24 +933,21 @@ class ContentDiffMigrator {
 				$local_term_id             = $category_term_id_updates[ $live_term_id ];
 				$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'category' );
 				$local_term_taxonomy_id    = $local_term_taxonomy_data['term_taxonomy_id'];
-				$term_name                 = $local_term_taxonomy_data['name'];
+				$local_term_name           = $local_term_taxonomy_data['name'];
 				$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 
 			} elseif ( 'post_tag' == $live_term_taxonomy_row['taxonomy'] ) {
 
-				$live_term_row = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
-				$term_name     = $live_term_row['name'];
-
 				// Get or insert this Tag.
-				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $term_name ], 'post_tag' );
+				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $live_term_name ], 'post_tag' );
 				if ( is_null( $local_term_taxonomy_data ) || empty( $local_term_taxonomy_data ) ) {
 
 					// Create a new Tag.
-					$term_insert_result = $this->wp_insert_term( $term_name, 'post_tag' );
+					$term_insert_result = $this->wp_insert_term( $live_term_name, 'post_tag' );
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
 							"Error occurred while inserting post_tag '%s' live_term_id=%s at live_post_ID=%s :%s",
-							$term_name,
+							$live_term_name,
 							$live_term_id,
 							$post_id,
 							$term_insert_result->get_error_message()
@@ -969,12 +970,21 @@ class ContentDiffMigrator {
 				}
 			}
 
-			if ( ! is_null( $local_term_taxonomy_id ) ) {
+			/**
+			 * We need to check if the same $local_term_taxonomy_id has already been inserted. This can happen if there are two
+			 * tags which have the same name but different case, e.g. first tag with name 'reseñas' and second with name 'Reseñas'.
+			 * WP distinguishes these Tags, but we should clean them up as we get the chance and merge them.
+			 */
+			$term_relationship_is_double = in_array( $local_term_taxonomy_id, $inserted_term_taxonomy_ids );
+
+			if ( ! is_null( $local_term_taxonomy_id ) && ! $term_relationship_is_double ) {
 				// Insert the Term Relationship record.
 				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
 
 				// Increment wp_term_taxonomy.count.
 				$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
+
+				$inserted_term_taxonomy_ids[] = $local_term_taxonomy_id;
 			}
 		}
 
