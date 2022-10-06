@@ -2084,35 +2084,6 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Wrapper for WP's native \term_exists(), for easier testing.
-	 *
-	 * @param string $term_name Term name.
-	 * @param string $term_slug Term slug.
-	 *
-	 * @return mixed @see term_exists.
-	 */
-	public function term_exists( $term_name, $term_slug ) {
-
-		// Native WP's term_exists() is highly discouraged due to not being cached, so writing custom query.
-
-		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$term_id = $this->wpdb->get_var(
-			$this->wpdb->prepare(
-				"SELECT term_id
-				FROM {$this->wpdb->terms}
-				WHERE name = %s
-				AND slug = %s ; ",
-				$term_name,
-				$term_slug
-			)
-		);
-		// phpcs:enable
-
-		return is_numeric( $term_id ) ? (int) $term_id : null;
-	}
-
-
-	/**
 	 * Finds for current post ID by old live DB ID, by searching for the self::SAVED_META_LIVE_POST_ID post meta.
 	 *
 	 * @param int|string $id_live  Post ID from live DB.

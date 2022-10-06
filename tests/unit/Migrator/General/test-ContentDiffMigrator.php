@@ -1641,7 +1641,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 										'insert_comment',
 										'insert_commentmeta_row',
 										'update_comment_parent',
-										'term_exists',
 										'insert_term',
 										'insert_termmeta_row',
 										'get_existing_term_taxonomy',
@@ -2140,50 +2139,6 @@ HTML;
 		$html_actual = $this->logic->update_image_element_data_id_attribute( $imported_attachment_ids, $html_actual );
 
 		$this->assertEquals( $html_expected, $html_actual );
-	}
-
-	/**
-	 * Checks that term_exists performs a correct query.
-	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.
-	 */
-	public function test_term_exists_should_query_correctly() {
-
-		// Prepare.
-		$term_name        = 'foo';
-		$term_slug        = 'bar';
-		$term_id_expected = 123;
-		$sql_sprintf      = "SELECT term_id
-				FROM {$this->wpdb_mock->terms}
-				WHERE name = %s
-				AND slug = %s ; ";
-		$sql              = sprintf( $sql_sprintf, $term_name, $term_slug );
-
-		// Mock.
-		$this->wpdb_mock->expects( $this->once() )
-						->method( 'prepare' )
-						->will(
-							$this->returnValueMap(
-								[
-									[ $sql_sprintf, $term_name, $term_slug, $sql ],
-								]
-							)
-						);
-		$this->wpdb_mock->expects( $this->once() )
-						->method( 'get_var' )
-						->will(
-							$this->returnValueMap(
-								[
-									[ $sql, $term_id_expected ],
-								]
-							)
-						);
-
-		// Run.
-		$term_id_actual = $this->logic->term_exists( $term_name, $term_slug );
-
-		// Assert.
-		$this->assertEquals( $term_id_expected, $term_id_actual );
 	}
 
 	/**
