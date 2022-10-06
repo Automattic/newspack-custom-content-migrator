@@ -9,6 +9,8 @@ namespace NewspackCustomContentMigrator\MigrationLogic;
 
 use \WP_CLI;
 use \WP_User;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use wpdb;
 
 /**
@@ -53,12 +55,35 @@ class ContentDiffMigrator {
 	private $wpdb;
 
 	/**
+	 * WpBlockManipulator.
+	 *
+	 * @var WpBlockManipulator.
+	 */
+	private $wp_block_manipulator;
+
+	/**
+	 * HtmlElementManipulator.
+	 *
+	 * @var HtmlElementManipulator
+	 */
+	private $html_element_manipulator;
+
+	/**
+	 * Crawler.
+	 *
+	 * @var Crawler.
+	 */
+	private $dom_crawler;
+
+	/**
 	 * ContentDiffMigrator constructor.
 	 *
 	 * @param object $wpdb Global $wpdb.
 	 */
 	public function __construct( $wpdb ) {
-		$this->wpdb = $wpdb;
+		$this->wpdb                     = $wpdb;
+		$this->wp_block_manipulator     = new WpBlockManipulator();
+		$this->html_element_manipulator = new HtmlElementManipulator();
 	}
 
 	/**
@@ -1022,12 +1047,34 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Gutenberg Blocks' attachment IDs with new attachment IDs in created `post_content` and `post_excerpt` fields.
 	 *
-	 * @param array  $imported_post_ids       An array of newly imported Post IDs. Will only fetch an do replacements in these.
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $log_file_path           Optional. Full path to a log file. If provided, will save and append a detailed
-	 *                                        output of all the changes made.
+	 * @param array  $imported_post_ids            An array of newly imported Post IDs. Will only fetch an do replacements in these.
+	 * @param array  $known_attachment_ids_updates An array of known Attachment IDs which were updated; keys are old IDs, values are
+	 *                                             new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local. Explanation and example --
+	 *                                             let's take hostname.com and a local image https://hostname.com/wp-content/2022/09/22/a.jpg
+	 *                                             as local image. Searching for this image's attachment ID will work just fine using
+	 *                                             the full URL. But perhaps if this site is using an S3 bucket, and if some of
+	 *                                             the URLs in post_content use https://hostname.s3.amazonaws.com/wp-content/uploads/2022/09/22/a.jpg
+	 *                                             we should then add value 'hostname.s3.amazonaws.com' in this array here, so that
+	 *                                             \attachment_url_to_postid can query the attachment ID by treating this S3 hostname
+	 *                                             as an alias of the local one.
+	 * @param string $log_file_path                Optional. Full path to a log file. If provided, will save and append a detailed
+	 *                                             output of all the changes made.
+	 *
+	 * @return void
 	 */
-	public function update_blocks_ids( $imported_post_ids, $imported_attachment_ids, $log_file_path = null ) {
+	public function update_blocks_ids( $imported_post_ids, array $known_attachment_ids_updates, array $local_hostname_aliases = [], $log_file_path = null ) {
+
+		// Filter the $local_hostname_aliases argument -- remove the local host if the user entered it, just leaving additional hostname aliases here.
+		if ( ! empty( $local_hostname_aliases ) ) {
+			$siteurl_parsed     = wp_parse_url( get_option( 'siteurl' ) );
+			$local_hostname     = $siteurl_parsed['host'];
+			$key_local_hostname = array_search( $local_hostname, $local_hostname_aliases );
+			if ( false !== $key_local_hostname ) {
+				unset( $local_hostname_aliases[ $key_local_hostname ] );
+				unset( $local_hostname_aliases[ $key_local_hostname ] );
+			}
+		}
 
 		// Fetch imported posts.
 		$post_ids_new = array_values( $imported_post_ids );
@@ -1049,17 +1096,33 @@ class ContentDiffMigrator {
 			$excerpt_before  = $result['post_excerpt'];
 			$excerpt_updated = $result['post_excerpt'];
 
-			// Do all replacements in content.
-			$content_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $content_updated );
-			$content_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $content_updated );
-
-			// Do all replacements in excerpt.
-			$excerpt_updated = $this->update_gutenberg_blocks_single_id( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_image_element_class_attribute( $imported_attachment_ids, $excerpt_updated );
-			$excerpt_updated = $this->update_image_element_data_id_attribute( $imported_attachment_ids, $excerpt_updated );
+			// wp:image and wp:gallery.
+			$content_updated = $this->update_image_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_image_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:audio.
+			$content_updated = $this->update_audio_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_audio_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:video.
+			$content_updated = $this->update_video_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_video_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:file.
+			$content_updated = $this->update_file_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_file_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:cover.
+			$content_updated = $this->update_cover_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_cover_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:media-text.
+			$content_updated = $this->update_mediatext_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_mediatext_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:jetpack/tiled-gallery.
+			$content_updated = $this->update_jetpacktiledgallery_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_jetpacktiledgallery_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:jetpack/slideshow.
+			$content_updated = $this->update_jetpackslideshow_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_jetpackslideshow_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			// wp:jetpack/image-compare.
+			$content_updated = $this->update_jetpackimagecompare_blocks_ids( $content_updated, $known_attachment_ids_updates, $local_hostname_aliases );
+			$excerpt_updated = $this->update_jetpackimagecompare_blocks_ids( $excerpt_updated, $known_attachment_ids_updates, $local_hostname_aliases );
 
 			// Persist.
 			if ( $content_before != $content_updated || $excerpt_before != $excerpt_updated ) {
@@ -1105,43 +1168,871 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates <img> element's data-id attribute value.
+	 * Searches for all wp:image blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
 	 *
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content                 HTML content.
+	 * @param string $content                      post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_image_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Get all blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:image', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get attachment ID from block header.
+			$att_id = $block_updated['attrs']['id'];
+
+			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
+				// No images.
+				continue;
+			}
+			$img_html         = $matches[0][0][0];
+			$img_html_updated = $img_html;
+
+			// Get img src.
+			$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
+			} else {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+					// Attachment ID not found.
+					continue;
+				}
+
+				// Add to known Att IDs updates.
+				if ( $new_att_id != $att_id ) {
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+				}
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// Update ID in image element `class` attribute.
+			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
+
+			// Update the whole img HTML element in Block HTML.
+			$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update IDs in block header.
+			$block_updated['attrs']['id'] = $new_att_id;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:audio blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_audio_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Match all wp:audio blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:audio', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through all audio blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $key_match => $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get attachment ID from block header.
+			$att_id = $block_updated['attrs']['id'];
+
+			// Get the first <audio> element from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
+				// No audio element.
+				continue;
+			}
+			$audio_html         = $matches[0][0][0];
+			$audio_html_updated = $audio_html;
+
+			// Get audio src.
+			$src = $this->html_element_manipulator->get_attribute_value( 'src', $audio_html );
+
+			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
+			} else {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+					// Attachment ID not found.
+					continue;
+				}
+
+				// Add to known Att IDs updates.
+				if ( $new_att_id != $att_id ) {
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+				}
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// Update the whole audio HTML element in Block HTML.
+			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $audio_html, $audio_html_updated, $block_innercontent_updated );
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update IDs in block header.
+			$block_updated['attrs']['id'] = $new_att_id;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:video blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_video_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Match all wp:video blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:video', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through all video blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get attachment ID from block header.
+			$att_id = $block_updated['attrs']['id'];
+
+			// Get the first <video> element from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
+				// No video element.
+				continue;
+			}
+			$video_html         = $matches[0][0][0];
+			$video_html_updated = $video_html;
+
+			// Get video src.
+			$src = $this->html_element_manipulator->get_attribute_value( 'src', $video_html );
+
+			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
+			} else {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+					// Attachment ID not found.
+					continue;
+				}
+
+				// Add to known Att IDs updates.
+				if ( $new_att_id != $att_id ) {
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+				}
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// Update the whole video HTML element in Block HTML.
+			$block_innerhtml_updated    = str_replace( $video_html, $video_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $video_html, $video_html_updated, $block_innercontent_updated );
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update ID in block header.
+			$block_updated['attrs']['id'] = $new_att_id;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:file blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_file_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Match all wp:file blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:file', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through all file blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $key_match => $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get attachment ID from block header.
+			$att_id = $block_updated['attrs']['id'];
+
+			// Get the first <a> elementa from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
+				// No <a> elements.
+				continue;
+			}
+			$a_html         = $matches[0][0][0];
+			$a_html_updated = $a_html;
+
+			// Get a href/src.
+			$src = $this->html_element_manipulator->get_attribute_value( 'href', $a_html );
+
+			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
+			} else {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+					// Attachment ID not found.
+					continue;
+				}
+
+				// Add to known Att IDs updates.
+				if ( $new_att_id != $att_id ) {
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+				}
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// Update the whole a HTML element in Block HTML.
+			$block_innerhtml_updated    = str_replace( $a_html, $a_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $a_html, $a_html_updated, $block_innercontent_updated );
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update ID in block header.
+			$block_updated['attrs']['id'] = $new_att_id;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:cover blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_cover_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Get all blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:cover', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get attachment ID from block header.
+			$att_id = $block_updated['attrs']['id'];
+
+			// Get the first <img> element from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
+				// No <img>s.
+				continue;
+			}
+			$img_html         = $matches[0][0][0];
+			$img_html_updated = $img_html;
+
+			// Get <img> src.
+			$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
+			} else {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+					// Attachment ID not found.
+					continue;
+				}
+
+				// Add to known Att IDs updates.
+				if ( $new_att_id != $att_id ) {
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+				}
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// Update ID in image element `class` attribute.
+			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
+
+			// Update the whole img HTML element in Block HTML.
+			$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update IDs in block header.
+			$block_updated['attrs']['id'] = $new_att_id;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:media-text blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_mediatext_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Match all wp:media-text blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:media-text', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through all media-text blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $key_match => $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get mediaID (attachment ID) from block header.
+			$att_id = $block_updated['attrs']['mediaId'];
+
+			// Get the first <img> element from innerHTML.
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
+				// No <img>s.
+				continue;
+			}
+			$img_html         = $matches[0][0][0];
+			$img_html_updated = $img_html;
+
+			// Get img src.
+			$src = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+			// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+			if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+				$new_att_id = $known_attachment_ids_updates[ $att_id ];
+			} else {
+				$new_att_id = null;
+				if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+					$src_cleaned = $this->clean_attachment_url_for_query( $src );
+					$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+				}
+				if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+					// Attachment ID not found.
+					continue;
+				}
+
+				// Add to known Att IDs updates.
+				if ( $new_att_id != $att_id ) {
+					$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+				}
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// If it's the same ID, don't update anything.
+			if ( $att_id === $new_att_id ) {
+				continue;
+			}
+
+			// Update ID in image element `class` attribute.
+			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
+
+			// Update the whole img HTML element in Block HTML.
+			$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+			$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update mediaId in block header.
+			$block_updated['attrs']['mediaId'] = $new_att_id;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all wp:jetpack/tiled-gallery blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_jetpacktiledgallery_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Get all blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:jetpack/tiled-gallery', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get all <img> elements from innerHTML.
+			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				// No <img>s.
+				continue;
+			}
+
+			// Loop through all <img> elements.
+			foreach ( $matches_images[0] as $match_image ) {
+
+				// Vars.
+				$img_html         = $match_image[0];
+				$img_html_updated = $img_html;
+
+				// Get data-id and src attributes.
+				$att_id = $this->html_element_manipulator->get_attribute_value( 'data-id', $img_html );
+				$src    = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+				// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+					$new_att_id = $known_attachment_ids_updates[ $att_id ];
+				} else {
+					$new_att_id = null;
+					if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+						$src_cleaned = $this->clean_attachment_url_for_query( $src );
+						$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					}
+					if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+						// Attachment ID not found.
+						continue;
+					}
+
+					// Add to known Att IDs updates.
+					if ( $new_att_id != $att_id ) {
+						$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+					}
+				}
+
+				// If it's the same ID, don't update anything.
+				if ( $att_id === $new_att_id ) {
+					continue;
+				}
+
+				// Update `data-id` attribute.
+				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
+
+				// Update the whole img HTML element in Block HTML.
+				$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+				$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
+			}
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update 'ids' in gallery block header.
+			$block_ids         = $block_updated['attrs']['ids'];
+			$block_ids_updated = $block_ids;
+			foreach ( $block_ids as $key => $id ) {
+				// Update ID, or leave it the same.
+				$block_ids_updated[ $key ] = $known_attachment_ids_updates[ $id ] ?? $id;
+			}
+			$block_updated['attrs']['ids'] = $block_ids_updated;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all jetpack/slideshow blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_jetpackslideshow_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Get all blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:jetpack/slideshow', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get all <img> elements from innerHTML.
+			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				// No <img>s.
+				continue;
+			}
+
+			// Loop through all <img> elements.
+			foreach ( $matches_images[0] as $match_image ) {
+
+				// Vars.
+				$img_html         = $match_image[0];
+				$img_html_updated = $img_html;
+
+				// Get data-id and src attributes.
+				$att_id = $this->html_element_manipulator->get_attribute_value( 'data-id', $img_html );
+				$src    = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+				// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+					$new_att_id = $known_attachment_ids_updates[ $att_id ];
+				} else {
+					$new_att_id = null;
+					if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+						$src_cleaned = $this->clean_attachment_url_for_query( $src );
+						$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					}
+					if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+						// Attachment ID not found.
+						continue;
+					}
+
+					// Add to known Att IDs updates.
+					if ( $new_att_id != $att_id ) {
+						$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+					}
+				}
+
+				// If it's the same ID, don't update anything.
+				if ( $att_id === $new_att_id ) {
+					continue;
+				}
+
+				// Update `data-id` attribute.
+				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
+				// Update ID in image element `class` attribute.
+				$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
+
+				// Update the whole img HTML element in Block HTML.
+				$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+				$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
+			}
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update 'ids' in gallery block header.
+			$block_ids         = $block_updated['attrs']['ids'];
+			$block_ids_updated = $block_ids;
+			foreach ( $block_ids as $key => $id ) {
+				// Update ID, or leave it the same.
+				$block_ids_updated[ $key ] = $known_attachment_ids_updates[ $id ] ?? $id;
+			}
+			$block_updated['attrs']['ids'] = $block_ids_updated;
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Searches for all jetpack/image-compare blocks, and checks and if necessary updates their attachment IDs based on `src` URL.
+	 *
+	 * @param string $content post_content.
+	 * @param array  $known_attachment_ids_updates Array with known attachment ID updates; keys are old IDs, values are new IDs.
+	 * @param array  $local_hostname_aliases       An array of image hostnames to be looked up as local hostnames.
+	 *
+	 * @return string Updated post_content.
+	 */
+	public function update_jetpackimagecompare_blocks_ids( string $content, array &$known_attachment_ids_updates, array $local_hostname_aliases = [] ): string {
+
+		// Get all blocks.
+		$matches = $this->wp_block_manipulator->match_wp_block( 'wp:jetpack/image-compare', $content );
+		if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+			return $content;
+		}
+
+		// Loop through blocks and update their IDs.
+		$content_updated = $content;
+		foreach ( $matches[0] as $match ) {
+
+			// Vars.
+			$block_html                 = $match[0];
+			$block                      = parse_blocks( $block_html )[0];
+			$block_updated              = $block;
+			$block_innerhtml_updated    = $block['innerHTML'];
+			$block_innercontent_updated = $block['innerContent'][0];
+
+			// Get all <img> elements from innerHTML.
+			$matches_images = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
+			if ( is_null( $matches ) || ! isset( $matches[0] ) || empty( $matches[0] ) ) {
+				// No <img>s.
+				continue;
+			}
+
+			// Loop through all <img> elements.
+			foreach ( $matches_images[0] as $match_image ) {
+
+				// Vars.
+				$img_html         = $match_image[0];
+				$img_html_updated = $img_html;
+
+				// Get id and src attributes.
+				$att_id = $this->html_element_manipulator->get_attribute_value( 'id', $img_html );
+				$src    = $this->html_element_manipulator->get_attribute_value( 'src', $img_html );
+
+				// Update this attachment ID -- first check if we have this ID on the record, if not query the DB by file src.
+				if ( isset( $known_attachment_ids_updates[ $att_id ] ) ) {
+					$new_att_id = $known_attachment_ids_updates[ $att_id ];
+				} else {
+					$new_att_id = null;
+					if ( $this->should_url_be_queried_as_local_attachment( $src, $local_hostname_aliases ) ) {
+						$src_cleaned = $this->clean_attachment_url_for_query( $src );
+						$new_att_id  = $this->attachment_url_to_postid( $src_cleaned, $local_hostname_aliases );
+					}
+					if ( is_null( $new_att_id ) || 0 === $new_att_id ) {
+						// Attachment ID not found.
+						continue;
+					}
+
+					// Add to known Att IDs updates.
+					if ( $new_att_id != $att_id ) {
+						$known_attachment_ids_updates[ $att_id ] = $new_att_id;
+					}
+				}
+
+				// If it's the same ID, don't update anything.
+				if ( $att_id === $new_att_id ) {
+					continue;
+				}
+
+				// Update `id` attribute.
+				$img_html_updated = $this->update_image_element_attribute( 'id', [ $att_id => $new_att_id ], $img_html_updated );
+				// Update ID in image element `class` attribute.
+				$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
+
+				// Update the whole img HTML element in Block HTML.
+				$block_innerhtml_updated    = str_replace( $img_html, $img_html_updated, $block_innerhtml_updated );
+				$block_innercontent_updated = str_replace( $img_html, $img_html_updated, $block_innercontent_updated );
+			}
+
+			// Apply innerHTML and innerContent changes to the block.
+			$block_updated['innerHTML']       = $block_innerhtml_updated;
+			$block_updated['innerContent'][0] = $block_innercontent_updated;
+
+			// Update IDs in block header, or leave them the same if they haven't changed.
+			$block_updated['attrs']['imageBefore']['id'] = $known_attachment_ids_updates[ $block_updated['attrs']['imageBefore']['id'] ] ?? $block_updated['attrs']['imageBefore']['id'];
+			$block_updated['attrs']['imageAfter']['id']  = $known_attachment_ids_updates[ $block_updated['attrs']['imageAfter']['id'] ] ?? $block_updated['attrs']['imageAfter']['id'];
+
+			// Update block with new content.
+			$content_updated = str_replace( serialize_block( $block ), serialize_block( $block_updated ), $content_updated );
+		}
+
+		return $content_updated;
+	}
+
+	/**
+	 * Updates <img> element's attribute value. Only for attributes which use double quotes for values. Update to the new value is
+	 * only done if the exact old value is found.
+	 *
+	 * @param string $attribute_name Name of attribute whose value is being updated.
+	 * @param array  $value_update   Key is old attribute value, value is new attribute value.
+	 * @param string $content        HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_image_element_data_id_attribute( $imported_attachment_ids, $content ) {
+	public function update_image_element_attribute( $attribute_name, $value_update, $content ) {
 
 		$content_updated = $content;
 
-		// Pattern for matching any Gutenberg block with an "id" attribute with a numeric value.
-		$pattern_block_id = '|
+		// Pattern for matching any Gutenberg block with the attribute using quotes for value.
+		$pattern = '|
 			(
 				\<img
 				[^\>]*        # zero or more characters except closing angle bracket
-				data-id="
+				' . $attribute_name . '="
 			)
 			(
-				\d+           # data-id ID value
+				\d+           # attribute value
 			)
 			(
-				"             # data-id value closing double quote
+				"             # value closing double quote
 				[^\>]*        # zero or more characters except closing angle bracket
-				/\>           # closing angle bracket
+				\>            # closing angle bracket (can be either prepended with forward slash, or without)
 			)
 		|xims';
 
 		$matches = [];
-		preg_match_all( $pattern_block_id, $content, $matches );
+		preg_match_all( $pattern, $content, $matches );
 		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
 
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $imported_attachment_ids[ $id ] ) ) {
-					$id_new = $imported_attachment_ids[ $id ];
+				if ( isset( $value_update[ $id ] ) ) {
+					$id_new = $value_update[ $id ];
 				}
 
 				// Check if this ID was updated.
@@ -1149,8 +2040,8 @@ class ContentDiffMigrator {
 					// Update just this specific block's header where this ID was matched (by $key_match).
 					$matched_block_header         = $matches[0][ $key_match ];
 					$matched_block_header_updated = str_replace(
-						sprintf( 'data-id="%d"', $id ),
-						sprintf( 'data-id="%d"', $id_new ),
+						sprintf( '%s="%d"', $attribute_name, $id ),
+						sprintf( '%s="%d"', $attribute_name, $id_new ),
 						$matched_block_header
 					);
 
@@ -1168,14 +2059,15 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates the ID in <img> element's class attribute, e.g. `class="wp-image-123"`.
+	 * Updates the ID in <img> element's class attribute, e.g. `class="wp-image-123"`. Update to new ID is only done if old ID is
+	 * used in class attribute value.
 	 *
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content                 HTML content.
+	 * @param array  $ids_updates An array of Attachment IDs to update; keys are old IDs, values are new IDs.
+	 * @param string $content     HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_image_element_class_attribute( $imported_attachment_ids, $content ) {
+	public function update_image_element_class_attribute( $ids_updates, $content ) {
 
 		$content_updated = $content;
 
@@ -1204,8 +2096,8 @@ class ContentDiffMigrator {
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $imported_attachment_ids[ $id ] ) ) {
-					$id_new = $imported_attachment_ids[ $id ];
+				if ( isset( $ids_updates[ $id ] ) ) {
+					$id_new = $ids_updates[ $id ];
 				}
 
 				// Check if this ID was updated.
@@ -1232,23 +2124,25 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates IDs in Gutenberg blocks which contain single IDs.
+	 * Updates attachment ID in Gutenberg blocks' headers which contain a single ID.
 	 *
-	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
-	 * @param string $content                 HTML content.
+	 * @param string $block_designation Block name/designation.
+	 * @param array  $id_update         An array; key is old ID, value is new ID.
+	 * @param string $content           HTML content.
 	 *
 	 * @return string|string[]
 	 */
-	public function update_gutenberg_blocks_single_id( $imported_attachment_ids, $content ) {
+	public function update_gutenberg_blocks_headers_single_id( $block_designation, $id_update, $content ) {
 
 		$content_updated = $content;
 
-		// Pattern for matching any Gutenberg block's "id" attribute value.
-		$pattern_block_id = '|
+		// Pattern for matching any Gutenberg block's "id" attribute value, uses sprintf for placeholder injection.
+		$block_designation_escaped = $this->escape_regex_pattern_string( $block_designation );
+		$pattern_block_id_sprintf  = '|
 			(
-				\<\!--      # beginning of the block element
+				\<\!--       # beginning of the block element
 				\s           # followed by a space
-				wp\:[^\s]+   # element name/designation
+				%s           # element name/designation
 				\s           # followed by a space
 				{            # opening brace
 				[^}]*        # zero or more characters except closing brace
@@ -1263,14 +2157,14 @@ class ContentDiffMigrator {
 		|xims';
 
 		$matches = [];
-		preg_match_all( $pattern_block_id, $content, $matches );
+		preg_match_all( sprintf( $pattern_block_id_sprintf, $block_designation_escaped ), $content, $matches );
 		if ( isset( $matches[2] ) && ! empty( $matches[2] ) ) {
 
 			// Loop through all ID values in $matches[2].
 			foreach ( $matches[2] as $key_match => $id ) {
 				$id_new = null;
-				if ( isset( $imported_attachment_ids[ $id ] ) ) {
-					$id_new = $imported_attachment_ids[ $id ];
+				if ( isset( $id_update[ $id ] ) ) {
+					$id_new = $id_update[ $id ];
 				}
 
 				// Check if this ID was updated.
@@ -1297,14 +2191,14 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Updates IDs in Gutenberg blocks which contain multiple CSV IDs.
+	 * Updates attachment ID in Gutenberg blocks' headers which contain multiple CSV IDs.
 	 *
 	 * @param array  $imported_attachment_ids An array of imported Attachment IDs to update; keys are old IDs, values are new IDs.
 	 * @param string $content                 HTML content.
 	 *
 	 * @return string|string[]|null
 	 */
-	public function update_gutenberg_blocks_multiple_ids( $imported_attachment_ids, $content ) {
+	public function update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $content ) {
 
 		// Pattern for matching Gutenberg block's multiple CSV IDs attribute value.
 		$pattern_csv_ids = '|
@@ -2161,6 +3055,73 @@ class ContentDiffMigrator {
 	}
 
 	/**
+	 * Cleans up the attachment file URL by just keeping scheme, host and path.
+	 *
+	 * @param string $url Attachment file URL.
+	 *
+	 * @return string Cleaned URL.
+	 */
+	public function clean_attachment_url_for_query( $url ) {
+		$parsed_url = parse_url( $url );
+
+		$url_cleaned = sprintf(
+			'%s://%s%s',
+			$parsed_url['scheme'],
+			$parsed_url['host'],
+			$parsed_url['path'],
+		);
+
+		return $url_cleaned;
+	}
+
+	/**
+	 * Checks if this $url should be queried as local attachment -- does it have the same hostname as 'siteurl', or is the hostname
+	 * one of $local_hostname_aliases.
+	 *
+	 * @param string $url                    Attachment file URL.
+	 * @param array  $local_hostname_aliases Array of hostnames to use as local hostname aliases.
+	 *
+	 * @return bool Should this URL be queried as local attachment.
+	 */
+	public function should_url_be_queried_as_local_attachment( $url, $local_hostname_aliases ) {
+		$url_parsed = parse_url( $url );
+		$url_host   = $url_parsed['host'];
+
+		$siteurl        = get_option( 'siteurl' );
+		$siteurl_parsed = wp_parse_url( $siteurl );
+		$siteurl_host   = $siteurl_parsed['host'];
+
+		return $siteurl_host == $url_host || in_array( $url_host, $local_hostname_aliases );
+	}
+
+	/**
+	 * Wrapper for WP's native \attachment_url_to_postid(), for easier testing.
+	 *
+	 * @param string $url                    The URL to resolve.
+	 * @param array  $local_hostname_aliases Array of hostnames to use as local hostname aliases.
+	 *
+	 * @return int The found post ID, or 0 on failure.
+	 */
+	public function attachment_url_to_postid( $url, $local_hostname_aliases = [] ) {
+
+		// If $url hostname has one of the given aliases, substitute its hostname with the local hostname.
+		if ( ! empty( $local_hostname_aliases ) ) {
+			$parsed_url = wp_parse_url( $url );
+			if ( in_array( $parsed_url['host'], $local_hostname_aliases ) ) {
+				$siteurl        = get_option( 'siteurl' );
+				$siteurl_parsed = wp_parse_url( $siteurl );
+
+				$url = str_replace( '//' . $parsed_url['host'], '//' . $siteurl_parsed['host'], $url );
+			}
+		}
+
+		// phpcs:ignore
+		$post_id = attachment_url_to_postid( $url );
+
+		return $post_id;
+	}
+
+	/**
 	 * Filters a multidimensional array and searches for a subarray with a key and value.
 	 *
 	 * @param array $array Array being searched and filtered.
@@ -2240,6 +3201,26 @@ class ContentDiffMigrator {
 				$current_percent = $next_percent_increase;
 			}
 		}
+	}
+
+  /**
+	 * Escapes special characters in string to be used in PHP regex patterns/expressions.
+	 *
+	 * @param string $subject Subject.
+	 *
+	 * @return string
+	 */
+	private function escape_regex_pattern_string( string $subject ): string {
+		$special_chars   = [ '.', '\\', '+', '*', '?', '[', '^', ']', '$', '(', ')', '{', '}', '=', '!', '<', '>', '|', ':' ];
+		$subject_escaped = $subject;
+		foreach ( $special_chars as $special_char ) {
+			$subject_escaped = str_replace( $special_char, '\\' . $special_char, $subject_escaped );
+		}
+
+		// Space.
+		$subject_escaped = str_replace( ' ', '\s', $subject_escaped );
+
+		return $subject_escaped;
 	}
 
 	/**
