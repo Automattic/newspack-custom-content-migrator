@@ -914,6 +914,9 @@ class ContentDiffMigrator {
 			$live_term_taxonomy_id  = $term_relationship_row['term_taxonomy_id'];
 			$live_term_taxonomy_row = $this->filter_array_element( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $live_term_taxonomy_id );
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
+			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
+			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
+			$live_term_name         = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
@@ -966,11 +969,13 @@ class ContentDiffMigrator {
 				}
 			}
 
-			// Insert the Term Relationship record.
-			$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
+			if ( ! is_null( $local_term_taxonomy_id ) ) {
+				// Insert the Term Relationship record.
+				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
 
-			// Increment wp_term_taxonomy.count.
-			$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
+				// Increment wp_term_taxonomy.count.
+				$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
+			}
 		}
 
 		return $error_messages;
