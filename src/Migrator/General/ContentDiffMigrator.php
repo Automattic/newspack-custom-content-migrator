@@ -487,7 +487,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ! in_array( $post_type, [ 'post', 'page', 'attachment' ] ) ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for id_old=%s', $post_type, $post_id_live ) );
-				echo "\n";
 				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
 			}
 
@@ -501,7 +500,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				];
 			} catch ( \Exception $e ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error while inserting post_type %s id_old=%d : %s', $post_type, $post_id_live, $e->getMessage() ) );
-				echo "\n";
 				WP_CLI::warning( sprintf( 'Error inserting %s Live ID %d (details in log file)', $post_type, $post_id_live ) );
 
 				// Error is logged. Continue importing other posts.
@@ -509,14 +507,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 
 			// Now import all related Post data.
-			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $this->live_table_prefix, $category_term_id_updates );
+			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
 				$this->log( $this->log_error, sprintf( 'Following errors happened in import_posts() for post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new ) );
 				foreach ( $import_errors as $import_error ) {
 					$this->log( $this->log_error, sprintf( '- %s', $import_error ) );
 				}
-				echo "\n";
-				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (details in log file).', $post_type, $post_id_live, $post_id_new ) );
+				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (see log %s).', $post_type, $post_id_live, $post_id_new, $this->log_error ) );
 			}
 
 			// Log imported post.
@@ -602,6 +599,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Try and free some memory.
 		$all_live_posts_ids  = null;
 		$imported_posts_data = null;
+		usleep( 100000 );
 
 		// Update parent IDs.
 		global $wpdb;
@@ -615,21 +613,14 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
 			}
 
-			// Get Post ID.
+			// Get new local Post ID.
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
 			$id_new = is_null( $id_new ) ? $imported_attachment_ids_map[ $id_old ] : $id_new;
 
-			// Get current ("old" in terms of updating its value) post_parent.
+			// Get Post's post_parent which uses the live DB ID.
 			$parent_id_old = $wpdb->get_var( $wpdb->prepare( "SELECT post_parent FROM $wpdb->posts WHERE ID = %d;", $id_new ) );
 			// No update to do.
 			if ( '0' === $parent_id_old ) {
-				continue;
-			}
-			// Extra safety check (should not really be necessary).
-			if ( is_null( $parent_id_old ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found in $imported_post_ids_map, $id_old=%s, $id_new=%s.', $id_old, $id_new ) );
-				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, post not found in $imported_post_ids_map $id_old=%s, $id_new=%s.', $id_old, $id_new ) );
 				continue;
 			}
 
@@ -639,14 +630,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$parent_id_new = is_null( $parent_id_new ) && array_key_exists( $parent_id_old, $imported_attachment_ids_map ) ? $imported_attachment_ids_map[ $parent_id_old ] : $parent_id_new;
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
-			// it won't be present in the list of the posts we imported, $all_live_posts_ids. So let's try and search for this
-			// post_parent directly in DB, and find its new ID.
-			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- if a previous content diff imported it.
+			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
+			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
 // TODO -- test
 				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, self::SAVED_META_LIVE_POST_ID );
 			}
-			// If all fails, also try searching by joining local and live DB tables.
+			// Next try searching for the new parent_id by joining local and live DB tables.
 			if ( is_null( $parent_id_new ) ) {
 // TODO -- test
 				$parent_id_new = self::$logic->get_current_post_id_by_comparing_with_live_db( $parent_id_old, $this->live_table_prefix );
@@ -656,9 +646,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// post_type different than the supported post type, or an error like the post_parent object missing in Live DB.
 			if ( is_null( $parent_id_new ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
-				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
-				continue;
+
+				// If all attempts failed (possible that parent didn't exist in live DB), set it to 0, because we shouldn't have loose invalid post_parents locally.
+				$parent_id_new = 0;
+				WP_CLI::warning( sprintf( 'Could not update parent ID for Post, parent ID now set to 0 -- $id_old(live DB Post ID)=%s, $id_new(local DB Post ID)=%s, $parent_id_old(live DB parent ID)=%s.', $id_old, $id_new, $parent_id_old ) );
 			}
 
 			// Update.

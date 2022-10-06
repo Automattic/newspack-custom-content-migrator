@@ -549,7 +549,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Rebuilds the full category's tree. Either taxes an existing category, or creates it.
+	 * Rebuilds the full tree of a category. Either taxes an existing category, or creates it.
 	 *
 	 * @param string $table_prefix  DB table prefix.
 	 * @param array  $category_tree {
@@ -651,48 +651,61 @@ class ContentDiffMigrator {
 	 */
 	public function get_category_array_by_term_id( $table_prefix, $term_id ) {
 
-		$category_data = $this->get_taxonomy_array_by_term_id( $table_prefix, $term_id, 'category' );
+		$category_data = $this->get_term_and_taxonomy_array( $table_prefix, [ 'term_id' => $term_id ], 'category' );
 
 		return $category_data;
 	}
 
 	/**
-	 * Gets taxonomy data array by term_id.
+	 * Gets Term and Taxonomy data array by either term_id or Term name.
 	 *
 	 * @param string $table_prefix DB table prefix.
-	 * @param string $term_id      term_id.
+	 * @param array  $where        Where clause. Must provide either 'term_id' or 'term_name' key and value.
 	 * @param string $taxonomy     Taxonomy.
 	 *
-	 * @return array {
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent's term_id.
+	 * @return array|null {
+	 *     @type string term_id     Term term_id.
+	 *     @type string taxonomy    Term taxonomy, e.g. 'category' or 'post_tag'.
+	 *     @type string name        Term name.
+	 *     @type string slug        Term slug.
+	 *     @type string description Taxonomy description.
+	 *     @type string count       Term count.
+	 *     @type string parent      Term parent's term_id.
 	 * }
 	 */
-	public function get_taxonomy_array_by_term_id( $table_prefix, $term_id, $taxonomy ) {
+	public function get_term_and_taxonomy_array( $table_prefix, array $where, $taxonomy ) {
+
 		$table_terms         = esc_sql( $table_prefix . 'terms' );
 		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
+		$query_and_clause    = '';
+		$query_and_parameter = null;
+		if ( isset( $where[ 'term_id' ] ) ) {
+			$query_and_clause    = ' AND t.term_id = %s ';
+			$query_and_parameter = $where[ 'term_id' ];
+		} elseif ( isset( $where[ 'term_name' ] ) ) {
+			$query_and_clause    = ' AND t.name = %s ';
+			$query_and_parameter = $where[ 'term_name' ];
+		} else {
+			return null;
+		}
+
 		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$category_top_parent = $this->wpdb->get_row(
+		$term_taxonomy_data = $this->wpdb->get_row(
 			$this->wpdb->prepare(
 				"SELECT t.term_id, tt.taxonomy, tt.term_taxonomy_id, t.name, t.slug, tt.parent, tt.description, tt.count
 				FROM $table_terms t
 		        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
 				WHERE tt.taxonomy = %s
-				AND t.term_id = %s;",
+				{$query_and_clause} ;",
 				$taxonomy,
-				$term_id
+				$query_and_parameter
 			),
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		return $category_top_parent;
+		return $term_taxonomy_data;
 	}
 
 	/**
@@ -877,15 +890,19 @@ class ContentDiffMigrator {
 			$live_term_taxonomy_row = $this->filter_array_element( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $live_term_taxonomy_id );
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
 
+			// These are the values we're going to get first, then update.
+			$local_term_id             = null;
+			$local_term_taxonomy_id    = null;
+			$local_term_taxonomy_count = null;
+
 			// If it's a category, all of them have already been recreated on Staging -- see $category_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
 			if ( 'category' == $live_term_taxonomy_row['taxonomy'] ) {
 
-				$local_term_id           = $category_term_id_updates[ $live_term_id ];
-				$local_term_taxonomy_row = $this->get_term_taxonomy_row_by_term_id_and_taxonomy( $this->wpdb->prefix, $local_term_id, 'category' );
-				$local_term_taxonomy_id  = $local_term_taxonomy_row['term_taxonomy_id'];
-
-				// Insert Term Relationships record.
-				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
+				$local_term_id             = $category_term_id_updates[ $live_term_id ];
+				$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'category' );
+				$local_term_taxonomy_id    = $local_term_taxonomy_data['term_taxonomy_id'];
+				$term_name                 = $local_term_taxonomy_data['name'];
+				$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 
 			} elseif ( 'post_tag' == $live_term_taxonomy_row['taxonomy'] ) {
 
@@ -893,8 +910,8 @@ class ContentDiffMigrator {
 				$term_name     = $live_term_row['name'];
 
 				// Get or insert this Tag.
-				$local_term_row = $this->get_term_row_by_name_and_taxonomy( $this->wpdb->prefix, $term_name, 'post_tag' );
-				if ( is_null( $local_term_row ) || empty( $local_term_row ) ) {
+				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $term_name ], 'post_tag' );
+				if ( is_null( $local_term_taxonomy_data ) || empty( $local_term_taxonomy_data ) ) {
 
 					// Create a new Tag.
 					$term_insert_result = $this->wp_insert_term( $term_name, 'post_tag' );
@@ -906,20 +923,29 @@ class ContentDiffMigrator {
 							$post_id,
 							$term_insert_result->get_error_message()
 						);
-					} else {
-						$term_taxonomy_id_new = $term_insert_result['term_taxonomy_id'];
-						$term_id_new          = $term_insert_result['term_id'];
+
+						continue;
 					}
+
+					$local_term_id             = $term_insert_result['term_id'];
+					$local_term_taxonomy_id    = $term_insert_result['term_taxonomy_id'];
+					$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'post_tag' );
+					$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
+
 				} else {
-					$term_data            = $this->get_taxonomy_array_by_term_id( $this->wpdb->prefix, $local_term_row['term_id'], 'post_tag' );
-					$term_taxonomy_id_new = $term_data['term_taxonomy_id'];
-					$term_id_new          = $term_data['term_id'];
+
+					// Use the existing Tag.
+					$local_term_taxonomy_id    = $local_term_taxonomy_data['term_taxonomy_id'];
+					$local_term_id             = $local_term_taxonomy_data['term_id'];
+					$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 				}
-
-				// Insert the Term Relationship record.
-				$this->insert_term_relationship( $post_id, $term_taxonomy_id_new );
-
 			}
+
+			// Insert the Term Relationship record.
+			$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
+
+			// Increment wp_term_taxonomy.count.
+			$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
 		}
 
 		return $error_messages;
@@ -1403,67 +1429,6 @@ class ContentDiffMigrator {
 		// phpcs:enable
 
 		return is_numeric( $var ) ? (int) $var : $var;
-	}
-
-	/**
-	 * Gets a term_taxonomy table row by term_id and taxonomy.
-	 *
-	 * @param string     $table_prefix DB table prefix.
-	 * @param int|string $term_id      term_id.
-	 * @param string     $taxonomy     Term taxonomy.
-	 *
-	 * @return array|null Associative array containing the wp_term_taxonomy record.
-	 */
-	public function get_term_taxonomy_row_by_term_id_and_taxonomy( $table_prefix, $term_id, $taxonomy ) {
-
-		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
-
-		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$row = $this->wpdb->get_row(
-			$this->wpdb->prepare(
-				"SELECT *
-				FROM {$table_term_taxonomy}
-				WHERE term_id = %d
-				AND taxonomy = %s;",
-				$term_id,
-				$taxonomy
-			),
-			ARRAY_A
-		);
-		// phpcs:enable
-
-		return $row;
-	}
-
-	/**
-	 * Gets a term row by term name and taxonomy.
-	 *
-	 * @param string $table_prefix DB table prefix.
-	 * @param string $term_name    Term name.
-	 * @param string $taxonomy     Term taxonomy.
-	 *
-	 * @return array|null Associative array containing the wp_terms record.
-	 */
-	public function get_term_row_by_name_and_taxonomy( $table_prefix, $term_name, $taxonomy ) {
-		$table_terms         = esc_sql( $table_prefix . 'terms' );
-		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
-
-		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$row = $this->wpdb->get_row(
-			$this->wpdb->prepare(
-				"SELECT t.*
-				FROM {$table_terms} t
-				JOIN {$table_term_taxonomy} tt ON t.term_id = tt.term_id
-				WHERE t.name = %s
-				AND tt.taxonomy = %s;",
-				$term_name,
-				$taxonomy
-			),
-			ARRAY_A
-		);
-		// phpcs:enable
-
-		return $row;
 	}
 
 	/**
@@ -2174,7 +2139,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Finds the current post ID by searching all the wp_posts and comparing them to the live DB record.
+	 * Finds a local post ID by live DB's ID, by comparing the live DB post record to the local DB.
 	 *
 	 * @param int    $id_live           Old live site's post object ID.
 	 * @param string $live_table_prefix Live DB tables' prefix.
