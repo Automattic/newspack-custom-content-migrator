@@ -705,12 +705,12 @@ class ContentDiffMigrator {
 
 		$query_and_clause    = '';
 		$query_and_parameter = null;
-		if ( isset( $where[ 'term_id' ] ) ) {
+		if ( isset( $where['term_id'] ) ) {
 			$query_and_clause    = ' AND t.term_id = %s ';
-			$query_and_parameter = $where[ 'term_id' ];
-		} elseif ( isset( $where[ 'term_name' ] ) ) {
+			$query_and_parameter = $where['term_id'];
+		} elseif ( isset( $where['term_name'] ) ) {
 			$query_and_clause    = ' AND t.name = %s ';
-			$query_and_parameter = $where[ 'term_name' ];
+			$query_and_parameter = $where['term_name'];
 		} else {
 			return null;
 		}
@@ -3203,7 +3203,7 @@ class ContentDiffMigrator {
 		}
 	}
 
-  /**
+	/**
 	 * Escapes special characters in string to be used in PHP regex patterns/expressions.
 	 *
 	 * @param string $subject Subject.

@@ -745,12 +745,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
 			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
-// TODO -- test
 				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, self::SAVED_META_LIVE_POST_ID );
 			}
 			// Next try searching for the new parent_id by joining local and live DB tables.
 			if ( is_null( $parent_id_new ) ) {
-// TODO -- test
 				$parent_id_new = self::$logic->get_current_post_id_by_comparing_with_live_db( $parent_id_old, $this->live_table_prefix );
 			}
 
@@ -766,7 +764,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 			// Update.
 			if ( $parent_id_old != $parent_id_new ) {
-// TODO -- test
 				self::$logic->update_post_parent( $id_new, $parent_id_new );
 			}
 
