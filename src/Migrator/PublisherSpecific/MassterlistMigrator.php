@@ -129,7 +129,7 @@ class MassterlistMigrator implements InterfaceMigrator {
 		foreach ( $jobs as $job ) {
 			$job_content = $this->generate_job_content_from_posts( $job );
 
-			if ( $this->post_exists( 'job_original_id', $job['id'] ) ) {
+			if ( $this->post_exists( 'job_original_id', $job['id'], 'newspack_lst_mktplce' ) ) {
 				WP_CLI::warning( sprintf( "Skipping job %d as it's already imported!", $job['id'] ) );
 				continue;
 			}
@@ -623,10 +623,11 @@ class MassterlistMigrator implements InterfaceMigrator {
 	 *
 	 * @param string $meta_key Meta to check the existance of the post with.
 	 * @param mixed  $meta_value Meta value.
+	 * @param mixed  $post_type Post type.
 	 * @return boolean
 	 */
-	private function post_exists( $meta_key, $meta_value ) {
-		$existing_posts = get_posts( [ 'meta_query' => [ ['key' => $meta_key, 'value' => $meta_value] ] ] ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+	private function post_exists( $meta_key, $meta_value, $post_type = 'post' ) {
+		$existing_posts = get_posts( [ 'post_type' => $post_type, 'meta_query' => [ ['key' => $meta_key, 'value' => $meta_value] ] ] ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 
 		return 0 < count( $existing_posts );
 	}
