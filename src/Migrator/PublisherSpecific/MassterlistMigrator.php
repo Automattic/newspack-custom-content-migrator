@@ -290,10 +290,10 @@ class MassterlistMigrator implements InterfaceMigrator {
 		$url_icon_url       = wp_get_attachment_url( self::JOBS_URL_ICON_MEDIA_ID );
 		$full_time_icon_url = wp_get_attachment_url( self::JOBS_FULLTIME_ICON_MEDIA_ID );
 
-		$company   = ( empty( $job['company_name'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $company_icon_url . '" alt="">  ' . $job['company_name'] . '<br>';
-		$locaiton  = ( empty( $job['location'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $location_icon_url . '" alt="">  ' . $job['location'] . '<br>';
-		$url       = ( empty( $job['url'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $url_icon_url . '" alt="">  <a href="' . $job['url'] . '">' . $job['url'] . '</a><br>';
-		$full_tile = ( 1 === intval( $job['is_fulltime'] ) ) ? '' : '<img class="wp-image-124" style="width: 20px;" src="' . $full_time_icon_url . '" alt="">  Full Time';
+		$company   = ( empty( $job['company_name'] ) ) ? '' : $job['company_name'] . '<br>';
+		$locaiton  = ( empty( $job['location'] ) ) ? '' : $job['location'] . '<br>';
+		$url       = ( empty( $job['url'] ) ) ? '' : $job['url'] . '">' . $job['url'] . '</a><br>';
+		$full_tile = ( 1 === intval( $job['is_fulltime'] ) ) ? '' : 'Full Time';
 
 		$details_content = "<!-- wp:paragraph --><p>$company$locaiton$url$full_tile</p><!-- /wp:paragraph -->";
 
