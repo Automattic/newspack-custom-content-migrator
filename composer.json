@@ -38,6 +38,7 @@
     "phpunit/phpunit": "9.*"
   },
   "config": {
-    "vendor-dir": "vendor"
+    "vendor-dir": "vendor",
+    "platform-check": false
   }
 }

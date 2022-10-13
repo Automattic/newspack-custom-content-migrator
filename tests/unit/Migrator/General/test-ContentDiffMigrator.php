@@ -992,11 +992,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 */
 	public function test_should_update_post_parent( $data ) {
 		// Prepare.
-		$post_id           = 123;
-		$new_post_parent   = 456;
-		$post              = new \stdClass();
-		$post->ID          = $post_id;
-		$post->post_parent = 145;
+		$post_id         = 123;
+		$new_post_parent = 456;
+		$old_post_parent = 145;
 
 		// Mock.
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
@@ -1014,7 +1012,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 						);
 
 		// Run.
-		$logic_partial_mock->update_post_parent( $post, $new_post_parent );
+		$logic_partial_mock->update_post_parent( $post_id, $new_post_parent );
 	}
 
 	/**
@@ -1643,7 +1641,6 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 										'insert_comment',
 										'insert_commentmeta_row',
 										'update_comment_parent',
-										'term_exists',
 										'insert_term',
 										'insert_termmeta_row',
 										'get_existing_term_taxonomy',
@@ -1931,9 +1928,9 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			// Term relationships rows.
 			'err insert_term_relationship',
 			// Inserts didn't happen here.
-			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $data['post']['ID'], $new_post_id, $term_taxonomy_rows[1]['term_taxonomy_id'] ),
-			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $data['post']['ID'], $new_post_id, $term_taxonomy_rows[2]['term_taxonomy_id'] ),
-			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $data['post']['ID'], $new_post_id, $term_taxonomy_rows[3]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $post_row['ID'], $new_post_id, $data['term_taxonomy'][1]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $post_row['ID'], $new_post_id, $data['term_taxonomy'][2]['term_taxonomy_id'] ),
+			sprintf( "Error, could not insert term_relationship for live post/object_id=%d (new post_id=%d) because term_taxonomy_id=%d is not found in live DB -- it exists in live term_relationships, but not in live term_taxonomy table", $post_row['ID'], $new_post_id, $data['term_taxonomy'][3]['term_taxonomy_id'] ),
 		];
 		$this->assertEquals( $expected_errors, $import_errors );
 	}
@@ -3204,50 +3201,6 @@ BLOCK;
 
 		// Assert.
 		$this->assertEquals( $html_expected, $html_actual );
-	}
-
-	/**
-	 * Checks that term_exists performs a correct query.
-	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::term_exists.
-	 */
-	public function test_term_exists_should_query_correctly() {
-
-		// Prepare.
-		$term_name        = 'foo';
-		$term_slug        = 'bar';
-		$term_id_expected = 123;
-		$sql_sprintf      = "SELECT term_id
-				FROM {$this->wpdb_mock->terms}
-				WHERE name = %s
-				AND slug = %s ; ";
-		$sql              = sprintf( $sql_sprintf, $term_name, $term_slug );
-
-		// Mock.
-		$this->wpdb_mock->expects( $this->once() )
-						->method( 'prepare' )
-						->will(
-							$this->returnValueMap(
-								[
-									[ $sql_sprintf, $term_name, $term_slug, $sql ],
-								]
-							)
-						);
-		$this->wpdb_mock->expects( $this->once() )
-						->method( 'get_var' )
-						->will(
-							$this->returnValueMap(
-								[
-									[ $sql, $term_id_expected ],
-								]
-							)
-						);
-
-		// Run.
-		$term_id_actual = $this->logic->term_exists( $term_name, $term_slug );
-
-		// Assert.
-		$this->assertEquals( $term_id_expected, $term_id_actual );
 	}
 
 	/**

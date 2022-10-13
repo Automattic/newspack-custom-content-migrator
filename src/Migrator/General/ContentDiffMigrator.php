@@ -25,8 +25,9 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
 	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                       = 'content-diff__err.log';
+	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
 
-	const SAVED_META_LIVE_POST_ID         = 'newspackcontentdiff_live_id';
+	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
 
 	/**
 	 * Instance.
@@ -55,6 +56,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 * @var null|string Full path to file.
 	 */
 	private $log_error;
+
+	/**
+	 * Log containing recreated categories term_ids.
+	 *
+	 * @var null|string Full path to file.
+	 */
+	private $log_recreated_categories;
 
 	/**
 	 * Log containing imported post IDs.
@@ -129,6 +137,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 						'name'        => 'live-table-prefix',
 						'description' => 'Live site table prefix.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-types-csv',
+						'description' => 'CSV of all the post types to scan, no extra spaces. E.g. --post-types-csv=post,page,attachment,some_cpt. Default value is post,page,attachment.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -275,6 +290,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
 		$export_dir        = $assoc_args['export-dir'] ?? false;
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
+		$post_types        = $assoc_args['post-types-csv'] ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
 
 		try {
 			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
@@ -284,7 +300,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 		WP_CLI::log( 'Searching for new content on Live Site...' );
 		try {
-			$ids = self::$logic->get_live_diff_content_ids( $live_table_prefix );
+			$ids = self::$logic->get_live_diff_content_ids_programmatic( $live_table_prefix, $post_types );
 		} catch ( \Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
@@ -310,7 +326,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		if ( ! file_exists( $file_ids_csv ) ) {
 			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_csv ) );
 		}
-		$all_live_posts_ids = explode( ',', file_get_contents( $file_ids_csv ) );
+		$all_live_posts_ids = explode( ',', trim( file_get_contents( $file_ids_csv ) ) );
 		if ( empty( $all_live_posts_ids ) ) {
 			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}
@@ -323,6 +339,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Set constants.
 		$this->live_table_prefix             = $live_table_prefix;
 		$this->log_error                     = $import_dir . '/' . self::LOG_ERROR;
+		$this->log_recreated_categories      = $import_dir . '/' . self::LOG_RECREATED_CATEGORIES;
 		$this->log_imported_post_ids         = $import_dir . '/' . self::LOG_IMPORTED_POST_IDS;
 		$this->log_updated_posts_parent_ids  = $import_dir . '/' . self::LOG_UPDATED_PARENT_IDS;
 		$this->log_updated_featured_imgs_ids = $import_dir . '/' . self::LOG_UPDATED_FEATURED_IMAGES_IDS;
@@ -331,32 +348,36 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		// Timestamp the logs.
 		$ts = gmdate( 'Y-m-d h:i:s a', time() );
 		$this->log( $this->log_error, sprintf( 'Starting %s.', $ts ) );
+		$this->log( $this->log_recreated_categories, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_imported_post_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_posts_parent_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
-		echo 'Recreating categories..';
-		$this->recreate_categories();
-		echo "\nDone!\n";
+		// Before we create categories, let's make sure categories have valid parents. If they don't they should be fixed first.
+		WP_CLI::log( 'Validating categories...' );
+		$this->validate_categories();
 
-		echo sprintf( 'Importing %d objects, hold tight..', count( $all_live_posts_ids ) );
-		$imported_posts_data = $this->import_posts( $all_live_posts_ids );
-		echo "\nDone!\n";
+		WP_CLI::log( 'Recreating categories...' );
+		$category_term_id_updates = $this->recreate_categories();
+		WP_CLI::log( 'Done!' );
 
-		echo 'Updating Post parent IDs..';
+		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
+		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $category_term_id_updates );
+		WP_CLI::log( 'Done!' );
+
+		WP_CLI::log( 'Updating Post parent IDs...' );
 		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
-		echo "\nDone!\n";
+		WP_CLI::log( 'Done!' );
 
-		echo 'Updating Featured images IDs..';
+		WP_CLI::log( 'Updating Featured images IDs...' );
 		$this->update_featured_image_ids( $imported_posts_data );
-		echo "\nDone!\n";
+		WP_CLI::log( 'Done!' );
 
-		echo 'Updating attachment IDs in block content..';
+		WP_CLI::log( 'Updating attachment IDs in block content...' );
 		$this->update_attachment_ids_in_blocks( $imported_posts_data );
-		echo "\nDone!\n";
+		WP_CLI::log( 'Done!' );
 
-		echo "\n";
 		WP_CLI::success( 'All done migrating content! 🙌 ' );
 
 		// Output info about all available logs.
@@ -376,6 +397,49 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Validates local DB and live DB categories. Checks if the categories' parent term_ids are correct and resets those if not.
+	 *
+	 * @return void
+	 */
+	public function validate_categories(): void {
+		global $wpdb;
+
+		// Check if any of the local categories have nonexistent wp_term_taxonomy.parent, and fix those before continuing.
+		$categories = self::$logic->get_categories_with_nonexistent_parents( $wpdb->prefix );
+		if ( ! empty( $categories ) ) {
+			$list              = '';
+			$term_taxonomy_ids = [];
+			foreach ( $categories as $category ) {
+				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $category );
+				$term_taxonomy_ids[] = $category['term_taxonomy_id'];
+			}
+
+			WP_CLI::warning( 'The following local DB categories have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::log( $list );
+
+			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
+			self::$logic->reset_categories_parents( $wpdb->prefix, $term_taxonomy_ids );
+		}
+
+		// Check the same for Live DB's categories, and fix those before continuing.
+		$categories = self::$logic->get_categories_with_nonexistent_parents( $this->live_table_prefix );
+		if ( ! empty( $categories ) ) {
+			$list              = '';
+			$term_taxonomy_ids = [];
+			foreach ( $categories as $category ) {
+				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $category );
+				$term_taxonomy_ids[] = $category['term_taxonomy_id'];
+			}
+
+			WP_CLI::warning( 'The following live DB categories have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::log( $list );
+
+			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
+			self::$logic->reset_categories_parents( $this->live_table_prefix, $term_taxonomy_ids );
+		}
 	}
 
 	/**
@@ -460,24 +524,30 @@ class ContentDiffMigrator implements InterfaceMigrator {
 
 	/**
 	 * Recreates all categories from Live to local.
+	 *
 	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
+	 *
+	 * @return array Map of category term_id udpdates. Keys are categories' term_ids on Live and values are corresponding
+	 *               categories' term_ids on local (staging).
 	 */
 	public function recreate_categories() {
-		$created_terms_in_taxonomies = self::$logic->recreate_categories( $this->live_table_prefix );
+		$category_term_id_updates = self::$logic->recreate_categories( $this->live_table_prefix );
 
-		// Output and log errors.
-		if ( isset( $created_terms_in_taxonomies['errors'] ) && ! empty( $created_terms_in_taxonomies['errors'] ) ) {
-			foreach ( $created_terms_in_taxonomies['errors'] as $error ) {
-				WP_CLI::warning( $error );
-				$this->log( $this->log_error, 'recreate_categories error: ' . $error );
-			}
-		}
+		// Log category term_id updates.
+		$this->log(
+			$this->log_recreated_categories,
+			json_encode( [ 'category_term_id_updates' => $category_term_id_updates ] )
+		);
+
+		return $category_term_id_updates;
 	}
 
 	/**
 	 * Creates and imports posts and all related post data. Skips previously imported IDs found in $this->log_imported_post_ids.
 	 *
-	 * @param array $all_live_posts_ids Live IDs to be imported to local.
+	 * @param array $all_live_posts_ids       Live IDs to be imported to local.
+	 * @param array $category_term_id_updates Map of updated category term_ids. Keys are Categories' term_ids on live, and values
+	 *                                        are corresponding Categories' term_ids on local (staging).
 	 *
 	 * @return array $imported_posts_data {
 	 *     Array with subarray records for all the imported post objects.
@@ -489,7 +559,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 	 *     }
 	 * }
 	 */
-	public function import_posts( $all_live_posts_ids ) {
+	public function import_posts( $all_live_posts_ids, $category_term_id_updates ) {
 
 		$post_ids_for_import = $all_live_posts_ids;
 
@@ -503,19 +573,23 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $post_ids_for_import ) ) {
-			echo "\n" . 'All posts were already imported, moving on.';
+			WP_CLI::log( 'All posts were already imported, moving on.' );
 			return $imported_posts_data;
 		}
 		if ( $post_ids_for_import !== $all_live_posts_ids ) {
 			$post_ids_for_import = array_values( $post_ids_for_import );
-			echo "\n" . sprintf( '%s of total %d IDs were already imported, continuing from there. Hold tight..', count( $all_live_posts_ids ) - count( $post_ids_for_import ), count( $all_live_posts_ids ) );
+			WP_CLI::log( sprintf( '%s of total %d IDs were already imported, continuing from there. Hold tight..', count( $all_live_posts_ids ) - count( $post_ids_for_import ), count( $all_live_posts_ids ) ) );
 		}
 
 		// Import Posts.
+		$percent_progress = null;
 		foreach ( $post_ids_for_import as $key_post_id => $post_id_live ) {
-			// Output a '.' every 2000 objects to let CLI know it's running.
-			if ( 0 == $key_post_id % 2000 ) {
-				echo '.';
+
+			// Get and output progress meter by 10%.
+			$last_percent_progress = $percent_progress;
+			self::$logic->get_progress_percentage( count( $post_ids_for_import ), $key_post_id + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
 			}
 
 			// Get all Post data from DB.
@@ -525,11 +599,10 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			// Extra check, shouldn't happen, but better safe than sorry.
 			if ( ! in_array( $post_type, [ 'post', 'page', 'attachment' ] ) ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for id_old=%s', $post_type, $post_id_live ) );
-				echo "\n";
 				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
 			}
 
-			// First just insert a new `wp_posts` record to get the new ID.
+			// First just insert a new blank `wp_posts` record to get the new ID.
 			try {
 				$post_id_new           = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
 				$imported_posts_data[] = [
@@ -539,7 +612,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 				];
 			} catch ( \Exception $e ) {
 				$this->log( $this->log_error, sprintf( 'import_posts error while inserting post_type %s id_old=%d : %s', $post_type, $post_id_live, $e->getMessage() ) );
-				echo "\n";
 				WP_CLI::warning( sprintf( 'Error inserting %s Live ID %d (details in log file)', $post_type, $post_id_live ) );
 
 				// Error is logged. Continue importing other posts.
@@ -547,14 +619,13 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 
 			// Now import all related Post data.
-			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data );
+			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
 				$this->log( $this->log_error, sprintf( 'Following errors happened in import_posts() for post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new ) );
 				foreach ( $import_errors as $import_error ) {
 					$this->log( $this->log_error, sprintf( '- %s', $import_error ) );
 				}
-				echo "\n";
-				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (details in log file).', $post_type, $post_id_live, $post_id_new ) );
+				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (see log %s).', $post_type, $post_id_live, $post_id_new, $this->log_error ) );
 			}
 
 			// Log imported post.
@@ -607,12 +678,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $parent_ids_for_update ) ) {
-			echo "\n" . 'All posts already had their post_parent updated, moving on.';
+			WP_CLI::log( 'All posts already had their post_parent updated, moving on.' );
 			return;
 		}
 		if ( $parent_ids_for_update !== $all_live_posts_ids ) {
 			$parent_ids_for_update = array_values( $parent_ids_for_update );
-			echo "\n" . sprintf( '%s post_parent IDs of total %d were already updated, continuing from there..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) );
+			WP_CLI::log( sprintf( '%s post_parent IDs of total %d were already updated, continuing from there..', count( $all_live_posts_ids ) - count( $parent_ids_for_update ), count( $all_live_posts_ids ) ) );
 		}
 
 		/**
@@ -637,58 +708,69 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
 		}
 
-		// Update parent IDs.
-		$i = 0;
-		foreach ( $parent_ids_for_update as $key_id_old => $id_old ) {
-			// Output a '.' every 2000 objects to let CLI know it's running.
-			if ( 0 == $i % 2000 ) {
-				echo '.';
-			}
-			$i++;
+		// Try and free some memory.
+		$all_live_posts_ids  = null;
+		$imported_posts_data = null;
+		usleep( 100000 );
 
-			// Get Post ID and its new parent_id.
+		// Update parent IDs.
+		global $wpdb;
+		$percent_progress = null;
+		foreach ( $parent_ids_for_update as $key_id_old => $id_old ) {
+
+			// Get and output progress meter by 10%.
+			$last_percent_progress = $percent_progress;
+			self::$logic->get_progress_percentage( count( $parent_ids_for_update ), $key_id_old + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
+			}
+
+			// Get new local Post ID.
 			$id_new = $imported_post_ids_map[ $id_old ] ?? null;
 			$id_new = is_null( $id_new ) ? $imported_attachment_ids_map[ $id_old ] : $id_new;
-			$post   = get_post( $id_new );
-			if ( is_null( $post ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, post not found in $imported_post_ids_map, $id_old=%s, $id_new=%s.', $id_old, $id_new ) );
-				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, post not found in $imported_post_ids_map $id_old=%s, $id_new=%s.', $id_old, $id_new ) );
-				continue;
-			}
 
+			// Get Post's post_parent which uses the live DB ID.
+			$parent_id_old = $wpdb->get_var( $wpdb->prepare( "SELECT post_parent FROM $wpdb->posts WHERE ID = %d;", $id_new ) );
 			// No update to do.
-			if ( 0 === $post->post_parent ) {
+			if ( '0' === $parent_id_old ) {
 				continue;
 			}
 
-			$parent_id_old = $post->post_parent;
-			$parent_id_new = $imported_post_ids_map[ $post->post_parent ] ?? null;
-			$parent_id_new = is_null( $parent_id_new ) & array_key_exists( $post->post_parent, $imported_attachment_ids_map ) ? $imported_attachment_ids_map[ $post->post_parent ] : $parent_id_new;
+			// Get new post_parent.
+			$parent_id_new = $imported_post_ids_map[ $parent_id_old ] ?? null;
+			// Check if it's perhaps an attachment.
+			$parent_id_new = is_null( $parent_id_new ) && array_key_exists( $parent_id_old, $imported_attachment_ids_map ) ? $imported_attachment_ids_map[ $parent_id_old ] : $parent_id_new;
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
-			// it won't be present in the list of the posts we imported, $all_live_posts_ids. So let's try and search for this
-			// post_parent directly in DB, and find it's new ID.
+			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
+			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
-				$parent_id_new = $this->get_existing_post_by_live_id( $parent_id_old );
+				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, self::SAVED_META_LIVE_POST_ID );
+			}
+			// Next try searching for the new parent_id by joining local and live DB tables.
+			if ( is_null( $parent_id_new ) ) {
+				$parent_id_new = self::$logic->get_current_post_id_by_comparing_with_live_db( $parent_id_old, $this->live_table_prefix );
 			}
 
-			// Check and warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
-			// post_type different than 'post','page' or 'attachment', or an error like the post_parent object missing in Live DB.
-			if ( ( 0 !== $post->post_parent ) && is_null( $parent_id_new ) ) {
+			// Warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
+			// post_type different than the supported post type, or an error like the post_parent object missing in Live DB.
+			if ( is_null( $parent_id_new ) ) {
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
-				echo "\n";
-				WP_CLI::warning( sprintf( 'Error updating post_parent, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
-				continue;
+
+				// If all attempts failed (possible that parent didn't exist in live DB), set it to 0, because we shouldn't have loose invalid post_parents locally.
+				$parent_id_new = 0;
+				WP_CLI::warning( sprintf( 'Could not update parent ID for Post, parent ID now set to 0 -- $id_old(live DB Post ID)=%s, $id_new(local DB Post ID)=%s, $parent_id_old(live DB parent ID)=%s.', $id_old, $id_new, $parent_id_old ) );
 			}
 
 			// Update.
-			self::$logic->update_post_parent( $post, $parent_id_new );
+			if ( $parent_id_old != $parent_id_new ) {
+				self::$logic->update_post_parent( $id_new, $parent_id_new );
+			}
 
 			// Log IDs of the Post.
 			$log_entry = [
 				'id_old' => $id_old,
-				'id_new' => $post->ID,
+				'id_new' => $id_new,
 			];
 			if ( 0 != $parent_id_old && ! is_null( $parent_id_new ) ) {
 				// Log, add IDs of post_parent.
@@ -754,12 +836,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $attachment_ids_for_featured_image_update ) ) {
-			echo "\n" . 'All posts already had their featured image IDs updated, moving on.';
+			WP_CLI::log( 'All posts already had their featured image IDs updated, moving on.' );
 			return;
 		}
 		if ( array_keys( $imported_attachment_ids_map ) !== $attachment_ids_for_featured_image_update ) {
 			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
-			echo "\n" . sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) );
+			WP_CLI::log( sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) ) );
 		}
 		self::$logic->update_featured_images( $imported_post_ids_map, $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
@@ -815,12 +897,12 @@ class ContentDiffMigrator implements InterfaceMigrator {
 			}
 		}
 		if ( empty( $new_post_ids_for_blocks_update ) ) {
-			echo "\n" . 'All posts already had their blocks\' att. IDs updated, moving on.';
+			WP_CLI::log( 'All posts already had their blocks\' att. IDs updated, moving on.' );
 			return;
 		}
 		if ( array_values( $imported_post_ids_map ) !== $new_post_ids_for_blocks_update ) {
 			$new_post_ids_for_blocks_update = array_values( $new_post_ids_for_blocks_update );
-			echo "\n" . sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) );
+			WP_CLI::log( sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) ) );
 		}
 
 		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, [], $this->log_updated_blocks_ids );
@@ -899,7 +981,7 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		foreach ( $tables_with_differing_collations as $result ) {
-			echo 'Addressing ' . $result['table'] . "\n";
+			WP_CLI::log( 'Addressing ' . $result['table'] );
 			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
 		}
 	}
@@ -976,39 +1058,6 @@ class ContentDiffMigrator implements InterfaceMigrator {
 		}
 
 		return $data;
-	}
-
-	/**
-	 * Takes the old Live site's ID, and finds this post in the local site.
-	 *
-	 * @param int $id_live Old live site's post object ID.
-	 *
-	 * @return int|null Found local ID.
-	 */
-	private function get_existing_post_by_live_id( $id_live ) {
-		global $wpdb;
-
-		$live_posts_table = $this->live_table_prefix . 'posts';
-		$posts_table      = $wpdb->posts;
-
-		// phpcs:disable -- wpdb::prepare is used correctly.
-		$parent_id_new = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT wp.ID
-			FROM {$live_posts_table} lwp
-			LEFT JOIN {$posts_table} wp
-				ON wp.post_name = lwp.post_name
-				AND wp.post_title = lwp.post_title
-				AND wp.post_status = lwp.post_status
-				AND wp.post_date = lwp.post_date
-				AND wp.post_type = lwp.post_type
-			WHERE lwp.ID = %d ;",
-				$id_live
-			)
-		);
-		// phpcs:enable
-
-		return $parent_id_new;
 	}
 
 	/**
