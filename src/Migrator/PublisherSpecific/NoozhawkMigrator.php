@@ -188,7 +188,22 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			array( $this, 'cmd_nh_set_primary_category_meta' ),
 			array(
 				'shortdesc' => 'Set Post primary category',
-				'synopsis'  => array(),
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
 			)
 		);
 
@@ -206,7 +221,22 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			array( $this, 'cmd_nh_import_featured_image' ),
 			array(
 				'shortdesc' => 'Set Post featured image.',
-				'synopsis'  => array(),
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
 			)
 		);
 
@@ -441,14 +471,26 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			$event_day = ( new \DateTime( $event['post_date_gmt'] ) );
 
 			// Event Content.
-			$this->dom_crawler->clear();
-			$this->dom_crawler->add( $event['post_content'] );
-			$event_content_dom = $this->dom_crawler->filter( '.profileRow.float-right' );
-			$event_content     = 1 === $event_content_dom->count() ? trim( $event_content_dom->getNode( 0 )->textContent ) : self::get_event_meta( $event['postmeta'], 'event_intro' );
+			// $this->dom_crawler->clear();
+			// $this->dom_crawler->add( $event['post_content'] );
+			// $event_content_dom = $this->dom_crawler->filter( '.profileRow.float-right' );
+			// $event_content     = 1 === $event_content_dom->count() ? trim( $event_content_dom->getNode( 0 )->textContent ) : self::get_event_meta( $event['postmeta'], 'event_intro' );
+			$event_content = $event['post_content'];
 
 			// Event Image.
-			$image_media_id = $this->attachment_logic->import_external_file( $event['attachment_url'], $event['post_title'] );
-			$featured_image = wp_get_attachment_url( $image_media_id );
+			// $image_media_id = $this->attachment_logic->import_external_file( $event['attachment_url'], $event['post_title'] );
+			// $featured_image = wp_get_attachment_url( $image_media_id );
+			$featured_image       = '';
+			$event_thumbnail_meta = self::get_event_meta( $event['postmeta'], '_newspack_thumbnail' );
+			if ( $event_thumbnail_meta ) {
+				$event_thumbnail = json_decode( $event_thumbnail_meta, true );
+				if ( $event_thumbnail && array_key_exists( 'url', $event_thumbnail ) ) {
+					$image_media_id = $this->attachment_logic->import_external_file( $event_thumbnail['url'], $event_thumbnail['title'], $event_thumbnail['caption'], null, $event_thumbnail['alt'] );
+					$featured_image = wp_get_attachment_url( $image_media_id );
+				} else {
+					WP_CLI::warning( sprintf( "Can't set the featured image of the event %s from the meta: %s", $event['post_title'], $event_thumbnail_meta ) );
+				}
+			}
 
 			WP_CLI::line( sprintf( 'Converted event: %s', $event['post_title'] ) );
 
@@ -778,15 +820,43 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_nh_set_primary_category_meta( $args, $assoc_args ) {
-		$query = new \WP_Query(
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_primary_category',
+				'compare' => 'EXISTS',
+			],
+			[
+				'key'     => '_newspack_migrated_primary_category',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
 			[
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
-				'meta_key'       => '_newspack_primary_category',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			]
 		);
 
 		$posts = $query->get_posts();
+
 		foreach ( $posts as $post ) {
 			$primary_category = $this->fix_primary_category_name( get_post_meta( $post->ID, '_newspack_primary_category', true ) );
 			$terms            = get_terms(
@@ -809,16 +879,20 @@ class NoozhawkMigrator implements InterfaceMigrator {
 					}
 				}
 			} else {
+				WP_CLI::warning( sprintf( 'Skipped category `%s` for the post %d', $primary_category, $post->ID ) );
 				continue;
 			}
 
 			if ( $category ) {
 				update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+				update_post_meta( $post->ID, '_newspack_migrated_primary_category', true );
 				WP_CLI::success( sprintf( 'Primary category for the post %d is set to: %s', $post->ID, $primary_category ) );
 			} else {
 				WP_CLI::error( sprintf( 'Couldn\'t set primary category for the post %d to: %s', $post->ID, $primary_category ) );
 			}
 		}
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -837,8 +911,8 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				return 'Arts & Entertainment';
 			case 'Health':
 				return 'Your Health';
-			case 'Four-Legged Friends and More':
-				return 'Four Legged Friends and More';
+			// case 'Four-Legged Friends and More':
+			// return 'Four Legged Friends and More';
 			case 'Housing and Development':
 				return 'Housing & Development';
 			case 'Election':
@@ -902,11 +976,38 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_nh_import_featured_image( $args, $assoc_args ) {
-		$query = new \WP_Query(
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_thumbnail',
+				'compare' => 'EXISTS',
+			],
+			[
+				'key'     => '_newspack_migrated_thumbnail',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
 			[
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
-				'meta_key'       => '_newspack_thumbnail',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			]
 		);
 
@@ -924,6 +1025,7 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			$existing_featured_image = $this->get_post_by_meta( '_newspack_imported_from_url', $featured_image['url'], 'attachment' );
 
 			if ( $existing_featured_image && get_post_thumbnail_id( $post->ID ) === $existing_featured_image->ID ) {
+				update_post_meta( $post->ID, '_newspack_migrated_thumbnail', true );
 				WP_CLI::line( sprintf( 'Skipping post %s (%d/%d) featured image already set: %d', $post->ID, $index + 1, $posts_count, $existing_featured_image->ID ) );
 				continue;
 			}
@@ -938,14 +1040,22 @@ class NoozhawkMigrator implements InterfaceMigrator {
 			);
 
 			if ( is_wp_error( $featured_image_id ) ) {
-				$this->log( 'bad-newspack_thumbnail.log', sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $featured_image['url'], $featured_image_id ) );
+				$this->log( 'bad-newspack_thumbnail.log', sprintf( "Can't download %d post featured image from %s: %s", $post->ID, $featured_image['url'], $featured_image_id->get_error_message() ) );
 				continue;
 			}
 
 			set_post_thumbnail( $post->ID, $featured_image_id );
 			update_post_meta( $featured_image_id, '_newspack_imported_from_url', $featured_image['url'] );
+			update_post_meta( $post->ID, '_newspack_migrated_thumbnail', true );
 			WP_CLI::success( sprintf( 'Setting post %s (%d/%d) featured image: %d', $post->ID, $index + 1, $posts_count, $featured_image_id ) );
+
+			if ( 0 === $index % 10 ) {
+				WP_CLI::line( 'Resting for 5 seconds...' );
+				sleep( 5 );
+			}
 		}
+
+		wp_cache_flush();
 	}
 
 	/**
