@@ -284,4 +284,29 @@ class CoAuthorPlus {
 
 		return [];
 	}
+
+	/**
+	 * Remove unusued author terms of 'author' taxonomy.
+	 */
+	public function remove_unused_author_terms() {
+		global $wpdb;
+	
+		$author_terms = get_terms( array(
+			'taxonomy' => 'author',
+			'hide_empty' => false,
+			'fields' => 'id=>slug',
+		) );
+	
+		foreach( $author_terms as $term_id => $term_slug ) {
+			// Find the Guest Author associated with the term
+			$query = $wpdb->prepare( "SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'guest-author' AND post_name = '%s'", $term_slug );
+	
+			$count = $wpdb->get_var( $query );
+	
+			if ( $count == 0 ) {
+				WP_CLI::log( sprintf( 'No Guest Author found for %s. Deleting term #%d...', $term_slug, $term_id ) );
+				wp_delete_term( $term_id, 'author' );
+			}
+		}
+	}
 }
