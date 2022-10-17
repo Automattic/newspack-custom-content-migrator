@@ -61,6 +61,23 @@ class MustangNewsMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Migrate php-snippet shortcodes.',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator mustangnews-fix-authors-counts',
+			[ $this, 'cmd_fix_authors_counts' ],
+		);
+	}
+
+	/**
+	 * Fix the authors missing counts by removing unused author taxonomies
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_fix_authors_counts( $args, $assoc_args ) {
+		WP_CLI::log( 'Deleting unusued "author" terms...' );
+		$this->coauthorsplus_logic->remove_unused_author_terms();
+		WP_CLI::success( 'Done!' );
 	}
 
 	/**
