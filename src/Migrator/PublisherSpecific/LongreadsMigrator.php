@@ -17,8 +17,14 @@ class LongreadsMigrator implements InterfaceMigrator {
 	 */
 	private static $instance = null;
 
+	/**
+	 * @var PostsLogic
+	 */
 	private $posts_migrator_logic;
 
+	/**
+	 * @var Logger
+	 */
 	private $logger;
 
 	/**
@@ -65,15 +71,20 @@ class LongreadsMigrator implements InterfaceMigrator {
 		wp_insert_category( [ 'cat_name' => "Editor's Pick" ]  );
 		$cat_id = get_cat_ID( "Editor's Pick" );
 
-		$posts_ids = [ 158333 ];
+		// Dev:
+		// $posts_ids = [ 158333 ];
+		$posts_ids_with_missing_meta = [ 48340,48775,49087,49597,54275,53491,53280,52672,52335,47307, ];
+
+		$posts_ids = $this->posts_migrator_logic->get_all_posts_ids();
 		foreach ( $posts_ids as $key_post_id => $post_id ) {
 
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $posts_ids ), $post_id ) );
 
-			// Get the first Pick meta, skip if doesn't exist, because that's not going to be a pick then.
+			// Get the first Pick meta, skip if doesn't exist, because that's not a pick.
 			$meta_authors = get_post_meta( $post_id, 'lr_pick_authors' );
 			if ( empty( $meta_authors ) || false === $meta_authors ) {
 				// Not pick.
+				WP_CLI::log( 'Not pick, skip' );
 				continue;
 			}
 
@@ -88,8 +99,8 @@ class LongreadsMigrator implements InterfaceMigrator {
 				|| empty( $meta_date )
 				|| empty( $meta_word_count )
 			) {
-				$d = 1;
 				WP_CLI::warning( 'one of the meta fields is empty' );
+				$this->logger->log( 'longreads_picksWithMissingMeta_notUpdated.log', $post_id, false );
 				continue;
 			}
 
