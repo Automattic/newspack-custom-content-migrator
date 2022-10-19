@@ -175,6 +175,13 @@ class PostsMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-status',
+						'description' => 'Post status to delete, by default it deletes all the posts.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -455,12 +462,13 @@ class PostsMigrator implements InterfaceMigrator {
 	public function cmd_delete_all_posts( $args, $assoc_args ) {
 		$dry_run         = isset( $assoc_args['dry-run'] ) ? true : false;
 		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
-		$batch = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$post_status     = isset( $assoc_args['post-status'] ) ? $assoc_args['post-status'] : 'any';
 
 		$this->posts_logic->throttled_posts_loop(
 			[
 				'post_type'   => 'post',
-				'post_status' => 'any',
+				'post_status' => $post_status,
 			],
 			function( $post ) use ( $dry_run ) {
 				WP_CLI::success( sprintf( 'Deleting post #%d', $post->ID ) );
