@@ -53,7 +53,6 @@ class LongreadsMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		// Convert markdown URLs.
 		WP_CLI::add_command(
 			'newspack-content-migrator longreads-convert-picks',
 			[ $this, 'cmd_convert_picks' ],
@@ -68,6 +67,7 @@ class LongreadsMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_convert_picks( array $args_pos, array $args_assoc ): void {
 
+		global $wpdb;
 		wp_insert_category( [ 'cat_name' => "Editor's Pick" ]  );
 		$cat_id = get_cat_ID( "Editor's Pick" );
 
@@ -90,7 +90,7 @@ class LongreadsMigrator implements InterfaceMigrator {
 
 			// Get the remaining metas.
 			$meta_publisher = get_post_meta( $post_id, 'lr_pick_publisher' );
-			$meta_url = get_post_meta( $post_id, 'lr_pick_url' );
+			$meta_url = get_post_meta( $post_id, 'lr_pick_url', true );
 			$meta_date = get_post_meta( $post_id, 'lr_pick_pub_date' );
 			$meta_word_count = get_post_meta( $post_id, 'lr_pick_word_count' );
 
@@ -118,6 +118,8 @@ class LongreadsMigrator implements InterfaceMigrator {
 
 			$date = date( 'F j, Y', $meta_date[0] );
 
+			$words = number_format( $meta_word_count[0] );
+
 			// newspack_post_subtitle
 			// Lex Pryor | The Ringer | September 8, 2022 | 159 words
 			$newspack_post_subtitle = sprintf(
@@ -125,11 +127,30 @@ class LongreadsMigrator implements InterfaceMigrator {
 				$authors,
 				$publisher,
 				$date,
-				$meta_word_count[0]
+				$words
 			);
 
 			update_post_meta( $post_id, 'newspack_post_subtitle', $newspack_post_subtitle );
+
 			wp_set_post_categories( $post_id, $cat_id );
+
+			// // Add the big red button to the bottom of the Pick.
+			if ( $meta_url ) {
+				$red_button = <<<HTML
+
+<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} -->
+<div class="wp-block-buttons"><!-- wp:button -->
+<div class="wp-block-button"><a class="wp-block-button__link" href="{$meta_url}">Read The Story</a></div>
+<!-- /wp:button --></div>
+<!-- /wp:buttons -->
+HTML;
+				$post_content = $wpdb->get_col( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+				$post_content_updated = $post_content . $red_button;
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+			}
+
+			// Set template to single column
+			update_post_meta( $post_id, '_wp_page_template', 'single-feature.php' );
 
 			$this->logger->log( 'longreads_picksMetaUpdated.log', $post_id, false );
 			WP_CLI::log( 'updated' );
