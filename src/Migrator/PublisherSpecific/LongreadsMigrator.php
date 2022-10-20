@@ -58,17 +58,35 @@ class LongreadsMigrator implements InterfaceMigrator {
 			[ $this, 'cmd_convert_picks' ],
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator longreads-update-excerpts',
-			[ $this, 'cmd_update_excerpts' ],
+			'newspack-content-migrator longreads-update-excerpts-to-subtitles-for-non-picks',
+			[ $this, 'cmd_update_excerpts_to_subtitles_for_non_picks' ],
 		);
 	}
 
-	public function cmd_update_excerpts( array $args_pos, array $args_assoc ): void {
+	public function cmd_update_excerpts_to_subtitles_for_non_picks( array $args_pos, array $args_assoc ): void {
 		global $wpdb;
 
-		// Update excerpt for all posts.
-		$post_excerpt = $wpdb->get_col( $wpdb->prepare( "select post_excerpt from {$wpdb->posts} where ID = %d", $post_id ) );
-		$updated = update_post_meta( $post_id, 'newspack_article_summary', $post_excerpt );
+		$cat_id = get_cat_ID( "Editor's Pick" );
+
+		$posts_ids = $this->posts_migrator_logic->get_all_posts_ids();
+		// $posts_ids = [165010];
+		foreach ( $posts_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $posts_ids ), $post_id ) );
+
+			$cat_ids = wp_get_post_categories( $post_id );
+			if ( in_array( $cat_id, $cat_ids ) ) {
+				WP_CLI::log( 'It is a Pick, skip' );
+				continue;
+			}
+
+			// Update excerpt for all posts.
+			$post_excerpt = $wpdb->get_var( $wpdb->prepare( "select post_excerpt from {$wpdb->posts} where ID = %d", $post_id ) );
+			if ( $post_excerpt ) {
+				$updated = update_post_meta( $post_id, 'newspack_post_subtitle', $post_excerpt );
+				$this->logger->log( 'longreads_excerptToSubtitleForNonPicks.log', $post_id, false );
+			}
+		}
 	}
 
 	/**
