@@ -57,6 +57,18 @@ class LongreadsMigrator implements InterfaceMigrator {
 			'newspack-content-migrator longreads-convert-picks',
 			[ $this, 'cmd_convert_picks' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator longreads-update-excerpts',
+			[ $this, 'cmd_update_excerpts' ],
+		);
+	}
+
+	public function cmd_update_excerpts( array $args_pos, array $args_assoc ): void {
+		global $wpdb;
+
+		// Update excerpt for all posts.
+		$post_excerpt = $wpdb->get_col( $wpdb->prepare( "select post_excerpt from {$wpdb->posts} where ID = %d", $post_id ) );
+		$updated = update_post_meta( $post_id, 'newspack_article_summary', $post_excerpt );
 	}
 
 	/**
@@ -79,6 +91,9 @@ class LongreadsMigrator implements InterfaceMigrator {
 		foreach ( $posts_ids as $key_post_id => $post_id ) {
 
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $posts_ids ), $post_id ) );
+
+			// Set template to single column for all posts.
+			$updated = update_post_meta( $post_id, '_wp_page_template', 'single-feature.php' );
 
 			// Get the first Pick meta, skip if doesn't exist, because that's not a pick.
 			$meta_authors = get_post_meta( $post_id, 'lr_pick_authors' );
@@ -130,27 +145,26 @@ class LongreadsMigrator implements InterfaceMigrator {
 				$words
 			);
 
-			update_post_meta( $post_id, 'newspack_post_subtitle', $newspack_post_subtitle );
+			// Save subtitle meta.
+			$updated = update_post_meta( $post_id, 'newspack_post_subtitle', $newspack_post_subtitle );
 
+			// Set category.
 			wp_set_post_categories( $post_id, $cat_id );
 
-			// // Add the big red button to the bottom of the Pick.
-			if ( $meta_url ) {
+			// Add the big red button to the bottom of the Pick.
+			$pick_ids_which_already_have_the_red_button = [ 164858,164886,164888,164942,164951,164955,164956,164960,164965,164967,164969,164979,165002,165005,172298,172391,172695,173022,174630,175983,176769,158687,158692,158770,158782,178089,160236,160782,161180,161268,162418,178094,178096,178097,163110,163509,163596,178154,179236,179245 ];
+			if ( $meta_url && ! in_array( $post_id, $pick_ids_which_already_have_the_red_button ) ) {
 				$red_button = <<<HTML
-
 <!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} -->
 <div class="wp-block-buttons"><!-- wp:button -->
 <div class="wp-block-button"><a class="wp-block-button__link" href="{$meta_url}">Read The Story</a></div>
 <!-- /wp:button --></div>
 <!-- /wp:buttons -->
 HTML;
-				$post_content = $wpdb->get_col( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
-				$post_content_updated = $post_content . $red_button;
+				$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+				$post_content_updated = $post_content . "\n\n" . $red_button;
 				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
 			}
-
-			// Set template to single column
-			update_post_meta( $post_id, '_wp_page_template', 'single-feature.php' );
 
 			$this->logger->log( 'longreads_picksMetaUpdated.log', $post_id, false );
 			WP_CLI::log( 'updated' );
