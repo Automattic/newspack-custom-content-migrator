@@ -189,8 +189,15 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 					),
 					array(
 						'type'        => 'assoc',
-						'name'        => 'imported-cache-path',
-						'description' => 'Cache file containing the original_id of the imported notes (original_id per line).',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
 						'optional'    => true,
 						'repeating'   => false,
 					),
@@ -695,49 +702,61 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 	 * @param $assoc_args
 	 */
 	public function cmd_des_fix_posts_categories( $args, $assoc_args ) {
-		global $wpdb;
-
 		$posts_json_path = $assoc_args['posts-json-path'] ?? null;
-		$cache_path      = $assoc_args['imported-cache-path'] ?? null;
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 100000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 
 		if ( ! file_exists( $posts_json_path ) ) {
 			WP_CLI::error( sprintf( 'Posts export %s not found.', $posts_json_path ) );
 		}
 
-		if ( ! file_exists( $cache_path ) ) {
-			WP_CLI::error( sprintf( 'Posts exported log %s not found.', $cache_path ) );
-		}
+		$time_start = microtime( true );
+		$posts      = Items::fromFile( $posts_json_path, array( 'decoder' => new ExtJsonDecoder( true ) ) );
 
-		$notes          = Items::fromFile( $posts_json_path, array( 'decoder' => new ExtJsonDecoder( true ) ) );
-		$imported_notes = file( $cache_path, FILE_IGNORE_NEW_LINES );
+		$added_posts = 0;
 
-		$posts_data = $wpdb->get_results(
-			"SELECT ID, meta_value, count(t.term_id) as cat_count FROM wp_posts p
-			INNER JOIN wp_postmeta pm on (p.ID = pm.post_id and pm.meta_key = 'original_id')
-			INNER JOIN wp_term_relationships tr on p.ID = tr.object_id
-			INNER JOIN wp_term_taxonomy tt on tr.term_taxonomy_id = tt.term_taxonomy_id
-			INNER JOIN wp_terms t on tt.term_id = t.term_id
-			WHERE tt.taxonomy = 'category'
-			GROUP BY ID
-			HAVING cat_count > 18",
-			\ARRAY_A
-		);
+		foreach ( $posts as $post_index => $post ) {
+			if ( $post_index < ( ( $batch - 1 ) * $posts_per_batch ) || $post_index >= ( $batch * $posts_per_batch ) ) {
+				WP_CLI::warning( sprintf( 'Skipped index %d', $post_index ) );
+				continue;
+			}
 
-		foreach ( $notes as $note ) {
-			$original_id     = $note['_id']['$oid'];
-			$post_data_index = array_search( $original_id, array_column( $posts_data, 'meta_value' ) );
-			if ( $post_data_index ) {
-				$post_data = $posts_data[ $post_data_index ];
-				if ( empty( $note['categories'] ) ) {
-					wp_set_post_categories( $post_data['ID'], array() );
-					WP_CLI::line( sprintf( 'Categories cleared for the post %d', $post_data['ID'] ) );
-				} else {
-					WP_CLI::warning( sprintf( 'Check post %d (%s)!', $post_data['ID'], $original_id ) );
+			WP_CLI::line( sprintf( 'Migrating index %d', $post_index ) );
+
+			$original_id = $post['_id']['$oid'];
+
+			if ( array_key_exists( 'category', $post ) ) {
+				$existing_post = $this->get_post_by_meta( 'original_id', $original_id );
+				if ( ! $existing_post ) {
+					$this->log( self::CATEGORIES_LOGS, sprintf( "Post '%s' not imported\n", $original_id ) );
+					continue;
 				}
+
+				// $post['category'] is not an array of categories.
+				$raw_categories     = $this->get_term_by_meta( 'original_id', [ $post['category'] ] );
+				$created_categories = array();
+				if ( empty( $raw_categories ) ) {
+					$this->log( self::CATEGORIES_LOGS, sprintf( "Category oid non-existing: %s\n", $post['category']['$oid'] ) );
+					continue;
+				}
+
+				$cats = [];
+				wp_set_post_categories(
+					$existing_post->ID,
+					empty( $raw_categories ) ? $created_categories : array_map(
+						function( $category ) use ( &$cats ) {
+							$cats[] = $category->name;
+							return $category->term_id;
+						},
+						$raw_categories
+                    )
+                );
+
+				$this->log( self::CATEGORIES_LOGS, sprintf( 'Setting the post (%d) category: %s', $existing_post->ID, implode( ', ', $cats ) ) );
 			}
 		}
 
-		WP_CLI::line( 'All done! 🙌' );
+		$this->log( self::POSTS_LOGS, sprintf( 'All done! 🙌 Importing %d posts took %d mins.', $added_posts, floor( ( microtime( true ) - $time_start ) / 60 ) ) );
 	}
 
 	/**
@@ -833,6 +852,27 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 			return $att_id;
 		}
+	}
+
+	/**
+	 * Get one post by meta value.
+	 *
+	 * @param string               $meta_key Meta Key.
+	 * @param string               $meta_value Meta value.
+	 * @param string|string[]|null $post_type Post_type.
+	 * @param string|string[]|null $post_status Post_status.
+	 * @return WP_Post|null
+	 */
+	private function get_post_by_meta( $meta_key, $meta_value, $post_type = 'post', $post_status = 'any' ) {
+		$query = new \WP_Query(
+            [
+				'post_type'   => $post_type,
+				'post_status' => $post_status,
+				'meta_query'  => [ ['key' => $meta_key, 'value' => $meta_value, 'compare' => '='] ], // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			]
+        );
+		$posts = $query->get_posts();
+		return ( count( $posts ) > 0 ) ? current( $posts ) : null;
 	}
 
 	/**
