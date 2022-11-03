@@ -182,6 +182,13 @@ class PostsMigrator implements InterfaceMigrator {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'categories',
+						'description' => 'Category IDs to delete their posts comma separated (e.g. 123,456).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -464,11 +471,13 @@ class PostsMigrator implements InterfaceMigrator {
 		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 		$post_status     = isset( $assoc_args['post-status'] ) ? $assoc_args['post-status'] : 'any';
+		$categories      = isset( $assoc_args['categories'] ) ? explode( ',', $assoc_args['categories'] ) : [];
 
 		$this->posts_logic->throttled_posts_loop(
 			[
-				'post_type'   => 'post',
-				'post_status' => $post_status,
+				'post_type'    => 'post',
+				'post_status'  => $post_status,
+				'category__in' => $categories,
 			],
 			function( $post ) use ( $dry_run ) {
 				WP_CLI::success( sprintf( 'Deleting post #%d', $post->ID ) );
