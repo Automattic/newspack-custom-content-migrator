@@ -578,12 +578,12 @@ class DiarioElSolMigrator implements InterfaceMigrator {
 
 				// Set Post Meta.
 				// Categories.
-				if ( ! empty( $post['categories'] ) ) {
-					$raw_categories     = $this->get_term_by_meta( 'original_id', $post['categories'] );
+				if ( ! empty( $post['category'] ) ) {
+					$raw_categories     = $this->get_term_by_meta( 'original_id', [ $post['category'] ] );
 					$created_categories = array();
 					if ( empty( $raw_categories ) ) {
 						// Sometimes categories are set from the tags (e.g. note #oid = 59ce420ae101583a8815faa5).
-						$categories_from_tags = $this->get_term_by_meta( 'original_id', $post['categories'], 'post_tag' );
+						$categories_from_tags = $this->get_term_by_meta( 'original_id', [ $post['category'] ], 'post_tag' );
 						foreach ( $categories_from_tags as $category_from_tag ) {
 							$created_category = category_exists( $category_from_tag->name );
 							if ( $created_category ) {
