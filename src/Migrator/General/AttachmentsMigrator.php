@@ -174,6 +174,44 @@ class AttachmentsMigrator implements InterfaceMigrator {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator attachments-check-missing-s3-images',
+			[ $this, 'cmd_check_missing_s3_images' ],
+			[
+				'shortdesc' => 'Check if there images that weren\'t imported from S3.',
+			]
+		);
+	}
+
+	/**
+	 * Find S3 images that don't exist locally.
+	 * 
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative Arguments.
+	 * 
+	 * @return void
+	 */
+	public function cmd_check_missing_s3_images( $pos_args, $assoc_args ) {
+		$images_ids  = $this->attachment_logic->get_s3_images();
+		$uploads_dir = $this->get_uploads_dir();
+
+		foreach ( $images_ids as $image_id ) {
+			$local_path = get_post_meta( $image_id, '_wp_attached_file', true );
+
+			$exists = file_exists( path_join( $uploads_dir, $local_path ) );
+
+			if ( ! $exists ) {
+				$s3_file_path = get_post_meta( $image_id, 'original-file', true );
+				
+				// Replace S3 filename with original filename
+				$path_parts = explode( '/', $s3_file_path );
+				$path_parts[6] = explode( '/', $local_path )[2];
+
+				$final_s3_path = join( '/', $path_parts );
+				file_put_contents( 'missing_images.txt', $final_s3_path . "\n", FILE_APPEND );
+			}
+		}
 	}
 
 	/**

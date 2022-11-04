@@ -226,4 +226,21 @@ class Attachments {
 
 		return $image_urls;
 	}
+	
+	/**
+	 * Find all attachments that were originally hosted on S3
+	 */
+	public function get_s3_images() {
+		global $wpdb;
+
+		$query = "SELECT $wpdb->posts.ID FROM $wpdb->posts
+		INNER JOIN $wpdb->postmeta ON $wpdb->postmeta.post_id = $wpdb->posts.ID 
+		WHERE post_type = 'attachment' 
+		AND meta_key = 'original-file' 
+		AND meta_value LIKE 's3://%';";
+
+		$results = $wpdb->get_col( $query );
+
+		return $results;
+	}
 }
