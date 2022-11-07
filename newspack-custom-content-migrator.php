@@ -57,6 +57,7 @@ PluginSetup::register_migrators(
 		Migrator\General\ContentFixerMigrator::class,
 		Migrator\General\XMLMigrator::class,
 		Migrator\General\PrelaunchSiteQAMigrator::class,
+		Migrator\General\MolonguiMigrator::class,
 
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
