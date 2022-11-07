@@ -66,7 +66,24 @@ class SimpleLocalAvatars {
 
 		$avatar = get_user_meta( $user_id, self::AVATAR_META_KEY, true );
 
-		if ( ! empty( $avatar ) ) {
+		if ( empty( $avatar ) ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Check if a user has an SLA avatar
+	 * 
+	 * @param int $user_id The user ID.
+	 * 
+	 * @return boolean True if the user has an avatar, false otherwise.
+	 */
+	public function user_has_sla_avatar( $user_id ) {
+		$avatar = get_user_meta( $user_id, self::AVATAR_META_KEY, true );
+
+		if ( empty( $avatar ) ) {
 			return false;
 		}
 
