@@ -101,11 +101,6 @@ class GiveWPMigrator implements InterfaceMigrator {
 
 		// Loop through each of the payment_ids and create $orders.
 		$orders = [];
-
-// TODO remove DEV
-// $payment_ids = [19703];
-
-
 		$invalid_payment_ids = [];
  		foreach ( $payment_ids as $key_payment_id => $payment_id ) {
 			\WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_payment_id + 1, count( $payment_ids ), $payment_id ) );
@@ -175,8 +170,7 @@ class GiveWPMigrator implements InterfaceMigrator {
 			// All donor's payments are also stored in a CSV, though we're already looping through all payment_ids:
 		    //      select * from `local`.wp_xpM1VX_give_donors where purchase_count > 1;
 		    // $donors_payment_ids = explode( ',', $donor['payment_ids'] );
-
-
+		    
 
 			// Statuses seem to be working like this.
 			if (
@@ -204,29 +198,36 @@ class GiveWPMigrator implements InterfaceMigrator {
 		    }
 
 
+		    // Subscriptions are linked to customers. But not all recurring donations seem to be associated to subscriptions.
+		    // $subscription = null;
+			// if ( isset( $donationmeta['subscription_id'] ) ) {
+			//     $subscription = $wpdb->get_row(
+			// 	    $wpdb->prepare(
+			// 		    "select * from {$wpdb->prefix}give_subscriptions where customer_id = %s order by id desc limit 1;",
+			// 		    $donationmeta['_give_payment_donor_id']
+			// 	    ),
+			// 	    ARRAY_A
+			//     );
+			// }
 
-
-
-
-		    // Subscriptions are linked to customers. But not all recurring donations are associated to subscriptions.
-		    $subscription = $wpdb->get_row(
-			    $wpdb->prepare(
-				    "select * from {$wpdb->prefix}give_subscriptions where customer_id = %s order by id desc limit 1;",
-				    $donationmeta['_give_payment_donor_id']
-			    ),
-			    ARRAY_A
-		    );
-
-			// Map products and subscriptions here.
-		    if ( 1 == $donationmeta['_give_subscription_payment'] ) {
-
-		    }
-		    if ( 1 == $donationmeta['_give_is_donation_recurring'] ||  1 == $donationmeta['_give_subscription_payment'] ) {
-			    $payment_type = 'subscription';
+		    // Type of payment.
+		    // Recurring donations are an internal addon to the GiveWP plugin, and they were additionally implemented,
+		    // which is why the data structure is not so clear.
+		    // Work in progress -- reading from method \Give\Donations\DataTransferObjects\DonationQueryData::fromObject
+		    // we can try and set the $donation_type from donation_meta:
+		    if ( $donationmeta['_give_subscription_payment'] ) {
+				$donation_type = 'subscription';
+		    } elseif (
+				isset( $donationmeta['subscription_id'] )
+				&& ( 0 != $donationmeta['subscription_id'] )
+		    ) {
+				$donation_type = 'renewal';
 		    } else {
-			    $payment_type = 'one time';
+				$donation_type = 'single';
 		    }
 
+
+			// TODO, set line items depending on type of payment.
 		    $line_items = 'product_id:20055|total:1|quantity:1';
 			$product_id = '20055';
 			$payment_type = 'one time';
@@ -234,19 +235,18 @@ class GiveWPMigrator implements InterfaceMigrator {
 			$subscription_billing_times = '';
 			$subscription_billing_frequency = '';
 
-		    // Recurring monthly donations
-		    // ID 20053
-		    // Donate: Monthly product
-
-		    // Recurring yearly donations
-		    // ID 20054
-		    // Donate: Yearly product
-
-		    // One-time, non-recurring donations
-		    // ID 20055
-		    // Donate: One-time product
-
-
+			// e.g. these WooComm products were created on one of our Publisher's site, so we'd next proceed to set the above
+		    // variables to one of these, depending on the type of payment:
+			//
+			// 	- Recurring monthly donations
+			// 		ID 20053
+			// 		Donate: Monthly product
+			// 	- Recurring yearly donations
+			// 		ID 20054
+			// 		Donate: Yearly product
+			//  - One-time, non-recurring donations
+			// 		ID 20055
+			// 		Donate: One-time product
 
 
 			$order = [
