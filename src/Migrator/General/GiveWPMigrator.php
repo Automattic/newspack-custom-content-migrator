@@ -69,6 +69,8 @@ class GiveWPMigrator implements InterfaceMigrator {
 	 */
 	public function cmd_export_csv_donations( $pos_args, $assoc_args ) {
 
+		WP_CLI::error( "This GiveWP migrator was made for a publisher whose GiveWP license expired and they lost access to their data. The following functionality needs to be further tested: determining Type of payment in code below. The following functionality needs to be custom entered depending on WooComm products which are going to be used instead of GiveWP's: Set line items. And lastly, the CSV schema might need to be changed to accommodate using the https://github.com/woocommerce/woocommerce-subscriptions-importer-exporter since this CSV was tailored towards another premium plugin." );
+
 		global $wpdb;
 
 		// Get all payment products/line items. Products are stored in wp_posts.
@@ -170,7 +172,7 @@ class GiveWPMigrator implements InterfaceMigrator {
 			// All donor's payments are also stored in a CSV, though we're already looping through all payment_ids:
 		    //      select * from `local`.wp_xpM1VX_give_donors where purchase_count > 1;
 		    // $donors_payment_ids = explode( ',', $donor['payment_ids'] );
-		    
+
 
 			// Statuses seem to be working like this.
 			if (
