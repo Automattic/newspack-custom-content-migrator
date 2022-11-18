@@ -57,6 +57,7 @@ PluginSetup::register_migrators(
 		Migrator\General\ContentFixerMigrator::class,
 		Migrator\General\XMLMigrator::class,
 		Migrator\General\PrelaunchSiteQAMigrator::class,
+		Migrator\General\WoocommerceSubscriptionsImporterExporterMigrator::class,
 
 		// Publisher specific.
 		Migrator\PublisherSpecific\GadisMigrator::class,
@@ -72,6 +73,5 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\ColoradoSunMigrator::class,
 		Migrator\PublisherSpecific\MustangNewsMigrator::class,
 		Migrator\PublisherSpecific\LkldNowMigrator::class,
-		Migrator\PublisherSpecific\AavlwatchdogMigrator::class,
 	)
 );
