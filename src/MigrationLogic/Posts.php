@@ -401,4 +401,67 @@ SQL;
 		$content .= '</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div><!-- /wp:jetpack/slideshow -->';
 		return $content;
 	}
+
+	/**
+	 * Gets a list of post IDs and the number of revisions each one has. It will return only posts that have more than $num_of_revisions revisions
+	 *
+	 * @param integer $num_of_revisions The minimum number of revisions you want to search for.
+	 * @return array An array of objects, each object having two keys: post_ID and num_of_revisions.
+	 */
+	public function get_posts_by_number_of_revisions( $num_of_revisions = 500 ) {
+		global $wpdb;
+		$results = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT post_parent as post_ID, COUNT(ID) as num_of_revisions 
+					FROM $wpdb->posts WHERE post_type = 'revision'
+					GROUP BY post_parent
+					HAVING COUNT(ID) > %d",
+				$num_of_revisions
+			)
+		);
+		return $results;
+	}
+
+	/**
+	 * Gets the number of revisions a post has
+	 *
+	 * @param integer $post_id The post ID.
+	 * @return integer
+	 */
+	public function get_post_number_of_revisions( $post_id ) {
+		global $wpdb;
+		$result = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(ID) FROM $wpdb->posts WHERE post_type = 'revision' AND post_parent = %d",
+				$post_id
+			)
+		);
+		return (int) $result;
+	}
+
+	/**
+	 * Deletes revisions from a post, from the oldest to the newest
+	 *
+	 * @param integer $post_id The post ID.
+	 * @param integer $chunk_size The number of revisions to be deleted.
+	 * @return integer|false The number of revisions deleted or false on failure.
+	 */
+	public function delete_post_revisions( $post_id, $chunk_size ) {
+		global $wpdb;
+		$ids          = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM $wpdb->posts WHERE post_type = 'revision' AND post_parent = %d ORDER BY post_date ASC LIMIT %d",
+				$post_id,
+				$chunk_size
+			)
+		);
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$deleted      = $wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM $wpdb->posts WHERE ID IN ($placeholders)", // phpcs:ignore
+				$ids
+			)
+		);
+		return $deleted;
+	}
 }

@@ -147,6 +147,95 @@ class PostsMigrator implements InterfaceMigrator {
 				'shortdesc' => 'Removes the postmeta with original ID which gets set on all exported posts/pages.',
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator find-posts-by-number-of-revisions',
+			array( $this, 'cmd_find_posts_by_number_of_revisions' ),
+			array(
+				'shortdesc' => 'Finds post IDs that have at least the informed number of revisisions. Used to find posts with too many revisions that need to be cleaned up.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'positional',
+						'name'        => 'number-of-revisions',
+						'description' => 'The minimum number of revisions a post must have to be returned in the search.',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => 500,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'format',
+						'description' => 'The output format. Default table',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => 'table',
+					),
+				),
+			)
+		);
+
+		$clear_revisions_arguments = [
+			array(
+				'type'        => 'assoc',
+				'name'        => 'keep',
+				'description' => 'The minimum number of revisions that should be kept and that a post must have to have its revisions cleared.',
+				'optional'    => true,
+				'repeating'   => false,
+				'default'     => 500,
+			),
+			array(
+				'type'        => 'assoc',
+				'name'        => 'chunk-size',
+				'description' => 'The number of revisions to be deleted in each step. Default 30.',
+				'optional'    => true,
+				'repeating'   => false,
+				'default'     => 1000,
+			),
+			array(
+				'type'        => 'assoc',
+				'name'        => 'sleep',
+				'description' => 'The time in miliseconds to sleep between each chunk. Default 100.',
+				'optional'    => true,
+				'repeating'   => false,
+				'default'     => 100,
+			),
+			array(
+				'type'        => 'flag',
+				'name'        => 'dry-run',
+				'description' => 'Just output debugging info but do not delete anything.',
+				'optional'    => true,
+				'repeating'   => false,
+			),
+		];
+
+		WP_CLI::add_command(
+			'newspack-content-migrator clear-revisions',
+			array( $this, 'cmd_clear_revisions' ),
+			array(
+				'shortdesc' => 'Clear post revisions of posts that have more than a certain number of revisions',
+				'synopsis'  => $clear_revisions_arguments,
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator clear-post-revisions',
+			array( $this, 'cmd_clear_post_revisions' ),
+			array(
+				'shortdesc' => 'Clear post revisions of a specific post, if it exceeds a certain number of revisions',
+				'synopsis'  => array_merge(
+					[
+						array(
+							'type'        => 'assoc',
+							'name'        => 'post-id',
+							'description' => 'The ID of the post you want to clear the revisions of.',
+							'optional'    => false,
+							'repeating'   => false,
+						),
+					],
+					$clear_revisions_arguments
+				),
+			)
+		);
 	}
 
 	/**
@@ -439,5 +528,108 @@ class PostsMigrator implements InterfaceMigrator {
 		);
 
 		return isset( $new_id ) ? $new_id : null;
+	}
+
+	/**
+	 * Gets a list of posts that have more than a certain number of revisions
+	 *
+	 * @param array $args The positional arguments passed to the command.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_find_posts_by_number_of_revisions( $args, $assoc_args ) {
+		$number = intval( $args[0] );
+		if ( ! $number ) {
+			WP_CLI::error( 'Invalid argument for Number of revisions. Integer expected.' );
+		}
+		$format  = WP_CLI\Utils\get_flag_value( $assoc_args, 'format', 'table' );
+		$results = $this->posts_logic->get_posts_by_number_of_revisions( $number );
+		WP_CLI\Utils\format_items( $format, $results, [ 'post_ID', 'num_of_revisions' ] );
+	}
+
+
+	/**
+	 * Callback for clear-post-revisions command
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_clear_post_revisions( $positional_args, $assoc_args ) {
+		$post_id = intval( $assoc_args['post-id'] );
+		$number  = intval( $assoc_args['keep'] );
+		if ( ! $number || ! $post_id ) {
+			WP_CLI::error( 'Invalid argument for Number of revisions or Post ID. Integer are expected in both cases.' );
+		}
+		$chunk_size = intval( $assoc_args['chunk-size'] );
+		if ( ! $chunk_size ) {
+			WP_CLI::error( 'Invalid argument for Chunk size. Integer is expected.' );
+		}
+		$sleep = intval( $assoc_args['sleep'] );
+		if ( ! $sleep ) {
+			WP_CLI::error( 'Invalid argument for Sleep. Integer is expected.' );
+		}
+		$slepp_micro = $sleep * 1000;
+		$dry_run     = isset( $assoc_args['dry-run'] );
+
+		$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+
+		if ( $dry_run ) {
+			WP_CLI::log( "Post $post_id currently has $current_revisions revisions" );
+			$steps         = ceil( ( $current_revisions - $number ) / $chunk_size );
+			$seconds_slept = ( $steps * $sleep ) / 1000;
+			WP_CLI::log( "In steps of $chunk_size, it would take $steps operations to finish" );
+			WP_CLI::log( "Since we are sleeping $sleep miliseconds per operation, this would take at least $seconds_slept seconds to finish" );
+			WP_CLI::halt( 1 );
+		}
+
+		WP_CLI::debug( "Post $post_id currently has $current_revisions revisions" );
+		$total_deleted = 0;
+
+		while ( $current_revisions > $number ) {
+			$chunk = min( $chunk_size, $current_revisions - $number );
+			WP_CLI::debug( "Preparing to delete $chunk revisions" );
+			$deleted = $this->posts_logic->delete_post_revisions( $post_id, $chunk );
+			if ( $deleted !== $chunk ) {
+				WP_CLI::error( "An error has occurred when trying to delete $chunk revisions", false );
+				if ( false === $deleted ) {
+					WP_CLI::error( 'Database error' );
+				} else {
+					WP_CLI::error( "$deleted revisions deleted" );
+				}
+			}
+			$total_deleted += $deleted;
+			WP_CLI::log( "Deleted $chunk revisions" );
+			$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+			WP_CLI::log( "Post $post_id currently has $current_revisions revisions" );
+			if ( $sleep > 0 ) {
+				WP_CLI::debug( "Sleeping for $sleep miliseconds" );
+				usleep( $slepp_micro );
+			}
+		}
+
+		WP_CLI::success( "Process finished! $total_deleted revisions deleted!" );
+	}
+
+	/**
+	 * Callback for clear-revisions command
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_clear_revisions( $positional_args, $assoc_args ) {
+		$number = intval( $assoc_args['keep'] );
+		if ( ! $number ) {
+			WP_CLI::error( 'Invalid argument for Number of revisions. Integer expected.' );
+		}
+		$posts_result = WP_CLI::launch_self( 'newspack-content-migrator find-posts-by-number-of-revisions', [ $number ], [ 'format' => 'json' ], true, true );
+		$posts        = json_decode( $posts_result->stdout );
+		foreach ( $posts as $post ) {
+			WP_CLI::log( '' );
+			WP_CLI::log( "Processing post {$post->post_ID}" );
+			$assoc_args['post-id'] = $post->post_ID;
+			$this->cmd_clear_post_revisions( $positional_args, $assoc_args );
+		}
 	}
 }
