@@ -4,9 +4,9 @@ read -p "Have you bumped up the version in newspack-custom-content-migrator.php?
 if [ "y" != "$CONFIRM_VERSION" ]; then exit; fi
 echo "Creating a release archive..."
 
-# # Reinstall dependencies.
-# rm -rf vendor 2> /dev/null
-# composer install
+# Reinstall dependencies.
+rm -rf vendor 2> /dev/null
+composer install
 
 # Flush release folder.
 # - repeat rm twice to delete hidden files
