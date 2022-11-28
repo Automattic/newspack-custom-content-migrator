@@ -1,7 +1,7 @@
 {
   "name": "newspack-custom-content-migrator",
   "version": "1.0.0",
-  "description": "This plugin is a set of WP CLI commands (**Migrator classes**), and scripts (**Recipes**) used during Newspack sites Live Launches and/or Content Updates.",
+  "description": "This plugin is a set of WP CLI commands (**Command classes**) used during Newspack sites Live Launches and/or Content Updates.",
   "main": "index.js",
   "scripts": {
     "release:archive": "rm -rf release && mkdir -p release && rsync -r . ./release/newspack-custom-content-migrator --exclude-from='./.distignore' && cd release && zip -r newspack-custom-content-migrator.zip newspack-custom-content-migrator"
