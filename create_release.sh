@@ -23,6 +23,7 @@ zip -qr release/newspack-custom-content-migrator.zip ../newspack-custom-content-
 	"../newspack-custom-content-migrator/tests/*" \
 	"../newspack-custom-content-migrator/phpunit*" \
 	"../newspack-custom-content-migrator/.phpunit*" \
+	"../newspack-custom-content-migrator/phpcs*" \
 	"../newspack-custom-content-migrator/.phpcs*" \
 	"../newspack-custom-content-migrator/.travis.yml" \
 	"../newspack-custom-content-migrator/.git*" \
