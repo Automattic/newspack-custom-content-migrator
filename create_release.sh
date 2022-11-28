@@ -34,4 +34,4 @@ zip -qr release/newspack-custom-content-migrator.zip ../newspack-custom-content-
 	"../newspack-custom-content-migrator/.idea" \
 	"../newspack-custom-content-migrator/*.log*"
 
-echo "Created in ./release/newspack-custom-content-migrator.zip"
+echo "Created ./release/newspack-custom-content-migrator.zip"
