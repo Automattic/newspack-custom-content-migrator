@@ -39,6 +39,37 @@
   },
   "config": {
     "vendor-dir": "vendor",
-    "platform-check": false
+    "platform-check": false,
+    "allow-plugins": {
+      "composer/installers": true,
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    }
+  },
+  "archive": {
+    "exclude": [
+      "create_release.sh",
+      "release/*",
+      "bin/*",
+      "tests/*",
+      "phpunit*",
+      ".phpunit*",
+      "phpcs*",
+      ".phpcs*",
+      ".travis.yml",
+      ".git*",
+      ".git/*",
+      ".distignore",
+      ".DS_Store",
+      ".env*",
+      ".idea",
+      "*.log*",
+      "release"
+    ]
+  },
+  "scripts": {
+    "release": [
+      "composer install",
+      "composer archive --format=zip --dir=release --file=newspack-custom-content-migrator"
+    ]
   }
 }
