@@ -1,16 +1,16 @@
 <?php
 /**
- * Test class for the \NewspackCustomContentMigrator\Migrator\General\ContentDiffMigrator.
+ * Test class for the \NewspackCustomContentMigrator\Command\General\ContentDiffMigrator.
  *
  * @package Newspack
  */
 
-namespace NewspackCustomContentMigratorTest\Migrator\General;
+namespace NewspackCustomContentMigratorTest\Command\General;
 
 use http\Exception\UnexpectedValueException;
 use PHP_CodeSniffer\Tests\Core\Autoloader\Sub\C;
 use WP_UnitTestCase;
-use NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator;
+use NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
 use NewspackCustomContentMigratorTest\DataProviders\DataProviderGutenbergBlocks;
 use WP_User;
 
@@ -2113,7 +2113,7 @@ HTML;
 	/**
 	 * A more exhaustive search replace test, testing all the exact replacements which the update_blocks_ids method does.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_blocks_ids
 	 */
 	public function test_update_blocks_ids_should_update_all_ids_correctly() {
 
@@ -2139,7 +2139,7 @@ HTML;
 			. "\n\n" . $this->blocks_data_provider->get_jetpack_tiled_gallery_block( 1111111111, 2222222222, 3333333333 );
 
 		$html_actual = $html;
-		// All the updates made in \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_blocks_ids.
+		// All the updates made in \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_blocks_ids.
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_single_id( 'wp:image', $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_gutenberg_blocks_headers_multiple_ids( $imported_attachment_ids, $html_actual );
 		$html_actual = $this->logic->update_image_element_class_attribute( $imported_attachment_ids, $html_actual );
@@ -2151,7 +2151,7 @@ HTML;
 	/**
 	 * Testings exact replacements which the update_image_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_image_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_image_blocks_ids
 	 */
 		public function test_update_image_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2226,7 +2226,7 @@ HTML;
 	/**
 	 * Testings exact replacements which the update_image_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_image_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_image_blocks_ids
 	 */
 		public function test_update_image_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2291,7 +2291,7 @@ HTML;
 	/**
 	 * Testings exact replacements which the update_audio_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_audio_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_audio_blocks_ids
 	 */
 	public function test_update_audio_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2339,7 +2339,7 @@ HTML;
 	/**
 	 * Testings exact replacements which the update_audio_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_audio_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_audio_blocks_ids
 	 */
 	public function test_update_audio_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2380,7 +2380,7 @@ HTML;
 	/**
 	 * Testings exact replacements which the update_video_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_video_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_video_blocks_ids
 	 */
 	public function test_update_video_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2436,7 +2436,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_video_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_video_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_video_blocks_ids
 	 */
 	public function test_update_video_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2478,7 +2478,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_file_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_file_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_file_blocks_ids
 	 */
 	public function test_update_file_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2535,7 +2535,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_file_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_file_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_file_blocks_ids
 	 */
 		public function test_update_file_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2577,7 +2577,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_cover_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_cover_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_cover_blocks_ids
 	 */
 	public function test_update_cover_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2636,7 +2636,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_cover_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_cover_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_cover_blocks_ids
 	 */
 	public function test_update_cover_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2678,7 +2678,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_mediatext_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_mediatext_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_mediatext_blocks_ids
 	 */
 	public function test_update_mediatext_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2742,7 +2742,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_mediatext_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_mediatext_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_mediatext_blocks_ids
 	 */
 	public function test_update_mediatext_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2788,7 +2788,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_jetpacktiledgallery_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpacktiledgallery_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_jetpacktiledgallery_blocks_ids
 	 */
 	public function test_update_jetpacktiledgallery_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -2872,7 +2872,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_jetpacktiledgallery_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpacktiledgallery_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_jetpacktiledgallery_blocks_ids
 	 */
 	public function test_update_jetpacktiledgallery_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -2949,7 +2949,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_jetpackslideshow_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
 	 */
 	public function test_update_jetpackslideshow_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -3028,7 +3028,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_jetpackslideshow_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_jetpackslideshow_blocks_ids
 	 */
 	public function test_update_jetpackslideshow_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.
@@ -3086,7 +3086,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_jetpackimagecompare_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
 	 */
 	public function test_update_jetpackimagecompare_blocks_ids_should_update_all_ids_correctly() {
 		// Prepare.
@@ -3155,7 +3155,7 @@ BLOCK;
 	/**
 	 * Testings exact replacements which the update_jetpackimagecompare_blocks_ids method should do.
 	 *
-	 * @covers \NewspackCustomContentMigrator\MigrationLogic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
+	 * @covers \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_jetpackimagecompare_blocks_ids
 	 */
 	public function test_update_jetpackimagecompare_blocks_ids_does_not_make_changes_if_no_attachment_id_found() {
 		// Prepare.

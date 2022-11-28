@@ -11,12 +11,12 @@ class PluginSetup {
 	/**
 	 * Registers migrators' commands.
 	 *
-	 * @param $migrator_classes Array of Migrator\InterfaceMigrator classes.
+	 * @param $migrator_classes Array of Command\InterfaceCommand classes.
 	 */
 	public static function register_migrators( $migrator_classes ) {
 		foreach ( $migrator_classes as $migrator_class ) {
 			$migrator = $migrator_class::get_instance();
-			if ( $migrator instanceof Migrator\InterfaceMigrator ) {
+			if ( $migrator instanceof Command\InterfaceCommand ) {
 				$migrator->register_commands();
 			}
 		}

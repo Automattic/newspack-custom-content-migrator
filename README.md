@@ -16,13 +16,13 @@ The Plugin is installed on a the Staging Site, and executed there to import the 
 
 Migrators are classes which perform content migration and data reformatting functionality. They are organized like this:
 
-- located in [`src/Migrator`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Migrator) are WP CLI Command classes
-- located in [`src/MigrationLogic`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/MigrationLogic) are business logic classes
+- located in [`src/Command`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Command) are WP CLI Command classes
+- located in [`src/Logic`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Logic) are business logic classes
 
-There are two kinds of `Migrators`:
+There are two kinds of `Commands`:
 
-- **General purpose** -- located in [`src/Migrator/General`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Migrator/General), these contain the reusable WP data migration logic, used by multiple Live Launches;
-- **Publisher-specific** -- located in [`src/Migrator/PublisherSpecific`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Migrator/PublisherSpecific), these are custom functionalities used one-time only for individual Publisher's specific needs.
+- **General purpose** -- located in [`src/Command/General`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Command/General), these contain the reusable WP data migration logic, used by multiple Live Launches;
+- **Publisher-specific** -- located in [`src/Command/PublisherSpecific`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Command/PublisherSpecific), these are custom functionalities used one-time only for individual Publisher's specific needs.
 
 ## Content Diff
 
@@ -33,17 +33,17 @@ It fetches the newest content from the JP Rewind backup archive, by importing "l
 
 ## Creating a Migrator
 
-### New Migrator Class
+### New Command Class
 
-Take any existing migrator from the [`src/Migrator`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Migrator) and copy it either into the [`src/Migrator/General`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Migrator/General) or the [`src/Migrator/PublisherSpecific`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Migrator/PublisherSpecific) with a new name.
+Take any existing migrator from the [`src/Command`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Command) and copy it either into the [`src/Command/General`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Command/General) or the [`src/Command/PublisherSpecific`](https://github.com/Automattic/newspack-custom-content-migrator/tree/master/src/Command/PublisherSpecific) with a new name.
 
-Migrator classes implement the [`InterfaceMigrator`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Migrator/InterfaceMigrator.php) which simply makes sure they register WP CLI commands.
+Command classes implement the [`InterfaceCommand`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Command/InterfaceCommand.php) which simply makes sure they register WP CLI commands.
 
-### Register the New Migrator
+### Register the New Command
 
-The new Migrator should be registered in the [`newspack-custom-content-migrator.php`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/newspack-custom-content-migrator.php).
+The new Command should be registered in the [`newspack-custom-content-migrator.php`](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/newspack-custom-content-migrator.php).
 
-After creating a new Migrator, run `composer dump-autoload` to update the autoloading files.
+After creating a new Command, run `composer dump-autoload` to update the autoloading files.
 
 ## Running the Content Diff
 
