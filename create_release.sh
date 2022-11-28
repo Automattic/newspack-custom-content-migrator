@@ -14,7 +14,7 @@ rm -rf release 2> /dev/null
 rm -rf release 2> /dev/null
 mkdir release
 
-# Create zip.
+# Create zip but exclude dev things.
 zip -qr release/newspack-custom-content-migrator.zip ../newspack-custom-content-migrator \
 	-x \
 	"../newspack-custom-content-migrator/create_release.sh" \
