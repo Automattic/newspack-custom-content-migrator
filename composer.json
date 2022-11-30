@@ -68,7 +68,7 @@
   },
   "scripts": {
     "release": [
-      "composer install",
+      "composer install --no-dev --optimize-autoloader",
       "composer archive --format=zip --dir=release --file=newspack-custom-content-migrator"
     ]
   }
