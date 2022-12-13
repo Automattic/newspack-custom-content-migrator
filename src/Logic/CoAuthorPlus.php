@@ -285,4 +285,28 @@ class CoAuthorPlus {
 
 		return [];
 	}
+
+	/**
+	 * Find Guest Authors by number of posts (less than $count)
+	 * 
+	 * @param $count The maximum number of posts (inclusive)
+	 * 
+	 * @return array Array of objects. Each object having 'term_id' and 'author_id' properties.
+	 */
+	public function get_guest_authors_by_post_count( $count = 0 ) {
+		global $wpdb;
+
+		$authors = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT $wpdb->posts.ID as author_id, $wpdb->terms.term_id 
+				FROM $wpdb->term_taxonomy 
+				JOIN $wpdb->terms ON $wpdb->terms.term_id = $wpdb->term_taxonomy.term_id 
+				LEFT JOIN $wpdb->posts on $wpdb->posts.post_name = $wpdb->terms.slug 
+				WHERE count <= %d;",
+				$count,
+			),
+		);
+
+		return $authors;
+	}
 }

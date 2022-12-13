@@ -247,6 +247,22 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-delete-authors-with-zero-posts',
+			[ $this, 'cmd_delete_authors_with_zero_posts' ],
+			[
+				'shortdesc' => 'Delete all Guest Authors having 0 posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run without deleting any Guest Authors.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				]
+			],
+		);
 	}
 
 	/**
@@ -767,6 +783,33 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::success('Done');
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator co-authors-delete-authors-with-zero-posts` command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_delete_authors_with_zero_posts( $args, $assoc_args ) {
+		$dry_run = isset( $assoc_args['dry-run'] );
+		$authors_to_delete = $this->coauthorsplus_logic->get_guest_authors_by_post_count( 0 );
+
+		foreach ( $authors_to_delete as $author ) {
+			WP_CLI::log( sprintf( 'Will delete Guest Author #%d', $author->author_id ) );
+
+			if ( $dry_run ) {
+				WP_CLI::log( 'Dry run is enabled. Skipping...' );
+				continue;
+			}
+
+			WP_CLI::log( 'Deleting the term...' );
+			wp_delete_term( $author->term_id, 'author' );
+			WP_CLI::log( 'Deleting the post...' );
+			wp_delete_post( $author->author_id );
+		}
+
+		WP_CLI::success( 'Done!' );
 	}
 
     /**
