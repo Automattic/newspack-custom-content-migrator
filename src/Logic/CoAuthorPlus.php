@@ -7,14 +7,21 @@ use \CoAuthors_Guest_Authors;
 use \WP_CLI;
 use WP_Post;
 
+/**
+ * CoAuthorPlus general logic class.
+ */
 class CoAuthorPlus {
 
 	/**
+	 * CoAuthors_Plus.
+	 *
 	 * @var null|CoAuthors_Plus $coauthors_plus
 	 */
 	public $coauthors_plus;
 
 	/**
+	 * CoAuthors_Guest_Authors.
+	 *
 	 * @var null|CoAuthors_Guest_Authors
 	 */
 	public $coauthors_guest_authors;
@@ -28,8 +35,8 @@ class CoAuthorPlus {
 
 		$plugin_path = defined( 'WP_PLUGIN_DIR' ) ? WP_PLUGIN_DIR : ABSPATH . 'wp-content/plugins';
 
-		$file_1 = $plugin_path . '/co-authors-plus/co-authors-plus.php';
-		$file_2 = $plugin_path . '/co-authors-plus/php/class-coauthors-guest-authors.php';
+		$file_1     = $plugin_path . '/co-authors-plus/co-authors-plus.php';
+		$file_2     = $plugin_path . '/co-authors-plus/php/class-coauthors-guest-authors.php';
 		$included_1 = is_file( $file_1 ) && include_once $file_1;
 		$included_2 = is_file( $file_2 ) && include_once $file_2;
 
@@ -96,16 +103,16 @@ class CoAuthorPlus {
 	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
 	 */
 	public function create_guest_author( array $args ) {
-		if ( ! isset( $args[ 'display_name' ] ) ) {
+		if ( ! isset( $args['display_name'] ) ) {
 			throw new \UnexpectedValueException( 'The `display_name` param is mandatory for Guest Author creation.' );
 		}
 
 		// If not provided, automatically set `user_login` from display_name.
-		if ( ! isset( $args[ 'user_login' ] ) ) {
-			$args[ 'user_login' ] = sanitize_title( $args[ 'display_name' ] );
+		if ( ! isset( $args['user_login'] ) ) {
+			$args['user_login'] = sanitize_title( $args['display_name'] );
 		}
 
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args[ 'user_login' ] );
+		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args['user_login'] );
 		if ( false === $guest_author ) {
 			$coauthor_id = $this->coauthors_guest_authors->create( $args );
 		} else {
@@ -134,8 +141,8 @@ class CoAuthorPlus {
 	/**
 	 * Links a Guest Author to an existing WP User.
 	 *
-	 * @param int $ga_id Guest Author ID.
-	 * @param \WPUser $user
+	 * @param int     $ga_id Guest Author ID.
+	 * @param \WPUser $user  WP User.
 	 */
 	public function link_guest_author_to_wp_user( $ga_id, $user ) {
 		// Since GAs and WP Users can't have the same login, update it if they're the same.
@@ -284,5 +291,37 @@ class CoAuthorPlus {
 		}
 
 		return [];
+	}
+
+	/**
+	 * Delete a guest author. This function is just a wrapper for \CoAuthors_Guest_Authors::delete.
+	 *
+	 * @param int    $id          The ID for the guest author profile.
+	 * @param string $reassign_to User login value for the co-author to reassign posts to.
+	 *
+	 * @return bool|WP_Error $success True on success, WP_Error on a failure.
+	 */
+	public function delete_ga( $id, $reassign_to = false ) {
+		return $this->coauthors_guest_authors->delete( $id, $reassign_to );
+	}
+
+	/**
+	 * Gets all guest author objects.
+	 *
+	 * @return array Array of GA objects.
+	 */
+	public function get_all_gas() {
+		global $wpdb;
+
+		// This query was taken directly from \CoAuthors_Guest_Authors::get_guest_author_by but added post_status,
+		// because otherwise it picks up 'auto-draft's, which are not valid GA objects.
+		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'guest-author' and post_status = 'publish';" );
+
+		$all_gas = [];
+		foreach ( $post_ids as $post_id ) {
+			$all_gas[] = $this->coauthors_guest_authors->get_guest_author_by( 'ID', $post_id );
+		}
+
+		return $all_gas;
 	}
 }
