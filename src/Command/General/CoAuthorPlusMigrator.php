@@ -272,6 +272,10 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			]
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-fix-gas-post-counts',
+			[ $this, 'cmd_fix_gas_post_counts' ],
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-delete-authors-with-zero-posts',
 			[ $this, 'cmd_delete_authors_with_zero_posts' ],
 			[
@@ -804,25 +808,43 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				WHERE taxonomy = 'author' AND description LIKE '%$guest_author%'"
 			);
 
-			//
-			$wpdb->query(
-				"UPDATE $wpdb->term_taxonomy SET count = (
+						$wpdb->query(
+							"UPDATE $wpdb->term_taxonomy SET count = (
     			SELECT COUNT(tr.object_id) FROM $wpdb->term_relationships AS tr
     			INNER JOIN $wpdb->posts AS p ON tr.object_id = p.ID
     			WHERE tr.term_taxonomy_id = $guest_author_term_taxonomy->term_taxonomy_id
     			AND p.post_type = 'post'
 			) WHERE term_taxonomy_id = $guest_author_term_taxonomy->term_taxonomy_id"
-			);
+						);
 		}
 
 		WP_CLI::success( 'Done' );
 	}
 
 	/**
-	 * Callable for the `newspack-content-migrator co-authors-delete-authors-with-zero-posts` command.
-	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_gas_post_counts( $args, $assoc_args ) {
+
+		$update_taxonomy = 'author';
+		$get_terms_args  = array(
+			'taxonomy'   => $update_taxonomy,
+			'fields'     => 'ids',
+			'hide_empty' => false,
+		);
+
+		$update_term_ids = get_terms( $get_terms_args );
+		foreach ( $update_term_ids as $key_term_id => $term_id ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) updating term_id %d', $key_term_id, count( $update_term_ids ), $term_id ) );
+			wp_update_term_count_now( [ $term_id ], $update_taxonomy );
+		}
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator co-authors-delete-authors-with-zero-posts` command.
 	 */
 	public function cmd_delete_authors_with_zero_posts( $args, $assoc_args ) {
 		$dry_run = isset( $assoc_args['dry-run'] );
@@ -839,8 +861,8 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 
 		// Delete GAs.
-		foreach ( $gas_to_delete as $ga_to_delete ) {
-			WP_CLI::log( sprintf( 'Deleting Guest Author #%d %s.', $ga_to_delete->ID, $ga_to_delete->display_name ) );
+		foreach ( $gas_to_delete as $key_ga_to_delete => $ga_to_delete ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) Deleting Guest Author #%d %s.', $key_ga_to_delete, count( $gas_to_delete ), $ga_to_delete->ID, $ga_to_delete->display_name ) );
 
 			if ( ! $dry_run ) {
 				$this->coauthorsplus_logic->delete_ga( $ga_to_delete->ID );
