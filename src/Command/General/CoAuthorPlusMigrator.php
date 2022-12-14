@@ -274,6 +274,9 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-fix-gas-post-counts',
 			[ $this, 'cmd_fix_gas_post_counts' ],
+			[
+				'shortdesc' => "Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.",
+			]
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-delete-authors-with-zero-posts',
