@@ -305,7 +305,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		// phpcs:disable -- string value was escaped.
 		$cpts_live = $wpdb->get_col( "SELECT DISTINCT( post_type ) FROM {$live_table_prefix_escaped}posts ;" );
 		// phpcs:enable
-		WP_CLI::log( sprintf( 'Found these Post types in live DB:%s', implode( "\n- ", $cpts_live ) ) );
+		WP_CLI::log( sprintf( 'Found these Post types in live DB:%s', "\n- " . implode( "\n- ", $cpts_live ) ) );
 
 		// Validate selected post types.
 		array_walk(
