@@ -298,7 +298,26 @@ class ContentDiffMigrator implements InterfaceCommand {
 			WP_CLI::error( $e->getMessage() );
 		}
 
-		WP_CLI::log( 'Searching for new content on Live Site...' );
+		global $wpdb;
+
+		// Search distinct Post types in live DB.
+		$live_table_prefix_escaped = esc_sql( $live_table_prefix );
+		// phpcs:disable -- string value was escaped.
+		$cpts_live = $wpdb->get_col( "SELECT DISTINCT( post_type ) FROM {$live_table_prefix_escaped}posts ;" );
+		// phpcs:enable
+		WP_CLI::log( sprintf( 'Found these Post types in live DB:%s', "\n- " . implode( "\n- ", $cpts_live ) ) );
+
+		// Validate selected post types.
+		array_walk(
+			$post_types,
+			function ( &$v, $k ) use ( $cpts_live ) {
+				if ( ! in_array( $v, $cpts_live ) ) {
+					WP_CLI::error( sprintf( 'Post type %s not found in live DB.', $v ) );
+				}
+			}
+		);
+
+		WP_CLI::log( sprintf( 'Searching Live Site for new content IDs with Post types %s ...', implode( ', ', $post_types ) ) );
 		try {
 			$ids = self::$logic->get_live_diff_content_ids_programmatic( $live_table_prefix, $post_types );
 		} catch ( \Exception $e ) {
@@ -360,23 +379,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		WP_CLI::log( 'Recreating categories...' );
 		$category_term_id_updates = $this->recreate_categories();
-		WP_CLI::log( 'Done!' );
 
 		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $category_term_id_updates );
-		WP_CLI::log( 'Done!' );
 
 		WP_CLI::log( 'Updating Post parent IDs...' );
 		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
-		WP_CLI::log( 'Done!' );
 
 		WP_CLI::log( 'Updating Featured images IDs...' );
 		$this->update_featured_image_ids( $imported_posts_data );
-		WP_CLI::log( 'Done!' );
 
 		WP_CLI::log( 'Updating attachment IDs in block content...' );
 		$this->update_attachment_ids_in_blocks( $imported_posts_data );
-		WP_CLI::log( 'Done!' );
 
 		WP_CLI::success( 'All done migrating content! 🙌 ' );
 
@@ -596,12 +610,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$post_data = self::$logic->get_post_data( (int) $post_id_live, $this->live_table_prefix );
 			$post_type = $post_data[ self::$logic::DATAKEY_POST ]['post_type'];
 
-			// Extra check, shouldn't happen, but better safe than sorry.
-			if ( ! in_array( $post_type, [ 'post', 'page', 'attachment' ] ) ) {
-				$this->log( $this->log_error, sprintf( 'import_posts error, unexpected post_type %s for id_old=%s', $post_type, $post_id_live ) );
-				WP_CLI::error( sprintf( 'Unexpected post_type %s for Live Post ID %s.', $post_type, $post_id_live ) );
-			}
-
 			// First just insert a new blank `wp_posts` record to get the new ID.
 			try {
 				$post_id_new           = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
@@ -687,26 +695,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 		}
 
 		/**
-		 * Helper map of imported Posts and Pages.
+		 * Map of all imported post types other than Attachments (Posts, Pages, etc).
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_post_ids_map    = [];
-		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
-		foreach ( $imported_posts_data_post as $entry ) {
-			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
-		}
+		$imported_post_ids_map = $this->get_non_attachments_from_imported_posts_log( $imported_posts_data );
 
 		/**
-		 * Helper map of imported Attachments.
+		 * Map of imported Attachments.
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map   = [];
-		$imported_post_data_attachment = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'attachment' ], false );
-		foreach ( $imported_post_data_attachment as $entry ) {
-			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
-		}
+		$imported_attachment_ids_map = $this->get_attachments_from_imported_posts_log( $imported_posts_data );
 
 		// Try and free some memory.
 		$all_live_posts_ids  = null;
@@ -731,8 +731,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// Get Post's post_parent which uses the live DB ID.
 			$parent_id_old = $wpdb->get_var( $wpdb->prepare( "SELECT post_parent FROM $wpdb->posts WHERE ID = %d;", $id_new ) );
+
 			// No update to do.
-			if ( '0' === $parent_id_old ) {
+			if ( ( '0' == $parent_id_old ) || empty( $parent_id_old ) ) {
 				continue;
 			}
 
@@ -759,7 +760,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 				// If all attempts failed (possible that parent didn't exist in live DB), set it to 0, because we shouldn't have loose invalid post_parents locally.
 				$parent_id_new = 0;
-				WP_CLI::warning( sprintf( 'Could not update parent ID for Post, parent ID now set to 0 -- $id_old(live DB Post ID)=%s, $id_new(local DB Post ID)=%s, $parent_id_old(live DB parent ID)=%s.', $id_old, $id_new, $parent_id_old ) );
+				WP_CLI::warning( sprintf( 'Could not update parent ID for Post $id_old=%s $id_new=%s $parent_id_old=%s. Parent ID now set to 0.', $id_old, $id_new, $parent_id_old ) );
 			}
 
 			// Update.
@@ -802,26 +803,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function update_featured_image_ids( $imported_posts_data ) {
 
 		/**
-		 * Helper map of imported Posts and Pages.
+		 * Map of all imported post types other than Attachments (Posts, Pages, etc).
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_post_ids_map    = [];
-		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
-		foreach ( $imported_posts_data_post as $entry ) {
-			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
-		}
+		$imported_post_ids_map = $this->get_non_attachments_from_imported_posts_log( $imported_posts_data );
 
 		/**
-		 * Helper map of imported Attachments.
+		 * Map of imported Attachments.
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map   = [];
-		$imported_post_data_attachment = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'attachment' ], false );
-		foreach ( $imported_post_data_attachment as $entry ) {
-			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
-		}
+		$imported_attachment_ids_map = $this->get_attachments_from_imported_posts_log( $imported_posts_data );
 
 		// We need the old Live attachment IDs; we'll first search for those then update them with new IDs.
 		$attachment_ids_for_featured_image_update = array_keys( $imported_attachment_ids_map );
@@ -865,26 +858,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function update_attachment_ids_in_blocks( $imported_posts_data ) {
 
 		/**
-		 * Helper map of imported Posts and Pages.
+		 * Map of all imported post types other than Attachments (Posts, Pages, etc).
 		 *
 		 * @var array $imported_post_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_post_ids_map    = [];
-		$imported_posts_data_post = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => [ 'post', 'page' ] ], false );
-		foreach ( $imported_posts_data_post as $entry ) {
-			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
-		}
+		$imported_post_ids_map = $this->get_non_attachments_from_imported_posts_log( $imported_posts_data );
 
 		/**
-		 * Helper map of imported Attachments.
+		 * Map of imported Attachments.
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map   = [];
-		$imported_post_data_attachment = $this->filter_log_data_array( $imported_posts_data, [ 'post_type' => 'attachment' ], false );
-		foreach ( $imported_post_data_attachment as $entry ) {
-			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
-		}
+		$imported_attachment_ids_map = $this->get_attachments_from_imported_posts_log( $imported_posts_data );
 
 		// Skip previously updated Posts.
 		$updated_post_ids               = $this->get_data_from_log( $this->log_updated_blocks_ids, [ 'id_new' ] ) ?? [];
@@ -987,38 +972,86 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Filters the log data array by where clause and returns found element(s).
+	 * Filters the log data array by where conditions.
 	 *
-	 * @param array $imported_posts_data Log data array, consists of subarrays with one or more multiple key=>values.
-	 * @param array $where               Search conditions, match key and value(s) in $imported_posts_data. Value can either be
-	 *                                   a scalar, or an array of multiple possible "or" values.
-	 * @param bool  $return_first        If true, return just the first found entry, otherwise return all which match the conditions.
+	 * @param array  $imported_posts_log_data Log data array, consists of subarrays with one or more multiple key=>values.
+	 * @param string $where_key               Search key.
+	 * @param array  $where_values            Search value.
+	 * @param string $where_operand           Search operand, can be '==' or '!='.
+	 * @param bool   $return_first            If true, return just the first matched entry, otherwise returns all matched entries.
+	 *
+	 * @throws \RuntimeException In case an unsupported $where_operand was given.
 	 *
 	 * @return array Found results. Mind that if $return_first is true, it will return a one-dimensional array,
 	 *               and if $return_first is false, it will return two-dimensional array with all matched elements as subarrays.
 	 */
-	private function filter_log_data_array( $imported_posts_data, $where, $return_first = true ) {
-		$return = [];
-		foreach ( $imported_posts_data as $entry ) {
+	private function filter_imported_posts_log( array $imported_posts_log_data, string $where_key, array $where_values, string $where_operand, bool $return_first = true ): array {
+		$return                   = [];
+		$supported_where_operands = [ '==', '!=' ];
+
+		// Validate $where_operand.
+		if ( ! in_array( $where_operand, $supported_where_operands ) ) {
+			throw new \RuntimeException( sprintf( 'Where operand %s is not supported.', $where_operand ) );
+		}
+
+		foreach ( $imported_posts_log_data as $entry ) {
+
 			// Check $where conditions.
-			foreach ( $where as $key => $value ) {
-				// If value is an array, it contains multiple OR options.
-				$multiple_values = is_array( $value ) ? $value : [ $value ];
-				foreach ( $multiple_values as $specific_value ) {
-					if ( isset( $entry[ $key ] ) && $specific_value == $entry[ $key ] ) {
-						if ( true === $return_first ) {
-							// Return first element matching $where.
-							return $entry;
-						} else {
-							// Return all the elements.
-							$return[] = $entry;
-						}
+			foreach ( $where_values as $where_value ) {
+
+				$matched = false;
+				if ( '==' === $where_operand ) {
+					$matched = isset( $entry[ $where_key ] ) && $where_value == $entry[ $where_key ];
+				} elseif ( '!=' === $where_operand ) {
+					$matched = isset( $entry[ $where_key ] ) && $where_value != $entry[ $where_key ];
+				}
+
+				if ( true === $matched ) {
+					$return[] = $entry;
+
+					// Return the very first element matching $where.
+					if ( true === $return_first ) {
+						return $entry;
 					}
 				}
 			}
 		}
 
 		return $return;
+	}
+
+	/**
+	 * Gets IDs from the log for Posts, Pages and other post types which are not Attachments.
+	 *
+	 * @param array $imported_posts_data Imported posts log data.
+	 *
+	 * @return array IDs.
+	 */
+	private function get_non_attachments_from_imported_posts_log( array $imported_posts_data ): array {
+		$imported_post_ids_map    = [];
+		$imported_posts_data_post = $this->filter_imported_posts_log( $imported_posts_data, 'post_type', [ 'attachment' ], '!=', false );
+		foreach ( $imported_posts_data_post as $entry ) {
+			$imported_post_ids_map[ $entry['id_old'] ] = $entry['id_new'];
+		}
+
+		return $imported_post_ids_map;
+	}
+
+	/**
+	 * Gets IDs from the log for Attachments.
+	 *
+	 * @param array $imported_posts_data Imported posts log data.
+	 *
+	 * @return array IDs.
+	 */
+	private function get_attachments_from_imported_posts_log( array $imported_posts_data ): array {
+		$imported_attachment_ids_map   = [];
+		$imported_post_data_attachment = $this->filter_imported_posts_log( $imported_posts_data, 'post_type', [ 'attachment' ], '==', false );
+		foreach ( $imported_post_data_attachment as $entry ) {
+			$imported_attachment_ids_map[ $entry['id_old'] ] = $entry['id_new'];
+		}
+
+		return $imported_attachment_ids_map;
 	}
 
 	/**
