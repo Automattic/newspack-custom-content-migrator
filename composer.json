@@ -47,6 +47,7 @@
   },
   "archive": {
     "exclude": [
+      "!vendor/*",
       "create_release.sh",
       "release/*",
       "bin/*",
