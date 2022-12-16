@@ -20,6 +20,7 @@ use WP_CLI;
 class ContentDiffMigrator implements InterfaceCommand {
 
 	const LOG_IDS_CSV                     = 'content-diff__new-ids-csv.log';
+	const LOG_IDS_MODIFIED_CSV            = 'content-diff__modified-ids-csv.log';
 	const LOG_IMPORTED_POST_IDS           = 'content-diff__imported-post-ids.log';
 	const LOG_UPDATED_PARENT_IDS          = 'content-diff__updated-parent-ids.log';
 	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
@@ -292,20 +293,14 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
 		$post_types        = $assoc_args['post-types-csv'] ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
 
-		try {
-			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
-		} catch ( \Exception $e ) {
-			WP_CLI::error( $e->getMessage() );
-		}
-
 		global $wpdb;
+		$this->validate_dbs( $live_table_prefix, [ 'options' ] );
 
 		// Search distinct Post types in live DB.
 		$live_table_prefix_escaped = esc_sql( $live_table_prefix );
-		// phpcs:disable -- string value was escaped.
+		// phpcs:ignore -- table prefix string value was escaped.
 		$cpts_live = $wpdb->get_col( "SELECT DISTINCT( post_type ) FROM {$live_table_prefix_escaped}posts ;" );
-		// phpcs:enable
-		WP_CLI::log( sprintf( 'Found these Post types in live DB:%s', "\n- " . implode( "\n- ", $cpts_live ) ) );
+		WP_CLI::log( sprintf( 'These unique Post types exist in live DB:%s', "\n- " . implode( "\n- ", $cpts_live ) ) );
 
 		// Validate selected post types.
 		array_walk(
@@ -317,17 +312,51 @@ class ContentDiffMigrator implements InterfaceCommand {
 			}
 		);
 
-		WP_CLI::log( sprintf( 'Searching Live Site for new content IDs with Post types %s ...', implode( ', ', $post_types ) ) );
+		// Get list of post types except attachments.
+		$post_types_non_attachments = $post_types;
+		if ( ( $key = array_search( 'attachment', $post_types_non_attachments ) ) !== false ) {
+			unset( $post_types_non_attachments[ $key ] );
+			$post_types_non_attachments = array_values( $post_types_non_attachments );
+		}
+
+		WP_CLI::log( sprintf( 'Now searching live DB for new content of Post types %s ...', implode( ', ', $post_types ) ) );
 		try {
-			$ids = self::$logic->get_live_diff_content_ids_programmatic( $live_table_prefix, $post_types );
+			WP_CLI::log( sprintf( 'Querying %s types...', implode( ',', $post_types_non_attachments ) ) );
+			$results_live_posts  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+			$results_local_posts = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+
+			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_posts ) ) );
+			$new_live_ids = self::$logic->filter_new_live_ids( $results_live_posts, $results_local_posts );
+			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_ids ) ) );
+
+			WP_CLI::log( 'Searching for records more recently modified on live...' );
+			$modified_live_ids = self::$logic->filter_modified_live_ids( $results_live_posts, $results_local_posts );
+			WP_CLI::success( sprintf( '%d modified IDs found.', count( $modified_live_ids ) ) );
+
+			WP_CLI::log( 'Querying attachments...' );
+			$results_live_attachments  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
+			$results_local_attachments = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
+
+			WP_CLI::log( 'Fetched %s total from live site. Searching new ones...' );
+			$new_live_attachment_ids = self::$logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
+			$new_live_ids            = array_merge( $new_live_ids, $new_live_attachment_ids );
+			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_attachment_ids ) ) );
+
 		} catch ( \Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
 
-		$file = $export_dir . '/' . self::LOG_IDS_CSV;
-		file_put_contents( $export_dir . '/' . self::LOG_IDS_CSV, implode( ',', $ids ) );
-
-		WP_CLI::success( sprintf( '%d new IDs found, and a list of these IDs exported to %s', count( $ids ), $file ) );
+		// Save log and output results.
+		if ( count( $new_live_ids ) > 0 ) {
+			$file = $export_dir . '/' . self::LOG_IDS_CSV;
+			file_put_contents( $file, implode( ',', $new_live_ids ) );
+			WP_CLI::success( sprintf( 'New IDs exported to %s', $file ) );
+		}
+		if ( count( $modified_live_ids ) > 0 ) {
+			$file_modified = $export_dir . '/' . self::LOG_IDS_MODIFIED_CSV;
+			file_put_contents( $file_modified, implode( ',', $modified_live_ids ) );
+			WP_CLI::success( sprintf( 'Modified IDs exported to %s', $file_modified ) );
+		}
 	}
 
 	/**
@@ -349,11 +378,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		if ( empty( $all_live_posts_ids ) ) {
 			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}
-		try {
-			self::$logic->validate_core_wp_db_tables( $live_table_prefix, [ 'options' ] );
-		} catch ( \Exception $e ) {
-			WP_CLI::error( $e->getMessage() );
-		}
+		$this->validate_dbs( $live_table_prefix, [ 'options' ] );
 
 		// Set constants.
 		$this->live_table_prefix             = $live_table_prefix;
@@ -372,6 +397,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$this->log( $this->log_updated_posts_parent_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
+
+		// Modified IDS:
+		// - delete first
+		// - merge with import IDs to be imported anew -- because much of the data can be updated (content, featured image, author, ...) all these should be updated.
 
 		// Before we create categories, let's make sure categories have valid parents. If they don't they should be fixed first.
 		WP_CLI::log( 'Validating categories...' );
@@ -1091,6 +1120,23 @@ class ContentDiffMigrator implements InterfaceCommand {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Validates DBs.
+	 *
+	 * @param string $live_table_prefix Live table prefix.
+	 * @param array  $skip_tables       Core WP DB tables to skip (without prefix).
+	 *
+	 * @throws \RuntimeException In case that table collations do not match.
+	 *
+	 * @return void
+	 */
+	public function validate_dbs( string $live_table_prefix, array $skip_tables ): void {
+		self::$logic->validate_core_wp_db_tables( $live_table_prefix, $skip_tables );
+		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix ) ) {
+			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
+		}
 	}
 
 	/**
