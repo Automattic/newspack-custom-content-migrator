@@ -21,9 +21,18 @@ class BillyPennMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
+	 * Instance of \Logic\SimpleLocalAvatars
+	 * 
+	 * @var null|SimpleLocalAvatars Instance.
+	 */
+	private $sla_logic;
+
+	/**
 	 * Constructor.
 	 */
-	private function __construct() {}
+	private function __construct() {
+		$this->sla_logic = new SimpleLocalAvatars();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -51,6 +60,95 @@ class BillyPennMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator billypenn-migrate-users-avatars',
+			[ $this, 'cmd_billypenn_migrate_users_avatars' ],
+			[
+				'shortdesc' => 'Migrate the users\' avatars.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator billypenn-migrate-users-bios',
+			[ $this, 'cmd_billypenn_migrate_users_bios' ],
+			[
+				'shortdesc' => 'Migrate the users\' bios.',
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator billypenn-migrate-users-bios`.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_billypenn_migrate_users_bios( $args, $assoc_args ) {
+		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
+			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+			return;
+		}
+
+		$users = get_users(
+			array(
+				'meta_key'     => 'user_bio_extended',
+				'meta_compare' => 'EXISTS',
+			)
+		);
+
+		foreach ( $users as $user ) {
+			$user_bio = get_user_meta( $user->ID, 'user_bio_extended', true );
+			
+			if ( ! $user_bio ) {
+				continue;
+			}
+
+			WP_CLI::log( sprintf( 'Migrating bioography for user #%d', $user->ID ) );
+
+			wp_update_user(
+				array(
+					'ID' => $user->ID,
+					'description' => $user_bio,
+				),
+			);
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator billypenn-migrate-users-avatars`.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_billypenn_migrate_users_avatars( $args, $assoc_args ) {
+		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
+			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+			return;
+		}
+
+		$users = get_users(
+			array(
+				'meta_key'     => 'wp_user_img',
+				'meta_compare' => 'EXISTS',
+			)
+		);
+
+		foreach ( $users as $user ) {
+			$avatar_id = get_user_meta( $user->ID, 'wp_user_img', true );
+			
+			if ( ! $avatar_id ) {
+				continue;
+			}
+
+			WP_CLI::log( sprintf( 'Migrating avatar for user #%d', $user->ID ) );
+
+			$this->sla_logic->import_avatar( $user->ID, $avatar_id );
+		}
+
+		WP_CLI::success( 'Done!' );
 	}
 
 	/**
