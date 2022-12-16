@@ -21,4 +21,15 @@ class PHP {
 
 		return $answer;
 	}
+
+	/**
+	 * Outputs a string directly to STDOUT. This lets you keep outputting to the same line. To break lines, add explicit "\n" to $str.
+	 *
+	 * @param string $str String to output.
+	 *
+	 * @return void
+	 */
+	public static function echo_stdout( string $str ) {
+		fwrite( STDOUT, $str );
+	}
 }
