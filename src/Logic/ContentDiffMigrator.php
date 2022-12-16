@@ -11,7 +11,7 @@ use \WP_CLI;
 use \WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
-use NewspackCustomContentMigrator\Utils\PHP as UtilPHP;
+use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use wpdb;
 
 /**
@@ -197,7 +197,7 @@ class ContentDiffMigrator {
 			$last_percent_progress = $percent_progress;
 			$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
 			if ( $last_percent_progress !== $percent_progress ) {
-				UtilPHP::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
 			}
 
 			$found = false;
@@ -235,7 +235,12 @@ class ContentDiffMigrator {
 	 * @param array $results_live_posts  Rows from live posts table.
 	 * @param array $results_local_posts Rows from local posts table.
 	 *
-	 * @return array IDs of posts found.
+	 * @return array $ids_modified {
+	 *     IDs of posts found.
+	 *
+	 *     @type int live_id  Live Post ID.
+	 *     @type int local_id Matching Local Post ID.
+	 * }
 	 */
 	public function filter_modified_live_ids( array $results_live_posts, array $results_local_posts ): array {
 
@@ -250,7 +255,7 @@ class ContentDiffMigrator {
 			$last_percent_progress = $percent_progress;
 			$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
 			if ( $last_percent_progress !== $percent_progress ) {
-				UtilPHP::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
 			}
 
 			$modified = false;
@@ -269,7 +274,10 @@ class ContentDiffMigrator {
 
 			// Modified on live, add to $ids_modified.
 			if ( true === $modified ) {
-				$ids_modified[] = $live_post['ID'];
+				$ids_modified[] = [
+					'live_id'  => (int) $live_post['ID'],
+					'local_id' => (int) $local_post['ID'],
+				];
 			}
 		}
 

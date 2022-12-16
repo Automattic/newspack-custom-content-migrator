@@ -20,7 +20,7 @@ use WP_CLI;
 class ContentDiffMigrator implements InterfaceCommand {
 
 	const LOG_IDS_CSV                     = 'content-diff__new-ids-csv.log';
-	const LOG_IDS_MODIFIED_CSV            = 'content-diff__modified-ids-csv.log';
+	const LOG_IDS_MODIFIED                = 'content-diff__modified-ids.log';
 	const LOG_IMPORTED_POST_IDS           = 'content-diff__imported-post-ids.log';
 	const LOG_UPDATED_PARENT_IDS          = 'content-diff__updated-parent-ids.log';
 	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
@@ -314,7 +314,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		// Get list of post types except attachments.
 		$post_types_non_attachments = $post_types;
-		if ( ( $key = array_search( 'attachment', $post_types_non_attachments ) ) !== false ) {
+		$key = array_search( 'attachment', $post_types_non_attachments );
+		if ( false !== $key ) {
 			unset( $post_types_non_attachments[ $key ] );
 			$post_types_non_attachments = array_values( $post_types_non_attachments );
 		}
@@ -346,15 +347,28 @@ class ContentDiffMigrator implements InterfaceCommand {
 			WP_CLI::error( $e->getMessage() );
 		}
 
-		// Save log and output results.
+		// Save logs and output results.
 		if ( count( $new_live_ids ) > 0 ) {
 			$file = $export_dir . '/' . self::LOG_IDS_CSV;
 			file_put_contents( $file, implode( ',', $new_live_ids ) );
 			WP_CLI::success( sprintf( 'New IDs exported to %s', $file ) );
 		}
 		if ( count( $modified_live_ids ) > 0 ) {
-			$file_modified = $export_dir . '/' . self::LOG_IDS_MODIFIED_CSV;
-			file_put_contents( $file_modified, implode( ',', $modified_live_ids ) );
+			$file_modified = $export_dir . '/' . self::LOG_IDS_MODIFIED;
+			if ( file_exists( $file_modified ) ) {
+				unlink( $file_modified );
+			}
+			foreach ( $modified_live_ids as $modified_live_id_pair ) {
+				$this->log(
+					$file_modified,
+					json_encode(
+						[
+							'live_id'  => $modified_live_id_pair['live_id'],
+							'local_id' => $modified_live_id_pair['local_id'],
+						]
+					)
+				);
+			}
 			WP_CLI::success( sprintf( 'Modified IDs exported to %s', $file_modified ) );
 		}
 	}
@@ -370,14 +384,24 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
 
 		// Validate all params.
-		$file_ids_csv = $import_dir . '/' . self::LOG_IDS_CSV;
+		$file_ids_csv      = $import_dir . '/' . self::LOG_IDS_CSV;
+		$file_ids_modified = $import_dir . '/' . self::LOG_IDS_MODIFIED;
 		if ( ! file_exists( $file_ids_csv ) ) {
 			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_csv ) );
 		}
-		$all_live_posts_ids = explode( ',', trim( file_get_contents( $file_ids_csv ) ) );
+		if ( ! file_exists( $file_ids_modified ) ) {
+			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_modified ) );
+		}
+		$all_live_posts_ids           = explode( ',', trim( file_get_contents( $file_ids_csv ) ) );
+		$all_live_modified_posts_data = $this->get_data_from_log( $file_ids_modified, [ 'live_id', 'local_id' ] ) ?? [];
 		if ( empty( $all_live_posts_ids ) ) {
 			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}
+		if ( empty( $all_live_modified_posts_data ) ) {
+			WP_CLI::error( sprint( 'File %s does not contain valid JSON IDs.', $file_ids_modified ) );
+		}
+
+		// Validate DBs.
 		$this->validate_dbs( $live_table_prefix, [ 'options' ] );
 
 		// Set constants.
@@ -398,16 +422,32 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
-		// Modified IDS:
-		// - delete first
-		// - merge with import IDs to be imported anew -- because much of the data can be updated (content, featured image, author, ...) all these should be updated.
-
 		// Before we create categories, let's make sure categories have valid parents. If they don't they should be fixed first.
 		WP_CLI::log( 'Validating categories...' );
 		$this->validate_categories();
 
 		WP_CLI::log( 'Recreating categories...' );
 		$category_term_id_updates = $this->recreate_categories();
+
+		WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
+		/**
+		 * Map of modified Post IDs.
+		 *
+		 * @var array $modified_ids_map Keys are old Live IDs, values are new local IDs.
+		 */
+		$modified_ids_map   = $this->get_ids_from_modified_posts_log( $all_live_modified_posts_data );
+		$modified_live_ids  = array_keys( $modified_ids_map );
+		$modified_local_ids = array_values( $modified_ids_map );
+		/**
+		 * Importing modified IDS. Different kind of data could have been updated for a post (content, author, featured image),
+		 * so the easies way to refresh them is to:
+		 * 1. delete the existing post,
+		 * 2. reimport it
+		 */
+		// Delete outdated local Posts.
+		$this->delete_local_posts( $modified_local_ids );
+		// Merge modified posts IDs with $all_live_posts_ids for reimport.
+		$all_live_posts_ids = array_merge( $all_live_posts_ids, $modified_live_ids );
 
 		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $category_term_id_updates );
@@ -586,6 +626,19 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Permanently deletes local posts.
+	 *
+	 * @param array $ids Post IDs.
+	 *
+	 * @return void
+	 */
+	public function delete_local_posts( array $ids ): void {
+		foreach ( $ids as $id ) {
+			wp_delete_post( $id, true );
+		}
+	}
+
+	/**
 	 * Creates and imports posts and all related post data. Skips previously imported IDs found in $this->log_imported_post_ids.
 	 *
 	 * @param array $all_live_posts_ids       Live IDs to be imported to local.
@@ -632,7 +685,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$last_percent_progress = $percent_progress;
 			self::$logic->get_progress_percentage( count( $post_ids_for_import ), $key_post_id + 1, 10, $percent_progress );
 			if ( $last_percent_progress !== $percent_progress ) {
-				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
 			}
 
 			// Get all Post data from DB.
@@ -751,7 +804,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$last_percent_progress = $percent_progress;
 			self::$logic->get_progress_percentage( count( $parent_ids_for_update ), $key_id_old + 1, 10, $percent_progress );
 			if ( $last_percent_progress !== $percent_progress ) {
-				WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
 			}
 
 			// Get new local Post ID.
@@ -1071,7 +1124,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *
 	 * @param array $imported_posts_data Imported posts log data.
 	 *
-	 * @return array IDs.
+	 * @return array IDs, keys are old/live IDs, values are new/local IDs.
 	 */
 	private function get_attachments_from_imported_posts_log( array $imported_posts_data ): array {
 		$imported_attachment_ids_map   = [];
@@ -1081,6 +1134,22 @@ class ContentDiffMigrator implements InterfaceCommand {
 		}
 
 		return $imported_attachment_ids_map;
+	}
+
+	/**
+	 * Gets a map of live=>local IDs from the modified IDs log.
+	 *
+	 * @param array $modified_posts_log_data Modified post IDs log data.
+	 *
+	 * @return array IDs, keys are live IDs, values are local IDs.
+	 */
+	private function get_ids_from_modified_posts_log( array $modified_posts_log_data ): array {
+		$ids = [];
+		foreach ( $modified_posts_log_data as $entry ) {
+			$ids[ $entry['live_id'] ] = $entry['local_id'];
+		}
+
+		return $ids;
 	}
 
 	/**
@@ -1133,9 +1202,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function validate_dbs( string $live_table_prefix, array $skip_tables ): void {
-		self::$logic->validate_core_wp_db_tables( $live_table_prefix, $skip_tables );
-		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix ) ) {
-			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
+		try {
+			self::$logic->validate_core_wp_db_tables( $live_table_prefix, $skip_tables );
+			if ( ! self::$logic->are_table_collations_matching( $live_table_prefix ) ) {
+				throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
+			}
+		} catch ( \Exception $e ) {
+			WP_CLI::error( sprintf( 'validate_dbs exception: %s', $e->getMessage() ) );
 		}
 	}
 
