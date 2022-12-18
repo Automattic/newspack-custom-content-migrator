@@ -2,7 +2,6 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \WP_CLI;
@@ -78,6 +77,115 @@ class BillyPennMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator billypenn-convert-img-shortcodes',
+			[ $this, 'cmd_billypenn_convert_img_shortcodes' ],
+			[
+				'shortdesc' => 'Convert [img] shortcodes to blocks.',
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator billypenn-convert-img-shortcodes`.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_billypenn_convert_img_shortcodes( $args, $assoc_args ) {
+		global $wpdb;
+
+		$args = array(
+			'post_type'      => array( 'post', 'page' ),
+			'posts_per_page' => -1,
+			'post_status'    => 'publish,draft',
+		);
+		
+		$query = new WP_Query( $args );
+
+		$posts = $query->posts;
+
+		$shortcode_pattern = '/\[img[^\]]+\]/';
+
+		foreach ( $posts as $post ) {
+			$found = preg_match_all( $shortcode_pattern, $post->post_content, $matches );
+			
+			if ( $found == 0 ) {
+				continue;
+			}
+
+			WP_CLI::log( sprintf( 'Replacing %d img shortcodes in post #%d', count( $matches[0] ), $post->ID ) );
+
+			$searches = array();
+			$replaces = array();
+
+			foreach ( $matches[0] as $match ) {
+				$shortcode = $this->fix_shortcode( urldecode( $match ) );
+				$shortcode_atts = shortcode_parse_atts( $shortcode );
+
+				if ( isset( $shortcode_atts['attachment'] ) ) {
+					$attachment_id = $shortcode_atts['attachment'];
+				} else if ( isset( $shortcode_atts['src'] ) ) {
+					$attachment_id = attachment_url_to_postid( $shortcode_atts['src'] );
+				}
+
+				if ( isset( $shortcode_atts['src'] ) ) {
+					$image_url = $shortcode_atts['src'];
+				} else if ( $attachment_id ) {
+					$image_url = wp_get_attachment_url( $attachment_id );
+				} else {
+					$image_url = null;
+				}
+
+				if ( isset( $shortcode_atts['url'] ) ) {
+					$link = $shortcode_atts['url'];
+				} else if ( isset( $shortcode_atts['href'] ) ) {
+					$link = $shortcode_atts['href'];
+				} else {
+					$link = null;
+				}
+
+				$credit = array();
+
+				if ( isset( $shortcode_atts['credit'] ) ) {
+					$credit['credit'] = urldecode( $shortcode_atts['credit'] );	
+				}
+
+				if ( isset( $shortcode_atts['credit_link'] ) ) {
+					$credit['url'] = urldecode( $shortcode_atts['credit_link'] );	
+				}
+
+				if ( ! empty( $credit ) && $attachment_id ) {
+					WP_CLI::log( sprintf( 'Adding image credits to attachment #%d...', $attachment_id ) );
+					$this->add_image_credits( $attachment_id, $credit );
+				}
+
+				$block_args = array(
+					'align' => isset( $shortcode_atts['align'] ) ? $shortcode_atts['align'] : NULL,
+					'sizeSlug' => isset( $shortcode_atts['size'] ) ? $shortcode_atts['size'] : NULL,
+					'linkDestination' => isset( $shortcode_atts['linkto'] ) ? $shortcode_atts['linkto'] : NULL,
+					'alt' => isset( $shortcode_atts['alt'] ) ? $shortcode_atts['alt'] : NULL,
+					'caption' => isset( $shortcode_atts['caption'] ) ? $shortcode_atts['caption'] : NULL,
+					'href' => $link,
+					'url' => $image_url,
+					'id' => $attachment_id,
+				);
+
+				$block = $this->generate_image_block( $block_args );
+
+				$searches[] = sprintf( "<!-- wp:shortcode -->\n%s\n<!-- /wp:shortcode -->", $match );
+				$searches[] = $match;
+
+				$replaces[] = $block;
+				$replaces[] = $block;
+			}
+
+			$new_content = str_replace( $searches, $replaces, $post->post_content );
+
+			$wpdb->update( $wpdb->posts, array( 'post_content' => $new_content ), array( 'ID' => $post->ID ) );
+		}
 	}
 
 	/**
@@ -217,6 +325,97 @@ class BillyPennMigrator implements InterfaceCommand {
 				wp_set_post_terms( $post_id, array( $new_term['term_id'] ), $taxonomy, true );
 			}
 		}
+	}
+
+	public function add_image_credits( $attachment_id, $credit ) {
+		if ( class_exists( '\Newspack\Newspack_Image_Credits' ) ) {
+			// Get the meta keys from Newspack plugins.
+			$credit_meta = \Newspack\Newspack_Image_Credits::MEDIA_CREDIT_META;
+			$credit_url_meta = \Newspack\Newspack_Image_Credits::MEDIA_CREDIT_URL_META;
+		} else {
+			// Fall back for when Newspack is not installed.
+			$credit_meta = '_media_credit';
+			$credit_url_meta = '_media_credit_url';
+		}
+
+		if ( isset( $credit['credit'] ) ) {
+			update_post_meta( $attachment_id, $credit_meta, $credit['credit'] );
+		}
+
+		if ( isset( $credit['url'] ) ) {
+			update_post_meta( $attachment_id, $credit_url_meta, $credit['url'] );
+		}
+		
+	}
+
+	public function generate_image_block( $args ) {
+		$block_html = <<<HTML
+<!-- wp:image {"align":"%s","id": %d,"sizeSlug":"%s","linkDestination":"%s"} -->
+<figure class="wp-block-image%s%s">%s<img src="%s" alt="%s"%s/>%s%s</figure>
+<!-- /wp:image -->
+HTML;
+
+		$link_html = <<<HTML
+<a href="%s">
+HTML;
+
+
+		$caption_html = <<<HTML
+<figcaption class="wp-element-caption">%s</figcaption>
+HTML;
+
+		if ( $args['href'] ) {
+			$href_start = sprintf( $link_html, $args['href'] );
+			$href_end = '</a>';
+		} else {
+			$href_start = '';
+			$href_end = '';
+		}
+
+		if ( $args['caption'] ) {
+			$caption = sprintf( $caption_html, $args['caption'] );
+		} else {
+			$caption = '';
+		}
+
+		if ( $args['align'] ) {
+			$align_class = ' ' . $args['align'];
+			$align = str_replace( 'align', '',  $args['align'] );
+		} else {
+			$align_class = '';
+			$align = '';
+		}
+
+		$block = sprintf(
+			$block_html,
+			$align,
+			$args['id'],
+			$args['sizeSlug'] ?? 'large',
+			$args['linkDestination'] == 'file' ? 'media' : $args['linkDestination'],
+			$align_class,
+			$args['sizeSlug'] ? sprintf( ' size-%s', $args['sizeSlug'] ) : '',
+			$href_start,
+			$args['url'],
+			$args['alt'],
+			$args['id'] ? sprintf( ' class="wp-image-%d"', $args['id'] ) : '',
+			$href_end,
+			$caption,
+		);
+
+		return $block;
+	}
+
+	/**
+	 * Make sure the shortcode is using quotation marks for attributes, instead of other special characters
+	 */
+	public function fix_shortcode( $shortcode ) {
+		return strtr(
+			html_entity_decode( $shortcode ),
+			array(
+				'”' => '"',
+				'″' => '"',
+			),
+		);
 	}
 
 	/**
