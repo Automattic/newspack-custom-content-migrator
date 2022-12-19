@@ -20,6 +20,10 @@ class Logger {
 	 * @return string Directory path.
 	 */
 	public function get_le_log_path() {
+		$path = get_temp_dir() . self::LE_LOG_DIRECTORY;
+		if ( ! file_exists( $path ) ) {
+			mkdir( $path );
+		}
 		return get_temp_dir() . self::LE_LOG_DIRECTORY;
 	}
 
