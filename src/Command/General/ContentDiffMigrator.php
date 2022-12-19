@@ -23,6 +23,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	const LOG_IDS_MODIFIED                = 'content-diff__modified-ids.log';
 	const LOG_IMPORTED_POST_IDS           = 'content-diff__imported-post-ids.log';
 	const LOG_UPDATED_PARENT_IDS          = 'content-diff__updated-parent-ids.log';
+	const LOG_DELETED_MODIFIED_IDS        = 'content-diff__deleted-modified-ids.log';
 	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
 	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                       = 'content-diff__err.log';
@@ -320,7 +321,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$post_types_non_attachments = array_values( $post_types_non_attachments );
 		}
 
-		WP_CLI::log( sprintf( 'Now searching live DB for new content of Post types %s ...', implode( ', ', $post_types ) ) );
+		WP_CLI::log( sprintf( 'Now searching live DB for new Post types %s ...', implode( ', ', $post_types ) ) );
 		try {
 			WP_CLI::log( sprintf( 'Querying %s types...', implode( ',', $post_types_non_attachments ) ) );
 			$results_live_posts  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
@@ -410,6 +411,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$this->log_recreated_categories      = $import_dir . '/' . self::LOG_RECREATED_CATEGORIES;
 		$this->log_imported_post_ids         = $import_dir . '/' . self::LOG_IMPORTED_POST_IDS;
 		$this->log_updated_posts_parent_ids  = $import_dir . '/' . self::LOG_UPDATED_PARENT_IDS;
+		$this->log_deleted_modified_ids      = $import_dir . '/' . self::LOG_DELETED_MODIFIED_IDS;
 		$this->log_updated_featured_imgs_ids = $import_dir . '/' . self::LOG_UPDATED_FEATURED_IMAGES_IDS;
 		$this->log_updated_blocks_ids        = $import_dir . '/' . self::LOG_UPDATED_BLOCKS_IDS;
 
@@ -419,6 +421,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$this->log( $this->log_recreated_categories, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_imported_post_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_posts_parent_ids, sprintf( 'Starting %s.', $ts ) );
+		$this->log( $this->log_deleted_modified_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
@@ -446,6 +449,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		 */
 		// Delete outdated local Posts.
 		$this->delete_local_posts( $modified_local_ids );
+		$this->log( $this->log_deleted_modified_ids, implode( ',', $modified_local_ids ) );
 		// Merge modified posts IDs with $all_live_posts_ids for reimport.
 		$all_live_posts_ids = array_merge( $all_live_posts_ids, $modified_live_ids );
 
