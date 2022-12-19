@@ -236,6 +236,22 @@ class PostsMigrator implements InterfaceCommand {
 				),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator check-shortcodes-in-posts',
+			array( $this, 'cmd_check_shortcodes_in_posts' ),
+			array(
+				'shortdesc' => 'Find posts that have raw shartcodes.',
+				'synopsis'  => [
+					array(
+						'type'        => 'assoc',
+						'name'        => 'log-file-prefix',
+						'description' => 'The log file prefix.',
+						'default'     => 'posts_shortcodes',
+					)
+				],
+			)
+		);
 	}
 
 	/**
@@ -631,5 +647,37 @@ class PostsMigrator implements InterfaceCommand {
 			$assoc_args['post-id'] = $post->post_ID;
 			$this->cmd_clear_post_revisions( $positional_args, $assoc_args );
 		}
+	}
+	
+	/**
+	 * Callback for check-shortcodes-in-posts
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_check_shortcodes_in_posts( $positional_args, $assoc_args ) {
+		$log_file_prefix = $assoc_args['log-file-prefix'];
+
+		$this->posts_logic->find_shortcodes_in_posts(
+			function( $post_id, $shortcodes ) use ( $log_file_prefix ) {
+				$this->log( sprintf( '%s.log', $log_file_prefix ), sprintf( 'The post #%d has these shortcodes: %s', $post_id, join( ',', $shortcodes ) ) );
+			}
+		);
+	}
+
+	/**
+	 * Simple file logging.
+	 *
+	 * @param string  $file    File name or path.
+	 * @param string  $message Log message.
+	 * @param boolean $to_cli Display the logged message in CLI.
+	 */
+	private function log( $file, $message, $to_cli = true ) {
+		if ( $to_cli ) {
+			WP_CLI::line( $message );
+		}
+		$message .= "\n";
+		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
