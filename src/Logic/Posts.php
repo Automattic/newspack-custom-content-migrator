@@ -408,7 +408,7 @@ SQL;
 	 * @param integer $num_of_revisions The minimum number of revisions you want to search for.
 	 * @return array An array of objects, each object having two keys: post_ID and num_of_revisions.
 	 */
-	public function get_posts_by_number_of_revisions( $num_of_revisions = 500 ) {
+	public function get_posts_by_number_of_revisions( $num_of_revisions = 5 ) {
 		global $wpdb;
 		$results = $wpdb->get_results(
 			$wpdb->prepare(
@@ -446,7 +446,7 @@ SQL;
 	 * @param integer $chunk_size The number of revisions to be deleted.
 	 * @return integer|false The number of revisions deleted or false on failure.
 	 */
-	public function delete_post_revisions( $post_id, $chunk_size ) {
+	public function delete_post_revisions( $post_id, $chunk_size, $logger = false ) {
 		global $wpdb;
 		$ids          = $wpdb->get_col(
 			$wpdb->prepare(
@@ -462,6 +462,33 @@ SQL;
 				$ids
 			)
 		);
+
+		if ( is_callable( $logger ) ) {
+			call_user_func( $logger, $post_id );
+		}
+		
 		return $deleted;
 	}
+
+	public function delete_post_revisions_in_chunks( $post_id, $number, $chunk_size, $sleep = 0, $logger = false ) {
+		$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+
+		$total_deleted = 0;
+
+		while ( $current_revisions > $number ) {
+			$deleted = $this->posts_logic->delete_post_revisions( $post_id, $chunk_size );
+			if ( false === $deleted ) {
+				return false;
+			}
+			$total_deleted += $deleted;
+			if ( is_callable( $logger ) ) {
+				call_user_func( $logger, $post_id, $total_deleted, $deleted );
+			}
+			$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+			if ( $sleep > 0 ) {
+				usleep( $sleep );
+			}
+		}
+	}
+	
 }

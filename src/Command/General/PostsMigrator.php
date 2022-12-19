@@ -160,7 +160,7 @@ class PostsMigrator implements InterfaceCommand {
 						'description' => 'The minimum number of revisions a post must have to be returned in the search.',
 						'optional'    => true,
 						'repeating'   => false,
-						'default'     => 500,
+						'default'     => 5,
 					),
 					array(
 						'type'        => 'assoc',
@@ -181,7 +181,7 @@ class PostsMigrator implements InterfaceCommand {
 				'description' => 'The minimum number of revisions that should be kept and that a post must have to have its revisions cleared.',
 				'optional'    => true,
 				'repeating'   => false,
-				'default'     => 500,
+				'default'     => 5,
 			),
 			array(
 				'type'        => 'assoc',
@@ -205,6 +205,13 @@ class PostsMigrator implements InterfaceCommand {
 				'description' => 'Just output debugging info but do not delete anything.',
 				'optional'    => true,
 				'repeating'   => false,
+			),
+			array(
+				'type'        => 'assoc',
+				'name'        => 'log-file-prefix',
+				'description' => 'A prefix for the file(s) used for logging.',
+				'option'      => true,
+				'default'     => 'delete_revisions',
 			),
 		];
 
@@ -558,6 +565,7 @@ class PostsMigrator implements InterfaceCommand {
 	public function cmd_clear_post_revisions( $positional_args, $assoc_args ) {
 		$post_id = intval( $assoc_args['post-id'] );
 		$number  = intval( $assoc_args['keep'] );
+		$log_file_prefix = $assoc_args['log-file-prefix'];
 		if ( ! $number || ! $post_id ) {
 			WP_CLI::error( 'Invalid argument for Number of revisions or Post ID. Integer are expected in both cases.' );
 		}
@@ -620,16 +628,34 @@ class PostsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_clear_revisions( $positional_args, $assoc_args ) {
 		$number = intval( $assoc_args['keep'] );
+		$log_file_prefix = $assoc_args['log-file-prefix'];
 		if ( ! $number ) {
 			WP_CLI::error( 'Invalid argument for Number of revisions. Integer expected.' );
 		}
-		$posts_result = WP_CLI::launch_self( 'newspack-content-migrator find-posts-by-number-of-revisions', [ $number ], [ 'format' => 'json' ], true, true );
-		$posts        = json_decode( $posts_result->stdout );
+		$posts = $this->posts_logic->get_posts_by_number_of_revisions( $number );
 		foreach ( $posts as $post ) {
 			WP_CLI::log( '' );
 			WP_CLI::log( "Processing post {$post->post_ID}" );
 			$assoc_args['post-id'] = $post->post_ID;
-			$this->cmd_clear_post_revisions( $positional_args, $assoc_args );
+			$this->cmd_clear_post_revisions(
+				$positional_args,
+				$assoc_args, 
+			);
 		}
+	}
+
+	/**
+	 * Simple file logging.
+	 *
+	 * @param string  $file    File name or path.
+	 * @param string  $message Log message.
+	 * @param boolean $to_cli Display the logged message in CLI.
+	 */
+	private function log( $file, $message, $to_cli = true ) {
+		$message .= "\n";
+		if ( $to_cli ) {
+			WP_CLI::line( $message );
+		}
+		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
