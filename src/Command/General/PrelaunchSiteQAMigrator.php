@@ -65,12 +65,16 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger = new Logger();
 
-		$this->available_commands = [
-			[
+		$this->available_commands = array(
+			array(
 				'name'   => 'Check broken images',
-				'method' => [ $this, 'call_check_broken_images' ],
-			],
-		];
+				'method' => array( $this, 'call_check_broken_images' ),
+			),
+			array(
+				'name'   => 'Check posts for raw shortcodes',
+				'method' => array( $this, 'call_check_shortcodes_in_posts' ),
+			),
+		);
 	}
 
 	/**
@@ -317,5 +321,17 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 
 		$attachments_migrator = AttachmentsMigrator::get_instance();
 		$attachments_migrator->cmd_check_broken_images( array(), $assoc_args );
+	}
+
+	/**
+	 * Wrapper function for calling the 
+	 */
+	public function call_check_shortcodes_in_posts() {
+		$assoc_args = array(
+			'log-file-prefix' => $this->get_log_file_name( 'check_shortcodes_in_posts' ),
+		);
+
+		$posts_migrator = PostsMigrator::get_instance();
+		$posts_migrator->cmd_check_shortcodes_in_posts( array(), $assoc_args );
 	}
 }
