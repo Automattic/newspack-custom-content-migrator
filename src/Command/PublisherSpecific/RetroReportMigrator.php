@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \WP_CLI;
 use WP_Query;
 
@@ -32,9 +33,16 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var null|Attachments
 	 */
 	private $attachments;
+
+	/**
+	 * Simple Local Avatars.
+	 * 
+	 * @var null|Simple_Local_Avatars
+	 */
+	private $simple_local_avatars;
 	
 	/**
-	 * CAP login.
+	 * CAP logic.
 	 * 
 	 * @var null|CoAuthorPlus
 	 */
@@ -69,6 +77,8 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->attachments = new Attachments();
 
 		$this->co_authors_plus = new CoAuthorPlus();
+
+		$this->simple_local_avatars = new SimpleLocalAvatars();
 
 		$this->core_fields = array(
 			'post_author',
@@ -145,6 +155,22 @@ class RetroReportMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-import-staff',
+			array( $this, 'cmd_retro_report_import_staff' ),
+			array(
+				'shortdesc' => 'Import staff from a JSON file',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'json-file',
+						'optional'    => false,
+						'description' => 'Path to the JSON file.',
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-add-cf-token',
 			array( $this, 'cmd_retro_report_add_cf_token' ),
 			array(
@@ -173,6 +199,127 @@ class RetroReportMigrator implements InterfaceCommand {
 		update_option( self::CF_TOKEN_OPTION, $token );
 
 		WP_CLI::success( sprintf( 'The token was added to the %s option.', self::CF_TOKEN_OPTION ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator retro-report-import-staff`
+	 * 
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_staff( $args, $assoc_args ) {
+		if ( ! $this->simple_local_avatars->is_sla_plugin_active() ) {
+			WP_CLI::error( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+			return;
+		}
+
+		$json_file = $assoc_args['json-file'];
+
+		if ( ! file_exists( $json_file ) ) {
+			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
+		}
+
+		$users = json_decode( file_get_contents( $json_file ) );
+
+		if ( null === $users ) {
+			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
+		}
+
+		foreach ( $users as $user ) {
+			$unique_id  = $user->unique_id;
+			$first_name = trim( $this->get_object_property( $user, 'first_name' ) );
+			$last_name  = trim( $this->get_object_property( $user, 'last_name' ) );
+			$images     = $this->get_object_property( $user, 'images' );
+			$twitter    = $this->get_object_property( $user, 'twitter' );
+			$position   = $this->get_object_property( $user, 'position' );
+			$role       = $this->get_object_property( $user, 'role' );
+
+			$path_parts = explode( '/', trim( $user->path, '/' ) );
+			$nicename   = end( $path_parts );
+
+			if ( ( ! $first_name || ! $last_name ) && property_exists( $user, 'title' ) ) {
+				list( $first_name, $last_name ) = explode( ' ', $user->title );
+			}
+
+			$username  = sprintf( '%s.%s', strtolower( $first_name ), strtolower( $last_name ) );
+			$email     = sprintf( '%s@retroreport.com', $username );
+			$full_name = sprintf( '%s %s', $first_name, $last_name );
+
+			if ( $this->user_exists( $user ) ) {
+				WP_CLI::log( sprintf( 'User %s already exists. Skipping...', $full_name ) );
+				continue;
+			}
+
+			WP_CLI::log( sprintf( 'Importing user %s...', $full_name ) );
+
+			if ( 'none' == $position || null == $position ) {
+				$position = '';
+			}
+
+			// There is one case where the role is set to an empty array. In that case we just consider it's empty.
+			// The array may have actual roles that we need to add, so revisit this condition when we have more examples.
+			if ( is_array( $role ) ) {
+				$role = '';
+			}
+
+			$wp_role = 'author';
+
+			if ( 'Masthead' == $role ) {
+				$wp_role = 'administrator';
+			}
+
+			if ( 'Business Staff' == $role ) {
+				$wp_role = 'editor';
+			}
+
+			$user_meta = array(
+				'newspack_job_title'               => $position,
+				'newspack_role'                    => $role,
+				'twitter'                          => $twitter,
+				$this->get_meta_key( 'images' )    => $images,
+				$this->get_meta_key( 'unique_id' ) => $unique_id,
+			);
+
+			$user_args = array(
+				'first_name'    => $first_name,
+				'last_name'     => $last_name,
+				'nickname'      => $username,
+				'user_login'    => $username,
+				'user_email'    => $email,
+				'user_nicename' => $nicename,
+				'user_pass'     => wp_generate_password(),
+				'display_name'  => property_exists( $user, 'title' ) ? $user->title : $full_name,
+				'description'   => property_exists( $user, 'content' ) ? $user->content : '',
+				'meta_input'    => $user_meta,
+				'role'          => $wp_role,
+			);
+
+			$user_id = wp_insert_user( $user_args );
+
+			if ( is_wp_error( $user_id ) ) {
+				WP_CLI::warning( sprintf( 'There was a problem importing user %s', $full_name ) );
+				WP_CLI::warning( $user_id->get_error_message() );
+				continue;
+			}
+
+			// Import the user's avatar.
+			$image = $this->get_object_property( $user, 'image' );
+
+			if ( $image ) {
+				$image_url     = self::BASE_URL . $image;
+				$attachment_id = $this->attachments->import_external_file( $image_url );
+
+				WP_CLI::log( sprintf( 'Importing the avatar for user %s...', $full_name ) );
+
+				if ( is_wp_error( $attachment_id ) ) {
+					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
+					WP_CLI::warning( $attachment_id->get_error_message() );
+				} else {
+					$this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
+				}
+			}
+		}
+
 	}
 
 	/**
@@ -372,6 +519,26 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Check if a user has already been imported.
+	 * 
+	 * @param object $user The user object (from JSON, not wp_users).
+	 * 
+	 * @return boolean True if the user has already been imported, false otherwise.
+	 */
+	public function user_exists( $user ) {
+		$unique_id = $user->unique_id;
+
+		$users = get_users(
+			array(
+				'meta_key'   => self::META_PREFIX . 'unique_id',
+				'meta_value' => $unique_id,
+			),
+		);
+
+		return count( $users ) > 0;
+	}
+
+	/**
 	 * Load the fields mappings from a CSV file
 	 * 
 	 * @param string $category The name of the category (endpoint title).
@@ -496,6 +663,18 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'images', 'array', 'images' ),
 			array( 'date', 'string', 'date' ),
 		);
+	}
+
+	/**
+	 * Get the property value, or return empty string if it doesn't exist.
+	 * 
+	 * @param object $object The object.
+	 * @param string $property The property to access.
+	 * 
+	 * @return mixed The property value.
+	 */
+	public function get_object_property( $object, $property ) {
+		return property_exists( $object, $property ) ? $object->{ $property } : '';
 	}
 
 	/**
