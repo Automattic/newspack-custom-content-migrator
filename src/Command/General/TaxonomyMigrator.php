@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Posts;
+use \NewspackCustomContentMigrator\Logic\Taxonomy as Taxonomy_Logic;
 use stdClass;
 use \WP_CLI;
 
@@ -20,6 +21,13 @@ class TaxonomyMigrator implements InterfaceCommand {
 	private $posts_logic;
 
 	/**
+	 * Taxonomy_Logic class object.
+	 *
+	 * @var Taxonomy_Logic $taxonomy_logic
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * List of taxonomy values recognized by WordPress.
 	 *
 	 * @var string[] WordPress recognized taxonomies.
@@ -34,7 +42,8 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_logic = new Posts();
+		$this->posts_logic          = new Posts();
+		$this->taxonomy_logic_logic = new Taxonomy_Logic();
 	}
 
 	/**
@@ -196,6 +205,45 @@ class TaxonomyMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator replant-category-tree',
+			[ $this, 'cmd_replant_category_tree' ],
+			[
+				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it to be children of a different parent (either an existing category, or as a root category). Also any content belonging to categories in that tree get updated.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'category-id',
+						'description' => 'The Category which will (together with all children Categories) get replanted to a different root/parent.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-category-id',
+						'description' => 'The new parent category where the category tree will get replanted to. If `0` is given, it will be replanted as a root category with its children.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator replant-category-tree`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_replant_category_tree( $pos_args, $assoc_args ) {
+		$category_id             = $assoc_args[ 'category-id' ];
+		$destination_category_id = $assoc_args[ 'category-destination-category-id' ];
+
+		$this->taxonomy_logic_logic;
 	}
 
 	/**
