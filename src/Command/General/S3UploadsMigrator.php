@@ -143,21 +143,21 @@ class S3UploadsMigrator implements InterfaceCommand {
 			'newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3',
 			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
 			[
-				'shortdesc' => '1. save list of all files from local folder to a --local-log file, run this year by year, e.g for year 2009: ' .
+				'shortdesc' => '1. Save list of all files from local folder to a --local-log file, run this year by year, e.g for year 2009: ' .
 							   'find 2009 -type f > 2009_local.txt ; ' .
 							   '' .
-							   '2. save list of all files from S3 to --s3-log file, run this for same years, year by year: ' .
+							   '2. Save list of all files from S3 to --s3-log file, run this for same years, year by year: ' .
 							   "aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
 							   '' .
-							   '3. notice what the path to this folder is on S3 and use it as --path-to-this-folder-on-s3=wp-content/uploads/ ' .
+							   '3. Notice what the path to this folder is on S3 and use it as --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 							   '' .
-							   'Then run the command like this: ' .
+							   '4. Then run the command like this: ' .
 							   '  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
 							   '    --local-log=2009_local.txt \ ' .
 							   '    --s3-log=2009_s3.txt \ ' .
 							   '    --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 							   '' .
-							   'and files which are missing on S3 will be detected.',
+							   'and files which are missing on S3 will be detected and saved to log.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
