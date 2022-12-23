@@ -210,19 +210,19 @@ class TaxonomyMigrator implements InterfaceCommand {
 			'newspack-content-migrator replant-category-tree',
 			[ $this, 'cmd_replant_category_tree' ],
 			[
-				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it to be children of a different parent (either an existing category, or as a root category). Also any content belonging to categories in that tree get updated.',
+				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it under a different parent. Any content belonging to categories in that tree get updated.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'category-id',
-						'description' => 'The Category which will (together with all children Categories) get replanted to a different root/parent.',
+						'description' => 'Category which together with all its children gets replanted to a different parent category.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'destination-category-id',
-						'description' => 'The new parent category where the category tree will get replanted to. If `0` is given, it will be replanted as a root category with its children.',
+						'name'        => 'destination-parent-category-id',
+						'description' => 'Parent category under which the category tree will be replanted. If `0` is given, category tree will become a root category with its children.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -240,10 +240,45 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_replant_category_tree( $pos_args, $assoc_args ) {
-		$category_id             = $assoc_args[ 'category-id' ];
-		$destination_category_id = $assoc_args[ 'category-destination-category-id' ];
+		$category_id                    = $assoc_args[ 'category-id' ];
+		$destination_parent_category_id = $assoc_args[ 'destination-parent-category-id' ];
 
-		$this->taxonomy_logic_logic;
+		// $term_id_if_new_or_zero = wp_insert_category(
+		// 	[
+		// 		'cat_name'             => 'bname',
+		// 		'category_description' => 'description',
+		// 		'category_parent'      => 3,
+		// 	]
+		// );
+//
+// return;
+
+		// Get and validate the category parent.
+		$category_data = $this->taxonomy_logic_logic->get_categories_data( [ 'term_id' => $category_id ], true );
+		if ( is_null( $category_data ) || empty( $category_data ) ) {
+			WP_CLI::error( sprintf( "Category ID %d can not be found.", $category_id ) );
+		}
+
+		// Get and validate the destination category parent -- can be '0' if moving the category to be the top parent.
+		if ( '0' != $destination_parent_category_id) {
+			$destination_parent_category_data = $this->taxonomy_logic_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
+			if ( is_null( $destination_parent_category_id ) || empty( $destination_parent_category_id ) ) {
+				WP_CLI::error( sprintf( "Destination category ID %d can not be found.", $destination_parent_category_id ) );
+			}
+		}
+
+		// Get category tree.
+		$category_tree_data = $this->taxonomy_logic_logic->get_category_tree_data( $category_data );
+
+		// Relocate to different root category.
+		$replanted_category_tree_data = $this->taxonomy_logic_logic->replant_category_tree( $category_tree_data, $destination_parent_category_data[ 'term_id' ] );
+
+		// Delete the original category tree.
+
+		// Update category count.
+
+return;
+
 	}
 
 	/**
