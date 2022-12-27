@@ -301,7 +301,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$category_id                    = $assoc_args['category-id'];
 		$destination_parent_category_id = $assoc_args['destination-parent-category-id'];
 
-		// Get and validate the category parent.
+		// Get and validate category and new parent.
 		$category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $category_id ], true );
 		if ( is_null( $category_data ) || empty( $category_data ) ) {
 			WP_CLI::error( sprintf( 'Category ID %d can not be found.', $category_id ) );
