@@ -12,7 +12,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 	/**
 	 * Instance.
-	 * 
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
@@ -545,6 +545,8 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * WARNING -- this method does not fetch rows where counts are zero, which might cause errors if updating all records is needed.
+	 *
 	 * Returns the list of term_taxonomy_id's which have count values
 	 * that don't match real values in wp_term_relationships.
 	 *
