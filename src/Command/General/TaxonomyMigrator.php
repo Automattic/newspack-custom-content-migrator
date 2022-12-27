@@ -43,7 +43,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->posts_logic          = new Posts();
-		$this->taxonomy_logic_logic = new Taxonomy_Logic();
+		$this->taxonomy_logic = new Taxonomy_Logic();
 	}
 
 	/**
@@ -229,6 +229,30 @@ class TaxonomyMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator move-content-from-one-category-to-another',
+			[ $this, 'cmd_move_content_from_one_category_to_another' ],
+			[
+				'shortdesc' => '.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'source-term-id',
+						'description' => 'term_id of source category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-term-id',
+						'description' => 'term_id of destination category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -243,42 +267,47 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$category_id                    = $assoc_args[ 'category-id' ];
 		$destination_parent_category_id = $assoc_args[ 'destination-parent-category-id' ];
 
-		// $term_id_if_new_or_zero = wp_insert_category(
-		// 	[
-		// 		'cat_name'             => 'bname',
-		// 		'category_description' => 'description',
-		// 		'category_parent'      => 3,
-		// 	]
-		// );
-//
-// return;
-
 		// Get and validate the category parent.
-		$category_data = $this->taxonomy_logic_logic->get_categories_data( [ 'term_id' => $category_id ], true );
+		$category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $category_id ], true );
 		if ( is_null( $category_data ) || empty( $category_data ) ) {
 			WP_CLI::error( sprintf( "Category ID %d can not be found.", $category_id ) );
 		}
 
 		// Get and validate the destination category parent -- can be '0' if moving the category to be the top parent.
 		if ( '0' != $destination_parent_category_id) {
-			$destination_parent_category_data = $this->taxonomy_logic_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
+			$destination_parent_category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
 			if ( is_null( $destination_parent_category_id ) || empty( $destination_parent_category_id ) ) {
 				WP_CLI::error( sprintf( "Destination category ID %d can not be found.", $destination_parent_category_id ) );
 			}
 		}
 
 		// Get category tree.
-		$category_tree_data = $this->taxonomy_logic_logic->get_category_tree_data( $category_data );
+		$category_tree_data = $this->taxonomy_logic->get_category_tree_data( $category_data );
 
 		// Relocate to different root category.
-		$replanted_category_tree_data = $this->taxonomy_logic_logic->replant_category_tree( $category_tree_data, $destination_parent_category_data[ 'term_id' ] );
+		$replanted_category_tree_data = $this->taxonomy_logic->replant_category_tree( $category_tree_data, $destination_parent_category_data[ 'term_id' ] );
 
 		// Delete the original category tree.
+		$this->taxonomy_logic->delete_category_tree( $category_tree_data );
 
 		// Update category count.
+		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
 
-return;
+		wp_cache_flush();
+		WP_CLI::success( 'Done.' );
+	}
 
+	public function cmd_move_content_from_one_category_to_another( $pos_args, $assoc_args ) {
+		$source_term_id      = $assoc_args['source-term-id'];
+		$destination_term_id = $assoc_args['destination-term-id'];
+
+		$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
+
+		// Update category count.
+		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
+
+		wp_cache_flush();
+		WP_CLI::success( 'Done.' );
 	}
 
 	/**
