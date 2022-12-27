@@ -309,8 +309,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 		if ( $destination_parent_category_id == $category_data['parent'] ) {
 			WP_CLI::error( sprintf( 'Category %s already has parent %s. No changes made.', $category_id, $destination_parent_category_id ) );
 		}
-
-		// Get and validate the destination category parent -- can be '0' if moving the category to be the top parent.
 		if ( '0' != $destination_parent_category_id ) {
 			$destination_parent_category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
 			if ( is_null( $destination_parent_category_id ) || empty( $destination_parent_category_id ) ) {
