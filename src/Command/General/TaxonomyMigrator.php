@@ -306,8 +306,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 		if ( is_null( $category_data ) || empty( $category_data ) ) {
 			WP_CLI::error( sprintf( 'Category ID %d can not be found.', $category_id ) );
 		}
-
-		// Check parent.
 		if ( $destination_parent_category_id == $category_data['parent'] ) {
 			WP_CLI::error( sprintf( 'Category %s already has parent %s. No changes made.', $category_id, $destination_parent_category_id ) );
 		}
