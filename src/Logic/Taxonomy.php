@@ -176,10 +176,15 @@ class Taxonomy {
 		}
 	}
 
+	/**
+	 * Fixes counts for taxonomy.
+	 *
+	 * @param string $taxonomy Taxonomy, e.g. 'category'.
+	 *
+	 * @return void
+	 */
 	public function fix_taxonomy_term_counts( string $taxonomy ) {
-
-		$taxonomy = $pos_args['taxonomy'] ?? null;
-		$get_terms_args  = [
+		$get_terms_args = [
 			'taxonomy'   => $taxonomy,
 			'fields'     => 'ids',
 			'hide_empty' => false,
@@ -187,9 +192,10 @@ class Taxonomy {
 
 		$update_term_ids = get_terms( $get_terms_args );
 		foreach ( $update_term_ids as $key_term_id => $term_id ) {
-			WP_CLI::log( sprintf( '(%d)/(%d) updating count for term_id %d', $key_term_id, count( $update_term_ids ), $term_id ) );
 			wp_update_term_count_now( [ $term_id ], $taxonomy );
 		}
+
+		wp_cache_flush();
 	}
 
 	public function delete_category_tree( array $category_tree_data ): void {
@@ -233,5 +239,4 @@ class Taxonomy {
 
 		return $term_id_if_new_or_zero;
 	}
-
 }
