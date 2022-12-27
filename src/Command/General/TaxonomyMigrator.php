@@ -311,7 +311,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		}
 		if ( '0' != $destination_parent_category_id ) {
 			$destination_parent_category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
-			if ( is_null( $destination_parent_category_id ) || empty( $destination_parent_category_id ) ) {
+			if ( empty( $destination_parent_category_data ) ) {
 				WP_CLI::error( sprintf( 'Destination category ID %d can not be found.', $destination_parent_category_id ) );
 			}
 		}
@@ -320,7 +320,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$category_tree_data = $this->taxonomy_logic->get_category_tree_data( $category_data );
 
 		// Relocate categories and content to a different parent/location.
-		$replanted_category_tree_data = $this->taxonomy_logic->replant_category_tree( $category_tree_data, $destination_parent_category_data['term_id'] );
+		$replanted_category_tree_data = $this->taxonomy_logic->replant_category_tree( $category_tree_data, $destination_parent_category_id );
 
 		// Delete the original category tree.
 		$this->taxonomy_logic->delete_category_tree( $category_tree_data );
