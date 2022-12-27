@@ -239,6 +239,124 @@ class TaxonomyMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator move-category-tree',
+			[ $this, 'cmd_move_category_tree' ],
+			[
+				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it under a different parent. Any content belonging to categories in that tree get updated.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'category-id',
+						'description' => 'Category which together with all its children gets moved to a different parent category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-parent-category-id',
+						'description' => 'Parent category under which the category tree will be moved. If `0` is given, category tree will become a root category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator move-content-from-one-category-to-another',
+			[ $this, 'cmd_move_content_from_one_category_to_another' ],
+			[
+				'shortdesc' => 'Moves all content from one category to a different one.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'source-term-id',
+						'description' => 'term_id of source category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-term-id',
+						'description' => 'term_id of destination category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator move-category-tree`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_move_category_tree( $pos_args, $assoc_args ) {
+		$category_id                    = $assoc_args['category-id'];
+		$destination_parent_category_id = $assoc_args['destination-parent-category-id'];
+
+		// Get and validate category and new parent.
+		$category        = get_category( $category_id );
+		$parent_category = '0' != $destination_parent_category_id ? get_category( $destination_parent_category_id ) : 0;
+		if ( is_null( $category ) ) {
+			WP_CLI::error( 'Wrong category ID.' );
+		}
+		if ( is_null( $parent_category ) ) {
+			WP_CLI::error( 'Wrong parent category ID.' );
+		}
+		if ( $category->parent == $destination_parent_category_id ) {
+			WP_CLI::error( 'Category already has that parent. No changes made.' );
+		}
+
+		wp_update_category(
+			[
+				'cat_ID'          => $category_id,
+				'category_parent' => $destination_parent_category_id,
+			]
+		);
+
+		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator move-content-from-one-category-to-another`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_move_content_from_one_category_to_another( $pos_args, $assoc_args ) {
+		$source_term_id      = $assoc_args['source-term-id'];
+		$destination_term_id = $assoc_args['destination-term-id'];
+
+		// Check IDs.
+		$source_category      = get_category( $source_term_id );
+		$destination_category = get_category( $destination_term_id );
+		if ( is_null( $source_category ) ) {
+			WP_CLI::error( 'Wrong source category ID.' );
+		}
+		if ( is_null( $destination_category ) ) {
+			WP_CLI::error( 'Wrong destination category ID.' );
+		}
+		if ( $source_term_id == $destination_term_id ) {
+			WP_CLI::error( 'Source and destination categories are the same. No changes made.' );
+		}
+
+
+		$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
+
+		// Update category count.
+		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
+
+		wp_cache_flush();
+		WP_CLI::success( 'Done.' );
 	}
 
 	/**
