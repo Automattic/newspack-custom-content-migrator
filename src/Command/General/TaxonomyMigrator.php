@@ -268,7 +268,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			'newspack-content-migrator move-content-from-one-category-to-another',
 			[ $this, 'cmd_move_content_from_one_category_to_another' ],
 			[
-				'shortdesc' => '.',
+				'shortdesc' => 'Moves all content from one category to a different one.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -298,39 +298,47 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_replant_category_tree( $pos_args, $assoc_args ) {
-		$category_id                    = $assoc_args[ 'category-id' ];
-		$destination_parent_category_id = $assoc_args[ 'destination-parent-category-id' ];
+		$category_id                    = $assoc_args['category-id'];
+		$destination_parent_category_id = $assoc_args['destination-parent-category-id'];
 
 		// Get and validate the category parent.
 		$category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $category_id ], true );
 		if ( is_null( $category_data ) || empty( $category_data ) ) {
-			WP_CLI::error( sprintf( "Category ID %d can not be found.", $category_id ) );
+			WP_CLI::error( sprintf( 'Category ID %d can not be found.', $category_id ) );
 		}
 
 		// Get and validate the destination category parent -- can be '0' if moving the category to be the top parent.
-		if ( '0' != $destination_parent_category_id) {
+		if ( '0' != $destination_parent_category_id ) {
 			$destination_parent_category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
 			if ( is_null( $destination_parent_category_id ) || empty( $destination_parent_category_id ) ) {
-				WP_CLI::error( sprintf( "Destination category ID %d can not be found.", $destination_parent_category_id ) );
+				WP_CLI::error( sprintf( 'Destination category ID %d can not be found.', $destination_parent_category_id ) );
 			}
 		}
 
-		// Get category tree.
+		// Get this category tree array data.
 		$category_tree_data = $this->taxonomy_logic->get_category_tree_data( $category_data );
 
-		// Relocate to different root category.
-		$replanted_category_tree_data = $this->taxonomy_logic->replant_category_tree( $category_tree_data, $destination_parent_category_data[ 'term_id' ] );
+		// Relocate categories and content to a different parent/location.
+		$replanted_category_tree_data = $this->taxonomy_logic->replant_category_tree( $category_tree_data, $destination_parent_category_data['term_id'] );
 
 		// Delete the original category tree.
 		$this->taxonomy_logic->delete_category_tree( $category_tree_data );
 
 		// Update category count.
-		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
+		$this->taxonomy_logic->fix_taxonomy_term_counts( 'category' );
 
 		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
 	}
 
+	/**
+	 * Callable for `newspack-content-migrator move-content-from-one-category-to-another`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
 	public function cmd_move_content_from_one_category_to_another( $pos_args, $assoc_args ) {
 		$source_term_id      = $assoc_args['source-term-id'];
 		$destination_term_id = $assoc_args['destination-term-id'];
