@@ -241,22 +241,22 @@ class TaxonomyMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator replant-category-tree',
-			[ $this, 'cmd_replant_category_tree' ],
+			'newspack-content-migrator move-category-tree',
+			[ $this, 'cmd_move_category_tree' ],
 			[
 				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it under a different parent. Any content belonging to categories in that tree get updated.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'category-id',
-						'description' => 'Category which together with all its children gets replanted to a different parent category.',
+						'description' => 'Category which together with all its children gets moved to a different parent category.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'destination-parent-category-id',
-						'description' => 'Parent category under which the category tree will be replanted. If `0` is given, category tree will become a root category.',
+						'description' => 'Parent category under which the category tree will be moved. If `0` is given, category tree will become a root category.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -290,45 +290,37 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator replant-category-tree`.
+	 * Callable for `newspack-content-migrator move-category-tree`.
 	 *
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
-	public function cmd_replant_category_tree( $pos_args, $assoc_args ) {
+	public function cmd_move_category_tree( $pos_args, $assoc_args ) {
 		$category_id                    = $assoc_args['category-id'];
 		$destination_parent_category_id = $assoc_args['destination-parent-category-id'];
 
 		// Get and validate category and new parent.
-		$category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $category_id ], true );
-		if ( is_null( $category_data ) || empty( $category_data ) ) {
-			WP_CLI::error( sprintf( 'Category ID %d can not be found.', $category_id ) );
+		$category        = get_category( $category_id );
+		$parent_category = '0' != $destination_parent_category_id ? get_category( $destination_parent_category_id ) : 0;
+		if ( is_null( $category ) ) {
+			WP_CLI::error( 'Wrong category ID.' );
 		}
-		if ( $destination_parent_category_id == $category_data['parent'] ) {
-			WP_CLI::error( sprintf( 'Category %s already has parent %s. No changes made.', $category_id, $destination_parent_category_id ) );
+		if ( is_null( $parent_category ) ) {
+			WP_CLI::error( 'Wrong parent category ID.' );
 		}
-		if ( '0' != $destination_parent_category_id ) {
-			$destination_parent_category_data = $this->taxonomy_logic->get_categories_data( [ 'term_id' => $destination_parent_category_id ], true );
-			if ( empty( $destination_parent_category_data ) ) {
-				WP_CLI::error( sprintf( 'Destination category ID %d can not be found.', $destination_parent_category_id ) );
-			}
+		if ( $category->parent == $destination_parent_category_id ) {
+			WP_CLI::error( 'Category already has that parent. No changes made.' );
 		}
 
-		// Get this category tree array data.
-		$category_tree_data = $this->taxonomy_logic->get_category_tree_data( $category_data );
+		wp_update_category(
+			[
+				'cat_ID'          => $category_id,
+				'category_parent' => $destination_parent_category_id,
+			]
+		);
 
-		// Relocate categories and content to a different parent/location.
-		$replanted_category_tree_data = $this->taxonomy_logic->replant_category_tree( $category_tree_data, $destination_parent_category_id );
-
-		// Delete the original category tree.
-		$this->taxonomy_logic->delete_category_tree( $category_tree_data );
-
-		// Update category count.
-		$this->taxonomy_logic->fix_taxonomy_term_counts( 'category' );
-
-		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
 	}
 
@@ -343,6 +335,20 @@ class TaxonomyMigrator implements InterfaceCommand {
 	public function cmd_move_content_from_one_category_to_another( $pos_args, $assoc_args ) {
 		$source_term_id      = $assoc_args['source-term-id'];
 		$destination_term_id = $assoc_args['destination-term-id'];
+
+		// Check IDs.
+		$source_category      = get_category( $source_term_id );
+		$destination_category = get_category( $destination_term_id );
+		if ( is_null( $source_category ) ) {
+			WP_CLI::error( 'Wrong source category ID.' );
+		}
+		if ( is_null( $destination_category ) ) {
+			WP_CLI::error( 'Wrong destination category ID.' );
+		}
+		if ( $source_term_id == $destination_term_id ) {
+			WP_CLI::error( 'Source and destination categories are the same. No changes made.' );
+		}
+
 
 		$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
 
