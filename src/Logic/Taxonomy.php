@@ -162,8 +162,6 @@ class Taxonomy {
 	 */
 	public function replant_category_tree( $category_tree_data, $parent_term_id ) {
 
-		// TODO TEST parent is 0?
-
 		// Get this category if it already exists.
 		$existing_category_data = $this->get_categories_data(
 			[

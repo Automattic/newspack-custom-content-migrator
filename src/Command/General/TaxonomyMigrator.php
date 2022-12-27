@@ -256,7 +256,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'destination-parent-category-id',
-						'description' => 'Parent category under which the category tree will be replanted. If `0` is given, category tree will become a root category with its children.',
+						'description' => 'Parent category under which the category tree will be replanted. If `0` is given, category tree will become a root category.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
