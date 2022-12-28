@@ -390,16 +390,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		if ( ! file_exists( $file_ids_csv ) ) {
 			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_csv ) );
 		}
-		if ( ! file_exists( $file_ids_modified ) ) {
-			WP_CLI::error( sprintf( 'File %s not found.', $file_ids_modified ) );
-		}
 		$all_live_posts_ids           = explode( ',', trim( file_get_contents( $file_ids_csv ) ) );
-		$all_live_modified_posts_data = $this->get_data_from_log( $file_ids_modified, [ 'live_id', 'local_id' ] ) ?? [];
+		$all_live_modified_posts_data = file_exists( $file_ids_modified ) ? $this->get_data_from_log( $file_ids_modified, [ 'live_id', 'local_id' ] ) : [];
 		if ( empty( $all_live_posts_ids ) ) {
-			WP_CLI::error( sprint( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
-		}
-		if ( empty( $all_live_modified_posts_data ) ) {
-			WP_CLI::error( sprint( 'File %s does not contain valid JSON IDs.', $file_ids_modified ) );
+			WP_CLI::error( sprintf( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}
 
 		// Validate DBs.
@@ -432,7 +426,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		WP_CLI::log( 'Recreating categories...' );
 		$category_term_id_updates = $this->recreate_categories();
 
-		WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
+		if ( ! empty( $all_live_modified_posts_data ) ) {
+			WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
+		}
+
 		/**
 		 * Map of modified Post IDs.
 		 *
@@ -842,11 +839,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 			// Warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
 			// post_type different than the supported post type, or an error like the post_parent object missing in Live DB.
 			if ( is_null( $parent_id_new ) ) {
-				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is null.', $id_old, $id_new, $parent_id_old ) );
-
-				// If all attempts failed (possible that parent didn't exist in live DB), set it to 0, because we shouldn't have loose invalid post_parents locally.
+				// If all attempts failed (possible that parent didn't exist in live DB, or is of a non-imported post_type), set it to 0.
 				$parent_id_new = 0;
-				WP_CLI::warning( sprintf( 'Could not update parent ID for Post $id_old=%s $id_new=%s $parent_id_old=%s. Parent ID now set to 0.', $id_old, $id_new, $parent_id_old ) );
+
+				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is 0.', $id_old, $id_new, $parent_id_old ) );
 			}
 
 			// Update.
