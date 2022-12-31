@@ -275,7 +275,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			'newspack-content-migrator co-authors-fix-gas-post-counts',
 			[ $this, 'cmd_fix_gas_post_counts' ],
 			[
-				'shortdesc' => "Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.",
+				'shortdesc' => 'Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.',
 			]
 		);
 		WP_CLI::add_command(
@@ -289,6 +289,22 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 						'name'        => 'dry-run',
 						'description' => 'Do a dry run without deleting any Guest Authors.',
 						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-create-gas-from-wpusers-for-posts',
+			[ $this, 'cmd_create_gas_from_wpusers_for_posts' ],
+			[
+				'shortdesc' => "Creates GAs from authors for specific posts. Takes a post's author, converts it to GAs, and assigns the GA to the post.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids-csv',
+						'description' => 'Post IDs for which to convert their WP User authors to GAs and assigne these new GAs as authors.',
+						'optional'    => false,
 						'repeating'   => false,
 					],
 				],
@@ -311,6 +327,101 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Callable for `newspack-content-migrator co-authors-create-gas-from-wpusers-for-posts`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_create_gas_from_wpusers_for_posts( $pos_args, $assoc_args ) {
+		$post_ids = explode( ',', $assoc_args['post-ids-csv'] ) ?? null;
+
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::log( sprintf( '(%d)/(%d) Post ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			// Get post and WP author User.
+			$post = get_post( $post_id );
+			if ( is_null( $post ) ) {
+				WP_CLI::warning( sprintf( 'Could not find post ID %d!', $post_id ) );
+				continue;
+			}
+			$author = get_user_by( 'ID', $post->post_author );
+			if ( false === $author ) {
+				WP_CLI::warning( sprintf( 'Could not find author User ID %d!', $post->post_author ) );
+				continue;
+			}
+			$author_name = $author->display_name ?? '';
+			if ( empty( $author_name ) ) {
+				$author_name  = $author->first_name;
+				$author_name .= ( ! empty( $author_name ) ? ' ' : '' ) . $author->last_name;
+			}
+			WP_CLI::log( sprintf( '- fetched WP author User %d %s', $author->ID, $author_name ) );
+
+			// Get display name -- the only actually required field to create a new GA.
+			$ga_args = [];
+			if ( ! empty( $author->display_name ) ) {
+				$ga_args['display_name'] = $author->display_name;
+			} else {
+				$ga_args['display_name'] = $author->first_name . ' ' . $author->last_name;
+				$ga_args['first_name']   = $author->first_name;
+				$ga_args['last_name']    = $author->last_name;
+			}
+
+			// Get the GA if it already exists, or create a new one.
+			$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $ga_args['display_name'] );
+			if ( false == $ga || ! $ga ) {
+				// Email.
+				if ( ! empty( $author->user_email ) ) {
+					$ga_args['user_email'] = $author->user_email;
+				}
+
+				// GA bio.
+				$bio  = ( ! empty( $author->description ) ? $author->description : '' );
+				$bio .= ( ! empty( $bio ) ? ' ' : '' )
+					. ( ! empty( $author->user_url ) ? 'Website: ' . $author->user_url : '' );
+				if ( ! empty( $bio ) ) {
+					$ga_args['bio'] = $bio;
+				}
+
+				// If Simple Local Avatars is used, use that same image.
+				$simplelocalavatar_usermeta = get_user_meta( $author->ID, 'simple_local_avatar' );
+				$sla_avatar_id              = $simplelocalavatar_usermeta[0]['media_id'] ?? null;
+				if ( ! is_null( $sla_avatar_id ) ) {
+					$ga_args['avatar'] = $sla_avatar_id;
+				}
+
+				// Create GA.
+				try {
+					$ga_id = $this->coauthorsplus_logic->create_guest_author( $ga_args );
+					if ( is_wp_error( $ga_id ) ) {
+						// phpcs:ignore -- We don't want to document this as @throws in docblock, because it's used for internal handling only, not ever thrown out of the scope of this method.
+						throw new \RuntimeException( $ga_id->get_error_message() );
+					}
+					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+					WP_CLI::log( sprintf( '- created GA ID %d', $ga->ID ) );
+				} catch ( \Exception $e ) {
+					WP_CLI::warning( sprintf( 'Could not create GA from WP User ... ' ) );
+					WP_CLI::warning( sprintf( 'Could not create GA from WP User ... ' ) );
+					continue;
+				}
+			} else {
+				WP_CLI::log( sprintf( '- fetched existing GA ID %d', $ga->ID ) );
+			}
+
+			// Link GA to WP author User.
+			$this->coauthorsplus_logic->link_guest_author_to_wp_user( $ga->ID, $author );
+			WP_CLI::log( sprintf( '- linked GA ID %d to WP User ID %d', $ga->ID, $author->ID ) );
+
+			// Assign the GA to post, alongside existing GA authors.
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $ga->ID ], $post_id, true );
+			WP_CLI::log( sprintf( '- assigned GA ID %d to Post', $ga->ID ) );
+		}
+
+		WP_CLI::success( 'Done 👍' );
+	}
 	/**
 	 * Create a guest author and assign to a post.
 	 *
@@ -825,6 +936,8 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator co-authors-fix-gas-post-counts`.
+	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 *
@@ -848,6 +961,11 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 	/**
 	 * Callable for the `newspack-content-migrator co-authors-delete-authors-with-zero-posts` command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
 	 */
 	public function cmd_delete_authors_with_zero_posts( $args, $assoc_args ) {
 		$dry_run = isset( $assoc_args['dry-run'] );
