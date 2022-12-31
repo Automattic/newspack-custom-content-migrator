@@ -298,13 +298,13 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			'newspack-content-migrator co-authors-create-gas-from-wpusers-for-posts',
 			[ $this, 'cmd_create_gas_from_wpusers_for_posts' ],
 			[
-				'shortdesc' => "Creates GAs from authors for specific posts. Takes a post's author, converts it to GAs, and assigns the GA to the post.",
+				'shortdesc' => "Creates GAs from authors for all or specific posts. Takes a post's author, converts it to GAs, and assigns the GA to the post.",
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'post-ids-csv',
-						'description' => 'Post IDs for which to convert their WP User authors to GAs and assigne these new GAs as authors.',
-						'optional'    => false,
+						'description' => 'If not given, command will run on all posts. This specifies only some Post IDs for which to convert their WP User authors to GAs.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -336,7 +336,14 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_create_gas_from_wpusers_for_posts( $pos_args, $assoc_args ) {
-		$post_ids = explode( ',', $assoc_args['post-ids-csv'] ) ?? null;
+		$post_ids = $assoc_args['post-ids-csv'] ?? null;
+		if ( ! is_null( $post_ids ) ) {
+			$post_ids = explode( ',', $post_ids );
+		} else {
+			WP_CLI::log( 'Fetching all posts...' );
+			$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ], true );
+		}
+
 
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 
