@@ -336,6 +336,11 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_create_gas_from_wpusers_for_posts( $pos_args, $assoc_args ) {
+		$active = $this->coauthorsplus_logic->validate_co_authors_plus_dependencies();
+		if ( false == $active ) {
+			WP_CLI::error( 'CoAuthors_Plus does not seem to be installed or active. Please install and activate then rerun the command.' );
+		}
+
 		$post_ids = $assoc_args['post-ids-csv'] ?? null;
 		if ( ! is_null( $post_ids ) ) {
 			$post_ids = explode( ',', $post_ids );
