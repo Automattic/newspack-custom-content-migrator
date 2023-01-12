@@ -68,6 +68,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var array
 	 */
 	private $post_types;
+
+	/**
+	 * Formatting functions for specific types of content
+	 * 
+	 * @var array
+	 */
+	private $content_formatters;
 	
 	
 	/**
@@ -89,12 +96,14 @@ class RetroReportMigrator implements InterfaceCommand {
 			'post_status',
 			'post_name',
 			'post_modified_gmt',
+			'tags_input',
 		);
 
 		$this->core_fields = array_flip( $this->core_fields );
 
 		$this->set_fields_mappings();
 		$this->set_post_types();
+		$this->set_content_formatters();
 
 		add_filter( 'http_request_args', array( $this, 'add_cf_token_to_requests' ), 10, 2 );
 	}
@@ -370,6 +379,8 @@ class RetroReportMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			$post->path = '';
+
 			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 
 			if ( is_wp_error( $post_id ) ) {
@@ -387,6 +398,8 @@ class RetroReportMigrator implements InterfaceCommand {
 					true,
 				);
 			}
+
+			exit;
 		}
 	}
 
@@ -411,6 +424,12 @@ class RetroReportMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $post_fields as $field ) {
+			if ( 'post_content' == $field->target && $this->get_content_formatter( $category ) ) {
+				$formatter_function = $this->get_content_formatter( $category );
+				$post_args['post_content'] = call_user_func( $formatter_function, $object );
+				continue;
+			}
+
 			$value           = property_exists( $object, $field->name ) ? $object->{ $field->name } : '';
 			$formatted_value = $this->format_post_field( $field, $value );
 			if ( $field->is_meta ) {
@@ -639,6 +658,16 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_fields_mappings() {
+		$this->fields_mappings['Education profiles'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'lastmod', 'date', 'post_date_gmt' ),
+			array( 'path', 'string', 'post_name' ),
+			array( 'path', 'string', 'path' ),
+		);
+
 		$this->fields_mappings['Standards'] = array(
 			array( 'title', 'string', 'post_title' ),
 			array( 'content', 'string', 'post_content' ),
@@ -665,6 +694,14 @@ class RetroReportMigrator implements InterfaceCommand {
 		);
 	}
 
+	public function set_content_formatters() {
+		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
+	}
+
+	public function get_content_formatter( $category ) {
+		return isset( $this->content_formatters[ $category ] ) ? $this->content_formatters[ $category ] : null;
+	}
+
 	/**
 	 * Get the property value, or return empty string if it doesn't exist.
 	 * 
@@ -683,8 +720,33 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_post_types() {
-		$this->post_types['Standards'] = 'wp_block';
-		$this->post_types['Links']     = 'post';
+		$this->post_types['Standards']          = 'wp_block';
+		$this->post_types['Links']              = 'post';
+		$this->post_types['Education profiles'] = 'newspack_lst_generic';
+	}
+
+	public function format_education_profiles_content( $post ) {
+		$content_code = <<<HTML
+<!-- wp:social-links -->
+<ul class="wp-block-social-links"><!-- wp:social-link {"url":"https://twitter.com/%s","service":"twitter"} /--></ul>
+<!-- /wp:social-links -->
+
+<!-- wp:paragraph -->
+<p><strong>%s<br></strong>%s</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>%s</p>
+<!-- /wp:paragraph -->
+HTML;
+
+		return sprintf(
+			$content_code,
+			$post->twitter_handle,
+			$post->school,
+			$post->location,
+			$post->description,
+		);
 	}
 
 	/**
