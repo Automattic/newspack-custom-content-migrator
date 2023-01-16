@@ -70,6 +70,10 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 				'name'   => 'Check broken images',
 				'method' => [ $this, 'call_check_broken_images' ],
 			],
+			[
+				'name'   => 'Clear post revisions',
+				'method' => [ $this, 'call_clear_post_revisions' ],
+			],
 		];
 	}
 
@@ -317,5 +321,21 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 
 		$attachments_migrator = AttachmentsMigrator::get_instance();
 		$attachments_migrator->cmd_check_broken_images( array(), $assoc_args );
+	}
+
+	/**
+	 * Wrapper function for calling the clear_post_revisions command
+	 */
+	public function call_clear_post_revisions() {
+		$assoc_args = array(
+			'log-file-prefix' => $this->get_log_file_name( 'clear_post_revisions' ),
+		);
+
+		if ( $this->is_dry_run_mode() ) {
+			$assoc_args['dry-run'] = true;
+		}
+
+		$posts_migrator = PostsMigrator::get_instance();
+		$posts_migrator->cmd_clear_revisions( array(), $assoc_args );
 	}
 }

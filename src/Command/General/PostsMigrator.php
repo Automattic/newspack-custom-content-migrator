@@ -641,6 +641,7 @@ class PostsMigrator implements InterfaceCommand {
 				$positional_args,
 				$assoc_args, 
 			);
+			$this->log( sprintf( '%s.log', $log_file_prefix ), sprintf( 'Cleared revisions for post %d,%s', $post->post_ID ) );
 		}
 	}
 

@@ -471,12 +471,12 @@ SQL;
 	}
 
 	public function delete_post_revisions_in_chunks( $post_id, $number, $chunk_size, $sleep = 0, $logger = false ) {
-		$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+		$current_revisions = $this->get_post_number_of_revisions( $post_id );
 
 		$total_deleted = 0;
 
 		while ( $current_revisions > $number ) {
-			$deleted = $this->posts_logic->delete_post_revisions( $post_id, $chunk_size );
+			$deleted = $this->delete_post_revisions( $post_id, $chunk_size );
 			if ( false === $deleted ) {
 				return false;
 			}
@@ -484,7 +484,7 @@ SQL;
 			if ( is_callable( $logger ) ) {
 				call_user_func( $logger, $post_id, $total_deleted, $deleted );
 			}
-			$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+			$current_revisions = $this->get_post_number_of_revisions( $post_id );
 			if ( $sleep > 0 ) {
 				usleep( $sleep );
 			}
