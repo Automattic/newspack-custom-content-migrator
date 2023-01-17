@@ -24,61 +24,61 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Instance of RetroReportMigrator
-	 * 
+	 *
 	 * @var null|InterfaceCommand
 	 */
 	private static $instance = null;
 
 	/**
 	 * Attachments logic.
-	 * 
+	 *
 	 * @var null|Attachments
 	 */
 	private $attachments;
 
 	/**
 	 * Simple Local Avatars.
-	 * 
+	 *
 	 * @var null|Simple_Local_Avatars
 	 */
 	private $simple_local_avatars;
-	
+
 	/**
 	 * CAP logic.
-	 * 
+	 *
 	 * @var null|CoAuthorPlus
 	 */
 	private $co_authors_plus;
-	
+
 	/**
 	 * List of core wp_posts fields
-	 * 
+	 *
 	 * @var array
 	 */
 	private $core_fields;
 
 	/**
 	 * Fields mappings from JSON fields to WP fields
-	 * 
+	 *
 	 * @var array
 	 */
 	private $fields_mappings;
 
 	/**
 	 * Post types for imported
-	 * 
+	 *
 	 * @var array
 	 */
 	private $post_types;
 
 	/**
 	 * Formatting functions for specific types of content
-	 * 
+	 *
 	 * @var array
 	 */
 	private $content_formatters;
-	
-	
+
+
 	/**
 	 * Constructor.
 	 */
@@ -109,7 +109,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		add_filter( 'http_request_args', array( $this, 'add_cf_token_to_requests' ), 10, 2 );
 	}
-	
+
 
 	/**
 	 * Singleton get_instance().
@@ -197,10 +197,10 @@ class RetroReportMigrator implements InterfaceCommand {
 			)
 		);
 	}
-	
+
 	/**
 	 * Callable for `newspack-content-migrator retro-report-add-cf-token`
-	 * 
+	 *
 	 * @param array $args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
@@ -214,7 +214,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Callable for `newspack-content-migrator retro-report-import-staff`
-	 * 
+	 *
 	 * @param array $args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
@@ -335,7 +335,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Callable for `newspack-content-migrator retro-report-import-posts`
-	 * 
+	 *
 	 * @param array $args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
@@ -362,7 +362,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
 
 		$posts = json_decode( file_get_contents( $json_file ) );
-		
+
 		if ( null === $posts ) {
 			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
 		}
@@ -403,12 +403,12 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Import an object as a WP post.
-	 * 
+	 *
 	 * @param object $object A standard object with post fields.
 	 * @param string $post_type The post type.
 	 * @param array  $post_fields An array containing the mapping of each field.
 	 * @param string $category The name of the post's category.
-	 * 
+	 *
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function import_post( $object, $post_type, $post_fields, $category ) {
@@ -434,7 +434,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			} else {
 				$value = property_exists( $object, $field->name ) ? $object->{ $field->name } : '';
 			}
-			
+
 			$formatted_value = $this->format_post_field( $field, $value );
 			if ( $field->is_meta ) {
 				$post_meta[ $field->target ] = $formatted_value;
@@ -454,10 +454,10 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Add a post to the database along with its meta data.
-	 * 
+	 *
 	 * @param array $post_args Array containing the post arguments (post_title, post_content etc.).
 	 * @param array $post_meta Associative array of post meta (key => value).
-	 * 
+	 *
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function add_post( $post_args, $post_meta ) {
@@ -478,10 +478,10 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * Convert a field's value to the necessary format.
 	 * For example, convert an image URL to attachment ID by importing it,
 	 * convert "draft": false to post_status=publish etc.
-	 * 
+	 *
 	 * @param object $field The field object.
 	 * @param mixed  $value The field's value (could be anything).
-	 * 
+	 *
 	 * @return mixed The formatted value.
 	 */
 	public function format_post_field( $field, $value ) {
@@ -491,11 +491,11 @@ class RetroReportMigrator implements InterfaceCommand {
 					if ( true === $value ) {
 						return 'draft';
 					}
-					
+
 					if ( false === $value ) {
 						return 'publish';
 					}
-	
+
 					return $value;
 				case 'post_name':
 					$path_parts = explode( '/', trim( $value, '/' ) );
@@ -506,7 +506,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		if ( 'thumbnail' == $field->type && $value ) {
 			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
-			
+
 			$image_url     = self::BASE_URL . $value;
 			$attachment_id = $this->attachments->import_external_file( $image_url );
 
@@ -524,10 +524,10 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Check if a post has already been imported.
-	 * 
+	 *
 	 * @param object $post The post object (from JSON, not WP_Post).
 	 * @param string $post_type The post type (wp_posts.post_type).
-	 * 
+	 *
 	 * @return boolean True if the post has already been imported, false otherwise.
 	 */
 	public function post_exists( $post, $post_type = 'post' ) {
@@ -547,9 +547,9 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Check if a user has already been imported.
-	 * 
+	 *
 	 * @param object $user The user object (from JSON, not wp_users).
-	 * 
+	 *
 	 * @return boolean True if the user has already been imported, false otherwise.
 	 */
 	public function user_exists( $user ) {
@@ -567,9 +567,9 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Load the fields mappings from a CSV file
-	 * 
+	 *
 	 * @param string $category The name of the category (endpoint title).
-	 * 
+	 *
 	 * @return array Array of fields.
 	 */
 	public function load_mappings( $category ) {
@@ -597,24 +597,24 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Get the post type of a category (endpoint).
-	 * 
+	 *
 	 * @param string $category The category.
-	 * 
+	 *
 	 * @return string The post type.
 	 */
 	public function get_post_type( $category ) {
 		if ( ! isset( $this->post_types[ $category ] ) ) {
 			WP_CLI::error( 'The given category does not exist.' );
 		}
-		
+
 		return $this->post_types[ $category ];
 	}
 
 	/**
 	 * Generate the meta key for a field.
-	 * 
+	 *
 	 * @param string $name The field name.
-	 * 
+	 *
 	 * @return string The meta key.
 	 */
 	public function get_meta_key( $name ) {
@@ -627,9 +627,9 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Check if a field should be saved in meta or in wp_posts table.
-	 * 
+	 *
 	 * @param string $field The field name.
-	 * 
+	 *
 	 * @return boolean True if meta, false otherwise.
 	 */
 	public function is_meta_field( $field ) {
@@ -638,10 +638,10 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Add the CloudFlare authorization token to HTTP requests.
-	 * 
+	 *
 	 * @param array  $args HTTP args.
 	 * @param string $url The requested URL.
-	 * 
+	 *
 	 * @return array The modified args.
 	 */
 	public function add_cf_token_to_requests( $args, $url ) {
@@ -662,7 +662,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Set the fields mappings for each endpoint.
-	 * 
+	 *
 	 * @return void
 	 */
 	public function set_fields_mappings() {
@@ -726,10 +726,10 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Get the property value, or return empty string if it doesn't exist.
-	 * 
+	 *
 	 * @param object $object The object.
 	 * @param string $property The property to access.
-	 * 
+	 *
 	 * @return mixed The property value.
 	 */
 	public function get_object_property( $object, $property ) {
@@ -738,7 +738,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Set the post types for each endpoint.
-	 * 
+	 *
 	 * @return void
 	 */
 	public function set_post_types() {
@@ -779,7 +779,7 @@ HTML;
 HTML;
 		$video_block = <<<HTML
 
-HTML:
+HTML;
 		$single_block_content = <<<HTML
 
 HTML;
