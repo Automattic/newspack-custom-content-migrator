@@ -73,5 +73,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
 		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
+		Command\PublisherSpecific\IndyWeekMigrator::class,
 	)
 );
