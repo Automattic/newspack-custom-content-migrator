@@ -20,6 +20,8 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	public const CF_TOKEN_OPTION = 'newspack_rr_cf_token';
 
+	public const ARRAY_ITEM_REGEX = '/(.*)\[(.*)\]/';
+
 	/**
 	 * Instance of RetroReportMigrator
 	 * 
@@ -379,8 +381,6 @@ class RetroReportMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$post->path = '';
-
 			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 
 			if ( is_wp_error( $post_id ) ) {
@@ -398,8 +398,6 @@ class RetroReportMigrator implements InterfaceCommand {
 					true,
 				);
 			}
-
-			exit;
 		}
 	}
 
@@ -430,7 +428,13 @@ class RetroReportMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$value           = property_exists( $object, $field->name ) ? $object->{ $field->name } : '';
+			if ( $this->is_array_item( $field ) ) {
+				$value = $this->get_array_item_value( $field, $object );
+				var_dump( $value );
+			} else {
+				$value = property_exists( $object, $field->name ) ? $object->{ $field->name } : '';
+			}
+			
 			$formatted_value = $this->format_post_field( $field, $value );
 			if ( $field->is_meta ) {
 				$post_meta[ $field->target ] = $formatted_value;
@@ -438,6 +442,10 @@ class RetroReportMigrator implements InterfaceCommand {
 				$post_args[ $field->target ] = $formatted_value;
 			}
 		}
+
+		var_dump( $post_args );
+
+		return;
 
 		$post_id = $this->add_post( $post_args, $post_meta );
 
@@ -610,7 +618,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return string The meta key.
 	 */
 	public function get_meta_key( $name ) {
-		if ( '_thumbnail_id' == $name ) {
+		if ( '_thumbnail_id' == $name || strpos( $name, 'newspack_' ) !== false ) {
 			return $name;
 		}
 
@@ -668,6 +676,19 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'path', 'string', 'path' ),
 		);
 
+		$this->fields_mappings['Education resources'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'lastmod', 'date', 'post_date_gmt' ),
+			array( 'path', 'string', 'post_name' ),
+			array( 'path', 'string', 'path' ),
+			array( 'description', 'string', 'newspack_article_summary' ),
+			array( 'subtitle', 'string', 'newspack_post_subtitle' ),
+			array( 'images[0]', 'thumbnail', '_thumbnail_id' ),
+		);
+
 		$this->fields_mappings['Standards'] = array(
 			array( 'title', 'string', 'post_title' ),
 			array( 'content', 'string', 'post_content' ),
@@ -696,6 +717,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	public function set_content_formatters() {
 		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
+		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
 	}
 
 	public function get_content_formatter( $category ) {
@@ -723,6 +745,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Standards']          = 'wp_block';
 		$this->post_types['Links']              = 'post';
 		$this->post_types['Education profiles'] = 'newspack_lst_generic';
+		$this->post_types['Education resources'] = 'post';
 	}
 
 	public function format_education_profiles_content( $post ) {
@@ -747,6 +770,33 @@ HTML;
 			$post->location,
 			$post->description,
 		);
+	}
+
+	public function format_education_resources_content( $post ) {
+		// WIP
+		$content_code = <<<HTML
+
+HTML;
+		$video_block = <<<HTML
+
+HTML:
+		$single_block_content = <<<HTML
+
+HTML;
+	}
+
+	public function is_array_item( $field ) {
+		return preg_match( self::ARRAY_ITEM_REGEX, $field->name );
+	}
+
+	public function get_array_item_value( $field, $object ) {
+		preg_match_all( self::ARRAY_ITEM_REGEX, $field->name, $matches );
+
+		$property_name  = $matches[1][0];
+		$index          = $matches[2][0];
+		$property_value = $this->get_object_property( $object, $property_name );
+
+		return $property_value[ $index ];
 	}
 
 	/**
