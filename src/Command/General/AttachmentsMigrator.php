@@ -69,7 +69,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 			'newspack-content-migrator attachments-switch-local-images-urls-to-s3-urls',
 			[ $this, 'cmd_switch_local_images_urls_to_s3_urls' ],
 			[
-				'shortdesc' => 'Switch images URLs from local URLs to S3 bucket based URLs.',
+				'shortdesc' => 'In all post_content it updates images URLs from local URLs to S3 bucket based URLs.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
