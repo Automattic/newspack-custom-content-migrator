@@ -11,6 +11,7 @@ use \WP_CLI;
 use \WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
+use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use wpdb;
 
 /**
@@ -89,12 +90,12 @@ class ContentDiffMigrator {
 	/**
 	 * Gets a diff of new Posts, Pages and Attachments from the Live Site.
 	 *
-	 * @deprecated Deprecated in favor of get_live_diff_content_ids_programmatic, since large JOINs can time out on Atomic.
-	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
-	 * @throws     \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
 	 * @return     array Result from $wpdb->get_results.
+	 * @throws     \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
+	 * @deprecated Since large JOINs can time out on Atomic, this was eprecated in favor of `get_posts_rows_for_content_diff` and
+	 * `filter_new_live_ids`. And there's also the new `filter_modified_live_ids` method.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
 		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
@@ -140,146 +141,147 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Finds unique IDs in live tables which don't exist in local Staging tables.
-	 * Uses programmatic search technique, since JOIN sometimes times out on Atomic.
-	 * Splits search into two post type groups -- attachments, and all other -- for memory usage reasons.
+	 * Gets records from the $posts_table, $post_types, returns the minimal set of columns needed to determine whether a post
+	 * doesn't exist in DB and needs to be inserted, or has been modified and needs to be updated.
 	 *
-	 * @param string $live_table_prefix Live tables' prefix.
-	 * @param array  $post_types        Post types to search for.
+	 * @param string $posts_table   Name of posts table.
+	 * @param array  $post_types    Post types to fetch.
+	 * @param array  $post_statuses Post statuses to fetch.
 	 *
-	 * @throws \RuntimeException Thrown if collations don't match.
-	 *
-	 * @return array Unique IDs in live tables.
+	 * @return array Associative array with columns specified in used query.
 	 */
-	public function get_live_diff_content_ids_programmatic( string $live_table_prefix, array $post_types ): array {
-		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
-			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
-		}
+	public function get_posts_rows_for_content_diff( string $posts_table, array $post_types, array $post_statuses ) {
+		// Get post types and statuses placeholders for $wpdb::prepare.
+		$post_types_placeholders        = array_fill( 0, count( $post_types ), '%s' );
+		$post_types_placeholders_csv    = implode( ',', $post_types_placeholders );
+		$post_statuses_placeholders     = array_fill( 0, count( $post_statuses ), '%s' );
+		$post_statuses_placeholders_csv = implode( ',', $post_statuses_placeholders );
 
-		$ids              = [];
-		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
-		$posts_table      = $this->wpdb->prefix . 'posts';
-
-		// Split post types into two groups for memory usage reasons -- attachment and other types.
-		$post_type_attachment = null;
-		$key_attachment       = array_search( 'attachment', $post_types );
-		if ( false !== $key_attachment ) {
-			$post_type_attachment = 'attachment';
-			unset( $post_types[ $key_attachment ] );
-		}
-		$post_types_other = $post_types;
-
-
-		// Get post types except attachments.
-		if ( ! empty( $post_types_other ) ) {
-
-			// Get post type placeholders for $wpdb::prepare.
-			$post_types_other_placeholders     = array_fill( 0, count( $post_types_other ), '%s' );
-			$post_types_other_placeholders_csv = implode( ',', $post_types_other_placeholders );
-
-			WP_CLI::log( sprintf( 'Querying %s types ...', implode( ',', $post_types_other ) ) );
-			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
-			// phpcs:disable
-			$sql_replace_table = $this->wpdb->prepare(
-				"SELECT ID, post_name, post_title, post_status, post_date
+		// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
+		// phpcs:disable
+		$sql_replace_table = $this->wpdb->prepare(
+			"SELECT ID, post_name, post_title, post_status, post_type, post_date, post_modified
 				FROM {TABLE}
-				WHERE post_type IN ( $post_types_other_placeholders_csv )
-				AND post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' );",
-				$post_types_other
-			);
-			$results_live_posts  = $this->wpdb->get_results(  str_replace( '{TABLE}', $live_posts_table, $sql_replace_table), ARRAY_A );
-			$results_local_posts = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table), ARRAY_A );
-			// phpcs:enable
+				WHERE post_type IN ( $post_types_placeholders_csv )
+				AND post_status IN ( $post_statuses_placeholders_csv );",
+			array_merge( $post_types, $post_statuses )
+		);
+		$posts_table_escaped = esc_sql( $posts_table );
+		$results             = $this->wpdb->get_results(  str_replace( '{TABLE}', $posts_table_escaped, $sql_replace_table), ARRAY_A );
 
-			// Search unique on live.
-			$percent_progress = null;
-			WP_CLI::log( sprintf( 'Searching for new %s from total %s...', implode( ',', $post_types_other ), count( $results_live_posts ) ) );
-			foreach ( $results_live_posts as $key_live_post => $live_post ) {
+		// Return empty array instead of null.
+		$results = is_null( $results ) ? [] : $results;
 
-				// Get and output progress meter by 10%.
-				$last_percent_progress = $percent_progress;
-				$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
-				if ( $last_percent_progress !== $percent_progress ) {
-					WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
-				}
+		return $results;
+	}
 
-				$found = false;
-				foreach ( $results_local_posts as $key_local_post => $local_post ) {
-					if (
-						$live_post['post_name'] == $local_post['post_name']
-						&& $live_post['post_title'] == $local_post['post_title']
-						&& $live_post['post_status'] == $local_post['post_status']
-						&& $live_post['post_date'] == $local_post['post_date']
-					) {
-						$found = true;
-						break;
-					}
-				}
+	/**
+	 * Finds unique records in live posts table which don't exist in local posts table.
+	 * Uses programmatic approach which requires less memory, but is a bit slower to run.
+	 *
+	 * Outputs progress by 10% increments to the CLI.
+	 *
+	 * @param array $results_live_posts  Rows from live posts table.
+	 * @param array $results_local_posts Rows from local posts table.
+	 *
+	 * @return array IDs of posts found.
+	 */
+	public function filter_new_live_ids( array $results_live_posts, array $results_local_posts ): array {
+		// Search unique on live.
+		$ids = [];
 
-				if ( true === $found ) {
-					// Unset record that was just matched for faster following searches.
-					unset( $results_local_posts[ $key_local_post ] );
-				} else {
-					// Unique on live, add to $ids.
-					$ids[] = $live_post['ID'];
+		$percent_progress = null;
+		foreach ( $results_live_posts as $key_live_post => $live_post ) {
+
+			// Output progress meter by 10% increments.
+			$last_percent_progress = $percent_progress;
+			$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
+			}
+
+			$found = false;
+			foreach ( $results_local_posts as $key_local_post => $local_post ) {
+				if (
+					$live_post['post_name'] == $local_post['post_name']
+					&& $live_post['post_title'] == $local_post['post_title']
+					&& $live_post['post_type'] == $local_post['post_type']
+					&& $live_post['post_status'] == $local_post['post_status']
+					&& $live_post['post_date'] == $local_post['post_date']
+				) {
+					$found = true;
+					break;
 				}
 			}
 
-			// Garbage collection should be faster for setting to null VS using \unset().
-			$results_live_posts  = null;
-			$results_local_posts = null;
-		}
+			// Unique on live, add to $ids.
+			if ( false === $found ) {
+				$ids[] = $live_post['ID'];
 
-
-		// Get attachments.
-		if ( ! is_null( $post_type_attachment ) ) {
-
-			WP_CLI::log( 'Querying attachments ...' );
-			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
-			$sql_replace_table = "SELECT ID, post_name, post_title, post_status, post_date
-				FROM {TABLE}
-				WHERE post_type = 'attachment';";
-			// phpcs:disable
-			$results_live_attachments  = $this->wpdb->get_results( str_replace( '{TABLE}', $live_posts_table, $sql_replace_table ), ARRAY_A );
-			$results_local_attachments = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table ), ARRAY_A );
-			// phpcs:enable
-
-			// Search unique attachments on live.
-			WP_CLI::log( sprintf( 'Searching for new attachments from total %s...', count( $results_live_attachments ) ) );
-			$percent_progress = null;
-			foreach ( $results_live_attachments as $key_live_attachment => $live_attachment ) {
-
-				// Get and output progress meter by 10%.
-				$last_percent_progress = $percent_progress;
-				$this->get_progress_percentage( count( $results_live_attachments ), $key_live_attachment + 1, 10, $percent_progress );
-				if ( $last_percent_progress !== $percent_progress ) {
-					WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
-				}
-
-				$found = false;
-				foreach ( $results_local_attachments as $key_local_attachment => $local_attachment ) {
-					if (
-						$live_attachment['post_name'] == $local_attachment['post_name']
-						&& $live_attachment['post_title'] == $local_attachment['post_title']
-						&& $live_attachment['post_status'] == $local_attachment['post_status']
-						&& $live_attachment['post_date'] == $local_attachment['post_date']
-					) {
-						$found = true;
-						break;
-					}
-				}
-
-				// Unset record that was just matched for faster following searches.
-				if ( true === $found ) {
-					unset( $results_local_attachments[ $key_local_attachment ] );
-				} else {
-					// Unset record that was just matched for faster following searches.
-					$ids[] = $live_attachment['ID'];
-				}
+				// Remove the local post which was found (break; was done), to make the next search a bit faster.
+				unset( $results_local_posts[ $key_local_post ] );
 			}
 		}
 
 		return $ids;
+	}
+
+	/**
+	 * Finds records in live posts table which have a newer post_modified date.
+	 * Uses programmatic approach which requires less memory, but is a bit slower to run.
+	 *
+	 * Outputs progress by 10% increments to the CLI.
+	 *
+	 * @param array $results_live_posts  Rows from live posts table.
+	 * @param array $results_local_posts Rows from local posts table.
+	 *
+	 * @return array $ids_modified {
+	 *     IDs of posts found.
+	 *
+	 *     @type int live_id  Live Post ID.
+	 *     @type int local_id Matching Local Post ID.
+	 * }
+	 */
+	public function filter_modified_live_ids( array $results_live_posts, array $results_local_posts ): array {
+
+		// Check if modified date is different. Posts which were already imported with Content Diff will have the original meta ID.
+		// But posts which were imported just by raw table import won't have the meta. So a full comparisson is needed.
+		$ids_modified = [];
+
+		$percent_progress = null;
+		foreach ( $results_live_posts as $key_live_post => $live_post ) {
+
+			// Output progress meter by 10% increments.
+			$last_percent_progress = $percent_progress;
+			$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
+			}
+
+			$modified = false;
+			foreach ( $results_local_posts as $key_local_post => $local_post ) {
+				if (
+					$live_post['post_name'] == $local_post['post_name']
+					&& $live_post['post_title'] == $local_post['post_title']
+					&& $live_post['post_status'] == $local_post['post_status']
+					&& $live_post['post_date'] == $local_post['post_date']
+					&& $live_post['post_modified'] > $local_post['post_modified']
+				) {
+					$modified = true;
+					break;
+				}
+			}
+
+			// Modified on live, add to $ids_modified.
+			if ( true === $modified ) {
+				$ids_modified[] = [
+					'live_id'  => (int) $live_post['ID'],
+					'local_id' => (int) $local_post['ID'],
+				];
+			}
+		}
+
+		return $ids_modified;
 	}
 
 	/**
@@ -2811,7 +2813,7 @@ class ContentDiffMigrator {
 	 * Checks whether all core WP DB tables are present in used DB.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param string $skip_tables  Core WP DB tables to skip (without prefix).
+	 * @param array  $skip_tables  Core WP DB tables to skip (without prefix).
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
