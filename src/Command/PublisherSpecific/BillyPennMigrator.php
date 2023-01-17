@@ -12,6 +12,10 @@ use WP_Query;
  */
 class BillyPennMigrator implements InterfaceCommand {
 
+	private $content_diff_ids_mappings_file;
+
+	private $content_diff_ids;
+
 	/**
 	 * Instance of BillyPennMigrator
 	 * 
@@ -31,6 +35,8 @@ class BillyPennMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->sla_logic = new SimpleLocalAvatars();
+		$this->content_diff_ids_mappings_file = ABSPATH . '/ids.csv';
+		$this->content_diff_ids = array();
 	}
 
 	/**
@@ -266,6 +272,8 @@ class BillyPennMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_billypenn_create_taxonomies( $args, $assoc_args ) {
+		$this->load_ids_mappings();
+
 		$this->convert_posts_to_taxonomies( 'pedestal_story', 'category' );
 		$this->convert_posts_to_taxonomies( 'pedestal_topic', 'post_tag' );
 		$this->convert_posts_to_taxonomies( 'pedestal_place', 'post_tag' );
@@ -305,24 +313,35 @@ class BillyPennMigrator implements InterfaceCommand {
 				),
 			);
 
-			WP_CLI::log( sprintf( 'Creating the term %s', $term->post_title ) );
-			
-			$new_term = wp_insert_term(
-				$term->post_title,
-				$taxonomy,
-				array(
-					'description' => $term->post_content,
-				),
-			);
+			$wp_term = get_term_by( 'name', $term->post_title, $taxonomy );		
 
-			if ( is_wp_error( $new_term ) ) {
-				WP_CLI::warning( 'Could not create term. Skipping...' );
-				continue;
+			if ( false == $wp_term ) {
+				WP_CLI::log( sprintf( 'Creating the term %s', $term->post_title ) );
+			
+				$new_term = wp_insert_term(
+					$term->post_title,
+					$taxonomy,
+					array(
+						'description' => $term->post_content,
+					),
+				);
+
+				$term_id = $new_term['term_id'];
+	
+				if ( is_wp_error( $new_term ) ) {
+					WP_CLI::warning( 'Could not create term...' );
+					WP_CLI::warning( $new_term->get_error_message() );
+				}
+			} else {
+				$term_id = $wp_term->term_id;
 			}
 
 			foreach ( $posts as $post_id ) {
+				if ( isset( $this->content_diff_ids[ $post_id ] ) ) {
+					$post_id = $this->content_diff_ids[ $post_id ];
+				}
 				WP_CLI::log( sprintf( 'Adding term to post #%d', $post_id ) );
-				wp_set_post_terms( $post_id, array( $new_term['term_id'] ), $taxonomy, true );
+				wp_set_post_terms( $post_id, array( $term_id ), $taxonomy, true );
 			}
 		}
 	}
@@ -416,6 +435,28 @@ HTML;
 				'″' => '"',
 			),
 		);
+	}
+
+	public function load_ids_mappings() {
+		if ( ! file_exists( $this->content_diff_ids_mappings_file ) ) {
+			WP_CLI::error( 'Cant find mappings file.' );
+		}
+
+		$lines = file( $this->content_diff_ids_mappings_file );
+
+		foreach ( $lines as $index => $line ) {
+			if ( 0 == $index ) {
+				continue;
+			}
+
+			$object = json_decode( $line );
+
+			if ( ! $object ) {
+				continue;
+			}
+
+			$this->content_diff_ids[ $object->id_new ] = $object->id_old;
+		}
 	}
 
 	/**
