@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.2.1
+ * Version:     1.0.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -57,6 +57,7 @@ PluginSetup::register_migrators(
 		Command\General\ContentFixerMigrator::class,
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
+		Command\General\MetroMirgator::class,
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
