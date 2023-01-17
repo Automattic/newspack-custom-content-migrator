@@ -2,7 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use WP_Query;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use WP_CLI;
 
 class Posts {
@@ -463,5 +463,51 @@ SQL;
 			)
 		);
 		return $deleted;
+	}
+
+	/**
+	 * Find all posts with raw shortcodes
+	 * 
+	 * @param callback $logger Function to call for logging.
+	 * 
+	 * @return array Associative array where ID is the Post ID and the value is an array of shortcodes used
+	 */
+	public function find_shortcodes_in_posts( $logger = false ) {
+		$query_args = array(
+			'post_type' => 'any',
+			'fields'    => 'id=>post_content',
+		);
+
+		$results = array();
+
+		$this->throttled_posts_loop(
+			$query_args,
+			function( $post ) use ( &$results, $logger ) {
+				$shortcodes = $this->find_shortcodes_in_post( $post );
+				if ( ! empty( $shortcodes ) ) {
+					$results[ $post->ID ] = $shortcodes;
+					if ( is_callable( $logger ) ) {
+						call_user_func( $logger, $post->ID, $shortcodes );
+					}
+				}
+			},
+		);
+
+		return $results;
+	}
+
+	/**
+	 * Find shortcodes used in a post
+	 * 
+	 * @param object $post The post object.
+	 * 
+	 * @return array Array of shortcodes (strings).
+	 */
+	public function find_shortcodes_in_post( $post ) {
+		$shortcodes_manipulator = new SquareBracketsElementManipulator();
+
+		$shortcodes = $shortcodes_manipulator->match_all_shortcode_designations( $post->post_content );
+		
+		return $shortcodes[1];
 	}
 }
