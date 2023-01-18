@@ -2,6 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use DateTime;
+use DateTimeZone;
+use DOMDocument;
+use DOMNode;
+use DOMNodeList;
+use DOMXPath;
+use Exception;
+use Generator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \WP_CLI;
 
@@ -518,6 +526,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         ]
     ];
 
+    private $log_file_path = '';
+
     /**
      * LaSillaVaciaMigrator Instance.
      *
@@ -538,6 +548,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
         if (null === self::$instance) {
             self::$instance = new $class();
+            self::$instance->log_file_path = date('YmdHis', time()) . 'LSV_import.log';
         }
 
         return self::$instance;
@@ -556,8 +567,78 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 'synopsis'  => [],
             ]
         );
+        
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-migrate-authors',
+            [ $this, 'migrate_authors' ],
+            [
+                'shortdesc' => 'Migrates authors.',
+                'synopsis' => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV authors.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'flag',
+                        'name' => 'reset-db',
+                        'description' => 'Resets the database for a fresh import.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ]
+                ],
+            ]
+        );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-migrate-articles',
+            [ $this, 'migrate_articles' ],
+            [
+                'shortdesc' => 'Migrate articles',
+                'synopsis' => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV articles.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'flag',
+                        'name' => 'reset-db',
+                        'description' => 'Resets the database for a fresh import.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ]
+                ]
+            ]
+        );
     }
 
+    private function reset_db()
+    {
+        WP_CLI::runcommand(
+            'db reset --yes --defaults',
+            [
+                'return'     => true,
+                'parse'      => 'json',
+                'launch'     => false,
+                'exit_error' => true,
+            ]
+        );
+
+        $output = shell_exec(
+            'wp core install --url=http://localhost:10013 --title="La Silla Vacia" --admin_user=edc598 --admin_email=edc598@gmail.com'
+        );
+        echo $output;
+
+        shell_exec( 'wp user update edc598 --user_pass=ilovenews' );
+
+        shell_exec( 'wp plugin activate newspack-custom-content-migrator' );
+    }
+    
     /**
      * @void
      */
@@ -580,4 +661,181 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             }
         }
     }
+
+    /**
+     * Generator for Author JSON.
+     *
+     * @param string $file
+     * @return Generator
+     */
+    private function json_generator( string $file, string $json_path )
+    {
+        $file = file_get_contents( $file );
+        $json = json_decode( $file, true );
+
+        $path = explode( '.', $json_path );
+        foreach ( $path as $step ) {
+            $json = $json[ $step ];
+        }
+
+        foreach ($json as $element) {
+            yield $element;
+        }
+    }
+
+    /**
+     * Migrates the author data from LSV.
+     *
+     * @param $args
+     * @param $assoc_args
+     */
+    public function migrate_authors( $args, $assoc_args )
+    {
+        if ( $assoc_args['reset-db'] ) {
+            $this->reset_db();
+        }
+
+        foreach ( $this->json_generator( $assoc_args['import-json'], '_embedded.User' ) as $author ) {
+            $author_data = [
+                'user_login' => $author['Username'],
+                'user_pass' => wp_generate_password(),
+                'user_email' => $author['Email'],
+                'user_registered' => $author['CreatedOn'] ?? $author['UpdatedOn'] ?? date('Y-m-d H:i:s', time() ),
+                'first_name' => $author['FirstName'],
+                'last_name' => $author['LastName'],
+                'display_name' => $author['FirstName'] . ' ' . $author['LastName'],
+                'role' => 'author',
+                'meta_input' => [
+                    'compañia' => $author['CompanyName'],
+                    'original_user_id' => $author['Id'],
+                ]
+            ];
+
+            $user_id = wp_insert_user( $author_data );
+        }
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function migrate_articles( $args, $assoc_args )
+    {
+        if ( $assoc_args['reset-db'] ) {
+            $this->reset_db();
+        }
+
+        global $wpdb;
+        $authors_sql = "SELECT um.meta_value, u.ID, um.meta_key
+            FROM wp_users u LEFT JOIN wp_usermeta um ON um.user_id = u.ID
+            WHERE um.meta_key = 'original_user_id'";
+        $authors = $wpdb->get_results( $authors_sql, OBJECT_K );
+        $authors = array_map( fn( $value ) => (int) $value->ID, $authors );
+
+        $imported_hashed_ids_sql = "SELECT meta_value, meta_key
+            FROM wp_postmeta
+            WHERE meta_key IN ('hashed_import_id')";
+        $imported_hashed_ids = $wpdb->get_results( $imported_hashed_ids_sql, OBJECT_K );
+        $imported_hashed_ids = array_map( fn( $value ) => null, $imported_hashed_ids );
+
+        foreach ( $this->json_generator( $assoc_args['import-json'], '_embedded.Article') as $article ) {
+
+            // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
+            $original_article_id = $article['Id'] ?? 0;
+            $original_article_title = $article['Title'] ?? '';
+            $original_article_slug = $article['Slug'] ?? '';
+            $hashed_import_id = md5( $original_article_id . $original_article_title . $original_article_slug );
+
+            $this->file_logger("Original Article ID: $original_article_id | Original Article Title: $original_article_title | Original Article Slug: $original_article_slug" );
+
+            if ( array_key_exists( $hashed_import_id, $imported_hashed_ids ) ) {
+                $this->file_logger("Possible duplicate article, skipping." );
+                continue;
+            }
+
+            $datetime_format = 'Y-m-d H:i:s';
+            $createdOnDT = new DateTime( $article['CreatedOn'], new DateTimeZone( 'America/Bogota' ) );
+            $createdOn = $createdOnDT->format( $datetime_format );
+            $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+            $createdOnGmt = $createdOnDT->format( $datetime_format );
+
+            $modifiedOnDT = new DateTime( $article['LastModified'], new DateTimeZone( 'America/Bogota' ) );
+            $modifiedOn = $modifiedOnDT->format( $datetime_format );
+            $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+            $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
+
+            $html = '';
+            if (!empty($article['Html'])) {
+
+                $dom = new DOMDocument();
+                $dom->encoding = 'utf-8';
+                @$dom->loadHTML( utf8_decode( htmlentities(  $article['Html'] ) ) );
+                $xpath = new DOMXPath($dom);
+                /* @var DOMNodeList $nodes */
+                $nodes = $xpath->query('//@*');
+
+                foreach ($nodes as $node) {
+                    /* @var DOMNode $node */
+                    if ('href' === $node->nodeName) {
+                        continue;
+                    }
+
+                    $node->parentNode->removeAttribute( $node->nodeName );
+                }
+
+                $html = html_entity_decode( $dom->saveHTML( $dom->documentElement ) );
+            }
+
+            $article_data = [
+                'post_author' => $authors[ $article['CreatedBy'] ] ?? 0,
+                'post_date' => $createdOn,
+                'post_date_gmt' => $createdOnGmt,
+                'post_content' => $html,
+                'post_title' => $article['Title'],
+                'post_excerpt' => '',
+                'post_status' => 'publish',
+                'comment_status' => 'closed',
+                'ping_status' => 'closed',
+                'post_password' => '',
+                'post_name' => $article['Slug'],
+                'to_ping' => '',
+                'pinged' => '',
+                'post_modified' => $modifiedOn,
+                'post_modified_gmt' => $modifiedOnGmt,
+                'post_content_filtered' => '',
+                'post_parent' => 0,
+                'menu_order' => 0,
+                'post_type' => 'post',
+                'post_mime_type' => '',
+                'comment_count' => 0,
+                'meta_input' => [
+                    'original_article_id' => $article['Id'],
+                    'canonical_url' => $article['CanonicalUrl'],
+                    'hashed_import_id' => $hashed_import_id,
+                ]
+            ];
+
+            $this->file_logger( json_encode( $article_data ), false );
+
+            $post_id = wp_insert_post( $article_data );
+
+            wp_update_post(
+                [
+                    'ID' => $post_id,
+                    'guid' => "http://lasillavacia-staging.newspackstaging.com/?page_id={$post_id}"
+                ]
+            );
+
+            $this->file_logger( "Article Imported: $post_id" );
+        }
+    }
+
+    private function file_logger(string $message, bool $output = true)
+    {
+        file_put_contents( $this->log_file_path, "$message\n", FILE_APPEND );
+
+        if ($output) {
+            WP_CLI::log( $message );
+        }
+    }
 }
+
