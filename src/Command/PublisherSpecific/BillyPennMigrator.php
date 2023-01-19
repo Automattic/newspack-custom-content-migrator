@@ -18,14 +18,14 @@ class BillyPennMigrator implements InterfaceCommand {
 
 	/**
 	 * Instance of BillyPennMigrator
-	 * 
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
 
 	/**
 	 * Instance of \Logic\SimpleLocalAvatars
-	 * 
+	 *
 	 * @var null|SimpleLocalAvatars Instance.
 	 */
 	private $sla_logic;
@@ -34,9 +34,9 @@ class BillyPennMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->sla_logic = new SimpleLocalAvatars();
+		$this->sla_logic                      = new SimpleLocalAvatars();
 		$this->content_diff_ids_mappings_file = ABSPATH . '/ids.csv';
-		$this->content_diff_ids = array();
+		$this->content_diff_ids               = [];
 	}
 
 	/**
@@ -103,12 +103,12 @@ class BillyPennMigrator implements InterfaceCommand {
 	public function cmd_billypenn_convert_img_shortcodes( $args, $assoc_args ) {
 		global $wpdb;
 
-		$args = array(
-			'post_type'      => array( 'post', 'page' ),
-			'posts_per_page' => -1,
+		$args = [
+			'post_type'      => [ 'post', 'page' ],
+			'posts_per_page' => - 1,
 			'post_status'    => 'publish,draft',
-		);
-		
+		];
+
 		$query = new WP_Query( $args );
 
 		$posts = $query->posts;
@@ -117,29 +117,29 @@ class BillyPennMigrator implements InterfaceCommand {
 
 		foreach ( $posts as $post ) {
 			$found = preg_match_all( $shortcode_pattern, $post->post_content, $matches );
-			
+
 			if ( $found == 0 ) {
 				continue;
 			}
 
 			WP_CLI::log( sprintf( 'Replacing %d img shortcodes in post #%d', count( $matches[0] ), $post->ID ) );
 
-			$searches = array();
-			$replaces = array();
+			$searches = [];
+			$replaces = [];
 
 			foreach ( $matches[0] as $match ) {
-				$shortcode = $this->fix_shortcode( urldecode( $match ) );
+				$shortcode      = $this->fix_shortcode( urldecode( $match ) );
 				$shortcode_atts = shortcode_parse_atts( $shortcode );
 
 				if ( isset( $shortcode_atts['attachment'] ) ) {
 					$attachment_id = $shortcode_atts['attachment'];
-				} else if ( isset( $shortcode_atts['src'] ) ) {
+				} elseif ( isset( $shortcode_atts['src'] ) ) {
 					$attachment_id = attachment_url_to_postid( $shortcode_atts['src'] );
 				}
 
 				if ( isset( $shortcode_atts['src'] ) ) {
 					$image_url = $shortcode_atts['src'];
-				} else if ( $attachment_id ) {
+				} elseif ( $attachment_id ) {
 					$image_url = wp_get_attachment_url( $attachment_id );
 				} else {
 					$image_url = null;
@@ -147,20 +147,20 @@ class BillyPennMigrator implements InterfaceCommand {
 
 				if ( isset( $shortcode_atts['url'] ) ) {
 					$link = $shortcode_atts['url'];
-				} else if ( isset( $shortcode_atts['href'] ) ) {
+				} elseif ( isset( $shortcode_atts['href'] ) ) {
 					$link = $shortcode_atts['href'];
 				} else {
 					$link = null;
 				}
 
-				$credit = array();
+				$credit = [];
 
 				if ( isset( $shortcode_atts['credit'] ) ) {
-					$credit['credit'] = urldecode( $shortcode_atts['credit'] );	
+					$credit['credit'] = urldecode( $shortcode_atts['credit'] );
 				}
 
 				if ( isset( $shortcode_atts['credit_link'] ) ) {
-					$credit['url'] = urldecode( $shortcode_atts['credit_link'] );	
+					$credit['url'] = urldecode( $shortcode_atts['credit_link'] );
 				}
 
 				if ( ! empty( $credit ) && $attachment_id ) {
@@ -168,16 +168,16 @@ class BillyPennMigrator implements InterfaceCommand {
 					$this->add_image_credits( $attachment_id, $credit );
 				}
 
-				$block_args = array(
-					'align' => isset( $shortcode_atts['align'] ) ? $shortcode_atts['align'] : NULL,
-					'sizeSlug' => isset( $shortcode_atts['size'] ) ? $shortcode_atts['size'] : NULL,
-					'linkDestination' => isset( $shortcode_atts['linkto'] ) ? $shortcode_atts['linkto'] : NULL,
-					'alt' => isset( $shortcode_atts['alt'] ) ? $shortcode_atts['alt'] : NULL,
-					'caption' => isset( $shortcode_atts['caption'] ) ? $shortcode_atts['caption'] : NULL,
-					'href' => $link,
-					'url' => $image_url,
-					'id' => $attachment_id,
-				);
+				$block_args = [
+					'align'           => isset( $shortcode_atts['align'] ) ? $shortcode_atts['align'] : null,
+					'sizeSlug'        => isset( $shortcode_atts['size'] ) ? $shortcode_atts['size'] : null,
+					'linkDestination' => isset( $shortcode_atts['linkto'] ) ? $shortcode_atts['linkto'] : null,
+					'alt'             => isset( $shortcode_atts['alt'] ) ? $shortcode_atts['alt'] : null,
+					'caption'         => isset( $shortcode_atts['caption'] ) ? $shortcode_atts['caption'] : null,
+					'href'            => $link,
+					'url'             => $image_url,
+					'id'              => $attachment_id,
+				];
 
 				$block = $this->generate_image_block( $block_args );
 
@@ -190,7 +190,7 @@ class BillyPennMigrator implements InterfaceCommand {
 
 			$new_content = str_replace( $searches, $replaces, $post->post_content );
 
-			$wpdb->update( $wpdb->posts, array( 'post_content' => $new_content ), array( 'ID' => $post->ID ) );
+			$wpdb->update( $wpdb->posts, [ 'post_content' => $new_content ], [ 'ID' => $post->ID ] );
 		}
 	}
 
@@ -203,19 +203,20 @@ class BillyPennMigrator implements InterfaceCommand {
 	public function cmd_billypenn_migrate_users_bios( $args, $assoc_args ) {
 		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
 			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+
 			return;
 		}
 
 		$users = get_users(
-			array(
+			[
 				'meta_key'     => 'user_bio_extended',
 				'meta_compare' => 'EXISTS',
-			)
+			]
 		);
 
 		foreach ( $users as $user ) {
 			$user_bio = get_user_meta( $user->ID, 'user_bio_extended', true );
-			
+
 			if ( ! $user_bio ) {
 				continue;
 			}
@@ -223,10 +224,10 @@ class BillyPennMigrator implements InterfaceCommand {
 			WP_CLI::log( sprintf( 'Migrating bioography for user #%d', $user->ID ) );
 
 			wp_update_user(
-				array(
-					'ID' => $user->ID,
+				[
+					'ID'          => $user->ID,
 					'description' => $user_bio,
-				),
+				],
 			);
 		}
 	}
@@ -240,19 +241,20 @@ class BillyPennMigrator implements InterfaceCommand {
 	public function cmd_billypenn_migrate_users_avatars( $args, $assoc_args ) {
 		if ( ! $this->sla_logic->is_sla_plugin_active() ) {
 			WP_CLI::warning( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+
 			return;
 		}
 
 		$users = get_users(
-			array(
+			[
 				'meta_key'     => 'wp_user_img',
 				'meta_compare' => 'EXISTS',
-			)
+			]
 		);
 
 		foreach ( $users as $user ) {
 			$avatar_id = get_user_meta( $user->ID, 'wp_user_img', true );
-			
+
 			if ( ! $avatar_id ) {
 				continue;
 			}
@@ -286,7 +288,7 @@ class BillyPennMigrator implements InterfaceCommand {
 
 	/**
 	 * Convert a custom post type to a taxonomy.
-	 * 
+	 *
 	 * @param string $post_type The custom post type.
 	 * @param string $taxonomy The taxonomy (category, post_tag etc.).
 	 */
@@ -297,10 +299,10 @@ class BillyPennMigrator implements InterfaceCommand {
 			return false;
 		}
 
-		$args = array(
+		$args = [
 			'post_type'      => $post_type,
-			'posts_per_page' => -1,
-		);
+			'posts_per_page' => - 1,
+		];
 
 		$query = new WP_Query( $args );
 		$terms = $query->posts;
@@ -313,21 +315,21 @@ class BillyPennMigrator implements InterfaceCommand {
 				),
 			);
 
-			$wp_term = get_term_by( 'name', $term->post_title, $taxonomy );		
+			$wp_term = get_term_by( 'name', $term->post_title, $taxonomy );
 
 			if ( false == $wp_term ) {
 				WP_CLI::log( sprintf( 'Creating the term %s', $term->post_title ) );
-			
+
 				$new_term = wp_insert_term(
 					$term->post_title,
 					$taxonomy,
-					array(
+					[
 						'description' => $term->post_content,
-					),
+					],
 				);
 
 				$term_id = $new_term['term_id'];
-	
+
 				if ( is_wp_error( $new_term ) ) {
 					WP_CLI::warning( 'Could not create term...' );
 					WP_CLI::warning( $new_term->get_error_message() );
@@ -341,7 +343,7 @@ class BillyPennMigrator implements InterfaceCommand {
 					$post_id = $this->content_diff_ids[ $post_id ];
 				}
 				WP_CLI::log( sprintf( 'Adding term to post #%d', $post_id ) );
-				wp_set_post_terms( $post_id, array( $term_id ), $taxonomy, true );
+				wp_set_post_terms( $post_id, [ $term_id ], $taxonomy, true );
 			}
 		}
 	}
@@ -349,11 +351,11 @@ class BillyPennMigrator implements InterfaceCommand {
 	public function add_image_credits( $attachment_id, $credit ) {
 		if ( class_exists( '\Newspack\Newspack_Image_Credits' ) ) {
 			// Get the meta keys from Newspack plugins.
-			$credit_meta = \Newspack\Newspack_Image_Credits::MEDIA_CREDIT_META;
+			$credit_meta     = \Newspack\Newspack_Image_Credits::MEDIA_CREDIT_META;
 			$credit_url_meta = \Newspack\Newspack_Image_Credits::MEDIA_CREDIT_URL_META;
 		} else {
 			// Fall back for when Newspack is not installed.
-			$credit_meta = '_media_credit';
+			$credit_meta     = '_media_credit';
 			$credit_url_meta = '_media_credit_url';
 		}
 
@@ -364,7 +366,7 @@ class BillyPennMigrator implements InterfaceCommand {
 		if ( isset( $credit['url'] ) ) {
 			update_post_meta( $attachment_id, $credit_url_meta, $credit['url'] );
 		}
-		
+
 	}
 
 	public function generate_image_block( $args ) {
@@ -378,17 +380,16 @@ HTML;
 <a href="%s">
 HTML;
 
-
 		$caption_html = <<<HTML
 <figcaption class="wp-element-caption">%s</figcaption>
 HTML;
 
 		if ( $args['href'] ) {
 			$href_start = sprintf( $link_html, $args['href'] );
-			$href_end = '</a>';
+			$href_end   = '</a>';
 		} else {
 			$href_start = '';
-			$href_end = '';
+			$href_end   = '';
 		}
 
 		if ( $args['caption'] ) {
@@ -399,10 +400,10 @@ HTML;
 
 		if ( $args['align'] ) {
 			$align_class = ' ' . $args['align'];
-			$align = str_replace( 'align', '',  $args['align'] );
+			$align       = str_replace( 'align', '', $args['align'] );
 		} else {
 			$align_class = '';
-			$align = '';
+			$align       = '';
 		}
 
 		$block = sprintf(
@@ -430,10 +431,10 @@ HTML;
 	public function fix_shortcode( $shortcode ) {
 		return strtr(
 			html_entity_decode( $shortcode ),
-			array(
+			[
 				'”' => '"',
 				'″' => '"',
-			),
+			],
 		);
 	}
 
@@ -462,7 +463,7 @@ HTML;
 	/**
 	 * Simple file logging.
 	 *
-	 * @param string $file    File name or path.
+	 * @param string $file File name or path.
 	 * @param string $message Log message.
 	 */
 	public function log( $file, $message ) {
