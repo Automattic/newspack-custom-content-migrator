@@ -92,6 +92,15 @@ class BillyPennMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator billypenn-convert-twitter-shortcodes',
+			[ $this, 'cmd_billypenn_convert_twitter_shortcodes' ],
+			[
+				'shortdesc' => 'Convert [twitter] shortcodes to blocks',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -186,6 +195,71 @@ class BillyPennMigrator implements InterfaceCommand {
 
 				$replaces[] = $block;
 				$replaces[] = $block;
+			}
+
+			$new_content = str_replace( $searches, $replaces, $post->post_content );
+
+			$wpdb->update( $wpdb->posts, [ 'post_content' => $new_content ], [ 'ID' => $post->ID ] );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator billypenn-convert-twitter-shortcodes`.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_billypenn_convert_twitter_shortcodes( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts_with_twitter_shortcodes = $wpdb->get_results(
+			"SELECT ID, post_content 
+			FROM $wpdb->posts 
+			WHERE post_type = 'post' 
+			  AND post_status = 'publish'
+			  AND post_content LIKE '%[twitter%'"
+		);
+
+		$shortcode_pattern = '/\[twitter[^\]]+\]/';
+
+		$twitter_block_template = '<!-- wp:embed {"url":"{url}","type":"rich","providerNameSlug":"twitter","responsive":true} -->
+<figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper">
+{url}
+</div></figure>
+<!-- /wp:embed -->';
+
+		foreach ( $posts_with_twitter_shortcodes as $post ) {
+			$found = preg_match_all( $shortcode_pattern, $post->post_content, $matches );
+
+			if ( 0 === $found ) {
+				continue;
+			}
+
+			WP_CLI::log( sprintf( 'Replacing %d twitter shortcodes in post #%d', count( $matches[0] ), $post->ID ) );
+
+			$searches = [];
+			$replaces = [];
+
+			foreach ( $matches[0] as $match ) {
+				$shortcode      = $this->fix_shortcode( urldecode( $match ) );
+				$shortcode_atts = shortcode_parse_atts( $shortcode );
+
+				if ( ! isset( $shortcode_atts['url'] ) ) {
+					continue;
+				}
+
+				$twitter_block = strtr(
+					$twitter_block_template,
+					[
+						'{url}' => $shortcode_atts['url'],
+					]
+				);
+
+				$searches[] = sprintf( "<!-- wp:shortcode -->\n%s\n<!-- /wp:shortcode -->", $match );
+				$searches[] = $match;
+
+				$replaces[] = $twitter_block;
+				$replaces[] = $twitter_block;
 			}
 
 			$new_content = str_replace( $searches, $replaces, $post->post_content );
