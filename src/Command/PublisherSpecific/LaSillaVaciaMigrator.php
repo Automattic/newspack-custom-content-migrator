@@ -11,6 +11,8 @@ use DOMXPath;
 use Exception;
 use Generator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \WP_CLI;
 
 class LaSillaVaciaMigrator implements InterfaceCommand
@@ -536,6 +538,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     private static $instance;
 
     /**
+     * @var CoAuthorPlus $coauthorsplus_logic
+     */
+    private $coauthorsplus_logic;
+
+    /**
+     * @var SimpleLocalAvatars $simple_local_avatars
+     */
+    private $simple_local_avatars;
+
+    /**
      * Constructor.
      */
     public function __constructor()
@@ -549,6 +561,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         if (null === self::$instance) {
             self::$instance = new $class();
             self::$instance->log_file_path = date('YmdHis', time()) . 'LSV_import.log';
+            self::$instance->coauthorsplus_logic = new CoAuthorPlus();
+            self::$instance->simple_local_avatars = new SimpleLocalAvatars();
         }
 
         return self::$instance;
@@ -698,23 +712,69 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $this->reset_db();
         }
 
-        foreach ( $this->json_generator( $assoc_args['import-json'], '_embedded.User' ) as $author ) {
+        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
+            $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: {$author['role']}" );
             $author_data = [
-                'user_login' => $author['Username'],
-                'user_pass' => wp_generate_password(),
-                'user_email' => $author['Email'],
-                'user_registered' => $author['CreatedOn'] ?? $author['UpdatedOn'] ?? date('Y-m-d H:i:s', time() ),
-                'first_name' => $author['FirstName'],
-                'last_name' => $author['LastName'],
-                'display_name' => $author['FirstName'] . ' ' . $author['LastName'],
-                'role' => 'author',
+                'user_login' => $author['user_login'],
+                'user_pass' => wp_generate_password( 24 ),
+                'user_email' => $author['user_email'],
+                'user_registered' => $author['user_registered'],
+                'first_name' => $author['user_first_name'] ?? '',
+                'last_name' => $author['user_last_name'] ?? '',
+                'display_name' => $author['display_name'],
                 'meta_input' => [
-                    'compañia' => $author['CompanyName'],
-                    'original_user_id' => $author['Id'],
+                    'original_user_id' => $author['xpr_id'],
+                    'description' => $author['bio']
                 ]
             ];
 
+            switch ( $author['role'] ) {
+                case 'author':
+                case 'editor':
+                    $author_data['role'] = $author['role'];
+                    break;
+                case 'admin':
+                    $author_data['role'] = 'administrator';
+                    break;
+                case 'antiguos usuarios':
+                case 'Silla Academica':
+                case 'Silla Llena':
+                    $this->file_logger( "Creating Guest Author." );
+                    //CAP
+                    $guest_author_data = [
+                        'display_name' => $author['display_name'],
+                        'user_login' => $author['user_login'],
+                        'first_name' => $author['user_first_name'] ?? '',
+                        'last_name' => $author['user_last_name'] ?? '',
+                        'user_email' => $author['user_email'],
+                        'description' => strip_tags( $author['bio'] ),
+                        // TODO handle avatar for guest author
+                        // 'avatar' => $this->handle_profile_photo( $author['image'] );
+                    ];
+
+                    $this->file_logger( json_encode( $guest_author_data ), false );
+
+                    $post_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data);
+
+                    update_post_meta( $post_id, 'original_user_id', $author['xpr_id'] );
+                    continue 2;
+            }
+
+            $this->file_logger( json_encode( $author_data ), false );
             $user_id = wp_insert_user( $author_data );
+            if ( is_wp_error( $user_id ) ) {
+                $this->file_logger( $user_id->get_error_message() );
+                continue;
+            }
+
+            $this->file_logger( "User created. ID: $user_id" );
+
+            if ( ! empty( $author['image'] ) ) {
+                $this->file_logger( "Creating User's avatar. File: {$author['image']}" );
+                /*$avatar_attachment_id = $this->handle_profile_photo( $author['image'] );
+
+                $this->simple_local_avatars->import_avatar( $user_id, $avatar_attachment_id );*/
+            }
         }
     }
 
