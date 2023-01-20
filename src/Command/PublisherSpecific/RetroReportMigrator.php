@@ -213,6 +213,18 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator retro-report-import-links`
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_links( $args, $assoc_args ) {
+
+		$staff = $this->validate_json_file( $assoc_args );
+
+	}
+
+	/**
 	 * Callable for `newspack-content-migrator retro-report-import-staff`
 	 *
 	 * @param array $args Positional arguments.
@@ -224,17 +236,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$json_file = $assoc_args['json-file'];
-
-		if ( ! file_exists( $json_file ) ) {
-			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
-		}
-
-		$users = json_decode( file_get_contents( $json_file ) );
-
-		if ( null === $users ) {
-			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
-		}
+		$users = $this->validate_json_file( $assoc_args );
 
 		foreach ( $users as $user ) {
 			$unique_id  = $user->unique_id;
@@ -341,14 +343,9 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
 		$category  = $assoc_args['category'];
-		$json_file = $assoc_args['json-file'];
 		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
-
+		$posts     = $this->validate_json_file( $assoc_args );
 		$post_type = $this->get_post_type( $category );
-
-		if ( ! file_exists( $json_file ) ) {
-			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
-		}
 
 		// Check if the category already exists.
 		$category_id = get_cat_ID( $category );
@@ -360,12 +357,6 @@ class RetroReportMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
-
-		$posts = json_decode( file_get_contents( $json_file ) );
-
-		if ( null === $posts ) {
-			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
-		}
 
 		$fields = $this->load_mappings( $category );
 
@@ -808,5 +799,28 @@ HTML;
 	public function log( $file, $message ) {
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
+	}
+
+	/**
+	 * Validate the JSON file and return it's decoded contents.
+	 * 
+	 * @param array $assoc_args The array of associate arguments passed to the CLI command.
+	 * @return mixed The decoded JSON, if possible.
+	 */
+	private function validate_json_file( $assoc_args ) {
+
+		if ( ! array_key_exists( 'json-file', $assoc_args ) ) {
+			WP_CLI::error( 'No JSON file provided. Please feed me JSON.' );
+		}
+
+		$json_file = $assoc_args['json-file'];
+		if ( ! file_exists( $json_file ) ) {
+			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
+		}
+
+		$data = json_decode( file_get_contents( $json_file ) );
+		if ( null === $data ) {
+			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
+		}
 	}
 }
