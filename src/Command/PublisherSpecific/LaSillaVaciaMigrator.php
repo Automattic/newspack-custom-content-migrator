@@ -832,6 +832,28 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         }
     }
 
+    /**
+     * Convenience function to handle low level task of getting the file from path and inserting attachment.
+     *
+     * @param string $filename
+     * @return int
+     */
+    private function handle_profile_photo(string $filename): int
+    {
+        // TODO find $filename with path
+
+        return wp_insert_attachment(
+            [
+                'comment_status' => 'closed',
+            ],
+            $filename
+        );
+    }
+
+    /**
+     * @param string $message
+     * @param bool $output
+     */
     private function file_logger(string $message, bool $output = true)
     {
         file_put_contents( $this->log_file_path, "$message\n", FILE_APPEND );
