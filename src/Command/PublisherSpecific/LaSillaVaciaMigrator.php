@@ -666,16 +666,19 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      * Generator for Author JSON.
      *
      * @param string $file
+     * @param string $json_path
      * @return Generator
      */
-    private function json_generator( string $file, string $json_path )
+    private function json_generator( string $file, string $json_path = '' )
     {
         $file = file_get_contents( $file );
         $json = json_decode( $file, true );
 
-        $path = explode( '.', $json_path );
-        foreach ( $path as $step ) {
-            $json = $json[ $step ];
+        if ( ! empty( $json_path ) ) {
+            $path = explode('.', $json_path);
+            foreach ($path as $step) {
+                $json = $json[$step];
+            }
         }
 
         foreach ($json as $element) {
