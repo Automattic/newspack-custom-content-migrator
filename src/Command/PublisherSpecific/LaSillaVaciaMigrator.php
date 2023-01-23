@@ -744,7 +744,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         }
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
-            $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: {$author['xpr_rol']}" );
+            $role = $author['xpr_rol'] ?? $author['role'] ?? 'antiguos usuarios';
+
+            $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: $role" );
             $author_data = [
                 'user_login' => $author['user_login'],
                 'user_pass' => wp_generate_password( 24 ),
@@ -769,7 +771,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 ]
             ];
 
-            switch ( $author['xpr_rol'] ) {
+            switch ( $role ) {
                 case 'author':
                 case 'editor':
                     $author_data['role'] = $author['xpr_rol'];
@@ -779,7 +781,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     break;
                 case 'antiguos usuarios':
                 case 'Silla Academica':
+                case 'SillaAcademica':
                 case 'Silla Llena':
+                case 'SillaLlena':
                     $this->file_logger( "Creating Guest Author." );
                     //CAP
                     $guest_author_data = [
@@ -790,6 +794,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'display_name' => $author['display_name'],
                         'description' => strip_tags( $author['bio'] ),
                         // TODO handle avatar for guest author
+
+                        /*if ( is_array( $author['image'] ) ) {
+                            $author['image'] = $author['image'][0];
+                        }*/
                         // 'avatar' => $this->handle_profile_photo( $author['image'] );
                     ];
 
@@ -820,6 +828,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             }
 
             $this->file_logger( "User created. ID: $user_id" );
+
+            if ( is_array( $author['image'] ) ) {
+                $author['image'] = $author['image'][0];
+            }
 
             if ( ! empty( $author['image'] ) ) {
                 $this->file_logger( "Creating User's avatar. File: {$author['image']}" );
