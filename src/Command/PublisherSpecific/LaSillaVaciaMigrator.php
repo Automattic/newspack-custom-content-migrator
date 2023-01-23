@@ -744,25 +744,35 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         }
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
-            $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: {$author['role']}" );
+            $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: {$author['xpr_rol']}" );
             $author_data = [
                 'user_login' => $author['user_login'],
                 'user_pass' => wp_generate_password( 24 ),
                 'user_email' => $author['user_email'],
                 'user_registered' => $author['user_registered'],
-                'first_name' => $author['user_first_name'] ?? '',
-                'last_name' => $author['user_last_name'] ?? '',
+                'first_name' => $author['user_name'] ?? '',
+                'last_name' => $author['user_lastname'] ?? '',
                 'display_name' => $author['display_name'],
                 'meta_input' => [
-                    'original_user_id' => $author['xpr_id'],
-                    'description' => $author['bio']
+                    'original_user_id' => $author['id'],
+                    'original_role_id' => $author['xpr_role_id'],
+                    'red' => $author['red'],
+                    'description' => $author['bio'],
+                    'xpr_usuario_de_twitter' => $author['xpr_UsuariodeTwitter'],
+                    'usuario_de_twitter' => $author['UsuariodeTwitter'],
+                    'ocupacion' => $author['xpr_ocupacion'],
+                    'genero' => $author['xpr_genero'] ?? '',
+                    'facebook_url' => $author['FacebookURL'],
+                    'linkedin_url' => $author['LinkedInURL'],
+                    'instagram_url' => $author['InstagramURL'],
+                    'whatsapp' => $author['whatsApp'],
                 ]
             ];
 
-            switch ( $author['role'] ) {
+            switch ( $author['xpr_rol'] ) {
                 case 'author':
                 case 'editor':
-                    $author_data['role'] = $author['role'];
+                    $author_data['role'] = $author['xpr_rol'];
                     break;
                 case 'admin':
                     $author_data['role'] = 'administrator';
@@ -773,11 +783,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     $this->file_logger( "Creating Guest Author." );
                     //CAP
                     $guest_author_data = [
-                        'display_name' => $author['display_name'],
                         'user_login' => $author['user_login'],
-                        'first_name' => $author['user_first_name'] ?? '',
-                        'last_name' => $author['user_last_name'] ?? '',
                         'user_email' => $author['user_email'],
+                        'first_name' => $author['user_name'] ?? '',
+                        'last_name' => $author['user_lastname'] ?? '',
+                        'display_name' => $author['display_name'],
                         'description' => strip_tags( $author['bio'] ),
                         // TODO handle avatar for guest author
                         // 'avatar' => $this->handle_profile_photo( $author['image'] );
@@ -787,7 +797,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
                     $post_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data);
 
-                    update_post_meta( $post_id, 'original_user_id', $author['xpr_id'] );
+                    update_post_meta( $post_id, 'original_user_id', $author['id'] );
+                    update_post_meta( $post_id, 'original_role_id', $author['xpr_role_id'] );
+                    update_post_meta( $post_id, 'red', $author['red'] );
+                    update_post_meta( $post_id, 'description', $author['bio'] );
+                    update_post_meta( $post_id, 'xpr_usuario_de_twitter', $author['xpr_UsuariodeTwitter'] );
+                    update_post_meta( $post_id, 'usuario_de_twitter', $author['UsuariodeTwitter'] );
+                    update_post_meta( $post_id, 'ocupacion', $author['xpr_ocupacion'] );
+                    update_post_meta( $post_id, 'genero', $author['xpr_genero'] );
+                    update_post_meta( $post_id, 'facebook_url', $author['FacebookURL'] );
+                    update_post_meta( $post_id, 'linkedin_url', $author['LinkedInURL'] );
+                    update_post_meta( $post_id, 'instagram_url', $author['InstagramURL'] );
+                    update_post_meta( $post_id, 'whatsapp', $author['whatsApp'] );
                     continue 2;
             }
 
