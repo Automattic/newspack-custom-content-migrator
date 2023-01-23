@@ -12,6 +12,7 @@ use Exception;
 use Generator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \WP_CLI;
 
@@ -548,6 +549,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     private $simple_local_avatars;
 
     /**
+     * @var Redirection $redirection
+     */
+    private $redirection;
+
+    /**
      * Constructor.
      */
     public function __constructor()
@@ -563,6 +569,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             self::$instance->log_file_path = date('YmdHis', time()) . 'LSV_import.log';
             self::$instance->coauthorsplus_logic = new CoAuthorPlus();
             self::$instance->simple_local_avatars = new SimpleLocalAvatars();
+            self::$instance->redirection = new Redirection();
         }
 
         return self::$instance;
@@ -616,6 +623,30 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'type' => 'assoc',
                         'name' => 'import-json',
                         'description' => 'The file which contains LSV articles.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'flag',
+                        'name' => 'reset-db',
+                        'description' => 'Resets the database for a fresh import.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ]
+                ]
+            ]
+        );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-migrate-redirects',
+            [ $this, 'migrate_redirects' ],
+            [
+                'shortdesc' => 'Migrate redirects',
+                'synopsis' => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV redirects',
                         'optional' => false,
                         'repeating' => false,
                     ],
@@ -889,6 +920,47 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             );
 
             $this->file_logger( "Article Imported: $post_id" );
+        }
+    }
+
+    /**
+     * Migrator for LSV redirects.
+     *
+     * @param $args
+     * @param $assoc_args
+     */
+    public function migrate_redirects( $args, $assoc_args )
+    {
+        if ( $assoc_args['reset-db'] ) {
+            $this->reset_db();
+        }
+
+        global $wpdb;
+
+        foreach ( $this->json_generator( $assoc_args['import-json']) as $redirect ) {
+            $from_path = parse_url( $redirect['CustomUrl'], PHP_URL_PATH );
+            $to_path = $redirect['Redirect'];
+            $this->file_logger( "Original Redirect From: $from_path | Original Redirect To: $to_path" );
+            // TODO Search in postmeta for $to_path
+            $query = $wpdb->prepare(
+                "SELECT 
+                        p.ID, 
+                        p.post_title, 
+                        p.post_name
+                    FROM $wpdb->posts p 
+                        LEFT JOIN $wpdb->postmeta pm 
+                            ON pm.post_id = p.ID 
+                    WHERE pm.meta_key = 'original_article_path' 
+                      AND pm.meta_value = '%s'",
+                $to_path
+            );
+            $result = $wpdb->get_row( $query );
+
+            if ( $result ) {
+                $to_path = get_site_url(null, $result->post_name );
+                $this->file_logger( "Creating redirect to $to_path" );
+                $this->redirection->create_redirection_rule( '', get_site_url( null, $from_path ), $to_path );
+            }
         }
     }
 
