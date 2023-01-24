@@ -213,18 +213,6 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator retro-report-import-links`
-	 *
-	 * @param array $args Positional arguments.
-	 * @param array $assoc_args Associative arguments.
-	 */
-	public function cmd_retro_report_import_links( $args, $assoc_args ) {
-
-		$staff = $this->validate_json_file( $assoc_args );
-
-	}
-
-	/**
 	 * Callable for `newspack-content-migrator retro-report-import-staff`
 	 *
 	 * @param array $args Positional arguments.
@@ -421,7 +409,6 @@ class RetroReportMigrator implements InterfaceCommand {
 
 			if ( $this->is_array_item( $field ) ) {
 				$value = $this->get_array_item_value( $field, $object );
-				var_dump( $value );
 			} else {
 				$value = property_exists( $object, $field->name ) ? $object->{ $field->name } : '';
 			}
@@ -433,10 +420,6 @@ class RetroReportMigrator implements InterfaceCommand {
 				$post_args[ $field->target ] = $formatted_value;
 			}
 		}
-
-		var_dump( $post_args );
-
-		return;
 
 		$post_id = $this->add_post( $post_args, $post_meta );
 
@@ -493,6 +476,11 @@ class RetroReportMigrator implements InterfaceCommand {
 					$slug       = end( $path_parts );
 					return $slug;
 			}
+		}
+
+		// Convert dates to WordPress' precious format.
+		if ( 'date' === $field->type ) {
+			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
 		}
 
 		if ( 'thumbnail' == $field->type && $value ) {
@@ -822,5 +810,7 @@ HTML;
 		if ( null === $data ) {
 			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
 		}
+
+		return $data;
 	}
 }
