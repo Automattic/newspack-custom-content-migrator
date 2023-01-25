@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use \WP_CLI;
 
@@ -12,7 +13,8 @@ use \WP_CLI;
  */
 class SentinelColoradoMigrator implements InterfaceCommand {
 	// Logs.
-	const GALLERY_LOGS = 'sentinelColorradoGalleryMigration.log';
+	const GALLERY_LOGS    = 'sentinelColoradoGalleryMigration.log';
+	const CO_AUTHORS_LOGS = 'sentinelColoradoCoAuthorsMigration.log';
 
 	/**
 	 * @var SquareBracketsElementManipulator.
@@ -25,11 +27,17 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 	private $posts_logic;
 
 	/**
+	 * @var CoAuthorPlusLogic $coauthorsplus_logic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->squarebracketselement_manipulator = new SquareBracketsElementManipulator();
         $this->posts_logic                       = new PostsLogic();
+		$this->coauthorsplus_logic               = new CoAuthorPlusLogic();
 	}
 
 	/**
@@ -60,6 +68,54 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 			array( $this, 'sentinel_colorado_migrate_gallery' ),
 			array(
 				'shortdesc' => 'Migrate Gallery shortcode.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator sentinel-colorado-migrate-authors',
+			array( $this, 'sentinel_colorado_migrate_authors' ),
+			array(
+				'shortdesc' => 'Migrate Authors custom fields.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator sentinel-colorado-migrate-bylines',
+			array( $this, 'sentinel_colorado_migrate_bylines' ),
+			array(
+				'shortdesc' => 'Migrate Bylines custom fields.',
 				'synopsis'  => array(
 					array(
 						'type'        => 'assoc',
@@ -175,6 +231,175 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 					$this->log( self::GALLERY_LOGS, 'Updated post: ' . $post->ID );
 				}
             }
+		}
+
+        wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator sentinel-colorado-migrate-authors`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function sentinel_colorado_migrate_authors( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_co_authors',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+                // 'p'              => 380384,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 380384,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$co_authors_ids  = [];
+            $co_author_names = get_post_meta( $post->ID, 'sfly_guest_author_names', true );
+            // $co_author_link        = urldecode( get_post_meta( $post->ID, 'sfly_guest_link', true ) );
+            $co_author_description = get_post_meta( $post->ID, 'sfly_guest_author_description', true );
+            $co_author_email       = get_post_meta( $post->ID, 'sfly_guest_author_email', true );
+
+			// Split names.
+			$co_author_names_list_fixed = [];
+			$co_author_names_list       = explode( ' and ', $co_author_names );
+
+			foreach ( $co_author_names_list as $co_author_name ) {
+				$lower_cased_co_author_name = strtolower( $co_author_name );
+				if (
+					str_contains( $co_author_name, ',' )
+					&& ! str_contains( $lower_cased_co_author_name, 'associated press' )
+					&& ! str_contains( $lower_cased_co_author_name, 'writer' )
+					) {
+						$co_author_names_list_fixed = array_merge( $co_author_names_list_fixed, explode( ',', $co_author_name ) );
+				} else {
+					$co_author_names_list_fixed[] = $co_author_name;
+				}
+			}
+
+			$co_author_names_list_fixed = array_filter( array_map( 'trim', $co_author_names_list_fixed ) );
+
+			foreach ( $co_author_names_list_fixed as $co_author_name ) {
+				$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+                    [
+						'display_name' => $co_author_name,
+						'user_email'   => $co_author_email,
+						'description'  => $co_author_description,
+					]
+                );
+				if ( is_wp_error( $guest_author_id ) ) {
+					$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Could not create GA for post %d with display name: %s', $post->ID, $co_author_name ) );
+				} else {
+					$co_authors_ids[] = $guest_author_id;
+				}
+			}
+
+			// Assign co-atuhors to the post in question.
+			if ( ! empty( $co_authors_ids ) ) {
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors_ids, $post->ID );
+				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Adding co-authors to the post %d: %s', $post->ID, join( ', ', $co_author_names_list_fixed ) ) );
+			}
+
+			update_post_meta( $post->ID, '_newspack_migrated_co_authors', true );
+		}
+
+        wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator sentinel-colorado-migrate-bylines`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function sentinel_colorado_migrate_bylines( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_bylines',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+                // 'p'              => 380384,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 380384,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+            $byline = get_post_meta( $post->ID, 'author_byline_field', true );
+
+			if ( empty( $byline ) ) {
+				continue;
+			}
+
+			// Clean byline.
+			$byline = trim( ltrim( $byline, 'BY' ) );
+
+			$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $byline ] );
+			if ( is_wp_error( $guest_author_id ) ) {
+				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Could not create GA for post %d with display name: %s', $post->ID, $co_author_name ) );
+				continue;
+			}
+
+			// Assign co-atuhors to the post in question.
+			if ( ! empty( $guest_author_id ) ) {
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
+				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Adding co-authors to the post %d: %s', $post->ID, join( ', ', $co_author_names_list_fixed ) ) );
+			}
+
+			update_post_meta( $post->ID, '_newspack_migrated_bylines', true );
 		}
 
         wp_cache_flush();
