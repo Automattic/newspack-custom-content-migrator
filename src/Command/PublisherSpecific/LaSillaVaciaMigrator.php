@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DateTime;
 use DateTimeZone;
 use DOMDocument;
-use DOMNode;
+use DOMElement;
 use DOMNodeList;
 use DOMXPath;
 use Exception;
@@ -870,7 +870,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $original_article_id = $article['Id'] ?? 0;
             $original_article_title = $article['Title'] ?? '';
             $original_article_slug = $article['Slug'] ?? '';
-            $hashed_import_id = md5( $original_article_id . $original_article_title . $original_article_slug );
+            $hashed_import_id = md5( $original_article_title . $original_article_slug );
 
             $this->file_logger("Original Article ID: $original_article_id | Original Article Title: $original_article_title | Original Article Slug: $original_article_slug" );
 
@@ -891,25 +891,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
 
             $html = '';
-            if (!empty($article['Html'])) {
 
-                $dom = new DOMDocument();
-                $dom->encoding = 'utf-8';
-                @$dom->loadHTML( utf8_decode( htmlentities(  $article['Html'] ) ) );
-                $xpath = new DOMXPath($dom);
-                /* @var DOMNodeList $nodes */
-                $nodes = $xpath->query('//@*');
-
-                foreach ($nodes as $node) {
-                    /* @var DOMNode $node */
-                    if ('href' === $node->nodeName) {
-                        continue;
-                    }
-
-                    $node->parentNode->removeAttribute( $node->nodeName );
-                }
-
-                $html = html_entity_decode( $dom->saveHTML( $dom->documentElement ) );
+            if ( ! empty( $article['html'] ) ) {
+                $html = $this->handle_extracting_html_content( $article['html'] );
             }
 
             $article_data = [
@@ -974,6 +958,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $from_path = parse_url( $redirect['CustomUrl'], PHP_URL_PATH );
             $to_path = $redirect['Redirect'];
             $this->file_logger( "Original Redirect From: $from_path | Original Redirect To: $to_path" );
+
+            $response_code = wp_remote_retrieve_response_code( wp_remote_get( $redirect['CustomUrl'] ) );
+
+            if ( 200 != $response_code ) {
+                $this->file_logger( "Unsuccessful request: ($response_code) {$redirect['CustomUrl']}" );
+                continue;
+            }
+
             // TODO Search in postmeta for $to_path
             $query = $wpdb->prepare(
                 "SELECT 
@@ -995,6 +987,27 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 $this->redirection->create_redirection_rule( '', get_site_url( null, $from_path ), $to_path );
             }
         }
+    }
+
+    private function handle_extracting_html_content(string $html)
+    {
+        $dom = new DOMDocument();
+        $dom->encoding = 'utf-8';
+        @$dom->loadHTML( utf8_decode( htmlentities(  $html ) ) );
+        $xpath = new DOMXPath($dom);
+        /* @var DOMNodeList $nodes */
+        $nodes = $xpath->query('//@*');
+
+        foreach ($nodes as $node) {
+            /* @var DOMElement $node */
+            if ('href' === $node->nodeName) {
+                continue;
+            }
+
+            $node->parentNode->removeAttribute( $node->nodeName );
+        }
+
+        return html_entity_decode( $dom->saveHTML( $dom->documentElement ) );
     }
 
     /**
