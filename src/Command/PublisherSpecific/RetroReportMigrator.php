@@ -490,6 +490,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		}
 
 		if ( 'thumbnail' == $field->type && $value ) {
+
 			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
 
 			$image_url     = self::BASE_URL . $value;
@@ -718,6 +719,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'video_source[0]->description', 'string', 'newspack_post_subtitle' ),
 			array( 'video_source[0]->description', 'string', 'newspack_article_summary' ),
 			array( 'video_source[0]->image', 'thumbnail', '_thumbnail_id' ),
+			array( 'video_source[0]->video_id', 'string', '_unique_id' ),
 		);
 	}
 
