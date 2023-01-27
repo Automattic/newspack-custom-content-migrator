@@ -459,6 +459,12 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return mixed The formatted value.
 	 */
 	public function format_post_field( $field, $value ) {
+
+		if ( false !== strpos( $field->name, '->' ) ) {
+			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
+			$value = $value->$prop;
+		}
+
 		if ( 'string' == $field->type || 'array' == $field->type || 'boolean' == $field->type ) {
 			switch ( $field->target ) {
 				case 'post_status':
