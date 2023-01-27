@@ -855,6 +855,7 @@ HTML;
 %3$s</div></details></div>
 <!-- /wp:genesis-blocks/gb-accordion -->';
 		if ( ! empty( $archive_videos ) ) {
+			$archive_video_block .= '<!-- wp:heading --><h2>Archived Versions</h2><!-- /wp:heading -->';
 			foreach ( $archive_videos as $video ) {
 				$archive_video_block .= sprintf(
 					$accordion_template,
@@ -873,7 +874,6 @@ HTML;
 			$released,
 			$this->convert_copy_to_blocks( $post->video_source[0]->copy ),
 			$transcript,
-			'<!-- wp:heading --><h2>Archived Versions</h2><!-- /wp:heading -->',
 			$archive_video_block
 		] );
 
