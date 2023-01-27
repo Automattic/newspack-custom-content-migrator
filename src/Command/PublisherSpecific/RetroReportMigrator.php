@@ -224,17 +224,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$json_file = $assoc_args['json-file'];
-
-		if ( ! file_exists( $json_file ) ) {
-			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
-		}
-
-		$users = json_decode( file_get_contents( $json_file ) );
-
-		if ( null === $users ) {
-			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
-		}
+		$users = $this->validate_json_file( $assoc_args );
 
 		foreach ( $users as $user ) {
 			$unique_id  = $user->unique_id;
@@ -341,14 +331,9 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
 		$category  = $assoc_args['category'];
-		$json_file = $assoc_args['json-file'];
 		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
-
+		$posts     = $this->validate_json_file( $assoc_args );
 		$post_type = $this->get_post_type( $category );
-
-		if ( ! file_exists( $json_file ) ) {
-			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
-		}
 
 		// Check if the category already exists.
 		$category_id = get_cat_ID( $category );
@@ -360,12 +345,6 @@ class RetroReportMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
-
-		$posts = json_decode( file_get_contents( $json_file ) );
-
-		if ( null === $posts ) {
-			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
-		}
 
 		$fields = $this->load_mappings( $category );
 
@@ -430,7 +409,6 @@ class RetroReportMigrator implements InterfaceCommand {
 
 			if ( $this->is_array_item( $field ) ) {
 				$value = $this->get_array_item_value( $field, $object );
-				var_dump( $value );
 			} else {
 				$value = property_exists( $object, $field->name ) ? $object->{ $field->name } : '';
 			}
@@ -442,10 +420,6 @@ class RetroReportMigrator implements InterfaceCommand {
 				$post_args[ $field->target ] = $formatted_value;
 			}
 		}
-
-		var_dump( $post_args );
-
-		return;
 
 		$post_id = $this->add_post( $post_args, $post_meta );
 
@@ -485,6 +459,12 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return mixed The formatted value.
 	 */
 	public function format_post_field( $field, $value ) {
+
+		if ( false !== strpos( $field->name, '->' ) ) {
+			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
+			$value = $value->$prop;
+		}
+
 		if ( 'string' == $field->type || 'array' == $field->type || 'boolean' == $field->type ) {
 			switch ( $field->target ) {
 				case 'post_status':
@@ -504,7 +484,13 @@ class RetroReportMigrator implements InterfaceCommand {
 			}
 		}
 
+		// Convert dates to WordPress' precious format.
+		if ( 'date' === $field->type ) {
+			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
+		}
+
 		if ( 'thumbnail' == $field->type && $value ) {
+
 			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
 
 			$image_url     = self::BASE_URL . $value;
@@ -555,14 +541,25 @@ class RetroReportMigrator implements InterfaceCommand {
 	public function user_exists( $user ) {
 		$unique_id = $user->unique_id;
 
-		$users = get_users(
-			array(
-				'meta_key'   => self::META_PREFIX . 'unique_id',
-				'meta_value' => $unique_id,
-			),
-		);
+		$users = $this->get_users_from_staff_id( $unique_id );
 
 		return count( $users ) > 0;
+	}
+
+	/**
+	 * Grab the user account based on the original staff ID.
+	 * 
+	 * @param int $staff_id Staff ID from the JSON import.
+	 * 
+	 * @return array List of WP_User objects that match the Staff ID.
+	 */
+	private function get_user_from_staff_id( $staff_id ) {
+		return get_users(
+			array(
+				'meta_key'   => self::META_PREFIX . 'unique_id',
+				'meta_value' => $staff_id,
+			),
+		);
 	}
 
 	/**
@@ -711,13 +708,25 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'path', 'string', 'path' ),
 			array( 'date', 'string', 'date' ),
 			array( 'images', 'array', 'images' ),
-			array( 'date', 'string', 'date' ),
+		);
+
+		$this->fields_mappings['Video'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'video_source[0]', 'array', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'publishdate', 'date', 'post_date_gmt' ),
+			array( 'video_source[0]->description', 'string', 'newspack_post_subtitle' ),
+			array( 'video_source[0]->description', 'string', 'newspack_article_summary' ),
+			array( 'video_source[0]->image', 'thumbnail', '_thumbnail_id' ),
+			array( 'video_source[0]->video_id', 'string', '_unique_id' ),
 		);
 	}
 
 	public function set_content_formatters() {
 		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
 		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
+		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
 	}
 
 	public function get_content_formatter( $category ) {
@@ -742,10 +751,11 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_post_types() {
-		$this->post_types['Standards']          = 'wp_block';
-		$this->post_types['Links']              = 'post';
-		$this->post_types['Education profiles'] = 'newspack_lst_generic';
+		$this->post_types['Standards']           = 'wp_block';
+		$this->post_types['Links']               = 'post';
+		$this->post_types['Education profiles']  = 'newspack_lst_generic';
 		$this->post_types['Education resources'] = 'post';
+		$this->post_types['Video']               = 'post';
 	}
 
 	public function format_education_profiles_content( $post ) {
@@ -785,6 +795,106 @@ HTML;
 HTML;
 	}
 
+	/**
+	 * Format post content for video posts.
+	 * 
+	 * Merges imported data with a post template specifically for Video content.
+	 * 
+	 * @param array $post Array of post data as retrieved from the JSON.
+	 * 
+	 * @return string Constructed post template.
+	 */
+	public function format_video_content( $post ) {
+
+		// Video group block at the top of the page.
+		$video_template = '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=%1$s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+https://www.youtube.com/watch?v=%1$s
+</div></figure>
+<!-- /wp:embed -->';
+		$video_block = sprintf( $video_template, $post->video_source[0]->video_id );
+		$video_group = <<<HTML
+		<!-- wp:group {"align":"full","backgroundColor":"dark-gray","textColor":"white","layout":{"type":"constrained"}} -->
+<div class="wp-block-group alignfull has-white-color has-dark-gray-background-color has-text-color has-background">$video_block</div>
+<!-- /wp:group -->
+HTML;
+
+		// List of production credits.
+		$credits         = '';
+		$credit_template = '<!-- wp:paragraph --><p>%1$s: %2$s</p><!-- /wp:paragraph -->';
+		foreach ( $post->production_credits as $credit ) {
+			foreach ( $credit->staff as $staff ) {
+				$users = $this->get_user_from_staff_id( $staff );
+				if ( ! empty( $users ) ) {
+					$credits .= sprintf( $credit_template, $credit->title, $users[0]->display_name );
+				}
+			}
+		}
+
+		// Release date, formatted according to the template.
+		$released = sprintf(
+			'<!-- wp:paragraph --><p>Released: %s </p><!-- /wp:paragraph -->',
+			date( 'M d, Y', strtotime( $post->video_source[0]->release_date ) )
+		);
+
+		// Transcript button.
+		$transcript = sprintf(
+			'<!-- wp:buttons -->
+			<div class="wp-block-buttons"><!-- wp:button -->
+			<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="%s">Transcript</a></div>
+			<!-- /wp:button --></div>
+			<!-- /wp:buttons -->',
+			$post->video_source[0]->transcript_file
+		);
+
+		// Accordion of "archive" videos.
+		$archive_videos      = array_slice( $post->video_source, 1 );
+		$archive_video_block = '';
+		$accordion_template  = '<!-- wp:genesis-blocks/gb-accordion -->
+<div class="wp-block-genesis-blocks-gb-accordion gb-block-accordion"><details><summary class="gb-accordion-title">%1$s</summary><div class="gb-accordion-text">%2$s
+%3$s</div></details></div>
+<!-- /wp:genesis-blocks/gb-accordion -->';
+		if ( ! empty( $archive_videos ) ) {
+			$archive_video_block .= '<!-- wp:heading --><h2>Archived Versions</h2><!-- /wp:heading -->';
+			foreach ( $archive_videos as $video ) {
+				$archive_video_block .= sprintf(
+					$accordion_template,
+					$video->title,
+					sprintf( $video_template, $video->video_id ),
+					$this->convert_copy_to_blocks( $video->copy )
+				);
+			}
+		}
+
+		// Combine all the parts in the right order.
+		return implode( '', [
+			$video_group,
+			"<!-- wp:heading --><h2>$post->title</h2><!-- /wp:heading -->",
+			$credits,
+			$released,
+			$this->convert_copy_to_blocks( $post->video_source[0]->copy ),
+			$transcript,
+			$archive_video_block
+		] );
+
+	}
+
+	/**
+	 * Convert paragraph HTML to blocks.
+	 * 
+	 * Intended to be used for any "copy" values from the JSON imports.
+	 * 
+	 * @param string $copy The raw HTML from the JSON
+	 * 
+	 * @return string Refactored content with paragraph blocks.
+	 */
+	private function convert_copy_to_blocks( $copy ) {
+		$copy = str_replace( '\n', '', $copy );
+		$copy = str_replace( '<p>', '<!-- wp:paragraph --><p>', $copy );
+		$copy = str_replace( '</p>', '</p><!-- /wp:paragraph -->', $copy );
+		return $copy;
+	}
+
 	public function is_array_item( $field ) {
 		return preg_match( self::ARRAY_ITEM_REGEX, $field->name );
 	}
@@ -808,5 +918,30 @@ HTML;
 	public function log( $file, $message ) {
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
+	}
+
+	/**
+	 * Validate the JSON file and return it's decoded contents.
+	 * 
+	 * @param array $assoc_args The array of associate arguments passed to the CLI command.
+	 * @return mixed The decoded JSON, if possible.
+	 */
+	private function validate_json_file( $assoc_args ) {
+
+		if ( ! array_key_exists( 'json-file', $assoc_args ) ) {
+			WP_CLI::error( 'No JSON file provided. Please feed me JSON.' );
+		}
+
+		$json_file = $assoc_args['json-file'];
+		if ( ! file_exists( $json_file ) ) {
+			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
+		}
+
+		$data = json_decode( file_get_contents( $json_file ) );
+		if ( null === $data ) {
+			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
+		}
+
+		return $data;
 	}
 }
