@@ -1176,28 +1176,59 @@ class NoozhawkMigrator implements InterfaceMigrator {
 	public function cmd_nh_copy_media_caption_from_titles( $args, $assoc_args ) {
 		global $wpdb;
 
-		$query = new \WP_Query(
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_attachment_captions',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
 			[
 				'posts_per_page' => -1,
-				'post_type'      => 'attachment',
+				'post_type'      => 'post',
+				// 'p'              => 354329,
 				'post_status'    => 'any',
+				'post_type'      => 'attachment',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 354329,
+				'post_status'    => 'any',
+				'post_type'      => 'attachment',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			]
 		);
 
 		$media_posts = $query->get_posts();
 
 		foreach ( $media_posts as $media ) {
-			$media_alt = get_post_meta( $media->ID, '_wp_attachment_image_alt', true );
-			if ( empty( $media->post_excerpt ) && ! empty( $media_alt ) ) {
+			$media_title = get_the_title( $media->ID );
+			if ( empty( $media->post_excerpt ) && ! empty( $media_title ) ) {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 				$wpdb->update(
 					$wpdb->prefix . 'posts',
-					array( 'post_excerpt' => $media_alt ),
+					array( 'post_excerpt' => $media_title ),
 					array( 'ID' => $media->ID )
 				);
 
 				WP_CLI::line( sprintf( 'Updated media: %d', $media->ID ) );
 			}
+
+			update_post_meta( $media->ID, '_newspack_migrated_attachment_captions', true );
 		}
 	}
 
