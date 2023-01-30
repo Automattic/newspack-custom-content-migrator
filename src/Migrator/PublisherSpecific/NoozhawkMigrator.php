@@ -305,6 +305,14 @@ class NoozhawkMigrator implements InterfaceMigrator {
 				),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator noozhawk-import-legacy-media',
+			array( $this, 'cmd_nh_import_legacy_media' ),
+			array(
+				'shortdesc' => 'Import Noozhawk legacy media.',
+			)
+		);
 	}
 
 	/**
@@ -1309,6 +1317,145 @@ class NoozhawkMigrator implements InterfaceMigrator {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator noozhawk-import-legacy-media`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_nh_import_legacy_media( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results( "SELECT * FROM `wp_posts` where post_type IN ('post', 'page') AND post_content like '%//www.legacy.noozhawk.com%'" );
+
+		foreach ( $posts as $post ) {
+			$post_content_updated = $post->post_content;
+			preg_match_all( '/(?P<urls>https:\/\/www\.legacy\.noozhawk\.com[^"\\\\]+)/', $post->post_content, $legacy_media_urls_matches );
+
+			if ( $legacy_media_urls_matches && array_key_exists( 'urls', $legacy_media_urls_matches ) ) {
+				foreach ( $legacy_media_urls_matches['urls'] as $media_url ) {
+					// Download or import the image file.
+					try {
+						$attachment_id = $this->import_external_file( $media_url, null, null, $description = null, null, $post->ID );
+					} catch ( \Exception $e ) {
+						WP_CLI::warning( sprintf( '❗ Error while downloading image %s: %s', $media_url, $e->getMessage() ) );
+						continue;
+					}
+
+					// Replace the URI in Post content with the new one.
+					$img_uri_new          = wp_get_attachment_url( $attachment_id );
+					$post_content_updated = str_replace( array( esc_attr( $media_url ), $media_url ), $img_uri_new, $post_content_updated );
+					$this->log(
+                        self::IMPORT_GALLERIES_LOGS,
+                        sprintf( 'Post ID %d ; original src %s ; new src %s ; imported attachment ID %d', $post->ID, $media_url, $img_uri_new, $attachment_id )
+					);
+				}
+			}
+
+			if ( $post_content_updated !== $post->post_content ) {
+				wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => $post_content_updated,
+					)
+				);
+
+				WP_CLI::success( sprintf( 'Post %d updated!', $post->ID ) );
+				die();
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Imports/downloads external media file to the Media Library, either from a URL or from a local path.
+	 *
+	 * To untangle the terminology, the optional params Title, Caption, Description and Alt are the params we see in the
+	 * Attachment edit form in WP Admin.
+	 *
+	 * @param string $path        Media file full URL or full local path, or URL to the media file.
+	 * @param string $title       Optional. Attachment title.
+	 * @param string $caption     Optional. Attachment caption.
+	 * @param string $description Optional. Attachment description.
+	 * @param string $alt         Optional. Image Attachment `alt` attribute.
+	 * @param int    $post_id     Optional.  Post ID the media is associated with; this will ensure it gets uploaded to the same
+	 *                            `yyyy/mm` folder.
+	 * @param array  $args        Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
+	 *                            internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
+	 *
+	 * @return int|WP_Error Attachment ID.
+	 *
+	 * @throws RuntimeException If error during download or import. Sets custom exception codes.
+	 */
+	public function import_external_file( $path, $title = null, $caption = null, $description = null, $alt = null, $post_id = 0, $args = array() ) {
+		$tmpfname = download_url( $path );
+		if ( is_wp_error( $tmpfname ) ) {
+			throw ( new \RuntimeException( $tmpfname->get_error_message(), 101 ) );
+		}
+
+		// Get the file name - using the `wp_parse_url()` eliminates the query params.
+		$file_name = basename( wp_parse_url( $path )['path'] );
+		// Where URI which seres an image containsd no extensions (e.g. some images from googleusercontent.com), try and detect the extension directly from the downloaded image binary's mime encoding.
+		$file_has_extension = isset( pathinfo( $file_name )['extension'] );
+		if ( ! $file_has_extension ) {
+			$extension = $this->get_image_extension_from_binary_file( $tmpfname );
+			if ( $extension ) {
+				$file_name .= '.' . $extension;
+			}
+		}
+
+		$file_array = array(
+			'name'     => $file_name,
+			'tmp_name' => $tmpfname,
+		);
+
+		if ( $title ) {
+			$args['post_title'] = $title;
+		}
+		if ( $caption ) {
+			$args['post_excerpt'] = $caption;
+		}
+		if ( $description ) {
+			$args['post_content'] = $description;
+		}
+		$att_id = media_handle_sideload( $file_array, $post_id, $title, $args );
+
+		// If there was an error importing after downloading, first clean up the temp file.
+		if ( is_wp_error( $att_id ) ) {
+			if ( file_exists( $file_array['tmp_name'] ) ) {
+				// phpcs:ignore
+				unlink( $file_array['tmp_name'] );
+			}
+			throw ( new \RuntimeException( $att_id->get_error_message(), 101 ) );
+		}
+
+		if ( $alt ) {
+			update_post_meta( $att_id, '_wp_attachment_image_alt', $alt );
+		}
+
+		return $att_id;
+	}
+
+	/**
+	 * Attempts to determine image file extension from the mime encoding of the image file.
+	 *
+	 * @param string $filename Full file path.
+	 *
+	 * @return string|null Image format extension, no dot.
+	 */
+	private function get_image_extension_from_binary_file( $filename ) {
+		$extension = null;
+
+		$mime_type       = ( new \finfo( FILEINFO_MIME ) )->file( $filename );
+		$mime_img_prefix = 'image/';
+		if ( is_string( $mime_type ) && ( 0 === strpos( $mime_type, $mime_img_prefix ) ) ) {
+			$extension = substr( $mime_type, strlen( $mime_img_prefix ), strpos( $mime_type, ';' ) - strlen( $mime_img_prefix ) );
+		}
+
+		return $extension ? $extension : null;
 	}
 
 	/**
