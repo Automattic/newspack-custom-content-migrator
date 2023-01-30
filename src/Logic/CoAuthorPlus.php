@@ -313,9 +313,8 @@ class CoAuthorPlus {
 	public function get_all_gas() {
 		global $wpdb;
 
-		// This query was taken directly from \CoAuthors_Guest_Authors::get_guest_author_by but added post_status,
-		// because otherwise it picks up 'auto-draft's, which are not valid GA objects.
-		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'guest-author' and post_status = 'publish';" );
+		// This query was taken directly from \CoAuthors_Guest_Authors::get_guest_author_by.
+		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'guest-author';" );
 
 		$all_gas = [];
 		foreach ( $post_ids as $post_id ) {
