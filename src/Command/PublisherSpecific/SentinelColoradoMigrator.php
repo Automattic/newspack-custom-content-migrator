@@ -389,14 +389,14 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 
 			$guest_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $byline ] );
 			if ( is_wp_error( $guest_author_id ) ) {
-				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Could not create GA for post %d with display name: %s', $post->ID, $co_author_name ) );
+				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Could not create GA for post %d with display name: %s', $post->ID, $byline ) );
 				continue;
 			}
 
 			// Assign co-atuhors to the post in question.
 			if ( ! empty( $guest_author_id ) ) {
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID );
-				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Adding co-authors to the post %d: %s', $post->ID, join( ', ', $co_author_names_list_fixed ) ) );
+				$this->log( self::CO_AUTHORS_LOGS, sprintf( 'Adding co-authors to the post %d: %s', $post->ID, $byline ) );
 			}
 
 			update_post_meta( $post->ID, '_newspack_migrated_bylines', true );
