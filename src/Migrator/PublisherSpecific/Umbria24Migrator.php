@@ -10,6 +10,7 @@ use \WP_CLI;
  * Custom migration scripts for Washington Monthly.
  */
 class Umbria24Migrator implements InterfaceMigrator {
+
 	const VIDEO_YOUTUBE_LOG   = 'video_youtube.log';
 	const VIDEO_IFRAME_LOG    = 'video_iframe.log';
 	const VIDEO_VIMEO_LOG     = 'video_vimeo.log';
@@ -20,6 +21,11 @@ class Umbria24Migrator implements InterfaceMigrator {
 	 * @var null|InterfaceMigrator Instance.
 	 */
 	private static $instance = null;
+
+	/**
+	 * @var PostsMigrator logic.
+	 */
+	private $posts_migrator_logic = null;
 
 	/**
 	 * Constructor.
@@ -34,7 +40,7 @@ class Umbria24Migrator implements InterfaceMigrator {
 	 * @return InterfaceMigrator|null
 	 */
 	public static function get_instance() {
-		$class = get_called_class();
+		 $class = get_called_class();
 		if ( null === self::$instance ) {
 			self::$instance = new $class();
 		}
@@ -48,29 +54,47 @@ class Umbria24Migrator implements InterfaceMigrator {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator umbria24-convert-acf-video',
-			[ $this, 'cmd_convert_acf_video' ],
-			[
+			array( $this, 'cmd_convert_acf_video' ),
+			array(
 				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => [],
-			]
+				'synopsis'  => array(),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator umbria24-convert-acf-medialab',
-			[ $this, 'cmd_convert_acf_medialab' ],
-			[
+			array( $this, 'cmd_convert_acf_medialab' ),
+			array(
 				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => [],
-			]
+				'synopsis'  => array(),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator umbria24-convert-acf-fotogallery',
-			[ $this, 'cmd_convert_acf_fotogallery' ],
-			[
+			array( $this, 'cmd_convert_acf_fotogallery' ),
+			array(
 				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => [],
-			]
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-fix-empty-jetpack-slideshows',
+			array( $this, 'cmd_fix_empty_jetpack_slideshows' ),
+			array(
+				'shortdesc' => 'Fix migrated emtpy Jetpack slideshows',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-revert-fix-empty-jetpack-slideshows',
+			array( $this, 'cmd_revert_fix_empty_jetpack_slideshows' ),
+			array(
+				'shortdesc' => 'Fix migrated emtpy Jetpack slideshows',
+				'synopsis'  => array(),
+			)
 		);
 	}
 
@@ -84,18 +108,18 @@ class Umbria24Migrator implements InterfaceMigrator {
 		$video_posts  = $this->get_all_posts_by_post_type( 'video' );
 		$video_cat    = get_category_by_slug( 'video' );
 		$video_cat_id = $video_cat ? $video_cat->term_id : wp_insert_category(
-			[
+			array(
 				'cat_name'             => 'Video',
 				'category_description' => 'Imported Video ACF',
-			],
+			),
 			true
 		);
 
 		foreach ( $video_posts as $video_post ) {
 			// If post body contains already the video, skip it.
 			if (
-			strpos( $video_post->post_content, 'youtube.com/' ) !== false
-			|| strpos( $video_post->post_content, 'facebook.com/plugins/video.php' ) !== false
+				strpos( $video_post->post_content, 'youtube.com/' ) !== false
+				|| strpos( $video_post->post_content, 'facebook.com/plugins/video.php' ) !== false
 			) {
 				$this->log( self::VIDEO_YOUTUBE_LOG, sprintf( 'Skipping post #%d as its body contains already the embed video.', $video_post->ID ), true );
 				continue;
@@ -127,16 +151,16 @@ class Umbria24Migrator implements InterfaceMigrator {
 
 					// Update the post into the database.
 					wp_update_post(
-						[
+						array(
 							'ID'            => $video_post->ID,
 							// Add YouTube block in top of the post content.
 							'post_content'  => '<!-- wp:embed {"url":"' . $video_url . '","providerNameSlug":"youtube","responsive":true} --><figure class="wp-block-embed is-provider-youtube wp-block-embed-youtube"><div class="wp-block-embed__wrapper">' . $video_url . '</div></figure><!-- /wp:embed -->' . $video_post->post_content,
 							'post_type'     => 'post',
 							'post_category' => array_merge(
-								[ $video_cat_id ],
-								wp_get_post_categories( $video_post->ID, [ 'fields' => 'ids' ] )
+								array( $video_cat_id ),
+								wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
 							),
-						]
+						)
 					);
 
 					$this->log( self::VIDEO_YOUTUBE_LOG, sprintf( 'YouTube video post #%d updated.', $video_post->ID ), true );
@@ -151,16 +175,16 @@ class Umbria24Migrator implements InterfaceMigrator {
 
 					// Update the post into the database.
 					wp_update_post(
-						[
+						array(
 							'ID'            => $video_post->ID,
 							// Add Iframe code in top of the post content.
 							'post_content'  => $this->posts_migrator_logic->embed_iframe_block_from_html( $video_iframe, $video_post->ID ) . $video_post->post_content,
 							'post_type'     => 'post',
 							'post_category' => array_merge(
-								[ $video_cat_id ],
-								wp_get_post_categories( $video_post->ID, [ 'fields' => 'ids' ] )
+								array( $video_cat_id ),
+								wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
 							),
-						]
+						)
 					);
 
 					$this->log( self::VIDEO_IFRAME_LOG, sprintf( 'Video iframe post #%d updated.', $video_post->ID ), true );
@@ -176,16 +200,16 @@ class Umbria24Migrator implements InterfaceMigrator {
 
 					// Update the post into the database.
 					wp_update_post(
-						[
+						array(
 							'ID'            => $video_post->ID,
 							// Add Vimeo block in top of the post content.
 							'post_content'  => '<!-- wp:embed {"url":"' . $video_src . '","type":"video","providerNameSlug":"vimeo","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} --><figure class="wp-block-embed is-type-video is-provider-vimeo wp-block-embed-vimeo wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">' . $video_src . '</div></figure><!-- /wp:embed -->' . $video_post->post_content,
 							'post_type'     => 'post',
 							'post_category' => array_merge(
-								[ $video_cat_id ],
-								wp_get_post_categories( $video_post->ID, [ 'fields' => 'ids' ] )
+								array( $video_cat_id ),
+								wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
 							),
-						]
+						)
 					);
 
 					$this->log( self::VIDEO_VIMEO_LOG, sprintf( 'Vimeo video post #%d updated.', $video_post->ID ), true );
@@ -204,10 +228,10 @@ class Umbria24Migrator implements InterfaceMigrator {
 		$medialab_posts  = $this->get_all_posts_by_post_type( 'medialab' );
 		$medialab_cat    = get_category_by_slug( 'medialab' );
 		$medialab_cat_id = $medialab_cat ? $medialab_cat->term_id : wp_insert_category(
-			[
+			array(
 				'cat_name'             => 'Medialab',
 				'category_description' => 'Imported Medialab ACF',
-			],
+			),
 			true
 		);
 
@@ -247,16 +271,16 @@ class Umbria24Migrator implements InterfaceMigrator {
 
 			// Update the post into the database.
 			wp_update_post(
-				[
+				array(
 					'ID'            => $medialab_post->ID,
 					// Add Metalab iframe code in top of the post content.
 					'post_content'  => $iframe_code . $medialab_post->post_content,
 					'post_type'     => 'post',
 					'post_category' => array_merge(
-						[ $medialab_cat_id ],
-						wp_get_post_categories( $medialab_post->ID, [ 'fields' => 'ids' ] )
+						array( $medialab_cat_id ),
+						wp_get_post_categories( $medialab_post->ID, array( 'fields' => 'ids' ) )
 					),
-				]
+				)
 			);
 
 			$this->log( self::MEDIALAB_IFRAME_LOG, sprintf( 'Medialab iframe post #%d updated.', $medialab_post->ID ), true );
@@ -273,10 +297,10 @@ class Umbria24Migrator implements InterfaceMigrator {
 		$fotogallery_posts  = $this->get_all_posts_by_post_type( 'fotogallery' );
 		$fotogallery_cat    = get_category_by_slug( 'fotogallery' );
 		$fotogallery_cat_id = $fotogallery_cat ? $fotogallery_cat->term_id : wp_insert_category(
-			[
+			array(
 				'cat_name'             => 'Fotogallery',
 				'category_description' => 'Imported Fotogallery ACF',
-			],
+			),
 			true
 		);
 
@@ -294,21 +318,96 @@ class Umbria24Migrator implements InterfaceMigrator {
 			if ( ! empty( $gallery_code ) ) {
 				// Update the post into the database.
 				wp_update_post(
-					[
+					array(
 						'ID'            => $fotogallery_post->ID,
 						// Add Metalab iframe code in top of the post content.
 						'post_content'  => $gallery_code . $fotogallery_post->post_content,
 						'post_type'     => 'post',
 						'post_category' => array_merge(
-							[ $fotogallery_cat_id ],
-							wp_get_post_categories( $fotogallery_post->ID, [ 'fields' => 'ids' ] )
+							array( $fotogallery_cat_id ),
+							wp_get_post_categories( $fotogallery_post->ID, array( 'fields' => 'ids' ) )
 						),
-					]
+					)
 				);
 
 				$this->log( self::FOTOGALLERY_LOG, sprintf( 'Fotogallery post #%d updated.', $fotogallery_post->ID ), true );
 			}
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-fix-empty-jetpack-slideshows`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_empty_jetpack_slideshows( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s AND ID = 923899',
+				'publish',
+				'%jetpack-slideshow_image wp-image-" data-id="" src=""%'
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$content_blocks = parse_blocks( $post->post_content );
+
+			foreach ( $content_blocks as $index => $block ) {
+				if ( 'jetpack/slideshow' === $block['blockName'] && str_contains( $block['innerHTML'], 'src=""' ) ) {
+					$gallery_code             = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_media_posts( $block['attrs']['ids'] );
+					$content_blocks[ $index ] = current( parse_blocks( $gallery_code ) );
+					$this->log( self::FOTOGALLERY_LOG, sprintf( 'Gallery fixed for the post %d fixed', $post->ID ), true );
+				}
+			}
+
+			$updated_content = serialize_blocks( $content_blocks );
+
+			print_r( $updated_content );
+			die();
+
+			if ( $updated_content !== $post->post_content ) {
+				wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => $updated_content,
+					),
+					true
+				);
+			}
+
+			$this->log( self::FOTOGALLERY_LOG, sprintf( 'Post %d fixed', $post->ID ), true );
+		}
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-revert-fix-empty-jetpack-slideshows`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_revert_fix_empty_jetpack_slideshows( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			'select p.ID, p.post_content, po.post_content as old_content from wp_posts p inner join wp_posts_old po on po.ID = p.ID where p.ID in (473618,491545,504124,530916,655429,668297,849209,859690,901953,919222,919253,919260,919261,919276,919290,919311,922726,922757,922790,922791,922800,922825,922835,922840,922853,922862,922899,922925,922928,922943,922980,922983,923005,923007,923025,923058,923066,923087,923117,923131,923143,923244,923269,923273,923314,923320,923352,923411,923415,923416,923418,923435,923438,923448,923461,923483,923492,923493,923497,923505,923511,923522,923541,923584,923597,923633,923662,923692,923724,923731,923735,923746,923749,923752,923756,923764,923765,923794,923797,923819,923864,923877,923888,923899,923904);'
+		);
+
+		foreach ( $posts as $post ) {
+			wp_update_post(
+				array(
+					'ID'           => $post->ID,
+					'post_content' => $post->old_content,
+				),
+				true
+			);
+
+			$this->log( self::FOTOGALLERY_LOG, sprintf( 'Post %d fixed', $post->ID ), true );
+		}
+		wp_cache_flush();
 	}
 
 	/**
@@ -319,11 +418,11 @@ class Umbria24Migrator implements InterfaceMigrator {
 	 */
 	public function get_all_posts_by_post_type( $post_type ) {
 		return get_posts(
-			[
+			array(
 				'posts_per_page' => -1,
 				'post_type'      => $post_type,
-				'post_status'    => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
-			]
+				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
+			)
 		);
 	}
 
