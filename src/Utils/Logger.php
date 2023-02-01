@@ -1,7 +1,7 @@
 <?php
 /**
  * Logger class for handling commands' logging
- * 
+ *
  * @package NewspackCustomContentMigrator
  */
 
@@ -16,7 +16,7 @@ class Logger {
 
 	/**
 	 * Determine the writeable directory used for storing logs created by migration commands.
-	 * 
+	 *
 	 * @return string Directory path.
 	 */
 	public function get_le_log_path() {
@@ -30,7 +30,7 @@ class Logger {
 	 * @param string  $message Log message.
 	 * @param boolean $to_cli Whether to output the message to the CLI. Default to false.
 	 */
-	private function log( $file, $message, $to_cli = true ) {
+	public function log( $file, $message, $to_cli = true ) {
 		$message .= "\n";
 		if ( $to_cli ) {
 			WP_CLI::line( $message );
