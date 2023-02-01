@@ -132,7 +132,7 @@ SQL;
 	 */
 	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
 		return get_posts(
-            [
+			[
 				'posts_per_page' => -1,
 				// Target all post_types.
 				'post_type'      => $post_types,
@@ -144,7 +144,7 @@ SQL;
 					],
 				],
 			]
-        );
+		);
 	}
 
 	/**
@@ -157,8 +157,8 @@ SQL;
 	 * @return int|\WP_Error|\WP_Term[]
 	 */
 	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
-        return get_terms(
-            [
+		return get_terms(
+			[
 				'hide_empty' => false,
 				'meta_query' => [
 					[
@@ -169,7 +169,7 @@ SQL;
 				],
 				'taxonomy'   => $taxonomy,
 			]
-        );
+		);
 	}
 
 	/**
@@ -224,22 +224,27 @@ SQL;
 	 * @return array
 	 */
 	public function get_all_existing_categories() {
-        $cats_ids_all = [];
-        $cats_parents = get_categories( [ 'hide_empty' => false, ] );
-        foreach ( $cats_parents as $cat_parent ) {
-            $cats_ids_all[] = $cat_parent->term_id;
-            $cats_children  = get_categories( [ 'parent' => $cat_parent->term_id, 'hide_empty' => false, ] );
-            if ( empty( $cats_children ) ) {
+		$cats_ids_all = [];
+		$cats_parents = get_categories( [ 'hide_empty' => false ] );
+		foreach ( $cats_parents as $cat_parent ) {
+			$cats_ids_all[] = $cat_parent->term_id;
+			$cats_children  = get_categories(
+				[
+					'parent'     => $cat_parent->term_id,
+					'hide_empty' => false,
+				]
+			);
+			if ( empty( $cats_children ) ) {
 				continue;
-            }
+			}
 
-            foreach ( $cats_children as $cat_child ) {
-                $cats_ids_all[] = $cat_child->term_id;
-            }
-        }
-        $cats_ids_all = array_unique( $cats_ids_all );
+			foreach ( $cats_children as $cat_child ) {
+				$cats_ids_all[] = $cat_child->term_id;
+			}
+		}
+		$cats_ids_all = array_unique( $cats_ids_all );
 
-        return $cats_ids_all;
+		return $cats_ids_all;
 	}
 
 	/**
@@ -463,5 +468,95 @@ SQL;
 			)
 		);
 		return $deleted;
+	}
+
+	/**
+	 * Fixes duplicate post_name entries for given post types.
+	 *
+	 * @param array $post_types Post types.
+	 *
+	 * @return array $updated {
+	 *     Resulting updated records.
+	 *
+	 *     @type int ID                   Live Post ID.
+	 *     @type string post_name_old     Previous post_name.
+	 *     @type string post_name_updated New post_name.
+	 * }
+	 */
+	public function fix_duplicate_slugs( array $post_types ): array {
+		global $wpdb;
+
+		$updated = [];
+
+		// Query which post_names have dupes.
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		// phpcs:disable -- Placeholders used and query sanitized
+		$results                 = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT post_name, COUNT(*) counter
+				FROM $wpdb->posts
+				WHERE post_type IN ( $post_types_placeholders )
+					AND post_status = 'publish'
+				GROUP BY post_name HAVING counter > 1 ;",
+				$post_types
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		// Get the post_names.
+		$post_names = [];
+		foreach ( $results as $result ) {
+			$post_names[] = $result['post_name'];
+		}
+
+		foreach ( $post_names as $key_post_name => $post_name ) {
+
+			WP_CLI::log( sprintf( '(%d)/(%d) fixing %s ...', $key_post_name + 1, count( $post_names ), $post_name ) );
+
+			// Get IDs with this post_name. Order by post_modified and ID descending.
+			// phpcs:disable -- Placeholders used and query sanitized
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID
+					FROM $wpdb->posts
+					WHERE post_name = %s
+			        AND post_type IN ( $post_types_placeholders )
+					ORDER BY post_modified, ID DESC;",
+					array_merge( [ $post_name ], $post_types )
+				)
+			);
+			// phpcs:enable
+
+			// Fix dupe post_names.
+			foreach ( $post_ids as $key_post_id => $post_id ) {
+				// Leave first/last one.
+				if ( 0 === $key_post_id ) {
+					continue;
+				}
+
+				// Rename slugs of previous one(s) by appending "-1" to them.
+				$post_name_updated = $post_name . '-' . ( $key_post_id + 1 );
+				$updated_res       = $wpdb->update(
+					$wpdb->posts,
+					[ 'post_name' => $post_name_updated ],
+					[ 'ID' => $post_id ],
+				);
+				if ( 1 === $updated_res ) {
+					$updated[] = [
+						'ID'                => $post_id,
+						'post_name_old'     => $post_name,
+						'post_name_updated' => $post_name_updated,
+					];
+
+					WP_CLI::log( sprintf( 'Updated ID %d post_name to %s', $post_id, $post_name_updated ) );
+				}
+			}
+		}
+
+		// Needed for $wpdb->update.
+		wp_cache_flush();
+
+		return $updated;
 	}
 }
