@@ -76,5 +76,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\RetroReportMigrator::class,
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
+		Command\PublisherSpecific\Moco360Migrator::class,
 	)
 );
