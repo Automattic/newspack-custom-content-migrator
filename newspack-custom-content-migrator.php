@@ -35,7 +35,6 @@ PluginSetup::register_migrators(
 		Command\General\ReaderRevenueMigrator::class,
 		Command\General\CampaignsMigrator::class,
 		Command\General\ListingsMigrator::class,
-		Command\General\InlineFeaturedImageMigrator::class,
 		Command\General\SubtitleMigrator::class,
 		Command\General\CoAuthorPlusMigrator::class,
 		Command\General\CPTMigrator::class,
