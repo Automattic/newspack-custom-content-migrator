@@ -1089,7 +1089,6 @@ class ContentDiffMigrator {
 			$key_local_hostname = array_search( $local_hostname, $local_hostname_aliases );
 			if ( false !== $key_local_hostname ) {
 				unset( $local_hostname_aliases[ $key_local_hostname ] );
-				unset( $local_hostname_aliases[ $key_local_hostname ] );
 			}
 		}
 
