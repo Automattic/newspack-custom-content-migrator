@@ -185,14 +185,14 @@ class ContentDiffMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'post-id-from',
 						'description' => 'Optional. Post ID range minimum.',
-						'optional'    => false,
+						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'post-id-to',
 						'description' => 'Optional. Post ID range maximum.',
-						'optional'    => false,
+						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
