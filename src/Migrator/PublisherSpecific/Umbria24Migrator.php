@@ -84,7 +84,14 @@ class Umbria24Migrator implements InterfaceMigrator {
 			array( $this, 'cmd_fix_empty_jetpack_slideshows' ),
 			array(
 				'shortdesc' => 'Fix migrated emtpy Jetpack slideshows',
-				'synopsis'  => array(),
+				'synopsis'  => array(
+					array(
+						'type'      => 'assoc',
+						'name'      => 'id_matcher_filepath',
+						'optional'  => false,
+						'repeating' => false,
+					),
+				),
 			)
 		);
 
@@ -344,20 +351,44 @@ class Umbria24Migrator implements InterfaceMigrator {
 	public function cmd_fix_empty_jetpack_slideshows( $args, $assoc_args ) {
 		global $wpdb;
 
+		$id_matcher_filepath = json_decode( file_get_contents( $assoc_args['id_matcher_filepath'] ), true );
+
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s AND ID = 923899',
+				'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s',
+				// 'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s AND ID = 923899',
 				'publish',
 				'%jetpack-slideshow_image wp-image-" data-id="" src=""%'
 			)
 		);
 
+		var_dump( count( $posts ) );
+		die();
 		foreach ( $posts as $post ) {
 			$content_blocks = parse_blocks( $post->post_content );
 
 			foreach ( $content_blocks as $index => $block ) {
 				if ( 'jetpack/slideshow' === $block['blockName'] && str_contains( $block['innerHTML'], 'src=""' ) ) {
-					$gallery_code             = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_media_posts( $block['attrs']['ids'] );
+					$media_ids = array_map(
+						function( $old_id ) use ( $id_matcher_filepath, $post ) {
+							$id_matcher_found = null;
+							foreach ( $id_matcher_filepath as $id_matcher ) {
+								if ( $old_id === $id_matcher['id_old'] ) {
+									$id_matcher_found = $id_matcher;
+									break;
+								}
+							}
+
+							if ( ! $id_matcher_found ) {
+								return $old_id;
+							}
+
+							return $id_matcher_found['id_new'];
+						},
+						$block['attrs']['ids']
+					);
+
+					$gallery_code             = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_media_posts( $media_ids );
 					$content_blocks[ $index ] = current( parse_blocks( $gallery_code ) );
 					$this->log( self::FOTOGALLERY_LOG, sprintf( 'Gallery fixed for the post %d fixed', $post->ID ), true );
 				}
@@ -365,10 +396,9 @@ class Umbria24Migrator implements InterfaceMigrator {
 
 			$updated_content = serialize_blocks( $content_blocks );
 
-			print_r( $updated_content );
-			die();
-
 			if ( $updated_content !== $post->post_content ) {
+				update_post_meta( $post->ID, 'newspack_old_post_content', $post->post_content );
+
 				wp_update_post(
 					array(
 						'ID'           => $post->ID,

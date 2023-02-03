@@ -53,6 +53,6 @@ PluginSetup::register_migrators(
 		Migrator\PublisherSpecific\GadisMigrator::class,
 		Migrator\PublisherSpecific\ElLiberoMigrator::class,
 		Migrator\PublisherSpecific\NewJerseyUrbanNewsMigrator::class,
-		Migrator\PublisherSpecific\Umbria24::class,
+		Migrator\PublisherSpecific\Umbria24Migrator::class,
 	)
 );
