@@ -400,7 +400,10 @@ class RetroReportMigrator implements InterfaceCommand {
 			self::META_PREFIX . 'unique_id' => $object->unique_id,
 		);
 
+		$post_authors = [];
+
 		foreach ( $post_fields as $field ) {
+
 			if ( 'post_content' == $field->target && $this->get_content_formatter( $category ) ) {
 				$formatter_function = $this->get_content_formatter( $category );
 				$post_args['post_content'] = call_user_func( $formatter_function, $object );
@@ -416,12 +419,14 @@ class RetroReportMigrator implements InterfaceCommand {
 			$formatted_value = $this->format_post_field( $field, $value );
 			if ( $field->is_meta ) {
 				$post_meta[ $field->target ] = $formatted_value;
+			} else if ( 'authors' === $field->type ) {
+				$post_authors = $formatted_value;
 			} else {
 				$post_args[ $field->target ] = $formatted_value;
 			}
 		}
 
-		$post_id = $this->add_post( $post_args, $post_meta );
+		$post_id = $this->add_post( $post_args, $post_meta, $post_authors );
 
 		return $post_id;
 	}
@@ -429,12 +434,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	/**
 	 * Add a post to the database along with its meta data.
 	 *
-	 * @param array $post_args Array containing the post arguments (post_title, post_content etc.).
-	 * @param array $post_meta Associative array of post meta (key => value).
+	 * @param array $post_args    Array containing the post arguments (post_title, post_content etc.).
+	 * @param array $post_meta    Associative array of post meta (key => value).
+	 * @param array $post_authors Array of CAP Guest Author IDs.
 	 *
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
-	public function add_post( $post_args, $post_meta ) {
+	public function add_post( $post_args, $post_meta, $post_authors ) {
 		$post_id = wp_insert_post( $post_args, true );
 
 		if ( is_wp_error( $post_id ) ) {
@@ -443,6 +449,11 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		foreach ( $post_meta as $key => $value ) {
 			update_post_meta( $post_id, $key, $value );
+		}
+
+		// Add Guest Authors.
+		if ( ! empty( $post_authors ) ) {
+			$this->co_authors_plus->assign_guest_authors_to_post( $post_authors, $post_id );
 		}
 
 		return $post_id;
@@ -460,7 +471,8 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function format_post_field( $field, $value ) {
 
-		if ( false !== strpos( $field->name, '->' ) ) {
+		// @TODO use a mechanism like in $this->is_array_item()?
+		if ( false !== strpos( $field->name, '->' ) && ! empty( $value ) ) {
 			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
 			$value = $value->$prop;
 		}
@@ -481,12 +493,26 @@ class RetroReportMigrator implements InterfaceCommand {
 					$path_parts = explode( '/', trim( $value, '/' ) );
 					$slug       = end( $path_parts );
 					return $slug;
+					
+				case "post_author":
+					if ( ! empty( $value ) ) {
+						// Just grab the first user for core post_author.
+						$author = $this->get_user_from_staff_id( $value[0] );
+						return ( empty( $author ) ) ? false : $author;
+					}
+
 			}
 		}
 
 		// Convert dates to WordPress' precious format.
 		if ( 'date' === $field->type ) {
 			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
+		}
+
+		// Process multiple authors into CAP guest authors.
+		if ( 'authors' === $field->type ) {
+			$authors = $this->convert_authors_to_guest_authors( $value );
+			return $authors;
 		}
 
 		if ( 'thumbnail' == $field->type && $value ) {
@@ -560,6 +586,49 @@ class RetroReportMigrator implements InterfaceCommand {
 				'meta_value' => $staff_id,
 			),
 		);
+	}
+
+	/**
+	 * Get CAP guest authors from the original staff ID.
+	 * 
+	 * @param int $staff_id Staff ID from the JSON import.
+	 * 
+	 * @return object|bool Guest author object, or false if not found.
+	 */
+	private function get_guest_author_from_staff_id( $staff_id ) {
+
+		// Get any existing user.
+		$user = $this->get_user_from_staff_id( $staff_id );
+		if ( empty( $user ) ) {
+			return false;
+		}
+
+		// Now find (or create) a corresponding Guest Author.
+		return $this->co_authors_plus->get_or_create_guest_author_from_user( $user[0] );
+
+	}
+
+	/**
+	 * Converts a list of staff IDs into WP user IDs.
+	 * 
+	 * @param array $authors A list of staff IDs from the original import.
+	 * 
+	 * @return array A list of guest author IDs.
+	 */
+	private function convert_authors_to_guest_authors( $authors ) {
+
+		$ga_ids = [];
+
+		foreach ( $authors as $author ) {
+			$ga = $this->get_guest_author_from_staff_id( $author );
+			if ( ! $ga ) {
+				continue;
+			}
+
+			$ga_ids[] = $ga->ID;
+		}
+
+		return $ga_ids;
 	}
 
 	/**
@@ -719,14 +788,29 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'video_source[0]->description', 'string', 'newspack_post_subtitle' ),
 			array( 'video_source[0]->description', 'string', 'newspack_article_summary' ),
 			array( 'video_source[0]->image', 'thumbnail', '_thumbnail_id' ),
-			array( 'video_source[0]->video_id', 'string', '_unique_id' ),
+			array( 'video_source[0]->video_id', 'string', 'video_id' ),
 		);
+
+		$this->fields_mappings['Articles'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'blocks', 'array', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'authors', 'array', 'post_author' ),
+			array( 'authors', 'authors', 'guest_authors' ),
+			array( 'description', 'string', 'newspack_article_summary' ),
+			array( 'publishdate', 'string', 'post_date_gmt' ),
+			array( 'lastmod', 'string', 'post_modified_gmt' ),
+			array( 'image->file', 'string', '_thumbnail_id' ),
+		);
+
 	}
 
 	public function set_content_formatters() {
 		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
 		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
 		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
+		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
 	}
 
 	public function get_content_formatter( $category ) {
@@ -756,6 +840,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Education profiles']  = 'newspack_lst_generic';
 		$this->post_types['Education resources'] = 'post';
 		$this->post_types['Video']               = 'post';
+		$this->post_types['Articles']            = 'post';
 	}
 
 	public function format_education_profiles_content( $post ) {
@@ -796,6 +881,25 @@ HTML;
 	}
 
 	/**
+	 * Format post content for articles.
+	 * 
+	 * Merges imported data with a post template specifically for article content.
+	 * 
+	 * @param array $post Array of post data as retrieved from the JSON.
+	 * 
+	 * @return string Constructed post template.
+	 */
+	public function format_article_content( $post ) {
+		return implode(
+			'',
+			[
+				$this->convert_copy_to_blocks( $post->content ),
+				$this->convert_blocks_to_blocks( $post->blocks ),
+			]
+		);
+	}
+
+	/**
 	 * Format post content for video posts.
 	 * 
 	 * Merges imported data with a post template specifically for Video content.
@@ -805,19 +909,6 @@ HTML;
 	 * @return string Constructed post template.
 	 */
 	public function format_video_content( $post ) {
-
-		// Video group block at the top of the page.
-		$video_template = '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=%1$s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
-<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
-https://www.youtube.com/watch?v=%1$s
-</div></figure>
-<!-- /wp:embed -->';
-		$video_block = sprintf( $video_template, $post->video_source[0]->video_id );
-		$video_group = <<<HTML
-		<!-- wp:group {"align":"full","backgroundColor":"dark-gray","textColor":"white","layout":{"type":"constrained"}} -->
-<div class="wp-block-group alignfull has-white-color has-dark-gray-background-color has-text-color has-background">$video_block</div>
-<!-- /wp:group -->
-HTML;
 
 		// List of production credits.
 		$credits         = '';
@@ -868,7 +959,7 @@ HTML;
 
 		// Combine all the parts in the right order.
 		return implode( '', [
-			$video_group,
+			$this->format_video_block( $post ),
 			"<!-- wp:heading --><h2>$post->title</h2><!-- /wp:heading -->",
 			$credits,
 			$released,
@@ -893,6 +984,120 @@ HTML;
 		$copy = str_replace( '<p>', '<!-- wp:paragraph --><p>', $copy );
 		$copy = str_replace( '</p>', '</p><!-- /wp:paragraph -->', $copy );
 		return $copy;
+	}
+
+	/**
+	 * Convert blocks from the JSON into WP blocks.
+	 * 
+	 * @param array $blocks List of blocks from the import JSON.
+	 * 
+	 * @return string WP Block HTML 
+	 */
+	private function convert_blocks_to_blocks( $blocks ) {
+		$new_blocks = [];
+		foreach ( $blocks as $block ) {
+			switch ( $block->layout ) {
+				case "video":
+					$new_blocks[] = $this->format_video_block( $block->video_id );
+					break;
+				case "text":
+					$new_blocks[] = $this->convert_copy_to_blocks( $block->copy );
+					break;
+				case "image":
+					$new_blocks[] = $this->format_image_block( $block );
+					break;
+			}
+		}
+		return implode( '', $new_blocks );
+	}
+
+	private function format_image_block( $block ) {
+
+		$filename = explode( '/', $block->image );
+		$filename = end( $filename );
+		$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
+		if ( is_null( $attachment_id ) ) {
+			$image_url     = self::BASE_URL . $block->image;
+			$attachment_id = $this->attachments->import_external_file(
+				$image_url,     // Image URL.
+				$block->copy, // Title.
+				$block->copy, // Caption.
+				$block->copy, // Description.
+				$block->alt   // Alt.
+			);
+		}
+
+		// Do we definitely have an imported image?
+		if ( is_wp_error( $attachment_id ) ) {
+			return '';
+		}
+
+		// Grab the attachment details and produce the image block.
+		$template = '<!-- wp:image {"id":%1$d,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="%2$s" alt="%3$s" class="wp-image-%1$d"/><figcaption class="wp-element-caption">%3$s</figcaption></figure>
+<!-- /wp:image -->';
+
+		return sprintf(
+			$template,
+			$attachment_id,
+			wp_get_attachment_url( $attachment_id ),
+			get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
+			wp_get_attachment_caption( $attachment_id ),
+		);
+		
+	}
+
+	/**
+	 * Generates a video block, based on a given video ID
+	 * 
+	 * @param string $video_id The ID of the video from the JSON import.
+	 * 
+	 * @return string Gutenberg block HTML.
+	 */
+	private function format_video_block( $video_id ) {
+
+		// Video group block at the top of the page.
+		$video_template = '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=%1$s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+https://www.youtube.com/watch?v=%1$s
+</div></figure>
+<!-- /wp:embed -->';
+		$video_block = sprintf( $video_template, $video_id );
+		$video_group = <<<HTML
+		<!-- wp:group {"align":"full","backgroundColor":"dark-gray","textColor":"white","layout":{"type":"constrained"}} -->
+<div class="wp-block-group alignfull has-white-color has-dark-gray-background-color has-text-color has-background">$video_block</div>
+<!-- /wp:group -->
+HTML;
+
+		return $video_group;
+
+	}
+
+	/**
+	 * Get posts by the video ID they had in the import JSON.
+	 * 
+	 * @param string $video_id Unique ID
+	 * 
+	 * @return WP_Post|false The post object or false if there is none.
+	 */
+	private function get_post_from_video_id( $video_id ) {
+		$posts = get_posts(
+			[
+				'post_type'      => 'any',
+				'posts_per_page' => 1,
+				'meta_query'     => [
+					[
+						'key'   => 'newspack_rr_video_id',
+						'value' => $video_id,
+					],
+				],
+			]
+		);
+		if ( $posts && ! empty( $posts ) ) {
+			return $posts[0];
+		}
+
+		return false;
 	}
 
 	public function is_array_item( $field ) {
