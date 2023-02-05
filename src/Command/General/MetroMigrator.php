@@ -10,7 +10,7 @@ class MetroMirgator implements InterfaceCommand {
 
 	private $ids_mappings;
 	private $mappings_folder;
-	
+
 	/**
 	 * @var null|InterfaceCommand Instance.
 	 */
@@ -32,7 +32,7 @@ class MetroMirgator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -42,7 +42,8 @@ class MetroMirgator implements InterfaceCommand {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-sections',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-sections',
 			[ $this, 'cmd_metro_import_sections' ],
 			[
 				'shortdesc' => 'Import Metro Sections as categories.',
@@ -58,7 +59,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-find-tags-types',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-find-tags-types',
 			[ $this, 'cmd_metro_find_tags_types' ],
 			[
 				'shortdesc' => 'Find the tags types (author/normal tag) to use later.',
@@ -74,7 +76,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-tags',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-tags',
 			[ $this, 'cmd_metro_import_tags' ],
 			[
 				'shortdesc' => 'Import Metro tags.',
@@ -90,7 +93,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-authors',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-authors',
 			[ $this, 'cmd_metro_import_authors' ],
 			[
 				'shortdesc' => 'Import Metro authors.',
@@ -106,7 +110,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-files',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-files',
 			[ $this, 'cmd_metro_import_files' ],
 			[
 				'shortdesc' => 'Import Metro files.',
@@ -122,7 +127,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-content',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-content',
 			[ $this, 'cmd_metro_import_content' ],
 			[
 				'shortdesc' => 'Import Metro content (posts).',
@@ -138,7 +144,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-locations',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-locations',
 			[ $this, 'cmd_metro_import_locations' ],
 			[
 				'shortdesc' => 'Import Metro locations.',
@@ -154,7 +161,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-import-events',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-import-events',
 			[ $this, 'cmd_metro_import_events' ],
 			[
 				'shortdesc' => 'Import Metro events.',
@@ -170,7 +178,8 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-update-posts',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-update-posts',
 			[ $this, 'cmd_metro_update_posts' ],
 			[
 				'shortdesc' => 'Update Metro posts.',
@@ -186,10 +195,27 @@ class MetroMirgator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command( 'newspack-content-migrator metro-fix-jpe-images',
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-fix-jpe-images',
 			[ $this, 'cmd_metro_fix_jpe_images' ],
 			[
 				'shortdesc' => 'Fix the JPE images by renaming them to JPEG extension.',
+			]
+		);
+
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-fix-jpe-images-posts',
+			[ $this, 'cmd_metro_fix_jpe_images_posts' ],
+			[
+				'shortdesc' => 'Fix the JPE images by renaming them to JPEG extension.',
+			]
+		);
+
+		WP_CLI::add_command(
+            'newspack-content-migrator metro-fix-jpe-images-in-posts-content',
+			[ $this, 'cmd_metro_fix_jpe_images_in_posts_content' ],
+			[
+				'shortdesc' => 'Fix the JPE images links inside post content.',
 			]
 		);
 	}
@@ -206,11 +232,11 @@ class MetroMirgator implements InterfaceCommand {
 
 		$uploads_path = wp_upload_dir()['basedir'];
 
-		foreach ( $attachments as $attachment ) {			
-			$filename = path_join( $uploads_path, $attachment->file );
+		foreach ( $attachments as $attachment ) {
+			$filename     = path_join( $uploads_path, $attachment->file );
 			$new_filename = path_join( $uploads_path, $filename . 'g' );
-			
-			WP_CLI::log( sprintf( 'Renaming attachement #%d filename from %s to %s', $attachment->ID , $filename, $filename . 'g' ) );
+
+			WP_CLI::log( sprintf( 'Renaming attachement #%d filename from %s to %s', $attachment->ID, $filename, $filename . 'g' ) );
 
 			if ( ! file_exists( $filename ) ) {
 				WP_CLI::warning( 'File not found. Skipping...' );
@@ -223,6 +249,99 @@ class MetroMirgator implements InterfaceCommand {
 		}
 
 		WP_CLI::success( 'Done!' );
+	}
+
+	public function cmd_metro_fix_jpe_images_posts( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, guid FROM $wpdb->posts WHERE guid LIKE %s",
+				'%' . '.jpe'
+			)
+		);
+
+		WP_CLI::warning( sprintf( 'Checking %d attachments...', count( $posts ) ) );
+		foreach ( $posts as $post ) {
+			$filename     = wp_upload_dir()['basedir'] . str_replace( '/wp-content/uploads', '', parse_url( $post->guid )['path'] );
+			$new_filename = $filename . 'g';
+
+			if ( ! file_exists( $filename ) && ! file_exists( $new_filename ) ) {
+				WP_CLI::warning( sprintf( 'File not found. Skipping... %s', $filename ) );
+				continue;
+			}
+
+			// fix post.
+			$wpdb->update( $wpdb->posts, [ 'guid' => $post->guid . 'g' ], [ 'ID' => $post->ID ] );
+
+			// fix file.
+			if ( file_exists( $filename ) && ! file_exists( $new_filename ) ) {
+				rename( $filename, $new_filename );
+			}
+
+			// fix meta.
+			$attachment_meta = get_post_meta( $post->ID, '_wp_attached_file', true );
+			if ( $attachment_meta && str_ends_with( $attachment_meta, 'jpe' ) ) {
+				update_post_meta( $post->ID, '_wp_attached_file', $attachment_meta . 'g' );
+			}
+
+			$attachment_thumbs_meta          = get_post_meta( $post->ID, '_wp_attachment_metadata', true );
+			$attachment_thumbs_meta['file'] .= 'g';
+
+			if ( array_key_exists( 'original_image', $attachment_thumbs_meta ) ) {
+				$attachment_thumbs_meta['original_image'] .= 'g';
+			}
+
+			foreach ( $attachment_thumbs_meta['sizes'] as $index => $size ) {
+				$attachment_thumbs_meta['sizes'][ $index ]['file'] .= 'g';
+			}
+			update_post_meta( $post->ID, '_wp_attachment_metadata', $attachment_thumbs_meta );
+
+			WP_CLI::success( sprintf( 'Attachment %d fixed', $post->ID ) );
+		}
+
+		WP_CLI::success( 'Done!' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator metro-fix-jpe-images-in-posts-content`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_metro_fix_jpe_images_in_posts_content( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				'select ID, post_content from wp_posts where post_content like %s and post_type in ("post", "page");',
+                '%.jpe"%'
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$fixed_content = $post->post_content;
+			preg_match_all( '/"(?P<url>[^"]+jpe)"/', $post->post_content, $jpe_links_matches );
+
+			foreach ( $jpe_links_matches['url'] as $url ) {
+				$wp_upload_dir = wp_upload_dir();
+				$fixed_url     = str_starts_with( $url, 'http' ) ? $url . 'g' : $wp_upload_dir['baseurl'] . $url . 'g';
+				$local_file    = $wp_upload_dir['basedir'] . str_replace( '/wp-content/uploads', '', parse_url( $fixed_url )['path'] );
+
+				if ( file_exists( $local_file ) ) {
+					$fixed_content = str_replace( $url, $fixed_url, $fixed_content );
+					WP_CLI::success( sprintf( 'Fixed URL: %s', $fixed_url ) );
+				} else {
+					WP_CLI::warning( sprintf( 'Need to download file from older server: %s', $url ) );
+				}
+			}
+
+			if ( $fixed_content !== $post->post_content ) {
+				wp_update_post( ['ID' => $post->ID, 'post_content' => $fixed_content] );
+				WP_CLI::success( sprintf( 'Post #%d is fixed!', $post->ID ) );
+			}
+			var_dump( $post->ID );
+		}
 	}
 
 	public function cmd_metro_update_posts( $args, $assoc_args ) {
@@ -264,7 +383,7 @@ class MetroMirgator implements InterfaceCommand {
 		$files_folder = $assoc_args['files-folder'];
 
 		$locations = $this->get_objects_from_folder( $files_folder );
-		
+
 		foreach ( $locations as $location ) {
 			if ( $this->location_exists( $location->uuid ) ) {
 				WP_CLI::log( sprintf( 'Location "%s" already exists. Skipping...', $location->title ) );
@@ -292,7 +411,7 @@ class MetroMirgator implements InterfaceCommand {
 
 			WP_CLI::log( sprintf( 'Importing event "%s"...', $event->title ) );
 
-			//$result = $this->add_post( $event, $files_folder );
+			// $result = $this->add_post( $event, $files_folder );
 
 		}
 	}
@@ -334,10 +453,10 @@ class MetroMirgator implements InterfaceCommand {
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Importing attachment "%s"', $file_data->filename  ) );
+			WP_CLI::log( sprintf( 'Importing attachment "%s"', $file_data->filename ) );
 
 			$file_path = path_join( $files_folder, $file_data->uuid . '.data' );
-			
+
 			$result = $this->add_file( $file_data, $file_path );
 			if ( is_wp_error( $result ) ) {
 				WP_CLI::warning( sprintf( 'Could not add attachment "%s"', $file_data->filename ) );
@@ -352,7 +471,7 @@ class MetroMirgator implements InterfaceCommand {
 		$authors = $this->get_objects_from_folder( $files_folder );
 
 		foreach ( $authors as $author ) {
-			if ( 'authored' != $this->get_object_id( $author->uuid, 'tags_types') ) {
+			if ( 'authored' != $this->get_object_id( $author->uuid, 'tags_types' ) ) {
 				continue;
 			}
 
@@ -361,7 +480,7 @@ class MetroMirgator implements InterfaceCommand {
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Importing author "%s"', $author->title) );
+			WP_CLI::log( sprintf( 'Importing author "%s"', $author->title ) );
 
 			$result = $this->add_author( $author );
 
@@ -378,16 +497,16 @@ class MetroMirgator implements InterfaceCommand {
 		$tags = $this->get_objects_from_folder( $files_folder );
 
 		foreach ( $tags as $tag ) {
-			if ( 'describes' != $this->get_object_id( $tag->uuid, 'tags_types') ) {
+			if ( 'describes' != $this->get_object_id( $tag->uuid, 'tags_types' ) ) {
 				continue;
 			}
-			
+
 			if ( $this->tag_exists( $tag->uuid ) ) {
 				WP_CLI::log( sprintf( 'Tag "%s" already exists. Skipping...', $tag->title ) );
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Importing tag "%s"', $tag->title) );
+			WP_CLI::log( sprintf( 'Importing tag "%s"', $tag->title ) );
 
 			$result = $this->add_tag( $tag );
 
@@ -426,7 +545,7 @@ class MetroMirgator implements InterfaceCommand {
 
 	public function cmd_metro_import_sections( $args, $assoc_args ) {
 		$files_folder = $assoc_args['files-folder'];
-		
+
 		$sections = $this->get_objects_from_folder( $files_folder );
 
 		if ( $sections == false ) {
@@ -445,7 +564,7 @@ class MetroMirgator implements InterfaceCommand {
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Importing category "%s"', $section->title) );
+			WP_CLI::log( sprintf( 'Importing category "%s"', $section->title ) );
 
 			$parent_id = 0;
 
@@ -460,7 +579,7 @@ class MetroMirgator implements InterfaceCommand {
 
 			$this->add_category( $section, $parent_id );
 		}
-		
+
 		if ( count( $need_parents ) > 0 ) {
 			$this->add_categories( $need_parents );
 		}
@@ -469,7 +588,7 @@ class MetroMirgator implements InterfaceCommand {
 	public function add_post( $post, $post_folder, $update = false ) {
 		$author_id = 1;
 		$post_tags = array();
-		$slots = array();
+		$slots     = array();
 
 		$tags_file = path_join( $post_folder, $post->uuid . '/tags.json' );
 
@@ -511,24 +630,24 @@ class MetroMirgator implements InterfaceCommand {
 		}
 
 		$post->content = '';
-		
+
 		$post_meta = array(
 			'newspack_post_subtitle' => $post->sub_title,
 			'newspack_canonical_url' => $post->canonical_url,
 		);
 
 		$post_args = array(
-			'post_content' => $post_content ?? '',
-			'post_author' => $author_id,
-			'post_date' => $post->issued,
+			'post_content'  => $post_content ?? '',
+			'post_author'   => $author_id,
+			'post_date'     => $post->issued,
 			'post_modified' => $post->modified,
-			'post_title' => $post->title ?? '',
-			'post_excerpt' => $post->description ?? '',
-			'post_status' => 'publish',
-			'post_name' => $post->urlname,
-			'tags_input' => $post_tags,
+			'post_title'    => $post->title ?? '',
+			'post_excerpt'  => $post->description ?? '',
+			'post_status'   => 'publish',
+			'post_name'     => $post->urlname,
+			'tags_input'    => $post_tags,
 			'post_category' => array( $this->get_section_id( $post->section_uuid ) ),
-			'meta_input' => $post_meta,
+			'meta_input'    => $post_meta,
 		);
 
 		if ( $update ) {
@@ -545,10 +664,10 @@ class MetroMirgator implements InterfaceCommand {
 		}
 
 		$featured_image = $post->feature_image_url ? $post->feature_image_url : $post->teaser_image_url;
-		
+
 		if ( $featured_image ) {
 			$featured_image_uuid = end( explode( '/', $featured_image ) );
-			$featured_image_id = $this->get_attachment_id( $featured_image_uuid );
+			$featured_image_id   = $this->get_attachment_id( $featured_image_uuid );
 
 			set_post_thumbnail( $post_id, $featured_image_id );
 		}
@@ -568,7 +687,7 @@ class MetroMirgator implements InterfaceCommand {
 			}
 
 			$searches[] = $slots_found[0][ $index ];
-			$replaces = $this->get_slot_html( $slots[ $slot_uuid ] );
+			$replaces   = $this->get_slot_html( $slots[ $slot_uuid ] );
 		}
 
 		return str_replace( $searches, $replaces, $post_content );
@@ -603,18 +722,18 @@ HTML;
 	}
 
 	public function get_image_slot_html( $slot ) {
-		$caption_html = '<figcaption class="wp-element-caption">%s</figcaption>';
-		$image_block = <<<HTML
+		$caption_html   = '<figcaption class="wp-element-caption">%s</figcaption>';
+		$image_block    = <<<HTML
 
 <!-- wp:image {"id":%d,"sizeSlug":"full","linkDestination":"none"} -->
 <figure class="wp-block-image size-full"><img src="%s" alt="%s" class="wp-image-%d"/>%s</figure>
 <!-- /wp:image -->
 
 HTML;
-		$caption = $slot->content ? sprintf( $caption_html, $slot->content ) : '';
-		$attachment_id = $this->get_attachment_id( $slot->image_uuid );
+		$caption        = $slot->content ? sprintf( $caption_html, $slot->content ) : '';
+		$attachment_id  = $this->get_attachment_id( $slot->image_uuid );
 		$attachment_url = wp_get_attachment_url( $attachment_id );
-		$title = get_the_title( $attachment_id );
+		$title          = get_the_title( $attachment_id );
 
 		return sprintf( $image_block, $attachment_id, $attachment_url, $title, $attachment_id, $caption );
 	}
@@ -632,12 +751,12 @@ HTML;
 		}
 
 		foreach ( $local_links[1] as $local_link ) {
-			$file = end( explode( '/', $local_link ) );
-			$filename = pathinfo( $file, PATHINFO_FILENAME );
-			$attachment_id = $attachments_logic->get_attachment_by_filename( $filename);
+			$file           = end( explode( '/', $local_link ) );
+			$filename       = pathinfo( $file, PATHINFO_FILENAME );
+			$attachment_id  = $attachments_logic->get_attachment_by_filename( $filename );
 			$attachment_url = wp_get_attachment_url( $attachment_id );
-			$searches[] = $local_link;
-			$replaces[] = $attachment_url;
+			$searches[]     = $local_link;
+			$replaces[]     = $attachment_url;
 		}
 
 		return str_replace( $searches, $replaces, $slot->embed_code );
@@ -650,16 +769,16 @@ HTML;
 
 		$tmpfname = wp_tempnam( $file_path );
 		copy( $file_path, $tmpfname );
-		
+
 		$file_array = array(
 			'name'     => $data->filename,
 			'tmp_name' => $tmpfname,
-			'type' => $data->mimetype,
+			'type'     => $data->mimetype,
 		);
-		
+
 		$post_data = array(
-			'post_title' => $data->title ?? '',
-			'post_date' => $data->created,
+			'post_title'   => $data->title ?? '',
+			'post_date'    => $data->created,
 			'post_content' => $data->description ?? '',
 		);
 
@@ -681,16 +800,16 @@ HTML;
 	public function add_author( $author ) {
 		$name_parts = explode( ' ', $author->title );
 		$first_name = $author->first_name ?? $name_parts[0];
-		$last_name = $name_parts[ count( $name_parts ) - 1 ];
-		$user_args = array(
-			'user_login' => substr( $author->urlname, 0, 60 ),
-			'user_pass' => wp_generate_password(),
+		$last_name  = $name_parts[ count( $name_parts ) - 1 ];
+		$user_args  = array(
+			'user_login'    => substr( $author->urlname, 0, 60 ),
+			'user_pass'     => wp_generate_password(),
 			'user_nicename' => substr( $author->urlname, 0, 50 ),
-			'user_email' => sprintf( '%s@indyweek.com', substr( $author->urlname, 0, 20 ) ),
-			'display_name' => $author->title,
-			'first_name' => $first_name,
-			'last_name' => $last_name,
-			'description' => $author->content,
+			'user_email'    => sprintf( '%s@indyweek.com', substr( $author->urlname, 0, 20 ) ),
+			'display_name'  => $author->title,
+			'first_name'    => $first_name,
+			'last_name'     => $last_name,
+			'description'   => $author->content,
 		);
 
 		$user_id = wp_insert_user( $user_args );
@@ -721,10 +840,10 @@ HTML;
 	public function add_category( $section, $parent_id ) {
 		$category_id = wp_insert_category(
 			array(
-				'cat_name' => $section->title,
+				'cat_name'             => $section->title,
 				'category_description' => $section->meta_description ?? '',
-				'category_nicename' => $section->urlname,
-				'category_parent' => $parent_id,
+				'category_nicename'    => $section->urlname,
+				'category_parent'      => $parent_id,
 			),
 			true,
 		);
@@ -810,7 +929,7 @@ HTML;
 
 	public function add_object_id( $uuid, $id, $type ) {
 		$this->ids_mappings[ $type ][ $uuid ] = $id;
-		$mappings_file = path_join( $this->mappings_folder, $type . '.txt' );
+		$mappings_file                        = path_join( $this->mappings_folder, $type . '.txt' );
 		file_put_contents( $mappings_file, sprintf( "%s:%s\n", $uuid, $id ), FILE_APPEND );
 	}
 
@@ -838,7 +957,7 @@ HTML;
 
 			if ( $decode ) {
 				$file_content = file_get_contents( path_join( $folder, $file ) );
-				$objects[] = json_decode( $file_content );
+				$objects[]    = json_decode( $file_content );
 			} else {
 				$objects[] = path_join( $folder, $file );
 			}
