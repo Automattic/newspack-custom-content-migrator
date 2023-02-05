@@ -6,6 +6,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use stdClass;
 use \WP_CLI;
 use WP_Query;
 
@@ -198,6 +199,22 @@ class RetroReportMigrator implements InterfaceCommand {
 			)
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-import-listings',
+			array( $this, 'cmd_retro_report_import_listings' ),
+			array(
+				'shortdesc' => 'Import listings from a JSON file',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'json-file',
+						'optional'    => false,
+						'description' => 'Path to the JSON file.',
+					),
+				),
+			)
+		);
+
 	}
 
 	/**
@@ -259,7 +276,7 @@ class RetroReportMigrator implements InterfaceCommand {
 				$this->co_authors_plus->assign_guest_authors_to_post(
 					array( $ga_id ),
 					$post_id,
-					true,
+					true
 				);
 			}
 		}
@@ -372,6 +389,53 @@ class RetroReportMigrator implements InterfaceCommand {
 					$this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
 				}
 			}
+		}
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator retro-report-import-listings`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_listings( $args, $assoc_args ) {
+		$listings    = $this->validate_json_file( $assoc_args );
+		$category    = 'Events';
+		$category_id = $this->get_or_create_category( $category, 'Education' );
+		$fields      = $this->load_mappings( $category );
+		$post_type   = 'newspack_lst_event';
+
+		\WP_CLI::log( 'The fields that are going to be imported are:' );
+		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+
+		foreach ( $listings as $listing ) {
+
+			\WP_CLI::log( sprintf( 'Importing listing "%s"...', $listing->title ) );
+
+			if ( $this->post_exists( $listing, $post_type ) ) {
+				\WP_CLI::log( sprintf( 'Listing "%s" is already imported. Skipping...', $listing->title ) );
+				continue;
+			}
+
+			// Import the post!
+			$post_id = $this->import_post( $listing, $post_type, $fields, $category );
+			if ( is_wp_error( $post_id ) ) {
+				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $listing->title ) );
+				\WP_CLI::warning( $post_id->get_error_message() );
+				continue;
+			}
+
+			// Set the categories.
+			wp_set_post_categories( $post_id, array( $category_id ) );
+
+			// Add our specific guest author.
+			$this->co_authors_plus->assign_guest_authors_to_post(
+				array( 34 ),
+				$post_id,
+				false
+			);
+
 		}
 
 	}
@@ -705,6 +769,17 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'image->file', 'string', '_thumbnail_id' ),
 		);
 
+		$this->fields_mappings['Events'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'description', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'string', 'post_date_gmt' ),
+			array( 'lastmod', 'string', 'post_modified_gmt' ),
+			array( 'images[0]', 'string', '_thumbnail_id' ),
+			array( 'link', 'string', 'link' ),
+			array( 'time_start', 'string', 'newspack_listings_event_start_date' ),
+		);
+
 	}
 
 	/**
@@ -857,7 +932,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 *
 	 * Merges imported data with a post template specifically for Education Profiles content.
 	 *
-	 * @param array $post Array of post data as retrieved from the JSON.
+	 * @param object $post Object of post data as retrieved from the JSON.
 	 *
 	 * @return string Constructed post template.
 	 */
@@ -912,7 +987,7 @@ HTML;
 	 *
 	 * Merges imported data with a post template specifically for article content.
 	 *
-	 * @param array $post Array of post data as retrieved from the JSON.
+	 * @param object $post Object of post data as retrieved from the JSON.
 	 *
 	 * @return string Constructed post template.
 	 */
@@ -931,7 +1006,7 @@ HTML;
 	 *
 	 * Merges imported data with a post template specifically for Video content.
 	 *
-	 * @param array $post Array of post data as retrieved from the JSON.
+	 * @param object $post Object of post data as retrieved from the JSON.
 	 *
 	 * @return string Constructed post template.
 	 */
@@ -993,6 +1068,72 @@ HTML;
 			$this->convert_copy_to_blocks( $post->video_source[0]->copy ),
 			$transcript,
 			$archive_video_block
+		] );
+
+	}
+
+	/**
+	 * Format post content for Education Event posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Event content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_events_content( $post ) {
+
+		$more_information = ( empty( $post->link ) ) ? '' : sprintf(
+			'<!-- wp:paragraph --><p><a href="%s">More Information</a></p><!-- /wp:paragraph -->',
+			$post->link
+		);
+
+		// Construct the Venue string, accounting for empty City and/or State.
+		if ( ! empty( $post->venue->city ) || ! empty( $post->venue->state ) ) {
+			$city_string  = ( empty( $post->venue->city ) ) ?
+				false :
+				sprintf( '<strong><em>City:</em></strong> %s', $post->venue->city );
+			$state_string = ( empty( $post->venue->state ) ) ?
+				false :
+				sprintf( '<strong><em>State:</em></strong> %s', $post->venue->state );
+
+			$venue = sprintf(
+				'<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->',
+				implode( '<br/>', array_filter( [ $city_string, $state_string ] ) )
+			);
+		} else {
+			$venue = '';
+		}
+
+		// Use the description if possible, otherwise grab the content field.
+		$content = ( ! empty( $post->description ) ) ?
+			sprintf( '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->', $post->description ) :
+			$this->convert_copy_to_blocks( $post->content );
+
+		$event_dates_block = sprintf(
+			'<!-- wp:newspack-listings/event-dates {"startDate":"%1$s","endDate":"%2$s","showTime":true,"showEnd":true} /-->',
+			substr( date( "c", strtotime( $post->time_start ) ), 0, -6 ),
+			substr( date( "c", strtotime( $post->time_end ) ), 0, -6 )
+		);
+
+		$images = [];
+		foreach ( $post->images as $image ) {
+			// Prepare an object so we can use `format_image_block()`.
+			$img_object = (object) [
+				'image' => $image,
+				'copy'  => '',
+				'alt'   => '',
+			];
+			$images[] = $this->format_image_block( $img_object );
+		}
+
+		return implode( '', [
+			$this->construct_event_date_format( $post->time_start, $post->time_end ),
+			$more_information,
+			$venue,
+			$content,
+			$event_dates_block,
+			implode( '', $images ),
 		] );
 
 	}
@@ -1114,6 +1255,22 @@ https://www.youtube.com/watch?v=%1$s
 		$video_block = sprintf( $video_template, $video_id );
 		return $video_block;
 
+	}
+
+	/**
+	 * Build a human-readable even duration from start and end times.
+	 *
+	 * @param string $start The start time in ISO 8601 format.
+	 * @param string $end   The end time in ISO 8601 format.
+	 *
+	 * @return string The human readable string, in a Paragraph block.
+	 */
+	private function construct_event_date_format( $start, $end ) {
+		return sprintf(
+			'<!-- wp:paragraph --><p><strong>%s - %s</strong></p><!-- /wp:paragraph -->',
+			date( "M. j, Y |  g:ia", strtotime( $start ) ),
+			date( "M. j, Y |  g:ia", strtotime( $end ) )
+		);
 	}
 
 	/**
