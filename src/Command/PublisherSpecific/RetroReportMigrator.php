@@ -129,6 +129,23 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public function register_commands() {
+
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-add-cf-token',
+			array( $this, 'cmd_retro_report_add_cf_token' ),
+			array(
+				'shortdesc' => 'Add the CloudFlare authorization token (CF_Authorization cookie) for later use (to download images for now).',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'token',
+						'optional'    => false,
+						'description' => 'The CF authorization token.',
+					),
+				),
+			)
+		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-posts',
 			array( $this, 'cmd_retro_report_import_posts' ),
@@ -181,27 +198,12 @@ class RetroReportMigrator implements InterfaceCommand {
 			)
 		);
 
-		WP_CLI::add_command(
-			'newspack-content-migrator retro-report-add-cf-token',
-			array( $this, 'cmd_retro_report_add_cf_token' ),
-			array(
-				'shortdesc' => 'Add the CloudFlare authorization token (CF_Authorization cookie) for later use (to download images for now).',
-				'synopsis'  => array(
-					array(
-						'type'        => 'assoc',
-						'name'        => 'token',
-						'optional'    => false,
-						'description' => 'The CF authorization token.',
-					),
-				),
-			)
-		);
 	}
 
 	/**
 	 * Callable for `newspack-content-migrator retro-report-add-cf-token`
 	 *
-	 * @param array $args Positional arguments.
+	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_add_cf_token( $args, $assoc_args ) {
@@ -213,9 +215,66 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator retro-report-import-posts`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
+		$category  = $assoc_args['category'];
+		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
+		$posts     = $this->validate_json_file( $assoc_args );
+		$post_type = $this->get_post_type( $category );
+
+		// Check if the category already exists.
+		$category_id = get_cat_ID( $category );
+
+		// If not, create it.
+		if ( 0 === $category_id ) {
+			WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $category ) );
+			$category_id = wp_create_category( $category );
+		}
+
+		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
+
+		$fields = $this->load_mappings( $category );
+
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+
+		foreach ( $posts as $post ) {
+			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
+
+			if ( $this->post_exists( $post, $post_type ) ) {
+				WP_CLI::log( sprintf( 'Post "%s" is already imported. Skipping...', $post->title ) );
+				continue;
+			}
+
+			$post_id = $this->import_post( $post, $post_type, $fields, $category );
+
+			if ( is_wp_error( $post_id ) ) {
+				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
+				WP_CLI::warning( $post_id->get_error_message() );
+				continue;
+			}
+
+			wp_set_post_categories( $post_id, array( $category_id ) );
+
+			if ( $ga_id ) {
+				$this->co_authors_plus->assign_guest_authors_to_post(
+					array( $ga_id ),
+					$post_id,
+					true,
+				);
+			}
+		}
+	}
+
+	/**
 	 * Callable for `newspack-content-migrator retro-report-import-staff`
 	 *
-	 * @param array $args Positional arguments.
+	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_staff( $args, $assoc_args ) {
@@ -321,63 +380,6 @@ class RetroReportMigrator implements InterfaceCommand {
 			}
 		}
 
-	}
-
-	/**
-	 * Callable for `newspack-content-migrator retro-report-import-posts`
-	 *
-	 * @param array $args Positional arguments.
-	 * @param array $assoc_args Associative arguments.
-	 */
-	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
-		$category  = $assoc_args['category'];
-		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
-		$posts     = $this->validate_json_file( $assoc_args );
-		$post_type = $this->get_post_type( $category );
-
-		// Check if the category already exists.
-		$category_id = get_cat_ID( $category );
-
-		// If not, create it.
-		if ( 0 === $category_id ) {
-			WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $category ) );
-			$category_id = wp_create_category( $category );
-		}
-
-		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
-
-		$fields = $this->load_mappings( $category );
-
-		WP_CLI::log( 'The fields that are going to be imported are:' );
-
-		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
-
-		foreach ( $posts as $post ) {
-			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
-
-			if ( $this->post_exists( $post, $post_type ) ) {
-				WP_CLI::log( sprintf( 'Post "%s" is already imported. Skipping...', $post->title ) );
-				continue;
-			}
-
-			$post_id = $this->import_post( $post, $post_type, $fields, $category );
-
-			if ( is_wp_error( $post_id ) ) {
-				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
-				WP_CLI::warning( $post_id->get_error_message() );
-				continue;
-			}
-
-			wp_set_post_categories( $post_id, array( $category_id ) );
-
-			if ( $ga_id ) {
-				$this->co_authors_plus->assign_guest_authors_to_post(
-					array( $ga_id ),
-					$post_id,
-					true,
-				);
-			}
-		}
 	}
 
 	/**
