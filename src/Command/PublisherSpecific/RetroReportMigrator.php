@@ -802,17 +802,6 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	}
 
-	public function set_content_formatters() {
-		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
-		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
-		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
-		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
-	}
-
-	public function get_content_formatter( $category ) {
-		return isset( $this->content_formatters[ $category ] ) ? $this->content_formatters[ $category ] : null;
-	}
-
 	/**
 	 * Get the property value, or return empty string if it doesn't exist.
 	 *
@@ -839,6 +828,39 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Articles']            = 'post';
 	}
 
+	/**
+	 * Map the content formatters used for different content types.
+	 *
+	 * @return void
+	 */
+	public function set_content_formatters() {
+		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
+		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
+		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
+		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
+		$this->content_formatters['Events'] = array( $this, 'format_events_content' );
+	}
+
+	/**
+	 * Grab the required content formatter callable.
+	 *
+	 * @param string $category The content category/type.
+	 *
+	 * @return array Callable method containing the required content formatter.
+	 */
+	public function get_content_formatter( $category ) {
+		return isset( $this->content_formatters[ $category ] ) ? $this->content_formatters[ $category ] : null;
+	}
+
+	/**
+	 * Format post content for Education Profiles posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Profiles content.
+	 *
+	 * @param array $post Array of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
 	public function format_education_profiles_content( $post ) {
 		$content_code = <<<HTML
 <!-- wp:social-links -->
@@ -863,6 +885,15 @@ HTML;
 		);
 	}
 
+	/**
+	 * Format post content for Education Resources posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Resources content.
+	 *
+	 * @param array $post Array of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
 	public function format_education_resources_content( $post ) {
 		// WIP
 		$content_code = <<<HTML
