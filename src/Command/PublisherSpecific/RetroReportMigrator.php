@@ -227,13 +227,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$post_type = $this->get_post_type( $category );
 
 		// Check if the category already exists.
-		$category_id = get_cat_ID( $category );
-
-		// If not, create it.
-		if ( 0 === $category_id ) {
-			WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $category ) );
-			$category_id = wp_create_category( $category );
-		}
+		$category_id = $this->get_or_create_category( $category );
 
 		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
 
@@ -1166,5 +1160,42 @@ https://www.youtube.com/watch?v=%1$s
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Get a category ID from it's name, creating if it doesn't exist.
+	 *
+	 * @param string $name   Full textual name of the category.
+	 * @param string $parent Name of the parent category, if required.
+	 *
+	 * @return int|false ID of the found category, false if not found/failed to create.
+	 */
+	private function get_or_create_category( $name, $parent = false ) {
+
+		// Check if the category already exists.
+		$category_id = get_cat_ID( $name );
+
+		// Check if the parent already exists.
+		if ( $parent ) {
+			$parent_id = $this->get_or_create_category( $parent );
+		}
+
+		// If not, create it.
+		if ( 0 === $category_id ) {
+			\WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $name ) );
+
+			// Create the category, under it's parent if required.
+			$category_id = ( $parent_id ) ?
+				wp_create_category( $name, $parent_id ) :
+				wp_create_category( $name );
+
+			if ( is_wp_error( $category_id ) ) {
+				\WP_CLI::warning( sprintf( 'Failed to create %s category', $name ) );
+				$category_id = false;
+			}
+
+		}
+
+		return $category_id;
 	}
 }
