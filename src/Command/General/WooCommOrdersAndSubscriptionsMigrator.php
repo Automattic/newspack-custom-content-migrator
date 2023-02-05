@@ -149,7 +149,7 @@ class WooCommOrdersAndSubscriptionsMigrator implements InterfaceCommand {
 	 * @param string   $table_prefix_source
 	 * @param string   $table_prefix_destination
 	 */
-	private function migrate_order_or_subscription( $source_order_id = null, $source_subscription_id = null, $table_prefix_source, $table_prefix_destination ) {
+	private function migrate_order_or_subscription( $source_order_id = null, $source_subscription_id = null, $table_prefix_source = '', $table_prefix_destination = '' ) {
 		global $wpdb;
 
 		if ( is_null( $source_order_id ) && is_null( $source_subscription_id ) ) {
