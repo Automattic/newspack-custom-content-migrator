@@ -493,7 +493,7 @@ class RetroReportMigrator implements InterfaceCommand {
 					$path_parts = explode( '/', trim( $value, '/' ) );
 					$slug       = end( $path_parts );
 					return $slug;
-					
+
 				case "post_author":
 					if ( ! empty( $value ) ) {
 						// Just grab the first user for core post_author.
@@ -567,16 +567,16 @@ class RetroReportMigrator implements InterfaceCommand {
 	public function user_exists( $user ) {
 		$unique_id = $user->unique_id;
 
-		$users = $this->get_users_from_staff_id( $unique_id );
+		$users = $this->get_user_from_staff_id( $unique_id );
 
 		return count( $users ) > 0;
 	}
 
 	/**
 	 * Grab the user account based on the original staff ID.
-	 * 
+	 *
 	 * @param int $staff_id Staff ID from the JSON import.
-	 * 
+	 *
 	 * @return array List of WP_User objects that match the Staff ID.
 	 */
 	private function get_user_from_staff_id( $staff_id ) {
@@ -590,9 +590,9 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Get CAP guest authors from the original staff ID.
-	 * 
+	 *
 	 * @param int $staff_id Staff ID from the JSON import.
-	 * 
+	 *
 	 * @return object|bool Guest author object, or false if not found.
 	 */
 	private function get_guest_author_from_staff_id( $staff_id ) {
@@ -610,9 +610,9 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	/**
 	 * Converts a list of staff IDs into WP user IDs.
-	 * 
+	 *
 	 * @param array $authors A list of staff IDs from the original import.
-	 * 
+	 *
 	 * @return array A list of guest author IDs.
 	 */
 	private function convert_authors_to_guest_authors( $authors ) {
@@ -882,11 +882,11 @@ HTML;
 
 	/**
 	 * Format post content for articles.
-	 * 
+	 *
 	 * Merges imported data with a post template specifically for article content.
-	 * 
+	 *
 	 * @param array $post Array of post data as retrieved from the JSON.
-	 * 
+	 *
 	 * @return string Constructed post template.
 	 */
 	public function format_article_content( $post ) {
@@ -901,11 +901,11 @@ HTML;
 
 	/**
 	 * Format post content for video posts.
-	 * 
+	 *
 	 * Merges imported data with a post template specifically for Video content.
-	 * 
+	 *
 	 * @param array $post Array of post data as retrieved from the JSON.
-	 * 
+	 *
 	 * @return string Constructed post template.
 	 */
 	public function format_video_content( $post ) {
@@ -972,11 +972,11 @@ HTML;
 
 	/**
 	 * Convert paragraph HTML to blocks.
-	 * 
+	 *
 	 * Intended to be used for any "copy" values from the JSON imports.
-	 * 
+	 *
 	 * @param string $copy The raw HTML from the JSON
-	 * 
+	 *
 	 * @return string Refactored content with paragraph blocks.
 	 */
 	private function convert_copy_to_blocks( $copy ) {
@@ -988,10 +988,10 @@ HTML;
 
 	/**
 	 * Convert blocks from the JSON into WP blocks.
-	 * 
+	 *
 	 * @param array $blocks List of blocks from the import JSON.
-	 * 
-	 * @return string WP Block HTML 
+	 *
+	 * @return string WP Block HTML
 	 */
 	private function convert_blocks_to_blocks( $blocks ) {
 		$new_blocks = [];
@@ -1044,14 +1044,14 @@ HTML;
 			get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
 			wp_get_attachment_caption( $attachment_id ),
 		);
-		
+
 	}
 
 	/**
 	 * Generates a video block, based on a given video ID
-	 * 
+	 *
 	 * @param string $video_id The ID of the video from the JSON import.
-	 * 
+	 *
 	 * @return string Gutenberg block HTML.
 	 */
 	private function format_video_block( $video_id ) {
@@ -1075,9 +1075,9 @@ HTML;
 
 	/**
 	 * Get posts by the video ID they had in the import JSON.
-	 * 
+	 *
 	 * @param string $video_id Unique ID
-	 * 
+	 *
 	 * @return WP_Post|false The post object or false if there is none.
 	 */
 	private function get_post_from_video_id( $video_id ) {
@@ -1127,7 +1127,7 @@ HTML;
 
 	/**
 	 * Validate the JSON file and return it's decoded contents.
-	 * 
+	 *
 	 * @param array $assoc_args The array of associate arguments passed to the CLI command.
 	 * @return mixed The decoded JSON, if possible.
 	 */
