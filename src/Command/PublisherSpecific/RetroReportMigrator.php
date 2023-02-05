@@ -621,7 +621,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		foreach ( $authors as $author ) {
 			$ga = $this->get_guest_author_from_staff_id( $author );
-			if ( ! $ga ) {
+			if ( ! is_object( $ga ) ) {
 				continue;
 			}
 
