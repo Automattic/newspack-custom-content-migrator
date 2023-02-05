@@ -951,7 +951,7 @@ HTML;
 				$archive_video_block .= sprintf(
 					$accordion_template,
 					$video->title,
-					sprintf( $video_template, $video->video_id ),
+					$this->format_video_block( $video->video_id ),
 					$this->convert_copy_to_blocks( $video->copy )
 				);
 			}
@@ -959,7 +959,7 @@ HTML;
 
 		// Combine all the parts in the right order.
 		return implode( '', [
-			$this->format_video_block( $post ),
+			$this->format_video_group_block( $post->video_source[0]->video_id ),
 			"<!-- wp:heading --><h2>$post->title</h2><!-- /wp:heading -->",
 			$credits,
 			$released,
@@ -998,7 +998,7 @@ HTML;
 		foreach ( $blocks as $block ) {
 			switch ( $block->layout ) {
 				case "video":
-					$new_blocks[] = $this->format_video_block( $block->video_id );
+					$new_blocks[] = $this->format_video_group_block( $block->video_id );
 					break;
 				case "text":
 					$new_blocks[] = $this->convert_copy_to_blocks( $block->copy );
@@ -1048,21 +1048,18 @@ HTML;
 	}
 
 	/**
-	 * Generates a video block, based on a given video ID
+	 * Generates a video group block, based on a given video ID.
+	 *
+	 * Used for creating the "featured image"-style spot at the top of video posts.
 	 *
 	 * @param string $video_id The ID of the video from the JSON import.
 	 *
 	 * @return string Gutenberg block HTML.
 	 */
-	private function format_video_block( $video_id ) {
+	private function format_video_group_block( $video_id ) {
 
 		// Video group block at the top of the page.
-		$video_template = '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=%1$s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
-<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
-https://www.youtube.com/watch?v=%1$s
-</div></figure>
-<!-- /wp:embed -->';
-		$video_block = sprintf( $video_template, $video_id );
+		$video_block = $this->format_video_block( $video_id );
 		$video_group = <<<HTML
 		<!-- wp:group {"align":"full","backgroundColor":"dark-gray","textColor":"white","layout":{"type":"constrained"}} -->
 <div class="wp-block-group alignfull has-white-color has-dark-gray-background-color has-text-color has-background">$video_block</div>
@@ -1070,6 +1067,25 @@ https://www.youtube.com/watch?v=%1$s
 HTML;
 
 		return $video_group;
+
+	}
+
+	/**
+	 * Generate an individual video block.
+	 *
+	 * @param string $video_id The ID of the video from the JSON import.
+	 *
+	 * @return string Gutenberg block HTML.
+	 */
+	private function format_video_block( $video_id ) {
+
+		$video_template = '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=%1$s","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+https://www.youtube.com/watch?v=%1$s
+</div></figure>
+<!-- /wp:embed -->';
+		$video_block = sprintf( $video_template, $video_id );
+		return $video_block;
 
 	}
 
