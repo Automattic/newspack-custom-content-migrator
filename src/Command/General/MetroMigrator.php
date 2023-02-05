@@ -196,14 +196,6 @@ class MetroMirgator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-            'newspack-content-migrator metro-fix-jpe-images',
-			[ $this, 'cmd_metro_fix_jpe_images' ],
-			[
-				'shortdesc' => 'Fix the JPE images by renaming them to JPEG extension.',
-			]
-		);
-
-		WP_CLI::add_command(
             'newspack-content-migrator metro-fix-jpe-images-posts',
 			[ $this, 'cmd_metro_fix_jpe_images_posts' ],
 			[
@@ -220,37 +212,12 @@ class MetroMirgator implements InterfaceCommand {
 		);
 	}
 
-	public function cmd_metro_fix_jpe_images( $args, $assoc_args ) {
-		global $wpdb;
-
-		$attachments = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT post_id as ID, meta_value as file FROM $wpdb->postmeta WHERE meta_value LIKE %s",
-				'%' . '.jpe',
-			),
-		);
-
-		$uploads_path = wp_upload_dir()['basedir'];
-
-		foreach ( $attachments as $attachment ) {
-			$filename     = path_join( $uploads_path, $attachment->file );
-			$new_filename = path_join( $uploads_path, $filename . 'g' );
-
-			WP_CLI::log( sprintf( 'Renaming attachement #%d filename from %s to %s', $attachment->ID, $filename, $filename . 'g' ) );
-
-			if ( ! file_exists( $filename ) ) {
-				WP_CLI::warning( 'File not found. Skipping...' );
-				continue;
-			}
-
-			update_post_meta( $attachment->ID, '_wp_attached_file', $new_filename );
-
-			rename( $filename, $new_filename );
-		}
-
-		WP_CLI::success( 'Done!' );
-	}
-
+	/**
+	 * Callable for `newspack-content-migrator metro-fix-jpe-images-posts`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
 	public function cmd_metro_fix_jpe_images_posts( $args, $assoc_args ) {
 		global $wpdb;
 
