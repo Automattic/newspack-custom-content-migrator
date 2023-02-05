@@ -628,6 +628,86 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Set the fields mappings for each endpoint.
+	 *
+	 * @return void
+	 */
+	public function set_fields_mappings() {
+		$this->fields_mappings['Education profiles'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'lastmod', 'date', 'post_date_gmt' ),
+			array( 'path', 'string', 'post_name' ),
+			array( 'path', 'string', 'path' ),
+		);
+
+		$this->fields_mappings['Education resources'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'lastmod', 'date', 'post_date_gmt' ),
+			array( 'path', 'string', 'post_name' ),
+			array( 'path', 'string', 'path' ),
+			array( 'description', 'string', 'newspack_article_summary' ),
+			array( 'subtitle', 'string', 'newspack_post_subtitle' ),
+			array( 'images[0]', 'thumbnail', '_thumbnail_id' ),
+		);
+
+		$this->fields_mappings['Standards'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'lastmod', 'date', 'post_date_gmt' ),
+			array( 'path', 'string', 'post_name' ),
+			array( 'path', 'string', 'path' ),
+		);
+
+		$this->fields_mappings['Links'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'publishdate', 'date', 'post_date_gmt' ),
+			array( 'description', 'string', 'post_excerpt' ),
+			array( 'path', 'string', 'post_name' ),
+			array( 'description', 'string', 'description' ),
+			array( 'path', 'string', 'path' ),
+			array( 'date', 'string', 'date' ),
+			array( 'images', 'array', 'images' ),
+		);
+
+		$this->fields_mappings['Video'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'video_source[0]', 'array', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'lastmod', 'date', 'post_modified_gmt' ),
+			array( 'publishdate', 'date', 'post_date_gmt' ),
+			array( 'video_source[0]->description', 'string', 'newspack_post_subtitle' ),
+			array( 'video_source[0]->description', 'string', 'newspack_article_summary' ),
+			array( 'video_source[0]->image', 'thumbnail', '_thumbnail_id' ),
+			array( 'video_source[0]->video_id', 'string', 'video_id' ),
+		);
+
+		$this->fields_mappings['Articles'] = array(
+			array( 'title', 'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'blocks', 'array', 'post_content' ),
+			array( 'draft', 'boolean', 'post_status' ),
+			array( 'authors', 'array', 'post_author' ),
+			array( 'authors', 'authors', 'guest_authors' ),
+			array( 'description', 'string', 'newspack_article_summary' ),
+			array( 'publishdate', 'string', 'post_date_gmt' ),
+			array( 'lastmod', 'string', 'post_modified_gmt' ),
+			array( 'image->file', 'string', '_thumbnail_id' ),
+		);
+
+	}
+
+	/**
 	 * Load the fields mappings from a CSV file
 	 *
 	 * @param string $category The name of the category (endpoint title).
@@ -720,86 +800,6 @@ class RetroReportMigrator implements InterfaceCommand {
 		$args['cookies']['CF_Authorization'] = $cf_token;
 
 		return $args;
-	}
-
-	/**
-	 * Set the fields mappings for each endpoint.
-	 *
-	 * @return void
-	 */
-	public function set_fields_mappings() {
-		$this->fields_mappings['Education profiles'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'lastmod', 'date', 'post_date_gmt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'path', 'string', 'path' ),
-		);
-
-		$this->fields_mappings['Education resources'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'lastmod', 'date', 'post_date_gmt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'path', 'string', 'path' ),
-			array( 'description', 'string', 'newspack_article_summary' ),
-			array( 'subtitle', 'string', 'newspack_post_subtitle' ),
-			array( 'images[0]', 'thumbnail', '_thumbnail_id' ),
-		);
-
-		$this->fields_mappings['Standards'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'lastmod', 'date', 'post_date_gmt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'path', 'string', 'path' ),
-		);
-
-		$this->fields_mappings['Links'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'publishdate', 'date', 'post_date_gmt' ),
-			array( 'description', 'string', 'post_excerpt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'description', 'string', 'description' ),
-			array( 'path', 'string', 'path' ),
-			array( 'date', 'string', 'date' ),
-			array( 'images', 'array', 'images' ),
-		);
-
-		$this->fields_mappings['Video'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'video_source[0]', 'array', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'publishdate', 'date', 'post_date_gmt' ),
-			array( 'video_source[0]->description', 'string', 'newspack_post_subtitle' ),
-			array( 'video_source[0]->description', 'string', 'newspack_article_summary' ),
-			array( 'video_source[0]->image', 'thumbnail', '_thumbnail_id' ),
-			array( 'video_source[0]->video_id', 'string', 'video_id' ),
-		);
-
-		$this->fields_mappings['Articles'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'blocks', 'array', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'authors', 'array', 'post_author' ),
-			array( 'authors', 'authors', 'guest_authors' ),
-			array( 'description', 'string', 'newspack_article_summary' ),
-			array( 'publishdate', 'string', 'post_date_gmt' ),
-			array( 'lastmod', 'string', 'post_modified_gmt' ),
-			array( 'image->file', 'string', '_thumbnail_id' ),
-		);
-
 	}
 
 	/**
