@@ -211,6 +211,18 @@ class RetroReportMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'description' => 'Path to the JSON file.',
 					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'category',
+						'optional'    => false,
+						'description' => 'Category name (about, board, articles, etc.).',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'category-parent',
+						'optional'    => true,
+						'description' => 'Category name (about, board, articles, etc.).',
+					),
 				),
 			)
 		);
@@ -400,11 +412,12 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_listings( $args, $assoc_args ) {
-		$listings    = $this->validate_json_file( $assoc_args );
-		$category    = 'Events';
-		$category_id = $this->get_or_create_category( $category, 'Education' );
-		$fields      = $this->load_mappings( $category );
-		$post_type   = 'newspack_lst_event';
+		$listings        = $this->validate_json_file( $assoc_args );
+		$category        = sanitize_text_field( $assoc_args['category'] );
+		$category_parent = array_key_exists( 'category-parent', $assoc_args ) ? sanitize_text_field( $assoc_args['category-parent'] ) : false;
+		$category_id     = $this->get_or_create_category( $category, $category_parent );
+		$fields          = $this->load_mappings( $category );
+		$post_type       = 'newspack_lst_event';
 
 		\WP_CLI::log( 'The fields that are going to be imported are:' );
 		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
@@ -1271,33 +1284,6 @@ https://www.youtube.com/watch?v=%1$s
 			date( "M. j, Y |  g:ia", strtotime( $start ) ),
 			date( "M. j, Y |  g:ia", strtotime( $end ) )
 		);
-	}
-
-	/**
-	 * Get posts by the video ID they had in the import JSON.
-	 *
-	 * @param string $video_id Unique ID
-	 *
-	 * @return WP_Post|false The post object or false if there is none.
-	 */
-	private function get_post_from_video_id( $video_id ) {
-		$posts = get_posts(
-			[
-				'post_type'      => 'any',
-				'posts_per_page' => 1,
-				'meta_query'     => [
-					[
-						'key'   => 'newspack_rr_video_id',
-						'value' => $video_id,
-					],
-				],
-			]
-		);
-		if ( $posts && ! empty( $posts ) ) {
-			return $posts[0];
-		}
-
-		return false;
 	}
 
 	public function is_array_item( $field ) {
