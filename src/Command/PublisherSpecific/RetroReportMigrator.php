@@ -157,7 +157,7 @@ class RetroReportMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'category',
 						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).',
+						'description' => 'Category name (about, board, articles, etc.).'
 					),
 					array(
 						'type'        => 'assoc',
@@ -229,6 +229,13 @@ class RetroReportMigrator implements InterfaceCommand {
 						'name'        => 'category-parent',
 						'optional'    => true,
 						'description' => 'Category name (about, board, articles, etc.).',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'guest-author',
+						'optional'    => true,
+						'description' => 'ID of the guest author to assign to post.',
+						'default'     => 'post',
 					),
 				),
 			)
@@ -451,11 +458,11 @@ class RetroReportMigrator implements InterfaceCommand {
 			wp_set_post_categories( $post_id, array( $category_id ) );
 
 			if ( $ga_id ) {
-			$this->co_authors_plus->assign_guest_authors_to_post(
+				$this->co_authors_plus->assign_guest_authors_to_post(
 					array( $ga_id ),
-				$post_id,
+					$post_id,
 					true
-			);
+				);
 			}
 
 		}
@@ -802,6 +809,16 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'time_start',  'string',    'newspack_listings_event_start_date' ),
 		);
 
+		$this->fields_mappings['Profiles'] = array(
+			array( 'title',        'string',    'post_title' ),
+			array( 'description',  'string',    'post_content' ),
+			array( 'draft',        'boolean',   'post_status' ),
+			array( 'lastmod',      'string',    'post_date_gmt' ),
+			array( 'lastmod',      'string',    'post_modified_gmt' ),
+			array( 'image',        'thumbnail', '_thumbnail_id' ),
+			array( 'profile_type', 'string',    'tags_input' ),
+		);
+
 	}
 
 	/**
@@ -936,6 +953,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
 		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
 		$this->content_formatters['Events'] = array( $this, 'format_events_content' );
+		$this->content_formatters['Profiles'] = array( $this, 'format_profiles_content' );
 	}
 
 	/**
@@ -1158,6 +1176,39 @@ HTML;
 			implode( '', $images ),
 		] );
 
+	}
+
+	/**
+	 * Format post content for Education Profiles posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Profiles content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_profiles_content( $post ) {
+
+		$content = [];
+
+		if ( ! empty( $post->twitter_handle ) ) {
+			$twitter_template = '<!-- wp:social-links -->
+			<ul class="wp-block-social-links"><!-- wp:social-link {"url":"https://twitter.com/%s","service":"twitter"} /--></ul>
+			<!-- /wp:social-links -->';
+			$content[] = sprintf( $twitter_template, esc_attr( $post->twitter_handle ) );
+		}
+
+		if ( ! empty( $post->school ) ) {
+			$school_template = '<!-- wp:paragraph --><p><strong>%1$s<br></strong>%2$s</p><!-- /wp:paragraph -->';
+			$content[] = sprintf( $school_template, esc_html( $post->school ), esc_html( $post->location ) );
+		}
+
+		if ( ! empty( $post->description ) ) {
+			$description_template = '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->';
+			$content[] = sprintf( $description_template, esc_html( $post->description ) );
+		}
+
+		return implode( '', $content );
 	}
 
 	/**
