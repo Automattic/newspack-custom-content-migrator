@@ -425,6 +425,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$category_id     = $this->get_or_create_category( $category, $category_parent );
 		$fields          = $this->load_mappings( $category );
 		$post_type       = sprintf( 'newspack_lst_%s', $assoc_args['type'] );
+		$ga_id           = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 
 		\WP_CLI::log( 'The fields that are going to be imported are:' );
 		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
@@ -449,12 +450,13 @@ class RetroReportMigrator implements InterfaceCommand {
 			// Set the categories.
 			wp_set_post_categories( $post_id, array( $category_id ) );
 
-			// Add our specific guest author.
+			if ( $ga_id ) {
 			$this->co_authors_plus->assign_guest_authors_to_post(
-				array( 34 ),
+					array( $ga_id ),
 				$post_id,
-				false
+					true
 			);
+			}
 
 		}
 
