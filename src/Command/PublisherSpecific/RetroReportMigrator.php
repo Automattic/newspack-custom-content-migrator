@@ -157,7 +157,7 @@ class RetroReportMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'category',
 						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).',
+						'description' => 'Category name (about, board, articles, etc.).'
 					),
 					array(
 						'type'        => 'assoc',
@@ -207,9 +207,35 @@ class RetroReportMigrator implements InterfaceCommand {
 				'synopsis'  => array(
 					array(
 						'type'        => 'assoc',
+						'name'        => 'type',
+						'optional'    => false,
+						'description' => 'Listing type (one of "generic", "events", "mktplce", "place")',
+						'options'     => array( 'events', 'generic', 'mktplce', 'place' ),
+					),
+					array(
+						'type'        => 'assoc',
 						'name'        => 'json-file',
 						'optional'    => false,
 						'description' => 'Path to the JSON file.',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'category',
+						'optional'    => false,
+						'description' => 'Category name (about, board, articles, etc.).',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'category-parent',
+						'optional'    => true,
+						'description' => 'Category name (about, board, articles, etc.).',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'guest-author',
+						'optional'    => true,
+						'description' => 'ID of the guest author to assign to post.',
+						'default'     => 'post',
 					),
 				),
 			)
@@ -400,11 +426,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_listings( $args, $assoc_args ) {
-		$listings    = $this->validate_json_file( $assoc_args );
-		$category    = 'Events';
-		$category_id = $this->get_or_create_category( $category, 'Education' );
-		$fields      = $this->load_mappings( $category );
-		$post_type   = 'newspack_lst_event';
+		$listings        = $this->validate_json_file( $assoc_args );
+		$category        = sanitize_text_field( $assoc_args['category'] );
+		$category_parent = array_key_exists( 'category-parent', $assoc_args ) ? sanitize_text_field( $assoc_args['category-parent'] ) : false;
+		$category_id     = $this->get_or_create_category( $category, $category_parent );
+		$fields          = $this->load_mappings( $category );
+		$post_type       = sprintf( 'newspack_lst_%s', $assoc_args['type'] );
+		$ga_id           = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 
 		\WP_CLI::log( 'The fields that are going to be imported are:' );
 		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
@@ -429,12 +457,13 @@ class RetroReportMigrator implements InterfaceCommand {
 			// Set the categories.
 			wp_set_post_categories( $post_id, array( $category_id ) );
 
-			// Add our specific guest author.
-			$this->co_authors_plus->assign_guest_authors_to_post(
-				array( 34 ),
-				$post_id,
-				false
-			);
+			if ( $ga_id ) {
+				$this->co_authors_plus->assign_guest_authors_to_post(
+					array( $ga_id ),
+					$post_id,
+					true
+				);
+			}
 
 		}
 
@@ -698,86 +727,96 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function set_fields_mappings() {
 		$this->fields_mappings['Education profiles'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'lastmod', 'date', 'post_date_gmt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'path', 'string', 'path' ),
+			array( 'title',   'string',  'post_title' ),
+			array( 'content', 'string',  'post_content' ),
+			array( 'draft',   'boolean', 'post_status' ),
+			array( 'lastmod', 'date',    'post_modified_gmt' ),
+			array( 'lastmod', 'date',    'post_date_gmt' ),
+			array( 'path',    'string',  'post_name' ),
+			array( 'path',    'string',  'path' ),
 		);
 
 		$this->fields_mappings['Education resources'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'lastmod', 'date', 'post_date_gmt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'path', 'string', 'path' ),
-			array( 'description', 'string', 'newspack_article_summary' ),
-			array( 'subtitle', 'string', 'newspack_post_subtitle' ),
-			array( 'images[0]', 'thumbnail', '_thumbnail_id' ),
+			array( 'title',       'string',    'post_title' ),
+			array( 'content',     'string',    'post_content' ),
+			array( 'draft',       'boolean',   'post_status' ),
+			array( 'lastmod',     'date',      'post_modified_gmt' ),
+			array( 'lastmod',     'date',      'post_date_gmt' ),
+			array( 'path',        'string',    'post_name' ),
+			array( 'path',        'string',    'path' ),
+			array( 'description', 'string',    'newspack_article_summary' ),
+			array( 'subtitle',    'string',    'newspack_post_subtitle' ),
+			array( 'images[0]',   'thumbnail', '_thumbnail_id' ),
 		);
 
 		$this->fields_mappings['Standards'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'lastmod', 'date', 'post_date_gmt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'path', 'string', 'path' ),
+			array( 'title',   'string',  'post_title' ),
+			array( 'content', 'string',  'post_content' ),
+			array( 'draft',   'boolean', 'post_status' ),
+			array( 'lastmod', 'date',    'post_modified_gmt' ),
+			array( 'lastmod', 'date',    'post_date_gmt' ),
+			array( 'path',    'string',  'post_name' ),
+			array( 'path',    'string',  'path' ),
 		);
 
 		$this->fields_mappings['Links'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'publishdate', 'date', 'post_date_gmt' ),
-			array( 'description', 'string', 'post_excerpt' ),
-			array( 'path', 'string', 'post_name' ),
-			array( 'description', 'string', 'description' ),
-			array( 'path', 'string', 'path' ),
-			array( 'date', 'string', 'date' ),
-			array( 'images', 'array', 'images' ),
+			array( 'title',       'string',  'post_title' ),
+			array( 'content',     'string',  'post_content' ),
+			array( 'draft',       'boolean', 'post_status' ),
+			array( 'lastmod',     'date',    'post_modified_gmt' ),
+			array( 'publishdate', 'date',    'post_date_gmt' ),
+			array( 'description', 'string',  'post_excerpt' ),
+			array( 'path',        'string',  'post_name' ),
+			array( 'description', 'string',  'description' ),
+			array( 'path',        'string',  'path' ),
+			array( 'date',        'string',  'date' ),
+			array( 'images',      'array',   'images' ),
 		);
 
 		$this->fields_mappings['Video'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'video_source[0]', 'array', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'date', 'post_modified_gmt' ),
-			array( 'publishdate', 'date', 'post_date_gmt' ),
-			array( 'video_source[0]->description', 'string', 'newspack_post_subtitle' ),
-			array( 'video_source[0]->description', 'string', 'newspack_article_summary' ),
-			array( 'video_source[0]->image', 'thumbnail', '_thumbnail_id' ),
-			array( 'video_source[0]->video_id', 'string', 'video_id' ),
+			array( 'title',                        'string',    'post_title' ),
+			array( 'video_source[0]',              'array',     'post_content' ),
+			array( 'draft',                        'boolean',   'post_status' ),
+			array( 'lastmod',                      'date',      'post_modified_gmt' ),
+			array( 'publishdate',                  'date',      'post_date_gmt' ),
+			array( 'video_source[0]->description', 'string',    'newspack_post_subtitle' ),
+			array( 'video_source[0]->description', 'string',    'newspack_article_summary' ),
+			array( 'video_source[0]->image',       'thumbnail', '_thumbnail_id' ),
+			array( 'video_source[0]->video_id',    'string',    'video_id' ),
 		);
 
 		$this->fields_mappings['Articles'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'blocks', 'array', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'authors', 'array', 'post_author' ),
-			array( 'authors', 'authors', 'guest_authors' ),
-			array( 'description', 'string', 'newspack_article_summary' ),
-			array( 'publishdate', 'string', 'post_date_gmt' ),
-			array( 'lastmod', 'string', 'post_modified_gmt' ),
-			array( 'image->file', 'string', '_thumbnail_id' ),
+			array( 'title',       'string',  'post_title' ),
+			array( 'content',     'string',  'post_content' ),
+			array( 'blocks',      'array',   'post_content' ),
+			array( 'draft',       'boolean', 'post_status' ),
+			array( 'authors',     'array',   'post_author' ),
+			array( 'authors',     'authors', 'guest_authors' ),
+			array( 'description', 'string',  'newspack_article_summary' ),
+			array( 'publishdate', 'string',  'post_date_gmt' ),
+			array( 'lastmod',     'string',  'post_modified_gmt' ),
+			array( 'image->file', 'string',  '_thumbnail_id' ),
 		);
 
 		$this->fields_mappings['Events'] = array(
-			array( 'title', 'string', 'post_title' ),
-			array( 'description', 'string', 'post_content' ),
-			array( 'draft', 'boolean', 'post_status' ),
-			array( 'lastmod', 'string', 'post_date_gmt' ),
-			array( 'lastmod', 'string', 'post_modified_gmt' ),
-			array( 'images[0]', 'string', '_thumbnail_id' ),
-			array( 'link', 'string', 'link' ),
-			array( 'time_start', 'string', 'newspack_listings_event_start_date' ),
+			array( 'title',       'string',    'post_title' ),
+			array( 'description', 'string',    'post_content' ),
+			array( 'draft',       'boolean',   'post_status' ),
+			array( 'lastmod',     'string',    'post_date_gmt' ),
+			array( 'lastmod',     'string',    'post_modified_gmt' ),
+			array( 'images[0]',   'thumbnail', '_thumbnail_id' ),
+			array( 'link',        'string',    'link' ),
+			array( 'time_start',  'string',    'newspack_listings_event_start_date' ),
+		);
+
+		$this->fields_mappings['Profiles'] = array(
+			array( 'title',        'string',    'post_title' ),
+			array( 'description',  'string',    'post_content' ),
+			array( 'draft',        'boolean',   'post_status' ),
+			array( 'lastmod',      'string',    'post_date_gmt' ),
+			array( 'lastmod',      'string',    'post_modified_gmt' ),
+			array( 'image',        'thumbnail', '_thumbnail_id' ),
+			array( 'profile_type', 'string',    'tags_input' ),
 		);
 
 	}
@@ -914,6 +953,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
 		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
 		$this->content_formatters['Events'] = array( $this, 'format_events_content' );
+		$this->content_formatters['Profiles'] = array( $this, 'format_profiles_content' );
 	}
 
 	/**
@@ -1139,6 +1179,39 @@ HTML;
 	}
 
 	/**
+	 * Format post content for Education Profiles posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Profiles content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_profiles_content( $post ) {
+
+		$content = [];
+
+		if ( ! empty( $post->twitter_handle ) ) {
+			$twitter_template = '<!-- wp:social-links -->
+			<ul class="wp-block-social-links"><!-- wp:social-link {"url":"https://twitter.com/%s","service":"twitter"} /--></ul>
+			<!-- /wp:social-links -->';
+			$content[] = sprintf( $twitter_template, esc_attr( $post->twitter_handle ) );
+		}
+
+		if ( ! empty( $post->school ) ) {
+			$school_template = '<!-- wp:paragraph --><p><strong>%1$s<br></strong>%2$s</p><!-- /wp:paragraph -->';
+			$content[] = sprintf( $school_template, esc_html( $post->school ), esc_html( $post->location ) );
+		}
+
+		if ( ! empty( $post->description ) ) {
+			$description_template = '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->';
+			$content[] = sprintf( $description_template, esc_html( $post->description ) );
+		}
+
+		return implode( '', $content );
+	}
+
+	/**
 	 * Convert paragraph HTML to blocks.
 	 *
 	 * Intended to be used for any "copy" values from the JSON imports.
@@ -1271,33 +1344,6 @@ https://www.youtube.com/watch?v=%1$s
 			date( "M. j, Y |  g:ia", strtotime( $start ) ),
 			date( "M. j, Y |  g:ia", strtotime( $end ) )
 		);
-	}
-
-	/**
-	 * Get posts by the video ID they had in the import JSON.
-	 *
-	 * @param string $video_id Unique ID
-	 *
-	 * @return WP_Post|false The post object or false if there is none.
-	 */
-	private function get_post_from_video_id( $video_id ) {
-		$posts = get_posts(
-			[
-				'post_type'      => 'any',
-				'posts_per_page' => 1,
-				'meta_query'     => [
-					[
-						'key'   => 'newspack_rr_video_id',
-						'value' => $video_id,
-					],
-				],
-			]
-		);
-		if ( $posts && ! empty( $posts ) ) {
-			return $posts[0];
-		}
-
-		return false;
 	}
 
 	public function is_array_item( $field ) {
