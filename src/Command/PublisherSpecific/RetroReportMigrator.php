@@ -309,7 +309,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		WP_CLI::log( 'The fields that are going to be imported are:' );
 
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
-$posts = [ $posts[0] ];
+
 		foreach ( $posts as $post ) {
 			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
 
@@ -545,6 +545,10 @@ $posts = [ $posts[0] ];
 			}
 
 			$formatted_value = $this->format_post_field( $field, $value );
+			if ( is_null( $formatted_value ) ) {
+				$formatted_value = '';
+			}
+
 			if ( $field->is_meta ) {
 				$post_meta[ $field->target ] = $formatted_value;
 			} else if ( 'authors' === $field->type ) {
