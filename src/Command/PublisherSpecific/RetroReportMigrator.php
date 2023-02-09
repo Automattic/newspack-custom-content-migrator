@@ -59,6 +59,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	private $core_fields;
 
 	/**
+	 * List of core post meta fields
+	 *
+	 * @var array
+	 */
+	private $core_meta;
+
+	/**
 	 * Fields mappings from JSON fields to WP fields
 	 *
 	 * @var array
@@ -103,6 +110,13 @@ class RetroReportMigrator implements InterfaceCommand {
 		);
 
 		$this->core_fields = array_flip( $this->core_fields );
+
+		$this->core_meta = array(
+			'_thumbnail_id',
+			'_wp_page_template'
+		);
+
+		$this->core_meta = array_flip( $this->core_meta );
 
 		$this->set_fields_mappings();
 		$this->set_post_types();
@@ -178,6 +192,22 @@ class RetroReportMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'description' => 'ID of the guest author to assign to post.',
 						'default'     => 'post',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'template',
+						'optional'    => true,
+						'description' => 'Name of the template to use for imported posts',
+						'default'     => 'default',
+						'options'     => array( 'default', 'single-feature.php', 'single-wide.php' ),
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'featured_image_position',
+						'optional'    => true,
+						'description' => 'Name of the template to use for imported posts',
+						'default'     => 'default',
+						'options'     => array( 'default', 'large', 'small', 'behind', 'beside', 'above', 'hidden' ),
 					),
 				),
 			)
@@ -279,7 +309,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		WP_CLI::log( 'The fields that are going to be imported are:' );
 
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
-
+$posts = [ $posts[0] ];
 		foreach ( $posts as $post ) {
 			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
 
@@ -288,8 +318,17 @@ class RetroReportMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$post_id = $this->import_post( $post, $post_type, $fields, $category );
+			// Specify the template to use, if needed.
+			if ( 'default' !== $assoc_args['template'] ) {
+				$post->template = esc_attr( $assoc_args['template'] );
+			}
 
+			// Specify the featured image positions to use, if needed.
+			if ( 'default' !== $assoc_args['featured_image_position'] ) {
+				$post->featured_image_position = esc_attr( $assoc_args['featured_image_position'] );
+			}
+
+			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
 				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
 				WP_CLI::warning( $post_id->get_error_message() );
@@ -530,6 +569,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function add_post( $post_args, $post_meta, $post_authors ) {
+
 		$post_id = wp_insert_post( $post_args, true );
 
 		if ( is_wp_error( $post_id ) ) {
@@ -678,6 +718,33 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Get a post from the unique id in the original import JSON.
+	 *
+	 * @param string $unqiue_id The unique ID from the JSON.
+	 *
+	 * @return bool|WP_Post The WP_Post object or false if we couldn't find it.
+	 */
+	private function get_post_from_unique_id( $unique_id ) {
+		if ( ! $this->post_exists( (object) [ 'unique_id' => $unique_id ] ) ) {
+			return false;
+		}
+
+		$posts = get_posts( [
+			'posts_per_page' => 1,
+			'post_type'      => 'any',
+			'meta_query'     => [
+				[
+					'key'   => self::META_PREFIX . 'unique_id',
+					'value' => $unique_id,
+				]
+			]
+		] );
+
+		return ( ! empty( $posts ) ) ? $posts[0] : false;
+
+	}
+
+	/**
 	 * Get CAP guest authors from the original staff ID.
 	 *
 	 * @param int $staff_id Staff ID from the JSON import.
@@ -819,6 +886,21 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'profile_type', 'string',    'tags_input' ),
 		);
 
+		$this->fields_mappings['Multi-Media'] = array(
+			array( 'title',                   'string',    'post_title' ),
+			array( 'description',             'string',    'post_content' ),
+			array( 'description',             'string',    'newspack_article_summary' ),
+			array( 'draft',                   'boolean',   'post_status' ),
+			array( 'path',                    'boolean',   'post_name' ),
+			array( 'publishdate',             'string',    'post_date_gmt' ),
+			array( 'lastmod',                 'string',    'post_modified_gmt' ),
+			array( 'tagline',                 'string',    'post_excerpt' ),
+			array( 'images[0]',               'thumbnail', '_thumbnail_id' ),
+			array( 'report_type',             'string',    'tags_input' ),
+			array( 'template',                'string',    '_wp_page_template' ),
+			array( 'featured_image_position', 'string',    'newspack_featured_image_position' ),
+		);
+
 	}
 
 	/**
@@ -874,7 +956,12 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return string The meta key.
 	 */
 	public function get_meta_key( $name ) {
-		if ( '_thumbnail_id' == $name || strpos( $name, 'newspack_' ) !== false ) {
+
+		// Ensure we don't prefix core or newspack meta fields.
+		if (
+			array_key_exists( $name, $this->core_meta ) ||
+			strpos( $name, 'newspack_' ) !== false
+		) {
 			return $name;
 		}
 
@@ -936,10 +1023,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	public function set_post_types() {
 		$this->post_types['Standards']           = 'wp_block';
 		$this->post_types['Links']               = 'post';
-		$this->post_types['Education profiles']  = 'newspack_lst_generic';
+		$this->post_types['Profiles']            = 'newspack_lst_generic';
 		$this->post_types['Education resources'] = 'post';
 		$this->post_types['Video']               = 'post';
 		$this->post_types['Articles']            = 'post';
+		$this->post_types['Events']              = 'newspack_lst_event';
+		$this->post_types['Profiles']            = 'newspack_lst_generic';
+		$this->post_types['Multi-Media']         = 'post';
 	}
 
 	/**
@@ -954,6 +1044,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
 		$this->content_formatters['Events'] = array( $this, 'format_events_content' );
 		$this->content_formatters['Profiles'] = array( $this, 'format_profiles_content' );
+		$this->content_formatters['Multi-Media'] = array( $this, 'format_multimedia_content' );
 	}
 
 	/**
@@ -1206,6 +1297,106 @@ HTML;
 		if ( ! empty( $post->description ) ) {
 			$description_template = '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->';
 			$content[] = sprintf( $description_template, esc_html( $post->description ) );
+		}
+
+		return implode( '', $content );
+	}
+
+	/**
+	 * Format post content for Multi-Media posts.
+	 *
+	 * Merges imported data with a post template specifically for Multi-Media content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_multimedia_content( $post ) {
+		$content = [];
+
+		if ( ! empty( $post->description ) ) {
+			$description_template = '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->';
+			$content[] = sprintf( $description_template, esc_html( $post->description ) );
+		}
+
+		if ( ! empty( $post->gallery ) ) {
+
+			$gallery_item_template_odd = '<!-- wp:group {"layout":{"type":"constrained"}} -->
+			<div class="wp-block-group"><!-- wp:columns -->
+			<div class="wp-block-columns"><!-- wp:column {"width":"66.66%%"} -->
+			<div class="wp-block-column" style="flex-basis:66.66%%">%1$s</div>
+			<!-- /wp:column -->
+
+			<!-- wp:column {"width":"33.33%%"} -->
+			<div class="wp-block-column" style="flex-basis:33.33%%"><!-- wp:heading -->
+			<h2>%2$s</h2>
+			<!-- /wp:heading -->
+
+			<!-- wp:paragraph -->
+			<p>%3$s</p>
+			<!-- /wp:paragraph --></div>
+			<!-- /wp:column --></div>
+			<!-- /wp:columns --></div>
+			<!-- /wp:group -->';
+
+			$gallery_item_template_even = '<!-- wp:columns -->
+			<div class="wp-block-columns"><!-- wp:column {"width":"33.33%%"} -->
+			<div class="wp-block-column" style="flex-basis:33.33%%"><!-- wp:heading -->
+			<h2>%2$s</h2>
+			<!-- /wp:heading -->
+
+			<!-- wp:paragraph -->
+			<p>%3$s</p>
+			<!-- /wp:paragraph --></div>
+			<!-- /wp:column -->
+
+			<!-- wp:column {"width":"66.7%%"} -->
+			<div class="wp-block-column" style="flex-basis:66.7%%">%1$s</div>
+			<!-- /wp:column --></div>
+			<!-- /wp:columns -->';
+
+			// Determine which template to start on.
+			$odd = true;
+			foreach ( $post->gallery as $item ) {
+
+				// Alternate the template to use.
+				$template = ( $odd ) ? $gallery_item_template_odd : $gallery_item_template_even;
+
+				// Put the image in a format consumable by format_image_block().
+				$image_block = (object) [
+					'image' => $item->image,
+					'copy'  => $item->caption,
+					'alt'   => '',
+				];
+
+				// Some things are null.
+				$heading = ( is_null( $item->heading ) ) ? '' : $item->heading;
+				$caption = ( is_null( $item->caption ) ) ? '' : $item->caption;
+
+				// Combine all the parts with the template.
+				$content[] .= sprintf(
+					$template,
+					$this->format_image_block( $image_block ),
+					$heading,
+					$caption
+				);
+
+				// Flip the template for the next one.
+				$odd = ! $odd;
+			}
+		}
+
+
+		// Get the related video.
+		$related_video = $this->get_post_from_unique_id( $post->related_video );
+		if ( $related_video ) {
+
+			$content[] = '<!-- wp:paragraph --><p>Related Documentary</p><!-- /wp:paragraph -->';
+			$content[] = sprintf(
+				'<!-- wp:newspack-blocks/homepage-articles {"minHeight":70,"postsToShow":1,"mediaPosition":"behind","specificPosts":["%d"],"specificMode":true} /-->',
+				$related_video->ID
+			);
+
 		}
 
 		return implode( '', $content );
