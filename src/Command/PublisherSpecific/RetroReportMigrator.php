@@ -97,7 +97,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 
-		$this->core_fields = array(
+		$this->core_fields = [
 			'post_author',
 			'post_date_gmt',
 			'post_content',
@@ -107,14 +107,14 @@ class RetroReportMigrator implements InterfaceCommand {
 			'post_name',
 			'post_modified_gmt',
 			'tags_input',
-		);
+		];
 
 		$this->core_fields = array_flip( $this->core_fields );
 
-		$this->core_meta = array(
+		$this->core_meta = [
 			'_thumbnail_id',
 			'_wp_page_template'
-		);
+		];
 
 		$this->core_meta = array_flip( $this->core_meta );
 
@@ -122,7 +122,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->set_post_types();
 		$this->set_content_formatters();
 
-		add_filter( 'http_request_args', array( $this, 'add_cf_token_to_requests' ), 10, 2 );
+		add_filter( 'http_request_args', [ $this, 'add_cf_token_to_requests' ], 10, 2 );
 	}
 
 
@@ -147,150 +147,150 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-add-cf-token',
-			array( $this, 'cmd_retro_report_add_cf_token' ),
-			array(
+			[ $this, 'cmd_retro_report_add_cf_token' ],
+			[
 				'shortdesc' => 'Add the CloudFlare authorization token (CF_Authorization cookie) for later use (to download images for now).',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
 						'type'        => 'assoc',
 						'name'        => 'token',
 						'optional'    => false,
 						'description' => 'The CF authorization token.',
-					),
-				),
-			)
+					],
+				],
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-posts',
-			array( $this, 'cmd_retro_report_import_posts' ),
-			array(
+			[ $this, 'cmd_retro_report_import_posts' ],
+			[
 				'shortdesc' => 'Import posts from a JSON file',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
 						'type'        => 'assoc',
 						'name'        => 'category',
 						'optional'    => false,
 						'description' => 'Category name (about, board, articles, etc.).'
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'json-file',
 						'optional'    => false,
 						'description' => 'Path to the JSON file.',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'post-type',
 						'optional'    => false,
 						'description' => 'The post type to be imported as (default is `post`).',
 						'default'     => 'post',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'guest-author',
 						'optional'    => true,
 						'description' => 'ID of the guest author to assign to post.',
 						'default'     => 'post',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'template',
 						'optional'    => true,
 						'description' => 'Name of the template to use for imported posts',
 						'default'     => 'default',
-						'options'     => array( 'default', 'single-feature.php', 'single-wide.php' ),
-					),
-					array(
+						'options'     => [ 'default', 'single-feature.php', 'single-wide.php' ],
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'featured_image_position',
 						'optional'    => true,
 						'description' => 'Name of the template to use for imported posts',
 						'default'     => 'default',
-						'options'     => array( 'default', 'large', 'small', 'behind', 'beside', 'above', 'hidden' ),
-					),
-				),
-			)
+						'options'     => [ 'default', 'large', 'small', 'behind', 'beside', 'above', 'hidden' ],
+					],
+				],
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-staff',
-			array( $this, 'cmd_retro_report_import_staff' ),
-			array(
+			[ $this, 'cmd_retro_report_import_staff' ],
+			[
 				'shortdesc' => 'Import staff from a JSON file',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
 						'type'        => 'assoc',
 						'name'        => 'json-file',
 						'optional'    => false,
 						'description' => 'Path to the JSON file.',
-					),
-				),
-			)
+					],
+				],
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-listings',
-			array( $this, 'cmd_retro_report_import_listings' ),
-			array(
+			[ $this, 'cmd_retro_report_import_listings' ],
+			[
 				'shortdesc' => 'Import listings from a JSON file',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
 						'type'        => 'assoc',
 						'name'        => 'type',
 						'optional'    => false,
 						'description' => 'Listing type (one of "generic", "events", "mktplce", "place")',
-						'options'     => array( 'events', 'generic', 'mktplce', 'place' ),
-					),
-					array(
+						'options'     => [ 'events', 'generic', 'mktplce', 'place' ],
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'json-file',
 						'optional'    => false,
 						'description' => 'Path to the JSON file.',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'category',
 						'optional'    => false,
 						'description' => 'Category name (about, board, articles, etc.).',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'category-parent',
 						'optional'    => true,
 						'description' => 'Category name (about, board, articles, etc.).',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'guest-author',
 						'optional'    => true,
 						'description' => 'ID of the guest author to assign to post.',
 						'default'     => 'post',
-					),
-				),
-			)
+					],
+				],
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-reusable-blocks',
-			array( $this, 'cmd_retro_report_import_reusable_blocks' ),
-			array(
+			[ $this, 'cmd_retro_report_import_reusable_blocks' ],
+			[
 				'shortdesc' => 'Import re-usable from a JSON file',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
 						'type'        => 'assoc',
 						'name'        => 'json-file',
 						'optional'    => false,
 						'description' => 'Path to the JSON file.',
-					),
-					array(
+					],
+					[
 						'type'        => 'assoc',
 						'name'        => 'category',
 						'optional'    => false,
 						'description' => 'Category name (about, board, articles, etc.).',
-					),
-				),
-			)
+					],
+				],
+			]
 		);
 
 	}
@@ -357,11 +357,11 @@ class RetroReportMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			wp_set_post_categories( $post_id, array( $category_id ) );
+			wp_set_post_categories( $post_id, [ $category_id ] );
 
 			if ( $ga_id ) {
 				$this->co_authors_plus->assign_guest_authors_to_post(
-					array( $ga_id ),
+					[ $ga_id ],
 					$post_id,
 					true
 				);
@@ -430,15 +430,15 @@ class RetroReportMigrator implements InterfaceCommand {
 				$wp_role = 'editor';
 			}
 
-			$user_meta = array(
+			$user_meta = [
 				'newspack_job_title'               => $position,
 				'newspack_role'                    => $role,
 				'twitter'                          => $twitter,
 				$this->get_meta_key( 'images' )    => $images,
 				$this->get_meta_key( 'unique_id' ) => $unique_id,
-			);
+			];
 
-			$user_args = array(
+			$user_args = [
 				'first_name'    => $first_name,
 				'last_name'     => $last_name,
 				'nickname'      => $username,
@@ -450,7 +450,7 @@ class RetroReportMigrator implements InterfaceCommand {
 				'description'   => property_exists( $user, 'content' ) ? $user->content : '',
 				'meta_input'    => $user_meta,
 				'role'          => $wp_role,
-			);
+			];
 
 			$user_id = wp_insert_user( $user_args );
 
@@ -516,11 +516,11 @@ class RetroReportMigrator implements InterfaceCommand {
 			}
 
 			// Set the categories.
-			wp_set_post_categories( $post_id, array( $category_id ) );
+			wp_set_post_categories( $post_id, [ $category_id ] );
 
 			if ( $ga_id ) {
 				$this->co_authors_plus->assign_guest_authors_to_post(
-					array( $ga_id ),
+					[ $ga_id ],
 					$post_id,
 					true
 				);
@@ -575,14 +575,14 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function import_post( $object, $post_type, $post_fields, $category ) {
-		$post_args = array(
+		$post_args = [
 			'post_type' => $post_type,
-		);
+		];
 
-		$post_meta = array(
+		$post_meta = [
 			self::META_PREFIX . 'type'      => $category,
 			self::META_PREFIX . 'unique_id' => $object->unique_id,
-		);
+		];
 
 		$post_authors = [];
 
@@ -735,12 +735,12 @@ class RetroReportMigrator implements InterfaceCommand {
 		$unique_id = $post->unique_id;
 
 		$query = new WP_Query(
-			array(
+			[
 				'meta_key'    => self::META_PREFIX . 'unique_id',
 				'meta_value'  => $unique_id,
 				'post_type'   => $post_type,
 				'post_status' => 'any',
-			),
+			],
 		);
 
 		return $query->post_count > 0;
@@ -770,10 +770,10 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	private function get_user_from_staff_id( $staff_id ) {
 		return get_users(
-			array(
+			[
 				'meta_key'   => self::META_PREFIX . 'unique_id',
 				'meta_value' => $staff_id,
-			),
+			],
 		);
 	}
 
@@ -853,119 +853,119 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_fields_mappings() {
-		$this->fields_mappings['Education profiles'] = array(
-			array( 'title',   'string',  'post_title' ),
-			array( 'content', 'string',  'post_content' ),
-			array( 'draft',   'boolean', 'post_status' ),
-			array( 'lastmod', 'date',    'post_modified_gmt' ),
-			array( 'lastmod', 'date',    'post_date_gmt' ),
-			array( 'path',    'string',  'post_name' ),
-			array( 'path',    'string',  'path' ),
-		);
+		$this->fields_mappings['Education profiles'] = [
+			[ 'title',   'string',  'post_title' ],
+			[ 'content', 'string',  'post_content' ],
+			[ 'draft',   'boolean', 'post_status' ],
+			[ 'lastmod', 'date',    'post_modified_gmt' ],
+			[ 'lastmod', 'date',    'post_date_gmt' ],
+			[ 'path',    'string',  'post_name' ],
+			[ 'path',    'string',  'path' ],
+		];
 
-		$this->fields_mappings['Education resources'] = array(
-			array( 'title',       'string',    'post_title' ),
-			array( 'content',     'string',    'post_content' ),
-			array( 'draft',       'boolean',   'post_status' ),
-			array( 'lastmod',     'date',      'post_modified_gmt' ),
-			array( 'lastmod',     'date',      'post_date_gmt' ),
-			array( 'path',        'string',    'post_name' ),
-			array( 'path',        'string',    'path' ),
-			array( 'description', 'string',    'newspack_article_summary' ),
-			array( 'subtitle',    'string',    'newspack_post_subtitle' ),
-			array( 'images[0]',   'thumbnail', '_thumbnail_id' ),
-		);
+		$this->fields_mappings['Education resources'] = [
+			[ 'title',       'string',    'post_title' ],
+			[ 'content',     'string',    'post_content' ],
+			[ 'draft',       'boolean',   'post_status' ],
+			[ 'lastmod',     'date',      'post_modified_gmt' ],
+			[ 'lastmod',     'date',      'post_date_gmt' ],
+			[ 'path',        'string',    'post_name' ],
+			[ 'path',        'string',    'path' ],
+			[ 'description', 'string',    'newspack_article_summary' ],
+			[ 'subtitle',    'string',    'newspack_post_subtitle' ],
+			[ 'images[0]',   'thumbnail', '_thumbnail_id' ],
+		];
 
-		$this->fields_mappings['Standards'] = array(
-			array( 'title',   'string',  'post_title' ),
-			array( 'content', 'string',  'post_content' ),
-			array( 'draft',   'boolean', 'post_status' ),
-			array( 'lastmod', 'date',    'post_modified_gmt' ),
-			array( 'lastmod', 'date',    'post_date_gmt' ),
-			array( 'path',    'string',  'post_name' ),
-			array( 'path',    'string',  'path' ),
-		);
+		$this->fields_mappings['Standards'] = [
+			[ 'title',   'string',  'post_title' ],
+			[ 'content', 'string',  'post_content' ],
+			[ 'draft',   'boolean', 'post_status' ],
+			[ 'lastmod', 'date',    'post_modified_gmt' ],
+			[ 'lastmod', 'date',    'post_date_gmt' ],
+			[ 'path',    'string',  'post_name' ],
+			[ 'path',    'string',  'path' ],
+		];
 
-		$this->fields_mappings['Links'] = array(
-			array( 'title',       'string',  'post_title' ),
-			array( 'content',     'string',  'post_content' ),
-			array( 'draft',       'boolean', 'post_status' ),
-			array( 'lastmod',     'date',    'post_modified_gmt' ),
-			array( 'publishdate', 'date',    'post_date_gmt' ),
-			array( 'description', 'string',  'post_excerpt' ),
-			array( 'path',        'string',  'post_name' ),
-			array( 'description', 'string',  'description' ),
-			array( 'path',        'string',  'path' ),
-			array( 'date',        'string',  'date' ),
-			array( 'images',      'array',   'images' ),
-		);
+		$this->fields_mappings['Links'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'content',     'string',  'post_content' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'lastmod',     'date',    'post_modified_gmt' ],
+			[ 'publishdate', 'date',    'post_date_gmt' ],
+			[ 'description', 'string',  'post_excerpt' ],
+			[ 'path',        'string',  'post_name' ],
+			[ 'description', 'string',  'description' ],
+			[ 'path',        'string',  'path' ],
+			[ 'date',        'string',  'date' ],
+			[ 'images',      'array',   'images' ],
+		];
 
-		$this->fields_mappings['Video'] = array(
-			array( 'title',                        'string',    'post_title' ),
-			array( 'video_source[0]',              'array',     'post_content' ),
-			array( 'draft',                        'boolean',   'post_status' ),
-			array( 'lastmod',                      'date',      'post_modified_gmt' ),
-			array( 'publishdate',                  'date',      'post_date_gmt' ),
-			array( 'video_source[0]->description', 'string',    'newspack_post_subtitle' ),
-			array( 'video_source[0]->description', 'string',    'newspack_article_summary' ),
-			array( 'video_source[0]->image',       'thumbnail', '_thumbnail_id' ),
-			array( 'video_source[0]->video_id',    'string',    'video_id' ),
-		);
+		$this->fields_mappings['Video'] = [
+			[ 'title',                        'string',    'post_title' ],
+			[ 'video_source[0]',              'array',     'post_content' ],
+			[ 'draft',                        'boolean',   'post_status' ],
+			[ 'lastmod',                      'date',      'post_modified_gmt' ],
+			[ 'publishdate',                  'date',      'post_date_gmt' ],
+			[ 'video_source[0]->description', 'string',    'newspack_post_subtitle' ],
+			[ 'video_source[0]->description', 'string',    'newspack_article_summary' ],
+			[ 'video_source[0]->image',       'thumbnail', '_thumbnail_id' ],
+			[ 'video_source[0]->video_id',    'string',    'video_id' ],
+		];
 
-		$this->fields_mappings['Articles'] = array(
-			array( 'title',       'string',  'post_title' ),
-			array( 'content',     'string',  'post_content' ),
-			array( 'blocks',      'array',   'post_content' ),
-			array( 'draft',       'boolean', 'post_status' ),
-			array( 'authors',     'array',   'post_author' ),
-			array( 'authors',     'authors', 'guest_authors' ),
-			array( 'description', 'string',  'newspack_article_summary' ),
-			array( 'publishdate', 'string',  'post_date_gmt' ),
-			array( 'lastmod',     'string',  'post_modified_gmt' ),
-			array( 'image->file', 'string',  '_thumbnail_id' ),
-		);
+		$this->fields_mappings['Articles'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'content',     'string',  'post_content' ],
+			[ 'blocks',      'array',   'post_content' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'authors',     'array',   'post_author' ],
+			[ 'authors',     'authors', 'guest_authors' ],
+			[ 'description', 'string',  'newspack_article_summary' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'image->file', 'string',  '_thumbnail_id' ],
+		];
 
-		$this->fields_mappings['Events'] = array(
-			array( 'title',       'string',    'post_title' ),
-			array( 'description', 'string',    'post_content' ),
-			array( 'draft',       'boolean',   'post_status' ),
-			array( 'lastmod',     'string',    'post_date_gmt' ),
-			array( 'lastmod',     'string',    'post_modified_gmt' ),
-			array( 'images[0]',   'thumbnail', '_thumbnail_id' ),
-			array( 'link',        'string',    'link' ),
-			array( 'time_start',  'string',    'newspack_listings_event_start_date' ),
-		);
+		$this->fields_mappings['Events'] = [
+			[ 'title',       'string',    'post_title' ],
+			[ 'description', 'string',    'post_content' ],
+			[ 'draft',       'boolean',   'post_status' ],
+			[ 'lastmod',     'string',    'post_date_gmt' ],
+			[ 'lastmod',     'string',    'post_modified_gmt' ],
+			[ 'images[0]',   'thumbnail', '_thumbnail_id' ],
+			[ 'link',        'string',    'link' ],
+			[ 'time_start',  'string',    'newspack_listings_event_start_date' ],
+		];
 
-		$this->fields_mappings['Profiles'] = array(
-			array( 'title',        'string',    'post_title' ),
-			array( 'description',  'string',    'post_content' ),
-			array( 'draft',        'boolean',   'post_status' ),
-			array( 'lastmod',      'string',    'post_date_gmt' ),
-			array( 'lastmod',      'string',    'post_modified_gmt' ),
-			array( 'image',        'thumbnail', '_thumbnail_id' ),
-			array( 'profile_type', 'string',    'tags_input' ),
-		);
+		$this->fields_mappings['Profiles'] = [
+			[ 'title',        'string',    'post_title' ],
+			[ 'description',  'string',    'post_content' ],
+			[ 'draft',        'boolean',   'post_status' ],
+			[ 'lastmod',      'string',    'post_date_gmt' ],
+			[ 'lastmod',      'string',    'post_modified_gmt' ],
+			[ 'image',        'thumbnail', '_thumbnail_id' ],
+			[ 'profile_type', 'string',    'tags_input' ],
+		];
 
-		$this->fields_mappings['Multi-Media'] = array(
-			array( 'title',                   'string',    'post_title' ),
-			array( 'description',             'string',    'post_content' ),
-			array( 'description',             'string',    'newspack_article_summary' ),
-			array( 'draft',                   'boolean',   'post_status' ),
-			array( 'path',                    'boolean',   'post_name' ),
-			array( 'publishdate',             'string',    'post_date_gmt' ),
-			array( 'lastmod',                 'string',    'post_modified_gmt' ),
-			array( 'tagline',                 'string',    'post_excerpt' ),
-			array( 'images[0]',               'thumbnail', '_thumbnail_id' ),
-			array( 'report_type',             'string',    'tags_input' ),
-			array( 'template',                'string',    '_wp_page_template' ),
-			array( 'featured_image_position', 'string',    'newspack_featured_image_position' ),
-		);
+		$this->fields_mappings['Multi-Media'] = [
+			[ 'title',                   'string',    'post_title' ],
+			[ 'description',             'string',    'post_content' ],
+			[ 'description',             'string',    'newspack_article_summary' ],
+			[ 'draft',                   'boolean',   'post_status' ],
+			[ 'path',                    'boolean',   'post_name' ],
+			[ 'publishdate',             'string',    'post_date_gmt' ],
+			[ 'lastmod',                 'string',    'post_modified_gmt' ],
+			[ 'tagline',                 'string',    'post_excerpt' ],
+			[ 'images[0]',               'thumbnail', '_thumbnail_id' ],
+			[ 'report_type',             'string',    'tags_input' ],
+			[ 'template',                'string',    '_wp_page_template' ],
+			[ 'featured_image_position', 'string',    'newspack_featured_image_position' ],
+		];
 
-		$this->fields_mappings['Standards'] = array(
-			array( 'title',   'string', 'post_title' ),
-			array( 'content', 'string', 'post_content' ),
-			array( 'publish', 'string', 'post_status' ),
-		);
+		$this->fields_mappings['Standards'] = [
+			[ 'title',   'string', 'post_title' ],
+			[ 'content', 'string', 'post_content' ],
+			[ 'publish', 'string', 'post_status' ],
+		];
 
 	}
 
@@ -981,19 +981,19 @@ class RetroReportMigrator implements InterfaceCommand {
 			WP_CLI::error( 'The given category does not exist.' );
 		}
 
-		$fields = array();
+		$fields = [];
 
 		foreach ( $this->fields_mappings[ $category ] as $field ) {
 			list( $name, $type, $target ) = $field;
 
 			$is_meta = $this->is_meta_field( $target );
 
-			$fields[] = (object) array(
+			$fields[] = (object) [
 				'name'    => $name,
 				'type'    => $type,
 				'is_meta' => $is_meta,
 				'target'  => $is_meta ? $this->get_meta_key( $target ) : $target,
-			);
+			];
 		}
 
 		return $fields;
@@ -1105,14 +1105,14 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_content_formatters() {
-		$this->content_formatters['Education profiles']  = array( $this, 'format_education_profiles_content' );
-		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
-		$this->content_formatters['Video']               = array( $this, 'format_video_content' );
-		$this->content_formatters['Articles']            = array( $this, 'format_article_content' );
-		$this->content_formatters['Events']              = array( $this, 'format_events_content' );
-		$this->content_formatters['Profiles']            = array( $this, 'format_profiles_content' );
-		$this->content_formatters['Multi-Media']         = array( $this, 'format_multimedia_content' );
-		$this->content_formatters['Standards']           = array( $this, 'format_standards_content' );
+		$this->content_formatters['Education profiles']  = [ $this, 'format_education_profiles_content' ];
+		$this->content_formatters['Education resources'] = [ $this, 'format_education_resources_content' ];
+		$this->content_formatters['Video']               = [ $this, 'format_video_content' ];
+		$this->content_formatters['Articles']            = [ $this, 'format_article_content' ];
+		$this->content_formatters['Events']              = [ $this, 'format_events_content' ];
+		$this->content_formatters['Profiles']            = [ $this, 'format_profiles_content' ];
+		$this->content_formatters['Multi-Media']         = [ $this, 'format_multimedia_content' ];
+		$this->content_formatters['Standards']           = [ $this, 'format_standards_content' ];
 	}
 
 	/**
