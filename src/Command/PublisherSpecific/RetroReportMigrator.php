@@ -331,7 +331,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		WP_CLI::log( 'The fields that are going to be imported are:' );
 
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
-
+$posts = [ $posts[0] ];
 		foreach ( $posts as $post ) {
 			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
 
@@ -649,81 +649,6 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Convert a field's value to the necessary format.
-	 * For example, convert an image URL to attachment ID by importing it,
-	 * convert "draft": false to post_status=publish etc.
-	 *
-	 * @param object $field The field object.
-	 * @param mixed  $value The field's value (could be anything).
-	 *
-	 * @return mixed The formatted value.
-	 */
-	public function format_post_field( $field, $value ) {
-
-		// @TODO use a mechanism like in $this->is_array_item()?
-		if ( false !== strpos( $field->name, '->' ) && ! empty( $value ) ) {
-			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
-			$value = $value->$prop;
-		}
-
-		if ( 'string' == $field->type || 'array' == $field->type || 'boolean' == $field->type ) {
-			switch ( $field->target ) {
-				case 'post_status':
-					if ( true === $value ) {
-						return 'draft';
-					}
-
-					if ( false === $value ) {
-						return 'publish';
-					}
-
-					return $value;
-				case 'post_name':
-					$path_parts = explode( '/', trim( $value, '/' ) );
-					$slug       = end( $path_parts );
-					return $slug;
-
-				case "post_author":
-					if ( ! empty( $value ) ) {
-						// Just grab the first user for core post_author.
-						$author = $this->get_user_from_staff_id( $value[0] );
-						return ( empty( $author ) ) ? false : $author;
-					}
-
-			}
-		}
-
-		// Convert dates to WordPress' precious format.
-		if ( 'date' === $field->type ) {
-			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
-		}
-
-		// Process multiple authors into CAP guest authors.
-		if ( 'authors' === $field->type ) {
-			$authors = $this->convert_authors_to_guest_authors( $value );
-			return $authors;
-		}
-
-		if ( 'thumbnail' == $field->type && $value ) {
-
-			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
-
-			$image_url     = self::BASE_URL . $value;
-			$attachment_id = $this->attachments->import_external_file( $image_url );
-
-			if ( is_wp_error( $attachment_id ) ) {
-				WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
-				WP_CLI::warning( $attachment_id->get_error_message() );
-				return $value;
-			}
-
-			return $attachment_id;
-		}
-
-		return maybe_serialize( $value );
-	}
-
-	/**
 	 * Check if a post has already been imported.
 	 *
 	 * @param object $post The post object (from JSON, not WP_Post).
@@ -967,6 +892,23 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ 'publish', 'string', 'post_status' ],
 		];
 
+		$this->fields_mappings['Library'] = [
+			[ 'title',              'string',    'post_title' ],
+			[ 'summary',            'string',    'post_content' ],
+			[ 'summary',            'string',    'post_content' ],
+			[ 'education_subjects', 'array',     'categories' ],
+			[ 'education_topics',   'array',     'categories' ],
+			[ 'education_levels',   'array',     'categories' ],
+			[ 'standards_ccss',     'array',     'tags_input' ],
+			[ 'standards_ncss',     'array',     'tags_input' ],
+			[ 'standards_ngss',     'array',     'tags_input' ],
+			[ 'standards_nshspc',   'array',     'tags_input' ],
+			[ 'video',              'thumbnail', '_thumbnail_id' ],
+			[ 'lastmod',            'string',    'post_date_gmt' ],
+			[ 'lastmod',            'string',    'post_modified_gmt' ],
+			[ 'draft',              'boolean',   'post_modified_gmt' ],
+		];
+
 	}
 
 	/**
@@ -1035,6 +977,81 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Convert a field's value to the necessary format.
+	 * For example, convert an image URL to attachment ID by importing it,
+	 * convert "draft": false to post_status=publish etc.
+	 *
+	 * @param object $field The field object.
+	 * @param mixed  $value The field's value (could be anything).
+	 *
+	 * @return mixed The formatted value.
+	 */
+	public function format_post_field( $field, $value ) {
+
+		// @TODO use a mechanism like in $this->is_array_item()?
+		if ( false !== strpos( $field->name, '->' ) && ! empty( $value ) ) {
+			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
+			$value = $value->$prop;
+		}
+
+		if ( 'string' == $field->type || 'array' == $field->type || 'boolean' == $field->type ) {
+			switch ( $field->target ) {
+				case 'post_status':
+					if ( true === $value ) {
+						return 'draft';
+					}
+
+					if ( false === $value ) {
+						return 'publish';
+					}
+
+					return $value;
+				case 'post_name':
+					$path_parts = explode( '/', trim( $value, '/' ) );
+					$slug       = end( $path_parts );
+					return $slug;
+
+				case "post_author":
+					if ( ! empty( $value ) ) {
+						// Just grab the first user for core post_author.
+						$author = $this->get_user_from_staff_id( $value[0] );
+						return ( empty( $author ) ) ? false : $author;
+					}
+
+			}
+		}
+
+		// Convert dates to WordPress' precious format.
+		if ( 'date' === $field->type ) {
+			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
+		}
+
+		// Process multiple authors into CAP guest authors.
+		if ( 'authors' === $field->type ) {
+			$authors = $this->convert_authors_to_guest_authors( $value );
+			return $authors;
+		}
+
+		if ( 'thumbnail' == $field->type && $value ) {
+
+			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
+
+			$image_url     = self::BASE_URL . $value;
+			$attachment_id = $this->attachments->import_external_file( $image_url );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
+				WP_CLI::warning( $attachment_id->get_error_message() );
+				return $value;
+			}
+
+			return $attachment_id;
+		}
+
+		return maybe_serialize( $value );
+	}
+
+	/**
 	 * Check if a field should be saved in meta or in wp_posts table.
 	 *
 	 * @param string $field The field name.
@@ -1097,6 +1114,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Profiles']            = 'newspack_lst_generic';
 		$this->post_types['Multi-Media']         = 'post';
 		$this->post_types['Standards']           = 'wp_block';
+		$this->post_types['Library']             = 'wp_block';
 	}
 
 	/**
@@ -1113,6 +1131,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Profiles']            = [ $this, 'format_profiles_content' ];
 		$this->content_formatters['Multi-Media']         = [ $this, 'format_multimedia_content' ];
 		$this->content_formatters['Standards']           = [ $this, 'format_standards_content' ];
+		$this->content_formatters['Library']             = [ $this, 'format_education_library_content' ];
 	}
 
 	/**
@@ -1497,6 +1516,19 @@ HTML;
 		);
 
 		return $content . $view_more;
+	}
+
+	/**
+	 * Format post content for Education Library posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Library content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_education_library_content( $post ) {
+		return $post->summary;
 	}
 
 	/**
