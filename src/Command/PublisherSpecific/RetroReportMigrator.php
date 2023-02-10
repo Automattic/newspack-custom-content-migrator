@@ -271,6 +271,28 @@ class RetroReportMigrator implements InterfaceCommand {
 			)
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-import-reusable-blocks',
+			array( $this, 'cmd_retro_report_import_reusable_blocks' ),
+			array(
+				'shortdesc' => 'Import re-usable from a JSON file',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'json-file',
+						'optional'    => false,
+						'description' => 'Path to the JSON file.',
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'category',
+						'optional'    => false,
+						'description' => 'Category name (about, board, articles, etc.).',
+					),
+				),
+			)
+		);
+
 	}
 
 	/**
@@ -502,6 +524,40 @@ class RetroReportMigrator implements InterfaceCommand {
 					$post_id,
 					true
 				);
+			}
+
+		}
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator retro-report-import-listings`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_reusable_blocks( $args, $assoc_args ) {
+		$blocks    = $this->validate_json_file( $assoc_args );
+		$category  = sanitize_text_field( $assoc_args['category'] );
+		$fields    = $this->load_mappings( $category );
+		$post_type = $this->get_post_type( $category );
+
+		\WP_CLI::log( 'The fields that are going to be imported are:' );
+		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+
+		foreach ( $blocks as $block ) {
+
+			\WP_CLI::log( sprintf( 'Importing re-usable block "%s"...', $block->title ) );
+
+			// Make sure we set them to published.
+			$block->publish = 'publish';
+
+			// Import the post!
+			$post_id = $this->import_post( $block, $post_type, $fields, $category );
+			if ( is_wp_error( $post_id ) ) {
+				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $block->title ) );
+				\WP_CLI::warning( $post_id->get_error_message() );
+				continue;
 			}
 
 		}
@@ -905,6 +961,12 @@ class RetroReportMigrator implements InterfaceCommand {
 			array( 'featured_image_position', 'string',    'newspack_featured_image_position' ),
 		);
 
+		$this->fields_mappings['Standards'] = array(
+			array( 'title',   'string', 'post_title' ),
+			array( 'content', 'string', 'post_content' ),
+			array( 'publish', 'string', 'post_status' ),
+		);
+
 	}
 
 	/**
@@ -1034,6 +1096,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Events']              = 'newspack_lst_event';
 		$this->post_types['Profiles']            = 'newspack_lst_generic';
 		$this->post_types['Multi-Media']         = 'post';
+		$this->post_types['Standards']           = 'wp_block';
 	}
 
 	/**
@@ -1042,13 +1105,14 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_content_formatters() {
-		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
+		$this->content_formatters['Education profiles']  = array( $this, 'format_education_profiles_content' );
 		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
-		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
-		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
-		$this->content_formatters['Events'] = array( $this, 'format_events_content' );
-		$this->content_formatters['Profiles'] = array( $this, 'format_profiles_content' );
-		$this->content_formatters['Multi-Media'] = array( $this, 'format_multimedia_content' );
+		$this->content_formatters['Video']               = array( $this, 'format_video_content' );
+		$this->content_formatters['Articles']            = array( $this, 'format_article_content' );
+		$this->content_formatters['Events']              = array( $this, 'format_events_content' );
+		$this->content_formatters['Profiles']            = array( $this, 'format_profiles_content' );
+		$this->content_formatters['Multi-Media']         = array( $this, 'format_multimedia_content' );
+		$this->content_formatters['Standards']           = array( $this, 'format_standards_content' );
 	}
 
 	/**
@@ -1404,6 +1468,35 @@ HTML;
 		}
 
 		return implode( '', $content );
+	}
+
+	/**
+	 * Format post content for Standards posts.
+	 *
+	 * Merges imported data with a post template specifically for Standards content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_standards_content( $post ) {
+
+		// Generate the content paragraph block.
+		$content = $this->convert_copy_to_blocks( $post->content );
+
+		// Get the tag.
+		$tag = term_exists( $post->title, 'post_tag' );
+		if ( is_null( $tag ) ) {
+			$tag = wp_create_term( $post->title, 'post_tag' );
+		}
+
+		// Generate the view more link paragraph block.
+		$view_more = sprintf(
+			'<!-- wp:paragraph --><p><a href="%s">View More</a></p><!-- /wp:paragraph -->',
+			get_term_link( (int) $tag['term_id'], 'post_tag' )
+		);
+
+		return $content . $view_more;
 	}
 
 	/**
