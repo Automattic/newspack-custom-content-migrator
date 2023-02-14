@@ -77,6 +77,44 @@ class Umbria24Migrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-update-feat-img-ids-from-logs',
+			[ $this, 'cmd_update_feat_imgs_ids_from_logs' ],
+			[
+				'shortdesc' => 'Updates featured imgages ids according to old2new attachment ids from content refresh logs.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachment-ids-changes-php-file',
+						'description' => "File which returns an array of old attachment ids as keys and new attachment ids as values.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-types-csv',
+						'description' => "CSV of post types to process. Default is `post`.",
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-from',
+						'description' => 'Optional. Post ID range minimum.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-to',
+						'description' => 'Optional. Post ID range maximum.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
 	}
 
 	/**
@@ -330,6 +368,46 @@ class Umbria24Migrator implements InterfaceCommand {
 				'post_status'    => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 			]
 		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-update-feat-img-ids-from-logs`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_update_feat_imgs_ids_from_logs( $args, $assoc_args ) {
+		$attachment_ids_changes_file = $assoc_args[ 'attachment-ids-changes-php-file' ] ?? null;
+		$post_types = $assoc_args[ 'post-types-csv' ] ? explode( ',', $assoc_args[ 'post-types-csv' ] ) : [ 'post' ];
+		$post_id_from = $assoc_args[ 'post-id-from' ] ?? null;
+		$post_id_to = $assoc_args[ 'post-id-to' ] ?? null;
+
+		$attachment_ids_changes = include( $assoc_args[ 'attachment-ids-changes-php-file' ] );
+
+		global $wpdb;
+
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"select ID
+					from $wpdb->posts
+					where post_type in ( 'post', 'fotogallery', 'video', 'medialab' )
+					and post_status in ( 'publish', 'draft' ) 
+					and ID >= %d
+					and ID <= %d
+					order by ID desc",
+				$post_id_from,
+				$post_id_to
+			)
+		);
+
+		foreach ( $ids as $key_id => $id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_id + 1, count( $ids ), $id ) );
+			$attachment_id = get_post_thumbnail_id( $id );
+			if ( isset( $attachment_ids_changes[$attachment_id] ) ) {
+				update_post_meta( $id, '_thumbnail_id', $attachment_ids_changes[$attachment_id] );
+				$this->log( 'featured_img_ids_updates.log', sprintf( "postID=%d oldAttId=%d newAttId=%d", $id, $attachment_id, $attachment_ids_changes[$attachment_id] ) );
+			}
+		}
 	}
 
 	/**
