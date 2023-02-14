@@ -99,6 +99,13 @@ class CharlestonCityPaperMigrator implements InterfaceCommand {
 				'shortdesc' => 'Loop over all the posts checking their `author` meta, link the author if it exists as a WP user, or create it as a Guest Author.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator charlestoncitypaper-resize-images-and-remove-shortcodes',
+			[ $this, 'cmd_resize_images_and_remove_shortcodes' ],
+			[
+				'shortdesc' => 'Resize images and remove shortcodes.',
+			]
+		);
 	}
 
 	/**
@@ -420,12 +427,108 @@ class CharlestonCityPaperMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable which processes all posts and resizes images and removes shortcodes.
+	 */
+	public function cmd_resize_images_and_remove_shortcodes() {
+		$last_processed_post_id_file     = "/tmp/last_processed_post_id_image_resize.txt";
+		$successfully_processed_post_ids = "/tmp/successfully_processed_post_ids_image_resize.log";
+
+		if ( ! file_exists( $last_processed_post_id_file ) ) {
+			file_put_contents( $last_processed_post_id_file, '' );
+		}
+
+		if ( ! file_exists( $successfully_processed_post_ids ) ) {
+			file_put_contents( $successfully_processed_post_ids, '' );
+		}
+
+		$last_processed_post_id = file_get_contents( $last_processed_post_id_file );
+
+		if ( empty( $last_processed_post_id ) ) {
+			$last_processed_post_id = PHP_INT_MAX;
+		}
+
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT DISTINCT pm.post_id
+				FROM {$wpdb->postmeta} pm 
+				WHERE pm.meta_key = '_wp_attachment_metadata' 
+				  AND pm.meta_value LIKE '%width%' 
+				  AND pm.post_id < %d 
+				ORDER BY pm.post_id DESC",
+				$last_processed_post_id
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			WP_CLI::log( "Post_ID: $post->post_id" );
+			$command = "wp media regenerate $post->post_id";
+			WP_CLI::log( "Executing: $command" );
+			$output = shell_exec( $command );
+			WP_CLI::log( "$output" );
+
+			file_put_contents( $last_processed_post_id_file, $post->post_id );
+			$this->log( $successfully_processed_post_ids, "$command | $output" );
+		}
+
+		$last_processed_post_id_file     = "/tmp/last_processed_post_id_shortcodes.txt";
+		$successfully_processed_post_ids = "/tmp/successfully_processed_post_ids_shortcodes.log";
+
+		if ( ! file_exists( $last_processed_post_id_file ) ) {
+			file_put_contents( $last_processed_post_id_file, '' );
+		}
+
+		if ( ! file_exists( $successfully_processed_post_ids ) ) {
+			file_put_contents( $successfully_processed_post_ids, '' );
+		}
+
+		$last_processed_post_id = file_get_contents( $last_processed_post_id_file );
+
+		if ( empty( $last_processed_post_id ) ) {
+			$last_processed_post_id = PHP_INT_MAX;
+		}
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID as post_id, post_content
+				FROM {$wpdb->posts}
+				WHERE post_content LIKE '%%[image-%%' 
+				  AND post_type = 'post'
+				  AND ID < %d
+				  ORDER BY ID DESC",
+				$last_processed_post_id
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$this->log( $successfully_processed_post_ids, "Post_ID: $post->post_id" );
+			$content = $post->post_content;
+			$content = preg_replace( '/\[image-\d{2}\]/', '', $content, -1, $replacements );
+
+			if ( ! is_null( $content ) ) {
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $content ],
+					[ 'ID' => $post->post_id ]
+				);
+
+				if ( $result >= 1 ) {
+					$this->log( $successfully_processed_post_ids, "eliminated shortcodes: $replacements" );
+				}
+			}
+
+			file_put_contents( $last_processed_post_id_file, $post->post_id );
+		}
+	}
+
+	/**
 	 * Simple file logging.
 	 *
 	 * @param string $file    File name or path.
 	 * @param string $message Log message.
 	 */
 	private function log( $file, $message ) {
+		WP_CLI::log( $message );
 		file_put_contents( $file, $message . "\n", FILE_APPEND );
 	}
 

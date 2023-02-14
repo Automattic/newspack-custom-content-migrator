@@ -12,6 +12,8 @@
 
 namespace NewspackCustomContentMigrator;
 
+use NewspackCustomContentMigrator\Command\PublisherSpecific\CharlestonCityPaperMigrator;
+
 require __DIR__ . '/vendor/autoload.php';
 
 // Don't do anything outside WP CLI.
@@ -77,5 +79,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
 		Command\PublisherSpecific\Moco360Migrator::class,
+		Command\PublisherSpecific\CharlestonCityPaperMigrator::class
 	)
 );
