@@ -4,6 +4,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use Symfony\Component\DomCrawler\Crawler as Crawler;
 use \WP_CLI;
 
 /**
@@ -27,10 +29,22 @@ class Umbria24Migrator implements InterfaceCommand {
 	private $posts_migrator_logic;
 
 	/**
+	 * @var WpBlockManipulator.
+	 */
+	private $block_manipulator;
+
+	/**
+	 * @var Crawler.
+	 */
+	private $crawler;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->posts_migrator_logic = new PostsLogic();
+		$this->block_manipulator = new WpBlockManipulator();
+		$this->crawler = new Crawler();
 	}
 
 	/**
@@ -76,6 +90,11 @@ class Umbria24Migrator implements InterfaceCommand {
 				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
 				'synopsis'  => [],
 			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-replace-youtube-iframes-with-youtube-blocks',
+			[ $this, 'cmd_replace_yt_iframes_with_yt_blocks' ],
 		);
 
 		WP_CLI::add_command(
@@ -368,6 +387,116 @@ class Umbria24Migrator implements InterfaceCommand {
 				'post_status'    => [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ],
 			]
 		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-replace-youtube-iframes-with-youtube-blocks`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_replace_yt_iframes_with_yt_blocks( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Keeping it simple.
+		$ytblock_sprintf = <<<BLOCK
+<!-- wp:embed {"url":"%s","type":"rich","providerNameSlug":"embed-handler","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+%s
+</div></figure>
+<!-- /wp:embed -->
+BLOCK;
+
+		$ids = $this->posts_migrator_logic->get_all_posts_ids( ['post','video','fotogallery','medialab','page'], ['publish','draft'] );
+		foreach ( $ids as $key_id => $id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_id + 1, count($ids), $id ) );
+
+			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID=%d", $id ));
+			$post_content_updated = $post_content;
+
+			$matches = $this->block_manipulator->match_wp_block_selfclosing( 'wp:newspack-blocks/iframe', $post_content );
+			if ( is_null( $matches ) || empty( $matches[0] ) ) {
+				continue;
+			}
+			foreach ( $matches[0] as $match ) {
+				$iframe_block = $match[0] ?? null;
+				if ( is_null( $iframe_block ) || empty( $iframe_block ) ) {
+					$this->log( 'iframe2ytblock_err_matchesEmpty.log', $id );
+					WP_CLI::warning( 'matches empty' );
+					continue;
+				}
+
+				/**
+				 * E.g. block:
+				 * <!-- wp:newspack-blocks/iframe {"src":"https://umbria24-newspack.newspackstaging.com/wp-content/uploads/2023/02/newspack_iframes/iframe-965141-gJZOmoxY/","archiveFolder":"/2023/02/newspack_iframes/iframe-965141-gJZOmoxY"} /-->
+				 */
+				$src = $this->block_manipulator->get_attribute( $iframe_block, 'src' );
+				/**
+				 * Transform this
+				 *      https://umbria24-newspack.newspackstaging.com/wp-content/uploads/2023/02/newspack_iframes/iframe-965141-gJZOmoxY/
+				 * to this
+				 *      {WP_CONTENT_DIR}/uploads/2023/02/newspack_iframes/iframe-965141-gJZOmoxY/index.html
+				 */
+				$pos_uploads = strpos( $src, '/uploads/' );
+				if ( false === $pos_uploads ) {
+					continue;
+				}
+				// The src might have a full file path, or might be missing index.html at the end.
+				$src_file = WP_CONTENT_DIR . substr( $src, $pos_uploads );
+				if ( is_dir( $src_file ) ) {
+					$src_file .= 'index.html';
+				}
+				if ( ! file_exists( $src_file ) ) {
+					$msg = sprintf( "%d %s", $id, $src_file );
+					$this->log( 'iframe2ytblock_err_iframeFileNotFound.log', $msg );
+					WP_CLI::log( $msg );
+					continue;
+				}
+
+				$iframe_code = file_get_contents( $src_file );
+				$this->crawler->clear();
+				$this->crawler->add( $iframe_code );
+				$iframe_data = $this->crawler->filterXpath( '//iframe' )->extract( [ 'src' ] );
+				if ( empty( $iframe_data ) ) {
+					// Does not contain iframe.
+					continue;
+				}
+				$iframe_src  = $iframe_data[0] ?? null;
+				if ( is_null( $iframe_src ) ) {
+					$msg = sprintf( "%d %s iframe_src is NULL", $id, $src_file );
+					$this->log( 'iframe2ytblock_err_iframeSrcIsNull.log', $msg );
+					WP_CLI::log( $msg );
+					continue;
+				}
+
+				$iframe_src_parsed = parse_url( $iframe_src );
+				if ( ! str_contains($iframe_src_parsed['host'], 'youtube.com') ) {
+					$msg = sprintf( "%d notYoutubeCom? %s", $id, $iframe_src );
+					$this->log( 'iframe2ytblock_err_srcNotYoutube.log', $msg );
+					WP_CLI::log( $msg );
+					continue;
+				}
+
+				$yt_block = sprintf( $ytblock_sprintf, $iframe_src, $iframe_src );
+				$post_content_updated = str_replace( $iframe_block, $yt_block, $post_content_updated );
+				$updated = $wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $id ]
+				);
+				if ( 1 !== $updated ) {
+					WP_CLI::warning( 'Not updated!' );
+					$this->log( 'iframe2ytblock_err_notUpdatedID.log', $id );
+					continue;
+				}
+				WP_CLI::success( 'Updated' );
+				$this->log( 'iframe2ytblock_updatedIds.log', $id );
+				$this->log( sprintf( 'iframe2ytblock_IDbefore_%s.log', $id ), $post_content );
+				$this->log( sprintf( 'iframe2ytblock_IDafter_%s.log', $id ), $post_content_updated );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
