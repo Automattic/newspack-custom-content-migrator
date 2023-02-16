@@ -503,7 +503,7 @@ class CharlestonCityPaperMigrator implements InterfaceCommand {
 		foreach ( $posts as $post ) {
 			$this->log( $successfully_processed_post_ids, "Post_ID: $post->post_id" );
 			$content = $post->post_content;
-			$content = preg_replace( '/\[image-\d{2}\]/', '', $content, -1, $replacements );
+			$content = preg_replace( '/\[image-\d+\]/', '', $content, -1, $replacements );
 
 			if ( ! is_null( $content ) ) {
 				$result = $wpdb->update(
