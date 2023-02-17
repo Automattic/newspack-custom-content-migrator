@@ -79,4 +79,57 @@ class Taxonomy {
 
 		return $wpdb->get_var( $wpdb->prepare( "UPDATE {$wpdb->term_relationships} SET term_taxonomy_id = %d WHERE term_taxonomy_id = %d ;", $new_term_taxonomy_id, $old_term_taxonomy_id ) );
 	}
+
+	/**
+	 * Gets duplicate term slugs.
+	 *
+	 * @return array
+	 */
+	public function get_duplicate_term_slugs() {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			"SELECT 
+			t.slug, 
+			tt.taxonomy, 
+			COUNT(DISTINCT tt.term_id) as term_id_count, 
+			COUNT(DISTINCT tt.term_taxonomy_id) as term_taxonomy_id_count
+			FROM $wpdb->terms t
+			LEFT JOIN (
+			    SELECT * FROM $wpdb->term_taxonomy
+			    WHERE taxonomy IN ('category', 'post_tag')
+			) as tt on t.term_id = tt.term_id
+			GROUP BY t.slug, tt.taxonomy
+			HAVING term_taxonomy_id_count > 1
+			ORDER BY term_taxonomy_id_count DESC"
+		);
+	}
+
+	/**
+	 * Gets terms and taxonomies by slug.
+	 *
+	 * @param string $slug Slug.
+	 *
+	 * @return array
+	 */
+	public function get_terms_and_taxonomies_by_slug( string $slug ) {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT 
+	                t.term_id, 
+	                t.name, t.slug, 
+	                tt.term_taxonomy_id, 
+	                tt.taxonomy, 
+	                tt.parent, 
+	                tt.count 
+				FROM wp_terms t
+				INNER JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
+				WHERE t.slug = %s
+				AND tt.taxonomy IN ( "category", "post_tag" )',
+				$slug
+			)
+		);
+	}
 }
