@@ -68,7 +68,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	/**
 	 * Common CLI arguments for commands.
 	 */
-	private $common_arguments;	
+	private $common_arguments;
 
 	/**
 	 * Fields mappings from JSON fields to WP fields
@@ -172,7 +172,7 @@ class RetroReportMigrator implements InterfaceCommand {
 				'optional'    => false,
 				'description' => 'Path to the JSON file.',
 			],
-			
+
 		];
 	}
 
@@ -299,7 +299,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
 		$this->set_dry_run( $assoc_args );
-		
+
 		$category  = $assoc_args['category'];
 		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 		$posts     = $this->validate_json_file( $assoc_args );
@@ -320,7 +320,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
-$posts = [ $posts[0] ];
+
 		foreach ( $posts as $post ) {
 			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
 
@@ -338,7 +338,7 @@ $posts = [ $posts[0] ];
 			if ( 'default' !== $assoc_args['featured_image_position'] ) {
 				$post->featured_image_position = esc_attr( $assoc_args['featured_image_position'] );
 			}
-			
+
 			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
 				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
@@ -602,7 +602,7 @@ $posts = [ $posts[0] ];
 			} else if ( 'authors' === $field->type ) {
 				$post_authors = $formatted_value;
 			} else {
-				// Account for multiple JSON fields contributing to one post arg. E.g. arrays 
+				// Account for multiple JSON fields contributing to one post arg. E.g. arrays
 				// of terms coming from multiple JSON fields.
 				if ( array_key_exists( $field->target, $post_args ) && is_array( $post_args[ $field->target ] ) ) {
 					$post_args[ $field->target ] = array_merge( $post_args[ $field->target ], $formatted_value );
@@ -792,19 +792,6 @@ $posts = [ $posts[0] ];
 			[ 'lastmod', 'date',    'post_date_gmt' ],
 			[ 'path',    'string',  'post_name' ],
 			[ 'path',    'string',  'path' ],
-		];
-
-		$this->fields_mappings['Education resources'] = [
-			[ 'title',       'string',    'post_title' ],
-			[ 'content',     'string',    'post_content' ],
-			[ 'draft',       'boolean',   'post_status' ],
-			[ 'lastmod',     'date',      'post_modified_gmt' ],
-			[ 'lastmod',     'date',      'post_date_gmt' ],
-			[ 'path',        'string',    'post_name' ],
-			[ 'path',        'string',    'path' ],
-			[ 'description', 'string',    'newspack_article_summary' ],
-			[ 'subtitle',    'string',    'newspack_post_subtitle' ],
-			[ 'images[0]',   'thumbnail', '_thumbnail_id' ],
 		];
 
 		$this->fields_mappings['Standards'] = [
@@ -1065,13 +1052,15 @@ $posts = [ $posts[0] ];
 					return $value;
 
 				case "tags_input":
-					$value = array_map(
-						function ( $value ) {
-							$tag_id = $this->get_reusable_block_tag_from_unique_id( $value );
-							return ( false !== $tag_id ) ? absint( $tag_id ) : false;
-						},
-						$value
-					);
+					if ( is_array( $value ) ) {
+						$value = array_map(
+							function ( $value ) {
+								$tag_id = $this->get_reusable_block_tag_from_unique_id( $value );
+								return ( false !== $tag_id ) ? absint( $tag_id ) : false;
+							},
+							$value
+						);
+					}
 					return $value;
 
 			}
@@ -1103,17 +1092,17 @@ $posts = [ $posts[0] ];
 			} else {
 
 				WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
-	
+
 				$image_url     = self::BASE_URL . $value;
 				$attachment_id = $this->attachments->import_external_file( $image_url );
-	
+
 				if ( is_wp_error( $attachment_id ) ) {
 					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
 					WP_CLI::warning( $attachment_id->get_error_message() );
 					return $value;
 				}
 
-			}				
+			}
 			return $attachment_id;
 		}
 
@@ -1176,7 +1165,6 @@ $posts = [ $posts[0] ];
 		$this->post_types['Standards']           = 'wp_block';
 		$this->post_types['Links']               = 'post';
 		$this->post_types['Profiles']            = 'newspack_lst_generic';
-		$this->post_types['Education resources'] = 'post';
 		$this->post_types['Video']               = 'post';
 		$this->post_types['Articles']            = 'post';
 		$this->post_types['Events']              = 'newspack_lst_event';
@@ -1193,7 +1181,6 @@ $posts = [ $posts[0] ];
 	 */
 	public function set_content_formatters() {
 		$this->content_formatters['Education profiles']  = [ $this, 'format_education_profiles_content' ];
-		$this->content_formatters['Education resources'] = [ $this, 'format_education_resources_content' ];
 		$this->content_formatters['Video']               = [ $this, 'format_video_content' ];
 		$this->content_formatters['Articles']            = [ $this, 'format_article_content' ];
 		$this->content_formatters['Events']              = [ $this, 'format_events_content' ];
@@ -1245,28 +1232,6 @@ HTML;
 			$post->location,
 			$post->description,
 		);
-	}
-
-	/**
-	 * Format post content for Education Resources posts.
-	 *
-	 * Merges imported data with a post template specifically for Education Resources content.
-	 *
-	 * @param array $post Array of post data as retrieved from the JSON.
-	 *
-	 * @return string Constructed post template.
-	 */
-	public function format_education_resources_content( $post ) {
-		// WIP
-		$content_code = <<<HTML
-
-HTML;
-		$video_block = <<<HTML
-
-HTML;
-		$single_block_content = <<<HTML
-
-HTML;
 	}
 
 	/**
@@ -1597,7 +1562,157 @@ HTML;
 	 * @return string Constructed post template.
 	 */
 	public function format_education_library_content( $post ) {
-		return $post->summary;
+
+		// Content placeholder.
+		$content = '';
+
+		// Get the video ID.
+		$video_id = $post->video;
+		if ( ! empty( $video_id ) ) {
+			$video_post = $this->get_post_from_unique_id( $video_id );
+			$youtube_id = get_post_meta( $video_post->ID, 'newspack_rr_video_id', true );
+			if ( $youtube_id && ! empty( $youtube_id ) ) {
+				$content .= $this->format_video_block( $youtube_id );
+			}
+		}
+
+		// Dump the video description.
+		$content .= '<!-- wp:paragraph --><p>ABOUT THIS VIDEO</p><!-- /wp:paragraph -->';
+		$content .= sprintf( '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->', esc_html( $post->summary ) );
+
+		// Prepare the lesson plans section.
+		$lesson_plan_template = '<!-- wp:paragraph --><p><a href="%1$s">%2$s</a></p><!-- /wp:paragraph -->';
+		$lesson_plans_output  = '';
+		foreach ( $post->summary_ctas as $plan ) {
+			$lesson_plans_output .= sprintf( $lesson_plan_template, $plan->url, $plan->copy );
+		}
+
+		// Append the lesson plans section.
+		$content .= <<<HTML
+		<!-- wp:columns -->
+		<div class="wp-block-columns"><!-- wp:column -->
+		<div class="wp-block-column"><!-- wp:group {"layout":{"type":"constrained"}} -->
+		<div class="wp-block-group">$lesson_plans_output</div>
+		<!-- /wp:group --></div>
+		<!-- /wp:column -->
+
+		<!-- wp:column -->
+		<div class="wp-block-column"><!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+		<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:paragraph -->
+		<p>Find similar lessons plans:</p>
+		<!-- /wp:paragraph -->
+
+		<!-- wp:post-terms {"term":"category"} /--></div>
+		<!-- /wp:group --></div>
+		<!-- /wp:column --></div>
+		<!-- /wp:columns -->
+		HTML;
+
+		// Start the objectives section.
+		$content .= '<!-- wp:paragraph --><p>Objectives</p><!-- /wp:paragraph -->';
+		$content .= '<!-- wp:paragraph --><p>Students will:</p><!-- /wp:paragraph -->';
+
+		// Convert the "Students Will" copy to a proper list.
+		$students_will = str_replace( 'Students will:', '', $post->learn_for_students );
+		$content .= $this->convert_markdown_unordered_lists( $students_will );
+
+		// Convert the questions into lists.
+		$comprehension_questions = array_map(
+			function ( $question ) {
+				return $this->convert_markdown_unordered_lists( $question->question );
+			},
+			$post->comprehension_questions
+		);
+		$comprehension_questions_output = implode( '', $comprehension_questions );
+
+		// Convert the resources into HTML.
+		$resource_output = '';
+		foreach ( $post->resources as $resource ) {
+			$resource_output .= sprintf(
+				'<!-- wp:paragraph --><p>%1$s <a href="%2$s">%3$s</a></p><!-- /wp:paragraph -->',
+				$resource->headline,
+				$resource->link,
+				$resource->source,
+			);
+		}
+
+		// Combine questions and resources to add the For Teachers section.
+		$content .= <<<HTML
+		<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+		<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:heading -->
+		<h2>For Teachers</h2>
+		<!-- /wp:heading -->
+
+		<!-- wp:heading {"level":4} -->
+		<h4>Essential Questions</h4>
+		<!-- /wp:heading -->
+
+		$comprehension_questions_output
+
+		<!-- wp:heading {"level":4} -->
+		<h4>Additional Resources</h4>
+		<!-- /wp:heading -->
+
+		$resource_output</div>
+		<!-- /wp:group -->
+		HTML;
+
+		// Prepare the "For Teachers" section using standards.
+		$standards = array_merge(
+			$post->standards_ap,
+			$post->standards_ap_biology,
+			$post->standards_ap_envscience,
+			$post->standards_ap_govpol,
+			$post->standards_ap_humgeo,
+			$post->standards_ap_psychology,
+			$post->standards_ccss,
+			$post->standards_ncss,
+			$post->standards_ngss,
+			$post->standards_nshspc,
+		);
+		if ( ! empty( $standards ) ) {
+
+			$standards_group    = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} --><div class="wp-block-group has-light-gray-background-color has-background">%s</div><!-- /wp:group -->';
+			$standard_template  = '<!-- wp:heading {"level":4} --><h4>%s</h4><!-- /wp:heading --><!-- wp:block {"ref":%d} /-->';
+			$standard_output    = array_map(
+				function( $standard ) use ( $standard_template ) {
+					$block = $this->get_post_from_unique_id( $standard );
+					return ( is_a( $block, 'WP_Post' ) ) ?
+						sprintf( $standard_template, get_the_title( $block->ID ), $block->ID ) :
+						false;
+				},
+				$standards
+			);
+
+			// Bring each standard together and insert into the group block.
+			$content .= sprintf( $standards_group, implode( '', $standard_output) );
+
+		}
+
+		// Prepare the related posts section.
+		if ( $post->related && ! empty( $post->related ) ) {
+
+			$related_template = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+			<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:newspack-blocks/homepage-articles {"excerptLength":25,"showDate":false,"showAuthor":false,"postLayout":"grid","columns":4,"postsToShow":4,"specificPosts":%s,"typeScale":3,"sectionHeader":"More Like this","specificMode":true} /--></div>
+			<!-- /wp:group -->';
+
+			// Convert the array of JSON unique IDs to an array of WP Post IDs .
+			$related_posts = array_map(
+				function ( $unique_id ) {
+					$post = $this->get_post_from_unique_id( $unique_id );
+					return ( is_a( $post, 'WP_Post' ) ) ? $post->ID : false;
+				},
+				$post->related
+			);
+var_dump(wp_json_encode($related_posts));
+			// Add the section, dropping the IDs into the homepage posts block.
+			if ( ! empty( $related_posts ) ) {
+				$content .= sprintf( $related_template, wp_json_encode( $related_posts ) );
+			}
+
+		}
+
+		return $content;
 	}
 
 	/**
@@ -1639,6 +1754,26 @@ HTML;
 			}
 		}
 		return implode( '', $new_blocks );
+	}
+
+	/**
+	 * Convert markdown lists to Gutenberg list blocks.
+	 *
+	 * @param string $content The markdown content.
+	 *
+	 * @return string WP Block HTML
+	 */
+	private function convert_markdown_unordered_lists( $content ) {
+		$items        = array_filter( explode( '* ', $content ) );
+		$ul_template  = '<!-- wp:list --><ul>%s</ul><!-- /wp:list -->';
+		$li_template  = '<!-- wp:list-item --><li>%s</li><!-- /wp:list-item -->';
+		$items_markup = '';
+
+		foreach ( $items as $item ) {
+			$items_markup = sprintf( $li_template, esc_html( $item ) );
+		}
+
+		return sprintf( $ul_template, $items_markup );
 	}
 
 	private function format_image_block( $block ) {
@@ -1824,12 +1959,12 @@ https://www.youtube.com/watch?v=%1$s
 
 	/**
 	 * Gets the title of an imported reusable block.
-	 * 
+	 *
 	 * Each Standard is imported as a reusable block, with the unique ID stored as meta.
 	 * This function finds the block with the ID and returns the tag it's associated with.
-	 * 
+	 *
 	 * @param string $unique_id The unique ID from the JSON import.
-	 * 
+	 *
 	 * @return string|bool Title of the re-usable block. False if not found.
 	 */
 	private function get_reusable_block_title_from_unique_id( $unique_id ) {
@@ -1845,7 +1980,7 @@ https://www.youtube.com/watch?v=%1$s
 		if ( ! $title ) {
 			return false;
 		}
-		
+
 		$tag   = wp_create_tag( $title );
 		$value = ( ! is_wp_error( $tag ) ) ? $tag['term_id'] : false;
 
