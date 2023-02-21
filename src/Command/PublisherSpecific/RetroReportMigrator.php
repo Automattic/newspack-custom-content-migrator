@@ -66,6 +66,11 @@ class RetroReportMigrator implements InterfaceCommand {
 	private $core_meta;
 
 	/**
+	 * Common CLI arguments for commands.
+	 */
+	private $common_arguments;	
+
+	/**
 	 * Fields mappings from JSON fields to WP fields
 	 *
 	 * @var array
@@ -85,6 +90,11 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var array
 	 */
 	private $content_formatters;
+
+	/**
+	 * Dry run mode - set to true to prevent changes.
+	 */
+	private $dryrun;
 
 
 	/**
@@ -107,6 +117,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			'post_name',
 			'post_modified_gmt',
 			'tags_input',
+			'post_category',
 		];
 
 		$this->core_fields = array_flip( $this->core_fields );
@@ -118,6 +129,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		$this->core_meta = array_flip( $this->core_meta );
 
+		$this->set_common_arguments();
 		$this->set_fields_mappings();
 		$this->set_post_types();
 		$this->set_content_formatters();
@@ -138,6 +150,34 @@ class RetroReportMigrator implements InterfaceCommand {
 		}
 
 		return self::$instance;
+	}
+
+	private function set_common_arguments() {
+		$this->common_arguments = [
+			[
+				'type'        => 'flag',
+				'name'        => 'dry-run',
+				'optional'    => true,
+				'description' => 'Whether to actually make updates or not.'
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'category',
+				'optional'    => false,
+				'description' => 'Category name (about, board, articles, etc.).'
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'json-file',
+				'optional'    => false,
+				'description' => 'Path to the JSON file.',
+			],
+			
+		];
+	}
+
+	private function set_dry_run( $assoc_args ) {
+		$this->dryrun = array_key_exists( 'dry-run', $assoc_args );
 	}
 
 	/**
@@ -166,26 +206,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ $this, 'cmd_retro_report_import_posts' ],
 			[
 				'shortdesc' => 'Import posts from a JSON file',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'category',
-						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).'
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'post-type',
-						'optional'    => false,
-						'description' => 'The post type to be imported as (default is `post`).',
-						'default'     => 'post',
-					],
+				'synopsis'  => array_merge( $this->common_arguments, [
 					[
 						'type'        => 'assoc',
 						'name'        => 'guest-author',
@@ -209,7 +230,7 @@ class RetroReportMigrator implements InterfaceCommand {
 						'default'     => 'default',
 						'options'     => [ 'default', 'large', 'small', 'behind', 'beside', 'above', 'hidden' ],
 					],
-				],
+				] ),
 			]
 		);
 
@@ -218,14 +239,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ $this, 'cmd_retro_report_import_staff' ],
 			[
 				'shortdesc' => 'Import staff from a JSON file',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					],
-				],
+				'synopsis'  => $this->common_arguments,
 			]
 		);
 
@@ -234,26 +248,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ $this, 'cmd_retro_report_import_listings' ],
 			[
 				'shortdesc' => 'Import listings from a JSON file',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'type',
-						'optional'    => false,
-						'description' => 'Listing type (one of "generic", "events", "mktplce", "place")',
-						'options'     => [ 'events', 'generic', 'mktplce', 'place' ],
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'category',
-						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).',
-					],
+				'synopsis'  => array_merge( $this->common_arguments, [
 					[
 						'type'        => 'assoc',
 						'name'        => 'category-parent',
@@ -267,7 +262,7 @@ class RetroReportMigrator implements InterfaceCommand {
 						'description' => 'ID of the guest author to assign to post.',
 						'default'     => 'post',
 					],
-				],
+				] ),
 			]
 		);
 
@@ -276,20 +271,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ $this, 'cmd_retro_report_import_reusable_blocks' ],
 			[
 				'shortdesc' => 'Import re-usable from a JSON file',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'category',
-						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).',
-					],
-				],
+				'synopsis'  => $this->common_arguments,
 			]
 		);
 
@@ -316,19 +298,26 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+		
 		$category  = $assoc_args['category'];
 		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 		$posts     = $this->validate_json_file( $assoc_args );
 		$post_type = $this->get_post_type( $category );
 
-		// Check if the category already exists.
-		$category_id = $this->get_or_create_category( $category );
-
-		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
-
 		$fields = $this->load_mappings( $category );
 
 		WP_CLI::log( 'The fields that are going to be imported are:' );
+
+		// Only use the CLI argument-supplied category as the post category if the field mapping
+		// doesn't explicitly include post categories to pull from JSON values.
+		if ( ! array_search( 'post_category', wp_list_pluck( $fields,'target' ) ) ) {
+
+			// Check if the category already exists.
+			$category_id = $this->get_or_create_category( $category );
+			WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
+
+		}
 
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
 $posts = [ $posts[0] ];
@@ -349,7 +338,7 @@ $posts = [ $posts[0] ];
 			if ( 'default' !== $assoc_args['featured_image_position'] ) {
 				$post->featured_image_position = esc_attr( $assoc_args['featured_image_position'] );
 			}
-
+			
 			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
 				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
@@ -357,7 +346,10 @@ $posts = [ $posts[0] ];
 				continue;
 			}
 
-			wp_set_post_categories( $post_id, [ $category_id ] );
+			// If we set categories using JSON values, don't override that.
+			if ( ! array_search( 'post_category', wp_list_pluck( $fields,'target' ) ) ) {
+				wp_set_post_categories( $post_id, [ $category_id ] );
+			}
 
 			if ( $ga_id ) {
 				$this->co_authors_plus->assign_guest_authors_to_post(
@@ -610,7 +602,13 @@ $posts = [ $posts[0] ];
 			} else if ( 'authors' === $field->type ) {
 				$post_authors = $formatted_value;
 			} else {
-				$post_args[ $field->target ] = $formatted_value;
+				// Account for multiple JSON fields contributing to one post arg. E.g. arrays 
+				// of terms coming from multiple JSON fields.
+				if ( array_key_exists( $field->target, $post_args ) && is_array( $post_args[ $field->target ] ) ) {
+					$post_args[ $field->target ] = array_merge( $post_args[ $field->target ], $formatted_value );
+				} else {
+					$post_args[ $field->target ] = $formatted_value;
+				}
 			}
 		}
 
@@ -629,6 +627,10 @@ $posts = [ $posts[0] ];
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function add_post( $post_args, $post_meta, $post_authors ) {
+
+		if ( $this->dryrun ) {
+			return 1;
+		}
 
 		$post_id = wp_insert_post( $post_args, true );
 
@@ -659,16 +661,20 @@ $posts = [ $posts[0] ];
 	public function post_exists( $post, $post_type = 'post' ) {
 		$unique_id = $post->unique_id;
 
-		$query = new WP_Query(
+		$query = get_posts(
 			[
-				'meta_key'    => self::META_PREFIX . 'unique_id',
-				'meta_value'  => $unique_id,
-				'post_type'   => $post_type,
+				'post_type'   => get_post_types(),
 				'post_status' => 'any',
-			],
+				'meta_query'  => [
+					[
+						'key'   => self::META_PREFIX . 'unique_id',
+						'value' => $unique_id,
+					],
+				]
+			]
 		);
 
-		return $query->post_count > 0;
+		return ( count( $query ) > 0 );
 	}
 
 	/**
@@ -716,7 +722,7 @@ $posts = [ $posts[0] ];
 
 		$posts = get_posts( [
 			'posts_per_page' => 1,
-			'post_type'      => 'any',
+			'post_type'      => get_post_types(), // 'any' doesn't include reusable blocks.
 			'meta_query'     => [
 				[
 					'key'   => self::META_PREFIX . 'unique_id',
@@ -893,20 +899,26 @@ $posts = [ $posts[0] ];
 		];
 
 		$this->fields_mappings['Library'] = [
-			[ 'title',              'string',    'post_title' ],
-			[ 'summary',            'string',    'post_content' ],
-			[ 'summary',            'string',    'post_content' ],
-			[ 'education_subjects', 'array',     'categories' ],
-			[ 'education_topics',   'array',     'categories' ],
-			[ 'education_levels',   'array',     'categories' ],
-			[ 'standards_ccss',     'array',     'tags_input' ],
-			[ 'standards_ncss',     'array',     'tags_input' ],
-			[ 'standards_ngss',     'array',     'tags_input' ],
-			[ 'standards_nshspc',   'array',     'tags_input' ],
-			[ 'video',              'thumbnail', '_thumbnail_id' ],
-			[ 'lastmod',            'string',    'post_date_gmt' ],
-			[ 'lastmod',            'string',    'post_modified_gmt' ],
-			[ 'draft',              'boolean',   'post_modified_gmt' ],
+			[ 'title',                   'string',    'post_title' ],
+			[ 'summary',                 'string',    'post_content' ],
+			[ 'summary',                 'string',    'post_content' ],
+			[ 'education_subjects',      'array',     'post_category' ],
+			[ 'education_topics',        'array',     'post_category' ],
+			[ 'education_levels',        'array',     'post_category' ],
+			[ 'standards_ap',            'array',     'tags_input' ],
+			[ 'standards_ap_biology',    'array',     'tags_input' ],
+			[ 'standards_ap_envscience', 'array',     'tags_input' ],
+			[ 'standards_ap_govpol',     'array',     'tags_input' ],
+			[ 'standards_ap_humgeo',     'array',     'tags_input' ],
+			[ 'standards_ap_psychology', 'array',     'tags_input' ],
+			[ 'standards_ccss',          'array',     'tags_input' ],
+			[ 'standards_ncss',          'array',     'tags_input' ],
+			[ 'standards_ngss',          'array',     'tags_input' ],
+			[ 'standards_nshspc',        'array',     'tags_input' ],
+			[ 'video',                   'thumbnail', '_thumbnail_id' ],
+			[ 'lastmod',                 'string',    'post_date_gmt' ],
+			[ 'lastmod',                 'string',    'post_modified_gmt' ],
+			[ 'draft',                   'boolean',   'post_status' ],
 		];
 
 	}
@@ -1004,6 +1016,7 @@ $posts = [ $posts[0] ];
 					if ( false === $value ) {
 						return 'publish';
 					}
+					break;
 
 					return $value;
 				case 'post_name':
@@ -1017,6 +1030,49 @@ $posts = [ $posts[0] ];
 						$author = $this->get_user_from_staff_id( $value[0] );
 						return ( empty( $author ) ) ? false : $author;
 					}
+					break;
+
+				case "post_category":
+					switch ( $field->name ) {
+						case 'education_subjects':
+							$parent_name = 'Education Subjects';
+							$this->get_or_create_category( $parent_name, 'In the Classroom' );
+							break;
+
+						case 'education_topics':
+							$parent_name = 'Education Topics';
+							$this->get_or_create_category( $parent_name, 'In the Classroom' );
+							break;
+
+						case 'education_levels':
+							$parent_name = 'Education Levels';
+							$this->get_or_create_category( $parent_name, 'In the Classroom' );
+							break;
+
+					}
+
+					if ( isset( $parent_name ) ) {
+						$value = array_map(
+							function ( $value ) use ( $parent_name ) {
+								return $this->get_or_create_category( $value, $parent_name );
+							},
+							$value
+						);
+					} else {
+						$value = array_map( [ $this, 'get_or_create_category' ], $value );
+					}
+
+					return $value;
+
+				case "tags_input":
+					$value = array_map(
+						function ( $value ) {
+							$tag_id = $this->get_reusable_block_tag_from_unique_id( $value );
+							return ( false !== $tag_id ) ? absint( $tag_id ) : false;
+						},
+						$value
+					);
+					return $value;
 
 			}
 		}
@@ -1034,17 +1090,30 @@ $posts = [ $posts[0] ];
 
 		if ( 'thumbnail' == $field->type && $value ) {
 
-			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
+			if ( 'video' === $field->name ) {
 
-			$image_url     = self::BASE_URL . $value;
-			$attachment_id = $this->attachments->import_external_file( $image_url );
+				// Get the video post from the ID.
+				$video_post = $this->get_post_from_unique_id( $value );
+				if ( ! is_a( $video_post, 'WP_Post' ) ) {
+					return false;
+				}
 
-			if ( is_wp_error( $attachment_id ) ) {
-				WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
-				WP_CLI::warning( $attachment_id->get_error_message() );
-				return $value;
-			}
+				$attachment_id = get_post_meta( $video_post->ID, '_thumbnail_id', true );
 
+			} else {
+
+				WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
+	
+				$image_url     = self::BASE_URL . $value;
+				$attachment_id = $this->attachments->import_external_file( $image_url );
+	
+				if ( is_wp_error( $attachment_id ) ) {
+					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
+					WP_CLI::warning( $attachment_id->get_error_message() );
+					return $value;
+				}
+
+			}				
 			return $attachment_id;
 		}
 
@@ -1114,7 +1183,7 @@ $posts = [ $posts[0] ];
 		$this->post_types['Profiles']            = 'newspack_lst_generic';
 		$this->post_types['Multi-Media']         = 'post';
 		$this->post_types['Standards']           = 'wp_block';
-		$this->post_types['Library']             = 'wp_block';
+		$this->post_types['Library']             = 'post';
 	}
 
 	/**
@@ -1739,7 +1808,7 @@ https://www.youtube.com/watch?v=%1$s
 			\WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $name ) );
 
 			// Create the category, under it's parent if required.
-			$category_id = ( $parent_id ) ?
+			$category_id = ( isset( $parent_id ) ) ?
 				wp_create_category( $name, $parent_id ) :
 				wp_create_category( $name );
 
@@ -1751,5 +1820,35 @@ https://www.youtube.com/watch?v=%1$s
 		}
 
 		return $category_id;
+	}
+
+	/**
+	 * Gets the title of an imported reusable block.
+	 * 
+	 * Each Standard is imported as a reusable block, with the unique ID stored as meta.
+	 * This function finds the block with the ID and returns the tag it's associated with.
+	 * 
+	 * @param string $unique_id The unique ID from the JSON import.
+	 * 
+	 * @return string|bool Title of the re-usable block. False if not found.
+	 */
+	private function get_reusable_block_title_from_unique_id( $unique_id ) {
+		$block = $this->get_post_from_unique_id( $unique_id );
+		if ( ! $block ) {
+			return false;
+		}
+		return $block->post_title;
+	}
+
+	private function get_reusable_block_tag_from_unique_id( $unique_id ) {
+		$title = $this->get_reusable_block_title_from_unique_id( $unique_id );
+		if ( ! $title ) {
+			return false;
+		}
+		
+		$tag   = wp_create_tag( $title );
+		$value = ( ! is_wp_error( $tag ) ) ? $tag['term_id'] : false;
+
+		return $value;
 	}
 }
