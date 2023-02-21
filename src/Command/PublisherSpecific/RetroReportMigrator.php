@@ -163,7 +163,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			[
 				'type'        => 'assoc',
 				'name'        => 'category',
-				'optional'    => false,
+				'optional'    => true,
 				'description' => 'Category name (about, board, articles, etc.).'
 			],
 			[
@@ -484,7 +484,7 @@ $posts = [ $posts[0] ];
 		$category_parent = array_key_exists( 'category-parent', $assoc_args ) ? sanitize_text_field( $assoc_args['category-parent'] ) : false;
 		$category_id     = $this->get_or_create_category( $category, $category_parent );
 		$fields          = $this->load_mappings( $category );
-		$post_type       = sprintf( 'newspack_lst_%s', $assoc_args['type'] );
+		$post_type       = $this->get_post_type( $category );
 		$ga_id           = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 
 		\WP_CLI::log( 'The fields that are going to be imported are:' );
