@@ -491,8 +491,8 @@ BLOCK;
 				}
 				WP_CLI::success( 'Updated' );
 				$this->log( 'iframe2ytblock_updatedIds.log', $id );
-				$this->log( sprintf( 'iframe2ytblock_IDbefore_%s.log', $id ), $post_content );
-				$this->log( sprintf( 'iframe2ytblock_IDafter_%s.log', $id ), $post_content_updated );
+				$this->log( sprintf( 'iframe2ytblock_%s_1before.log', $id ), $post_content );
+				$this->log( sprintf( 'iframe2ytblock_%s_2after.log', $id ), $post_content_updated );
 			}
 		}
 
