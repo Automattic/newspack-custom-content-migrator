@@ -9,7 +9,7 @@ use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \NewspackCustomContentMigrator\Logic\Sponsors;
 use stdClass;
-use \WP_CLI;
+use WP_CLI;
 use WP_Query;
 
 /**
@@ -334,25 +334,24 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		$fields = $this->load_mappings( $category );
 
-		WP_CLI::log( 'The fields that are going to be imported are:' );
-
 		// Only use the CLI argument-supplied category as the post category if the field mapping
 		// doesn't explicitly include post categories to pull from JSON values.
 		if ( ! array_search( 'post_category', wp_list_pluck( $fields,'target' ) ) ) {
 
 			// Check if the category already exists.
 			$category_id = $this->get_or_create_category( $category );
-			WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
+			$this->logger->log( 'retroreport', sprintf( 'Using category %s ID %d.', $category, $category_id ) );
 
 		}
 
+		WP_CLI::log( 'The fields that are going to be imported are:' );
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
 
 		foreach ( $posts as $post ) {
-			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
+			$this->logger->log( 'retroreport', sprintf( 'Importing post "%s"...', $post->title ) );
 
 			if ( $this->post_exists( $post, $post_type ) ) {
-				WP_CLI::log( sprintf( 'Post "%s" is already imported. Skipping...', $post->title ) );
+				$this->logger->log( 'retroreport', sprintf( 'Post "%s" is already imported. Skipping...', $post->title ) );
 				continue;
 			}
 
@@ -368,8 +367,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
-				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
-				WP_CLI::warning( $post_id->get_error_message() );
+				$this->logger->log( 'retroreport', sprintf( 'Could not add post "%1$s" because "%2$s".', $post->title, $post_id->get_error_message() ) );
 				continue;
 			}
 
@@ -398,7 +396,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->set_dry_run( $assoc_args );
 
 		if ( ! $this->simple_local_avatars->is_sla_plugin_active() ) {
-			WP_CLI::error( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+			$this->logger->log( 'retroreport', 'Simple Local Avatars not found. Install and activate it before using this command.' );
 			return;
 		}
 
@@ -425,11 +423,11 @@ class RetroReportMigrator implements InterfaceCommand {
 			$full_name = sprintf( '%s %s', $first_name, $last_name );
 
 			if ( $this->user_exists( $user ) ) {
-				WP_CLI::log( sprintf( 'User %s already exists. Skipping...', $full_name ) );
+				$this->logger->log( 'retroreport', sprintf( 'User %s already exists. Skipping...', $full_name ) );
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Importing user %s...', $full_name ) );
+			$this->logger->log( 'retroreport', sprintf( 'Importing user %s...', $full_name ) );
 
 			if ( 'none' == $position || null == $position ) {
 				$position = '';
@@ -476,8 +474,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			$user_id = wp_insert_user( $user_args );
 
 			if ( is_wp_error( $user_id ) ) {
-				WP_CLI::warning( sprintf( 'There was a problem importing user %s', $full_name ) );
-				WP_CLI::warning( $user_id->get_error_message() );
+				$this->logger->log( 'retroreport', sprintf( 'There was a problem importing user %1$s because: %2$s', $full_name, $user_id->get_error_message() ) );
 				continue;
 			}
 
@@ -488,11 +485,10 @@ class RetroReportMigrator implements InterfaceCommand {
 				$image_url     = self::BASE_URL . $image;
 				$attachment_id = $this->attachments->import_external_file( $image_url );
 
-				WP_CLI::log( sprintf( 'Importing the avatar for user %s...', $full_name ) );
+				$this->logger->log( 'retroreport', sprintf( 'Importing the avatar for user %s...', $full_name ) );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
-					WP_CLI::warning( $attachment_id->get_error_message() );
+					$this->logger->log( 'retroreport', sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_url, $attachment_id->get_error_message() ) );
 				} else {
 					$this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
 				}
@@ -518,23 +514,22 @@ class RetroReportMigrator implements InterfaceCommand {
 		$post_type       = $this->get_post_type( $category );
 		$ga_id           = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 
-		\WP_CLI::log( 'The fields that are going to be imported are:' );
-		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
 
 		foreach ( $listings as $listing ) {
 
-			\WP_CLI::log( sprintf( 'Importing listing "%s"...', $listing->title ) );
+			$this->logger->log( 'retroreport', sprintf( 'Importing listing "%s"...', $listing->title ) );
 
 			if ( $this->post_exists( $listing, $post_type ) ) {
-				\WP_CLI::log( sprintf( 'Listing "%s" is already imported. Skipping...', $listing->title ) );
+				$this->logger->log( 'retroreport', sprintf( 'Listing "%s" is already imported. Skipping...', $listing->title ) );
 				continue;
 			}
 
 			// Import the post!
 			$post_id = $this->import_post( $listing, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
-				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $listing->title ) );
-				\WP_CLI::warning( $post_id->get_error_message() );
+				$this->logger->log( 'retroreport', sprintf( 'Could not add post "%1$s" because: %2$s', $listing->title, $post_id->get_error_message() ) );
 				continue;
 			}
 
@@ -567,12 +562,12 @@ class RetroReportMigrator implements InterfaceCommand {
 		$fields    = $this->load_mappings( $category );
 		$post_type = $this->get_post_type( $category );
 
-		\WP_CLI::log( 'The fields that are going to be imported are:' );
-		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
 
 		foreach ( $blocks as $block ) {
 
-			\WP_CLI::log( sprintf( 'Importing re-usable block "%s"...', $block->title ) );
+			$this->logger->log( 'retroreport', sprintf( 'Importing re-usable block "%s"...', $block->title ) );
 
 			// Make sure we set them to published.
 			$block->publish = 'publish';
@@ -580,8 +575,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			// Import the post!
 			$post_id = $this->import_post( $block, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
-				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $block->title ) );
-				\WP_CLI::warning( $post_id->get_error_message() );
+				$this->logger->log( 'retroreport', sprintf( 'Could not add post "%1$s" because: %2$s', $block->title, $post_id->get_error_message() ) );
 				continue;
 			}
 
@@ -603,23 +597,22 @@ class RetroReportMigrator implements InterfaceCommand {
 		$fields    = $this->load_mappings( $category );
 		$post_type = $this->get_post_type( $category );
 
-		\WP_CLI::log( 'The fields that are going to be imported are:' );
-		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
 
 		foreach ( $sponsors as $sponsor ) {
 
-			\WP_CLI::log( sprintf( 'Importing sponsor "%s"...', $sponsor->title ) );
+			$this->logger->log( 'retroreport', sprintf( 'Importing sponsor "%s"...', $sponsor->title ) );
 
 			if ( $this->post_exists( $sponsor, $post_type ) ) {
-				\WP_CLI::log( sprintf( 'Partner "%s" is already imported. Skipping...', $sponsor->title ) );
+				$this->logger->log( 'retroreport', sprintf( 'Partner "%s" is already imported. Skipping...', $sponsor->title ) );
 				continue;
 			}
 
 			// Import the post!
 			$post_id = $this->import_post( $sponsor, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
-				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $sponsor->title ) );
-				\WP_CLI::warning( $post_id->get_error_message() );
+				$this->logger->log( 'retroreport', sprintf( 'Could not add post "%1$s" because: %2$s', $sponsor->title, $post_id->get_error_message() ) );
 				continue;
 			}
 
@@ -1019,7 +1012,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function load_mappings( $category ) {
 		if ( ! isset( $this->fields_mappings[ $category ] ) ) {
-			WP_CLI::error( 'The given category does not exist.' );
+			$this->logger->log( 'retroreport', 'The given category does not exist.' );
 		}
 
 		$fields = [];
@@ -1049,7 +1042,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	public function get_post_type( $category ) {
 		if ( ! isset( $this->post_types[ $category ] ) ) {
-			WP_CLI::error( 'The given category does not exist.' );
+			$this->logger->log( 'retroreport', 'The given category does not exist.' );
 		}
 
 		return $this->post_types[ $category ];
@@ -1191,14 +1184,13 @@ class RetroReportMigrator implements InterfaceCommand {
 
 			} else {
 
-				WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
+				$this->logger->log( 'retroreport', sprintf( 'Importing thumbnail from %s', $value ) );
 
 				$image_url     = self::BASE_URL . $value;
 				$attachment_id = $this->attachments->import_external_file( $image_url );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
-					WP_CLI::warning( $attachment_id->get_error_message() );
+					$this->logger->log( 'retroreport', sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_url, $attachment_id->get_error_message() ) );
 					return $value;
 				}
 
@@ -1236,7 +1228,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$cf_token = get_option( self::CF_TOKEN_OPTION );
 
 		if ( ! $cf_token ) {
-			WP_CLI::error( 'HTTP requests to CloudFlare will not work because the CF token does not exist. Aborting.' );
+			$this->logger->log( 'retroreport', 'HTTP requests to CloudFlare will not work because the CF token does not exist. Aborting.' );
 		}
 
 		$args['cookies']['CF_Authorization'] = $cf_token;
@@ -2005,17 +1997,17 @@ https://www.youtube.com/watch?v=%1$s
 	private function validate_json_file( $assoc_args ) {
 
 		if ( ! array_key_exists( 'json-file', $assoc_args ) ) {
-			WP_CLI::error( 'No JSON file provided. Please feed me JSON.' );
+			$this->logger->log( 'retroreport', 'No JSON file provided. Please feed me JSON.' );
 		}
 
 		$json_file = $assoc_args['json-file'];
 		if ( ! file_exists( $json_file ) ) {
-			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
+			$this->logger->log( 'retroreport', 'The provided JSON file doesn\'t exist.' );
 		}
 
 		$data = json_decode( file_get_contents( $json_file ) );
 		if ( null === $data ) {
-			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
+			$this->logger->log( 'retroreport', 'Could not decode the JSON data. Exiting...' );
 		}
 
 		return $data;
@@ -2041,7 +2033,7 @@ https://www.youtube.com/watch?v=%1$s
 
 		// If not, create it.
 		if ( 0 === $category_id ) {
-			\WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $name ) );
+			$this->logger->log( 'retroreport', sprintf( 'Category %s not found. Creating it....', $name ) );
 
 			// Create the category, under it's parent if required.
 			$category_id = ( isset( $parent_id ) ) ?
@@ -2049,7 +2041,7 @@ https://www.youtube.com/watch?v=%1$s
 				wp_create_category( $name );
 
 			if ( is_wp_error( $category_id ) ) {
-				\WP_CLI::warning( sprintf( 'Failed to create %s category', $name ) );
+				$this->logger->log( 'retroreport', sprintf( 'Failed to create %s category', $name ) );
 				$category_id = false;
 			}
 
