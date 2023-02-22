@@ -846,12 +846,12 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 				WP_CLI\Utils\format_items( 'table', $terms, array_keys( (array) $terms[0] ) );
 
-				$option = $duplicate_slug->term_id_count > 1 ? '(r)ename slug' : '(s)plit term and rename slug';
+				$option = $duplicate_slug->term_id_count > 1 ? 're(n)ame slug' : 's(p)lit term and rename slug';
 
-				$response = $this->ask_prompt( "What would you like to do with this slug? $option, s(k)ip, return to (a)uto, or (q)uit?" );
+				$response = $this->ask_prompt( "What would you like to do with this slug? $option, (s)kip, return to (a)uto, or (q)uit?" );
 			}
 
-			if ( 'k' === $response ) {
+			if ( 's' === $response ) {
 				$this->output( 'Skipping...' );
 				continue;
 			}
@@ -863,6 +863,11 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 			if ( 'a' === $response ) {
 				$interactive = false;
+			}
+
+			if ( ! in_array( $response, [ 'n', 'p' ] ) ) {
+				$this->output( 'Invalid response. Skipping...' );
+				continue;
 			}
 
 			if ( $duplicate_slug->term_id_count > 1 ) {
