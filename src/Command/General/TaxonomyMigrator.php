@@ -905,17 +905,8 @@ class TaxonomyMigrator implements InterfaceCommand {
 		array_shift( $terms ); // Remove the first term, which will remain the original slug.
 
 		// Rename all terms with the same slug.
-		$offset = 1;
 		foreach ( $terms as $key => $term ) {
-			$new_slug = $term->slug . '-' . $key + $offset;
-			do {
-				$slug_exists = term_exists( $new_slug );
-
-				if ( ! is_null( $slug_exists ) ) {
-					$offset++;
-					$new_slug = $term->slug . '-' . $key + $offset;
-				}
-			} while ( ! is_null( $slug_exists ) );
+			$new_slug = $this->taxonomy_logic->get_new_term_slug( $term->slug, $key + 1 );
 
 			wp_update_term( $term->term_id, $term->taxonomy, [ 'slug' => $new_slug ] );
 		}
@@ -944,20 +935,24 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		// Split all other term_taxonomy_ids into new terms.
 		foreach ( $taxonomic_records as $key => $taxonomy ) {
+			$new_slug = $this->taxonomy_logic->get_new_term_slug( $taxonomy->slug, $key + 1 );
+
 			$result = $wpdb->insert(
 				$wpdb->terms,
 				[
 					'name'       => $taxonomy->name,
-					'slug'       => $taxonomy->slug . '-' . $key + 1,
+					'slug'       => $new_slug,
 					'term_group' => 0,
 				]
 			);
 
 			if ( is_int( $result ) ) {
+				$new_term_id = term_exists( $new_slug );
+
 				$wpdb->update(
 					$wpdb->term_taxonomy,
 					[
-						'term_id' => $result['term_id'],
+						'term_id' => $new_term_id,
 					],
 					[
 						'term_taxonomy_id' => $taxonomy->term_taxonomy_id,
