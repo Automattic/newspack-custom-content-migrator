@@ -264,6 +264,22 @@ class RetroReportMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-delete-post-by-unique-id',
+			[ $this, 'cmd_delete_by_unique_id' ],
+			[
+				'shortdesc' => 'Delete an imported by via the unique ID in the JSON import',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'unique_id',
+						'optional'    => false,
+						'description' => 'The unique ID'
+					]
+				]
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-posts',
 			[ $this, 'cmd_retro_report_import_posts' ],
 			[
@@ -338,6 +354,30 @@ class RetroReportMigrator implements InterfaceCommand {
 		update_option( self::CF_TOKEN_OPTION, $token );
 
 		WP_CLI::success( sprintf( 'The token was added to the %s option.', self::CF_TOKEN_OPTION ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator retro-report-delete-post-by-unique-id`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_delete_by_unique_id( $args, $assoc_args ) {
+		$unique_id = $args[0];
+		$post = $this->get_post_from_unique_id( $unique_id );
+		if ( ! is_a( $post, 'WP_Post' ) ) {
+			WP_CLI::error( sprintf( 'No post found with unique ID %s', $unique_id ) );
+			return;
+		}
+
+		$delete = wp_delete_post( $post->ID, true );
+		if ( false === $delete || is_null( $delete ) ) {
+			WP_CLI::error( sprintf( 'Failed to delete post ID %d', $post->ID ) );
+			return;
+		}
+
+		WP_CLI::success( sprintf( 'Deleted post %d with unique ID %s', $post->ID, $unique_id ) );
+
 	}
 
 	/**
