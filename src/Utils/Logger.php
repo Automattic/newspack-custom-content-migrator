@@ -7,6 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
+use \WP_CLI;
+
 /**
  * Class for handling commands' logging
  */
