@@ -395,6 +395,8 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_staff( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
 		if ( ! $this->simple_local_avatars->is_sla_plugin_active() ) {
 			WP_CLI::error( 'Simple Local Avatars not found. Install and activate it before using this command.' );
 			return;
@@ -506,6 +508,8 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_listings( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
 		$listings        = $this->validate_json_file( $assoc_args );
 		$category        = sanitize_text_field( $assoc_args['category'] );
 		$category_parent = array_key_exists( 'category-parent', $assoc_args ) ? sanitize_text_field( $assoc_args['category-parent'] ) : false;
@@ -556,6 +560,8 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_reusable_blocks( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
 		$blocks    = $this->validate_json_file( $assoc_args );
 		$category  = sanitize_text_field( $assoc_args['category'] );
 		$fields    = $this->load_mappings( $category );
@@ -590,6 +596,8 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_sponsors( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
 		$sponsors  = $this->validate_json_file( $assoc_args );
 		$category  = sanitize_text_field( $assoc_args['category'] );
 		$fields    = $this->load_mappings( $category );
@@ -601,6 +609,11 @@ class RetroReportMigrator implements InterfaceCommand {
 		foreach ( $sponsors as $sponsor ) {
 
 			\WP_CLI::log( sprintf( 'Importing sponsor "%s"...', $sponsor->title ) );
+
+			if ( $this->post_exists( $sponsor, $post_type ) ) {
+				\WP_CLI::log( sprintf( 'Partner "%s" is already imported. Skipping...', $sponsor->title ) );
+				continue;
+			}
 
 			// Import the post!
 			$post_id = $this->import_post( $sponsor, $post_type, $fields, $category );
@@ -614,6 +627,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			if ( isset( $sponsor->related_content ) ) {
 
 				foreach ( $sponsor->related_content as $related ) {
+
 					$related_post = $this->get_post_from_unique_id( $related );
 					if ( ! $related_post ) {
 						$this->logger->log( 'retroreport', sprintf( 'Failed to find related post for unique ID %s', $related ), false );
@@ -621,11 +635,11 @@ class RetroReportMigrator implements InterfaceCommand {
 					}
 
 					// Use the Sponsors utility.
-					$add_sponsor = $this->sponsors->add_sponsor_to_post( $post_id, $related_post );
+					$add_sponsor = $this->sponsors->add_sponsor_to_post( $post_id, $related_post->ID );
 					if ( ! $add_sponsor ) {
-						$this->logger->log( 'retroreport', sprintf( 'Failed to attach sponsor %1$d to post %2$d', $post_id, $related_post ), false );
+						$this->logger->log( 'retroreport', sprintf( 'Failed to attach sponsor %1$d to post %2$d', $post_id, $related_post->ID ), true );
 					} else {
-						$this->logger->log( 'retroreport', sprintf( 'Successfully attached sponsor %1$d to post %2$d', $post_id, $related_post ), false );
+						$this->logger->log( 'retroreport', sprintf( 'Successfully attached sponsor %1$d to post %2$d', $post_id, $related_post->ID ), false );
 					}
 				}
 			}
@@ -704,7 +718,6 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function add_post( $post_args, $post_meta, $post_authors ) {
-
 		if ( $this->dryrun ) {
 			return 1;
 		}
@@ -1969,7 +1982,7 @@ https://www.youtube.com/watch?v=%1$s
 		$index          = $matches[2][0];
 		$property_value = $this->get_object_property( $object, $property_name );
 
-		return $property_value[ $index ];
+		return ( is_null( $property_value ) ) ? false : $property_value[ $index ];
 	}
 
 	/**
