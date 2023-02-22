@@ -17,6 +17,7 @@ class Umbria24Migrator implements InterfaceCommand {
 	const VIDEO_VIMEO_LOG     = 'video_vimeo.log';
 	const MEDIALAB_IFRAME_LOG = 'medialab_iframe.log';
 	const FOTOGALLERY_LOG     = 'fotogallery.log';
+	const CITTA_LOG           = 'citta.log';
 
 	/**
 	 * @var null|InterfaceCommand Instance.
@@ -43,8 +44,8 @@ class Umbria24Migrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->posts_migrator_logic = new PostsLogic();
-		$this->block_manipulator = new WpBlockManipulator();
-		$this->crawler = new Crawler();
+		$this->block_manipulator    = new WpBlockManipulator();
+		$this->crawler              = new Crawler();
 	}
 
 	/**
@@ -158,14 +159,14 @@ class Umbria24Migrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'attachment-ids-changes-php-file',
-						'description' => "File which returns an array of old attachment ids as keys and new attachment ids as values.",
+						'description' => 'File which returns an array of old attachment ids as keys and new attachment ids as values.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'post-types-csv',
-						'description' => "CSV of post types to process. Default is `post`.",
+						'description' => 'CSV of post types to process. Default is `post`.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -183,7 +184,37 @@ class Umbria24Migrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
-				]
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-migrate-citta-taxonomy-to-category-from-old-tables',
+			[ $this, 'cmd_migrate_citta_taxonomy_to_category_from_old_tables' ],
+			[
+				'shortdesc' => 'Migrate citta taxonomy to category from old tables.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'id_matcher_filepath',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
 			]
 		);
 	}
@@ -557,11 +588,11 @@ class Umbria24Migrator implements InterfaceCommand {
 <!-- /wp:embed -->
 BLOCK;
 
-		$ids = $this->posts_migrator_logic->get_all_posts_ids( ['post','video','fotogallery','medialab','page'], ['publish','draft'] );
+		$ids = $this->posts_migrator_logic->get_all_posts_ids( [ 'post', 'video', 'fotogallery', 'medialab', 'page' ], [ 'publish', 'draft' ] );
 		foreach ( $ids as $key_id => $id ) {
-			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_id + 1, count($ids), $id ) );
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_id + 1, count( $ids ), $id ) );
 
-			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID=%d", $id ));
+			$post_content         = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID=%d", $id ) );
 			$post_content_updated = $post_content;
 
 			$matches = $this->block_manipulator->match_wp_block_selfclosing( 'wp:newspack-blocks/iframe', $post_content );
@@ -597,7 +628,7 @@ BLOCK;
 					$src_file .= 'index.html';
 				}
 				if ( ! file_exists( $src_file ) ) {
-					$msg = sprintf( "%d %s", $id, $src_file );
+					$msg = sprintf( '%d %s', $id, $src_file );
 					$this->log( 'iframe2ytblock_err_iframeFileNotFound.log', $msg );
 					WP_CLI::log( $msg );
 					continue;
@@ -611,25 +642,25 @@ BLOCK;
 					// Does not contain iframe.
 					continue;
 				}
-				$iframe_src  = $iframe_data[0] ?? null;
+				$iframe_src = $iframe_data[0] ?? null;
 				if ( is_null( $iframe_src ) ) {
-					$msg = sprintf( "%d %s iframe_src is NULL", $id, $src_file );
+					$msg = sprintf( '%d %s iframe_src is NULL', $id, $src_file );
 					$this->log( 'iframe2ytblock_err_iframeSrcIsNull.log', $msg );
 					WP_CLI::log( $msg );
 					continue;
 				}
 
 				$iframe_src_parsed = parse_url( $iframe_src );
-				if ( ! str_contains($iframe_src_parsed['host'], 'youtube.com') ) {
-					$msg = sprintf( "%d notYoutubeCom? %s", $id, $iframe_src );
+				if ( ! str_contains( $iframe_src_parsed['host'], 'youtube.com' ) ) {
+					$msg = sprintf( '%d notYoutubeCom? %s', $id, $iframe_src );
 					$this->log( 'iframe2ytblock_err_srcNotYoutube.log', $msg );
 					WP_CLI::log( $msg );
 					continue;
 				}
 
-				$yt_block = sprintf( $ytblock_sprintf, $iframe_src, $iframe_src );
+				$yt_block             = sprintf( $ytblock_sprintf, $iframe_src, $iframe_src );
 				$post_content_updated = str_replace( $iframe_block, $yt_block, $post_content_updated );
-				$updated = $wpdb->update(
+				$updated              = $wpdb->update(
 					$wpdb->posts,
 					[ 'post_content' => $post_content_updated ],
 					[ 'ID' => $id ]
@@ -656,12 +687,12 @@ BLOCK;
 	 * @param $assoc_args
 	 */
 	public function cmd_update_feat_imgs_ids_from_logs( $args, $assoc_args ) {
-		$attachment_ids_changes_file = $assoc_args[ 'attachment-ids-changes-php-file' ] ?? null;
-		$post_types = $assoc_args[ 'post-types-csv' ] ? explode( ',', $assoc_args[ 'post-types-csv' ] ) : [ 'post' ];
-		$post_id_from = $assoc_args[ 'post-id-from' ] ?? null;
-		$post_id_to = $assoc_args[ 'post-id-to' ] ?? null;
+		$attachment_ids_changes_file = $assoc_args['attachment-ids-changes-php-file'] ?? null;
+		$post_types                  = $assoc_args['post-types-csv'] ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post' ];
+		$post_id_from                = $assoc_args['post-id-from'] ?? null;
+		$post_id_to                  = $assoc_args['post-id-to'] ?? null;
 
-		$attachment_ids_changes = include( $assoc_args[ 'attachment-ids-changes-php-file' ] );
+		$attachment_ids_changes = include $assoc_args['attachment-ids-changes-php-file'];
 
 		global $wpdb;
 
@@ -670,7 +701,7 @@ BLOCK;
 				"select ID
 					from $wpdb->posts
 					where post_type in ( 'post', 'fotogallery', 'video', 'medialab' )
-					and post_status in ( 'publish', 'draft' ) 
+					and post_status in ( 'publish', 'draft' )
 					and ID >= %d
 					and ID <= %d
 					order by ID desc",
@@ -680,13 +711,156 @@ BLOCK;
 		);
 
 		foreach ( $ids as $key_id => $id ) {
-			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_id + 1, count( $ids ), $id ) );
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_id + 1, count( $ids ), $id ) );
 			$attachment_id = get_post_thumbnail_id( $id );
-			if ( isset( $attachment_ids_changes[$attachment_id] ) ) {
-				update_post_meta( $id, '_thumbnail_id', $attachment_ids_changes[$attachment_id] );
-				$this->log( 'featured_img_ids_updates.log', sprintf( "postID=%d oldAttId=%d newAttId=%d", $id, $attachment_id, $attachment_ids_changes[$attachment_id] ) );
+			if ( isset( $attachment_ids_changes[ $attachment_id ] ) ) {
+				update_post_meta( $id, '_thumbnail_id', $attachment_ids_changes[ $attachment_id ] );
+				$this->log( 'featured_img_ids_updates.log', sprintf( 'postID=%d oldAttId=%d newAttId=%d', $id, $attachment_id, $attachment_ids_changes[ $attachment_id ] ) );
 			}
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-migrate-citta-taxonomy-to-category-from-old-tables`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_migrate_citta_taxonomy_to_category_from_old_tables( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		// Make sure NGG DB tables are available.
+		$this->validate_db_tables_exist( 'wp_terms_old', 'wp_term_taxonomy_old', 'wp_term_relationships_old' );
+
+		$matchers_from_db_raw = $wpdb->get_results(
+			"select pm.meta_value oldid, pm.post_id newid from wp_postmeta pm join wp_posts p on p.ID = pm.post_id where p.post_type = 'post' and pm.meta_key='newspackcontentdiff_live_id';"
+		);
+
+		$matchers_from_db = array_map(
+			function( $matcher_from_db ) {
+				return array(
+					'id_old' => intval( $matcher_from_db->oldid ),
+					'id_new' => intval( $matcher_from_db->newid ),
+				);
+			},
+			$matchers_from_db_raw
+		);
+
+		$id_matcher_filepath_log = json_decode( file_get_contents( $assoc_args['id_matcher_filepath'] ), true );
+		$id_matcher_filepath     = array_merge( $id_matcher_filepath_log, $matchers_from_db );
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_citty_category',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'orderby'        => 'ID',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $new_post_id ) {
+			// $new_post_id = 991440;
+			// get post original ID, if not found the post was migrated with its original ID.
+			$id_matcher_found = null;
+			foreach ( $id_matcher_filepath as $id_matcher ) {
+				if ( $new_post_id === $id_matcher['id_new'] ) {
+					$id_matcher_found = $id_matcher['id_old'];
+					break;
+				}
+			}
+
+			if ( ! $id_matcher_found ) {
+				$this->log( self::CITTA_LOG, sprintf( "! Can't find original post ID for the post: %d", $new_post_id ), true );
+				update_post_meta( $new_post_id, '_newspack_migrated_citty_category', true );
+				continue;
+			} else {
+				// get citta taxonomies for this post.
+				$post_cittas = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT t.* FROM wp_terms_old t
+						INNER JOIN wp_term_taxonomy_old tt ON t.term_id = tt.term_id AND tt.taxonomy = 'citta'
+						INNER JOIN wp_term_relationships_old tr ON tt.term_taxonomy_id = tr.term_taxonomy_id
+						WHERE tr.object_id = %d ",
+						$id_matcher_found
+					)
+				);
+
+				$categories     = [];
+				$category_names = [];
+				foreach ( $post_cittas as $citta ) {
+					// $citta_category = get_category_by_slug( $citta->slug );
+					$citta_category = get_term_by( 'name', $citta->name, 'category' );
+					// $citta_category = null;
+					// $citta_categories = $post_cittas = $wpdb->get_results(
+					// $wpdb->prepare(
+					// "SELECT t.* FROM wp_terms t
+					// INNER JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id AND tt.taxonomy = 'category'
+					// WHERE t.slug = %s ORDER BY t.term_id DESC",
+					// $citta->slug
+					// )
+					// );
+
+					// // check which category taxonomy isn't linked to a tag.
+					// foreach ( $citta_categories as $citta_tax ) {
+					// $citta_tag = $post_cittas = $wpdb->get_row(
+					// $wpdb->prepare(
+					// "SELECT tt.* FROM wp_term_taxonomy tt
+					// WHERE tt.taxonomy = 'post_tag' AND tt.term_id = %d",
+					// $citta_tax->term_id
+					// )
+					// );
+
+					// if ( ! $citta_tag ) {
+					// $citta_category = $citta_tax;
+					// break;
+					// }
+					// }
+
+					$category_names[] = $citta->name;
+
+					if ( $citta_category ) {
+						$categories[] = $citta_category->term_id;
+					} else {
+						$categories[] = wp_create_category( $citta->name );
+					}
+				}
+
+				if ( ! empty( $categories ) ) {
+					wp_set_post_categories( $new_post_id, $categories, true );
+					$this->log( self::CITTA_LOG, sprintf( 'Setting categories for the post %d (old ID %d): %s', $new_post_id, $id_matcher_found, join( ', ', $category_names ) ), true );
+				}
+
+				update_post_meta( $new_post_id, '_newspack_migrated_citty_category', true );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -702,5 +876,27 @@ BLOCK;
 
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
+	}
+
+	/**
+	 * Checks if DB tables exist locally.
+	 *
+	 * @param array $tables Tables to check.
+	 *
+	 * @return bool
+	 *
+	 * @throws \Exception
+	 */
+	private function validate_db_tables_exist( $tables ) {
+		global $wpdb;
+
+		foreach ( $tables as $table ) {
+			$row = $wpdb->get_row( $wpdb->prepare( 'select * from information_schema.tables where table_schema = %s AND table_name = %s limit 1;', DB_NAME, $table ), ARRAY_A );
+			if ( is_null( $row ) || empty( $row ) ) {
+				throw new \Exception( sprintf( 'Table %s not found in DB.', $table ) );
+			}
+		}
+
+		return true;
 	}
 }
