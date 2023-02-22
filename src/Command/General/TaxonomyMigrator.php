@@ -831,7 +831,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$interactive = $assoc_args['interactive'];
+		$interactive = $assoc_args['interactive'] ?? false;
 		$response = 'a';
 		foreach ( $duplicate_slugs as $duplicate_slug ) {
 			// If a duplicate slug has term_id_count > 1, then it has multiple terms with the same slug.
@@ -865,7 +865,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 				$interactive = false;
 			}
 
-			if ( ! in_array( $response, [ 'n', 'p' ] ) ) {
+			if ( ! in_array( $response, [ 'n', 'p', 'a' ] ) ) {
 				$this->output( 'Invalid response. Skipping...' );
 				continue;
 			}
