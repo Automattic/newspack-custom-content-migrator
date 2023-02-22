@@ -826,7 +826,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			return;
 		}
 
-		if ( $assoc_args['display'] ) {
+		if ( isset( $assoc_args['display'] ) && $assoc_args['display'] ) {
 			WP_CLI\Utils\format_items( 'table', $duplicate_slugs, array_keys( (array) $duplicate_slugs[0] ) );
 			return;
 		}
@@ -870,16 +870,18 @@ class TaxonomyMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			$duplicate_slug->taxonomies = explode( ', ', $duplicate_slug->taxonomies );
+
 			if ( $duplicate_slug->term_id_count > 1 ) {
 				// Multiple terms with the same slug.
 				// Rename all other slugs to be unique.
 				$this->output( 'Renaming duplicate term slugs...' );
-				$this->rename_duplicate_term_slugs( $duplicate_slug->slug, $duplicate_slug->taxonomy );
+				$this->rename_duplicate_term_slugs( $duplicate_slug->slug, $duplicate_slug->taxonomies );
 			} else {
 				// Multiple term_taxonomy_ids with the same slug.
 				// Split the term_taxonomy_id into a new term.
 				$this->output( 'Splitting duplicate term slug...' );
-				$this->split_duplicate_term_slug( $duplicate_slug->slug, $duplicate_slug->taxonomy );
+				$this->split_duplicate_term_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
 			}
 		}
 	}
@@ -888,13 +890,13 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * Function to rename a duplicate term slug into a new term.
 	 *
 	 * @param string $slug The slug to split.
-	 * @param string $taxonomy The taxonomy of the slug.
+	 * @param array  $taxonomies The taxonomy of the slug.
 	 */
-	public function rename_duplicate_term_slugs( string $slug, string $taxonomy ) {
+	public function rename_duplicate_term_slugs( string $slug, array $taxonomies ) {
 		// Get all terms with the same slug.
 		$terms = get_terms(
 			[
-				'taxonomy'   => $taxonomy,
+				'taxonomy'   => $taxonomies,
 				'hide_empty' => false,
 				'slug'       => $slug,
 			]
@@ -903,9 +905,19 @@ class TaxonomyMigrator implements InterfaceCommand {
 		array_shift( $terms ); // Remove the first term, which will remain the original slug.
 
 		// Rename all terms with the same slug.
+		$offset = 1;
 		foreach ( $terms as $key => $term ) {
-			$term->slug = $term->slug . '-' . $key + 1;
-			wp_update_term( $term->term_id, $taxonomy, [ 'slug' => $term->slug ] );
+			$new_slug = $term->slug . '-' . $key + $offset;
+			do {
+				$slug_exists = term_exists( $new_slug );
+
+				if ( ! is_null( $slug_exists ) ) {
+					$offset++;
+					$new_slug = $term->slug . '-' . $key + $offset;
+				}
+			} while ( ! is_null( $slug_exists ) );
+
+			wp_update_term( $term->term_id, $term->taxonomy, [ 'slug' => $new_slug ] );
 		}
 	}
 
@@ -913,25 +925,25 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * Function to split a duplicate term slug into a new term.
 	 *
 	 * @param string $slug The slug to split.
-	 * @param string $taxonomy The taxonomy of the slug.
+	 * @param array  $taxonomies The taxonomy of the slug.
 	 */
-	public function split_duplicate_term_slug( string $slug, string $taxonomy ) {
+	public function split_duplicate_term_slug( string $slug, array $taxonomies ) {
 		// Get all term_taxonomy_ids with the same slug.
-		$taxonomies = get_terms(
+		$taxonomic_records = get_terms(
 			[
-				'taxonomy'   => $taxonomy,
+				'taxonomy'   => $taxonomies,
 				'hide_empty' => false,
 				'slug'       => $slug,
 			]
 		);
 
 		// Get the first term_taxonomy_id, which will remain the original slug.
-		$main_term_taxonomy_id = array_shift( $taxonomies );
+		$main_term_taxonomy_id = array_shift( $taxonomic_records );
 
 		global $wpdb;
 
 		// Split all other term_taxonomy_ids into new terms.
-		foreach ( $taxonomies as $key => $taxonomy ) {
+		foreach ( $taxonomic_records as $key => $taxonomy ) {
 			$result = $wpdb->insert(
 				$wpdb->terms,
 				[
