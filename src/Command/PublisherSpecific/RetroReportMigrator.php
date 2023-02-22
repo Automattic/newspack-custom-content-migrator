@@ -201,6 +201,21 @@ class RetroReportMigrator implements InterfaceCommand {
 				'optional'    => false,
 				'description' => 'Path to the JSON file.',
 			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'guest-author',
+				'optional'    => true,
+				'description' => 'ID of the guest author to assign to post.',
+				'default'     => 'post',
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'template',
+				'optional'    => true,
+				'description' => 'Name of the template to use for imported posts',
+				'default'     => 'default',
+				'options'     => [ 'default', 'single-feature.php', 'single-wide.php' ],
+			],
 
 		];
 	}
@@ -256,21 +271,6 @@ class RetroReportMigrator implements InterfaceCommand {
 				'synopsis'  => array_merge( $this->common_arguments, [
 					[
 						'type'        => 'assoc',
-						'name'        => 'guest-author',
-						'optional'    => true,
-						'description' => 'ID of the guest author to assign to post.',
-						'default'     => 'post',
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'template',
-						'optional'    => true,
-						'description' => 'Name of the template to use for imported posts',
-						'default'     => 'default',
-						'options'     => [ 'default', 'single-feature.php', 'single-wide.php' ],
-					],
-					[
-						'type'        => 'assoc',
 						'name'        => 'featured_image_position',
 						'optional'    => true,
 						'description' => 'Name of the template to use for imported posts',
@@ -301,13 +301,6 @@ class RetroReportMigrator implements InterfaceCommand {
 						'name'        => 'category-parent',
 						'optional'    => true,
 						'description' => 'Category name (about, board, articles, etc.).',
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'guest-author',
-						'optional'    => true,
-						'description' => 'ID of the guest author to assign to post.',
-						'default'     => 'post',
 					],
 				] ),
 			]
@@ -386,7 +379,7 @@ class RetroReportMigrator implements InterfaceCommand {
 			}
 
 			// Specify the template to use, if needed.
-			if ( 'default' !== $assoc_args['template'] ) {
+			if ( isset( $assoc_args['template'] ) && 'default' !== $assoc_args['template'] ) {
 				$post->template = esc_attr( $assoc_args['template'] );
 			}
 
@@ -557,6 +550,11 @@ class RetroReportMigrator implements InterfaceCommand {
 			if ( $this->post_exists( $listing, $post_type ) ) {
 				$this->logger->log( $this->log_name, sprintf( 'Listing "%s" is already imported. Skipping...', $listing->title ) );
 				continue;
+			}
+
+			// Specify the template to use, if needed.
+			if ( isset( $assoc_args['template'] ) && 'default' !== $assoc_args['template'] ) {
+				$listing->template = esc_attr( $assoc_args['template'] );
 			}
 
 			// Import the post!
@@ -1038,6 +1036,14 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ 'images[0]',   'string',  '_thumbnail_id' ],
 		];
 
+		$this->fields_mappings['Playlist'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'description', 'boolean', 'post_content' ],
+		];
+
 	}
 
 	/**
@@ -1302,6 +1308,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Standards']   = 'wp_block';
 		$this->post_types['Library']     = 'post';
 		$this->post_types['Partner']     = 'newspack_spnsrs_cpt';
+		$this->post_types['Playlist']    = 'newspack_lst_generic';
 	}
 
 	/**
@@ -1318,6 +1325,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Multi-Media']        = [ $this, 'format_multimedia_content' ];
 		$this->content_formatters['Standards']          = [ $this, 'format_standards_content' ];
 		$this->content_formatters['Library']            = [ $this, 'format_education_library_content' ];
+		$this->content_formatters['Playlist']           = [ $this, 'format_playlist_content' ];
 	}
 
 	/**
@@ -1834,12 +1842,73 @@ HTML;
 				},
 				$post->related
 			);
-var_dump(wp_json_encode($related_posts));
+
 			// Add the section, dropping the IDs into the homepage posts block.
 			if ( ! empty( $related_posts ) ) {
 				$content .= sprintf( $related_template, wp_json_encode( $related_posts ) );
 			}
 
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Format post content for Playlist posts.
+	 *
+	 * Merges imported data with a post template specifically for Playlist content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	private function format_playlist_content( $post ) {
+
+		$content = '';
+
+		// Build the main video columns block.
+		if ( ! isset( $post->related_videos) || empty( $post->related_videos ) ) {
+			return false; // Nothing to print out.
+		}
+
+		$video_id = $post->related_videos[0];
+		$video_post = $this->get_post_from_unique_id( $video_id );
+		if ( ! is_a( $video_post, 'WP_Post' ) ) {
+			return false;
+		}
+
+		$youtube_id        = get_post_meta( $video_post->ID, self::META_PREFIX . 'video_id', true );
+		$youtube_video     = $this->format_video_block( $youtube_id );
+		$video_title       = get_the_title( $video_post );
+		$video_description = get_post_meta( $video_post->ID, 'newspack_article_summary', true );
+		$content          .= <<<HTML
+		<!-- wp:columns -->
+		<div class="wp-block-columns"><!-- wp:column {"width":"66.66%"} -->
+		<div class="wp-block-column" style="flex-basis:66.66%">$youtube_video</div>
+		<!-- /wp:column -->
+
+		<!-- wp:column {"width":"33.33%"} -->
+		<div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:heading -->
+		<h2>$video_title</h2>
+		<!-- /wp:heading -->
+
+		<!-- wp:paragraph -->
+		<p>$video_description</p>
+		<!-- /wp:paragraph --></div>
+		<!-- /wp:column --></div>
+		<!-- /wp:columns -->
+		HTML;
+
+		$related_template = '<!-- wp:newspack-blocks/homepage-articles {"showExcerpt":false,"showDate":false,"minHeight":25,"showAuthor":false,"postLayout":"grid","columns":5,"postsToShow":100,"specificPosts":%1$s,"mediaPosition":"behind","typeScale":2,"sectionHeader":"See more stories about %2$s","specificMode":true} /-->';
+		$related_video_ids = array_map(
+			function ( $unique_id ) {
+				$post = $this->get_post_from_unique_id( $unique_id );
+				return ( ! is_a( $post, 'WP_Post' ) ) ? false : $post->ID;
+			},
+			array_slice( $post->related_videos, 1 )
+		);
+		if ( ! empty( $related_video_ids ) ) {
+			$content .= sprintf( $related_template, wp_json_encode( $related_video_ids ), $video_title );
 		}
 
 		return $content;
