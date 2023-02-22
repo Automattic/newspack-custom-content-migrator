@@ -1084,6 +1084,15 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ 'description', 'boolean', 'post_content' ],
 		];
 
+		$this->fields_mappings['Transcript'] = [
+			[ 'title',       'string',  'post_title'],
+			[ 'publishdate', 'string',  'post_date_gmt'],
+			[ 'lastmod',     'string',  'post_modified_gmt'],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'content',     'string',  'post_content' ],
+			[ 'template',    'string',  '_wp_page_template' ],
+		];
+
 	}
 
 	/**
@@ -1349,6 +1358,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Library']     = 'post';
 		$this->post_types['Partner']     = 'newspack_spnsrs_cpt';
 		$this->post_types['Playlist']    = 'newspack_lst_generic';
+		$this->post_types['Transcript']  = 'post';
 	}
 
 	/**
@@ -1366,6 +1376,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Standards']          = [ $this, 'format_standards_content' ];
 		$this->content_formatters['Library']            = [ $this, 'format_education_library_content' ];
 		$this->content_formatters['Playlist']           = [ $this, 'format_playlist_content' ];
+		$this->content_formatters['Transcript']         = [ $this, 'format_transcript_content' ];
 	}
 
 	/**
@@ -1952,6 +1963,19 @@ HTML;
 		}
 
 		return $content;
+	}
+
+	/**
+	 * Format post content for Transcript posts.
+	 *
+	 * Merges imported data with a post template specifically for Transcript content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	private function format_transcript_content( $post ) {
+		return ( isset( $post->content ) ) ? $this->convert_copy_to_blocks( $post->content ) : '';
 	}
 
 	/**
