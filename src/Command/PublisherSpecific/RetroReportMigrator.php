@@ -3,9 +3,11 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use \NewspackCustomContentMigrator\Utils\Logger;
+use \NewspackCustomContentMigrator\Logic\Attachments;
+use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use \NewspackCustomContentMigrator\Logic\Sponsors;
 use stdClass;
 use \WP_CLI;
 use WP_Query;
@@ -31,6 +33,11 @@ class RetroReportMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
+	 * @var Logger.
+	 */
+	private $logger;
+
+	/**
 	 * Attachments logic.
 	 *
 	 * @var null|Attachments
@@ -50,6 +57,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var null|CoAuthorPlus
 	 */
 	private $co_authors_plus;
+
+	/**
+	 * Sponsors logic.
+	 *
+	 * @var null|Sponsors
+	 */
+	private $sponsors;
 
 	/**
 	 * List of core wp_posts fields
@@ -101,11 +115,15 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->logger = new Logger();
+
 		$this->attachments = new Attachments();
 
 		$this->co_authors_plus = new CoAuthorPlus();
 
 		$this->simple_local_avatars = new SimpleLocalAvatars();
+
+		$this->sponsors = new Sponsors();
 
 		$this->core_fields = [
 			'post_author',
@@ -271,6 +289,15 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ $this, 'cmd_retro_report_import_reusable_blocks' ],
 			[
 				'shortdesc' => 'Import re-usable from a JSON file',
+				'synopsis'  => $this->common_arguments,
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-import-sponsors',
+			[ $this, 'cmd_retro_report_import_sponsors' ],
+			[
+				'shortdesc' => 'Import sponsors from a JSON file',
 				'synopsis'  => $this->common_arguments,
 			]
 		);
@@ -554,6 +581,56 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		}
 
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator retro-report-import-sponsors`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_sponsors( $args, $assoc_args ) {
+		$sponsors  = $this->validate_json_file( $assoc_args );
+		$category  = sanitize_text_field( $assoc_args['category'] );
+		$fields    = $this->load_mappings( $category );
+		$post_type = $this->get_post_type( $category );
+
+		\WP_CLI::log( 'The fields that are going to be imported are:' );
+		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+
+		foreach ( $sponsors as $sponsor ) {
+
+			\WP_CLI::log( sprintf( 'Importing sponsor "%s"...', $sponsor->title ) );
+
+			// Import the post!
+			$post_id = $this->import_post( $sponsor, $post_type, $fields, $category );
+			if ( is_wp_error( $post_id ) ) {
+				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $sponsor->title ) );
+				\WP_CLI::warning( $post_id->get_error_message() );
+				continue;
+			}
+
+			// Add the sponsor to the related posts.
+			if ( isset( $sponsor->related_content ) ) {
+
+				foreach ( $sponsor->related_content as $related ) {
+					$related_post = $this->get_post_from_unique_id( $related );
+					if ( ! $related_post ) {
+						$this->logger->log( 'retroreport', sprintf( 'Failed to find related post for unique ID %s', $related ), false );
+						continue;
+					}
+
+					// Use the Sponsors utility.
+					$add_sponsor = $this->sponsors->add_sponsor_to_post( $post_id, $related_post );
+					if ( ! $add_sponsor ) {
+						$this->logger->log( 'retroreport', sprintf( 'Failed to attach sponsor %1$d to post %2$d', $post_id, $related_post ), false );
+					} else {
+						$this->logger->log( 'retroreport', sprintf( 'Successfully attached sponsor %1$d to post %2$d', $post_id, $related_post ), false );
+					}
+				}
+			}
+
+		}
 	}
 
 	/**
@@ -908,6 +985,16 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ 'draft',                   'boolean',   'post_status' ],
 		];
 
+		$this->fields_mappings['Partner'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'draft',       'string',  'post_status' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'website',     'string',  'newspack_sponsor_url' ],
+			[ 'images[0]',   'string',  '_thumbnail_id' ],
+		];
+
 	}
 
 	/**
@@ -1162,16 +1249,17 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_post_types() {
-		$this->post_types['Standards']           = 'wp_block';
-		$this->post_types['Links']               = 'post';
-		$this->post_types['Profiles']            = 'newspack_lst_generic';
-		$this->post_types['Video']               = 'post';
-		$this->post_types['Articles']            = 'post';
-		$this->post_types['Events']              = 'newspack_lst_event';
-		$this->post_types['Profiles']            = 'newspack_lst_generic';
-		$this->post_types['Multi-Media']         = 'post';
-		$this->post_types['Standards']           = 'wp_block';
-		$this->post_types['Library']             = 'post';
+		$this->post_types['Standards']   = 'wp_block';
+		$this->post_types['Links']       = 'post';
+		$this->post_types['Profiles']    = 'newspack_lst_generic';
+		$this->post_types['Video']       = 'post';
+		$this->post_types['Articles']    = 'post';
+		$this->post_types['Events']      = 'newspack_lst_event';
+		$this->post_types['Profiles']    = 'newspack_lst_generic';
+		$this->post_types['Multi-Media'] = 'post';
+		$this->post_types['Standards']   = 'wp_block';
+		$this->post_types['Library']     = 'post';
+		$this->post_types['Partner']     = 'newspack_spnsrs_cpt';
 	}
 
 	/**
@@ -1180,14 +1268,14 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function set_content_formatters() {
-		$this->content_formatters['Education profiles']  = [ $this, 'format_education_profiles_content' ];
-		$this->content_formatters['Video']               = [ $this, 'format_video_content' ];
-		$this->content_formatters['Articles']            = [ $this, 'format_article_content' ];
-		$this->content_formatters['Events']              = [ $this, 'format_events_content' ];
-		$this->content_formatters['Profiles']            = [ $this, 'format_profiles_content' ];
-		$this->content_formatters['Multi-Media']         = [ $this, 'format_multimedia_content' ];
-		$this->content_formatters['Standards']           = [ $this, 'format_standards_content' ];
-		$this->content_formatters['Library']             = [ $this, 'format_education_library_content' ];
+		$this->content_formatters['Education profiles'] = [ $this, 'format_education_profiles_content' ];
+		$this->content_formatters['Video']              = [ $this, 'format_video_content' ];
+		$this->content_formatters['Articles']           = [ $this, 'format_article_content' ];
+		$this->content_formatters['Events']             = [ $this, 'format_events_content' ];
+		$this->content_formatters['Profiles']           = [ $this, 'format_profiles_content' ];
+		$this->content_formatters['Multi-Media']        = [ $this, 'format_multimedia_content' ];
+		$this->content_formatters['Standards']          = [ $this, 'format_standards_content' ];
+		$this->content_formatters['Library']            = [ $this, 'format_education_library_content' ];
 	}
 
 	/**
