@@ -614,6 +614,54 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         );
 
         WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-migrate-expertos-as-guest-authors',
+            [ $this, 'migrate_expertos_as_guest_authors'],
+            [
+                'shortdesc' => 'Migrates expertos as guest authors.',
+                'synopsis' => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV authors.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'flag',
+                        'name' => 'reset-db',
+                        'description' => 'Resets the database for a fresh import.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ]
+                ],
+            ]
+        );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-migrate-users',
+            [ $this, 'migrate_users' ],
+            [
+                'shortdesc' => 'Migrates users.',
+                'synopsis' => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV authors.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'flag',
+                        'name' => 'reset-db',
+                        'description' => 'Resets the database for a fresh import.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ]
+                ]
+            ]
+        );
+
+        WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-migrate-articles',
             [ $this, 'migrate_articles' ],
             [
@@ -803,7 +851,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
                     $this->file_logger( json_encode( $guest_author_data ), false );
 
-                    $post_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data);
+                    $post_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
 
                     update_post_meta( $post_id, 'original_user_id', $author['id'] );
                     update_post_meta( $post_id, 'original_role_id', $author['xpr_role_id'] );
@@ -835,10 +883,140 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
             if ( ! empty( $author['image'] ) ) {
                 $this->file_logger( "Creating User's avatar. File: {$author['image']}" );
-                /*$avatar_attachment_id = $this->handle_profile_photo( $author['image'] );
+                $avatar_attachment_id = $this->handle_profile_photo( $author['image'] );
 
-                $this->simple_local_avatars->import_avatar( $user_id, $avatar_attachment_id );*/
+                $this->simple_local_avatars->import_avatar( $user_id, $avatar_attachment_id );
             }
+        }
+    }
+
+    /**
+     * Imports Guest Authors from JSON file.
+     *
+     * @param $args
+     * @param $assoc_args
+     */
+    public function migrate_expertos_as_guest_authors( $args, $assoc_args )
+    {
+        if ( $assoc_args['reset-db'] ) {
+            $this->reset_db();
+        }
+
+        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
+            $this->file_logger( "ID: {$user['id']} | FULLNAME: {$user['fullname']}" );
+
+            $guest_author_exists = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_email', $user['email'] );
+
+            $names = explode(' ', $user['fullname']);
+            $last_name = array_pop($names);
+            $first_name = implode(' ', $names);
+
+            $guest_author_data = [
+                'display_name' => $user['slug'],
+                'first_name' => $first_name,
+                'last_name' => $last_name,
+                'user_email' => $user['email'],
+                'website' => $user['url'],
+                'description' => $user['description'],
+            ];
+
+            if ( ! empty( $user['picture'] ) ) {
+                $file_path_parts = explode( '/', $user['picture'] );
+                $filename = array_pop( $file_path_parts );
+                $guest_author_data['avatar'] = $this->handle_profile_photo( $filename );
+            }
+
+            if ( false === $guest_author_exists ) {
+                $guest_author_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
+
+                update_post_meta( $guest_author_id, 'original_user_id', $user['id'] );
+                update_post_meta( $guest_author_id, 'publicaciones', $user['publicaciones'] );
+                update_post_meta( $guest_author_id, 'lineasInvestigacion', $user['lineasInvestigacion'] );
+                update_post_meta( $guest_author_id, 'cap-newspack_job_title', $user['lineasInvestigacion'] );
+                update_post_meta( $guest_author_id, 'cap-newspack_phone_number', $user['phone'] );
+                update_post_meta( $guest_author_id, 'cap-website', $user['url'] );
+            } else {
+                $this->file_logger( "Guest Author already exists. ID: {$guest_author_exists->ID}, will attempt to update information." );
+                update_post_meta( $guest_author_exists->ID, 'cap-display_name', $guest_author_data['display_name'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-first_name', $guest_author_data['first_name'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-last_name', $guest_author_data['last_name'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-user_email', $guest_author_data['user_email'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-description', $guest_author_data['description'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-description', $guest_author_data['description'] );
+                update_post_meta( $guest_author_exists->ID, '_thumbnail_id', $guest_author_data['avatar'] );
+                update_post_meta( $guest_author_exists->ID, 'original_user_id', $user['id'] );
+                update_post_meta( $guest_author_exists->ID, 'publicaciones', $user['publicaciones'] );
+                update_post_meta( $guest_author_exists->ID, 'lineasInvestigacion', $user['lineasInvestigacion'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-newspack_job_title', $user['lineasInvestigacion'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-newspack_phone_number', $user['phone'] );
+                update_post_meta( $guest_author_exists->ID, 'cap-website', $user['url'] );
+            }
+        }
+    }
+
+    /**
+     * Migrates users from JSON file.
+     *
+     * @param $args
+     * @param $assoc_args
+     * @throws Exception
+     */
+    public function migrate_users($args, $assoc_args )
+    {
+        if ( $assoc_args['reset-db'] ) {
+            $this->reset_db();
+        }
+
+        $unmigrated_users_file_path = 'unmigrated-users.json';
+        $unmigrated_users = [];
+
+        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
+            $this->file_logger( "ID: {$user['id']} | EMAIL: {$user['email']} | NAME: {$user['name']}" );
+
+            $is_valid_email = filter_var( $user['email'], FILTER_VALIDATE_EMAIL );
+
+            if ( false === $is_valid_email ) {
+                $this->file_logger( "Invalid email. Skipping." );
+                $unmigrated_users[] = $user;
+                continue;
+            }
+
+            $display_name = $user['name'] . ' ' . $user['lastname'];
+
+            if ( is_null( $user['lastname'] ) ) {
+                $display_name = $user['name'];
+            }
+
+            $created_at = new DateTime( $user['createdAt'], new DateTimeZone( 'America/Bogota' ) );
+            $created_at->setTimezone( new DateTimeZone( 'UTC' ) );
+
+            $user_id = wp_insert_user(
+                [
+                    'user_pass' => wp_generate_password( 24 ),
+                    'user_login' => $user['email'],
+                    'user_email' => $user['email'],
+                    'display_name' => $display_name,
+                    'first_name' => $user['name'],
+                    'last_name' => $user['lastname'],
+                    'description' => $user['job'],
+                    'user_registered' => $created_at->format( 'Y-m-d H:i:s' ),
+                    'role' => 'subscriber',
+                    'meta_input' => [
+                        'original_user_id' => $user['id'],
+                    ]
+                ]
+            );
+
+            if ( is_wp_error( $user_id ) ) {
+                $this->file_logger( $user_id->get_error_message() );
+                $user['error'] = $user_id->get_error_message();
+                $unmigrated_users[] = $user;
+            }
+        }
+
+        if ( ! empty( $unmigrated_users ) ) {
+            $this->file_logger( "Writing unmigrated users to file." );
+            file_put_contents( $unmigrated_users_file_path, json_encode( $unmigrated_users ) );
         }
     }
 
@@ -989,6 +1167,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         }
     }
 
+    /**
+     * @param string $html
+     * @return string
+     */
     private function handle_extracting_html_content(string $html)
     {
         $dom = new DOMDocument();
@@ -1018,14 +1200,61 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      */
     private function handle_profile_photo(string $filename): int
     {
-        // TODO find $filename with path
+        $base_dir = wp_upload_dir()['basedir'];
+
+        $output = shell_exec( "find '$base_dir' -name '$filename'" );
+        $files = explode( "\n", trim ( $output ) );
+
+        if ( empty( $files ) ) {
+            $attachment_id = $this->get_attachment_id( $filename );
+
+            if ( ! is_null( $attachment_id ) ) {
+                return $attachment_id;
+            }
+        }
+
+        $file_path = $files[0];
+
+        $attachment_id = $this->get_attachment_id( $filename );
+
+        if ( ! is_null( $attachment_id ) ) {
+            return $attachment_id;
+        }
 
         return wp_insert_attachment(
             [
+                'guid'  => wp_upload_dir()['url'] . '/' . $filename,
+                'post_mime_type' => wp_get_image_mime( $file_path ),
+                'post_title' => basename( $file_path ),
+                'post_content' => '',
+                'post_status' => 'inherit',
                 'comment_status' => 'closed',
             ],
+            $file_path
+        );
+    }
+
+    /**
+     * Look in the DB to see if a record already exists for file. If so, return the attachment/post ID.
+     *
+     * @param string $filename
+     * @return string|null
+     */
+    private function get_attachment_id( string $filename )
+    {
+        global $wpdb;
+
+        $file_exists_query = $wpdb->prepare(
+            "SELECT 
+                post_id 
+            FROM $wpdb->postmeta 
+            WHERE meta_key = '_wp_attached_file' 
+              AND meta_value LIKE '%%s%' 
+              LIMIT 1",
             $filename
         );
+
+        return $wpdb->get_var( $file_exists_query );
     }
 
     /**
