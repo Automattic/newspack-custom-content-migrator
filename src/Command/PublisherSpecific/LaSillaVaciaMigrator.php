@@ -905,7 +905,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
             $this->file_logger( "ID: {$user['id']} | FULLNAME: {$user['fullname']}" );
 
-            $guest_author_exists = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_email', $user['email'] );
+            // There will always be a slug, but not always an email.
+            $guest_author_exists = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_login', $user['slug'] );
+
+            // Email is preferred for finding guest authors.
+            if  ( ! empty( $user['email'] ) ) {
+                $guest_author_exists = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_email', $user['email'] );
+            }
 
             $names = explode(' ', $user['fullname']);
             $last_name = array_pop($names);
