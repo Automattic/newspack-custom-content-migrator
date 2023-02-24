@@ -1093,6 +1093,18 @@ class RetroReportMigrator implements InterfaceCommand {
 			[ 'template',    'string',  '_wp_page_template' ],
 		];
 
+		$this->fields_mappings['Series'] = [
+			[ 'title', 'string', 'post_title' ],
+			[ 'authors',     'array',   'post_author' ],
+			[ 'producers',   'authors', 'guest_authors' ],
+			[ 'description', 'string',  'newspack_article_summary' ],
+			[ 'description', 'string',  'post_content' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'images[0]',   'string',  '_thumbnail_id' ],
+			[ 'draft',       'boolean', 'post_status' ],
+		];
+
 	}
 
 	/**
@@ -1359,6 +1371,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->post_types['Partner']     = 'newspack_spnsrs_cpt';
 		$this->post_types['Playlist']    = 'newspack_lst_generic';
 		$this->post_types['Transcript']  = 'post';
+		$this->post_types['Series']      = 'post';
 	}
 
 	/**
@@ -1377,6 +1390,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->content_formatters['Library']            = [ $this, 'format_education_library_content' ];
 		$this->content_formatters['Playlist']           = [ $this, 'format_playlist_content' ];
 		$this->content_formatters['Transcript']         = [ $this, 'format_transcript_content' ];
+		$this->content_formatters['Series']             = [ $this, 'format_series_content' ];
 	}
 
 	/**
@@ -1976,6 +1990,161 @@ HTML;
 	 */
 	private function format_transcript_content( $post ) {
 		return ( isset( $post->content ) ) ? $this->convert_copy_to_blocks( $post->content ) : '';
+	}
+
+	/**
+	 * Format post content for Series posts.
+	 *
+	 * Merges imported data with a post template specifically for Series content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	private function format_series_content( $post ) {
+		$content = '';
+
+		// Description.
+		if ( isset( $post->description ) ) {
+			$content .= sprintf(
+				'<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->',
+				esc_html( $post->description )
+			);
+		}
+
+		// Blocks
+		if ( isset( $post->blocks ) && ! empty( $post->blocks ) ) {
+			foreach ( $post->blocks as $block ) {
+				if (
+					! property_exists( $block, 'video_id') ||
+					! property_exists( $block, 'ctas') ||
+					empty( $block->ctas ) ||
+					empty( $block->video_id )
+				) {
+					continue;
+				}
+
+				$youtube_video = $this->format_video_block( $block->video_id );
+				$title         = esc_html( $block->title );
+				$caption       = esc_html( $block->caption );
+				$cta_copy      = esc_html( $block->ctas[0]->copy );
+				$cta_url       = esc_html( $block->ctas[0]->url );
+
+				// Add to content, flip-flopping based on media_position
+				$content .= ( 'Left' === $block->media_position ) ? <<<HTML
+				<!-- wp:group {"layout":{"type":"constrained"}} -->
+				<div class="wp-block-group"><!-- wp:columns -->
+				<div class="wp-block-columns"><!-- wp:column {"width":"66.66%"} -->
+				<div class="wp-block-column" style="flex-basis:66.66%">$youtube_video</div>
+				<!-- /wp:column -->
+
+				<!-- wp:column {"width":"33.33%"} -->
+				<div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:heading -->
+				<h2>$title</h2>
+				<!-- /wp:heading -->
+
+				<!-- wp:paragraph -->
+				<p>$caption</p>
+				<!-- /wp:paragraph -->
+
+				<!-- wp:buttons -->
+				<div class="wp-block-buttons"><!-- wp:button -->
+				<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="$cta_url">$cta_copy</a></div>
+				<!-- /wp:button --></div>
+				<!-- /wp:buttons --></div>
+				<!-- /wp:column --></div>
+				<!-- /wp:columns --></div>
+				<!-- /wp:group -->
+				HTML : <<<HTML
+				<!-- wp:group {"layout":{"type":"constrained"}} -->
+				<div class="wp-block-group"><!-- wp:columns -->
+				<div class="wp-block-columns"><!-- wp:column {"width":"33.33%"} -->
+				<div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:heading -->
+				<h2>$title</h2>
+				<!-- /wp:heading -->
+
+				<!-- wp:paragraph -->
+				<p>$caption</p>
+				<!-- /wp:paragraph -->
+
+				<!-- wp:buttons -->
+				<div class="wp-block-buttons"><!-- wp:button -->
+				<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="$cta_url">$cta_copy</a></div>
+				<!-- /wp:button --></div>
+				<!-- /wp:buttons --></div>
+				<!-- /wp:column -->
+
+				<!-- wp:column {"width":"66.7%"} -->
+				<div class="wp-block-column" style="flex-basis:66.7%">$youtube_video</div>
+				<!-- /wp:column --></div>
+				<!-- /wp:columns --></div>
+				<!-- /wp:group -->
+				HTML;
+			}
+		}
+
+		// Funders section.
+		if ( isset( $post->funders ) && ! empty( $post->funders ) ) {
+			$funders       = [];
+			$funder_images = [];
+			foreach ( $post->funders as $funder ) {
+				$funder_post = $this->get_post_from_unique_id( $funder );
+				if ( ! is_a( $funder_post, 'WP_Post' ) ) {
+					$this->logger->log( $this->log_name, sprintf( 'No posts found for funder unique ID %s', $funder ), false );
+					continue;
+				}
+
+				$funder_name = get_the_title( $funder_post->ID );
+				$funder_url  = get_post_meta( $funder_post->ID, 'newspack_sponsor_url', true );
+				$funders[]   = sprintf( '<a href="%1$s">%2$s</a>', esc_url( $funder_url ), esc_html( $funder_name ) );
+				$funder_images[] = get_the_post_thumbnail( $funder_post );
+			}
+
+			$funders_output = '<!-- wp:paragraph --><p>A special thank you to ';
+			// Generate a writen list of funders, separating with a comma or "and" where appropriate
+			// and ensuring funders names that don't start "The" are prefixed with it.
+			for ( $i = 0; $i < count( $funders ); $i++ ) {
+
+				$the = ( false !== strpos( $funders[ $i ], 'The' ) ) ? true : false;
+
+				if ( $i === 0 ) {
+					$tpl = ( $the ) ? 'the %s' : '%s';
+				} else if ( $i !== count( $funders )-1 ) {
+					$tpl = ( $the ) ? ', the %s' : ', %s';
+				} else {
+					$tpl = ( $the ) ? ' and the %s' : ' and %s';
+				}
+
+				$funders_output .= sprintf( $tpl, $funders[ $i ] );
+			}
+			$funders_output .= ' for supporting this project.</p><!-- /wp:paragraph -->';
+
+			// Dump the images.
+			$funders_output .= implode( '', $funder_images );
+
+			// Add our completed funders content.
+			$content .= $funders_output;
+
+		}
+
+		// Related section.
+		if ( isset( $post->related ) && ! empty( $post->related ) ) {
+			$related_template = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+			<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:newspack-blocks/homepage-articles {"showDate":false,"showAuthor":false,"showCategory":true,"postLayout":"grid","columns":4,"postsToShow":4,"specificPosts":%1$s,"typeScale":2,"sectionHeader":"Related"} /--></div>
+			<!-- /wp:group -->';
+			$related_post_ids = array_map(
+				function ( $unique_id ) {
+					$post = $this->get_post_from_unique_id( $unique_id );
+					return ( ! is_a( $post, 'WP_Post' ) ) ? false : $post->ID;
+				},
+				array_slice( $post->related, 1 )
+			);
+			if ( ! empty( $related_video_ids ) ) {
+				$content .= sprintf( $related_template, wp_json_encode( $related_video_ids ) );
+			}
+		}
+
+		return $content;
 	}
 
 	/**
