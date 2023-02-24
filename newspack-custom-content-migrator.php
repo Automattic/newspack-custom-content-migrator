@@ -12,6 +12,8 @@
 
 namespace NewspackCustomContentMigrator;
 
+use NewspackCustomContentMigrator\Command\General\UsersMigrator;
+
 require __DIR__ . '/vendor/autoload.php';
 
 // Don't do anything outside WP CLI.
@@ -58,6 +60,7 @@ PluginSetup::register_migrators(
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\MetroMirgator::class,
+		Command\General\UsersMigrator::class,
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
