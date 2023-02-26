@@ -2120,7 +2120,31 @@ HTML;
 			$funders_output .= ' for supporting this project.</p><!-- /wp:paragraph -->';
 
 			// Dump the images.
-			$funders_output .= implode( '', $funder_images );
+			if ( count( $funder_images ) === 1 ) {
+				$funders_output .= implode( '', $funder_images );
+			} else {
+				$columns = '<!-- wp:columns --><div class="wp-block-columns">%s</div><!-- /wp:columns -->';
+				$column  = '<!-- wp:column --><div class="wp-block-column">%s</div><!-- /wp:column -->';
+
+				// Split the array into an array of columns and rows.
+				$number_of_rows = count( $funder_images ) / 2;
+				$columns_rows   = [];
+				for ( $i = 0; $i < $number_of_rows; $i++ ) {
+					$columns_rows[ $i ] = ( isset( $funder_images[ $i++ ] ) ) ? [
+						$funder_images[ $i ],
+						$funder_images[ $i++ ],
+					] : [ $funder_images[ $i ] ];
+				}
+
+				// Combine the images into columns blocks.
+				foreach ( $columns_rows as $row ) {
+					$col1 = sprintf( $column, $row[0] );
+					$col2 = sprintf( $column, $row[0] );
+
+					// Print out the columns, or just the image if there's only one.
+					$funders_output .= ( count( $row ) > 1 ) ? sprintf( $columns, $col1 . $col2 ) : $row[0];
+				}
+			}
 
 			// Add our completed funders content.
 			$content .= $funders_output;
