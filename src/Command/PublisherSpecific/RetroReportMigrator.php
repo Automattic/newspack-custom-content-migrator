@@ -390,7 +390,7 @@ class RetroReportMigrator implements InterfaceCommand {
 		$this->set_dry_run( $assoc_args );
 
 		$category  = $assoc_args['category'];
-		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
+		$ga_id     = isset( $assoc_args['guest-author'] ) ? $assoc_args['guest-author'] : null;
 		$posts     = $this->validate_json_file( $assoc_args );
 		$post_type = $this->get_post_type( $category );
 		$fields    = $this->load_mappings( $category );
