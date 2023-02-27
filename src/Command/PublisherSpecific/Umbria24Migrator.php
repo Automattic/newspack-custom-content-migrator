@@ -217,6 +217,60 @@ class Umbria24Migrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-fix-youtube-links',
+			[ $this, 'cmd_fix_youtube_links' ],
+			[
+				'shortdesc' => 'Fix YouTube links on post content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'video-category-id',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-delete-duplicated-posts',
+			[ $this, 'cmd_delete_duplicated_posts' ],
+			[
+				'shortdesc' => 'Delete duplicated posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -733,7 +787,7 @@ BLOCK;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 
 		// Make sure NGG DB tables are available.
-		$this->validate_db_tables_exist( 'wp_terms_old', 'wp_term_taxonomy_old', 'wp_term_relationships_old' );
+		$this->validate_db_tables_exist( [ 'wp_terms_old', 'wp_term_taxonomy_old', 'wp_term_relationships_old' ] );
 
 		$matchers_from_db_raw = $wpdb->get_results(
 			"select pm.meta_value oldid, pm.post_id newid from wp_postmeta pm join wp_posts p on p.ID = pm.post_id where p.post_type = 'post' and pm.meta_key='newspackcontentdiff_live_id';"
@@ -754,7 +808,7 @@ BLOCK;
 
 		$meta_query = [
 			[
-				'key'     => '_newspack_migrated_citty_category',
+				'key'     => '_newspack_migrated_citta_category',
 				'compare' => 'NOT EXISTS',
 			],
 		];
@@ -785,7 +839,6 @@ BLOCK;
 		$posts = $query->get_posts();
 
 		foreach ( $posts as $new_post_id ) {
-			// $new_post_id = 991440;
 			// get post original ID, if not found the post was migrated with its original ID.
 			$id_matcher_found = null;
 			foreach ( $id_matcher_filepath as $id_matcher ) {
@@ -797,7 +850,7 @@ BLOCK;
 
 			if ( ! $id_matcher_found ) {
 				$this->log( self::CITTA_LOG, sprintf( "! Can't find original post ID for the post: %d", $new_post_id ), true );
-				update_post_meta( $new_post_id, '_newspack_migrated_citty_category', true );
+				update_post_meta( $new_post_id, '_newspack_migrated_citta_category', true );
 				continue;
 			} else {
 				// get citta taxonomies for this post.
@@ -814,33 +867,7 @@ BLOCK;
 				$categories     = [];
 				$category_names = [];
 				foreach ( $post_cittas as $citta ) {
-					// $citta_category = get_category_by_slug( $citta->slug );
 					$citta_category = get_term_by( 'name', $citta->name, 'category' );
-					// $citta_category = null;
-					// $citta_categories = $post_cittas = $wpdb->get_results(
-					// $wpdb->prepare(
-					// "SELECT t.* FROM wp_terms t
-					// INNER JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id AND tt.taxonomy = 'category'
-					// WHERE t.slug = %s ORDER BY t.term_id DESC",
-					// $citta->slug
-					// )
-					// );
-
-					// // check which category taxonomy isn't linked to a tag.
-					// foreach ( $citta_categories as $citta_tax ) {
-					// $citta_tag = $post_cittas = $wpdb->get_row(
-					// $wpdb->prepare(
-					// "SELECT tt.* FROM wp_term_taxonomy tt
-					// WHERE tt.taxonomy = 'post_tag' AND tt.term_id = %d",
-					// $citta_tax->term_id
-					// )
-					// );
-
-					// if ( ! $citta_tag ) {
-					// $citta_category = $citta_tax;
-					// break;
-					// }
-					// }
 
 					$category_names[] = $citta->name;
 
@@ -856,7 +883,145 @@ BLOCK;
 					$this->log( self::CITTA_LOG, sprintf( 'Setting categories for the post %d (old ID %d): %s', $new_post_id, $id_matcher_found, join( ', ', $category_names ) ), true );
 				}
 
-				update_post_meta( $new_post_id, '_newspack_migrated_citty_category', true );
+				update_post_meta( $new_post_id, '_newspack_migrated_citta_category', true );
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-fix-youtube-links`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_youtube_links( $args, $assoc_args ) {
+		$posts_per_batch   = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch             = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$video_category_id = intval( $assoc_args['video-category-id'] );
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_fixed_yt_link',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'cat'            => $video_category_id,
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'orderby'        => 'ID',
+				'cat'            => $video_category_id,
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$content_blocks = parse_blocks( $post->post_content );
+			foreach ( $content_blocks as $index => $block ) {
+				if ( 'core/embed' === $block['blockName'] && array_key_exists( 'providerNameSlug', $block['attrs'] ) && 'youtube' === $block['attrs']['providerNameSlug'] ) {
+					$video_url                = $block['attrs']['url'];
+					$content_blocks[ $index ] = current( parse_blocks( $video_url . "\n" ) );
+				}
+			}
+
+			$fixed_content = serialize_blocks( $content_blocks );
+
+			if ( $fixed_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $fixed_content,
+					]
+				);
+
+				$this->log( 'youtube_block_fix.log', sprintf( 'YouTube video iframe fixed for the post %d.', $post->ID ), true );
+			}
+
+			update_post_meta( $post->ID, '_newspack_fixed_yt_link', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-delete-duplicated-posts`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_delete_duplicated_posts( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'orderby'        => 'ID',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$r = preg_match_all( '/.*?-(\d{1,2})$/', $post->post_name );
+
+			if ( $r > 0 ) {
+				$original_name = preg_replace( '/(.*?)-(\d{1,2})$/', '$1', $post->post_name );
+
+				$original_post_query = new \WP_Query(
+					[
+						'name'        => $original_name,
+						'post_type'   => 'post',
+						'post_status' => 'publish',
+						'numberposts' => 1,
+					]
+				);
+
+				$original_post = current( $original_post_query->get_posts() );
+				if ( $original_post ) {
+					if ( $original_post->post_title === $post->post_title ) {
+						$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d, duplicated ID %d', $original_post->ID, $post->ID ), true );
+						wp_delete_post( $post->ID );
+					} else {
+						$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d (%s), duplicated ID %d (%s) don\'t have the same title!', $original_post->ID, $original_post->post_title, $post->ID, $post->post_title ), true );
+					}
+				}
 			}
 		}
 
