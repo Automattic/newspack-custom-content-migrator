@@ -67,33 +67,6 @@ class Umbria24Migrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator umbria24-convert-acf-video',
-			array( $this, 'cmd_convert_acf_video' ),
-			array(
-				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => array(),
-			)
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator umbria24-convert-acf-medialab',
-			array( $this, 'cmd_convert_acf_medialab' ),
-			array(
-				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => array(),
-			)
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator umbria24-convert-acf-fotogallery',
-			array( $this, 'cmd_convert_acf_fotogallery' ),
-			array(
-				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => array(),
-			)
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator umbria24-fix-empty-jetpack-slideshows',
 			array( $this, 'cmd_fix_empty_jetpack_slideshows' ),
 			array(
@@ -296,12 +269,40 @@ class Umbria24Migrator implements InterfaceCommand {
 				strpos( $video_post->post_content, 'youtube.com/' ) !== false
 				|| strpos( $video_post->post_content, 'facebook.com/plugins/video.php' ) !== false
 			) {
+				wp_update_post(
+					array(
+						'ID'            => $video_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $video_cat_id ),
+							wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
+
 				$this->log( self::VIDEO_YOUTUBE_LOG, sprintf( 'Skipping post #%d as its body contains already the embed video.', $video_post->ID ), true );
 				continue;
 			}
 
 			// 3 meta_value for `video_type` meta_key: youtube, iframe, vimeo.
 			$meta = get_post_custom( $video_post->ID );
+
+			if ( ! array_key_exists( 'video_type', $meta ) ) {
+				wp_update_post(
+					array(
+						'ID'            => $video_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $video_cat_id ),
+							wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
+
+				update_post_meta( $video_post->ID, '_newspack_video_without_type', true );
+				$this->log( self::VIDEO_YOUTUBE_LOG, sprintf( 'Post #%d doesn\'t have a video type.', $video_post->ID ), true );
+				continue;
+			}
 
 			switch ( $meta['video_type'][0] ) {
 				case 'youtube':
@@ -310,6 +311,18 @@ class Umbria24Migrator implements InterfaceCommand {
 					$video_id  = $meta['id_old_youtube'][0];
 
 					if ( empty( $video_src ) && empty( $video_id ) ) {
+						wp_update_post(
+							array(
+								'ID'            => $video_post->ID,
+								'post_type'     => 'post',
+								'post_category' => array_merge(
+									array( $video_cat_id ),
+									wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
+								),
+							)
+						);
+
+						update_post_meta( $video_post->ID, '_newspack_video_without_youtube_source', true );
 						\WP_CLI::warning( sprintf( 'Skipping post #%d as video source can\'t be found.', $video_post->ID ) );
 						$this->log( self::VIDEO_YOUTUBE_LOG, sprintf( 'Skipping post #%d as video source can\'t be found.', $video_post->ID ) );
 						continue 2;
@@ -343,6 +356,18 @@ class Umbria24Migrator implements InterfaceCommand {
 				case 'iframe':
 					$video_iframe = $meta['iframe'][0];
 					if ( empty( $video_iframe ) ) {
+						wp_update_post(
+							array(
+								'ID'            => $video_post->ID,
+								'post_type'     => 'post',
+								'post_category' => array_merge(
+									array( $video_cat_id ),
+									wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
+								),
+							)
+						);
+
+						update_post_meta( $video_post->ID, '_newspack_video_without_iframe_source', true );
 						\WP_CLI::warning( sprintf( 'Skipping post #%d as video source can\'t be found.', $video_post->ID ) );
 						$this->log( self::VIDEO_IFRAME_LOG, sprintf( 'Skipping post #%d as video source can\'t be found.', $video_post->ID ) );
 						continue 2;
@@ -368,6 +393,18 @@ class Umbria24Migrator implements InterfaceCommand {
 					// Get full URL.
 					$video_src = $meta['video'][0];
 					if ( strpos( $meta['video'][0], 'vimeo.com/' ) === false ) {
+						wp_update_post(
+							array(
+								'ID'            => $video_post->ID,
+								'post_type'     => 'post',
+								'post_category' => array_merge(
+									array( $video_cat_id ),
+									wp_get_post_categories( $video_post->ID, array( 'fields' => 'ids' ) )
+								),
+							)
+						);
+
+						update_post_meta( $video_post->ID, '_newspack_video_without_vimeo_source', true );
 						\WP_CLI::warning( sprintf( 'Skipping post #%d as video source can\'t be found.', $video_post->ID ) );
 						$this->log( self::VIDEO_VIMEO_LOG, sprintf( 'Skipping post #%d as video source can\'t be found.', $video_post->ID ) );
 						continue 2;
@@ -411,7 +448,24 @@ class Umbria24Migrator implements InterfaceCommand {
 		);
 
 		foreach ( $medialab_posts as $medialab_post ) {
-			$meta                   = get_post_custom( $medialab_post->ID );
+			$meta = get_post_custom( $medialab_post->ID );
+
+			if ( ! array_key_exists( 'iframe', $meta ) && 'draft' === $medialab_post->post_status ) {
+				wp_update_post(
+					array(
+						'ID'            => $medialab_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $medialab_cat_id ),
+							wp_get_post_categories( $medialab_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
+				update_post_meta( $medialab_post->ID, '_newspack_skipped_draft_medialab', true );
+				$this->log( self::MEDIALAB_IFRAME_LOG, sprintf( 'Skipping post #%d as it\'s a draft.', $medialab_post->ID ), true );
+				continue;
+			}
+
 			$iframe_meta            = $meta['iframe'][0];
 			$sottotitolo_meta       = $meta['sottotitolo'][0];
 			$link_old_timeline_meta = $meta['link_old_timeline'][0];
@@ -419,6 +473,16 @@ class Umbria24Migrator implements InterfaceCommand {
 
 			// Skip iList elements.
 			if ( strpos( $sottotitolo_meta, 'qcld-ilist' ) !== false ) {
+				wp_update_post(
+					array(
+						'ID'            => $medialab_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $medialab_cat_id ),
+							wp_get_post_categories( $medialab_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
 				$this->log( self::MEDIALAB_IFRAME_LOG, sprintf( 'Skipping post #%d as it contains a short code for iList.', $medialab_post->ID ), true );
 				continue;
 			}
@@ -429,6 +493,16 @@ class Umbria24Migrator implements InterfaceCommand {
 				&& empty( $link_old_timeline_meta )
 				&& empty( $link_old_webdoc_meta )
 			) {
+				wp_update_post(
+					array(
+						'ID'            => $medialab_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $medialab_cat_id ),
+							wp_get_post_categories( $medialab_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
 				$this->log( self::MEDIALAB_IFRAME_LOG, sprintf( 'Skipping post #%d as we can\'t get its content', $medialab_post->ID ), true );
 				continue;
 			}
@@ -578,7 +652,24 @@ class Umbria24Migrator implements InterfaceCommand {
 		);
 
 		foreach ( $fotogallery_posts as $fotogallery_post ) {
-			$meta         = get_post_custom( $fotogallery_post->ID );
+			$meta = get_post_custom( $fotogallery_post->ID );
+
+			if ( ! array_key_exists( 'gallery', $meta ) && 'draft' === $fotogallery_post->post_status ) {
+				wp_update_post(
+					array(
+						'ID'            => $fotogallery_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $fotogallery_cat_id ),
+							wp_get_post_categories( $fotogallery_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
+
+				$this->log( self::FOTOGALLERY_LOG, sprintf( 'Skipped draft Fotogallery post #%d updated.', $fotogallery_post->ID ), true );
+				continue;
+			}
+
 			$gallery_meta = $meta['gallery'][0];
 
 			$gallery_code = '';
