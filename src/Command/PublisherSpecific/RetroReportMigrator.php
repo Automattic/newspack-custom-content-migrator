@@ -535,8 +535,8 @@ class RetroReportMigrator implements InterfaceCommand {
 				'role'          => $wp_role,
 			];
 
-			$user_id = wp_insert_user( $user_args );
-
+			// Insert the new user.
+			$user_id = ( $this->dryrun ) ? true : wp_insert_user( $user_args );
 			if ( is_wp_error( $user_id ) ) {
 				$this->logger->log( $this->log_name, sprintf( 'There was a problem importing user %1$s because: %2$s', $full_name, $user_id->get_error_message() ) );
 				continue;
@@ -546,13 +546,13 @@ class RetroReportMigrator implements InterfaceCommand {
 			$image = $this->get_object_property( $user, 'image' );
 
 			if ( $image ) {
-				$image_url     = self::BASE_URL . $image;
-				$attachment_id = $this->attachments->import_external_file( $image_url );
+				$image_path     = untrailingslashit( ABSPATH ) . $image;
+				$attachment_id = $this->attachments->import_external_file( $image_path );
 
 				$this->logger->log( $this->log_name, sprintf( 'Importing the avatar for user %s...', $full_name ) );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_url, $attachment_id->get_error_message() ) );
+					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_path, $attachment_id->get_error_message() ) );
 				} else {
 					$this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
 				}
@@ -1290,11 +1290,11 @@ class RetroReportMigrator implements InterfaceCommand {
 
 				$this->logger->log( $this->log_name, sprintf( 'Importing thumbnail from %s', $value ) );
 
-				$image_url     = self::BASE_URL . $value;
-				$attachment_id = $this->attachments->import_external_file( $image_url );
+				$image_path     = untrailingslashit( ABSPATH ) . $value;
+				$attachment_id = $this->attachments->import_external_file( $image_path );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_url, $attachment_id->get_error_message() ) );
+					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_path, $attachment_id->get_error_message() ) );
 					return $value;
 				}
 
@@ -2214,9 +2214,9 @@ HTML;
 		$filename = end( $filename );
 		$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
 		if ( is_null( $attachment_id ) ) {
-			$image_url     = self::BASE_URL . $block->image;
+			$image_path    = untrailingslashit( ABSPATH ) . $block->image;
 			$attachment_id = $this->attachments->import_external_file(
-				$image_url,     // Image URL.
+				$image_path,     // Image URL.
 				$block->copy, // Title.
 				$block->copy, // Caption.
 				$block->copy, // Description.
