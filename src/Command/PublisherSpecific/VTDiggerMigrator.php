@@ -13,6 +13,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 
 	const NEWS_BRIEFS_CAT_NAME = 'News Briefs';
 	const LIVEBLOGS_CAT_NAME = 'Liveblogs';
+	const LETTERSTOTHEEDITOR_CAT_NAME = 'Letters to the Editor';
 
 	// Tells us which CPT this post was originally, e.g. 'liveblog'.
 	const META_VTD_CPT = 'newspack_vtd_cpt';
@@ -68,6 +69,14 @@ class VTDiggerMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-migrate-letterstotheeditor',
+			[ $this, 'cmd_letterstotheeditor' ],
+			[
+				'shortdesc' => 'Migrates the Letters to the Editor CPT to regular posts with category.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -107,7 +116,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 		// Assign category 'News Briefs'.
 		WP_CLI::log( sprintf( "Assigning News Briefs cat ID %d ...", $newsbriefs_cat_id ) );
 		foreach ( $newsbriefs_ids as $key_newsbrief_id => $newsbrief_id ) {
-			wp_set_post_categories( $newsbrief_id, [ $newsbriefs_cat_id ] );
+			wp_set_post_categories( $newsbrief_id, [ $newsbriefs_cat_id ], true );
 		}
 
 		wp_cache_flush();
@@ -151,7 +160,51 @@ class VTDiggerMigrator implements InterfaceCommand {
 		// Assign category 'Liveblogs'.
 		WP_CLI::log( sprintf( "Assigning %s cat ID %d ...", self::LIVEBLOGS_CAT_NAME, $liveblogs_cat_id ) );
 		foreach ( $liveblogs_ids as $key_liveblog_id => $liveblog_id ) {
-			wp_set_post_categories( $liveblog_id, [ $liveblogs_cat_id ] );
+			wp_set_post_categories( $liveblog_id, [ $liveblogs_cat_id ], true );
+		}
+
+		wp_cache_flush();
+		WP_CLI::log( sprintf( "Done; see %s", $log ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator vtdigger-migrate-letterstotheeditor`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_letterstotheeditor( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+		$log = 'vtd_letterstotheeditor.log';
+
+		// Get Letters to the Editor category ID.
+		$letters_cat_id = get_cat_ID( self::LETTERSTOTHEEDITOR_CAT_NAME );
+		if ( ! $letters_cat_id ) {
+			$letters_cat_id = wp_insert_category( [ 'cat_name' => self::LETTERSTOTHEEDITOR_CAT_NAME ] );
+		}
+
+		$letters_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type='letters_to_editor';" );
+
+		// Convert to 'post' type.
+		foreach ( $letters_ids as $key_letter_id => $letter_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_letter_id + 1, count( $letters_ids ), $letter_id ) );
+
+			// Update to type post.
+			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $letter_id ) );
+
+			// Set meta 'newspack_vtd_cpt' = 'letters_to_editor';
+			update_post_meta( $letter_id, self::META_VTD_CPT, 'letters_to_editor' );
+		}
+
+		$this->logger->log( $log, implode( ',', $letters_ids ), false );
+		wp_cache_flush();
+
+		// Assign category 'Letters to the Editor'.
+		WP_CLI::log( sprintf( "Assigning %s cat ID %d ...", self::LETTERSTOTHEEDITOR_CAT_NAME, $letters_cat_id ) );
+		foreach ( $letters_ids as $letter_id ) {
+			wp_set_post_categories( $letter_id, [ $letters_cat_id ], true );
 		}
 
 		wp_cache_flush();
