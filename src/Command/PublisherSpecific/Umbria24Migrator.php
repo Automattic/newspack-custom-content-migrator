@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use Symfony\Component\DomCrawler\Crawler as Crawler;
 use \WP_CLI;
 
@@ -35,6 +36,11 @@ class Umbria24Migrator implements InterfaceCommand {
 	private $block_manipulator;
 
 	/**
+	 * @var SquareBracketsElementManipulator.
+	 */
+	private $squarebracketselement_manipulator;
+
+	/**
 	 * @var Crawler.
 	 */
 	private $crawler;
@@ -43,9 +49,10 @@ class Umbria24Migrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_migrator_logic = new PostsLogic();
-		$this->block_manipulator    = new WpBlockManipulator();
-		$this->crawler              = new Crawler();
+		$this->posts_migrator_logic              = new PostsLogic();
+		$this->block_manipulator                 = new WpBlockManipulator();
+		$this->squarebracketselement_manipulator = new SquareBracketsElementManipulator();
+		$this->crawler                           = new Crawler();
 	}
 
 	/**
@@ -96,7 +103,22 @@ class Umbria24Migrator implements InterfaceCommand {
 			[ $this, 'cmd_convert_acf_video' ],
 			[
 				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 
@@ -114,7 +136,70 @@ class Umbria24Migrator implements InterfaceCommand {
 			[ $this, 'cmd_convert_acf_fotogallery' ],
 			[
 				'shortdesc' => 'Convert Video ACF posts to normal posts under `video` category',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-fix-duplicated-galleries',
+			[ $this, 'cmd_fix_duplicated_galleries' ],
+			[
+				'shortdesc' => 'Fix duplicated galleries in posts',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-fix-empty-galleries',
+			[ $this, 'cmd_fix_empty_galleries' ],
+			[
+				'shortdesc' => 'Fix empty galleries in posts',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 
@@ -222,6 +307,36 @@ class Umbria24Migrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-migrate-old-youtube-links',
+			[ $this, 'cmd_migrate_old_youtube_links' ],
+			[
+				'shortdesc' => 'Migrate old YouTube links on post content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'video-category-id',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator umbria24-delete-duplicated-posts',
 			[ $this, 'cmd_delete_duplicated_posts' ],
 			[
@@ -253,7 +368,10 @@ class Umbria24Migrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_convert_acf_video( $args, $assoc_args ) {
-		$video_posts  = $this->get_all_posts_by_post_type( 'video' );
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$video_posts  = $this->get_all_posts_by_post_type( 'video', $posts_per_batch, $batch );
 		$video_cat    = get_category_by_slug( 'video' );
 		$video_cat_id = $video_cat ? $video_cat->term_id : wp_insert_category(
 			array(
@@ -576,20 +694,22 @@ class Umbria24Migrator implements InterfaceCommand {
 
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s',
+				'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s AND ID IN (923916, 923893)',
 				// 'SELECT * FROM wp_posts WHERE post_status = %s AND post_content LIKE %s AND ID = 923899',
 				'publish',
-				'%jetpack-slideshow_image wp-image-" data-id="" src=""%'
+				'%src=""%'
 			)
 		);
 
-		var_dump( count( $posts ) );
-		die();
 		foreach ( $posts as $post ) {
 			$content_blocks = parse_blocks( $post->post_content );
 
 			foreach ( $content_blocks as $index => $block ) {
 				if ( 'jetpack/slideshow' === $block['blockName'] && str_contains( $block['innerHTML'], 'src=""' ) ) {
+					if ( ! array_key_exists( 'ids', $block['attrs'] ) ) {
+						echo 'Recover manually: https://umbria24-newspack.newspackstaging.com/wp-admin/post.php?post=' . $post->ID . "&action=edit\n";
+						continue;
+					}
 					$media_ids = array_map(
 						function( $old_id ) use ( $id_matcher_filepath, $post ) {
 							$id_matcher_found = null;
@@ -641,7 +761,10 @@ class Umbria24Migrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_convert_acf_fotogallery( $args, $assoc_args ) {
-		$fotogallery_posts  = $this->get_all_posts_by_post_type( 'fotogallery' );
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$fotogallery_posts  = $this->get_all_posts_by_post_type( 'fotogallery', $posts_per_batch, $batch );
 		$fotogallery_cat    = get_category_by_slug( 'fotogallery' );
 		$fotogallery_cat_id = $fotogallery_cat ? $fotogallery_cat->term_id : wp_insert_category(
 			array(
@@ -670,13 +793,32 @@ class Umbria24Migrator implements InterfaceCommand {
 				continue;
 			}
 
-			$gallery_meta = $meta['gallery'][0];
-
 			$gallery_code = '';
 
-			if ( ! empty( $gallery_meta ) ) {
-				$gallery_posts = unserialize( $gallery_meta );
+			if ( array_key_exists( 'gallery', $meta ) && ! empty( $meta['gallery'][0] ) ) {
+				$gallery_posts = unserialize( $meta['gallery'][0] );
 				$gallery_code  = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_media_posts( $gallery_posts );
+			} elseif ( str_starts_with( $fotogallery_post->post_content, '[gallery' ) ) {
+				$ids = $this->squarebracketselement_manipulator->get_attribute_value( 'ids', $fotogallery_post->post_content );
+				if ( ! empty( $ids ) ) {
+					$gallery_code = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_media_posts( explode( ',', $ids ) );
+				}
+			} else {
+				// Update the post into the database.
+				wp_update_post(
+					array(
+						'ID'            => $fotogallery_post->ID,
+						'post_type'     => 'post',
+						'post_category' => array_merge(
+							array( $fotogallery_cat_id ),
+							wp_get_post_categories( $fotogallery_post->ID, array( 'fields' => 'ids' ) )
+						),
+					)
+				);
+
+				update_post_meta( $fotogallery_post->ID, 'newspack_non_migrated_gallery', true );
+				$this->log( self::FOTOGALLERY_LOG, sprintf( 'Fotogallery post #%d non migrated.', $fotogallery_post->ID ), true );
+				continue;
 			}
 
 			if ( ! empty( $gallery_code ) ) {
@@ -700,19 +842,173 @@ class Umbria24Migrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator umbria24-fix-duplicated-galleries`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_duplicated_galleries( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'cat'            => 465249, // Fotogallery Category.
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				// 'p'              => 298924,
+				'post_type'      => 'post',
+				'cat'            => 465249, // Fotogallery Category.
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			echo( $post->ID . "\n" );
+			$content_blocks = parse_blocks( $post->post_content );
+			foreach ( $content_blocks as $index => $content_block ) {
+				if ( 'jetpack/slideshow' === $content_block['blockName'] ) {
+					$next_index = $index + 1;
+					if (
+						isset( $content_blocks[ $next_index ] )
+						&& ( empty( $content_blocks[ $next_index ]['blockName'] ) )
+						&& str_starts_with( $content_blocks[ $next_index ]['innerHTML'], '[gallery' )
+						) {
+							unset( $content_blocks[ $next_index ] );
+							break;
+					}
+				}
+			}
+
+			$fixed_gallery_post = serialize_blocks( $content_blocks );
+
+			if ( $fixed_gallery_post !== $post->post_content ) {
+				// Update the post into the database.
+				wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => $fixed_gallery_post,
+					)
+				);
+
+				$this->log( self::FOTOGALLERY_LOG, sprintf( 'Fixed duplicated gallery fot the post #%d.', $post->ID ), true );
+			}
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-fix-empty-galleries`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_empty_galleries( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'cat'            => 465249, // Fotogallery Category.
+				'post_status'    => 'publish',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				// 'p'              => 923893,
+				'post_type'      => 'post',
+				'cat'            => 465249, // Fotogallery Category.
+				'post_status'    => 'publish',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $fotogallery_post ) {
+			if ( ! str_contains( $fotogallery_post->post_content, 'jetpack/slideshow' ) ) {
+				$meta = get_post_meta( $fotogallery_post->ID, 'gallery', true );
+
+				if ( ! $meta ) {
+					continue;
+				}
+
+				$gallery_posts = array_map(
+					function( $id ) {
+						return intval( $id );
+					},
+					$meta
+				);
+				$gallery_code  = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_media_posts( $gallery_posts );
+
+				if ( ! empty( $gallery_code ) ) {
+					// Update the post into the database.
+					wp_update_post(
+                        array(
+							'ID'           => $fotogallery_post->ID,
+							'post_content' => $gallery_code . $fotogallery_post->post_content,
+                        )
+					);
+
+					$this->log( self::FOTOGALLERY_LOG, sprintf( 'Fotogallery post #%d updated.', $fotogallery_post->ID ), true );
+				}
+			}
+		}
+	}
+
+	/**
 	 * Fetches Posts by post type.
 	 *
 	 * @param string $post_type Post type to filter with the selected posts.
+	 * @param int    $posts_per_batch Posts per batch.
+	 * @param int    $batch Batch index.
 	 * @return \WP_Post[]
 	 */
-	public function get_all_posts_by_post_type( $post_type ) {
-		return get_posts(
-			array(
+	public function get_all_posts_by_post_type( $post_type, $posts_per_batch, $batch ) {
+		$total_query = new \WP_Query(
+			[
 				'posts_per_page' => -1,
 				'post_type'      => $post_type,
 				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
-			)
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
 		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				// 'p'              => 298924,
+				'post_type'      => $post_type,
+				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+			]
+		);
+
+		return $query->get_posts();
 	}
 
 	/**
@@ -1021,7 +1317,7 @@ BLOCK;
 				'cat'            => $video_category_id,
 				'paged'          => $batch,
 				'posts_per_page' => $posts_per_batch,
-				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+				// 'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			]
 		);
 
@@ -1030,7 +1326,7 @@ BLOCK;
 		foreach ( $posts as $post ) {
 			$content_blocks = parse_blocks( $post->post_content );
 			foreach ( $content_blocks as $index => $block ) {
-				if ( 'core/embed' === $block['blockName'] && array_key_exists( 'providerNameSlug', $block['attrs'] ) && 'youtube' === $block['attrs']['providerNameSlug'] ) {
+				if ( 'core/embed' === $block['blockName'] && array_key_exists( 'url', $block['attrs'] ) && ( str_contains( $post->post_content, 'youtube' ) || str_contains( $post->post_content, 'youtu.be' ) ) ) {
 					$video_url                = $block['attrs']['url'];
 					$content_blocks[ $index ] = current( parse_blocks( $video_url . "\n" ) );
 				}
@@ -1050,6 +1346,74 @@ BLOCK;
 			}
 
 			update_post_meta( $post->ID, '_newspack_fixed_yt_link', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-migrate-old-youtube-links`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_migrate_old_youtube_links( $args, $assoc_args ) {
+		$posts_per_batch   = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch             = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$video_category_id = intval( $assoc_args['video-category-id'] );
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_fixed_yt_post',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'cat'            => $video_category_id,
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'orderby'        => 'ID',
+				'cat'            => $video_category_id,
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			if ( ! str_contains( $post->post_content, 'newspack-blocks/iframe' ) && ! str_contains( $post->post_content, 'youtube' ) && ! str_contains( $post->post_content, 'youtu.be' ) && ! str_contains( $post->post_content, '.mp4' ) ) {
+				// id_old_youtube meta.
+				$id_old_youtube_meta = get_post_meta( $post->ID, 'id_old_youtube', true );
+
+				if ( $id_old_youtube_meta && ! str_contains( $id_old_youtube_meta, 'http' ) ) {
+					wp_update_post(
+                        [
+							'ID'           => $post->ID,
+							'post_content' => "https://www.youtube.com/watch?v=$id_old_youtube_meta\n" . $post->post_content,
+                        ]
+					);
+
+					$this->log( 'old_youtube_post.log', sprintf( 'YouTube video iframe fixed for the post %d.', $post->ID ), true );
+				}
+			}
+			update_post_meta( $post->ID, '_newspack_fixed_yt_post', true );
 		}
 
 		wp_cache_flush();
@@ -1109,8 +1473,48 @@ BLOCK;
 					if ( $original_post->post_title === $post->post_title ) {
 						$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d, duplicated ID %d', $original_post->ID, $post->ID ), true );
 						wp_delete_post( $post->ID );
+					} elseif ( str_ends_with( $post->post_name, '3' ) ) {
+						// sometimes the original post ends with -2.
+						$original_post_query = new \WP_Query(
+							[
+								'name'        => $original_name . '-2',
+								'post_type'   => 'post',
+								'post_status' => 'publish',
+								'numberposts' => 1,
+							]
+						);
+
+						$original_post = current( $original_post_query->get_posts() );
+						if ( $original_post ) {
+							if ( $original_post->post_title === $post->post_title ) {
+								$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d, duplicated ID %d', $original_post->ID, $post->ID ), true );
+								wp_delete_post( $post->ID );
+							} else {
+								$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d (%s), duplicated ID %d (%s) don\'t have the same title!', $original_post->ID, $original_post->post_title, $post->ID, $post->post_title ), true );
+							}
+						}
 					} else {
 						$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d (%s), duplicated ID %d (%s) don\'t have the same title!', $original_post->ID, $original_post->post_title, $post->ID, $post->post_title ), true );
+					}
+				} elseif ( str_ends_with( $post->post_name, '3' ) ) {
+					// sometimes the original post ends with -2.
+					$original_post_query = new \WP_Query(
+						[
+							'name'        => $original_name . '-2',
+							'post_type'   => 'post',
+							'post_status' => 'publish',
+							'numberposts' => 1,
+						]
+					);
+
+					$original_post = current( $original_post_query->get_posts() );
+					if ( $original_post ) {
+						if ( $original_post->post_title === $post->post_title ) {
+							$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d, duplicated ID %d', $original_post->ID, $post->ID ), true );
+							wp_delete_post( $post->ID );
+						} else {
+							$this->log( 'duplicated_posts.log', sprintf( 'Original ID %d (%s), duplicated ID %d (%s) don\'t have the same title!', $original_post->ID, $original_post->post_title, $post->ID, $post->post_title ), true );
+						}
 					}
 				}
 			}
