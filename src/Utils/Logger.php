@@ -33,11 +33,10 @@ class Logger {
 	 * @param boolean $to_cli Whether to output the message to the CLI. Default to false.
 	 */
 	public function log( $file, $message, $to_cli = true ) {
-		$message .= "\n";
 		if ( $to_cli ) {
 			WP_CLI::line( $message );
 		}
-		file_put_contents( $file, $message, FILE_APPEND );
+		file_put_contents( $file, $message . "\n", FILE_APPEND );
 	}
 
 }

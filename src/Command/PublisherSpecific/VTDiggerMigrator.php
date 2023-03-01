@@ -25,6 +25,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 	const LIVEBLOGS_CAT_NAME = 'Liveblogs';
 	const LETTERSTOTHEEDITOR_CAT_NAME = 'Letters to the Editor';
 	const OBITUARIES_CAT_NAME = 'Obituaries';
+	const SERIES_CAT_NAME = 'Series';
 
 	// This postmeta will tell us which CPT this post was originally, e.g. 'liveblog'.
 	const META_VTD_CPT = 'newspack_vtd_cpt';
@@ -107,6 +108,14 @@ class VTDiggerMigrator implements InterfaceCommand {
 			[ $this, 'cmd_counties' ],
 			[
 				'shortdesc' => 'Migrates Counties taxonomy to Categories.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-migrate-series',
+			[ $this, 'cmd_series' ],
+			[
+				'shortdesc' => 'Migrates Series taxonomy to Categories.',
 				'synopsis'  => [],
 			]
 		);
@@ -694,11 +703,83 @@ HTML;
 
 			// Assign the destination category to all objects.
 			foreach ( $object_ids as $object_id ) {
-				$this->logger->log( $log, sprintf( "object_id=%d to category_id=%d", $object_id, $destination_cat_id ), true );
+				$this->logger->log( $log, sprintf( "post_id=%d to category_id=%d", $object_id, $destination_cat_id ), true );
 				wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
 			}
 
 			// Remove the custom taxonomy from objects, leaving just the newly assigned category.
+			$wpdb->query(
+				$wpdb->prepare(
+					"delete from {$wpdb->term_relationships} where term_taxonomy_id = %d;",
+					$term_taxonomy_id
+				)
+			);
+		}
+
+		WP_CLI::success( "Done. See {$log}." );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator vtdigger-migrate-series`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_series( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$log = 'vtd_series.log';
+
+		// Get Series category ID.
+		$series_parent_cat_id = get_cat_ID( self::SERIES_CAT_NAME );
+		if ( ! $series_parent_cat_id ) {
+			$series_parent_cat_id = wp_insert_category( [ 'cat_name' => self::SERIES_CAT_NAME ] );
+		}
+
+		// Get all term_ids, term_taxonomy_ids and term names with 'series' taxonomy.
+		$seriess_terms = $wpdb->get_results(
+			$wpdb->prepare(
+				"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name 
+				from vtdWP_term_taxonomy tt
+				join vtdWP_terms t on t.term_id = tt.term_id 
+				where tt.taxonomy = '%s';",
+				self::SERIES_TAXONOMY
+			),
+			ARRAY_A
+		);
+
+		// Loop through all 'series' terms.
+		foreach ( $seriess_terms as $key_series_term => $series_term ) {
+			$term_id = $series_term['term_id'];
+			$term_taxonomy_id = $series_term['term_taxonomy_id'];
+			$term_name = $series_term['name'];
+
+			// Get all objects for this 'series' term's term_taxonomy_id.
+			$object_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select object_id from vtdWP_term_relationships vwtr where term_taxonomy_id = %d;",
+					$term_taxonomy_id
+				)
+			);
+
+			$this->logger->log( $log, sprintf( "(%d)/(%d) %d %d %s count=%d", $key_series_term + 1, count( $seriess_terms ), $term_id, $term_taxonomy_id, $term_name, count( $object_ids ) ), true );
+			if ( 0 == count( $object_ids ) ) {
+				WP_CLI::log( "0 posts, skipping." );
+				continue;
+			}
+
+			// Get the destination category.
+			$destination_cat_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $term_name, $series_parent_cat_id );
+
+			// Assign the destination category to all objects.
+			foreach ( $object_ids as $object_id ) {
+				$this->logger->log( $log, sprintf( "post_id=%d to category_id=%d", $object_id, $destination_cat_id ), true );
+				wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
+			}
+
+			// Remove this term from objects, leaving just the newly assigned category.
 			$wpdb->query(
 				$wpdb->prepare(
 					"delete from {$wpdb->term_relationships} where term_taxonomy_id = %d;",
