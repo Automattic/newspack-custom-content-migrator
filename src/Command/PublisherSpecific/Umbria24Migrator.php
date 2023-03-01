@@ -359,6 +359,15 @@ class Umbria24Migrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator umbria24-delete-duplicated-posts-with-same-name',
+			[ $this, 'cmd_delete_duplicated_posts_with_same_name' ],
+			[
+				'shortdesc' => 'Delete duplicated posts.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -1517,6 +1526,36 @@ BLOCK;
 						}
 					}
 				}
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator umbria24-delete-duplicated-posts-with-same-name`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_delete_duplicated_posts_with_same_name( $args, $assoc_args ) {
+		global $wpdb;
+
+		$duplicated_posts = $wpdb->get_results(
+			"SELECT
+		post_name, COUNT(*) as counter, GROUP_CONCAT(ID) as post_ids FROM wp_posts
+		WHERE post_type IN ('post', 'page') AND post_status = 'publish'
+		GROUP BY post_name
+		HAVING counter > 1;"
+		);
+
+		foreach ( $duplicated_posts as $duplicated_post ) {
+			$post_ids    = explode( ',', $duplicated_post->post_ids );
+			$original_id = array_shift( $post_ids );
+
+			foreach ( $post_ids as $post_id ) {
+				wp_delete_post( intval( $post_id ) );
+				$this->log( 'duplicated_posts_same_name.log', sprintf( 'Original ID %d, duplicated ID %d', $original_id, $post_id ), true );
 			}
 		}
 
