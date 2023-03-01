@@ -697,6 +697,14 @@ HTML;
 				$this->logger->log( $log, sprintf( "object_id=%d to category_id=%d", $object_id, $destination_cat_id ), true );
 				wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
 			}
+
+			// Remove the custom taxonomy from objects, leaving just the newly assigned category.
+			$wpdb->query(
+				$wpdb->prepare(
+					"delete from {$wpdb->term_relationships} where term_taxonomy_id = %d;",
+					$term_taxonomy_id
+				)
+			);
 		}
 
 		WP_CLI::success( "Done. See {$log}." );
