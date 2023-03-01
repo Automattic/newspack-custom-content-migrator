@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
+use \NewspackCustomContentMigrator\Logic\Taxonomy as TaxonomyLogic;
 use \WP_CLI;
 
 /**
@@ -13,6 +14,11 @@ class VTDiggerMigrator implements InterfaceCommand {
 
 	// VTD CPTs.
 	const OBITUARY_CPT = 'obituary';
+
+
+	// VTD Taxonomies.
+	const COUNTIES_TAXONOMY = 'counties';
+	const SERIES_TAXONOMY = 'series';
 
 	// WP Category names.
 	const NEWS_BRIEFS_CAT_NAME = 'News Briefs';
@@ -34,10 +40,16 @@ class VTDiggerMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
+	 * @var TaxonomyLogic
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
+		$this->taxonomy_logic = new TaxonomyLogic();
 	}
 
 	/**
@@ -87,6 +99,14 @@ class VTDiggerMigrator implements InterfaceCommand {
 			[ $this, 'cmd_obituaries' ],
 			[
 				'shortdesc' => 'Migrates the Obituaries CPT to regular posts with category.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-migrate-counties',
+			[ $this, 'cmd_counties' ],
+			[
+				'shortdesc' => 'Migrates Counties taxonomy to Categories.',
 				'synopsis'  => [],
 			]
 		);
@@ -558,5 +578,127 @@ HTML;
 		}
 
 		return $post_content;
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator vtdigger-migrate-counties`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_counties( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$log = 'vtd_counties.log';
+
+		WP_CLI::log( "Getting or creating category tree..." );
+		/**
+		 * Fetch or create the destination category tree:
+		 *	Regional
+		 *		Champlain Valley
+		 *			Chittenden County
+		 *				Burlington
+		 *			Grand Isle County
+		 *			Franklin County
+		 *			Addison County
+		 *		Northeast Kingdom
+		 *			Orleans County
+		 *			Essex County
+		 *			Caledonia County
+		 *		Central Vermont
+		 *			Washington County
+		 *			Lamoille County
+		 *			Orange County
+		 *		Southern Vermont
+		 *			Windsor County
+		 *			Rutland County
+		 *			Bennington County
+		 *			Windham County
+		 **/
+		// phpcs:disable -- leave this indentation for a more convenient overview
+		$regional_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Regional', 0 );
+			$champlain_valley_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Champlain Valley', $regional_id );
+				$chittenden_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Chittenden County', $champlain_valley_id );
+					$burlington_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Burlington', $chittenden_county_id );
+				$grand_isle_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Grand Isle County', $champlain_valley_id );
+				$franklin_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Franklin County', $champlain_valley_id );
+				$addison_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Addison County', $champlain_valley_id );
+			$northeast_kingdom_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Northeast Kingdom', $regional_id );
+				$orleans_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Orleans County', $northeast_kingdom_id );
+				$essex_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Essex County', $northeast_kingdom_id );
+				$caledonia_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Caledonia County', $northeast_kingdom_id );
+			$central_vermont_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Central Vermont', $regional_id );
+				$washington_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Washington County', $central_vermont_id );
+				$lamoille_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Lamoille County', $central_vermont_id );
+				$orange_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Orange County', $central_vermont_id );
+			$southern_vermontt_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Southern Vermont', $regional_id );
+				$windsor_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Windsor County', $southern_vermontt_id );
+				$rutland_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Rutland County', $southern_vermontt_id );
+				$bennington_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Bennington County', $southern_vermontt_id );
+				$windham_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Windham County', $southern_vermontt_id );
+		// phpcs:enable
+
+		$county_id_to_cat_id = [
+			'Addison' => $addison_county_id,
+			'Bennington' => $bennington_county_id,
+			'Caledonia' => $caledonia_county_id,
+			'Chittenden' => $chittenden_county_id,
+			'Essex' => $essex_county_id,
+			'Franklin' => $franklin_county_id,
+			'Grand Isle' => $grand_isle_county_id,
+			'Lamoille' => $lamoille_county_id,
+			'Orange' => $orange_county_id,
+			'Orleans' => $orleans_county_id,
+			'Rutland' => $rutland_county_id,
+			'Washington' => $washington_county_id,
+			'Windham' => $windham_county_id,
+			'Windsor' => $windsor_county_id,
+		];
+
+		// Get all term_ids, term_taxonomy_ids and term names with 'counties' taxonomy.
+		$counties_terms = $wpdb->get_results(
+			$wpdb->prepare(
+				"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name 
+				from vtdWP_term_taxonomy tt
+				join vtdWP_terms t on t.term_id = tt.term_id 
+				where tt.taxonomy = '%s';",
+				self::COUNTIES_TAXONOMY
+			),
+			ARRAY_A
+		);
+
+		// Loop through all 'counties' terms.
+		foreach ( $counties_terms as $key_county_term => $county_term ) {
+			$term_id = $county_term['term_id'];
+			$term_taxonomy_id = $county_term['term_taxonomy_id'];
+			$term_name = $county_term['name'];
+
+			$this->logger->log( $log, sprintf( "(%d)/(%d) %d %d %s", $key_county_term + 1, count( $counties_terms ), $term_id, $term_taxonomy_id, $term_name ), true );
+
+			// Get all objects for this 'county' term's term_taxonomy_id.
+			$object_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select object_id from vtdWP_term_relationships vwtr where term_taxonomy_id = %d;",
+					$term_taxonomy_id
+				)
+			);
+
+			// Get the destination category.
+			$destination_cat_id = $county_id_to_cat_id[$term_name] ?? null;
+			// We should have all 'counties' on record. Double check.
+			if ( is_null( $destination_cat_id ) ) {
+				throw new \RuntimeException( sprintf( "County term_id=%d term_taxonomy_id=%d name=%s is not mapped by the migrator script.", $term_id, $term_taxonomy_id, $term_name ) );
+			}
+
+			// Assign the destination category to all objects.
+			foreach ( $object_ids as $object_id ) {
+				$this->logger->log( $log, sprintf( "object_id=%d to category_id=%d", $object_id, $destination_cat_id ), true );
+				wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
+			}
+		}
+
+		WP_CLI::success( "Done. See {$log}." );
 	}
 }
