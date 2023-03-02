@@ -280,6 +280,22 @@ class RetroReportMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-author-assignment-fixer',
+			[ $this, 'cmd_fix_authors' ],
+			[
+				'shortdesc' => 'Resolve issues with author assignment',
+				'synopsis'  => array_merge( $this->common_arguments, [
+					[
+						'type'        => 'assoc',
+						'name'        => 'staff_json',
+						'optional'    => false,
+						'description' => 'The JSON file where we can find the staff info.'
+					]
+				] ),
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-posts',
 			[ $this, 'cmd_retro_report_import_posts' ],
 			[
@@ -378,6 +394,108 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		WP_CLI::success( sprintf( 'Deleted post %d with unique ID %s', $post->ID, $unique_id ) );
 
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator author-assignment-fixer`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_authors( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
+		$category   = $assoc_args['category'];
+		$json       = $this->validate_json_file( $assoc_args );
+		$log_name   = 'fix-authors-' . $category;
+
+		foreach ( $json as $item ) {
+
+			$unique_id = $item->unique_id;
+
+			$this->logger->log( $log_name, sprintf( 'Processing ID %s...', $unique_id ) );
+
+			$post = $this->get_post_from_unique_id( $unique_id );
+			if ( ! $post ) {
+				$this->logger->log( $log_name, sprintf( 'No post found for id %s', $unique_id ), false );
+				continue;
+			}
+
+			$author_id     = get_post_field( 'post_author', $post->ID );
+			$guest_authors = $this->co_authors_plus->get_guest_authors_for_post( $post->ID );
+			if ( ! empty( $author_id ) || ! empty( $guest_authors ) ) {
+				continue; // We have either an author or guest authors assigned, so skip.
+			}
+
+			// Get the fields mapping just for authors/guest authors.
+			$fields        = $this->load_mappings( $category );
+			$keys          = array_column( $fields, 'target' );
+			$authors_index = array_search( 'post_author', $keys );
+			$ga_index      = array_search( self::META_PREFIX . 'guest_authors', $keys );
+
+			// Get the staff ID for post author.
+			if ( $authors_index ) {
+				$author_json_field = $fields[ $authors_index ]->name;
+				$staff_id          = $item->{ $author_json_field };
+			}
+
+			// Get the staff IDs for guest authors.
+			if ( $ga_index ) {
+				$ga_json_field = $fields[ $ga_index ]->name;
+				$staff_id      = $item->{ $ga_json_field };
+			}
+
+			if ( ! isset( $staff_id ) ) {
+				$this->logger->log( $log_name, sprintf( 'Failed to get a staff ID for %s', $unique_id ), false );
+				continue;
+			}
+
+			// Try to find the user/GA from the staff IDs.
+			$staff_ids = ( is_array( $staff_id ) ) ? $staff_id : [ $staff_id ];
+			$wp_users  = [];
+
+			foreach ( $staff_ids as $staff_uid ) {
+				$wp_user = $this->get_user_from_staff_id( $staff_uid );
+				if ( empty( $wp_user ) ) {
+					$wp_user = [ $this->find_alternative_user( $staff_uid, $assoc_args['staff_json'] ) ];
+				}
+
+				if ( is_a( $wp_user[0], 'WP_User' ) ) {
+					$wp_users[ $staff_uid ] = $wp_user[0];
+				}
+			}
+
+			// Hopefully we found users, but log it if we don't, and skip this item.
+			if ( empty( $wp_users ) ) {
+				$this->logger->log( $log_name, sprintf( 'No users found for item %s', $unique_id ) );
+				continue;
+			}
+
+			// Assign the author if that's what we need to do.
+			if ( $authors_index ) {
+				$update = ( $this->dryrun ) ? true : wp_update_post(
+					[
+						'ID' => $post->ID,
+						'post_author' => $wp_users[ array_key_first( $wp_users ) ]->ID,
+					]
+				);
+				if ( ! $update ) {
+					$this->logger->log( $log_name, sprintf( 'Failed to update post %d', $post->ID ) );
+				}
+			}
+
+			// Set Guest Authors if we have them.
+			if ( $ga_index ) {
+				$gas_to_add = [];
+				foreach ( $wp_users as $user ) {
+					$guest_author = $this->co_authors_plus->get_or_create_guest_author_from_user( $user );
+					$gas_to_add[] = $guest_author;
+				}
+
+				// $this->co_authors_plus->assign_guest_authors_to_post( $ga_id );
+			}
+
+		}
 	}
 
 	/**
@@ -848,6 +966,33 @@ class RetroReportMigrator implements InterfaceCommand {
 		$users = $this->get_user_from_staff_id( $unique_id );
 
 		return count( $users ) > 0;
+	}
+
+	/**
+	 * Find a duplicate/alternative user for a given unique_id.
+	 *
+	 * The staff JSON includes duplicates, but these are effectively not imported
+	 * so for some content we need to find the duplicate.
+	 *
+	 * @param string $unique_id  Unique ID of the staff member.
+	 * @param string $staff_json The JSON file with all staff members.
+	 *
+	 * @return WP_User|bool The User object or false if not found.
+	 */
+	private function find_alternative_user( $unique_id, $staff_json ) {
+
+		// Find the object form the staff JSON that matches this unique ID.
+		$staff     = $this->validate_json_file( [ 'json-file' => $staff_json ] );
+		$keys      = array_column( $staff, 'unique_id' );
+		$index     = array_search( $unique_id, $keys );
+		$staff_obj = $staff[ $index ];
+
+		// Find the already imported duplicate user.
+		$username = sprintf( '%s.%s', strtolower( $staff_obj->first_name ), strtolower( $staff_obj->last_name ) );
+		$wp_user  = get_user_by( 'login', $username );
+
+		return $wp_user;
+
 	}
 
 	/**
