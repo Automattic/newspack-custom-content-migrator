@@ -81,7 +81,7 @@ class GutenbergBlockGenerator {
 		return [
 			'blockName'    => 'jetpack/tiled-gallery',
 			'attrs'        => [
-				'columnWidths' => $tile_sizes,
+				'columnWidths' => [], // It will be filled after fixing the block manually from the backend.
 				'ids'          => $attachment_ids,
 			],
 			'innerBlocks'  => [],
