@@ -106,7 +106,8 @@ class SaportaReportMigrator implements InterfaceCommand {
 
 		$meta_query = [
 			[
-				'key'     => '_newspack_migration_gallery_migrated',
+				// 'key'     => '_newspack_migration_gallery_migrated',
+				'key'     => '_newspack_migration_gallery_migrated_',
 				'compare' => 'NOT EXISTS',
 			],
 		];
@@ -174,7 +175,7 @@ class SaportaReportMigrator implements InterfaceCommand {
 				}
 			}
 
-			update_post_meta( $post->ID, '_newspack_migration_gallery_migrated', true );
+			update_post_meta( $post->ID, '_newspack_migration_gallery_migrated_', true );
 		}
 	}
 }
