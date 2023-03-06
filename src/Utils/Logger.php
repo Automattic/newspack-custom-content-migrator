@@ -7,12 +7,18 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
+use \WP_CLI;
+
 /**
  * Class for handling commands' logging
  */
 class Logger {
 
 	const LE_LOG_DIRECTORY = 'newspack_le_logs';
+
+	const WARNING = 'warning';
+	const LINE    = 'line';
+	const SUCCESS = 'success';
 
 	/**
 	 * Determine the writeable directory used for storing logs created by migration commands.
@@ -26,16 +32,28 @@ class Logger {
 	/**
 	 * Simple file logging.
 	 *
-	 * @param string  $file File name or path.
-	 * @param string  $message Log message.
-	 * @param boolean $to_cli Whether to output the message to the CLI. Default to false.
+	 * @param string         $file File name or path.
+	 * @param string         $message Log message.
+	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
 	 */
-	public function log( $file, $message, $to_cli = true ) {
+	public function log( $file, $message, $level = 'line' ) {
 		$message .= "\n";
-		if ( $to_cli ) {
-			WP_CLI::line( $message );
+		if ( $level ) {
+			switch ( $level ) {
+				case ( self::SUCCESS ):
+					WP_CLI::success( $message );
+				    break;
+				case ( self::WARNING ):
+					WP_CLI::warning( $message );
+		            break;
+				case ( self::LINE ):
+				default:
+					WP_CLI::line( $message );
+				    break;
+			}
 		}
-		file_put_contents( $file, $message, FILE_APPEND );
+
+		file_put_contents( $file, $message, FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
 	}
 
 }
