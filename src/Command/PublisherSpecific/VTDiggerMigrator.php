@@ -863,7 +863,7 @@ HTML;
 
 		WP_CLI::log( "Fetching Post IDs..." );
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-		// $post_ids = [75657,]; // DEV test.
+		// $post_ids = [382132,]; // DEV test.
 
 		// Loop through all posts and create&assign GAs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -1054,6 +1054,22 @@ HTML;
 			$wp_user_row = $wpdb->get_row(
 				$wpdb->prepare(
 					"select * from {$wpdb->users} where user_nicename = %s; ",
+					$author_name
+				),
+				ARRAY_A
+			);
+
+			// Get $author_name from display_name.
+			if ( $wp_user_row ) {
+				$author_name = $wp_user_row['display_name'];
+			}
+		}
+
+		// Next, try and get a WP user with that user_login.
+		if ( is_null( $wp_user_row ) ) {
+			$wp_user_row = $wpdb->get_row(
+				$wpdb->prepare(
+					"select * from {$wpdb->users} where user_login = %s; ",
 					$author_name
 				),
 				ARRAY_A
