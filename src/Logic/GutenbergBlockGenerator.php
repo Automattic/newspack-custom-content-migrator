@@ -2,11 +2,20 @@
 /**
  * Generator for Gutenberg Blocks content.
  *
+ * To add a new method to this class that generates a Gutenberg Block, please follow these instructions:
+ *     - Create a draft post in Gutenberg and add the desired block.
+ *     - Copy the source HTML of your block (from the code editor) and pass it to the `get_block_json_array_from_content` method.
+ *     - Transform the JSON result to a PHP array using a tool like https://wtools.io/convert-json-to-php-array
+ *     - The newly created method should return this PHP array.
+ *     - Add method parameters as necessary to customize the resulting array.
+ *     - The idea is to use the output of your method as an input to the serialize_block(s) to get the HTML content of the block.
+ *
  * @package GutenbergBlockGenerator
  */
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use \NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 /**
@@ -15,6 +24,18 @@ use \WP_CLI;
  * @package NewspackCustomContentMigrator\Logic
  */
 class GutenbergBlockGenerator {
+    /**
+	 * @var Logger.
+	 */
+	private $logger;
+
+	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+		$this->logger = new Logger();
+	}
+
     /**
      * Generate a Jetpack Tiled Gallery Block.
      *
@@ -41,7 +62,7 @@ class GutenbergBlockGenerator {
 
                         if ( ! $attachment_url ) {
                             $non_existing_attachment_indexes[] = $index;
-                            WP_CLI::warning( sprintf( "Attachment %d doesn't exist!", $attachment_id ) );
+                            $this->logger->log( 'jetpack_tiled_gallery_migrator.log', sprintf( "Attachment %d doesn't exist!", $attachment_id ), Logger::WARNING );
                             return null;
                         }
 
@@ -107,7 +128,7 @@ class GutenbergBlockGenerator {
 		foreach ( $attachment_ids as $attachment_id ) {
             $attachment_post = get_post( $attachment_id );
             if ( ! $attachment_post ) {
-                WP_CLI::warning( sprintf( "Attachment %d doesn't exist!", $attachment_id ) );
+                $this->logger->log( 'jetpack_slideshow_migrator.log', sprintf( "Attachment %d doesn't exist!", $attachment_id ), Logger::WARNING );
                 continue;
             }
 

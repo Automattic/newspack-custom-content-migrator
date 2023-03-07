@@ -38,7 +38,6 @@ class Logger {
 	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
 	 */
 	public function log( $file, $message, $level = 'line' ) {
-		$message .= "\n";
 		if ( $level ) {
 			switch ( $level ) {
 				case ( self::SUCCESS ):
@@ -57,7 +56,7 @@ class Logger {
 			}
 		}
 
-		file_put_contents( $file, $message, FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
+		file_put_contents( $file, "\n" . $message, FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
 	}
 
 }
