@@ -980,13 +980,13 @@ HTML;
 			}
 
 			// Assign GAs to post and log all post_ids.
-			$existing_post_ga_ids = $this->cap_logic->get_posts_existing_ga_ids( $post_id );
-			$new_post_ga_ids = array_unique( array_merge( $existing_post_ga_ids, $ga_ids ) );
-			if ( $existing_post_ga_ids != $new_post_ga_ids ) {
-				$this->cap_logic->assign_guest_authors_to_post( $new_post_ga_ids, $post_id );
-				$this->logger->log( $logs['assigned_gas_post_ids'], sprintf( "NEWLY_ASSIGNED_GAS post_id=%d ga_ids=%s", $post_id, implode( ',', $new_post_ga_ids ) ), true );
-			} elseif ( ! empty( $existing_post_ga_ids ) ) {
-				$this->logger->log( $logs['already_assigned_gas_post_ids'], sprintf( "ALREADY_ASSIGNED post_id=%d ga_ids=%s", $post_id, implode( ',', $new_post_ga_ids ) ), true );
+			$existing_ga_ids = $this->cap_logic->get_posts_existing_ga_ids( $post_id );
+			$new_ga_ids = array_unique( array_merge( $existing_ga_ids, $ga_ids ) );
+			if ( $existing_ga_ids != $new_ga_ids ) {
+				$this->cap_logic->assign_guest_authors_to_post( $new_ga_ids, $post_id );
+				$this->logger->log( $logs['assigned_gas_post_ids'], sprintf( "NEWLY_ASSIGNED_GAS post_id=%d ga_ids=%s", $post_id, implode( ',', $new_ga_ids ) ), true );
+			} elseif ( ! empty( $existing_ga_ids ) ) {
+				$this->logger->log( $logs['already_assigned_gas_post_ids'], sprintf( "ALREADY_ASSIGNED post_id=%d ga_ids=%s", $post_id, implode( ',', $new_ga_ids ) ), true );
 			} else {
 				$this->logger->log( $logs['post_has_no_authors_at_all'], sprintf( "NO_AUTHORS_AT_ALL post_id=%d", $post_id ), true );
 			}
