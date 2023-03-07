@@ -5,28 +5,37 @@ namespace NewspackCustomContentMigrator\Logic;
 use WP_Query;
 use WP_CLI;
 
+/**
+ * General Post object logic.
+ */
 class Posts {
-	/**
-	 * Gets IDs of all the Pages.
-	 *
-	 * @return array Pages IDs.
-	 */
-	public function get_all_posts_ids( $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $nopaging = true ) {
-		$ids = array();
 
-		// Arguments in \WP_Query::parse_query .
-		$args  = array(
-			'nopaging'    => $nopaging,
-			'post_type'   => $post_type,
-			'post_status' => $post_status,
+	/**
+	 * Fetches post IDs.
+	 * Rewriten to raw queries for safer execution on lower resources platforms, and is significantly faster this way.
+	 *
+	 * @param string $post_type     Post type.
+	 * @param array  $post_statuses Post statuses.
+	 * @param bool   $nopaging      Unused, abandoned. Temporarily kept for backwards compatibility reasons.
+	 *
+	 * @return array Array of IDs.
+	 */
+	public function get_all_posts_ids( $post_type = 'post', $post_statuses = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $nopaging = true ) {
+		global $wpdb;
+
+		$post_status_placeholders = implode( ',', array_fill( 0, count( $post_statuses ), '%s' ) );
+
+		// phpcs:disable Using secure placeholders with $wpdb->prepare().
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"select ID
+				from {$wpdb->posts}
+				where post_type = %s
+				and post_status in ( $post_status_placeholders ) ; ",
+				array_merge( [ $post_type ], $post_statuses )
+			)
 		);
-		$query = new \WP_Query( $args );
-		$posts = $query->get_posts();
-		if ( ! empty( $posts ) ) {
-			foreach ( $posts as $post ) {
-				$ids[] = $post->ID;
-			}
-		}
+		// phpcs:enable
 
 		return $ids;
 	}
