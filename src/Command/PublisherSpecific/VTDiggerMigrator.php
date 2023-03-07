@@ -862,7 +862,7 @@ HTML;
 
 		WP_CLI::log( "Fetching Post IDs..." );
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-		// $post_ids = [410385,410332,410281,410249,]; // DEV test.
+		// $post_ids = [410045,]; // DEV test.
 
 		// Loop through all posts and create&assign GAs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -1008,7 +1008,7 @@ HTML;
 	}
 
 	/**
-	 * Creates GA from WP User with display_name same as $author_name.
+	 * Creates GA from WP User with display_name or user_nicename same as $author_name.
 	 *
 	 * @param string $author_name Display name.
 	 *
@@ -1017,6 +1017,7 @@ HTML;
 	public function create_ga_from_wp_user( string $author_name ) {
 		global $wpdb;
 
+		// Try and get WP user with display_name.
 		$wp_user_row = $wpdb->get_row(
 			$wpdb->prepare(
 				"select * from {$wpdb->users} where display_name = %s; ",
@@ -1025,6 +1026,23 @@ HTML;
 			ARRAY_A
 		);
 
+		// Next, try and get a WP user with that user_nicename.
+		if ( is_null( $wp_user_row ) ) {
+			$wp_user_row = $wpdb->get_row(
+				$wpdb->prepare(
+					"select * from {$wpdb->users} where user_nicename = %s; ",
+					$author_name
+				),
+				ARRAY_A
+			);
+
+			// Get $author_name from display_name.
+			if ( $wp_user_row ) {
+				$author_name = $wp_user_row['display_name'];
+			}
+		}
+
+		// Still nothing. Exit.
 		if ( is_null( $wp_user_row ) ) {
 			return null;
 		}
