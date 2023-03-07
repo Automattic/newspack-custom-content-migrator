@@ -831,18 +831,19 @@ HTML;
 		global $wpdb;
 
 		$logs = [
-			'post_ids_no_author_names'            => 'vtd_authors__post_ids_no_author_names.log',
-			'created_gas_from_acf'                => 'vtd_authors__created_gas_from_acf.log',
-			'created_gas_from_wpusers'            => 'vtd_authors__created_gas_from_wpusers.log',
-			'post_ids_obituaries'                 => 'vtd_authors__post_ids_obituaries.log',
-			'post_ids_letters_to_editor'          => 'vtd_authors__post_ids_letters_to_editor.log',
-			'post_ids_no_acfauthor_or_wpuser'     => 'vtd_authors__post_ids_no_acfauthor_or_wpuser.log',
-			'assigned_gas_post_ids'               => 'vtd_authors__assigned_gas_post_ids.log',
-			'already_assigned_gas_post_ids'       => 'vtd_authors__already_assigned_gas_post_ids.log',
-			'post_has_no_authors_at_all'          => 'vtd_authors__post_has_no_authors_at_all.log',
+			'post_ids_no_author_names'                      => 'vtd_authors__post_ids_no_author_names.log',
+			'created_gas_from_acf'                          => 'vtd_authors__created_gas_from_acf.log',
+			'created_gas_from_wpusers'                      => 'vtd_authors__created_gas_from_wpusers.log',
+			'post_ids_obituaries'                           => 'vtd_authors__post_ids_obituaries.log',
+			'post_ids_letters_to_editor'                    => 'vtd_authors__post_ids_letters_to_editor.log',
+			'post_ids_no_acfauthor_or_wpuser'               => 'vtd_authors__post_ids_no_acfauthor_or_wpuser.log',
+			'assigned_gas_post_ids'                         => 'vtd_authors__assigned_gas_post_ids.log',
+			'already_assigned_gas_post_ids_pre_authornames' => 'vtd_authors__already_assigned_gas_post_ids_pre_authornames.log',
+			'already_assigned_gas_post_ids'                 => 'vtd_authors__already_assigned_gas_post_ids.log',
+			'post_has_no_authors_at_all'                    => 'vtd_authors__post_has_no_authors_at_all.log',
 			// DEV helper, things not yet done, just log and skip these:
-			'post_ids_was_newsbrief_not_assigned' => 'vtd_authors__post_id_was_newsbrief_not_assigned.log',
-			'post_ids_was_liveblog_not_assigned'  => 'vtd_authors__post_id_was_liveblog_not_assigned.log',
+			'post_ids_was_newsbrief_not_assigned'           => 'vtd_authors__post_id_was_newsbrief_not_assigned.log',
+			'post_ids_was_liveblog_not_assigned'            => 'vtd_authors__post_id_was_liveblog_not_assigned.log',
 		];
 
 		// Local caching var.
@@ -896,6 +897,13 @@ HTML;
 			} elseif ( $was_cpt && ( self::LIVEBLOG_CPT == $was_cpt ) ) {
 				$this->logger->log( $logs['post_ids_was_liveblog_not_assigned'], sprintf( "LIVEBLOG post_id=%d", $post_id ), true );
 				WP_CLI::log( 'skipping' );
+				continue;
+			}
+
+			// Skip if it already has GAs assigned.
+			$existing_ga_ids = $this->cap_logic->get_posts_existing_ga_ids( $post_id );
+			if ( ! empty( $existing_ga_ids ) ) {
+				$this->logger->log( $logs['already_assigned_gas_post_ids_pre_authornames'], sprintf( "HAS_GAs post_id=%d", $post_id ), true );
 				continue;
 			}
 
@@ -968,7 +976,9 @@ HTML;
 				}
 
 				// Add new or existing.
-				$ga_ids[] = $ga_id;
+				if ( $ga_id ) {
+					$ga_ids[] = $ga_id;
+				}
 			} // Done foreach $author_names.
 
 
