@@ -5,7 +5,7 @@
  * @package NewspackCustomContentMigrator
  */
 
-namespace NewspackCustomContentMigrator\Utils\Contracts;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts;
 
 interface CSVFile extends IterableFile {
 	/**

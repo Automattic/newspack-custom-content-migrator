@@ -1,10 +1,10 @@
 <?php
 
-namespace NewspackCustomContentMigrator\Utils;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use Exception;
-use IteratorAggregate;
-use NewspackCustomContentMigrator\Utils\Contracts\IterableFile;
+use \Exception;
+use \IteratorAggregate;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\IterableFile;
 
 class FileImportFactory {
 	/**

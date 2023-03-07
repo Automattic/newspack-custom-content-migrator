@@ -5,9 +5,9 @@
  * @package NewspackCustomContentMigrator
  */
 
-namespace NewspackCustomContentMigrator\Utils;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use Exception;
+use \Exception;
 
 /**
  * Abstract File class, handles low level loading of file and basic functions.

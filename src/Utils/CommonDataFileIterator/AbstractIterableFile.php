@@ -5,10 +5,10 @@
  * @package NewspackCustomContentMigrator
  */
 
-namespace NewspackCustomContentMigrator\Utils;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use Exception;
-use NewspackCustomContentMigrator\Utils\Contracts\IterableFile;
+use \Exception;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\IterableFile;
 
 /**
  * Abstract implementation of Iterable File contract.

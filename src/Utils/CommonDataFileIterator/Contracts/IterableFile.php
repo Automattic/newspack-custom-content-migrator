@@ -5,7 +5,7 @@
  * @package NewspackCustomContentMigrator
  */
 
-namespace NewspackCustomContentMigrator\Utils\Contracts;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts;
 
 use IteratorAggregate;
 use NewspackCustomContentMigrator\Utils\Contracts\File as FileInterface;

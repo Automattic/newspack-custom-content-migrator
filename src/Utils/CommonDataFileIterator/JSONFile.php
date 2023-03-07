@@ -5,9 +5,9 @@
  * @package NewspackCustomContentMigrator.
  */
 
-namespace NewspackCustomContentMigrator\Utils;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use Iterator;
+use \Iterator;
 
 /**
  * Iterable File implementation for JSON file types.

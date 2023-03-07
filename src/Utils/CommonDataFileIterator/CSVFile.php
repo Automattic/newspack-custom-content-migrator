@@ -5,12 +5,12 @@
  * @package NewspackCustomContentMigrator
  */
 
-namespace NewspackCustomContentMigrator\Utils;
+namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use Exception;
-use Iterator;
-use NewspackCustomContentMigrator\Utils\Contracts\CSVFile as CSVFileInterface;
-use NewspackCustomContentMigrator\Utils\Contracts\IterableFile;
+use \Exception;
+use \Iterator;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\CSVFile as CSVFileInterface;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\IterableFile;
 
 /**
  * Short description.
