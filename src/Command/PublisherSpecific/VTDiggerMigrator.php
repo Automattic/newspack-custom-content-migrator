@@ -849,19 +849,21 @@ HTML;
 		$cached_authors_meta = [];
 
 		// Get/create GA for CPTs.
-		$obituaries_ga_id = $this->cap_logic->get_guest_author_by_display_name( self::OBITUARIES_GA_NAME );
+		$obituaries_ga = $this->cap_logic->get_guest_author_by_display_name( self::OBITUARIES_GA_NAME );
+		$obituaries_ga_id = $obituaries_ga->ID ?? null;
 		if ( ! $obituaries_ga_id ) {
 			$obituaries_ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => self::OBITUARIES_GA_NAME ] );
 		}
-		$letters_to_editor_ga_id = $this->cap_logic->get_guest_author_by_display_name( self::LETTERS_TO_EDITOR_GA_NAME );
+		$letters_to_editor_ga = $this->cap_logic->get_guest_author_by_display_name( self::LETTERS_TO_EDITOR_GA_NAME );
+		$letters_to_editor_ga_id = $letters_to_editor_ga->ID ?? null;
 		if ( ! $letters_to_editor_ga_id ) {
 			$letters_to_editor_ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => self::LETTERS_TO_EDITOR_GA_NAME ] );
 		}
 
 
 		WP_CLI::log( "Fetching Post IDs..." );
-		// $post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-		$post_ids = [75657,]; // DEV test.
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		// $post_ids = [75657,]; // DEV test.
 
 		// Loop through all posts and create&assign GAs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
