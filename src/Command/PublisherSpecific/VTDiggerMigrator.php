@@ -831,15 +831,14 @@ HTML;
 		global $wpdb;
 
 		$logs = [
-			'post_ids_no_author_names'                      => 'vtd_authors__post_ids_no_author_names.log',
 			'created_gas_from_acf'                          => 'vtd_authors__created_gas_from_acf.log',
 			'created_gas_from_wpusers'                      => 'vtd_authors__created_gas_from_wpusers.log',
 			'post_ids_obituaries'                           => 'vtd_authors__post_ids_obituaries.log',
 			'post_ids_letters_to_editor'                    => 'vtd_authors__post_ids_letters_to_editor.log',
-			'post_ids_no_acfauthor_or_wpuser'               => 'vtd_authors__post_ids_no_acfauthor_or_wpuser.log',
 			'assigned_gas_post_ids'                         => 'vtd_authors__assigned_gas_post_ids.log',
 			'already_assigned_gas_post_ids_pre_authornames' => 'vtd_authors__already_assigned_gas_post_ids_pre_authornames.log',
 			'already_assigned_gas_post_ids'                 => 'vtd_authors__already_assigned_gas_post_ids.log',
+			'post_ids_failed_author'                        => 'vtd_authors__post_ids_failed_author.log',
 			'post_has_no_authors_at_all'                    => 'vtd_authors__post_has_no_authors_at_all.log',
 			// DEV helper, things not yet done, just log and skip these:
 			'post_ids_was_newsbrief_not_assigned'           => 'vtd_authors__post_id_was_newsbrief_not_assigned.log',
@@ -861,8 +860,8 @@ HTML;
 
 
 		WP_CLI::log( "Fetching Post IDs..." );
-		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-		// $post_ids = [410045,]; // DEV test.
+		// $post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		$post_ids = [75657,]; // DEV test.
 
 		// Loop through all posts and create&assign GAs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -927,64 +926,86 @@ HTML;
 					$post_id
 				)
 			);
-			if ( empty( $author_names ) ) {
-				$this->logger->log( $logs['post_ids_no_author_names'], sprintf( "NO_AUTHOR_NAMES___SKIPPING post_id=%d", $post_id ), true );
-				// Continue to next $post_id.
-				continue;
-			}
+
+			// GA IDs for this Post.
+			$ga_ids = [];
 
 			/**
-			 * Get or create GAs.
+			 * First try and get or create GAs based on $author_names.
 			 */
-			$ga_ids = [];
-			foreach ( $author_names as $author_name ) {
-				WP_CLI::log( "author_name=" . $author_name );
+			if ( ! empty( $author_names ) ) {
 
-				// Get existing GA.
-				$ga = $this->cap_logic->get_guest_author_by_display_name( $author_name );
-				$ga_id = $ga->ID ?? null;
+				foreach ( $author_names as $author_name ) {
+					WP_CLI::log( "author_name=" . $author_name );
 
-				// Create GA if it doesn't exist.
-				if ( is_null( $ga_id ) ) {
+					// Get existing GA.
+					$ga = $this->cap_logic->get_guest_author_by_display_name( $author_name );
+					$ga_id = $ga->ID ?? null;
 
-					/**
-					 * 1/2 First try and create GA from ACF author Post object with this name.
-					 */
-					$acf_author_meta = isset( $cached_authors_meta[ $author_name ] )
-						? $cached_authors_meta[ $author_name ]
-						: $this->get_acf_author_meta( $author_name );
-					if ( ! is_null( $acf_author_meta ) ) {
-						// Cache entry.
-						if ( ! isset( $cached_authors_meta[ $author_name ] ) ) {
-							$cached_authors_meta[ $author_name ] = $acf_author_meta;
-						}
-						// Create GA.
-						$ga_id = $this->create_ga_from_acf_author( $author_name, $acf_author_meta );
-						$this->logger->log( $logs['created_gas_from_acf'], sprintf( "CREATED_FROM_ACF post_id=%d name='%s' ga_id=%d", $post_id, $author_name, $ga_id ), true );
-					}
-
-					/**
-					 * 2/2 Next try and create GA from WP User with this display_name.
-					 */
+					// Create GA if it doesn't exist.
 					if ( is_null( $ga_id ) ) {
-						$ga_id = $this->create_ga_from_wp_user( $author_name );
-						// Success.
-						if ( ! is_null( $ga_id ) ) {
-							$this->logger->log( $logs['created_gas_from_wpusers'], sprintf( "CREATED_FROM_WPUSER ga_id=%d name='%s' post_id=%d linked_wp_user_id=%d", $ga_id, $author_name, $post_id, $wp_user_row['ID'] ), true );
+
+						/**
+						 * 1/2 First try and create GA from ACF author Post object with this name.
+						 */
+						$acf_author_meta = isset( $cached_authors_meta[ $author_name ] )
+							? $cached_authors_meta[ $author_name ]
+							: $this->get_acf_author_meta( $author_name );
+						if ( ! is_null( $acf_author_meta ) ) {
+							// Cache entry.
+							if ( ! isset( $cached_authors_meta[ $author_name ] ) ) {
+								$cached_authors_meta[ $author_name ] = $acf_author_meta;
+							}
+							// Create GA.
+							$ga_id = $this->create_ga_from_acf_author( $author_name, $acf_author_meta );
+							$this->logger->log( $logs['created_gas_from_acf'], sprintf( "CREATED_FROM_ACF post_id=%d name='%s' ga_id=%d", $post_id, $author_name, $ga_id ), true );
+						}
+
+						/**
+						 * 2/2 Next try and create GA from WP User with this display_name.
+						 */
+						if ( is_null( $ga_id ) ) {
+							$ga_id = $this->create_ga_from_wp_user( $author_name );
+							// Success.
+							if ( ! is_null( $ga_id ) ) {
+								$this->logger->log( $logs['created_gas_from_wpusers'], sprintf( "CREATED_FROM_WPUSER ga_id=%d name='%s' post_id=%d linked_wp_user_id=%d", $ga_id, $author_name, $post_id, $wp_user_row['ID'] ), true );
+							}
 						}
 					}
-				}
 
-				// Add new or existing.
-				if ( $ga_id ) {
-					$ga_ids[] = $ga_id;
+					// Add new or existing.
+					if ( $ga_id ) {
+						$ga_ids[] = $ga_id;
+					}
+				} // Done foreach $author_names.
+
+			} else {
+
+				/**
+				 * Next try and create GAs just from pure WP User author.
+				 */
+				// Get WP User author's display_name as $author_name.
+				$author_name = $wpdb->get_var(
+					$wpdb->prepare(
+						"select u.display_name
+						from {$wpdb->users} u
+						join {$wpdb->posts} p on p.post_author = u.ID 
+						where p.ID = %d ; ",
+						$post_id
+					)
+				);
+				if ( $author_name ) {
+					$ga_id = $this->create_ga_from_wp_user( $author_name );
+					if ( $ga_id ) {
+						$ga_ids[] = $ga_id;
+					}
 				}
-			} // Done foreach $author_names.
+			}
 
 
 			// This is where author creation/assignment failed completely, GA was not created or fetched from known sources.
 			if ( empty( $ga_ids ) ) {
-				$this->logger->log( $logs['post_ids_no_acfauthor_or_wpuser'], sprintf( "NO_ACF_OR_WPUSER___SKIPPED post_id=%d author_name='%s'", $post_id, $author_name ), true );
+				$this->logger->log( $logs['post_ids_failed_author'], sprintf( "FAILED_AUTHOR___SKIPPED post_id=%d author_name='%s'", $post_id, $author_name ), true );
 				// Continue to next $post_id.
 				continue;
 			}
