@@ -692,8 +692,8 @@ HTML;
 		$counties_terms = $wpdb->get_results(
 			$wpdb->prepare(
 				"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name 
-				from vtdWP_term_taxonomy tt
-				join vtdWP_terms t on t.term_id = tt.term_id 
+				from {$wpdb->term_taxonomy} tt
+				join {$wpdb->terms} t on t.term_id = tt.term_id 
 				where tt.taxonomy = '%s';",
 				self::COUNTIES_TAXONOMY
 			),
@@ -711,7 +711,7 @@ HTML;
 			// Get all objects for this 'county' term's term_taxonomy_id.
 			$object_ids = $wpdb->get_col(
 				$wpdb->prepare(
-					"select object_id from vtdWP_term_relationships vwtr where term_taxonomy_id = %d;",
+					"select object_id from {$wpdb->term_relationships} vwtr where term_taxonomy_id = %d;",
 					$term_taxonomy_id
 				)
 			);
@@ -764,8 +764,8 @@ HTML;
 		$seriess_terms = $wpdb->get_results(
 			$wpdb->prepare(
 				"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name 
-				from vtdWP_term_taxonomy tt
-				join vtdWP_terms t on t.term_id = tt.term_id 
+				from {$wpdb->term_taxonomy} tt
+				join {$wpdb->terms} t on t.term_id = tt.term_id 
 				where tt.taxonomy = '%s';",
 				self::SERIES_TAXONOMY
 			),
@@ -781,7 +781,7 @@ HTML;
 			// Get all objects for this 'series' term's term_taxonomy_id.
 			$object_ids = $wpdb->get_col(
 				$wpdb->prepare(
-					"select object_id from vtdWP_term_relationships vwtr where term_taxonomy_id = %d;",
+					"select object_id from {$wpdb->term_relationships} vwtr where term_taxonomy_id = %d;",
 					$term_taxonomy_id
 				)
 			);
@@ -825,34 +825,46 @@ HTML;
 		global $wpdb;
 
 		$logs = [
-			'created_gas_from_acf' => 'vtd_authors_created_gas_from_acf.log',
-			'created_gas_from_wpusers' => 'vtd_authors_created_gas_from_wpusers.log',
-			'post_ids_no_acfauthor_or_wpuser'  => 'vtd_authors_post_ids_no_acfauthor_or_wpuser.log',
-			'post_ids_no_authors'  => 'vtd_authors_post_ids_no_authors.log',
-			'post_ids'  => 'vtd_authors_post_ids.log',
+			'post_ids_no_author_names'        => 'vtd_authors__post_ids_no_author_names.log',
+			'created_gas_from_acf'            => 'vtd_authors__created_gas_from_acf.log',
+			'created_gas_from_wpusers'        => 'vtd_authors__created_gas_from_wpusers.log',
+			'post_ids_no_acfauthor_or_wpuser' => 'vtd_authors__post_ids_no_acfauthor_or_wpuser.log',
+			'assigned_gas_post_ids'           => 'vtd_authors__assigned_gas_post_ids.log',
+			'already_assigned_gas_post_ids'   => 'vtd_authors__already_assigned_gas_post_ids.log',
+			'post_has_no_authors_at_all'      => 'vtd_authors__post_has_no_authors_at_all.log',
 		];
 
-		// $post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-$post_ids = [410385,410332,410281,410249,];
+		// Local caching var.
+		$cached_authors_meta = [];
+
+		WP_CLI::log( "Fetching Post IDs..." );
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		// $post_ids = [410385,410332,410281,410249,]; // DEV test.
 
 		// Loop through all posts and create&assign GAs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
+			// Skip some specific dev IDs.
 			if ( in_array( $post_id, [ 410385 ] ) ) {
 				WP_CLI::log( "skipping this specific ID" );
 				continue;
 			}
 
+			/**
+			 * Get author names for this post.
+			 * Author names are terms with 'author' taxonomy. And the actual data for these authors can either be located in ACF 'vtd_team' Post objects,
+			 * or can be regular WP Users.
+			 */
 			$author_names = $wpdb->get_col(
 				$wpdb->prepare(
 					"select name
-					from vtdWP_terms where term_id in (
+					from {$wpdb->terms} where term_id in (
 						select term_id
-						from vtdWP_term_taxonomy vwtt
+						from {$wpdb->term_taxonomy} vwtt
 						where taxonomy = 'author' and term_taxonomy_id in (
 							select term_taxonomy_id
-							from vtdWP_term_relationships vwtr
+							from {$wpdb->term_relationships} vwtr
 							where object_id = %d
 						)
 					);",
@@ -860,147 +872,187 @@ $post_ids = [410385,410332,410281,410249,];
 				)
 			);
 			if ( empty( $author_names ) ) {
-				$this->logger->log( $logs['post_ids_no_authors'], $post_id, false );
-				WP_CLI::log( "NO AUTHOR, skipping." );
+				$this->logger->log( $logs['post_ids_no_author_names'], sprintf( "NO_AUTHOR_NAMES___SKIPPING post_id=%d", $post_id ), true );
+				// Continue to next $post_id.
 				continue;
 			}
 
-
-			// Get or create GAs from authors.
-			$ga_ids_from_acf_authors = [];
+			/**
+			 * Get or create GAs.
+			 */
+			$ga_ids = [];
 			foreach ( $author_names as $author_name ) {
+				WP_CLI::log( "author_name=" . $author_name );
 
+				// Get existing GA.
 				$ga = $this->cap_logic->get_guest_author_by_display_name( $author_name );
 				$ga_id = $ga->ID ?? null;
-				// Create.
+
+				// Create GA if it doesn't exist.
 				if ( is_null( $ga_id ) ) {
 
-					// Populate these args to convert from current user format to CAP GA.
-					$ga_args = [];
-
-					// Get ACF vtd_team author.
-					$acf_author = $this->get_acf_author_meta( $author_name );
-					if ( ! is_null( $acf_author ) ) {
-
-						// Compose $media_link for bio.
-						$media_link = '';
-						if ( $acf_author['vtd_social_media_handle'] && $acf_author['vtd_social_media_link'] ) {
-							// $media_link is a <a> element if both handle and link given.
-							$media_link = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a>", $acf_author['vtd_social_media_link'], $acf_author['vtd_social_media_handle'] );
-						} elseif ( $acf_author['vtd_social_media_link'] ) {
-							// $media_link is a <a> element if just link given.
-							$media_link = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a>", $acf_author['vtd_social_media_link'], $acf_author['vtd_social_media_link'] );
-						} elseif ( $acf_author['vtd_social_media_handle'] ) {
-							// $media_link text.
-							$media_link = $acf_author['vtd_social_media_handle'];
+					/**
+					 * 1/2 First try and create GA from ACF author Post object with this name.
+					 */
+					$acf_author_meta = isset( $cached_authors_meta[ $author_name ] )
+						? $cached_authors_meta[ $author_name ]
+						: $this->get_acf_author_meta( $author_name );
+					if ( ! is_null( $acf_author_meta ) ) {
+						// Cache entry.
+						if ( ! isset( $cached_authors_meta[ $author_name ] ) ) {
+							$cached_authors_meta[ $author_name ] = $acf_author_meta;
 						}
-
-						// Compose GA description.
-						// Start with the title.
-						$description = $acf_author['vtd_title'] ? $acf_author['vtd_title'] . '. ' : '';
-						// Add media link.
-						$description .= $media_link ? $media_link . ' ' : '';
-						// Add bio.
-						$description .= $acf_author['vtd_bio'] ? $acf_author['vtd_bio'] : '';
-
-						// Leaving out:
-						// 'office_phone', 'cell_phone', 'google_phone', 'vtd_department' (e.g. vtd_department e.g. a:1:{i:0;s:8:"newsroom";})
-
-						$ga_args = [
-							'display_name' => $author_name,
-							'user_email'   => $acf_author['vtd_email'] ?? null,
-							'website'      => $acf_author['vtd_social_media_link'] ?? null,
-							'description'  => $description,
-							'avatar'       => $acf_author['_thumbnail_id'] ?? null,
-						];
-
-						// Create GA
-						$ga_id = $this->cap_logic->create_guest_author( $ga_args );
-
-						// Log GA creation.
-						$this->logger->log( $logs['created_gas_from_acf'], sprintf( "post_id=%d name='%s' ga_id=%d", $post_id, $author_name, $ga_id ), true );
+						// Create GA.
+						$ga_id = $this->create_ga_from_acf_author( $author_name, $acf_author_meta );
+						$this->logger->log( $logs['created_gas_from_acf'], sprintf( "CREATED_FROM_ACF post_id=%d name='%s' ga_id=%d", $post_id, $author_name, $ga_id ), true );
 					}
 
-
-					// If no ACF Author was found, use WP User object as author and convert to GA.
-					if ( empty( $ga_args ) ) {
-
-						$wp_user_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where display_name = %s; ", $author_name), ARRAY_A );
-
-						if ( is_null( $wp_user_row ) ) {
-							$this->logger->log( $logs['post_ids_no_acfauthor_or_wpuser'], $post_id, false );
-
-							// Skip.
-							continue;
-						}
-
-						$social_sources = '';
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'aim', true ) )        ? 'AIM: ' .                  get_user_meta( $wp_user_row['ID'], 'aim', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'yim', true ) )        ? 'Yahoo IM: ' .             get_user_meta( $wp_user_row['ID'], 'yim', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'jabber', true ) )     ? 'Jabber / Google Talk: ' . get_user_meta( $wp_user_row['ID'], 'jabber', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'facebook', true ) )   ? 'Facebook: ' .             get_user_meta( $wp_user_row['ID'], 'facebook', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'instagram', true ) )  ? 'Instagram: ' .            get_user_meta( $wp_user_row['ID'], 'instagram', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'linkedin', true ) )   ? 'LinkedIn: ' .             get_user_meta( $wp_user_row['ID'], 'linkedin', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'myspace', true ) )    ? 'MySpace: ' .              get_user_meta( $wp_user_row['ID'], 'myspace', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'pinterest', true ) )  ? 'Pinterest: ' .            get_user_meta( $wp_user_row['ID'], 'pinterest', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'soundcloud', true ) ) ? 'SoundCloud: ' .           get_user_meta( $wp_user_row['ID'], 'soundcloud', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'twitter', true ) )    ? 'Twitter: @' .             get_user_meta( $wp_user_row['ID'], 'twitter', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'youtube', true ) )    ? 'YouTube: ' .              get_user_meta( $wp_user_row['ID'], 'youtube', true ) . '. ' : null;
-						$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'wikipedia', true ) )  ? 'Wikipedia: ' .            get_user_meta( $wp_user_row['ID'], 'wikipedia', true ) . '. ' : null;
-
-						$bio = ! empty( get_user_meta( $wp_user_row['ID'], 'description', true ) ) ? get_user_meta( $wp_user_row['ID'], 'description', true ) : null;
-
-						$description = $social_sources
-						               . ( ( ! empty( $social_sources ) && ! empty( $bio ) ) ? ' ' : '' )
-						               . $bio;
-
-						$ga_args = [
-							'display_name' => $author_name,
-							'user_email'   => $wp_user_row['user_email'] ?? null,
-							'website'      => $wp_user_row['user_url'] ?? null,
-							'description'  => $description,
-							// Their WP Users have an external plugin shich extends avatar abilities, but these are not used.
-							// 'avatar'       => null,
-						];
-
-						// Create GA
-						$ga_id = $this->cap_logic->create_guest_author( $ga_args );
-
-						// Link to WP User.
-						$wp_user = get_user_by( 'ID', $wp_user_row['ID'] );
-						$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $wp_user );
-
-						// Log GA creation.
-						$this->logger->log( $logs['created_gas_from_wpusers'], sprintf( "post_id=%d name='%s' ga_id=%d linked_wp_user_id=%d", $post_id, $author_name, $ga_id, $wp_user_row['ID'] ), true );
-					}
-
-					// This won't happen since exiting above. Just for dev purposes.
+					/**
+					 * 2/2 Next try and create GA from WP User with this display_name.
+					 */
 					if ( is_null( $ga_id ) ) {
-						$debug = 1;
+						$ga_id = $this->create_ga_from_wp_user( $author_name );
+						// Success.
+						if ( ! is_null( $ga_id ) ) {
+							$this->logger->log( $logs['created_gas_from_wpusers'], sprintf( "CREATED_FROM_WPUSER ga_id=%d name='%s' post_id=%d linked_wp_user_id=%d", $ga_id, $author_name, $post_id, $wp_user_row['ID'] ), true );
+						}
 					}
-
-				} else {
-					// Exists $ga_id
-					$debug = 1;
 				}
 
-				$ga_ids_from_acf_authors[] = $ga_id;
+				// Add new or existing.
+				$ga_ids[] = $ga_id;
+			} // Done foreach $author_names.
 
-			} // for $post_names
 
+			// This is where author creation/assignment failed completely, GA was not created or fetched from known sources.
+			if ( empty( $ga_ids ) ) {
+				$this->logger->log( $logs['post_ids_no_acfauthor_or_wpuser'], sprintf( "NO_ACF_OR_WPUSER___SKIPPED post_id=%d author_name='%s'", $post_id, $author_name ), true );
+				// Continue to next $post_id.
+				continue;
+			}
 
-			// Get list of GA IDs for this post.
+			// Assign GAs to post and log all post_ids.
 			$existing_post_ga_ids = $this->cap_logic->get_posts_existing_ga_ids( $post_id );
-			$new_post_ga_ids = array_unique( array_merge( $existing_post_ga_ids, $ga_ids_from_acf_authors ) );
+			$new_post_ga_ids = array_unique( array_merge( $existing_post_ga_ids, $ga_ids ) );
+			if ( $existing_post_ga_ids != $new_post_ga_ids ) {
+				$this->cap_logic->assign_guest_authors_to_post( $new_post_ga_ids, $post_id );
+				$this->logger->log( $logs['assigned_gas_post_ids'], sprintf( "NEWLY_ASSIGNED_GAS post_id=%d ga_ids=%s", $post_id, implode( ',', $new_post_ga_ids ) ), true );
+			} elseif ( ! empty( $existing_post_ga_ids ) ) {
+				$this->logger->log( $logs['already_assigned_gas_post_ids'], sprintf( "ALREADY_ASSIGNED post_id=%d ga_ids=%s", $post_id, implode( ',', $new_post_ga_ids ) ), true );
+			} else {
+				$this->logger->log( $logs['post_has_no_authors_at_all'], sprintf( "NO_AUTHORS_AT_ALL post_id=%d", $post_id ), true );
+			}
 
-			// Assign GA to post.
-			$this->cap_logic->assign_guest_authors_to_post( $new_post_ga_ids, $post_id );
-
-			// Log.
-			$this->logger->log( $logs['post_ids'], sprintf( "post_id=%d ga_ids=%s", $post_id, $author_name, $post_ids, implode( ',', $new_post_ga_ids ) ), true );
 		}
 
+		wp_cache_flush();
 		WP_CLI::log( sprintf( "Done, see %s ", implode( ', ', array_keys( $logs ) ) ) );
+	}
+
+	/**
+	 * Creates GA from WP User with display_name same as $author_name.
+	 *
+	 * @param string $author_name Display name.
+	 *
+	 * @return int|null GA ID or null.
+	 */
+	public function create_ga_from_wp_user( string $author_name ) {
+		global $wpdb;
+
+		$wp_user_row = $wpdb->get_row(
+			$wpdb->prepare(
+				"select * from {$wpdb->users} where display_name = %s; ",
+				$author_name
+			),
+			ARRAY_A
+		);
+
+		if ( is_null( $wp_user_row ) ) {
+			return null;
+		}
+
+		$social_sources = '';
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'aim', true ) )        ? 'AIM: ' .                  get_user_meta( $wp_user_row['ID'], 'aim', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'yim', true ) )        ? 'Yahoo IM: ' .             get_user_meta( $wp_user_row['ID'], 'yim', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'jabber', true ) )     ? 'Jabber / Google Talk: ' . get_user_meta( $wp_user_row['ID'], 'jabber', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'facebook', true ) )   ? 'Facebook: ' .             get_user_meta( $wp_user_row['ID'], 'facebook', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'instagram', true ) )  ? 'Instagram: ' .            get_user_meta( $wp_user_row['ID'], 'instagram', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'linkedin', true ) )   ? 'LinkedIn: ' .             get_user_meta( $wp_user_row['ID'], 'linkedin', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'myspace', true ) )    ? 'MySpace: ' .              get_user_meta( $wp_user_row['ID'], 'myspace', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'pinterest', true ) )  ? 'Pinterest: ' .            get_user_meta( $wp_user_row['ID'], 'pinterest', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'soundcloud', true ) ) ? 'SoundCloud: ' .           get_user_meta( $wp_user_row['ID'], 'soundcloud', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'twitter', true ) )    ? 'Twitter: @' .             get_user_meta( $wp_user_row['ID'], 'twitter', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'youtube', true ) )    ? 'YouTube: ' .              get_user_meta( $wp_user_row['ID'], 'youtube', true ) . '. ' : null;
+		$social_sources .= ! empty( get_user_meta( $wp_user_row['ID'], 'wikipedia', true ) )  ? 'Wikipedia: ' .            get_user_meta( $wp_user_row['ID'], 'wikipedia', true ) . '. ' : null;
+
+		$bio = ! empty( get_user_meta( $wp_user_row['ID'], 'description', true ) ) ? get_user_meta( $wp_user_row['ID'], 'description', true ) : null;
+
+		$description = $social_sources
+		               . ( ( ! empty( $social_sources ) && ! empty( $bio ) ) ? ' ' : '' )
+		               . $bio;
+
+		$ga_args = [
+			'display_name' => $author_name,
+			'user_email'   => $wp_user_row['user_email'] ?? null,
+			'website'      => $wp_user_row['user_url'] ?? null,
+			'description'  => ! empty( $description ) ? $description : null,
+			// Their WP Users have an external plugin which extends avatar abilities, but these are not used.
+			// 'avatar'       => null,
+		];
+
+		// Create GA
+		$ga_id = $this->cap_logic->create_guest_author( $ga_args );
+
+		// Link to WP User.
+		$wp_user = get_user_by( 'ID', $wp_user_row['ID'] );
+		$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $wp_user );
+
+		return $ga_id;
+	}
+
+	/**
+	 * @param string $author_name
+	 * @param array  $acf_author_meta
+	 *
+	 * @return int GA ID.
+	 */
+	public function create_ga_from_acf_author( string $author_name, array $acf_author_meta ) {
+		// Compose $media_link for bio.
+		$media_link = '';
+		if ( $acf_author_meta['vtd_social_media_handle'] && $acf_author_meta['vtd_social_media_link'] ) {
+			// $media_link is a <a> element if both handle and link given.
+			$media_link = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a>", $acf_author_meta['vtd_social_media_link'], $acf_author_meta['vtd_social_media_handle'] );
+		} elseif ( $acf_author_meta['vtd_social_media_link'] ) {
+			// $media_link is a <a> element if just link given.
+			$media_link = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a>", $acf_author_meta['vtd_social_media_link'], $acf_author_meta['vtd_social_media_link'] );
+		} elseif ( $acf_author_meta['vtd_social_media_handle'] ) {
+			// $media_link text.
+			$media_link = $acf_author_meta['vtd_social_media_handle'];
+		}
+
+		// Compose GA description.
+		// Start with the title.
+		$description = $acf_author_meta['vtd_title'] ? $acf_author_meta['vtd_title'] . '. ' : '';
+		// Add media link.
+		$description .= $media_link ? $media_link . ' ' : '';
+		// Add bio.
+		$description .= $acf_author_meta['vtd_bio'] ? $acf_author_meta['vtd_bio'] : '';
+
+		// Leaving out:
+		// 'office_phone', 'cell_phone', 'google_phone', 'vtd_department' (e.g. vtd_department e.g. a:1:{i:0;s:8:"newsroom";})
+
+		$ga_args = [
+			'display_name' => $author_name,
+			'user_email'   => $acf_author_meta['vtd_email'] ?? null,
+			'website'      => $acf_author_meta['vtd_social_media_link'] ?? null,
+			'description'  => $description,
+			'avatar'       => $acf_author_meta['_thumbnail_id'] ?? null,
+		];
+
+		// Create GA
+		$ga_id = $this->cap_logic->create_guest_author( $ga_args );
+
+		return $ga_id;
 	}
 
 	/**
@@ -1016,7 +1068,7 @@ $post_ids = [410385,410332,410281,410249,];
 		$post_id = $wpdb->get_var(
 			$wpdb->prepare(
 				"select ID
-				from vtdWP_posts
+				from {$wpdb->posts}
 				where post_title = %s and post_type = 'vtd_team'; ",
 				$author_name
 			)
@@ -1028,11 +1080,12 @@ $post_ids = [410385,410332,410281,410249,];
 		$post_meta = $wpdb->get_row(
 			$wpdb->prepare(
 				"select meta_key, meta_value
-				from vtdWP_postmeta
+				from {$wpdb->postmeta}
 				where post_id = %d 
 				and meta_key in ( '_thumbnail_id', 'vtd_email', 'vtd_title', 'vtd_bio', 'vtd_social_media_handle', 'vtd_social_media_link', 'office_phone', 'cell_phone', 'google_phone', 'vtd_department' ) ; ",
 				$post_id
-			)
+			),
+			ARRAY_A
 		);
 
 		return $post_meta;
