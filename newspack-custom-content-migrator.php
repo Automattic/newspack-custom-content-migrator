@@ -61,6 +61,7 @@ PluginSetup::register_migrators(
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
+		Command\PublisherSpecific\DublinInquirerMigrator::class,
 		Command\PublisherSpecific\ElLiberoMigrator::class,
 		Command\PublisherSpecific\NoozhawkMigrator::class,
 		Command\PublisherSpecific\CharlottesvilleTodayMigrator::class,
