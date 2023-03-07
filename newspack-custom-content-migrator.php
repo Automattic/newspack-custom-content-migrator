@@ -74,6 +74,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,
+		Command\PublisherSpecific\QCityMetroMigrator::class,
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
 		Command\PublisherSpecific\Moco360Migrator::class,
