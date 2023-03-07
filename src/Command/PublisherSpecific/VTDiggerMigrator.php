@@ -16,7 +16,13 @@ class VTDiggerMigrator implements InterfaceCommand {
 
 	// VTD CPTs.
 	const OBITUARY_CPT = 'obituary';
+	const LETTERS_TO_EDITOR_CPT = 'letters_to_editor';
+	const LIVEBLOG_CPT = 'liveblog';
+	const NEWSBRIEF_CPT = 'news-brief';
 
+	// GAs for CPTs.
+	const OBITUARIES_GA_NAME = 'VTD Obituaries';
+	const LETTERS_TO_EDITOR_GA_NAME = 'Letters to Editor';
 
 	// VTD Taxonomies.
 	const COUNTIES_TAXONOMY = 'counties';
@@ -161,7 +167,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$newsbriefs_cat_id = wp_insert_category( [ 'cat_name' => self::NEWS_BRIEFS_CAT_NAME ] );
 		}
 
-		$newsbriefs_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type='news-brief';" );
+		$newsbriefs_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s ;", self::NEWSBRIEF_CPT ) );
 
 		// Convert to 'post' type.
 		foreach ( $newsbriefs_ids as $key_newsbrief_id => $newsbrief_id ) {
@@ -171,7 +177,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $newsbrief_id ) );
 
 			// Set meta 'newspack_vtd_cpt' = 'news-brief';
-			update_post_meta( $newsbrief_id, self::META_VTD_CPT, 'news-brief' );
+			update_post_meta( $newsbrief_id, self::META_VTD_CPT, self::NEWSBRIEF_CPT );
 		}
 
 		$this->logger->log( $log, implode( ',', $newsbriefs_ids ), false );
@@ -205,7 +211,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$liveblogs_cat_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
 		}
 
-		$liveblogs_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type='liveblog';" );
+		$liveblogs_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s;", self::LIVEBLOG_CPT ) );
 
 		// Convert to 'post' type.
 		foreach ( $liveblogs_ids as $key_liveblog_id => $liveblog_id ) {
@@ -215,7 +221,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $liveblog_id ) );
 
 			// Set meta 'newspack_vtd_cpt' = 'liveblog';
-			update_post_meta( $liveblog_id, self::META_VTD_CPT, 'liveblog' );
+			update_post_meta( $liveblog_id, self::META_VTD_CPT, self::LIVEBLOG_CPT );
 		}
 
 		$this->logger->log( $log, implode( ',', $liveblogs_ids ), false );
@@ -249,7 +255,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$letters_cat_id = wp_insert_category( [ 'cat_name' => self::LETTERSTOTHEEDITOR_CAT_NAME ] );
 		}
 
-		$letters_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type='letters_to_editor';" );
+		$letters_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type = %s;", self::LETTERS_TO_EDITOR_CPT ) );
 
 		// Convert to 'post' type.
 		foreach ( $letters_ids as $key_letter_id => $letter_id ) {
@@ -259,7 +265,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $letter_id ) );
 
 			// Set meta 'newspack_vtd_cpt' = 'letters_to_editor';
-			update_post_meta( $letter_id, self::META_VTD_CPT, 'letters_to_editor' );
+			update_post_meta( $letter_id, self::META_VTD_CPT, self::LETTERS_TO_EDITOR_CPT );
 		}
 
 		$this->logger->log( $log, implode( ',', $letters_ids ), false );
@@ -825,17 +831,33 @@ HTML;
 		global $wpdb;
 
 		$logs = [
-			'post_ids_no_author_names'        => 'vtd_authors__post_ids_no_author_names.log',
-			'created_gas_from_acf'            => 'vtd_authors__created_gas_from_acf.log',
-			'created_gas_from_wpusers'        => 'vtd_authors__created_gas_from_wpusers.log',
-			'post_ids_no_acfauthor_or_wpuser' => 'vtd_authors__post_ids_no_acfauthor_or_wpuser.log',
-			'assigned_gas_post_ids'           => 'vtd_authors__assigned_gas_post_ids.log',
-			'already_assigned_gas_post_ids'   => 'vtd_authors__already_assigned_gas_post_ids.log',
-			'post_has_no_authors_at_all'      => 'vtd_authors__post_has_no_authors_at_all.log',
+			'post_ids_no_author_names'            => 'vtd_authors__post_ids_no_author_names.log',
+			'created_gas_from_acf'                => 'vtd_authors__created_gas_from_acf.log',
+			'created_gas_from_wpusers'            => 'vtd_authors__created_gas_from_wpusers.log',
+			'post_ids_obituaries'                 => 'vtd_authors__post_ids_obituaries.log',
+			'post_ids_letters_to_editor'          => 'vtd_authors__post_ids_letters_to_editor.log',
+			'post_ids_no_acfauthor_or_wpuser'     => 'vtd_authors__post_ids_no_acfauthor_or_wpuser.log',
+			'assigned_gas_post_ids'               => 'vtd_authors__assigned_gas_post_ids.log',
+			'already_assigned_gas_post_ids'       => 'vtd_authors__already_assigned_gas_post_ids.log',
+			'post_has_no_authors_at_all'          => 'vtd_authors__post_has_no_authors_at_all.log',
+			// DEV helper, things not yet done, just log and skip these:
+			'post_ids_was_newsbrief_not_assigned' => 'vtd_authors__post_id_was_newsbrief_not_assigned.log',
+			'post_ids_was_liveblog_not_assigned'  => 'vtd_authors__post_id_was_liveblog_not_assigned.log',
 		];
 
 		// Local caching var.
 		$cached_authors_meta = [];
+
+		// Get/create GA for CPTs.
+		$obituaries_ga_id = $this->cap_logic->get_guest_author_by_display_name( self::OBITUARIES_GA_NAME );
+		if ( ! $obituaries_ga_id ) {
+			$obituaries_ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => self::OBITUARIES_GA_NAME ] );
+		}
+		$letters_to_editor_ga_id = $this->cap_logic->get_guest_author_by_display_name( self::LETTERS_TO_EDITOR_GA_NAME );
+		if ( ! $letters_to_editor_ga_id ) {
+			$letters_to_editor_ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => self::LETTERS_TO_EDITOR_GA_NAME ] );
+		}
+
 
 		WP_CLI::log( "Fetching Post IDs..." );
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
@@ -847,7 +869,33 @@ HTML;
 
 			// Skip some specific dev IDs.
 			if ( in_array( $post_id, [ 410385 ] ) ) {
-				WP_CLI::log( "skipping this specific ID" );
+				WP_CLI::log( "skipping DEV ID" );
+				continue;
+			}
+
+			// Get if this post used to be a CPT.
+			$was_cpt = get_post_meta( $post_id, self::META_VTD_CPT, true );
+
+			// Assign specific GAs to ex CPTs.
+			if ( $was_cpt && ( self::OBITUARY_CPT == $was_cpt ) ) {
+				$this->cap_logic->assign_guest_authors_to_post( [ $obituaries_ga_id ], $post_id);
+				$this->logger->log( $logs[ 'post_ids_obituaries' ], sprintf( "OBITUARY post_id=%d", $post_id ), true );
+				continue;
+			} elseif ( $was_cpt && ( self::LETTERS_TO_EDITOR_CPT == $was_cpt ) ) {
+				$this->cap_logic->assign_guest_authors_to_post( [ $letters_to_editor_ga_id ], $post_id );
+				$this->logger->log( $logs['post_ids_letters_to_editor'], sprintf( "LETTERS_TO_EDITOR post_id=%d", $post_id ), true );
+				continue;
+			}
+			//
+			// WIP -- for now just log and skip those CPTs we don't know how to handle yet. Answers will come soon and this part will be refined.
+			//
+			elseif ( $was_cpt && ( self::NEWSBRIEF_CPT == $was_cpt ) ) {
+				$this->logger->log( $logs['post_ids_was_newsbrief_not_assigned'], sprintf( "NEWSBRIEF post_id=%d", $post_id ), true );
+				WP_CLI::log( 'skipping' );
+				continue;
+			} elseif ( $was_cpt && ( self::LIVEBLOG_CPT == $was_cpt ) ) {
+				$this->logger->log( $logs['post_ids_was_liveblog_not_assigned'], sprintf( "LIVEBLOG post_id=%d", $post_id ), true );
+				WP_CLI::log( 'skipping' );
 				continue;
 			}
 
