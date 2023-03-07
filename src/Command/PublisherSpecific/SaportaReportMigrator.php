@@ -72,7 +72,31 @@ class SaportaReportMigrator implements InterfaceCommand {
 			'newspack-content-migrator saporta-report-migrate-galleries',
 			[ $this, 'cmd_migrate_galleries' ],
 			[
-				'shortdesc' => 'Migrate Photonic Galleries to Co-Authors Plus.',
+				'shortdesc' => 'Migrate Photonic Galleries to Jetpack Tilled Galleries and Slideshows.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator saporta-report-migrate-authors',
+			[ $this, 'cmd_migrate_authors' ],
+			[
+				'shortdesc' => 'Migrate authors to Co-Authors Plus.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -177,5 +201,114 @@ class SaportaReportMigrator implements InterfaceCommand {
 
 			update_post_meta( $post->ID, '_newspack_migration_gallery_migrated_', true );
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator saporta-report-migrate-authors`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_migrate_authors( $args, $assoc_args ) {
+		$log_file        = 'saporta_report_migrate_authors.log';
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 2000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			$this->logger->log( $log_file, 'Co-Authors Plus plugin not found. Install and activate it before using this command.', Logger::ERROR );
+			return;
+		}
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migration_authors_migrated_',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post_id ) {
+			$author_type_meta = get_post_meta( $post_id, 'BS_author_type', true );
+			if ( 'BS_author_is_guest' === $author_type_meta ) {
+				$author_type_meta        = get_post_meta( $post_id, 'BS_guest_author_name', true );
+				$author_name_meta        = get_post_meta( $post_id, 'BS_guest_author_name', true );
+				$author_description_meta = $this->get_author_meta_by_author_name( $author_name_meta, 'BS_guest_author_description' );
+				$author_image_id_meta    = $this->get_author_meta_by_author_name( $author_name_meta, 'BS_guest_author_image_id' );
+				$author_url_meta         = $this->get_author_meta_by_author_name( $author_name_meta, 'BS_guest_author_url' );
+
+				try {
+					$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+						[
+							'display_name' => $author_name_meta,
+							'website'      => $author_url_meta,
+							'description'  => $author_description_meta,
+							'avatar'       => $author_image_id_meta,
+						]
+					);
+
+					if ( is_wp_error( $guest_author_id ) ) {
+						$this->logger->log( $log_file, sprintf( "Could not create GA full name '%s' (from the post %d): %s", $author_name_meta, $post_id, $guest_author_id->get_error_message() ), Logger::WARNING );
+						continue;
+					}
+
+					// Set original ID.
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post_id );
+					$this->logger->log( $log_file, sprintf( 'Assigning the post %d a new co-author: %s', $post_id, $author_name_meta ), Logger::SUCCESS );
+				} catch ( \Exception $e ) {
+					$this->logger->log( $log_file, sprintf( "Could not create GA full name '%s' (from the post %d): %s", $author_name_meta, $post_id, $e->getMessage() ), Logger::WARNING );
+				}
+			}
+
+			update_post_meta( $post_id, '_newspack_migration_authors_migrated_', true );
+		}
+	}
+
+	/**
+	 * Try to find filled author meta value based on author's name.
+	 *
+	 * @param string $author_name_meta Author display name.
+	 * @param string $meta_key Author meta to get.
+	 * @return string
+	 */
+	private function get_author_meta_by_author_name( $author_name_meta, $meta_key ) {
+		global $wpdb;
+		// Get all author's posts to get the meta from one of them.
+		$raw_author_post_ids = $wpdb->get_results( $wpdb->prepare( "SELECT DISTINCT(post_id) FROM {$wpdb->postmeta} WHERE meta_value = %s", $author_name_meta ), \ARRAY_A );
+		$author_post_ids     = array_map( 'intval', array_map( 'current', array_values( $raw_author_post_ids ) ) );
+
+		// Get the meta value when filled.
+		$post_id_placeholders = implode( ', ', array_fill( 0, count( $author_post_ids ), '%d' ) );
+		$meta_values          = $wpdb->get_results( $wpdb->prepare( "SELECT DISTINCT(meta_value) FROM {$wpdb->postmeta} WHERE post_id IN ($post_id_placeholders) AND meta_key = %s", array_merge( $author_post_ids, [ $meta_key ] ) ) ); //phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		foreach ( $meta_values as $meta ) {
+			if ( ! empty( $meta->meta_value ) ) {
+				return $meta->meta_value;
+			}
+		}
+
+		return '';
 	}
 }

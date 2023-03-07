@@ -19,6 +19,7 @@ class Logger {
 	const WARNING = 'warning';
 	const LINE    = 'line';
 	const SUCCESS = 'success';
+	const ERROR   = 'error';
 
 	/**
 	 * Determine the writeable directory used for storing logs created by migration commands.
@@ -45,6 +46,9 @@ class Logger {
 				    break;
 				case ( self::WARNING ):
 					WP_CLI::warning( $message );
+		            break;
+				case ( self::ERROR ):
+					WP_CLI::error( $message );
 		            break;
 				case ( self::LINE ):
 				default:
