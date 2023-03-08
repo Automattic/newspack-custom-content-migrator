@@ -1175,24 +1175,24 @@ HTML;
 	public function create_ga_from_acf_author( string $author_name, array $acf_author_meta ) {
 		// Compose $media_link for bio.
 		$media_link = '';
-		if ( $acf_author_meta['vtd_social_media_handle'] && $acf_author_meta['vtd_social_media_link'] ) {
+		if ( isset( $acf_author_meta['vtd_social_media_handle'] ) && ! empty( $acf_author_meta['vtd_social_media_handle'] ) && isset( $acf_author_meta['vtd_social_media_link'] ) && ! empty( $acf_author_meta['vtd_social_media_link'] ) ) {
 			// $media_link is a <a> element if both handle and link given.
 			$media_link = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a>", $acf_author_meta['vtd_social_media_link'], $acf_author_meta['vtd_social_media_handle'] );
-		} elseif ( $acf_author_meta['vtd_social_media_link'] ) {
+		} elseif ( isset( $acf_author_meta['vtd_social_media_link'] ) && ! empty( $acf_author_meta['vtd_social_media_link'] ) ) {
 			// $media_link is a <a> element if just link given.
 			$media_link = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a>", $acf_author_meta['vtd_social_media_link'], $acf_author_meta['vtd_social_media_link'] );
-		} elseif ( $acf_author_meta['vtd_social_media_handle'] ) {
+		} elseif ( isset( $acf_author_meta['vtd_social_media_handle'] ) && ! empty( $acf_author_meta['vtd_social_media_handle'] ) ) {
 			// $media_link text.
 			$media_link = $acf_author_meta['vtd_social_media_handle'];
 		}
 
 		// Compose GA description.
 		// Start with the title.
-		$description = $acf_author_meta['vtd_title'] ? $acf_author_meta['vtd_title'] . '. ' : '';
+		$description = ( isset( $acf_author_meta['vtd_title'] ) && ! empty( $acf_author_meta['vtd_title'] ) ) ? $acf_author_meta['vtd_title'] . '. ' : '';
 		// Add media link.
 		$description .= $media_link ? $media_link . ' ' : '';
 		// Add bio.
-		$description .= $acf_author_meta['vtd_bio'] ? $acf_author_meta['vtd_bio'] : '';
+		$description .= ( isset( $acf_author_meta['vtd_bio'] ) && ! empty( $acf_author_meta['vtd_bio'] ) ) ? $acf_author_meta['vtd_bio'] : '';
 
 		// Leaving out:
 		// 'office_phone', 'cell_phone', 'google_phone', 'vtd_department' (e.g. vtd_department e.g. a:1:{i:0;s:8:"newsroom";})
