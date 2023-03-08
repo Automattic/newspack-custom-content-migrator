@@ -38,6 +38,9 @@ class VTDiggerMigrator implements InterfaceCommand {
 	// This postmeta will tell us which CPT this post was originally, e.g. 'liveblog'.
 	const META_VTD_CPT = 'newspack_vtd_cpt';
 
+	// This postmeta will tell us if authors have already been migrated for this post.
+	const META_AUTHORS_MIGRATED = 'newspack_vtd_authors_migrated';
+
 	/**
 	 * @var null|InterfaceCommand Instance.
 	 */
@@ -831,6 +834,7 @@ HTML;
 		global $wpdb;
 
 		$logs = [
+			'previously_migrated_skipping'                  => 'vtd_authors__previously_migrated_skipping.log',
 			'created_gas_from_acf'                          => 'vtd_authors__created_gas_from_acf.log',
 			'created_gas_from_wpusers'                      => 'vtd_authors__created_gas_from_wpusers.log',
 			'post_ids_obituaries'                           => 'vtd_authors__post_ids_obituaries.log',
@@ -863,7 +867,7 @@ HTML;
 
 		WP_CLI::log( "Fetching Post IDs..." );
 		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-		// $post_ids = [382132,]; // DEV test.
+		// $post_ids = [386951,]; // DEV test.
 
 		// Loop through all posts and create&assign GAs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -875,16 +879,24 @@ HTML;
 				continue;
 			}
 
+			// Skip if already imported.
+			if ( get_post_meta( $post_id, self::META_AUTHORS_MIGRATED, true ) ) {
+				$this->logger->log( $logs[ 'previously_migrated_skipping' ], sprintf( "PREVIOUSLY_MIGRATED_SKIPPING post_id=%d", $post_id ), true );
+				continue;
+			}
+
 			// Get if this post used to be a CPT.
 			$was_cpt = get_post_meta( $post_id, self::META_VTD_CPT, true );
 
 			// Assign specific GAs to ex CPTs.
 			if ( $was_cpt && ( self::OBITUARY_CPT == $was_cpt ) ) {
 				$this->cap_logic->assign_guest_authors_to_post( [ $obituaries_ga_id ], $post_id);
+				update_post_meta( $post_id, self::META_AUTHORS_MIGRATED, true );
 				$this->logger->log( $logs[ 'post_ids_obituaries' ], sprintf( "OBITUARY post_id=%d", $post_id ), true );
 				continue;
 			} elseif ( $was_cpt && ( self::LETTERS_TO_EDITOR_CPT == $was_cpt ) ) {
 				$this->cap_logic->assign_guest_authors_to_post( [ $letters_to_editor_ga_id ], $post_id );
+				update_post_meta( $post_id, self::META_AUTHORS_MIGRATED, true );
 				$this->logger->log( $logs['post_ids_letters_to_editor'], sprintf( "LETTERS_TO_EDITOR post_id=%d", $post_id ), true );
 				continue;
 			}
@@ -893,11 +905,11 @@ HTML;
 			//
 			elseif ( $was_cpt && ( self::NEWSBRIEF_CPT == $was_cpt ) ) {
 				$this->logger->log( $logs['post_ids_was_newsbrief_not_assigned'], sprintf( "NEWSBRIEF post_id=%d", $post_id ), true );
-				WP_CLI::log( 'skipping' );
+				WP_CLI::log( 'not sure how to handle this CPT, skipping for now' );
 				continue;
 			} elseif ( $was_cpt && ( self::LIVEBLOG_CPT == $was_cpt ) ) {
 				$this->logger->log( $logs['post_ids_was_liveblog_not_assigned'], sprintf( "LIVEBLOG post_id=%d", $post_id ), true );
-				WP_CLI::log( 'skipping' );
+				WP_CLI::log( 'not sure how to handle this CPT, skipping for now' );
 				continue;
 			}
 
@@ -905,6 +917,7 @@ HTML;
 			$existing_ga_ids = $this->cap_logic->get_posts_existing_ga_ids( $post_id );
 			if ( ! empty( $existing_ga_ids ) ) {
 				$this->logger->log( $logs['already_assigned_gas_post_ids_pre_authornames'], sprintf( "HAS_GAs post_id=%d", $post_id ), true );
+				update_post_meta( $post_id, self::META_AUTHORS_MIGRATED, true );
 				continue;
 			}
 
@@ -967,11 +980,8 @@ HTML;
 						 * 2/2 Next try and create GA from WP User with this display_name.
 						 */
 						if ( is_null( $ga_id ) ) {
-							$ga_id = $this->create_ga_from_wp_user( $author_name );
-							// Success.
-							if ( ! is_null( $ga_id ) ) {
-								$this->logger->log( $logs['created_gas_from_wpusers'], sprintf( "CREATED_FROM_WPUSER ga_id=%d name='%s' post_id=%d linked_wp_user_id=%d", $ga_id, $author_name, $post_id, $wp_user_row['ID'] ), true );
-							}
+							$ga_id = $this->create_ga_from_wp_user( $post_id, $author_name, $logs['created_gas_from_wpusers'] );
+
 						}
 					}
 
@@ -997,7 +1007,7 @@ HTML;
 					)
 				);
 				if ( $author_name ) {
-					$ga_id = $this->create_ga_from_wp_user( $author_name );
+					$ga_id = $this->create_ga_from_wp_user( $post_id, $author_name, $logs['created_gas_from_wpusers'] );
 					if ( $ga_id ) {
 						$ga_ids[] = $ga_id;
 					}
@@ -1017,6 +1027,7 @@ HTML;
 			$new_ga_ids = array_unique( array_merge( $existing_ga_ids, $ga_ids ) );
 			if ( $existing_ga_ids != $new_ga_ids ) {
 				$this->cap_logic->assign_guest_authors_to_post( $new_ga_ids, $post_id );
+				update_post_meta( $post_id, self::META_AUTHORS_MIGRATED, true );
 				$this->logger->log( $logs['assigned_gas_post_ids'], sprintf( "NEWLY_ASSIGNED_GAS post_id=%d ga_ids=%s", $post_id, implode( ',', $new_ga_ids ) ), true );
 			} elseif ( ! empty( $existing_ga_ids ) ) {
 				$this->logger->log( $logs['already_assigned_gas_post_ids'], sprintf( "ALREADY_ASSIGNED post_id=%d ga_ids=%s", $post_id, implode( ',', $new_ga_ids ) ), true );
@@ -1033,11 +1044,13 @@ HTML;
 	/**
 	 * Creates GA from WP User with display_name or user_nicename same as $author_name.
 	 *
+	 * @param int    $post_id     Post ID being processed (for logging).
 	 * @param string $author_name Display name.
+	 * @param string $log         Log file name.
 	 *
 	 * @return int|null GA ID or null.
 	 */
-	public function create_ga_from_wp_user( string $author_name ) {
+	public function create_ga_from_wp_user( int $post_id, string $author_name, string $log ) {
 		global $wpdb;
 
 		// Try and get WP user with display_name.
@@ -1061,7 +1074,22 @@ HTML;
 
 			// Get $author_name from display_name.
 			if ( $wp_user_row ) {
-				$author_name = $wp_user_row['display_name'];
+
+				/**
+				 * Handle exceptions manually.
+				 */
+				// This user has 'Commentary' for display_name, let's not use that.
+				if ( 'opinion' == $wp_user_row['user_nicename'] ) {
+					$author_name = 'Opinion';
+				} elseif ( 'stacey1' == $wp_user_row['user_nicename'] ) {
+					// This is a weird one. This user has 'stacey 2' for display_name, let's not use that.
+					$author_name = 'stacey1';
+				} elseif ( 'ben-heintz' == $wp_user_row['user_nicename'] ) {
+					// This user has 'Underground Workshop' for display_name, let's not use that.
+					$author_name = 'Ben Heintz';
+				} else {
+					$author_name = $wp_user_row['display_name'];
+				}
 			}
 		}
 
@@ -1077,7 +1105,18 @@ HTML;
 
 			// Get $author_name from display_name.
 			if ( $wp_user_row ) {
-				$author_name = $wp_user_row['display_name'];
+				/**
+				 * Handle exceptions manually.
+				 */
+				// This user has 'Underground Workshop' for display_name, let's not use that.
+				if ( 'Ben Heintz' == $wp_user_row['user_login'] ) {
+					$author_name = 'Ben Heintz';
+				} elseif ( 'Ben Opinion' == $wp_user_row['user_login'] ) {
+					// This user has 'Commentary' for display_name, let's not use that.
+					$author_name = 'Opinion';
+				} else {
+					$author_name = $wp_user_row['display_name'];
+				}
 			}
 		}
 
@@ -1121,6 +1160,8 @@ HTML;
 		// Link to WP User.
 		$wp_user = get_user_by( 'ID', $wp_user_row['ID'] );
 		$this->cap_logic->link_guest_author_to_wp_user( $ga_id, $wp_user );
+
+		$this->logger->log( $log, sprintf( "CREATED_FROM_WPUSER ga_id=%d name='%s' post_id=%d linked_wp_user_id=%d", $ga_id, $author_name, $post_id, $wp_user_row['ID'] ), true );
 
 		return $ga_id;
 	}
