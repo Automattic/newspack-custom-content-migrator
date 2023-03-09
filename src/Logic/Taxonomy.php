@@ -79,4 +79,36 @@ class Taxonomy {
 
 		return $wpdb->get_var( $wpdb->prepare( "UPDATE {$wpdb->term_relationships} SET term_taxonomy_id = %d WHERE term_taxonomy_id = %d ;", $new_term_taxonomy_id, $old_term_taxonomy_id ) );
 	}
+
+	/**
+	 * Returns the list of term_taxonomy_id's which have count values
+	 * that don't match real values in wp_term_relationships.
+	 *
+	 * @return stdClass[]
+	 */
+	public function get_unsynced_taxonomy_rows() {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			"SELECT 
+	            tt.term_taxonomy_id, 
+       			t.term_id,
+       			t.name,
+       			t.slug,
+       			tt.taxonomy,
+	            tt.count, 
+	            IFNULL( sub.counter, 0 ) as real_count 
+			FROM $wpdb->term_taxonomy tt LEFT JOIN (
+			    SELECT 
+			           term_taxonomy_id, 
+			           COUNT(object_id) as real_count 
+			    FROM $wpdb->term_relationships 
+			    GROUP BY term_taxonomy_id
+			    ) as sub 
+			ON tt.term_taxonomy_id = sub.term_taxonomy_id 
+			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
+			WHERE tt.count <> IFNULL( sub.counter, 0 ) 
+			  AND tt.taxonomy IN ('category', 'post_tag')"
+		);
+	}
 }
