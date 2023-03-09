@@ -97,7 +97,7 @@ class Taxonomy {
        			t.slug,
        			tt.taxonomy,
 	            tt.count, 
-	            IFNULL( sub.counter, 0 ) as real_count 
+	            IFNULL( sub.real_count, 0 ) as real_count 
 			FROM $wpdb->term_taxonomy tt LEFT JOIN (
 			    SELECT 
 			           term_taxonomy_id, 
@@ -107,7 +107,7 @@ class Taxonomy {
 			    ) as sub 
 			ON tt.term_taxonomy_id = sub.term_taxonomy_id 
 			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
-			WHERE tt.count <> IFNULL( sub.counter, 0 ) 
+			WHERE tt.count <> IFNULL( sub.real_count, 0 )";
 			  AND tt.taxonomy IN ('category', 'post_tag')"
 		);
 	}
