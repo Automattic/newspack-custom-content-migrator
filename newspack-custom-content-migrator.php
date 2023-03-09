@@ -64,6 +64,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\ElLiberoMigrator::class,
 		Command\PublisherSpecific\NoozhawkMigrator::class,
 		Command\PublisherSpecific\CharlottesvilleTodayMigrator::class,
+		Command\PublisherSpecific\ChulaVistaMigrator::class,
 		Command\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
 		Command\PublisherSpecific\SearchLightNMMigrator::class,
