@@ -84,31 +84,48 @@ class Taxonomy {
 	 * Returns the list of term_taxonomy_id's which have count values
 	 * that don't match real values in wp_term_relationships.
 	 *
+	 * @param string[] $taxonomies Taxonomies to check.
+	 * @param string   $order_by   Order by column.
+	 * @param string   $order_direction Order direction.
 	 * @return stdClass[]
 	 */
-	public function get_unsynced_taxonomy_rows() {
+	public function get_unsynced_taxonomy_rows( array $taxonomies, string $order_by = 'real_count', string $order_direction = 'DESC' ) {
 		global $wpdb;
 
-		return $wpdb->get_results(
+		$from_table = "$wpdb->term_taxonomy as tt";
+
+		if ( ! empty( $taxonomies ) ) {
+			$from_table = "( SELECT * FROM $wpdb->term_taxonomy WHERE taxonomy IN ( "
+			          . implode( ', ', array_fill( 0, count( $taxonomies ), '%s' ) )
+			          . ') ) as tt';
+		}
+
+		$query =
 			"SELECT 
-	            tt.term_taxonomy_id, 
-       			t.term_id,
-       			t.name,
-       			t.slug,
-       			tt.taxonomy,
-	            tt.count, 
-	            IFNULL( sub.real_count, 0 ) as real_count 
-			FROM $wpdb->term_taxonomy tt LEFT JOIN (
-			    SELECT 
-			           term_taxonomy_id, 
-			           COUNT(object_id) as real_count 
-			    FROM $wpdb->term_relationships 
-			    GROUP BY term_taxonomy_id
-			    ) as sub 
-			ON tt.term_taxonomy_id = sub.term_taxonomy_id 
-			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
-			WHERE tt.count <> IFNULL( sub.real_count, 0 )";
-			  AND tt.taxonomy IN ('category', 'post_tag')"
+       			* 
+			FROM ( 
+			    SELECT
+					tt.term_taxonomy_id, 
+					t.term_id,
+					t.name,
+					t.slug,
+					tt.taxonomy,
+					tt.count, 
+					IFNULL( sub.real_count, 0 ) as real_count 
+				FROM $from_table LEFT JOIN (
+					SELECT 
+				       term_taxonomy_id, 
+				       COUNT(object_id) as real_count 
+					FROM $wpdb->term_relationships 
+					GROUP BY term_taxonomy_id
+				) as sub ON tt.term_taxonomy_id = sub.term_taxonomy_id 
+				LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
+				WHERE tt.count <> IFNULL( sub.real_count, 0 )
+            ) as sub2
+			ORDER BY sub2.$order_by $order_direction";
+
+		return $wpdb->get_results(
+			$wpdb->prepare( $query, ...$taxonomies )
 		);
 	}
 }
