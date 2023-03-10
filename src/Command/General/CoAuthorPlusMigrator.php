@@ -294,6 +294,22 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-meta-to-guest-authors',
+			[ $this, 'cmd_meta_to_guest_authors' ], 
+			[
+				'shortdesc' => "Converts meta value with specified key to Guest Authors, in the following way -- Checks each post with that meta key and determines whether the meta value is different than the current author. If so, it creates or finds the guest author and assigns it to the post. It completely overwrites the existing list of authors for these Posts.",
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'meta_key',
+						'description' => 'The meta key to use for guest author assignment.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+				),
+			]
+		);
 	}
 
 	/**
@@ -874,6 +890,128 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for the 'co-authors-meta-to-guest-authors' command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_meta_to_guest_authors( $args, $assoc_args ) {
+		$this->require_cap_plugin();
+
+		$meta_key = $assoc_args['meta_key'];
+		
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			'meta_key'       => $meta_key,
+			'meta_value'     => '',
+			'meta_compare'   => '!='
+		] );
+
+		if ( empty( $posts ) ) {
+			WP_CLI::error( sprintf( 'No posts found with meta_key "%s%', $meta_key ) );
+		}
+
+		foreach ( $posts as $post ) {
+			$coauthors      = get_coauthors( $post->ID );
+			$current_author = get_the_author_meta( 'display_name', $post->post_author );
+			$byline_author  = get_post_meta( $post->ID, $meta_key, true );
+
+			if ( empty( $byline_author ) ) {
+				WP_CLI::warning( sprintf(
+					'No byline author found in meta for post: %s (%d). Skipping.',
+					$post->post_title,
+					$post->ID
+				) );
+				continue;
+			}
+
+			if ( strtolower( $current_author ) === strtolower( $byline_author ) ) {
+				WP_CLI::warning( sprintf(
+					'Author %s is already assigned to post: %s (%d)',
+					$byline_author,
+					$post->post_title,
+					$post->ID
+				) );
+				continue;
+			}
+
+			// Check if any guest authors are already the byline author.
+			$author_already_set = false;
+			foreach ( $coauthors as $coauthor ) {
+				if ( strtolower( $byline_author ) === strtolower( $coauthor->display_name ) ) {
+					WP_CLI::warning( sprintf(
+						'Author %s is already assigned to post: %s (%d)',
+						$byline_author,
+						$post->post_title,
+						$post->ID
+					) );
+					$author_already_set = true;
+					break;
+				}
+			}
+			if ( $author_already_set ) {
+				continue;
+			}
+
+			WP_CLI::warning( sprintf(
+				'Assigning %s for post %s (%d) instead of %s',
+				$byline_author,
+				$post->post_title,
+				$post->ID,
+				$current_author
+			) );
+
+			$guest_author = false;
+
+			// Get co-author author if exists.
+			$possible_guest_authors = $this->coauthorsplus_logic->coauthors_plus->search_authors( $byline_author );
+			foreach ( $possible_guest_authors as $possible_guest_author ) {
+				if ( strtolower( $possible_guest_author->display_name ) === strtolower( $byline_author ) ) {
+					WP_CLI::warning( sprintf(
+						'Found existing guest author %s',
+						$possible_guest_author->display_name
+					) );
+					$guest_author = $possible_guest_author;
+					break;
+				}
+			}
+
+			// Check by username.
+			if ( ! $guest_author ) {
+				$author_username = sanitize_title( $byline_author );
+				$potential_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_login', $author_username, true );
+				if ( $potential_author ) {
+					$guest_author = $potential_author;
+				}
+			}
+
+			if ( ! $guest_author ) {
+				WP_CLI::warning( 'Creating guest author: ' . $byline_author );
+				$author_data = [ 
+					'display_name' => $byline_author, 
+					'user_login'   => sanitize_title( $byline_author ) 
+				];
+				$author_id    = $this->coauthorsplus_logic->create_guest_author( $author_data );
+				if ( ! $author_id ) {
+					WP_CLI::error( sprintf(
+						'Failed to create guest author: %s',
+						$byline_author
+					) );
+				}
+				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id(  $author_id );
+			}
+
+			$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $post->ID, [ $guest_author->user_nicename ] );
+			WP_CLI::warning( sprintf(
+				'Added guest author to post %d',
+				$post->ID
+			) );
+		}
+		
+		WP_CLI::success( 'Done!' );
 	}
 
 	/**
