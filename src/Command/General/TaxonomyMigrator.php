@@ -287,6 +287,49 @@ class TaxonomyMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator get-unsynced-taxonomies',
+			[ $this, 'cmd_get_unsynced_taxonomies' ],
+			[
+				'shortdesc' => 'Get a list of taxonomies that are not synced with the wp_term_taxonomy table.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'taxonomy',
+						'description' => 'Comma-seperated list of taxonomies to check. If not provided, all taxonomies will be checked.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'  	  => 'order-by',
+						'description' => 'Order by specific column. Default is real_count.',
+						'optional'    => true,
+						'default'     => 'real_count',
+						'options'     => [
+							'term_taxonomy_id',
+							'term_id',
+							'name',
+							'slug',
+							'count',
+							'taxonomy',
+							'real_count',
+						],
+					],
+					[
+						'type'        => 'assoc',
+						'name'  	  => 'order-direction',
+						'description' => 'Order direction. Default is DESC.',
+						'optional'    => true,
+						'default'     => 'DESC',
+						'options'     => [
+							'ASC',
+							'DESC',
+						],
+					]
+				],
+			]
+		);
 	}
 
 	/**
@@ -660,6 +703,34 @@ class TaxonomyMigrator implements InterfaceCommand {
 		WP_CLI::line( "Deleted wp_term_relationships rows: $term_relationship_rows_deleted" );
 		WP_CLI::line( "Deleted wp_term_taxonomy rows: $term_taxonomy_rows_deleted" );
 		WP_CLI::line( "Deleted wp_terms rows: $term_rows_deleted" );
+	}
+
+	public function cmd_get_unsynced_taxonomies( $args, $assoc_args ) {
+		$taxonomies = [];
+
+		if ( ! is_null( $assoc_args['taxonomy'] ) ) {
+			$taxonomies = explode( ',', $assoc_args['taxonomy'] );
+		}
+
+		$unsynced_taxonomies = $this->taxonomy_logic->get_unsynced_taxonomy_rows(
+			$taxonomies,
+			$assoc_args['order-by'],
+			$assoc_args['order-direction']
+		);
+
+		WP_CLI\Utils\format_items(
+			'table',
+			$unsynced_taxonomies,
+			[
+				'term_taxonomy_id',
+				'term_id',
+				'name',
+				'slug',
+				'taxonomy',
+				'count',
+				'real_count',
+			]
+		);
 	}
 
 	/**
