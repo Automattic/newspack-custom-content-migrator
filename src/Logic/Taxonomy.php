@@ -92,14 +92,15 @@ class Taxonomy {
 			"SELECT 
 			t.slug, 
 			GROUP_CONCAT( DISTINCT tt.taxonomy ORDER BY tt.taxonomy SEPARATOR ', ' ) as taxonomies,
+			GROUP_CONCAT( 
+			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy ) 
+			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  ' 
+			    ) as 'term_id:term_taxonomy_id:taxonomy',
 			COUNT( DISTINCT tt.term_id ) as term_id_count, 
 			COUNT( DISTINCT tt.term_taxonomy_id ) as term_taxonomy_id_count
 			FROM $wpdb->terms t
-			LEFT JOIN (
-			    SELECT * FROM $wpdb->term_taxonomy
-			    WHERE taxonomy IN ('category', 'post_tag')
-			) as tt on t.term_id = tt.term_id
-			GROUP BY t.slug
+			LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+			GROUP BY t.slug, tt.term_id
 			HAVING term_taxonomy_id_count > 1
 			ORDER BY term_taxonomy_id_count DESC"
 		);
