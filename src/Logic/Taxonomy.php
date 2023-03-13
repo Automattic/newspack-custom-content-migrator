@@ -134,7 +134,7 @@ class Taxonomy {
 			          . ' )';
 		}
 
-		$query .= ' ORDER BY t.term_id';
+		$query .= ' ORDER BY t.term_id, tt.term_taxonomy_id ASC';
 
 		return $wpdb->get_results(
 			$wpdb->prepare(
