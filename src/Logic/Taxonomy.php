@@ -110,27 +110,36 @@ class Taxonomy {
 	 * Gets terms and taxonomies by slug.
 	 *
 	 * @param string $slug Slug.
+	 * @param array  $taxonomies Taxonomies.
 	 *
 	 * @return array
 	 */
-	public function get_terms_and_taxonomies_by_slug( string $slug ) {
+	public function get_terms_and_taxonomies_by_slug( string $slug, array $taxonomies = [ 'category', 'post_tag' ] ) {
 		global $wpdb;
 
-		return $wpdb->get_results(
-			$wpdb->prepare(
-				'SELECT 
+		$query = "SELECT 
 	                t.term_id, 
 	                t.name, t.slug, 
 	                tt.term_taxonomy_id, 
 	                tt.taxonomy, 
 	                tt.parent, 
 	                tt.count 
-				FROM wp_terms t
-				INNER JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
-				WHERE t.slug = %s
-				AND tt.taxonomy IN ( "category", "post_tag" )
-				ORDER BY t.term_id',
-				$slug
+				FROM $wpdb->terms t
+				INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+				WHERE t.slug = %s";
+
+		if ( ! empty( $taxonomies ) ) {
+			$query .= 'AND tt.taxonomy IN ( '
+			          . implode(',', array_fill( 0, count( $taxonomies ), '%s' ) )
+			          . ' )';
+		}
+
+		$query .= ' ORDER BY t.term_id';
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				$query,
+				array_merge( [ $slug ], $taxonomies )
 			)
 		);
 	}
