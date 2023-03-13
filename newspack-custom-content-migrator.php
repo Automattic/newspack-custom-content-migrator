@@ -78,5 +78,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\IndyWeekMigrator::class,
 		Command\PublisherSpecific\Moco360Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
+		Command\PublisherSpecific\MusicallyMigrator::class,
 	)
 );
