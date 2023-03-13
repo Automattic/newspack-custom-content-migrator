@@ -841,8 +841,10 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 			WP_CLI\Utils\format_items( 'table', [ $duplicate_slug ], array_keys( (array) $duplicate_slug ) );
 
+			$duplicate_slug->taxonomies = explode( ', ', $duplicate_slug->taxonomies );
+
 			if ( $interactive ) {
-				$terms = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $duplicate_slug->slug );
+				$terms = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
 
 				WP_CLI\Utils\format_items( 'table', $terms, array_keys( (array) $terms[0] ) );
 
@@ -869,8 +871,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 				$this->output( 'Invalid response. Skipping...' );
 				continue;
 			}
-
-			$duplicate_slug->taxonomies = explode( ', ', $duplicate_slug->taxonomies );
 
 			if ( $duplicate_slug->term_id_count > 1 ) {
 				// Multiple terms with the same slug.
@@ -919,14 +919,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @param array  $taxonomies The taxonomy of the slug.
 	 */
 	public function split_duplicate_term_slug( string $slug, array $taxonomies ) {
-		// Get all term_taxonomy_ids with the same slug.
-		$taxonomic_records = get_terms(
-			[
-				'taxonomy'   => $taxonomies,
-				'hide_empty' => false,
-				'slug'       => $slug,
-			]
-		);
+		$taxonomic_records = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $slug, $taxonomies );
 
 		// Get the first term_taxonomy_id, which will remain the original slug.
 		$main_term_taxonomy_id = array_shift( $taxonomic_records );
@@ -947,7 +940,12 @@ class TaxonomyMigrator implements InterfaceCommand {
 			);
 
 			if ( is_int( $result ) ) {
-				$new_term_id = term_exists( $new_slug );
+				$new_term_id = $wpdb->get_var( "SELECT term_id FROM $wpdb->terms WHERE slug = '$new_slug'" );
+
+				if ( ! is_numeric( $new_term_id ) ) {
+					WP_CLI::error( 'Could not get new term_id.' );
+					return;
+				}
 
 				$wpdb->update(
 					$wpdb->term_taxonomy,
