@@ -139,6 +139,108 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			]
 		);
 
+		\WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-fix-authors',
+			[ $this, 'cmd_fix_authors' ],
+			[
+				'shortdesc' => 'Fixes authors on posts that have imported without one.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
+			]
+		);
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-fix-authors`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_authors( $args, $assoc_args ) {
+		$this->log( 'Importing Newsroom NZ articles...' );
+
+		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
+			$this->dryrun = true;
+			$this->log( 'Performing a dry-run. No changes will be made.' );
+		}
+
+		global $wpdb;
+		$posts = $wpdb->get_results( "SELECT ID FROM {$wpdb->prefix}posts WHERE post_author = '0' AND post_type = 'post'" );
+		if ( ! $posts || empty( $posts ) ) {
+			$this->log( 'No posts found to process', 'error' );
+		}
+
+		// Convert the array of objects into a simple array of integer IDs.
+		$posts = array_map( function( $post ) {
+			return intval( $post->ID );
+		}, $posts );
+
+		// Go forth and fix!
+		foreach ( $posts as $post_id ) {
+			$import_data = get_post_meta( $post_id, 'newspack_nnz_import_data', true );
+
+			// Check we have the data we need.
+			if (
+				empty( $import_data ) ||
+				! is_array( $import_data ) ||
+				! array_key_exists( 'author_firstname', $import_data ) ||
+				! array_key_exists( 'author_lastname', $import_data ) ||
+				! array_key_exists( 'author_email', $import_data )
+			) {
+				$this->log(
+					sprintf(
+						'Required meta data not available for post %d',
+						$post_id
+					),
+					'warning'
+				);
+				continue;
+			}
+
+			// Attempt to get the user by email.
+			$user = get_user_by( 'email', $import_data['author_email'] );
+			if ( ! $user ) {
+				$user = get_user_by(
+					'login',
+					$this->create_username( $import_data['author_firstname'], $import_data['author_lastname'], $import_data['author_email'] )
+				);
+			}
+
+			// No user found at all, something is very wrong.
+			if ( ! $user ) {
+				$this->log(
+					sprintf(
+						'Failed to find a user for %s %s <%s> to add to post %d',
+						$import_data['author_firstname'],
+						$import_data['author_lastname'],
+						$import_data['author_email'],
+						$post_id
+					),
+					'warning'
+				);
+				continue;
+			}
+
+			// Assign the found user to the post.
+			$update = ( $this->dryrun ) ? true : wp_update_post(
+				[
+					'ID'          => $post_id,
+					'post_author' => $user->ID,
+				]
+			);
+			if ( is_wp_error( $update ) ) {
+				$this->log( sprintf( 'Failed to update post %d with author %d', $post_id, $user->id ), 'warning' );
+			} else {
+				$this->log( sprintf( 'Added user %d to post %d', $user->ID, $post_id ), 'success' );
+			}
+		}
 	}
 
 	/**
@@ -182,7 +284,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$post_id = $this->import_post( $article );
 
 			// Add the original data to the post as meta.
-			if ( ! is_wp_error( $post_id ) && ! $this->dryrun ) {
+			if ( ! $this->dryrun ) {
 				add_post_meta( $post_id, self::META_PREFIX . 'import_data', $article );
 			}
 
@@ -392,22 +494,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		} else {
 
 			// Create a username.
-			$username = [];
-			if ( isset( $fields['author_firstname'] ) && ! empty( $fields['author_firstname'] ) ) {
-				$username[] = strtolower( sanitize_user( $fields['author_firstname'] ) );
-			}
-
-			if ( isset( $fields['author_lastname'] ) && ! empty( $fields['author_lastname'] ) ) {
-				$username[] = strtolower( sanitize_user( $fields['author_lastname'] ) );
-			}
-
-			// Combine first and last names to create a
-			if ( ! empty( $username ) ) {
-				$username = sanitize_user( implode( '.', $username ) );
-			} else {
-				// Fallback to generating a username from the email address.
-				$username = sanitize_user( strstr( $value, '@', true ) );
-			}
+			$username = $this->create_username( $fields['author_firstname'], $fields['author_lastname'], $value );
 
 			// Create the user.
 			$user_id = ( $this->dryrun ) ? 1 : wp_create_user(
@@ -419,6 +506,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$this->log( sprintf( 'Failed to create user for email %s', $value ), 'warning' );
 				return null;
 			}
+
 		}
 
 		return $user_id;
@@ -475,6 +563,34 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			[ $this, 'get_or_create_category' ],
 			$value['section']
 		) : [ $this->get_or_create_category( $value['section'] ) ];
+	}
+
+	/**
+	 * Create a username from author details.
+	 *
+	 * @param string $first_name The author's first name.
+	 * @param string $last_name  The author's last name.
+	 * @param string $email      The author's email address.
+	 */
+	private function create_username( $first_name, $last_name, $email ) {
+		$username = [];
+		if ( isset( $first_name ) && ! empty( $first_name ) ) {
+			$username[] = strtolower( sanitize_user( $first_name ) );
+		}
+
+		if ( isset( $last_name ) && ! empty( $last_name ) ) {
+			$username[] = strtolower( sanitize_user( $last_name ) );
+		}
+
+		// Combine first and last names to create a
+		if ( ! empty( $username ) ) {
+			$username = sanitize_user( implode( '.', $username ) );
+		} else {
+			// Fallback to generating a username from the email address.
+			$username = sanitize_user( strstr( $email, '@', true ) );
+		}
+
+		return $username;
 	}
 
 	/**
