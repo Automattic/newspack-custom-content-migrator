@@ -31,7 +31,7 @@ class ElInformadorMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-youtube-videos',
+			'newspack-content-migrator el-informador-migrate-youtube-videos',
 			[ $this, 'cmd_migrate_youtube_videos' ],
 			[
 				'shortdesc' => 'Migrates YouTube videos from postmeta table to posts.',
