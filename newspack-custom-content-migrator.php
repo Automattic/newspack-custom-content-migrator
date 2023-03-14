@@ -67,6 +67,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
 		Command\PublisherSpecific\SearchLightNMMigrator::class,
+		Command\PublisherSpecific\ElInformadorMigrator::class,
 		Command\PublisherSpecific\CalMattersMigrator::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Command\PublisherSpecific\MassterlistMigrator::class,
