@@ -287,6 +287,46 @@ class TaxonomyMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator set-posts-primary-category',
+			[ $this, 'cmd_set_posts_primary_category' ],
+			[
+				'shortdesc' => 'Set specified posts primary category.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'primary-categry-id',
+						'description' => 'term_id of primary category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'CSV post/page IDs to set their primary categories.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts per batch, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => -1,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch number, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => 1,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -349,13 +389,76 @@ class TaxonomyMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Source and destination categories are the same. No changes made.' );
 		}
 
-
 		$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
 
 		// Update category count.
 		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
 
 		wp_cache_flush();
+		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator set-posts-primary-category`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_set_posts_primary_category( $pos_args, $assoc_args ) {
+		$primary_categry_id = $assoc_args['primary-categry-id'];
+		$post_ids_csv       = isset( $assoc_args['post-ids'] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
+		$posts_per_batch    = $assoc_args['posts-per-batch'] ?? 1000;
+		$batch              = $assoc_args['batch'] ?? 1;
+
+		// Check Primary category existance.
+		$primary_categry = get_category( $primary_categry_id );
+		if ( is_null( $primary_categry ) ) {
+			WP_CLI::error( 'Wrong main category ID.' );
+		}
+
+		if ( ! $post_ids_csv ) {
+			WP_CLI::confirm( sprintf( 'This will set "%s" as primary category to all the published posts, are you sure?', $primary_categry->name ) );
+		}
+
+		$query_base = [
+			'post_type'     => 'post',
+			'post_status'   => 'any',
+			'fields'        => 'ids',
+			'no_found_rows' => true,
+		];
+
+		if ( $post_ids_csv ) {
+			$query_base['post__in'] = $post_ids_csv;
+		}
+
+		$total_query = new \WP_Query( array_merge( $query_base, [ 'posts_per_page' => -1 ] ) );
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			array_merge(
+                $query_base,
+                [
+					'paged'          => $batch,
+					'posts_per_page' => $posts_per_batch,
+				]
+            )
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post_id ) {
+			$post_categories = wp_get_post_categories( $post_id );
+			if ( ! in_array( $primary_categry_id, $post_categories ) ) {
+				WP_CLI::warning( sprintf( "Can't set '%s' as primary category for the post #%d, it needs to be set as a category to the post first.", $primary_categry->name, $post_id ) );
+				continue;
+			}
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $primary_categry_id );
+		}
+
+        wp_cache_flush();
 		WP_CLI::success( 'Done.' );
 	}
 
@@ -508,7 +611,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @param array $assoc_args WP CLI Optional arguments.
 	 */
 	public function cmd_fix_category_and_tag_count( $args, $assoc_args ) {
-
 		$dry_run = $assoc_args['dry-run'] ?? null;
 
 		if ( ! $dry_run ) {
@@ -527,7 +629,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_fix_taxonomy_count( $pos_args, $assoc_args ) {
-
 		$dry_run    = $assoc_args['dry-run'] ?? null;
 		$taxonomies = explode( ',', $assoc_args['taxonomies-csv'] ) ?? null;
 
@@ -596,11 +697,11 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		$results = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
-       				term_taxonomy_id, 
-       				term_id 
-				FROM $wpdb->term_taxonomy 
-				WHERE taxonomy = 'post_tag' 
+				"SELECT
+       				term_taxonomy_id,
+       				term_id
+				FROM $wpdb->term_taxonomy
+				WHERE taxonomy = 'post_tag'
 				  AND count <= %d",
 				$tag_limit
 			)
@@ -631,14 +732,14 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 			$term_ids           = implode( ',', $term_ids );
 			$affected_term_rows = $wpdb->get_results(
-				"SELECT 
-                    t.term_id, 
+				"SELECT
+                    t.term_id,
                     COUNT(tt.term_taxonomy_id) as counter
-				FROM $wpdb->terms t 
-				    LEFT JOIN $wpdb->term_taxonomy tt 
-				        ON t.term_id = tt.term_id 
-				WHERE t.term_id IN ($term_ids) 
-				GROUP BY t.term_id 
+				FROM $wpdb->terms t
+				    LEFT JOIN $wpdb->term_taxonomy tt
+				        ON t.term_id = tt.term_id
+				WHERE t.term_id IN ($term_ids)
+				GROUP BY t.term_id
 				HAVING counter = 0"
 			);
 
@@ -674,25 +775,25 @@ class TaxonomyMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		return $wpdb->get_results(
-			"SELECT 
-	            tt.term_taxonomy_id, 
+			"SELECT
+	            tt.term_taxonomy_id,
        			t.term_id,
        			t.name,
        			t.slug,
        			tt.taxonomy,
-	            tt.count, 
-	            sub.counter 
+	            tt.count,
+	            sub.counter
 			FROM $wpdb->term_taxonomy tt LEFT JOIN (
-			    SELECT 
-			           term_taxonomy_id, 
-			           COUNT(object_id) as counter 
-			    FROM $wpdb->term_relationships 
+			    SELECT
+			           term_taxonomy_id,
+			           COUNT(object_id) as counter
+			    FROM $wpdb->term_relationships
 			    GROUP BY term_taxonomy_id
-			    ) as sub 
-			ON tt.term_taxonomy_id = sub.term_taxonomy_id 
+			    ) as sub
+			ON tt.term_taxonomy_id = sub.term_taxonomy_id
 			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
-			WHERE sub.counter IS NOT NULL 
-			  AND tt.count <> sub.counter 
+			WHERE sub.counter IS NOT NULL
+			  AND tt.count <> sub.counter
 			  AND tt.taxonomy IN ('category', 'post_tag')"
 		);
 	}
@@ -978,8 +1079,8 @@ class TaxonomyMigrator implements InterfaceCommand {
 	public function delete_loose_terms( array $term_ids = [] ) {
 		global $wpdb;
 		$imploded_term_ids  = implode( ', ', $term_ids );
-		$loose_term_ids_sql = "SELECT * FROM $wpdb->terms t 
-    		LEFT JOIN $wpdb->term_taxonomy wtt on t.term_id = wtt.term_id 
+		$loose_term_ids_sql = "SELECT * FROM $wpdb->terms t
+    		LEFT JOIN $wpdb->term_taxonomy wtt on t.term_id = wtt.term_id
 			WHERE t.term_id IN ($imploded_term_ids) AND wtt.term_taxonomy_id IS NULL";
 		$this->output_sql( $imploded_term_ids );
 		$loose_term_ids = $wpdb->get_results( $loose_term_ids_sql );
