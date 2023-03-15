@@ -67,6 +67,15 @@ class IndyWeekMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator indyweek-fix-prints-featured-image',
+			[ $this, 'cmd_indyweek_fix_prints_featured_image' ],
+			[
+				'shortdesc' => 'Fix print editions featured images.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator indyweek-fix-puzzles-links',
 			[ $this, 'cmd_indyweek_fix_puzzles_links' ],
 			[
@@ -142,6 +151,40 @@ HTML;
 		}
 
 		WP_CLI::success( 'Done!' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator indyweek-fix-prints-featured-image`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_indyweek_fix_prints_featured_image( $args, $assoc_args ) {
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'newspack_lst_generic',
+				'post_status'    => 'publish',
+				'posts_per_page' => -1,
+				'cat'            => 40778,
+				'orderby'        => 'ID',
+				'order'          => 'ASC',
+			]
+		);
+
+		$posts = $query->get_posts();
+		array_shift( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			$fixed_index = $index + 3;
+			if ( isset( $posts[ $fixed_index ] ) ) {
+				set_post_thumbnail( $post->ID, get_post_thumbnail_id( $posts[ $fixed_index ]->ID ) );
+				WP_CLI::success( sprintf( 'Post fixed: %d', $post->ID ) );
+			} else {
+				WP_CLI::warning( sprintf( 'Post to be fixed manually: %d', $post->ID ) );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
