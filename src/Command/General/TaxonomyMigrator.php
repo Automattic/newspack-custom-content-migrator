@@ -1380,6 +1380,28 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Convenience function to remove $taxonomies property from $duplicate_slugs array.
+	 *
+	 * @param array $duplicate_slugs Array of taxonomic records with duplicate slugs.
+	 * @param bool  $show_taxonomies_column Boolean flag to show taxonomies column.
+	 *
+	 * @returns array
+	 * */
+	private function show_taxonomies_column( array $duplicate_slugs, bool $show_taxonomies_column = false ) {
+		if ( $show_taxonomies_column ) {
+			return $duplicate_slugs;
+		}
+
+		return array_map(
+			function( $duplicate_slug ) {
+				unset( $duplicate_slug->taxonomies );
+				return $duplicate_slug;
+			},
+			$duplicate_slugs
+		);
+	}
+
+	/**
 	 * Using as a sort of constructor, to initialize some class properties.
 	 *
 	 * @returns void
