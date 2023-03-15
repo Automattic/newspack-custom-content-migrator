@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use \WP_CLI;
+use \WP_Query;
 
 /**
  * Custom migration scripts for LkldNow.
@@ -18,7 +19,7 @@ class IndyWeekMigrator implements InterfaceCommand {
 
 	/**
 	 * Instance of Attachments Login
-	 * 
+	 *
 	 * @var null|Attachments
 	 */
 	private $attachments;
@@ -38,7 +39,7 @@ class IndyWeekMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -56,12 +57,21 @@ class IndyWeekMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'	      => 'json-file-path',
+						'name'        => 'json-file-path',
 						'description' => 'JSON file path containing the prints.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator indyweek-fix-puzzles-links',
+			[ $this, 'cmd_indyweek_fix_puzzles_links' ],
+			[
+				'shortdesc' => 'Fix Puzzles media links',
+				'synopsis'  => [],
 			]
 		);
 	}
@@ -74,7 +84,7 @@ class IndyWeekMigrator implements InterfaceCommand {
 	 */
 	public function cmd_indyweek_import_prints( $args, $assoc_args ) {
 		$json_file = $assoc_args['json-file-path'];
-		
+
 		if ( ! file_exists( $json_file ) ) {
 			WP_CLI::error( 'The provided file does not exist.' );
 		}
@@ -91,9 +101,9 @@ class IndyWeekMigrator implements InterfaceCommand {
 
 		$category_id = get_terms(
 			array(
-				'fields' => 'ids',
-				'taxonomy' => 'category',
-				'name' => 'Print Edition',
+				'fields'     => 'ids',
+				'taxonomy'   => 'category',
+				'name'       => 'Print Edition',
 				'hide_empty' => false,
 			)
 		)[0];
@@ -134,4 +144,64 @@ HTML;
 		WP_CLI::success( 'Done!' );
 	}
 
+	/**
+	 * Callable for `newspack-content-migrator indyweek-fix-puzzles-links`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_indyweek_fix_puzzles_links( $args, $assoc_args ) {
+		$page = get_post( 162921 );
+		preg_match_all( '|(?P<url>https://indyweek\.com/downloads/\d+/download/(?P<attachment_name>.*?))"|', $page->post_content, $download_url_matches );
+
+		$updated_content = $page->post_content;
+
+		foreach ( $download_url_matches['url'] as $index => $download_url ) {
+			if ( isset( $download_url_matches['attachment_name'][ $index ] ) ) {
+				$original_name   = $download_url_matches['attachment_name'][ $index ];
+				$attachment_name = urldecode( $original_name );
+				$attachment_name = explode( '?', $attachment_name )[0];
+				$attachment_name = str_replace( [ '.jpg', '.pdf' ], '', $attachment_name );
+				$attachment      = $this->get_attachment_id_by_filename( $attachment_name );
+
+				if ( ! $attachment ) {
+					$attachment_name = str_replace( ' ', '-', urldecode( $attachment_name ) );
+					$attachment      = $this->get_attachment_id_by_filename( $attachment_name );
+
+					if ( ! $attachment ) {
+						$attachment_name = str_replace( [ '[1].', '-(1).' ], '.', $attachment_name );
+						$attachment      = $this->get_attachment_id_by_filename( $attachment_name );
+
+						if ( ! $attachment ) {
+							print_r( "No attachment for $attachment_name: $original_name \n" );
+							continue;
+						}
+					}
+				}
+
+				$updated_content = str_replace( $download_url, wp_get_attachment_url( $attachment ), $updated_content );
+				wp_update_post(
+					array(
+						'ID'           => $page->ID,
+						'post_content' => $updated_content,
+					)
+				);
+
+				wp_cache_flush();
+			}
+		}
+	}
+
+	/**
+	 * Get attachment ID by it's filename
+	 *
+	 * @param string $filename attachment filename.
+	 * @return int|false
+	 */
+	private function get_attachment_id_by_filename( $filename ) {
+		global $wpdb;
+		$sql         = $wpdb->prepare( "SELECT * FROM  $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value like %s", "%$filename%" );
+		$attachments = $wpdb->get_results( $sql );
+		return $attachments[0]->post_id ?? false;
+	}
 }
