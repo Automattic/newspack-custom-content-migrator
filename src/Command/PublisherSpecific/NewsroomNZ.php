@@ -10,6 +10,7 @@ use \NewspackCustomContentMigrator\Logic\Attachments;
 /* External dependencies */
 use stdClass;
 use WP_CLI;
+use WP_Query;
 
 /**
  * Custom migration scripts for Retro Report.
@@ -276,6 +277,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 						$post_exists
 					)
 				);
+				continue;
 			}
 
 			// Get a list of the fields we explicitly need to import.
@@ -286,6 +288,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			// Add the original data to the post as meta.
 			if ( ! $this->dryrun ) {
 				add_post_meta( $post_id, self::META_PREFIX . 'import_data', $article );
+				add_post_meta( $post_id, self::META_PREFIX . 'guid', $article['guid'] );
 			}
 
 		}
@@ -598,16 +601,21 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 *
 	 * @param string $guid GUID as provided by the XML export.
 	 *
-	 * @return null|bool Post ID if it exists, null otherwise.
+	 * @return bool True if it exists, false otherwise.
 	 */
 	private function post_exists( $guid ) {
-		global $wpdb;
-    	return $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT ID FROM $wpdb->posts WHERE guid=%s",
-				$guid
-			)
-		);
+
+		$query_args = [
+			'post_type'  => 'post',
+			'meta_query' => [
+				[
+					'key'   => self::META_PREFIX . 'guid',
+					'value' => $guid,
+				],
+			],
+		];
+		$posts = get_posts( $query_args );
+		return ( $posts && ! empty( $posts ) );
 	}
 
 	/**
