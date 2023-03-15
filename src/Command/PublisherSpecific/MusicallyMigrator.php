@@ -298,6 +298,10 @@ class MusicallyMigrator implements InterfaceCommand {
 				// Gate content by adding the `Premium` tag.
 				wp_set_post_tags( $post_id, 'Premium', true );
 
+				// Templating.
+				update_post_meta( $post_id, '_wp_page_template', 'single-wide.php' );
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+
 				$this->logger->log( $log_file, sprintf( 'Report migrated for the post %d', $post_id ), Logger::SUCCESS );
 			}
 
