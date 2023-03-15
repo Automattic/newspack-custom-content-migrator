@@ -297,16 +297,24 @@ class TaxonomyMigrator implements InterfaceCommand {
 					[
 						'type'          => 'flag',
 						'name'          => 'display',
-						'description'   => 'Display the terms that will be split.',
+						'description'   => 'Display the terms that will be split only. No further execution nor changes will be made.',
 						'optional'      => true,
 						'repeating'     => false,
 					],
 					[
 						'type'          => 'flag',
 						'name'          => 'interactive',
-						'description'   => 'Ask for confirmation before proceeding.',
+						'description'   => 'Ask for confirmation before proceeding with any change.',
 						'optional'      => true,
 						'repeating'     => false,
+					],
+					[
+						'type'          => 'flag',
+						'name'          => 'show-taxonomies',
+						'description'   => 'Show the taxonomies for each term.',
+						'optional'      => true,
+						'repeating'     => false,
+						'default'       => false,
 					],
 				],
 			]
@@ -826,7 +834,11 @@ class TaxonomyMigrator implements InterfaceCommand {
 			return;
 		}
 
+		$assoc_args['show-taxonomies'] = $assoc_args['show-taxonomies'] ?? false;
+
 		if ( isset( $assoc_args['display'] ) && $assoc_args['display'] ) {
+			$duplicate_slugs = $this->show_taxonomies_column( $duplicate_slugs, $assoc_args['show-taxonomies'] ?? false );
+
 			WP_CLI\Utils\format_items( 'table', $duplicate_slugs, array_keys( (array) $duplicate_slugs[0] ) );
 			return;
 		}
@@ -839,7 +851,17 @@ class TaxonomyMigrator implements InterfaceCommand {
 			// If a duplicate slug has term_id_count == 1, then it has multiple term_taxonomy_ids with the same slug.
 			// In this case, we need to split the term_taxonomy_id into a new term.
 
+			$taxonomies = '';
+			if ( isset( $assoc_args['show-taxonomies'] ) && ! $assoc_args['show-taxonomies'] ) {
+				$taxonomies = $duplicate_slug->taxonomies;
+				unset( $duplicate_slug->taxonomies );
+			}
+
 			WP_CLI\Utils\format_items( 'table', [ $duplicate_slug ], array_keys( (array) $duplicate_slug ) );
+
+			if ( isset( $assoc_args['show-taxonomies'] ) && ! $assoc_args['show-taxonomies'] ) {
+				$duplicate_slug->taxonomies = $taxonomies;
+			}
 
 			$duplicate_slug->taxonomies = explode( ', ', $duplicate_slug->taxonomies );
 
@@ -880,7 +902,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			} else {
 				// Multiple term_taxonomy_ids with the same slug.
 				// Split the term_taxonomy_id into a new term.
-				$this->output( 'Splitting duplicate term slug...' );
+				$this->output( 'Splitting term...' );
 				$this->split_duplicate_term_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
 			}
 		}
