@@ -96,7 +96,6 @@ class Taxonomy {
 			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy ) 
 			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  ' 
 			    ) as 'term_id:term_taxonomy_id:taxonomy',
-			COUNT( DISTINCT tt.term_id ) as term_id_count, 
 			COUNT( DISTINCT tt.term_taxonomy_id ) as term_taxonomy_id_count
 			FROM $wpdb->terms t
 			LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
