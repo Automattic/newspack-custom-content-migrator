@@ -113,6 +113,23 @@ class MusicallyMigrator implements InterfaceCommand {
 				],
             ]
 		);
+
+		WP_CLI::add_command(
+            'newspack-content-migrator musically-export-events-to-EC-csv',
+            [ $this, 'cmd_export_events_to_EC_csv' ],
+            [
+				'shortdesc' => 'Export events to EC csv file',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'output-folder-path',
+						'description' => 'Output folder path.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+            ]
+		);
 	}
 
 	/**
@@ -483,11 +500,173 @@ class MusicallyMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Get a given post' sections with their content.
+	 * Callable for `newspack-content-migrator musically-export-events-to-EC-csv`.
 	 *
-	 * @param int $post_id Post ID.
-	 * @return array
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
 	 */
+	public function cmd_export_events_to_EC_csv( $args, $assoc_args ) {
+		$output_folder_path = $assoc_args['output-folder-path'];
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migration_exported_event',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+            [
+				'posts_per_page' => -1,
+				'post_type'      => 'musically_events',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+            ]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+            [
+				'post_type'      => 'musically_events',
+				'posts_per_page' => -1,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+            ]
+		);
+
+		$posts = $query->get_posts();
+
+		$venues = [];
+		$events = [];
+
+		register_taxonomy(
+            'event_categories',
+            'musically_events',
+            array(
+				'rewrite' => array( 'slug' => 'event_categories/musically_events' ),
+            )
+        );
+
+		foreach ( $posts as $post ) {
+			$start_date                     = get_post_meta( $post->ID, 'start_date', true );
+			$end_date                       = get_post_meta( $post->ID, 'end_date', true );
+			$location                       = get_post_meta( $post->ID, 'location', true );
+			$eventbrite_embed               = get_post_meta( $post->ID, 'eventbrite_embed', true );
+			$eventbrite_embed_2             = get_post_meta( $post->ID, 'eventbrite_embed_2', true );
+			$additional_sidebar_image_count = intval( get_post_meta( $post->ID, 'additional_sidebar_images', true ) );
+
+			// venue.
+			if ( ! empty( $location ) && ! in_array( $location, $venues, true ) ) {
+				$venues[] = $location;
+			}
+
+			// dates.
+			$start_date = $start_date ? new \DateTime( $start_date ) : new \DateTime( $post->post_date );
+			$end_date   = $end_date ? new \DateTime( $end_date ) : null;
+
+			// event.
+			$event = [
+				'EVENT NAME'       => $post->post_title,
+				'EVENT VENUE NAME' => $location,
+				'EVENT START DATE' => $start_date->format( 'Y-m-d' ),
+				'EVENT START TIME' => $start_date->format( 'H:i:s' ),
+				'ALL DAY EVENT'    => ! $end_date,
+			];
+
+			if ( $end_date ) {
+				$event['EVENT END DATE'] = $end_date->format( 'Y-m-d' );
+				$event['EVENT END TIME'] = $end_date->format( 'H:i:s' );
+			}
+
+			// content.
+			$content = $post->post_content;
+			if ( $additional_sidebar_image_count > 1 ) {
+				$additional_image_id = get_post_meta( $post->ID, 'additional_sidebar_images_1_additional_sidebar_image', true );
+				$image_url           = wp_get_attachment_url( $additional_image_id );
+				if ( $image_url ) {
+					$content .= '<img src="' . $image_url . '" alt="' . wp_get_attachment_caption( $additional_image_id ) . '" />';
+				}
+			}
+			if ( $eventbrite_embed ) {
+				$content .= $eventbrite_embed;
+			}
+			if ( $eventbrite_embed_2 ) {
+				$content .= $eventbrite_embed_2;
+			}
+
+			$event['EVENT DESCRIPTION'] = $content;
+
+			// featured image.
+			if ( $additional_sidebar_image_count > 0 ) {
+				$featured_image_id  = get_post_meta( $post->ID, 'additional_sidebar_images_0_additional_sidebar_image', true );
+				$featured_image_url = wp_get_attachment_url( $featured_image_id );
+				if ( $featured_image_url ) {
+					$event['EVENT FEATURED IMAGE'] = $featured_image_id;
+				}
+			}
+
+			// categories.
+			$event_cats = wp_get_post_terms( $post->ID, 'event_categories' );
+			if ( $event_cats ) {
+				$event['EVENT CATEGORY'] = join(
+                    ',',
+					array_map(
+                        function( $c ) {
+                            return $c->name;
+                        },
+                        $event_cats
+                    )
+                );
+			}
+
+			$events[] = $event;
+
+			update_post_meta( $post->ID, '_newspack_migration_exported_event', true );
+		}
+
+		if ( ! empty( $events ) ) {
+			$this->save_CSV(
+				$output_folder_path . 'venues-' . strtotime( 'now' ) . '.csv',
+				array_map(
+					function( $d ) {
+						return [ 'Venue Name' => $d ];
+					},
+					$venues
+				)
+			);
+
+			$this->save_CSV( $output_folder_path . 'events-' . strtotime( 'now' ) . '.csv', $events );
+
+			WP_CLI::line( sprintf( 'The XML content was successfully migrated to the folder: %s', $output_folder_path ) );
+		} else {
+			WP_CLI::line( 'There are no events to import!' );
+		}
+	}
+
+	/**
+	 * Save array of data to a CSV file.
+	 *
+	 * @param string $output_file Filepath where the save the CSV.
+	 * @param mixed  $data Data to save as a CSV.
+	 * @return void
+	 */
+	private function save_CSV( $output_file, $data ) {
+		$csv_output_file = fopen( $output_file, 'w' );
+		fputcsv( $csv_output_file, array_keys( $data[0] ) );
+		foreach ( $data as $datum ) {
+			fputcsv( $csv_output_file, $datum );
+		}
+
+		fclose( $csv_output_file );
+	}
+
+	/**
+	 * Get a given post' sections with their content .
+     *
+     * @param int    $post_id Post ID .
+     * @return array
+     * /
 	private function get_report_sections( $post_id ) {
 		global $wpdb;
 
