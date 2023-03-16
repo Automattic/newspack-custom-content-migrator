@@ -388,9 +388,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			if ( $post_exists ) {
 				$this->log(
 					sprintf(
-						'Post with guid %s already exists - imported with ID %d',
-						$article['guid'],
-						$post_exists
+						'Post with guid %s already exists',
+						$article['guid']
 					)
 				);
 				continue;
