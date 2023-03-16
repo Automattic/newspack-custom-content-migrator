@@ -272,9 +272,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			if ( $post_exists ) {
 				$this->log(
 					sprintf(
-						'Post with guid %s already exists - imported with ID %d',
-						$article['guid'],
-						$post_exists
+						'Post with guid %s already exists',
+						$article['guid']
 					)
 				);
 				continue;
@@ -341,7 +340,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		$post = ( $this->dryrun ) ? true : wp_insert_post( $post_args, true );
 		if ( is_wp_error( $post ) ) {
-			$this->log( sprintf( 'Failed to create post for guid %s', $import_fields['guid'] ), 'warning' );
+			$this->log( sprintf( 'Failed to create post for guid %s', $fields['guid'] ), 'warning' );
 		} else {
 			$this->log( sprintf( 'Successfully imported "%s" as ID %d', $import_fields['title'], $post ), 'success' );
 		}
