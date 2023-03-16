@@ -958,15 +958,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					'display_name' => $display_name,
 				]
 			);
-			if ( is_wp_error( $user ) ) {
+			if ( is_wp_error( $user_id ) ) {
 				$this->log( sprintf( 'Failed to create user for email %s', $value ), 'warning' );
 				return null;
 			}
-
-			$user_id = $user->ID;
 		}
 
-		return $user_id;
+		return ( is_int( $user_id ) ) ? $user_id : $user_id->ID;
 	}
 
 	/**
