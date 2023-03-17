@@ -58,6 +58,7 @@ PluginSetup::register_migrators(
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\MetroMirgator::class,
+		Command\General\ProfilePress::class,
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
