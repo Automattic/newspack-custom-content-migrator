@@ -2,7 +2,6 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Posts;
