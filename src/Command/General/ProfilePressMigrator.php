@@ -79,6 +79,7 @@ class ProfilePress implements InterfaceCommand {
 
 		$post_ids = $this->posts_logic->get_all_posts_ids();
 		// $post_ids = [ 14373, 13631 ];
+		// $post_ids = [ 7492 ];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
@@ -170,11 +171,18 @@ class ProfilePress implements InterfaceCommand {
 			}
 
 			// Assign to Post.
-			$this->coauthorsplus_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
-			$this->logger->log(
-				'coronado_authors__assigned_gas_to_post.log',
-				sprintf( "ASSIGNED_GAS_TO_POST post_id=%d ga_ids=%s", $post_id, implode( ',', $ga_ids ) )
-			);
+			if ( ! empty( $ga_ids ) ) {
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
+				$this->logger->log(
+					'coronado_authors__assigned_gas_to_post.log',
+					sprintf( "ASSIGNED_GAS_TO_POST post_id=%d ga_ids=%s", $post_id, implode( ',', $ga_ids ) )
+				);
+			} else {
+				$this->logger->log(
+					'coronado_authors__no_authors_assigned_to_post.log',
+					sprintf( "NO_AUTHORS_ASSIGNED_TO_POST post_id=%d", $post_id )
+				);
+			}
 		}
 
 		echo "Done.";
