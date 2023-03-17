@@ -78,6 +78,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
 		Command\PublisherSpecific\Moco360Migrator::class,
+		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
 	)
 );
