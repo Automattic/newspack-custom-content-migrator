@@ -982,7 +982,9 @@ class TaxonomyMigrator implements InterfaceCommand {
 				// Duplicate term meta
 				$term_meta = get_term_meta( $taxonomy->term_id );
 				foreach ( $term_meta as $meta_key => $meta_value ) {
-					update_term_meta( $new_term_id, $meta_key, $meta_value[0] );
+					foreach ( $meta_value as $value ) {
+						add_term_meta( $new_term_id, $meta_key, $value );
+					}
 				}
 			}
 		}
