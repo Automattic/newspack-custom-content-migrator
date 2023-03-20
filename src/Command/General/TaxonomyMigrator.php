@@ -820,11 +820,15 @@ class TaxonomyMigrator implements InterfaceCommand {
 		return $parent_category;
 	}
 
-	public function cmd_split_duplicate_term_slugs( $args, $assoc_args ) {
+	/**
+	 * Main driver command for handling terms with duplicate slugs.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_split_duplicate_term_slugs( array $args, array $assoc_args ) {
 		// Create query for all duplicate term slugs
 		// If any exist, they must be split, one by one, for however many times they are duplicate - 1.
-
-		global $wpdb;
 
 		$duplicate_slugs = $this->taxonomy_logic->get_duplicate_term_slugs();
 
@@ -844,7 +848,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		}
 
 		$interactive = $assoc_args['interactive'] ?? false;
-		$response = 'a';
+		$response    = 'a';
 		foreach ( $duplicate_slugs as $duplicate_slug ) {
 			// If a duplicate slug has term_id_count > 1, then it has multiple terms with the same slug.
 			// In this case, a simple renaming of other slugs will work.
@@ -889,7 +893,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 				$interactive = false;
 			}
 
-			if ( ! in_array( $response, [ 'n', 'p', 'a' ] ) ) {
+			if ( ! in_array( $response, [ 'n', 'p', 'a' ], true ) ) {
 				$this->output( 'Invalid response. Skipping...' );
 				continue;
 			}
@@ -944,7 +948,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$taxonomic_records = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $slug, $taxonomies );
 
 		// Get the first term_taxonomy_id, which will remain the original slug.
-		$main_term_taxonomy_id = array_shift( $taxonomic_records );
+		array_shift( $taxonomic_records );
 
 		global $wpdb;
 
@@ -952,6 +956,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		foreach ( $taxonomic_records as $key => $taxonomy ) {
 			$new_slug = $this->taxonomy_logic->get_new_term_slug( $taxonomy->slug, $key + 1 );
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 			$result = $wpdb->insert(
 				$wpdb->terms,
 				[
@@ -962,13 +967,20 @@ class TaxonomyMigrator implements InterfaceCommand {
 			);
 
 			if ( is_int( $result ) ) {
-				$new_term_id = $wpdb->get_var( "SELECT term_id FROM $wpdb->terms WHERE slug = '$new_slug'" );
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$new_term_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT term_id FROM $wpdb->terms WHERE slug = %s",
+						$new_slug
+					)
+				);
 
 				if ( ! is_numeric( $new_term_id ) ) {
 					WP_CLI::error( 'Could not get new term_id.' );
 					return;
 				}
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 				$wpdb->update(
 					$wpdb->term_taxonomy,
 					[
@@ -979,7 +991,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 					]
 				);
 
-				// Duplicate term meta
+				// Duplicate term meta records.
 				$term_meta = get_term_meta( $taxonomy->term_id );
 				foreach ( $term_meta as $meta_key => $meta_value ) {
 					foreach ( $meta_value as $value ) {
