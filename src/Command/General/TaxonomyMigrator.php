@@ -287,6 +287,38 @@ class TaxonomyMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator split-duplicate-term-slugs',
+			[ $this, 'cmd_split_duplicate_term_slugs' ],
+			[
+				'shortdesc' => 'Splits duplicate term slugs into separate terms.',
+				'synopsis'  => [
+					[
+						'type'          => 'flag',
+						'name'          => 'display',
+						'description'   => 'Display the terms that will be split only. No further execution nor changes will be made.',
+						'optional'      => true,
+						'repeating'     => false,
+					],
+					[
+						'type'          => 'flag',
+						'name'          => 'interactive',
+						'description'   => 'Ask for confirmation before proceeding with any change.',
+						'optional'      => true,
+						'repeating'     => false,
+					],
+					[
+						'type'          => 'flag',
+						'name'          => 'show-taxonomies',
+						'description'   => 'Show the taxonomies for each term.',
+						'optional'      => true,
+						'repeating'     => false,
+						'default'       => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -789,6 +821,188 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Main driver command for handling terms with duplicate slugs.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_split_duplicate_term_slugs( array $args, array $assoc_args ) {
+		// Create query for all duplicate term slugs
+		// If any exist, they must be split, one by one, for however many times they are duplicate - 1.
+
+		$duplicate_slugs = $this->taxonomy_logic->get_duplicate_term_slugs();
+
+		if ( ! $duplicate_slugs ) {
+			WP_CLI::success( 'No duplicate term slugs found.' );
+
+			return;
+		}
+
+		$assoc_args['show-taxonomies'] = $assoc_args['show-taxonomies'] ?? false;
+
+		if ( isset( $assoc_args['display'] ) && $assoc_args['display'] ) {
+			$duplicate_slugs = $this->show_taxonomies_column( $duplicate_slugs, $assoc_args['show-taxonomies'] ?? false );
+
+			WP_CLI\Utils\format_items( 'table', $duplicate_slugs, array_keys( (array) $duplicate_slugs[0] ) );
+			return;
+		}
+
+		$interactive = $assoc_args['interactive'] ?? false;
+		$response    = 'a';
+		foreach ( $duplicate_slugs as $duplicate_slug ) {
+			// If a duplicate slug has term_id_count > 1, then it has multiple terms with the same slug.
+			// In this case, a simple renaming of other slugs will work.
+			// If a duplicate slug has term_id_count == 1, then it has multiple term_taxonomy_ids with the same slug.
+			// In this case, we need to split the term_taxonomy_id into a new term.
+
+			$taxonomies = '';
+			if ( isset( $assoc_args['show-taxonomies'] ) && ! $assoc_args['show-taxonomies'] ) {
+				$taxonomies = $duplicate_slug->taxonomies;
+				unset( $duplicate_slug->taxonomies );
+			}
+
+			WP_CLI\Utils\format_items( 'table', [ $duplicate_slug ], array_keys( (array) $duplicate_slug ) );
+
+			if ( isset( $assoc_args['show-taxonomies'] ) && ! $assoc_args['show-taxonomies'] ) {
+				$duplicate_slug->taxonomies = $taxonomies;
+			}
+
+			$duplicate_slug->taxonomies = explode( ', ', $duplicate_slug->taxonomies );
+
+			if ( $interactive ) {
+				$terms = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
+
+				WP_CLI\Utils\format_items( 'table', $terms, array_keys( (array) $terms[0] ) );
+
+				$option = $duplicate_slug->term_id_count > 1 ? 're(n)ame slug' : 's(p)lit term and rename slug';
+
+				$response = $this->ask_prompt( "What would you like to do with this slug? $option, (s)kip, return to (a)uto, or (q)uit?" );
+			}
+
+			if ( 's' === $response ) {
+				$this->output( 'Skipping...' );
+				continue;
+			}
+
+			if ( 'q' === $response ) {
+				$this->output( 'Quitting...' );
+				return;
+			}
+
+			if ( 'a' === $response ) {
+				$interactive = false;
+			}
+
+			if ( ! in_array( $response, [ 'n', 'p', 'a' ], true ) ) {
+				$this->output( 'Invalid response. Skipping...' );
+				continue;
+			}
+
+			if ( $duplicate_slug->term_id_count > 1 ) {
+				// Multiple terms with the same slug.
+				// Rename all other slugs to be unique.
+				$this->output( 'Renaming duplicate term slugs...' );
+				$this->rename_duplicate_term_slugs( $duplicate_slug->slug, $duplicate_slug->taxonomies );
+			} else {
+				// Multiple term_taxonomy_ids with the same slug.
+				// Split the term_taxonomy_id into a new term.
+				$this->output( 'Splitting term...' );
+				$this->split_duplicate_term_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
+			}
+		}
+	}
+
+	/**
+	 * Function to rename a duplicate term slug into a new term.
+	 *
+	 * @param string $slug The slug to split.
+	 * @param array  $taxonomies The taxonomy of the slug.
+	 */
+	public function rename_duplicate_term_slugs( string $slug, array $taxonomies ) {
+		// Get all terms with the same slug.
+		$terms = get_terms(
+			[
+				'taxonomy'   => $taxonomies,
+				'hide_empty' => false,
+				'slug'       => $slug,
+			]
+		);
+
+		array_shift( $terms ); // Remove the first term, which will remain the original slug.
+
+		// Rename all terms with the same slug.
+		foreach ( $terms as $key => $term ) {
+			$new_slug = $this->taxonomy_logic->get_new_term_slug( $term->slug, $key + 1 );
+
+			wp_update_term( $term->term_id, $term->taxonomy, [ 'slug' => $new_slug ] );
+		}
+	}
+
+	/**
+	 * Function to split a duplicate term slug into a new term.
+	 *
+	 * @param string $slug The slug to split.
+	 * @param array  $taxonomies The taxonomy of the slug.
+	 */
+	public function split_duplicate_term_slug( string $slug, array $taxonomies ) {
+		$taxonomic_records = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $slug, $taxonomies );
+
+		// Get the first term_taxonomy_id, which will remain the original slug.
+		array_shift( $taxonomic_records );
+
+		global $wpdb;
+
+		// Split all other term_taxonomy_ids into new terms.
+		foreach ( $taxonomic_records as $key => $taxonomy ) {
+			$new_slug = $this->taxonomy_logic->get_new_term_slug( $taxonomy->slug, $key + 1 );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$result = $wpdb->insert(
+				$wpdb->terms,
+				[
+					'name'       => $taxonomy->name,
+					'slug'       => $new_slug,
+					'term_group' => 0,
+				]
+			);
+
+			if ( is_int( $result ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$new_term_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT term_id FROM $wpdb->terms WHERE slug = %s",
+						$new_slug
+					)
+				);
+
+				if ( ! is_numeric( $new_term_id ) ) {
+					WP_CLI::error( 'Could not get new term_id.' );
+					return;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update(
+					$wpdb->term_taxonomy,
+					[
+						'term_id' => $new_term_id,
+					],
+					[
+						'term_taxonomy_id' => $taxonomy->term_taxonomy_id,
+					]
+				);
+
+				// Duplicate term meta records.
+				$term_meta = get_term_meta( $taxonomy->term_id );
+				foreach ( $term_meta as $meta_key => $meta_value ) {
+					foreach ( $meta_value as $value ) {
+						add_term_meta( $new_term_id, $meta_key, $value );
+					}
+				}
+			}
+		}
+	}
+
+	/**
 	 * Function to merge wp_term_relationships records.
 	 *
 	 * @param int $main_term_taxonomy_id Main term_taxonomy_id to merge relationship records into.
@@ -1204,6 +1418,28 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$exclude_taxonomies,
 			$new_taxonomy,
 			$parent_term_id
+		);
+	}
+
+	/**
+	 * Convenience function to remove $taxonomies property from $duplicate_slugs array.
+	 *
+	 * @param array $duplicate_slugs Array of taxonomic records with duplicate slugs.
+	 * @param bool  $show_taxonomies_column Boolean flag to show taxonomies column.
+	 *
+	 * @returns array
+	 * */
+	private function show_taxonomies_column( array $duplicate_slugs, bool $show_taxonomies_column = false ) {
+		if ( $show_taxonomies_column ) {
+			return $duplicate_slugs;
+		}
+
+		return array_map(
+			function( $duplicate_slug ) {
+				unset( $duplicate_slug->taxonomies );
+				return $duplicate_slug;
+			},
+			$duplicate_slugs
 		);
 	}
 
