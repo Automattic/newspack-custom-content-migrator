@@ -10,7 +10,7 @@ use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use NewspackCustomContentMigrator\Utils\FileImportFactory;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -222,6 +222,23 @@ class DublinInquirerMigrator implements InterfaceCommand {
 			[ $this, 'cmd_fix_article_dates' ],
 			[
 				'shortdesc' => 'Migrate Dublin Inquirer comments.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator dublin-inquirer-fix-issue-as-categories',
+			[ $this, 'cmd_add_issue_to_post' ],
+			[
+				'shortdesc' => 'Add issues as category to posts',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'import-file',
+						'description' => 'CSV file with tags to import.',
+						'optional'    => false,
+						'default'     => false,
+					],
+				],
 			]
 		);
 	}
@@ -600,9 +617,49 @@ class DublinInquirerMigrator implements InterfaceCommand {
 
 				$this->redirection->create_redirection_rule(
 					$row['title'],
-					"http://dublinginquirer.com{$former_slug}",
+					"http://dublininquirer.com{$former_slug}",
 					get_permalink( $post_id )
 				);
+			}
+		}
+	}
+
+	public function cmd_add_issue_to_post( $args, $assoc_args) {
+		$file_path = $args[0];
+
+		$iterator = ( new FileImportFactory() )
+			->get_file( $file_path )
+			->getIterator();
+
+		$log_file_name = 'dublin-inquirer-issues-as-categories-fix-' . gmdate( 'YmdHis' ) . '.log';
+
+		global $wpdb;
+
+		foreach ( $iterator as $row ) {
+			$this->logger->log( $log_file_name, "Processing {$row['id']}, Issue ID: {$row['issue_id']}" );
+			$option = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT option_name 
+					FROM $wpdb->options 
+					WHERE option_value = %s AND option_name LIKE 'issue_id_%'",
+					$row['issue_id']
+				)
+			);
+
+			if ( $option ) {
+				$this->logger->log( $log_file_name, "Found option {$option}" );
+				$post_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'original_article_id' AND meta_value = %s",
+						$row['id']
+					)
+				);
+
+				if ( $post_id ) {
+					$this->logger->log( $log_file_name, "Found post {$post_id}" );
+					$term_id = intval( str_replace( 'issue_id_', '', $option ) );
+					wp_set_post_terms( $post_id, $term_id, 'category', true );
+				}
 			}
 		}
 	}
@@ -771,29 +828,44 @@ class DublinInquirerMigrator implements InterfaceCommand {
 		}
 	}
 
-	public function cmd_fix_article_dates() {
+	public function cmd_fix_article_dates( $args, $assoc_args ) {
+		$file_path = $args[0];
+
 		$iterator = ( new FileImportFactory() )
-			->get_file( '/tmp/articles.csv' )
+			->get_file( $file_path )
 			->getIterator();
 
 		foreach ( $iterator as $row ) {
+			$slug_date = '0';
+			$slug_parts = explode( '/', $row['slug'] );
+			if ( ! array_key_exists( 3, $slug_parts ) ) {
+				WP_CLI::log( "SLUG NOT VALID: " . $row['slug'] );
+			} else {
+				$slug_date  = $slug_parts[1] . '-' . $slug_parts[2] . '-' . $slug_parts[3];
+			}
+
 			$post_date     = $row['created_at'];
 			WP_CLI::log( 'Original date: ' . $post_date );
-			$new_post_date = \DateTime::createFromFormat( 'Y-m-d H:i:s', $post_date );
+			$new_post_date = \DateTime::createFromFormat( 'Y-m-d H:i:s', $post_date, new \DateTimeZone( 'GMT' ) );
 			if ( is_bool( $new_post_date ) ) {
-				$new_post_date = \DateTime::createFromFormat( 'Y-m-d H:i:s.u', $post_date );
+				$new_post_date = \DateTime::createFromFormat( 'Y-m-d H:i:s.u', $post_date, new \DateTimeZone( 'GMT' ) );
 				if ( is_bool( $new_post_date ) ) {
 					WP_CLI::warning('Date not valid: ' . $post_date);
 					continue;
 				}
 			}
-			WP_CLI::log( 'Original date: ' . $post_date . ' New date: ' . $new_post_date->format( 'Y-m-d H:i:s' ) );
+			WP_CLI::log( 'Original date: ' . $post_date . ' New date: ' . $new_post_date->format( 'Y-m-d H:i:s' ) . ' Slug Date: ' . $slug_date );
+
+			if ( ! is_bool( \DateTime::createFromFormat( 'Y-m-d', $slug_date ) ) && $slug_date !== $new_post_date->format( 'Y-m-d' ) ) {
+				WP_CLI::warning( 'Slug date does not match post date, updating...' );
+				$new_post_date->setDate( intval( $slug_parts[1] ), intval( $slug_parts[2] ), intval( $slug_parts[3] ) );
+			}
 
 			$post_modified_date = $row['updated_at'];
 			WP_CLI::log( 'Original modified date: ' . $post_modified_date );
-			$new_post_modified_date = \DateTime::createFromFormat( 'Y-m-d H:i:s', $post_modified_date );
+			$new_post_modified_date = \DateTime::createFromFormat( 'Y-m-d H:i:s', $post_modified_date, new \DateTimeZone( 'GMT' ) );
 			if ( is_bool( $new_post_modified_date ) ) {
-				$new_post_modified_date = \DateTime::createFromFormat( 'Y-m-d H:i:s.u', $post_modified_date );
+				$new_post_modified_date = \DateTime::createFromFormat( 'Y-m-d H:i:s.u', $post_modified_date, new \DateTimeZone( 'GMT' ) );
 				if ( is_bool( $new_post_modified_date ) ) {
 					WP_CLI::warning('Date not valid: ' . $post_modified_date);
 					continue;
