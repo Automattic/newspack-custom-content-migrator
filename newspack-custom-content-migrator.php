@@ -58,6 +58,7 @@ PluginSetup::register_migrators(
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\MetroMirgator::class,
+		Command\General\ProfilePress::class,
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -77,6 +78,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
 		Command\PublisherSpecific\Moco360Migrator::class,
+		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 	)
