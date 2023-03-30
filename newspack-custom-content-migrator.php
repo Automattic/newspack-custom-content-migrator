@@ -69,6 +69,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
 		Command\PublisherSpecific\SearchLightNMMigrator::class,
 		Command\PublisherSpecific\CalMattersMigrator::class,
+		Command\PublisherSpecific\HighCountryNewsMigrator::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Command\PublisherSpecific\MassterlistMigrator::class,
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
