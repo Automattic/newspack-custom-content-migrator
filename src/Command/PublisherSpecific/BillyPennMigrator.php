@@ -92,6 +92,24 @@ class BillyPennMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator billypenn-find-remaining-shortcodes',
+			[ $this, 'cmd_billypenn_find_remaining_shortcodes' ],
+			[
+				'shortdesc' => 'Find remaining shortcodes.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator billypenn-fix-broken-youtube-shortcodes-and-love-letter-emojis',
+			[ $this, 'cmd_fix_broken_youtube_shortcodes_and_love_letter_emojis' ],
+			[
+				'shortdesc' => 'Fix broken youtube shortcodes and love letter emojis.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -424,6 +442,313 @@ HTML;
 		return $block;
 	}
 
+	public function cmd_billypenn_find_remaining_shortcodes() {
+		global $wpdb;
+
+		$file_path = '/tmp/affected_posts_with_shortcodes.log';
+		file_put_contents( $file_path, '' );
+
+		$posts = $wpdb->get_results(
+			"SELECT ID, post_content FROM $wpdb->posts WHERE post_type = 'post' AND post_status = 'publish' ORDER BY ID DESC"
+		);
+
+		$shortcodes_regex = get_shortcode_regex();
+		$shortcodes_regex = str_replace( '|gallery|', '|gallery|instagram|twitter|', $shortcodes_regex );
+//		$shortcodes_regex = '\[(\[?)(.?)(?![\w-])([^\]\/]*(?:\/(?!\])[^\]\/]*)*?)(?:(\/)\]|\](?:([^\[]*+(?:\[(?!\/\2\])[^\[]*+)*+)\[\/\2\])?)(\]?)';
+
+		$youtube_embed_template = '<!-- wp:embed {"url":"{url}","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+{url}
+</div></figure>
+<!-- /wp:embed -->';
+
+		$iframe_embed_template = '<!-- wp:newspack-blocks/iframe {"src":"{url}"} /-->';
+
+		$video_embed_template = '<!-- wp:video -->
+<figure class="wp-block-video"><video controls src="{url}"></video></figure>
+<!-- /wp:video -->';
+
+		$facebook_embed_template = '<!-- wp:embed {"url":"{encoded_url}","type":"rich","providerNameSlug":"embed-handler","responsive":true,"previewable":false} -->
+<figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler"><div class="wp-block-embed__wrapper">
+{url}
+</div></figure>
+<!-- /wp:embed -->';
+
+		$instagram_embed_template = '<!-- wp:embed {"url":"{url}","type":"rich","providerNameSlug":"instagram","responsive":true} -->
+<figure class="wp-block-embed is-type-rich is-provider-instagram wp-block-embed-instagram"><div class="wp-block-embed__wrapper">
+{url}
+</div></figure>
+<!-- /wp:embed -->';
+
+		$twitter_embed_template = '<!-- wp:embed {"url":"{url}","type":"rich","providerNameSlug":"twitter","responsive":true} -->
+<figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper">
+{url}
+</div></figure>
+<!-- /wp:embed -->';
+
+		foreach ( $posts as $post ) {
+				preg_match_all( "/$shortcodes_regex/", $post->post_content, $matches, PREG_SET_ORDER );
+
+			$post_content = $post->post_content;
+
+			if ( count( $matches ) > 0 ) {
+				echo WP_CLI::colorize( "%wPost ID: {$post->ID}%n" ) . "\n";
+
+				$youtube_shortcodes_replaced = 0;
+				$iframe_shortcodes_replaced = 0;
+				$video_shortcodes_replaced = 0;
+				$facebook_shortcodes_replaced = 0;
+				$instagram_shortcodes_replaced = 0;
+				$twitter_shortcodes_replaced = 0;
+				foreach ( $matches as $match ) {
+					$shortcode = $this->fix_shortcode( $match[0] );
+
+					if ( str_starts_with( $shortcode, '[iframe' ) ) {
+						$attributes = shortcode_parse_atts( $shortcode );
+
+						if ( isset( $attributes['src'] ) ) {
+							$iframe_embed = strtr( $iframe_embed_template, [ '{url}' => $attributes['src'] ] );
+							$post_content = str_replace( $match[0], $iframe_embed, $post_content );
+							$iframe_shortcodes_replaced++;
+						} else {
+							echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+							WP_CLI::log( "Shortcode: $shortcode" );
+						}
+					} else if ( str_starts_with( $shortcode, '[youtube' ) ) {
+						$video_id = $this->attempt_to_get_video_id( $shortcode );
+
+						if ( $video_id ) {
+							$youtube_embed = strtr( $youtube_embed_template, [ '{url}' => "https://youtu.be/$video_id" ] );
+							$post_content = str_replace( $match[0], $youtube_embed, $post_content );
+							$youtube_shortcodes_replaced++;
+						} else {
+							echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+							WP_CLI::log( "Shortcode: $shortcode" );
+							echo WP_CLI::colorize( '%rCant find video id%n' ) . "\n";
+						}
+					} else if ( str_starts_with( $shortcode, '[video' ) ) {
+						// regex to find any url within a string
+						$pattern = '/https?:\/\/[^\s]+/';
+						preg_match( $pattern, $shortcode, $url_matches );
+
+						if ( isset( $url_matches[0] ) ) {
+							$video_embed = strtr( $video_embed_template, [ '{url}' => $url_matches[0] ] );
+							$post_content = str_replace( $match[0], $video_embed, $post_content );
+							$video_shortcodes_replaced++;
+						} else {
+							echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+							WP_CLI::log( "Shortcode: $shortcode" );
+							echo WP_CLI::colorize( '%rCant find video url%n' ) . "\n";
+						}
+
+					} else if ( str_starts_with( $shortcode, '[facebook' ) ) {
+						$attributes = shortcode_parse_atts( $shortcode );
+
+						if ( ! isset( $attributes['url'] ) ) {
+							$shortcode = str_replace( [ '/]', ']' ], [ ' /]', ' /]' ], $shortcode );
+							$attributes = shortcode_parse_atts( $shortcode );
+						}
+
+						if ( isset( $attributes['url'] ) ) {
+							$decoded_url = urldecode( trim( $attributes['url'] ) );
+							$facebook_embed = strtr(
+								$facebook_embed_template,
+								[
+									'{url}' => htmlspecialchars( $decoded_url ),
+									'{encoded_url}' => $decoded_url,
+								]
+							);
+							$post_content = str_replace( $match[0], $facebook_embed, $post_content );
+							$facebook_shortcodes_replaced++;
+						} else {
+							echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+							WP_CLI::log( "Shortcode: $shortcode" );
+						}
+					} else if ( str_starts_with( $shortcode, '[instagram' ) ) {
+						$attributes = shortcode_parse_atts( $shortcode );
+
+						if ( ! isset( $attributes['url'] ) ) {
+							$shortcode = str_replace( [ '/]', ']' ], [ ' /]', ' /]' ], $shortcode );
+							$attributes = shortcode_parse_atts( $shortcode );
+						}
+
+						if ( isset( $attributes['url'] ) ) {
+							$decoded_url = urldecode( trim( $attributes['url'] ) );
+							$instagram_embed = strtr(
+								$instagram_embed_template,
+								[
+									'{url}' => htmlspecialchars( $decoded_url ),
+								]
+							);
+							$post_content = str_replace( $match[0], $instagram_embed, $post_content );
+							$instagram_shortcodes_replaced++;
+						} else {
+							echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+							WP_CLI::log( "Shortcode: $shortcode" );
+						}
+					} else if ( str_starts_with( $shortcode, '[twitter' ) ) {
+						$attributes = shortcode_parse_atts( $shortcode );
+
+						if ( ! isset( $attributes['url'] ) ) {
+							$shortcode = str_replace( [ '/]', ']' ], [ ' /]', ' /]' ], $shortcode );
+							$attributes = shortcode_parse_atts( $shortcode );
+						}
+
+						/*if ( ! isset( $attributes['url'] ) ) {
+							$after_host = substr( $shortcode, strpos( $shortcode, 'twitter.com' ) + 11 );
+							$after_host = substr( $after_host, 0, -2 );
+							$after_host = str_replace( ' ', '', $after_host );
+							$shortcode = substr( $shortcode, 0, strpos( $shortcode, 'twitter.com' ) + 11 ) . $after_host . ' /]';
+							$attributes = shortcode_parse_atts( $shortcode );
+						}*/
+
+						if ( isset( $attributes['url'] ) ) {
+							$decoded_url = urldecode( trim( $attributes['url'] ) );
+							$twitter_embed = strtr(
+								$twitter_embed_template,
+								[
+									'{url}' => htmlspecialchars( $decoded_url ),
+								]
+							);
+							$post_content = str_replace( $match[0], $twitter_embed, $post_content );
+							$twitter_shortcodes_replaced++;
+						} else {
+							echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+							WP_CLI::log( "Shortcode: $shortcode" );
+						}
+					} else {
+						echo WP_CLI::colorize( "%yOriginal: {$match[0]}%n" ) . "\n";
+						WP_CLI::log( "Shortcode: $shortcode" );
+					}
+				}
+
+				WP_CLI\Utils\format_items(
+					'table',
+					[
+						[
+							'Youtube shortcodes replaced' => $youtube_shortcodes_replaced,
+							'Iframe shortcodes replaced' => $iframe_shortcodes_replaced,
+							'Video shortcodes replaced' => $video_shortcodes_replaced,
+							'Facebook shortcodes replaced' => $facebook_shortcodes_replaced,
+							'Instagram shortcodes replaced' => $instagram_shortcodes_replaced,
+							'Twitter shortcodes replaced' => $twitter_shortcodes_replaced,
+						],
+					],
+					[
+						'Youtube shortcodes replaced',
+						'Iframe shortcodes replaced',
+						'Video shortcodes replaced',
+						'Facebook shortcodes replaced',
+						'Instagram shortcodes replaced',
+						'Twitter shortcodes replaced',
+					]
+				);
+
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_content' => $post_content,
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					echo WP_CLI::colorize( '%gPost content updated%n' ) . "\n";
+					file_put_contents( $file_path, 'UPDATED POST ID: ' . $post->ID . "\n" . implode( "\n", array_map( fn( $match ) => $match[0], $matches ) ) . "\n", FILE_APPEND );
+				} else {
+					echo WP_CLI::colorize( '%rPost content not updated%n' ) . "\n";
+					file_put_contents( $file_path, 'ISSUE UPDATING POST ID: ' . $post->ID . "\n" . implode( "\n",  array_map( fn( $match ) => $match[0], $matches ) ) . "\n", FILE_APPEND );
+				}
+			}
+		}
+	}
+
+	public function cmd_fix_broken_youtube_shortcodes_and_love_letter_emojis() {
+		global $wpdb;
+
+		$posts = $wpdb->get_results( "SELECT ID, post_content FROM {$wpdb->posts} WHERE post_type = 'post' AND post_status = 'publish'" );
+
+		$youtube_embed_template = '<!-- wp:embed {"url":"{url}","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+{url}
+</div></figure>
+<!-- /wp:embed -->';
+
+		foreach ( $posts as $post ) {
+
+			$post_content = $post->post_content;
+			$youtube_shortcodes_replaced = 0;
+			$love_philly_text_replaced = 0;
+
+			$pattern = '/http(s)?:\/\/(.*)youtu\.be\/.{11}(.{0,10})?(?|([\]])|([\/\]]))/i';
+			preg_match_all( $pattern, $post->post_content, $youtube_matches, PREG_SET_ORDER );
+
+			if ( count( $youtube_matches ) > 0 ) {
+				WP_CLI::log( 'Post ID: ' . $post->ID );
+				$seen = [];
+				foreach ( $youtube_matches as $match ) {
+					if ( in_array( $match[0], $seen, true ) ) {
+						continue;
+					}
+
+					WP_CLI::log( $match[0] );
+					$seen[] = $match[0];
+
+					$link_pattern = '/http(s)?:\/\/(.*)youtu\.be\/.{11}/i';
+					preg_match( $link_pattern, $match[0], $link_match );
+
+					if ( count( $link_match ) > 0 ) {
+						$post_content = str_replace( $match[0], $link_match[0], $post_content );
+						$youtube_shortcodes_replaced++;
+					}
+				}
+			}
+
+			$has_love_philly_text = false;
+			if ( str_contains( $post_content, '?<em> Love Philly?' ) ) {
+				$post_content = str_replace( '?<em> Love Philly?', '💌<em> Love Philly?', $post_content );
+				$love_philly_text_replaced++;
+				$has_love_philly_text = true;
+			}
+
+			if ( count( $youtube_matches ) > 0 || $has_love_philly_text ) {
+				WP_CLI::log( 'Post ID: ' . $post->ID );
+
+				WP_CLI\Utils\format_items(
+					'table',
+					[
+						[
+							'Youtube shortcodes replaced' => $youtube_shortcodes_replaced,
+							'Love Philly text replaced'   => $love_philly_text_replaced,
+						],
+					],
+					[
+						'Youtube shortcodes replaced',
+						'Love Philly text replaced',
+					]
+				);
+
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_content' => $post_content,
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					echo WP_CLI::colorize( '%gPost content updated%n' ) . "\n";
+				} else {
+					echo WP_CLI::colorize( '%rPost content not updated%n' ) . "\n";
+				}
+			}
+		}
+	}
+
 	/**
 	 * Make sure the shortcode is using quotation marks for attributes, instead of other special characters
 	 */
@@ -468,5 +793,33 @@ HTML;
 	public function log( $file, $message ) {
 		$message .= "\n";
 		file_put_contents( $file, $message, FILE_APPEND );
+	}
+
+	private function attempt_to_get_video_id( string $shortcode ) {
+		if ( str_contains( $shortcode, 'youtu.be/' ) ) {
+			$video_id = substr( $shortcode, strrpos( $shortcode, 'youtu.be/' ) + 9 );
+
+			if ( str_contains( $video_id, '?' ) ) {
+				$video_id = substr( $video_id, 0, strpos( $video_id, '?' ) );
+			}
+		} else {
+			// regex for extracting youtube video id from url
+			$pattern = '/(?<=v=)[^&#]+/';
+			preg_match( $pattern, $shortcode, $matches );
+			$video_id = $matches[0] ?? '';
+
+			// If video_id is still not found, try finding it as the last part of URL
+			if ( empty( $video_id ) ) {
+				$pattern = '/http(s)?:\/\/[^\s]+/';
+				preg_match( $pattern, $shortcode, $url_matches );
+
+				if ( isset( $url_matches[0] ) ) {
+					$url_parts = explode( '/', $url_matches[0] );
+					$video_id = end( $url_parts );
+				}
+			}
+		}
+
+		return $video_id;
 	}
 }
