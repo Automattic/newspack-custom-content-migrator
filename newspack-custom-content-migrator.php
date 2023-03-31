@@ -71,6 +71,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\CalMattersMigrator::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Command\PublisherSpecific\MassterlistMigrator::class,
+		Command\PublisherSpecific\MauiTimesMigrator::class,
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
 		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
