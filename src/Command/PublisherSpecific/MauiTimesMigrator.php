@@ -55,20 +55,31 @@ class MauiTimesMigrator implements InterfaceCommand {
 			    GROUP BY post_id, meta_value
 			) pm ON p.ID = pm.post_id
 			WHERE p.post_type = 'post' AND p.post_status = 'publish'
-			GROUP BY pm.post_id
-			HAVING counter = 1"
+			GROUP BY pm.post_id"
 		);
 
 		foreach ( $posts as $post ) {
 			WP_CLI::log( 'Post ID: ' . $post->ID );
 
+			if ( $post->counter > 1 ) {
+				echo WP_CLI::colorize( '%rMore than one file path found.%n' ) . "\n";
+
+				// Check if beginning of post_content has an image
+				if ( str_starts_with( $post->post_content, '<!-- wp:image' ) || str_starts_with( $post->post_content, '<figure' ) ) {
+					echo WP_CLI::colorize( '%cThere is an image at the beginning of post.%n' ) . "\n";
+					$string = substr( $post->post_content, 0, 100 );
+					echo WP_CLI::colorize( "%y$string%n" ) . "\n";
+//					$wpdb->delete( $wpdb->postmeta, [ 'post_id' => $post->ID, 'meta_key' => '_thumbnail_id' ] );
+					$wpdb->get_var( "DELETE FROM $wpdb->postmeta WHERE meta_key = '_thumbnail_id' AND post_id = $post->ID AND meta_value IN ($post->_thumbnail_id)" );
+				}
+
+				continue;
+			}
+
 			$partial_file_path = $wpdb->get_results( "SELECT meta_value FROM $wpdb->postmeta WHERE post_id = $post->_thumbnail_id AND meta_key = '_wp_attached_file'" );
 
 			$count_of_results = count( $partial_file_path );
-			if ( $count_of_results > 1 ) {
-				echo WP_CLI::colorize( '%rMore than one file path found.%n' ) . "\n";
-				continue;
-			} else if ( 0 === $count_of_results ) {
+			if ( 0 === $count_of_results ) {
 				echo WP_CLI::colorize( '%rNo file path found.%n' ) . "\n";
 				continue;
 			}
