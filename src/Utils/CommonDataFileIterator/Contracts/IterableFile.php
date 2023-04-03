@@ -8,7 +8,7 @@
 namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts;
 
 use IteratorAggregate;
-use NewspackCustomContentMigrator\Utils\Contracts\File as FileInterface;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\File as FileInterface;
 
 interface IterableFile extends FileInterface, IteratorAggregate {
 	/**
