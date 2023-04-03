@@ -48,7 +48,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate_church_listings',
+			'newspack-content-migrator qcity_metro_migrate_church_listings',
 			[ $this, 'cmd_migrate_church_listings' ],
 			[
 				'shortdesc' => 'Migrate church listings from the old plugin format to the Newspack Listings.',
@@ -56,7 +56,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate_business_listings',
+			'newspack-content-migrator qcity_metro_migrate_business_listings',
 			[ $this, 'cmd_migrate_business_listings' ],
 			[
 				'shortdesc' => 'Migrate business listings from the old plugin format to the Newspack Listings.',
@@ -64,7 +64,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate_job_listings',
+			'newspack-content-migrator qcity_metro_migrate_job_listings',
 			[ $this, 'cmd_migrate_job_listings' ],
 			[
 				'shortdesc' => 'Migrate job listings from the old plugin format to the Newspack Listings.',
@@ -72,7 +72,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate_xml_posts',
+			'newspack-content-migrator qcity_metro_migrate_xml_posts',
 			[ $this, 'cmd_migrate_xml_posts' ],
 			[
 				'shortdesc' => 'Migrate posts from XML file.',
@@ -101,7 +101,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator fix_attachment_postmeta',
+			'newspack-content-migrator qcity_metro_fix_attachment_postmeta',
 			[ $this, 'cmd_fix_attachment_data' ],
 			[
 				'shortdesc' => 'Fix attachment postmeta.',
@@ -109,7 +109,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate_galleries',
+			'newspack-content-migrator qcity_metro_migrate_galleries',
 			[ $this, 'cmd_migrate_galleries' ],
 			[
 				'shortdesc' => 'Migrate galleries from the old plugin format to the Newspack Galleries.',
