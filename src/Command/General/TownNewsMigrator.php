@@ -136,11 +136,11 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 	}
 
-	public function myErrorHandler( $errno, $errstr, $errfile, $errline ) {
-		if ( ! str_contains( $errstr, 'exif_read_data' ) ) {
-			die( "Fatal notice in line $errline: " . $errstr );
-		}
-	}
+	// public function myErrorHandler( $errno, $errstr, $errfile, $errline ) {
+	// if ( ! str_contains( $errstr, 'exif_read_data' ) ) {
+	// die( "Fatal notice in line $errline: " . $errstr );
+	// }
+	// }
 
 	/**
 	 * Import a TownNews post from the exported XML file.
@@ -151,11 +151,12 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @return int|false    The imported post ID, false otherwise.
 	 */
 	private function import_post_from_xml( $xml_path, $dir_path ) {
-		set_error_handler( [ $this, 'myErrorHandler' ] );
+		// set_error_handler( [ $this, 'myErrorHandler' ] );
 		// print_r( 'Migrating: ' . $xml_path . "\n" );
-		// if ( ! str_ends_with( $xml_path, '9b4dec1e-cd6c-5d96-8a43-48906635c67e.xml' ) ) {
-		// return false;
-		// }
+
+		if ( ! str_ends_with( $xml_path, '55dfa84b-0694-5523-97cc-c7da34a6a7be.xml' ) ) {
+			return false;
+		}
 
 		if ( ! file_exists( $xml_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'not found ' . $xml_path );
@@ -176,6 +177,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		$title           = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
 		$subtitle        = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl2' );
 		$author_fullname = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:byline[not(contains(@class, "tncms-author"))]' );
+		$author_email    = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:byline[not(contains(@class, "tncms-author"))]' );
 		$author_meta     = $xml_doc->xpath( '//tn:body/tn:body.head/tn:byline[contains(@class, "tncms-author")]' );
 		$pubdate         = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:head/tn:docdata/tn:date.release', 'norm' );
 		$categories      = array_map(
@@ -199,9 +201,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 
 		// Set post author if exists.
-		if ( ! empty( $author_fullname ) ) {
-			$this->set_post_author( $post_id, $author_fullname, $author_meta );
-		}
+		$this->set_post_author( $post_id, $author_fullname, $author_meta );
 
 		// Import attached media.
 		$content        = [];
@@ -448,6 +448,23 @@ class TownNewsMigrator implements InterfaceCommand {
 				}
 
 				return $this->generate_video_from_xml_collection( $element, $video_filepath, $dir_path, $parent_id );
+			case 'audio':
+				$media_caption = $this->get_element_by_xpath( $element, 'tn:media-caption' );
+				$attachment_id = $this->import_attachment_from_media_element( $element, $dir_path, $parent_id );
+
+				if ( is_wp_error( $attachment_id ) ) {
+					return '';
+				}
+
+				$attachment_url = wp_get_attachment_url( $attachment_id );
+				$caption_tag    = ! empty( $media_caption ) ? '<figcaption>' . $media_caption . '</figcaption>' : '';
+
+				return '<figure>
+				<audio controls>
+				  <source src="' . $attachment_url . '" type="audio/mpeg">
+				</video>
+				' . $caption_tag . '
+			  </figure>';
 			default:
 				$this->logger->log( self::LOG_FILE, sprintf( "Media type '%s' not processed, please add it to the code.", $media_type ), Logger::WARNING );
 				die();
