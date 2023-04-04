@@ -9,6 +9,7 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use WP_CLI;
 
 class QCityMetroMigrator implements InterfaceCommand {
@@ -113,6 +114,23 @@ class QCityMetroMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_galleries' ],
 			[
 				'shortdesc' => 'Migrate galleries from the old plugin format to the Newspack Galleries.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator qcity_metro_migrate_memberful_data',
+			[ $this, 'cmd_qcity_metro_migrate_memberful_data' ],
+			[
+				'shortdesc' => 'Migrate Memberful data.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'CSV file to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -671,6 +689,112 @@ class QCityMetroMigrator implements InterfaceCommand {
 				WP_CLI::log( 'Failed to migrate gallery ' . $gallery_post->post_title );
 			}
 		}
+	}
+
+	/**
+	 * Migrating memberful data to woocommerce.
+	 *
+	 * @param array $args Positional Arguments.
+	 * @param array $assoc_args Associative Arguments.
+	 *
+	 * @throws Exception Throws exception if file is not found.
+	 */
+	public function cmd_qcity_metro_migrate_memberful_data( $args, $assoc_args ) {
+		$file_path = $args[0];
+
+		$iterator = ( new FileImportFactory() )->get_file( $file_path )->getIterator();
+
+		$new_woo_data = [];
+
+		foreach ( $iterator as $row_number => $row ) {
+			WP_CLI::log( 'Row Number: ' . $row_number + 1 . ' - ' . $row['email'] );
+			$data = [];
+
+			$full_name_parts = explode( ' ', $row['full_name'] );
+			$last_name       = array_pop( $full_name_parts );
+			$first_name      = implode( ' ', $full_name_parts );
+
+			$status = 'wc-expired';
+
+			if ( 'yes' === strtolower( $row['active'] ) ) {
+				$status = 'wc-active';
+			} elseif ( 'no' === strtolower( $row['active'] ) ) {
+				$status = 'wc-cancelled';
+			}
+
+			$row_plan       = strtolower( trim( $row['plan'] ) );
+			$billing_period = '';
+			$order_item     = null;
+
+			if ( 'two-year membership' === $row_plan ) {
+				$billing_period = 'year';
+				$order_item     = 223057;
+			} elseif ( 'one-year membership' === $row_plan ) {
+				$billing_period = 'year';
+				$order_item     = 223057;
+			} elseif ( 'pay monthly' === $row_plan ) {
+				$billing_period = 'month';
+				$order_item     = 223056;
+			} elseif ( 'one-time donor' === $row_plan ) {
+				$billing_period  = 'month';
+				$status          = 'wc-expired';
+				$row['end_date'] = $row['created_at'];
+				$order_item      = 223053;
+			}
+
+			if ( empty( $billing_period ) ) {
+				WP_CLI::error( 'Unabled to determine billing period. Row: ' . print_r( $row, true ) );
+			}
+
+			$payment_method_post_meta_data = [
+				'_stripe_customer_id' => $row['stripe_customer_id'],
+			];
+			array_walk(
+				$payment_method_post_meta_data,
+				function ( $key, $value ) {
+					return $key . ':' . $value;
+				}
+			);
+
+			$data['customer_email']           = $row['email'];
+			$data['billing_first_name']       = $row['first_name'] ?? $first_name;
+			$data['billing_last_name']        = $row['last_name'] ?? $last_name;
+			$data['billing_address_1']        = $row['address'];
+			$data['billing_address_2']        = '';
+			$data['billing_city']             = $row['city'];
+			$data['billing_state']            = $row['state'];
+			$data['billing_postcode']         = $row['zip_postal'];
+			$data['billing_country']          = $row['country'];
+			$data['subscription_status']      = $status;
+			$data['start_date']               = $row['created_at'];
+			$data['next_payment_date']        = $row['expiration_date'];
+			$data['billing_period']           = $billing_period;
+			$data['billing_interval']         = '1';
+			$data['order_items']              = $order_item;
+			$data['order_total']              = $row['total_spend'];
+			$data['order_notes']              = 'Memberful ID: ' . $row['memberful_id'] . ';';
+			$data['payment_method']           = 'one-time donor' === $row_plan ? '' : 'stripe';
+			$data['payment_method_title']     = 'Online payment';
+			$data['payment_method_post_meta'] = implode( '|', $payment_method_post_meta_data );
+			$data['_custom_field']            = $row['custom_field'];
+			$data['_referrer']                = $row['referrer'];
+			$data['_utm_campaign']            = $row['utm_campaign'];
+			$data['_utm_content']             = $row['utm_content'];
+			$data['_utm_medium']              = $row['utm_medium'];
+			$data['_utm_source']              = $row['utm_source'];
+			$data['_utm_term']                = $row['utm_term'];
+
+			$new_woo_data[] = $data;
+		}
+
+		$header = array_keys( $new_woo_data[0] );
+		array_unshift( $new_woo_data, $header );
+
+		$fp = fopen( 'woo_data.csv', 'w' );
+		foreach ( $new_woo_data as $new_row ) {
+			fputcsv( $fp, $new_row );
+		}
+		fclose( $fp );
 	}
 
 	private function handle_xml_author( DOMElement $author ) {
