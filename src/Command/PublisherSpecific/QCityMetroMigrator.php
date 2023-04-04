@@ -96,8 +96,8 @@ class QCityMetroMigrator implements InterfaceCommand {
 							'post',
 							'attachment',
 						],
-					]
-				]
+					],
+				],
 			]
 		);
 
@@ -499,7 +499,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 					case 'how_to_apply':
 						if ( 'direct' === $value[0] ) {
 							$apply_link = $this->get_apply_button_html( $meta['application_direct'][0], 'direct' );
-						} else if ( 'email' === $value[0] ) {
+						} elseif ( 'email' === $value[0] ) {
 							$apply_link = $this->get_apply_button_html( $meta['application_email'][0], 'email' );
 						}
 						break;
@@ -672,11 +672,11 @@ class QCityMetroMigrator implements InterfaceCommand {
 			);
 
 			$jetpack_slideshow = $gutenberg_block_generator->get_jetpack_slideshow( $attachment_ids )['innerHTML'];
-			$attributes = [
-				'ids' => array_map( fn( $attachment_id ) => intval( $attachment_id ), $attachment_ids ),
+			$attributes        = [
+				'ids'      => array_map( fn( $attachment_id ) => intval( $attachment_id ), $attachment_ids ),
 				'sizeSlug' => 'large',
 			];
-			$json_attributes = wp_json_encode( $attributes );
+			$json_attributes   = wp_json_encode( $attributes );
 
 			$content                   = "<!-- wp:jetpack/slideshow $json_attributes -->$jetpack_slideshow<!-- /wp:jetpack/slideshow --><br>$gallery_post->post_content";
 			$post_data['post_content'] = $content;
@@ -885,7 +885,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 			'post_excerpt'   => '',
 			'comment_status' => '',
 			'post_modified'  => '',
-			//'post_parent' => '',
+			// 'post_parent' => '',
 			'guid'           => '',
 			'post_category'  => [],
 			'tags_input'     => [],
