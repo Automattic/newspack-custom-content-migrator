@@ -41,6 +41,15 @@ class MauiTimesMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator maui-times-fix-subtitles',
+			[ $this, 'cmd_fix_subtitles' ],
+			[
+				'shortdesc' => 'Copies ACF subtitles to post_excerpt and .',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	public function cmd_fix_posts_with_dupe_featured_images() {
@@ -129,6 +138,18 @@ class MauiTimesMigrator implements InterfaceCommand {
 			} else {
 				echo WP_CLI::colorize( '%gFeatured image not in beginning of post..%n' ) . "\n";
 			}
+		}
+	}
+
+	public function cmd_fix_subtitles(  ) {
+		global $wpdb;
+
+		$subtitle_rows = $wpdb->get_results(
+			"SELECT * FROM $wpdb->postmeta WHERE meta_key = 'acf_subtitle' AND meta_value <> ''"
+		);
+
+		foreach ( $subtitle_rows as $subtitle_row ) {
+			add_post_meta( $subtitle_row->post_id, 'newspack_post_subtitle', $subtitle_row->meta_value );
 		}
 	}
 }
