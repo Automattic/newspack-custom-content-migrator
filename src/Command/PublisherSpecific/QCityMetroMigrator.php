@@ -748,17 +748,18 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 			$payment_method_post_meta_data = [
 				'_stripe_customer_id' => $row['stripe_customer_id'],
+				'_stripe_source_id'   => '',
 			];
 			array_walk(
 				$payment_method_post_meta_data,
-				function ( $key, $value ) {
-					return $key . ':' . $value;
+				function ( &$value, $key ) {
+					$value = $key . ':' . $value;
 				}
 			);
 
 			$data['customer_email']           = $row['email'];
-			$data['billing_first_name']       = $row['first_name'] ?? $first_name;
-			$data['billing_last_name']        = $row['last_name'] ?? $last_name;
+			$data['billing_first_name']       = ! empty( trim( $row['first_name'] ) ) ? trim( $row['first_name'] ) : $first_name;
+			$data['billing_last_name']        = ! empty( trim( $row['last_name'] ) ) ? trim( $row['last_name'] ) : $last_name;
 			$data['billing_address_1']        = $row['address'];
 			$data['billing_address_2']        = '';
 			$data['billing_city']             = $row['city'];
@@ -783,6 +784,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 			$data['_utm_medium']              = $row['utm_medium'];
 			$data['_utm_source']              = $row['utm_source'];
 			$data['_utm_term']                = $row['utm_term'];
+			$data['_stripe_customer_id']      = $row['stripe_customer_id'];
 
 			$new_woo_data[] = $data;
 		}
