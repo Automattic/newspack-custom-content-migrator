@@ -154,9 +154,9 @@ class TownNewsMigrator implements InterfaceCommand {
 		// set_error_handler( [ $this, 'myErrorHandler' ] );
 		// print_r( 'Migrating: ' . $xml_path . "\n" );
 
-		if ( ! str_ends_with( $xml_path, '55dfa84b-0694-5523-97cc-c7da34a6a7be.xml' ) ) {
-			return false;
-		}
+		// if ( ! str_ends_with( $xml_path, '55dfa84b-0694-5523-97cc-c7da34a6a7be.xml' ) ) {
+		// return false;
+		// }
 
 		if ( ! file_exists( $xml_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'not found ' . $xml_path );
@@ -316,11 +316,12 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @param \SimpleXMLElement $author_meta XML element containing author meta.
 	 * @return void
 	 */
-	private function set_post_author( $post_id, $fullname, $author_meta ) {
-		$first_name = '';
-		$last_name  = '';
-		$email      = '';
-		$avatar     = '';
+	private function set_post_author( $post_id, $display_name, $author_meta ) {
+		$first_name                 = '';
+		$last_name                  = '';
+		$email                      = '';
+		$avatar                     = '';
+		$using_email_as_displayname = false;
 
 		if ( ! empty( $author_meta ) ) {
 			$author_meta = current( $author_meta );
@@ -332,7 +333,17 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 
 		// clean byline.
-		$fullname = str_starts_with( strtolower( $fullname ), 'by ' ) ? substr( $fullname, 3 ) : $fullname;
+		$display_name = str_starts_with( strtolower( $display_name ), 'by ' ) ? substr( $display_name, 3 ) : $display_name;
+		// if no display_name use email address.
+		if ( empty( $display_name ) ) {
+			$display_name               = $email;
+			$using_email_as_displayname = true;
+		}
+
+		if ( empty( $display_name ) ) {
+			$this->logger->log( self::LOG_FILE, sprintf( "Can't get the post %d author!", $post_id ), Logger::WARNING );
+			return;
+		}
 
 		$author = get_user_by( 'email', $email );
 		if ( $author ) {
@@ -350,7 +361,7 @@ class TownNewsMigrator implements InterfaceCommand {
 			} else {
 				$avatar_id = null;
 				if ( ! empty( $avatar ) ) {
-					$avatar_id = $this->attachments->import_external_file( $avatar, $fullname );
+					$avatar_id = $this->attachments->import_external_file( $avatar, $display_name );
 
 					if ( is_wp_error( $avatar_id ) ) {
 						$this->logger->log( self::LOG_FILE, sprintf( "Can't download user avatar for the post %d: %s", $post_id, $avatar_id->get_error_message() ), Logger::WARNING );
@@ -359,7 +370,7 @@ class TownNewsMigrator implements InterfaceCommand {
 				}
 				$author_id = $this->coauthorsplus_logic->create_guest_author(
 					[
-						'display_name' => $fullname,
+						'display_name' => $display_name,
 						'first_name'   => $first_name,
 						'last_name'    => $last_name,
 						'user_email'   => $email,
@@ -369,6 +380,10 @@ class TownNewsMigrator implements InterfaceCommand {
 			}
 
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $author_id ], $post_id );
+
+			if ( $using_email_as_displayname ) {
+				update_post_meta( $author_id, 'author_email_as_display_name', true );
+			}
 		}
 	}
 
