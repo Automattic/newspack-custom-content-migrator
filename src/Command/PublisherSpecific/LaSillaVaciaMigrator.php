@@ -883,7 +883,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
             if ( ! empty( $author['image'] ) ) {
                 $this->file_logger( "Creating User's avatar. File: {$author['image']}" );
-                $avatar_attachment_id = $this->handle_profile_photo( $author['image'] );
+                $file_path_parts = explode( '/', $author['image'] );
+                $filename = array_pop( $file_path_parts );
+                $avatar_attachment_id = $this->handle_profile_photo( $filename );
 
                 $this->simple_local_avatars->import_avatar( $user_id, $avatar_attachment_id );
             }
@@ -918,13 +920,29 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $first_name = implode(' ', $names);
 
             $guest_author_data = [
-                'display_name' => $user['slug'],
+                'display_name' => $user['fullname'],
+                'user_login' => $user['slug'],
                 'first_name' => $first_name,
                 'last_name' => $last_name,
                 'user_email' => $user['email'],
                 'website' => $user['url'],
-                'description' => $user['description'],
             ];
+
+            $description = '';
+
+            if ( ! empty( $user['description'] ) ) {
+                $description .= $user['description'];
+            }
+
+            if ( ! empty( $user['lineasInvestigacion'] ) ) {
+                $description .= "\n<strong>Líneas de Investigación: </strong>" . $user['lineasInvestigacion'];
+            }
+
+            if ( ! empty ( $user['categories'] ) ) {
+                $description .= "\n\n<strong>Universidad: </strong>" . $user['categories'][0]['name'];
+            }
+
+            $guest_author_data['description'] = $description;
 
             if ( ! empty( $user['picture'] ) ) {
                 $file_path_parts = explode( '/', $user['picture'] );
@@ -1042,34 +1060,29 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         $authors = $wpdb->get_results( $authors_sql, OBJECT_K );
         $authors = array_map( fn( $value ) => (int) $value->ID, $authors );
 
-        $imported_hashed_ids_sql = "SELECT meta_value, meta_key
+        $imported_hashed_ids_sql = "SELECT meta_value, post_id
             FROM wp_postmeta
             WHERE meta_key IN ('hashed_import_id')";
         $imported_hashed_ids = $wpdb->get_results( $imported_hashed_ids_sql, OBJECT_K );
-        $imported_hashed_ids = array_map( fn( $value ) => null, $imported_hashed_ids );
+        $imported_hashed_ids = array_map( fn( $value ) => (int) $value->post_id, $imported_hashed_ids );
 
-        foreach ( $this->json_generator( $assoc_args['import-json'], '_embedded.Article') as $article ) {
+        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
 
             // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
-            $original_article_id = $article['Id'] ?? 0;
-            $original_article_title = $article['Title'] ?? '';
-            $original_article_slug = $article['Slug'] ?? '';
+            $original_article_id = $article['id'] ?? 0;
+            $original_article_title = $article['post_title'] ?? '';
+            $original_article_slug = $article['post_name'] ?? '';
             $hashed_import_id = md5( $original_article_title . $original_article_slug );
 
             $this->file_logger("Original Article ID: $original_article_id | Original Article Title: $original_article_title | Original Article Slug: $original_article_slug" );
 
-            if ( array_key_exists( $hashed_import_id, $imported_hashed_ids ) ) {
-                $this->file_logger("Possible duplicate article, skipping." );
-                continue;
-            }
-
             $datetime_format = 'Y-m-d H:i:s';
-            $createdOnDT = new DateTime( $article['CreatedOn'], new DateTimeZone( 'America/Bogota' ) );
+            $createdOnDT = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
             $createdOn = $createdOnDT->format( $datetime_format );
             $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
             $createdOnGmt = $createdOnDT->format( $datetime_format );
 
-            $modifiedOnDT = new DateTime( $article['LastModified'], new DateTimeZone( 'America/Bogota' ) );
+            $modifiedOnDT = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
             $modifiedOn = $modifiedOnDT->format( $datetime_format );
             $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
             $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
@@ -1078,20 +1091,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
             if ( ! empty( $article['html'] ) ) {
                 $html = $this->handle_extracting_html_content( $article['html'] );
+            } else {
+                $html = $article['post_content'];
             }
 
             $article_data = [
-                'post_author' => $authors[ $article['CreatedBy'] ] ?? 0,
+                'post_author' => 0,
                 'post_date' => $createdOn,
                 'post_date_gmt' => $createdOnGmt,
                 'post_content' => $html,
-                'post_title' => $article['Title'],
+                'post_title' => $article['post_title'],
                 'post_excerpt' => '',
                 'post_status' => 'publish',
                 'comment_status' => 'closed',
                 'ping_status' => 'closed',
                 'post_password' => '',
-                'post_name' => $article['Slug'],
+                'post_name' => $article['post_name'],
                 'to_ping' => '',
                 'pinged' => '',
                 'post_modified' => $modifiedOn,
@@ -1103,15 +1118,81 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 'post_mime_type' => '',
                 'comment_count' => 0,
                 'meta_input' => [
-                    'original_article_id' => $article['Id'],
-                    'canonical_url' => $article['CanonicalUrl'],
+                    'original_article_id' => $original_article_id,
+//                    'canonical_url' => $article['CanonicalUrl'],
                     'hashed_import_id' => $hashed_import_id,
                 ]
             ];
 
+            if ( 1 === count( $article['post_author'] ) ) {
+                $article_data['post_author'] = $authors[ $article['post_author'][0] ] ?? 0;
+            }
+
+            foreach ( $article['customfields'] as $customfield ) {
+                $article_data['meta_input'][ $customfield['name'] ] = $customfield['value'];
+            }
+
             $this->file_logger( json_encode( $article_data ), false );
 
+            $new_post_id = $imported_hashed_ids[ $hashed_import_id ] ?? null;
+
+            if ( ! is_null( $new_post_id ) ) {
+                $this->file_logger( "Found existing post with ID: $new_post_id. Updating..." );
+                // Setting the ID to the existing post ID will update the existing post.
+                $article_data['ID'] = $new_post_id;
+                // Delete the existing post's categories and guest authors.
+                $wpdb->delete(
+                    $wpdb->term_relationships,
+                    [
+                        'object_id' => $new_post_id,
+                    ]
+                );
+            }
+
             $post_id = wp_insert_post( $article_data );
+
+            if ( count( $article['post_author'] ) > 1 ) {
+                global $wpdb;
+
+                $guest_author_query = $wpdb->prepare(
+                    "SELECT 
+                        post_id 
+                    FROM $wpdb->postmeta 
+                    WHERE meta_key = 'original_user_id' 
+                      AND meta_value IN (" . implode( ',', $article['post_author'] ) . ')'
+                );
+                $guest_author_ids = $wpdb->get_col( $guest_author_query );
+
+                if ( ! empty( $guest_author_ids ) ) {
+                    $term_taxonomy_ids_query = $wpdb->prepare(
+                        "SELECT 
+                            tt.term_taxonomy_id
+                        FROM $wpdb->term_taxonomy tt 
+                            INNER JOIN $wpdb->term_relationships tr 
+                                ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                        WHERE tt.taxonomy = 'author' 
+                          AND tr.object_id IN (" . implode( ',', $guest_author_ids ) . ')'
+                    );
+                    $term_taxonomy_ids = $wpdb->get_col( $term_taxonomy_ids_query );
+
+                    foreach ( $term_taxonomy_ids as $term_taxonomy_id ) {
+                        $wpdb->insert(
+                            $wpdb->term_relationships,
+                            [
+                                'object_id'        => $post_id,
+                                'term_taxonomy_id' => $term_taxonomy_id,
+                            ]
+                        );
+                    }
+                }
+            }
+
+            foreach ( $article['categories'] as $category ) {
+                $term = get_term_by( 'name', $category['name'], 'category' );
+                if ( $term ) {
+                    wp_set_post_terms( $post_id, $term->term_id, 'category', true );
+                }
+            }
 
             wp_update_post(
                 [
@@ -1231,7 +1312,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             [
                 'guid'  => wp_upload_dir()['url'] . '/' . $filename,
                 'post_mime_type' => wp_get_image_mime( $file_path ),
-                'post_title' => basename( $file_path ),
+                'post_title' => sanitize_file_name( $filename ),
                 'post_content' => '',
                 'post_status' => 'inherit',
                 'comment_status' => 'closed',
