@@ -75,6 +75,37 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		// Then images
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-migrate-images-from-json',
+			[ $this, 'cmd_migrate_images_from_json' ],
+			[
+				'shortdesc' => 'Migrate images from JSON data.',
+				'synopsis' => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'Path to the JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start',
+						'description' => 'Start row (default: 0)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end',
+						'description' => 'End row (default: PHP_INT_MAX)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
 	}
 
 	public function cmd_migrate_authors_from_scrape() {
@@ -161,6 +192,128 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				WP_CLI::log( $result->get_error_message() );
 			} else {
 				WP_CLI::success( "User {$row['email']} created." );
+			}
+		}
+	}
+
+	/**
+	 * Function to process images from a Plone JSON image file.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @throws Exception
+	 */
+	public function cmd_migrate_images_from_json( $args, $assoc_args ) {
+		$file_path = $args[0];
+		$start = $assoc_args['start'] ?? 0;
+		$end = $assoc_args['end'] ?? PHP_INT_MAX;
+
+		$iterator = ( new FileImportFactory() )->get_file( $file_path )
+		                                       ->set_start( $start )
+		                                       ->set_end( $end )
+		                                       ->getIterator();
+
+		$creators = [];
+
+		foreach ( $iterator as $row_number => $row ) {
+			echo WP_CLI::colorize( 'Handling Row Number: ' . "%b$row_number%n" . ' - ' . $row['@id'] ) . "\n";
+
+			$post_author = 0;
+
+			WP_CLI::log( 'Looking for user: ' . $row['creators'][0] );
+			if ( array_key_exists( $row['creators'][0], $creators ) ) {
+				$post_author = $creators[ $row['creators'][0] ];
+				echo WP_CLI::colorize( '%yFound user in array... ' . $post_author . '%n' ) . "\n";
+			} else {
+				$user = get_user_by( 'login', $row['creators'][0] );
+
+				if ( ! $user ) {
+					echo WP_CLI::colorize( '%rUser not found in DB...' ) . "\n";
+				} else {
+					echo WP_CLI::colorize( '%YUser found in DB, updating role... ' . $row['creators'][0] . ' => ' . $user->ID . '%n' ) . "\n";
+					$user->set_role( 'author' );
+					$creators[ $row['creators'][0] ] = $user->ID;
+					$post_author                     = $user->ID;
+				}
+			}
+
+			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['created'] );
+			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['modified'] );
+
+			$caption = '';
+
+			if ( ! empty( $row['description'] ) ) {
+				$caption = $row['description'];
+			}
+
+			if ( ! empty( $row['credit'] ) ) {
+				if ( ! empty( $caption ) ) {
+					$caption .= '<br />';
+				}
+
+				$caption .= 'Credit: ' . $row['credit'];
+			}
+
+			// check image param, if not empty, it is a blob
+			if ( ! empty( $row['image'] ) ) {
+				echo WP_CLI::colorize( '%wHandling blob...' ) . "\n";
+				$filename = $row['image']['filename'];
+				$destination_file_path = WP_CONTENT_DIR . '/uploads/' . $filename;
+				$file_blob_path = WP_CONTENT_DIR . '/high_country_news/blobs/' . $row['image']['blob_path'];
+				file_put_contents( $destination_file_path, file_get_contents( $file_blob_path ) );
+
+				$result = media_handle_sideload(
+					[
+						'name'     => $destination_file_path,
+						'tmp_name' => $destination_file_path,
+					],
+					0,
+					$row['description'],
+					[
+						'post_title' => $row['id'] ?? '',
+						'post_author' => $post_author,
+						'post_excerpt' => $caption,
+						'post_content' => $row['description'] ?? '',
+						'post_date' => $created_at->format( 'Y-m-d H:i:s' ),
+						'post_date_gmt' => $created_at->format( 'Y-m-d H:i:s' ),
+						'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
+						'post_modified_gmt' => $updated_at->format( 'Y-m-d H:i:s' ),
+					]
+				);
+
+				if ( is_wp_error( $result ) ) {
+					echo WP_CLI::colorize( '%r' . $result->get_error_message() . '%n' ) . "\n";
+				} else {
+					echo WP_CLI::colorize( "%gImage {$row['id']} created.%n" ) . "\n";
+					update_post_meta( $result, 'UID', $row['UID'] );
+				}
+			} else if ( ! empty( $row['legacyPath'] ) ) {
+				echo WP_CLI::colorize( '%wHandling legacyPath...' ) . "\n";
+				// download image and upload it
+				$attachment_id = media_sideload_image( $row['@id'] );
+
+				if ( is_wp_error( $attachment_id ) ) {
+					echo WP_CLI::colorize( '%r' . $attachment_id->get_error_message() . '%n' ) . "\n";
+				} else {
+					echo WP_CLI::colorize( "%gImage {$row['id']} created.%n" ) . "\n";
+					wp_update_post(
+						[
+							'ID' => $attachment_id,
+							'post_author' => $post_author,
+							'post_excerpt' => $caption,
+							'post_content' => $row['description'] ?? '',
+							'post_date' => $created_at->format( 'Y-m-d H:i:s' ),
+							'post_date_gmt' => $created_at->format( 'Y-m-d H:i:s' ),
+							'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
+							'post_modified_gmt' => $updated_at->format( 'Y-m-d H:i:s' ),
+						]
+					);
+
+					update_post_meta( $attachment_id, 'UID', $row['UID'] );
+				}
+			} else {
+				echo WP_CLI::colorize( '%rNo image found for this row...' ) . "\n";
 			}
 		}
 	}
