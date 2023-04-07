@@ -338,6 +338,76 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator soccer-america-missing-articles',
+			[ $this, 'cmd_missing_articles' ],
+			[
+				'shortdesc' => 'Import articles from a Soccer America tags CSV export.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'csv',
+						'optional'    => false,
+						'description' => 'The CSV export file location',
+					],
+					[
+						'type'        => 'positional',
+						'name'        => 'output',
+						'optional'    => false,
+						'description' => 'File to print missing articles to.',
+					],
+				]
+			]
+		);
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator soccer-america-missing-articles`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_missing_articles( $args, $assoc_args ) {
+		$this->log( 'Checking for missing Soccer America articles...' );
+
+		// Make sure there is a path to CSV provided.
+		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
+			$this->log( 'Please provide a path to an CSV file.', 'error' );
+		}
+
+		// Open the CSV file.
+		$csv = fopen( $args[0], 'r' );
+
+		// Get the first row of the CSV, which should be the column headers.
+		$this->csv_headers = fgetcsv( $csv, null, "\t" );
+
+		global $wpdb;
+
+		$progress = \WP_CLI\Utils\make_progress_bar( 'Finding missing articles', 58415 );
+
+		// Loop through the CSV rows.
+		while ( $row = fgetcsv( $csv, null, "\t" ) ) {
+			$article_id = $this->get_field_from_row( 'article_id', $row );
+
+			// Check if the article exists.
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '%s' AND meta_value = %s",
+					self::META_PREFIX . 'article_id',
+					$article_id
+				)
+			);
+
+			// Only report missing articles in a way we can easily re-use.
+			if ( is_null( $post_id ) ) {
+				file_put_contents( $args[1], implode( "\t", $row ) . PHP_EOL, FILE_APPEND );
+			}
+
+			$progress->tick();
+		}
+
+		$progress->finish();
 	}
 
 	/**
