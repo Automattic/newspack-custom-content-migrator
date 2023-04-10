@@ -156,4 +156,90 @@ class Taxonomy {
 
 		return $cat_id;
 	}
+
+	/**
+	 * Gets duplicate term slugs.
+	 *
+	 * @return array
+	 */
+	public function get_duplicate_term_slugs() {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			"SELECT 
+			t.slug, 
+			GROUP_CONCAT( DISTINCT tt.taxonomy ORDER BY tt.taxonomy SEPARATOR ', ' ) as taxonomies,
+			GROUP_CONCAT( 
+			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy ) 
+			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  ' 
+			    ) as 'term_id:term_taxonomy_id:taxonomy',
+			COUNT( DISTINCT tt.term_taxonomy_id ) as term_taxonomy_id_count
+			FROM $wpdb->terms t
+			LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+			GROUP BY t.slug, tt.term_id
+			HAVING term_taxonomy_id_count > 1
+			ORDER BY term_taxonomy_id_count DESC"
+		);
+	}
+
+	/**
+	 * Gets terms and taxonomies by slug.
+	 *
+	 * @param string $slug Slug.
+	 * @param array  $taxonomies Taxonomies.
+	 *
+	 * @return array
+	 */
+	public function get_terms_and_taxonomies_by_slug( string $slug, array $taxonomies = [ 'category', 'post_tag' ] ) {
+		global $wpdb;
+
+		$query = "SELECT 
+	                t.term_id, 
+	                t.name, t.slug, 
+	                tt.term_taxonomy_id, 
+	                tt.taxonomy, 
+	                tt.parent, 
+	                tt.count 
+				FROM $wpdb->terms t
+				INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+				WHERE t.slug = %s";
+
+		if ( ! empty( $taxonomies ) ) {
+			$query .= 'AND tt.taxonomy IN ( '
+			          . implode(',', array_fill( 0, count( $taxonomies ), '%s' ) )
+			          . ' )';
+		}
+
+		$query .= ' ORDER BY t.term_id, tt.term_taxonomy_id ASC';
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				$query,
+				array_merge( [ $slug ], $taxonomies )
+			)
+		);
+	}
+
+	/**
+	 * Obtains a new slug that does not exist in the database.
+	 *
+	 * @param string $slug Slug.
+	 * @param int    $offset Offset.
+	 *
+	 * @return string
+	 */
+	public function get_new_term_slug( string $slug, int $offset = 1 ) {
+		$new_slug = $slug . '-' . $offset;
+
+		do {
+			$slug_exists = ! is_null( term_exists( $new_slug ) );
+
+			if ( $slug_exists ) {
+				$offset++;
+				$new_slug = $slug . '-' . $offset;
+			}
+		} while ( $slug_exists );
+
+		return $new_slug;
+	}
 }
