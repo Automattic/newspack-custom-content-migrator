@@ -18,22 +18,32 @@ class VTDiggerMigrator implements InterfaceCommand {
 	const OBITUARY_CPT = 'obituary';
 	const LETTERS_TO_EDITOR_CPT = 'letters_to_editor';
 	const LIVEBLOG_CPT = 'liveblog';
+	const OLYMPICS_BLOG_CPT = 'olympics';
 	const NEWSBRIEF_CPT = 'news-brief';
+	const ELECTION_CPT = 'election_brief';
 
 	// GAs for CPTs.
 	const OBITUARIES_GA_NAME = 'VTD Obituaries';
-	const LETTERS_TO_EDITOR_GA_NAME = 'Letters to Editor';
+	const LETTERS_TO_EDITOR_GA_NAME = 'Opinion';
+	const NEWS_BRIEFS_GA_NAME = 'VTD staff';
+	const LIVEBLOG_GA_NAME = 'Liveblogs';
+	const ELECTION_GA_NAME = 'Election Briefs';
+	const OLYMPICS_GA_NAME = 'Olympics Blog';
 
 	// VTD Taxonomies.
 	const COUNTIES_TAXONOMY = 'counties';
 	const SERIES_TAXONOMY = 'series';
 
+	// WP tag names.
+	const ALL_LIVEBLOGS_TAG_NAME = 'news in brief';
+	const LETTERSTOTHEEDITOR_TAG_NAME = 'letters to the editor';
+	const SERIES_TAG_NAME = 'series';
+
 	// WP Category names.
-	const NEWS_BRIEFS_CAT_NAME = 'News Briefs';
 	const LIVEBLOGS_CAT_NAME = 'Liveblogs';
-	const LETTERSTOTHEEDITOR_CAT_NAME = 'Letters to the Editor';
+	const OLYMPICS_BLOG_CAT_NAME = 'Olympics Blog';
 	const OBITUARIES_CAT_NAME = 'Obituaries';
-	const SERIES_CAT_NAME = 'Series';
+	const ELECTION_BLOG_CAT_NAME = 'Election Blog';
 
 	// This postmeta will tell us which CPT this post was originally, e.g. 'liveblog'.
 	const META_VTD_CPT = 'newspack_vtd_cpt';
@@ -95,14 +105,6 @@ class VTDiggerMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator vtdigger-migrate-newsbriefs',
-			[ $this, 'cmd_newsbriefs' ],
-			[
-				'shortdesc' => 'Migrates the News Briefs CPT to regular posts with category.',
-				'synopsis'  => [],
-			]
-		);
-		WP_CLI::add_command(
 			'newspack-content-migrator vtdigger-migrate-liveblogs',
 			[ $this, 'cmd_liveblogs' ],
 			[
@@ -150,50 +152,91 @@ class VTDiggerMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-helper-remove-subcategories',
+			[ $this, 'cmd_helper_remove_subcategories' ],
+			[
+				'shortdesc' => 'Removes subcategories of given parent category if post count is 0.',
+				'synopsis'  => [
+					[
+						'type'      => 'assoc',
+						'name'      => 'parent-cat-id',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-helper-get-nonobituaries-post-ids',
+			[ $this, 'cmd_helper_get_nonobituaries_post_ids' ],
+			[
+				'shortdesc' => 'Gets post IDs of all posts that were not obituaries.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator vtdigger-migrate-newsbrief`.
+	 * Outputs all Post IDs that were not obituaries.
 	 *
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
-	public function cmd_newsbriefs( array $pos_args, array $assoc_args ) {
+	public function cmd_helper_get_nonobituaries_post_ids( array $pos_args, array $assoc_args ) {
 		global $wpdb;
-		$log = 'vtd_newsbriefs.log';
+		$log_csv = 'post_ids_not_obituaries.csv';
 
-		// Get News Briefs category ID.
-		$newsbriefs_cat_id = get_cat_ID( self::NEWS_BRIEFS_CAT_NAME );
-		if ( ! $newsbriefs_cat_id ) {
-			$newsbriefs_cat_id = wp_insert_category( [ 'cat_name' => self::NEWS_BRIEFS_CAT_NAME ] );
+		// all posts 71462
+		"select count(ID) from vtdWP_posts where post_type = 'post';";
+		// obituaries 455
+		"select count(distinct post_id) as ID from vtdWP_postmeta where meta_key = 'newspack_vtd_cpt' and meta_value = 'obituary';";
+
+		// -- posts that weren't obituaries 71007
+		$ids = $wpdb->get_col(
+			"select distinct ID from vtdWP_posts
+			where post_type = 'post' and ID not in (
+				select distinct post_id as ID from vtdWP_postmeta where meta_key = 'newspack_vtd_cpt' and meta_value = 'obituary'
+			);"
+		);
+
+		$this->logger->log( $log_csv, implode( ',', $ids ), false );
+		WP_CLI::success( sprintf( "Done. See %s", $log_csv ) );
+	}
+
+	/**
+	 * Takes parent-cat-id from $assoc_args and removes subcategories if post count is 0.
+	 * This is a helper command to clean up categories after migration.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_helper_remove_subcategories( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$parent_cat_id = $assoc_args['parent-cat-id'];
+		$log = 'vtd_helper_remove_subcategories.log';
+		$log_error = 'vtd_helper_remove_subcategories_err.log';
+
+		$children_cat_term_taxonomy_ids = $wpdb->get_col( $wpdb->prepare( "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE parent = %d", $parent_cat_id ) );
+		foreach ( $children_cat_term_taxonomy_ids as $key_children_cat_term_taxonomy_id => $children_cat_term_taxonomy_id ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_children_cat_term_taxonomy_id + 1, count( $children_cat_term_taxonomy_ids ), $children_cat_term_taxonomy_id ) );
+			$children_cat_post_count = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM $wpdb->term_relationships WHERE term_taxonomy_id = %d", $children_cat_term_taxonomy_id ) );
+			if ( 0 == $children_cat_post_count ) {
+				WP_CLI::log( sprintf( 'Removing category %d', $children_cat_term_taxonomy_id ) );
+				$deleted = wp_delete_term( $children_cat_term_taxonomy_id, 'category' );
+				if ( is_wp_error( $deleted ) || false === $deleted || 0 === $deleted ) {
+					WP_CLI::warning( sprintf( 'Error removing category %d: %s', $children_cat_term_taxonomy_id, is_object( $deleted ) ? $deleted->get_error_message() : '' ) );
+					$this->logger->log( $log_error, sprintf( 'Error removing category %d: %s', $children_cat_term_taxonomy_id, is_object( $deleted ) ? $deleted->get_error_message() : '' ) );
+				}
+			} else {
+				$this->logger->log( $log, sprintf( 'Category %d has %d posts, not removing.', $children_cat_term_taxonomy_id, $children_cat_post_count ) );
+			}
 		}
-
-		$newsbriefs_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s ;", self::NEWSBRIEF_CPT ) );
-
-		// Convert to 'post' type.
-		foreach ( $newsbriefs_ids as $key_newsbrief_id => $newsbrief_id ) {
-			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_newsbrief_id + 1, count( $newsbriefs_ids ), $newsbrief_id ) );
-
-			// Update to type post.
-			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $newsbrief_id ) );
-
-			// Set meta 'newspack_vtd_cpt' = 'news-brief';
-			update_post_meta( $newsbrief_id, self::META_VTD_CPT, self::NEWSBRIEF_CPT );
-		}
-
-		$this->logger->log( $log, implode( ',', $newsbriefs_ids ), false );
-		wp_cache_flush();
-
-		// Assign category 'News Briefs'.
-		WP_CLI::log( sprintf( "Assigning News Briefs cat ID %d ...", $newsbriefs_cat_id ) );
-		foreach ( $newsbriefs_ids as $key_newsbrief_id => $newsbrief_id ) {
-			wp_set_post_categories( $newsbrief_id, [ $newsbriefs_cat_id ], true );
-		}
-
-		wp_cache_flush();
-		WP_CLI::log( sprintf( "Done; see %s", $log ) );
 	}
 
 	/**
@@ -206,38 +249,154 @@ class VTDiggerMigrator implements InterfaceCommand {
 	 */
 	public function cmd_liveblogs( array $pos_args, array $assoc_args ) {
 		global $wpdb;
-		$log = 'vtd_liveblog.log';
 
-		// Get Liveblogs category ID.
-		$liveblogs_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
-		if ( ! $liveblogs_cat_id ) {
-			$liveblogs_cat_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
+		/**
+		 * Move Liveblogs>Uncategorized to Liveblogs.
+		 * Move
+		 */
+
+		/**
+		 * Newsbriefs.
+		 */
+		WP_CLI::log( sprintf( 'Migrating %s ...', self::NEWSBRIEF_CPT ) );
+		$log = 'vtd_cpt_newsbriefs.log';
+		$ga_id = $this->get_or_create_ga_id_by_display_name( self::NEWS_BRIEFS_GA_NAME );
+		$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s ;", self::NEWSBRIEF_CPT ) );
+		// NewsBriefs posts remain uncategorized.
+		$this->migrate_liveblog( self::NEWSBRIEF_CPT, false, $ga_id, $post_ids, self::ALL_LIVEBLOGS_TAG_NAME );
+		$this->logger->log( $log, implode( ',', $post_ids ), false );
+		WP_CLI::log( sprintf( "Done with %s; see %s", self::NEWSBRIEF_CPT, $log ) );
+
+		/**
+		 * Liveblogs.
+		 */
+		WP_CLI::log( sprintf( 'Migrating %s ...', self::LIVEBLOG_CPT ) );
+		$log = 'vtd_cpt_liveblog.log';
+		$ga_id = $this->get_or_create_ga_id_by_display_name( self::LIVEBLOG_GA_NAME );
+		$parent_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
+		if ( 0 == $parent_cat_id ) {
+			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
+		}
+		$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s;", self::LIVEBLOG_CPT ) );
+		$this->migrate_liveblog( self::LIVEBLOG_CPT, $parent_cat_id, $ga_id, $post_ids, self::ALL_LIVEBLOGS_TAG_NAME );
+		$this->logger->log( $log, implode( ',', $post_ids ), false );
+		WP_CLI::log( sprintf( "Done with %s; see %s", self::LIVEBLOGS_CAT_NAME, $log ) );
+
+		/**
+		 * Olympics Blog.
+		 */
+		WP_CLI::log( sprintf( 'Migrating %s ...', self::OLYMPICS_BLOG_CPT ) );
+		$log = 'vtd_cpt_olympicsblog.log';
+		$parent_cat_id = get_cat_ID( self::OLYMPICS_BLOG_CAT_NAME );
+		if ( 0 == $parent_cat_id ) {
+			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::OLYMPICS_BLOG_CAT_NAME ] );
+		}
+		$ga_id = $this->get_or_create_ga_id_by_display_name( self::OLYMPICS_GA_NAME );
+		$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s;", self::OLYMPICS_BLOG_CPT ) );
+		$this->migrate_liveblog( self::OLYMPICS_BLOG_CPT, $parent_cat_id, $ga_id, $post_ids, self::ALL_LIVEBLOGS_TAG_NAME );
+		$this->logger->log( $log, implode( ',', $post_ids ), false );
+		WP_CLI::log( sprintf( "Done with %s; see %s", self::OLYMPICS_BLOG_CPT, $log ) );
+
+		/**
+		 * Election Liveblogs.
+		 */
+		WP_CLI::log( sprintf( 'Migrating %s ...', self::ELECTION_CPT ) );
+		$log = 'vtd_cpt_election.log';
+		$parent_cat_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
+		if ( 0 == $parent_cat_id ) {
+			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
+		}
+		$ga_id = $this->get_or_create_ga_id_by_display_name( self::ELECTION_GA_NAME );
+		$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s ;", self::ELECTION_CPT ) );
+		$this->migrate_liveblog( self::ELECTION_CPT, $parent_cat_id, $ga_id, $post_ids, self::ALL_LIVEBLOGS_TAG_NAME );
+		$this->logger->log( $log, implode( ',', $post_ids ), false );
+		WP_CLI::log( sprintf( "Done with %s; see %s", self::ELECTION_CPT, $log ) );
+
+
+		WP_CLI::log( 'Done.' );
+		wp_cache_flush();
+	}
+
+	/**
+	 * Gets or creates a GA by display name.
+	 *
+	 * @param string $display_name GA display name.
+	 *
+	 * @throws \RuntimeException If GA could not be created.
+	 *
+	 * @return int GA ID.
+	 */
+	private function get_or_create_ga_id_by_display_name( $display_name ) {
+		$ga = $this->cap_logic->get_guest_author_by_display_name( $display_name );
+		$ga_id = $ga->ID ?? null;
+		if ( is_null( $ga_id ) ) {
+			$ga_id = $this->cap_logic->create_guest_author( ['display_name' => $display_name] );
+		}
+		if ( ! $ga_id ) {
+			throw new \RuntimeException( sprintf( 'Could not get/create Guest Author %s.', $display_name ) );
 		}
 
-		$liveblogs_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type=%s;", self::LIVEBLOG_CPT ) );
+		return $ga_id;
+	}
+
+	/**
+	 * @param string   $liveblog_cpt  post_type of the liveblog.
+	 * @param bool|int $parent_cat_id ID of the parent category for all liveblogs, or false if content should become uncategorized.
+	 * @param int      $ga_id         GA ID to assign to all posts.
+	 * @param array    $post_ids      Post IDs to migrate.
+	 * @param string   $tag           Tag to append to all posts.
+	 *
+	 * @return void
+	 */
+	public function migrate_liveblog( string $liveblog_cpt, bool|int $parent_cat_id, int $ga_id, array $post_ids, string $tag ) {
+		global $wpdb;
 
 		// Convert to 'post' type.
-		foreach ( $liveblogs_ids as $key_liveblog_id => $liveblog_id ) {
-			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_liveblog_id + 1, count( $liveblogs_ids ), $liveblog_id ) );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			// Update to type post.
-			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $liveblog_id ) );
+			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $post_id ) );
 
-			// Set meta 'newspack_vtd_cpt' = 'liveblog';
-			update_post_meta( $liveblog_id, self::META_VTD_CPT, self::LIVEBLOG_CPT );
+			// Tag, append.
+			wp_set_post_tags( $post_id, $tag, true );
+
+			// GA, not append, just this one GA.
+			if ( $ga_id ) {
+				$this->cap_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id, false );
+			}
+
+			// Update post Categories.
+			if ( false == $parent_cat_id ) {
+				/**
+				 * Uncategorized.
+				 */
+
+				wp_set_post_categories( $post_id, [], false );
+			} else {
+				/**
+				 * Migrate categories to this new post category.
+				 */
+
+				$category_ids = wp_get_post_categories( $post_id );
+				foreach ( $category_ids as $category_id ) {
+					$category = get_category( $category_id );
+
+					// Get or recreate this category under $parent_cat_id parent.
+					$new_category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $category->name, $parent_cat_id );
+
+					// Assign
+					wp_set_post_categories( $post_id, [ $new_category_id ], false );
+				}
+				// Or if no category, set $parent_cat_id.
+				if ( empty( $category_ids ) ) {
+					wp_set_post_categories( $post_id, [ $parent_cat_id ], false );
+				}
+			}
+
+			// Set meta 'newspack_vtd_cpt' = $liveblog_cpt;
+			update_post_meta( $post_id, self::META_VTD_CPT, $liveblog_cpt );
 		}
-
-		$this->logger->log( $log, implode( ',', $liveblogs_ids ), false );
-		wp_cache_flush();
-
-		// Assign category 'Liveblogs'.
-		WP_CLI::log( sprintf( "Assigning %s cat ID %d ...", self::LIVEBLOGS_CAT_NAME, $liveblogs_cat_id ) );
-		foreach ( $liveblogs_ids as $key_liveblog_id => $liveblog_id ) {
-			wp_set_post_categories( $liveblog_id, [ $liveblogs_cat_id ], true );
-		}
-
-		wp_cache_flush();
-		WP_CLI::log( sprintf( "Done; see %s", $log ) );
 	}
 
 	/**
@@ -252,12 +411,6 @@ class VTDiggerMigrator implements InterfaceCommand {
 		global $wpdb;
 		$log = 'vtd_letterstotheeditor.log';
 
-		// Get Letters to the Editor category ID.
-		$letters_cat_id = get_cat_ID( self::LETTERSTOTHEEDITOR_CAT_NAME );
-		if ( ! $letters_cat_id ) {
-			$letters_cat_id = wp_insert_category( [ 'cat_name' => self::LETTERSTOTHEEDITOR_CAT_NAME ] );
-		}
-
 		$letters_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type = %s;", self::LETTERS_TO_EDITOR_CPT ) );
 
 		// Convert to 'post' type.
@@ -269,16 +422,12 @@ class VTDiggerMigrator implements InterfaceCommand {
 
 			// Set meta 'newspack_vtd_cpt' = 'letters_to_editor';
 			update_post_meta( $letter_id, self::META_VTD_CPT, self::LETTERS_TO_EDITOR_CPT );
+
+			// Tag, append.
+			wp_set_post_tags( $letter_id, [ self::LETTERSTOTHEEDITOR_TAG_NAME ], true );
 		}
 
 		$this->logger->log( $log, implode( ',', $letters_ids ), false );
-		wp_cache_flush();
-
-		// Assign category 'Letters to the Editor'.
-		WP_CLI::log( sprintf( "Assigning %s cat ID %d ...", self::LETTERSTOTHEEDITOR_CAT_NAME, $letters_cat_id ) );
-		foreach ( $letters_ids as $letter_id ) {
-			wp_set_post_categories( $letter_id, [ $letters_cat_id ], true );
-		}
 
 		wp_cache_flush();
 		WP_CLI::log( sprintf( "Done; see %s", $log ) );
@@ -423,16 +572,12 @@ class VTDiggerMigrator implements InterfaceCommand {
 
 			// Set meta 'newspack_vtd_cpt' = self::OBITUARY_CPT;
 			update_post_meta( $obituary_id, self::META_VTD_CPT, self::OBITUARY_CPT );
+
+			// Assign category for Obituaries.
+			wp_set_post_categories( $obituary_id, [ $obituaries_cat_id ], true );
 		}
 
 		$this->logger->log( $log, implode( ',', $obituaries_ids ), false );
-		wp_cache_flush();
-
-		// Assign category for Obituaries.
-		WP_CLI::log( sprintf( "Assigning %s cat ID %d ...", self::OBITUARIES_CAT_NAME, $obituaries_cat_id ) );
-		foreach ( $obituaries_ids as $obituary_id ) {
-			wp_set_post_categories( $obituary_id, [ $obituaries_cat_id ], true );
-		}
 
 		wp_cache_flush();
 		WP_CLI::log( sprintf( "Done; see %s", $log ) );
@@ -657,7 +802,7 @@ HTML;
 		 *			Bennington County
 		 *			Windham County
 		 **/
-		// phpcs:disable -- leave this indentation for a more convenient overview
+		// phpcs:disable -- leave this indentation for clear hierarchical overview.
 		$regional_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Regional', 0 );
 			$champlain_valley_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Champlain Valley', $regional_id );
 				$chittenden_county_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Chittenden County', $champlain_valley_id );
@@ -763,12 +908,6 @@ HTML;
 
 		$log = 'vtd_series.log';
 
-		// Get Series category ID.
-		$series_parent_cat_id = get_cat_ID( self::SERIES_CAT_NAME );
-		if ( ! $series_parent_cat_id ) {
-			$series_parent_cat_id = wp_insert_category( [ 'cat_name' => self::SERIES_CAT_NAME ] );
-		}
-
 		// Get all term_ids, term_taxonomy_ids and term names with 'series' taxonomy.
 		$seriess_terms = $wpdb->get_results(
 			$wpdb->prepare(
@@ -801,13 +940,12 @@ HTML;
 				continue;
 			}
 
-			// Get the destination category.
-			$destination_cat_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $term_name, $series_parent_cat_id );
-
-			// Assign the destination category to all objects.
+			// Assign the tag to posts/objects.
 			foreach ( $object_ids as $object_id ) {
-				$this->logger->log( $log, sprintf( "post_id=%d to category_id=%d", $object_id, $destination_cat_id ), true );
-				wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
+				$this->logger->log( $log, sprintf( "post_id=%d tag='%s'", $object_id, self::SERIES_TAG_NAME ), true );
+
+				// Tag, append.
+				wp_set_post_tags( $object_id, [ self::SERIES_TAG_NAME ], true );
 			}
 
 			// Remove this term from objects, leaving just the newly assigned category.
