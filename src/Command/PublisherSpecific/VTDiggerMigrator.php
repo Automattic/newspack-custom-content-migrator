@@ -237,8 +237,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 				$guest_author = $this->cap_logic->get_guest_author_by_display_name( $ga_display_name );
 				if ( ! $guest_author ) {
 					$ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => $ga_display_name ] );
-					$this->logger->log( $log_created_gas, sprintf( "Created Guest Author '%s' ID %s", $ga_display_name, $ga_id ) );
-					WP_CLI::log( sprintf( 'Created Guest Author: %s', $ga_display_name ) );
+					$this->logger->log( $log_created_gas, sprintf( "Created Guest Author %s ID %s", $ga_display_name, $ga_id ) );
 				} else {
 					$ga_id = $guest_author->ID;
 				}
@@ -250,7 +249,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$this->cap_logic->assign_guest_authors_to_post( $ga_ids, $new_post_id );
 		}
 
-		WP_CLI::success( 'Done. See %s', $log_created_gas );
+		WP_CLI::success( sprintf( 'Done. See %s', $log_created_gas ) );
 	}
 
 	/**

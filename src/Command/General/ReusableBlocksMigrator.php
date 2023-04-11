@@ -8,9 +8,14 @@ use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\Utils\Logger as Logger;
 use \WP_CLI;
 
+/**
+ * Reusable Blocks Migrator.
+ */
 class ReusableBlocksMigrator implements InterfaceCommand {
 
 	/**
+	 * Reusable Blocks export file.
+	 *
 	 * @var string Reusable Blocks export file.
 	 */
 	const REUSABLE_BLOCKS_FILE = 'newspack-custom-reusable-blocks.xml';
@@ -42,6 +47,8 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
@@ -86,7 +93,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
-			] 
+			]
 		);
 
 		WP_CLI::add_command(
@@ -103,7 +110,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
-			] 
+			]
 		);
 
 		WP_CLI::add_command(
@@ -127,7 +134,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
-			] 
+			]
 		);
 
 		WP_CLI::add_command(
@@ -138,20 +145,20 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => '--reusable-block-ids-csv',
+						'name'        => 'reusable-block-ids-csv',
 						'description' => 'CSV of reusable block IDs to delete from post_content.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => '--post-types-csv',
+						'name'        => 'post-types-csv',
 						'description' => 'CSV of post types to scan and delete reusable blocks from.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
-			] 
+			]
 		);
 	}
 
@@ -164,14 +171,13 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	public function cmd_delete_reusable_blocks_from_content( $pos_args, $assoc_args ) {
 		global $wpdb;
 
-		$reusable_block_ids = $assoc_args['reusable-block-ids-csv'];
+		$reusable_block_ids = explode( ',', $assoc_args['reusable-block-ids-csv'] );
 		$post_types         = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page' ];
 		if ( empty( $reusable_block_ids ) ) {
 			WP_CLI::error( 'No reusable block IDs provided.' );
 		}
 
-		// List of post IDs that were updated.
-		$log = 'post_ids__deleted_reusable_blocks';
+		$log_dir = 'logs_deleted_reusable_blocks';
 
 		WP_CLI::log( 'Getting all post IDs...' );
 		$post_ids = [];
@@ -238,21 +244,33 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 				$wpdb->update( $wpdb->prefix . 'posts', [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
 
 				// Log.
-				$this->logger->log( $log, sprintf( 'Updated %d', $post_id ) );
+				if ( ! is_dir( $log_dir ) ) {
+					// phpcs:ignore
+					mkdir( $log_dir );
+				}
+				$this->logger->log( sprintf( '%s/%s_before.txt', $log_dir, $post_id ), $post_content, false );
+				$this->logger->log( sprintf( '%s/%s_after.txt', $log_dir, $post_id ), $post_content_updated, false );
+				WP_CLI::log( 'Updated' );
 			}
 		}
 
 		// Let $wpdb->update() sink in.
 		wp_cache_flush();
+
+		if ( is_dir( $log_dir ) ) {
+			WP_CLI::log( sprintf( 'Done, see logs in %s', $log_dir ) );
+		} else {
+			WP_CLI::log( 'Done.' );
+		}
 	}
 
 	/**
 	 * Callable for export-reusable-blocks. Exits with code 0 on success or 1 otherwise.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_export_reusable_blocks( $args, $assoc_args ) {
+	public function cmd_export_reusable_blocks( $pos_args, $assoc_args ) {
 		$output_dir = isset( $assoc_args['output-dir'] ) ? $assoc_args['output-dir'] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -305,7 +323,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 				'posts_per_page' => $posts_per_page,
 				'post_type'      => 'wp_block',
 				'post_status'    => $post_status,
-			] 
+			]
 		);
 		if ( ! $query_reusable_blocks->have_posts() ) {
 			return $posts;
@@ -319,10 +337,10 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	/**
 	 * Callable for import-reusable-blocks command.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_import_reusable_blocks_file( $args, $assoc_args ) {
+	public function cmd_import_reusable_blocks_file( $pos_args, $assoc_args ) {
 		$input_dir = isset( $assoc_args['input-dir'] ) ? $assoc_args['input-dir'] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -346,10 +364,10 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	/**
 	 * Callable for update-reusable-blocks-id command.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_update_reusable_blocks_id( $args, $assoc_args ) {
+	public function cmd_update_reusable_blocks_id( $pos_args, $assoc_args ) {
 		$id_old = $assoc_args['id-old'] ?? null;
 		$id_new = $assoc_args['id-new'] ?? null;
 		if ( is_null( $id_old ) || ! is_null( $id_new ) ) {
@@ -366,8 +384,8 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 				'post_type'      => [ 'post', 'page' ],
 				'post_status'    => 'publish',
 			// The search param.doesn't work as expected, so commenting it out for now (it's just a small optimization, anyway).
-			// 's'              => '<!-- wp:block'
-			] 
+			// 's'              => '<!-- wp:block'          // .
+			]
 		);
 		if ( ! $query_public_posts->have_posts() ) {
 			return;
@@ -405,6 +423,8 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 
 		// Get a list of all ID changes for Reusable Block after import.
 		/**
+		 * Blocks_id_changes.
+		 *
 		 * @param array $blocks_id_changes An array containing old Post IDs for keys, and new Post IDs for values.
 		 */
 		$blocks_id_changes = [];
@@ -425,8 +445,8 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 				'post_type'      => [ 'post', 'page' ],
 				'post_status'    => 'publish',
 			// The search param.doesn't work as expected, so commenting it out for now (it's just a small optimization, anyway).
-			// 's'              => '<!-- wp:block'
-			] 
+			// 's'              => '<!-- wp:block'                   // .
+			]
 		);
 		if ( ! $query_public_posts->have_posts() ) {
 			return;
