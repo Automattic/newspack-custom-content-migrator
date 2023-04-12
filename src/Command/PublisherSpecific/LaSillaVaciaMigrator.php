@@ -21,28 +21,252 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
     private $category_tree = [
         [
-            'name' => 'Detector de Mentiras',
+            'name' => 'La Silla Nacional',
             'children' => [
                 [
-                    'name' => 'Detector en Facebook',
+                    'name' => 'Caribe',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Gobierno Duque',
+                    'name' => 'Bogotá',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Coronavirus',
+                    'name' => 'Pacífico',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Elecciones 2022',
+                    'name' => 'Antioquia',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Detector al chat de la familia',
+                    'name' => 'Santanderes',
                     'children' => [],
                 ],
+                [
+                    'name' => 'Región Sur',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Eje Cafetero',
+                    'children' => [],
+                ],
+            ]
+        ],
+        [
+            'name' => 'En Vivo',
+            'children' => [],
+        ],
+        [
+            'name' => 'Red de Expertos',
+            'children' => [
+                [
+                    'name' => 'Red Rural',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red de la Paz',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red de las Mujeres',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Cachaca',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red de la Educación',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red de Ciencia e Innovación',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Social',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Étnica',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Verde',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red de Venezuela',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Paisa',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Sur',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Blogeconomía',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Pacífico',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Santandereana',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Caribe',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Minera',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Red Líder',
+                    'children' => [],
+                ]
+            ]
+        ],
+        [
+            'name' => 'Opinión',
+            'children' => [
+                [
+                    'name' => 'El Computador de Palacio',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Latonería y pintura',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'El poder de las Cifras',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Del director editorial',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Desde el jardín',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Mi plebi-SI-TIO',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Dimensión desconocida',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Ojo al dato',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'De la dirección',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Suarezterapia',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Desde los santanderes',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Ya está pintón',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Desde mi mecedora',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'La pecera',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Piedra de Toque',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Otra Mirada',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Colombia Civil',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Ruido blanco',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Bemoles',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'El picó',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'La mesa de centro',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Hector Riveros',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Disculpe, se cayó el sistema',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Caleidoscopio',
+                    'children' => [],
+                ],
+            ],
+        ],
+        [
+            'name' => 'Silla Datos',
+            'children' => [
+                [
+                    'name' => 'Contratación',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Caso Uribe',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Poder de las empresas',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Poder regional',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Acuerdo de paz y posconflicto',
+                    'children' => [],
+                ],
+                [
+                    'name' => 'Poder nacional',
+                    'children' => [],
+                ],
+            ]
+        ],
+        [
+            'name' => 'Detector de mentiras',
+            'children' => [
                 [
                     'name' => 'Cierto',
                     'children' => [],
@@ -56,7 +280,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     'children' => [],
                 ],
                 [
-                    'name' => 'Más falso que cierto',
+                    'name' => 'Engañoso',
                     'children' => [],
                 ],
                 [
@@ -66,263 +290,54 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             ]
         ],
         [
-            'name' => 'Silla Datos',
+            'name' => 'Silla Cursos',
             'children' => [
                 [
-                    'name' => 'Poder nacional',
-                    'children' => [],
+                    'name' => 'en línea',
+                    'children' => [
+                        [
+                            'name' => 'Periodismo digital',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Liderazgo femenino',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Create digital products',
+                            'children' => [],
+                        ],
+                    ],
                 ],
                 [
-                    'name' => 'Poder regional',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Acuerdo de paz y posconflicto',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Contractación',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Poder de las empresas',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Caso Uribe',
-                    'children' => [],
+                    'name' => 'presenciales',
+                    'children' => [
+                        [
+                            'name' => 'Inmersión 2023',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Inmersión 2022',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Inmersión 2021',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Curso de vacaciones',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Contraseña',
+                            'children' => [],
+                        ],
+                    ]
                 ]
             ]
         ],
         [
-            'name' => 'Silla Nacional',
-            'children' => [
-                [
-                    'name' => 'Antioquia', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Bogotá', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Caribe', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Elecciones 2023', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Gustavo Petro', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Pacífico', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'En vivo',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Quién es Quién',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Detector de mentiras',
-                    'children' => [],
-                ],
-            ]
-        ],
-        [
-            'name' => 'Opinión',
-            'children' => [],
-        ],
-        [
-            'name' => 'Silla Llena',
-            'children' => [
-                [
-                    'name' => 'Conflicto armado', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Coronavirus', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Desarrollo rural', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Economía', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Educación', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Justicia transicional', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Medio ambiente', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Movimientos sociales', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Proceso con las Farc', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Posconflicto', // Hilos
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Cachaca',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red de Ciencia e Innovación',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red de la Educación',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red de la paz',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red de las mujeres',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red de Venezuela',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Etnica',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Rural',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Social',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Verde',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Líder',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Minera',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Caribe',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Santandereana',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Pacifico',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Red Sur',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Blogeconomia',
-                    'children' => [],
-                ],
-            ]
-        ],
-        [
-            'name' => 'Silla Académica',
-            'children' => [
-                [
-                    'name' => 'Facultad de Ciencias Sociales de La Universidad de Los Andes',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Instituto de Estudios Urbanos de la Universidad Nacional de Colombia',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Observatorio para la Equidad de Las Mujeres ICESI-FWWB',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad de Los Andes',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad de Manizales',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad del Norte',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad del Rosario',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad Externado',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad Javeriana',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad Pontificia Bolivariana',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad públicas - Convenio Ford',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Universidad públicas - Convenio Usaid',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Publicaciones',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Eventos',
-                    'children' => [],
-                ],
-            ]
-        ],
-        [
-            'name' => 'Silla Datos',
-            'children' => [],
-        ],
-        [
-            'name' => 'Silla Podcasts',
-            'children' => []
-        ],
-        [
-            'name' => 'Silla Podcasts',
+            'name' => 'Podcasts',
             'children' => [
                 [
                     'name' => 'Huevos revueltos con política',
@@ -351,182 +366,204 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             ]
         ],
         [
-            'name' => 'Silla Cursos',
-            'children' => [],
-        ],
-        [
-            'name' => 'Silla Viajera',
-            'children' => [],
-        ],
-        [
-            'name' => 'Superamigos',
-            'children' => [],
-        ],
-        [
-            'name' => 'Temas',
+            'name' => 'Silla Académica',
             'children' => [
                 [
-                    'name' => 'Álvaro Uribe',
+                    'name' => 'Universidad Javeriana',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Conflicto Armado',
+                    'name' => 'Universidad del Norte',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Congreso',
+                    'name' => 'Universidad del Rosario',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Coronavirus',
+                    'name' => 'Universidad Pontificia Bolivariana',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Corrupción',
+                    'name' => 'Instituto de Estudios Urbanos de la Universidad Nacional de Colombia',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Cundinamarca',
+                    'name' => 'Universidades públicas - Convenio Ford',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Desarrollo Rural',
+                    'name' => 'Universidad públicas - Convenio Usaid',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Detector de mentiras',
+                    'name' => 'Universidad Externado',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Dónde está la Plata',
+                    'name' => 'Universidad de Los Andes',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Drogas',
+                    'name' => 'Universidad de Manizales',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Economía',
+                    'name' => 'Observatorio para la Equidad de Las Mujeres ICESI-FWWB',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Educación',
+                    'name' => 'Facultad de Ciencias Sociales de La Universidad de Los Andes',
                     'children' => [],
                 ],
                 [
-                    'name' => 'Eje Cafetero',
-                    'children' => [],
+                    'name' => 'Publicaciones',
+                    'children' => [
+                        [
+                            'name' => 'Papers',
+                            'children' => [],
+                        ],
+                    ],
                 ],
                 [
-                    'name' => 'Elecciones',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Elecciones 2022',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Encuestas',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Fuerza pública',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Gobierno Duque',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Gobiernos anteriores',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Grandes casos judiciales',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Justicia',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Justicia transicional',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'La Silla Vacía',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Medio Ambiente',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Medios',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Movimientos Sociales',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Mujeres',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Otras Regiones',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Otros personajes',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Otros temas',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Polarización',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Política menuda',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Posconflicto',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Proceso con el ELN',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Región Sur',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Sala de Redacción Ciudadana',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Salud',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Superpoderosos',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Venezuela',
-                    'children' => [],
-                ],
-                [
-                    'name' => 'Víctimas',
-                    'children' => [],
+                    'name' => 'Eventos',
+                    'children' => [
+                        [
+                            'name' => 'Libros',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Publicaciones seriadas',
+                            'children' => [],
+                        ],
+                        [
+                            'name' => 'Estudios patrocinados',
+                            'children' => [],
+                        ]
+                    ],
                 ],
             ]
-        ]
+        ],
+        [
+            'name' => 'Quién es quién',
+            'children' => [],
+        ],
+        [
+            'name' => 'Especiales',
+            'children' => [],
+        ],
+    ];
+
+    private $tags = [
+        'Drogas',
+        'Posconflicto',
+        'Superpoderosos',
+        'Plebiscito',
+        'Renegociación',
+        'Alejandro Ordoñez',
+        'Álvaro Uribe',
+        'Camelladores',
+        'Ciudadanos de a pie',
+        'Conflicto Armado',
+        'Congreso',
+        'Coronavirus',
+        'Corrupción',
+        'Desarrollo Rural',
+        'Detector al chat de la familia',
+        'Detector en Facebook',
+        'Dónde está la Plata',
+        'Economía',
+        'Educación',
+        'El factor Vargas Lleras',
+        'Elecciones',
+        'Elecciones 2019',
+        'Encuestas',
+        'Étnico',
+        'Fuerza pública',
+        'Gobierno de Claudia López',
+        'Gobierno de Peñalosa',
+        'Gobierno de Santos',
+        'Gobierno de Uribe',
+        'Gobierno Duque',
+        'Gobiernos anteriores',
+        'Grandes casos judiciales',
+        'Gustavo Petro',
+        'Justicia',
+        'Justicia transicional',
+        'La elección del fiscal',
+        'La Silla Vacía',
+        'Las ías',
+        'Las vacas flacas',
+        'Medio Ambiente',
+        'Medios',
+        'Minería',
+        'Movimientos Sociales',
+        'Mujeres',
+        'Odebrecht',
+        'Otras Regiones',
+        'Otros países',
+        'Otros personajes',
+        'Otros temas',
+        'Polarización',
+        'Política menuda',
+        'Presidenciales 2018',
+        'Proceso con el ELN',
+        'Proceso con las FARC',
+        'Salud',
+        'Seguridad',
+        'Testigos falsos y Uribe',
+        'Urbanismo',
+        'Venezuela',
+        'Víctimas',
+        'Conversaciones',
+        'Cubrimiento Especial',
+        'Hágame el cruce',
+        'Coronavirus',
+        'Proceso de paz',
+        'Jep',
+        'Arte',
+        'Posconflicto',
+        'Elecciones 2023',
+        'Sala de Redacción Ciudadana',
+        'Gobierno',
+        'Crisis',
+        'Elecciones 2022',
+        'La Dimensión Desconocida',
+        'Econimia',
+        'Entrevista',
+        'Redes Silla llena',
+        'Papers',
+        'Libros',
+        'Publicaciones seriadas',
+        'Estudios patrocinados',
+        'Política',
+        'Medio Ambiente',
+        'Género',
+        'Religión',
+        'Corrupción',
+        'Cultura',
+        'Educación',
+        'Economía',
+        'Migraciones',
+        'Relaciones Internacionales',
+        'Ciencia',
+        'Política social',
+        'Elecciones',
+        'Posconflicto',
+        'Acuerdo de Paz',
+        'Seguridad',
+        'Desarrollo rural',
+        'Salud',
+        'Coronavirus',
+        'Congreso',
+        'Gobierno',
+        'Justicia',
+        'Movimientos sociales',
+        'Sector privado',
+        'Medios',
+        'Tecnología e innovación',
+        'Ciudades',
+        'Comunidades étnicas',
     ];
 
     private $log_file_path = '';
@@ -738,6 +775,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     public function establish_taxonomy()
     {
         $this->create_categories( $this->category_tree );
+
+        foreach ( $this->tags as $tag ) {
+            wp_create_tag( $tag );
+        }
     }
 
     /**
