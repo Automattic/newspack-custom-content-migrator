@@ -189,14 +189,10 @@ class TownNewsMigrator implements InterfaceCommand {
 		);
 		$tags            = array_map(
 			function( $keyword ) {
-				return (string) $keyword[0]->attributes()['key'];
+				return ucwords( (string) $keyword[0]->attributes()['key'] );
 			},
 			$xml_doc->xpath( '//tn:head/tn:docdata/tn:key-list/tn:keyword' )
 		);
-
-		if ( 'usable' !== $status ) {
-			return;
-		}
 
 		// Add article if it doesn't exists, else skip it.
 		$post_id = $this->create_post_if_new( $tn_id, $title );
