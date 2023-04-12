@@ -243,7 +243,7 @@ class TownNewsMigrator implements InterfaceCommand {
 					$category_id = wp_create_category( $category_name );
 				}
 
-				if ( 0 !== $category_id && array_key_last( $category_hierarchy ) === $category_index ) {
+				if ( 0 !== $category_id ) {
 					$categories_to_add[] = $category_id;
 				}
 			}
