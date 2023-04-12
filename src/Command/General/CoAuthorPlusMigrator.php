@@ -307,14 +307,14 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			'newspack-content-migrator co-authors-export-posts-and-gas',
 			[ $this, 'cmd_export_posts_gas' ],
 			[
-				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file.',
+				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file. The command exports just the GAs names associated to post IDs, not WP Users -- if a post has a WP User author but no GAs, that ID will have a null value.',
 				'synopsis'  => [],
 			],
 		);
 	}
 
 	/**
-	 * Saves a list of all posts and their GAs to an array file.
+	 * Saves a list of all posts and their GAs to an array file. Does not export WP Users authors.
 	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
