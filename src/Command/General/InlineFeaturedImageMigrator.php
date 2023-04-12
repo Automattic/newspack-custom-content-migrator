@@ -66,7 +66,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			'newspack-content-migrator de-dupe-featured-images',
 			[ $this, 'cmd_de_dupe_featured_images' ],
 			[
-				'shortdesc' => 'Goes through all the Posts, and removes the first image from Post content if that image is already used as the Featured image too.',
+				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured image from Post content.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
