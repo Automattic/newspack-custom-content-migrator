@@ -136,12 +136,6 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 	}
 
-	// public function myErrorHandler( $errno, $errstr, $errfile, $errline ) {
-	// if ( ! str_contains( $errstr, 'exif_read_data' ) ) {
-	// die( "Fatal notice in line $errline: " . $errstr );
-	// }
-	// }
-
 	/**
 	 * Import a TownNews post from the exported XML file.
 	 *
@@ -151,13 +145,6 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @return int|false    The imported post ID, false otherwise.
 	 */
 	private function import_post_from_xml( $xml_path, $dir_path ) {
-		// set_error_handler( [ $this, 'myErrorHandler' ] );
-		// print_r( 'Migrating: ' . $xml_path . "\n" );
-
-		// if ( ! str_ends_with( $xml_path, '55dfa84b-0694-5523-97cc-c7da34a6a7be.xml' ) ) {
-		// return false;
-		// }
-
 		if ( ! file_exists( $xml_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'not found ' . $xml_path );
 			return false;
@@ -168,7 +155,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		$file_type = (string) $xml_doc->xpath( '//tn:identified-content/tn:classifier[@type="tncms:asset"]' )[0]->attributes()->value;
 
-		if ( 'article' !== $file_type ) {
+		if ( ! in_array( $file_type, [ 'article', 'collection' ] ) ) {
 			return false;
 		}
 
@@ -178,7 +165,6 @@ class TownNewsMigrator implements InterfaceCommand {
 		$title           = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
 		$subtitle        = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl2' );
 		$author_fullname = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:byline[not(contains(@class, "tncms-author"))]' );
-		$author_email    = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:byline[not(contains(@class, "tncms-author"))]' );
 		$author_meta     = $xml_doc->xpath( '//tn:body/tn:body.head/tn:byline[contains(@class, "tncms-author")]' );
 		$pubdate         = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:head/tn:docdata/tn:date.release', 'norm' );
 		$categories      = array_map(
@@ -195,7 +181,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		);
 
 		// Add article if it doesn't exists, else skip it.
-		$post_id = $this->create_post_if_new( $tn_id, $title );
+		$post_id = $this->create_post_if_new( $tn_id, $title, 'usable' === $status ? 'publish' : 'draft', $pubdate );
 		if ( ! $post_id ) {
 			$this->logger->log( self::LOG_FILE, sprintf( "Skipping post '%s' as it already exists", $tn_id ) );
 			return;
@@ -204,24 +190,13 @@ class TownNewsMigrator implements InterfaceCommand {
 		// Set post author if exists.
 		$this->set_post_author( $post_id, $author_fullname, $author_meta );
 
-		// Import attached media.
-		$content        = [];
-		$content_parent = $xml_doc->xpath( '//tn:body/tn:body.content' );
-		foreach ( $content_parent[0]->children() as $element ) {
-			if ( 'media' === $element->getName() ) {
-				$content[] = $this->migrate_media_tag( $element, $dir_path, $post_id );
-			} else {
-				$content[] = $element->asXML();
-			}
-		}
-		$post_content = wp_specialchars_decode( join( "\n", $content ) );
+		// Set post content.
+		$post_content = 'collection' === $file_type ? $this->get_collection_content( $xml_doc, $dir_path, $post_id ) : $this->get_article_content( $xml_doc, $dir_path, $post_id );
 
-		// Set post content and date.
 		wp_update_post(
 			[
 				'ID'           => $post_id,
 				'post_content' => $post_content,
-				'post_status'  => 'usable' === $status ? 'publish' : 'draft',
 			]
 		);
 
@@ -261,8 +236,11 @@ class TownNewsMigrator implements InterfaceCommand {
 			$this->set_featured_image( $post_id, $dir_path, $featured_image );
 		}
 
-		// var_dump( $post_id );
-		// die();
+		// Hide featured images for collections.
+		if ( 'collection' === $file_type ) {
+			update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+		}
+
 		return $post_id;
 	}
 
@@ -271,9 +249,11 @@ class TownNewsMigrator implements InterfaceCommand {
 	 *
 	 * @param string $tn_id The post TownNews original ID.
 	 * @param string $title The post title.
+	 * @param string $status The post status.
+	 * @param string $pubdate The post publication date.
 	 * @return int|false The new Post ID, false if it already exists.
 	 */
-	private function create_post_if_new( $tn_id, $title ) {
+	private function create_post_if_new( $tn_id, $title, $status, $pubdate ) {
 		$post_id = $this->get_post_by_tn_id( $tn_id );
 
 		if ( $post_id ) {
@@ -281,7 +261,13 @@ class TownNewsMigrator implements InterfaceCommand {
 			return false;
 		}
 
-		$post_id = wp_insert_post( [ 'post_title' => $title ] );
+		$post_id = wp_insert_post(
+			[
+				'post_title'  => $title,
+				'post_status' => $status,
+				'post_date'   => ( new \DateTime( $pubdate ) )->format( 'Y-m-d H:i:s' ),
+			]
+		);
 		update_post_meta( $post_id, self::TOWN_NEWS_ORIGINAL_ID_META_KEY, $tn_id );
 
 		return $post_id;
@@ -309,10 +295,84 @@ class TownNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Generate article content from article node.
+	 *
+	 * @param \SimpleXMLElement $xml_doc Content XML node.
+	 * @param string            $dir_path Directory path of the XML node.
+	 * @param int               $post_id Post ID.
+	 * @return string
+	 */
+	private function get_article_content( $xml_doc, $dir_path, $post_id ) {
+		// Import attached media.
+		$content        = [];
+		$content_parent = $xml_doc->xpath( '//tn:body/tn:body.content' );
+		foreach ( $content_parent[0]->children() as $element ) {
+			if ( 'media' === $element->getName() ) {
+				$content[] = $this->migrate_media_tag( $element, $dir_path, $post_id );
+			} elseif ( 'block' === $element->getName() && 'breakout' === (string) $element->attributes()['class'] ) {
+				$this->register_element_namespace( $element );
+				$is_editor_note = "Editor's Note" === $this->get_element_by_xpath_attribute( $element, 'tn:classifier[@value="Editor\'s Note"]', 'value' );
+
+				if ( $is_editor_note ) {
+					if ( $element->attributes()->class ) {
+						// If it does, add the new class to the existing "class" attribute.
+						$classes                      = $element->attributes()->class;
+						$classes                     .= ' newspack-editor-note';
+						$element->attributes()->class = $classes;
+					} else {
+						// If it doesn't, simply add the new "class" attribute.
+						$element->addAttribute( 'class', 'newspack-editor-note' );
+					}
+				}
+
+				$content[] = $element->asXML();
+			} else {
+				$content[] = $element->asXML();
+			}
+		}
+
+		return wp_specialchars_decode( join( "\n", $content ) );
+	}
+
+	/**
+	 * Generate collection content from collection node.
+	 *
+	 * @param \SimpleXMLElement $xml_doc Content XML node.
+	 * @param string            $dir_path Directory path of the XML node.
+	 * @param int               $post_id Post ID.
+	 * @return string
+	 */
+	private function get_collection_content( $xml_doc, $dir_path, $post_id ) {
+		$media_ids      = [];
+		$media_elements = $xml_doc->xpath( '//tn:body/tn:body.content/tn:media' );
+		foreach ( $media_elements as $element ) {
+			$media_type = (string) $element->attributes()['media-type'];
+			if ( 'image' !== $media_type ) {
+				if ( 'collection' !== $media_type ) {
+					$this->logger->log( self::LOG_FILE, sprintf( "Couldn't download media for the gallery %d, media type not supported: %s", $post_id, $media_type ), Logger::WARNING );
+				}
+
+				continue;
+			}
+
+			$attachment_id = $this->import_attachment_from_media_element( $element, $dir_path, $post_id );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( "Couldn't download media for the gallery %d: %s", $post_id, $attachment_id->get_error_message() ), Logger::WARNING );
+				continue;
+			}
+
+			$media_ids[] = $attachment_id;
+		}
+
+		return serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $media_ids ) );
+	}
+
+	/**
 	 * Set post author/co-author.
 	 *
 	 * @param int               $post_id Post ID.
-	 * @param string            $fullname Author full name.
+	 * @param string            $display_name Author full name.
 	 * @param \SimpleXMLElement $author_meta XML element containing author meta.
 	 * @return void
 	 */
