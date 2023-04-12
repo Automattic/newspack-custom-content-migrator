@@ -173,6 +173,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 
 		$tn_id           = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+		$status          = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:docdata', 'management-status' );
 		$featured_image  = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:head/tn:meta[@name="tncms-view-preview"]', 'content' );
 		$title           = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
 		$subtitle        = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl2' );
@@ -192,6 +193,10 @@ class TownNewsMigrator implements InterfaceCommand {
 			},
 			$xml_doc->xpath( '//tn:head/tn:docdata/tn:key-list/tn:keyword' )
 		);
+
+		if ( 'usable' !== $status ) {
+			return;
+		}
 
 		// Add article if it doesn't exists, else skip it.
 		$post_id = $this->create_post_if_new( $tn_id, $title );
@@ -220,8 +225,7 @@ class TownNewsMigrator implements InterfaceCommand {
 			[
 				'ID'           => $post_id,
 				'post_content' => $post_content,
-				'post_status'  => 'publish',
-				'post_date'    => ( new \DateTime( $pubdate ) )->format( 'Y-m-d H:i:s' ),
+				'post_status'  => 'usable' === $status ? 'publish' : 'draft',
 			]
 		);
 
