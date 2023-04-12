@@ -14,6 +14,7 @@ use \WP_CLI;
 class TownNewsMigrator implements InterfaceCommand {
 	const LOG_FILE                       = 'townnews_importer.log';
 	const TOWN_NEWS_ORIGINAL_ID_META_KEY = '_newspack_import_id';
+	const DEFAULT_CO_AUTHOR_DISPLAY_NAME = 'Staff';
 
 	/**
 	 * @var null|InterfaceCommand Instance.
@@ -83,6 +84,13 @@ class TownNewsMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'default-author-id',
+						'description' => 'Default author for posts without author.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -95,7 +103,8 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_migrate_content( $args, $assoc_args ) {
-		$export_dir_path = $assoc_args['export-dir-path'];
+		$export_dir_path   = $assoc_args['export-dir-path'];
+		$default_author_id = isset( $assoc_args['default-author-id'] ) ? intval( $assoc_args['default-author-id'] ) : null;
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
@@ -125,7 +134,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
-						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname() );
+						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $default_author_id );
 
 						if ( $post_id ) {
 							$this->logger->log( self::LOG_FILE, sprintf( 'Post %d is imported from %s', $post_id, $file->getFilename() ), Logger::SUCCESS );
@@ -141,10 +150,11 @@ class TownNewsMigrator implements InterfaceCommand {
 	 *
 	 * @param string $xml_path The post XML.
 	 * @param string $dir_path The post XML directory path.
+	 * @param ?int   $default_author_id Default author ID for posts without author in case it's set.
 	 *
 	 * @return int|false    The imported post ID, false otherwise.
 	 */
-	private function import_post_from_xml( $xml_path, $dir_path ) {
+	private function import_post_from_xml( $xml_path, $dir_path, $default_author_id ) {
 		if ( ! file_exists( $xml_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'not found ' . $xml_path );
 			return false;
@@ -188,7 +198,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 
 		// Set post author if exists.
-		$this->set_post_author( $post_id, $author_fullname, $author_meta );
+		$this->set_post_author( $post_id, $author_fullname, $author_meta, $default_author_id );
 
 		// Set post content.
 		$post_content = 'collection' === $file_type ? $this->get_collection_content( $xml_doc, $dir_path, $post_id ) : $this->get_article_content( $xml_doc, $dir_path, $post_id );
@@ -374,9 +384,10 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @param int               $post_id Post ID.
 	 * @param string            $display_name Author full name.
 	 * @param \SimpleXMLElement $author_meta XML element containing author meta.
+	 * @param ?int              $default_author_id Default author ID for posts without author in case it's set.
 	 * @return void
 	 */
-	private function set_post_author( $post_id, $display_name, $author_meta ) {
+	private function set_post_author( $post_id, $display_name, $author_meta, $default_author_id ) {
 		$first_name                 = '';
 		$last_name                  = '';
 		$email                      = '';
@@ -400,8 +411,21 @@ class TownNewsMigrator implements InterfaceCommand {
 			$using_email_as_displayname = true;
 		}
 
+		// Setting default author/co-author in case the article doesn't have any.
 		if ( empty( $display_name ) ) {
-			$this->logger->log( self::LOG_FILE, sprintf( "Can't get the post %d author!", $post_id ), Logger::WARNING );
+			if ( $default_author_id ) {
+				wp_update_post(
+					[
+						'ID'          => $post_id,
+						'post_author' => $default_author_id,
+					]
+				);
+				$this->logger->log( self::LOG_FILE, sprintf( 'Setting the author %d as a default author for the post %d.', $default_author_id, $post_id ), Logger::WARNING );
+			} else {
+				$default_co_author_id = $this->get_staff_author_id();
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $default_co_author_id ], $post_id );
+				$this->logger->log( self::LOG_FILE, sprintf( 'Setting the co-author %d as a default author for the post %d.', $default_co_author_id, $post_id ), Logger::WARNING );
+			}
 			return;
 		}
 
@@ -707,6 +731,15 @@ class TownNewsMigrator implements InterfaceCommand {
 		</video>
 		' . $caption_tag . '
 	  </figure>';
+	}
+
+	/**
+	 * Generate a default co-author for posts without author.
+	 *
+	 * @return int
+	 */
+	private function get_staff_author_id() {
+		return $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => self::DEFAULT_CO_AUTHOR_DISPLAY_NAME ] );
 	}
 
 	/**
