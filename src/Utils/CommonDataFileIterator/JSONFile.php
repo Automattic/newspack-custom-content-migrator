@@ -35,7 +35,7 @@ class JSONFile extends AbstractIterableFile {
 		}
 
 		while ( $row_count <= $this->get_end() && ! empty( $json ) ) {
-			yield array_shift( $json );
+			yield $row_count => array_shift( $json );
 			$row_count++;
 		}
 	}
