@@ -59,6 +59,7 @@ PluginSetup::register_migrators(
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\MetroMirgator::class,
 		Command\General\ProfilePress::class,
+		Command\General\TownNewsMigrator::class,
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -81,5 +82,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\Moco360Migrator::class,
 		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
+		Command\PublisherSpecific\MusicallyMigrator::class,
 	)
 );
