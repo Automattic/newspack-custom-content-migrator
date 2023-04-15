@@ -4,8 +4,11 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTime;
 use DateTimeZone;
+use DOMDocument;
+use DOMElement;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use \WP_CLI;
 
@@ -19,6 +22,11 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	private static $instance;
 
 	/**
+	 * @var CoAuthorPlus $coauthorsplus_logic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Get Instance.
 	 *
 	 * @return HighCountryNewsMigrator
@@ -28,6 +36,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 		if ( null === self::$instance ) {
 			self::$instance = new $class();
+			self::$instance->coauthorsplus_logic = new CoAuthorPlus();
 		}
 
 		return self::$instance;
@@ -82,7 +91,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_images_from_json' ],
 			[
 				'shortdesc' => 'Migrate images from JSON data.',
-				'synopsis' => [
+				'synopsis'  => [
 					[
 						'type'        => 'positional',
 						'name'        => 'file',
@@ -104,6 +113,62 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				]
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-migrate-issues-from-json',
+			[ $this, 'cmd_migrate_issues_from_json' ],
+			[
+				'shortdesc' => 'Migrate issues from JSON data.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'Path to the JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start',
+						'description' => 'Start row (default: 0)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end',
+						'description' => 'End row (default: PHP_INT_MAX)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+
+		// Then tags, Topics?
+		// Then posts
+
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-migrate-articles-from-json',
+			[ $this, 'cmd_migrate_articles_from_json' ],
+			[
+				'shortdesc' => 'Migrate JSON data from the old site.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'Path to the JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start',
+						'description' => 'Start row (default: 0)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -141,7 +206,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					[ 'ID' => $record->post_id ]
 				);
 			} else {
-				WP_CLI::log( "Author not found." );
+				WP_CLI::log( 'Author not found.' );
 			}
 
 			file_put_contents( '/tmp/highcountrynews-last-processed-post-id-authors-update.txt', $record->post_id );
@@ -158,8 +223,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_users_from_json( $args, $assoc_args ) {
 		$file_path = $args[0];
-		$start = $assoc_args['start'] ?? 0;
-		$end = $assoc_args['end'] ?? PHP_INT_MAX;
+		$start     = $assoc_args['start'] ?? 0;
+		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
 		                                       ->set_start( $start )
@@ -206,8 +271,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_images_from_json( $args, $assoc_args ) {
 		$file_path = $args[0];
-		$start = $assoc_args['start'] ?? 0;
-		$end = $assoc_args['end'] ?? PHP_INT_MAX;
+		$start     = $assoc_args['start'] ?? 0;
+		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
 		                                       ->set_start( $start )
@@ -238,8 +303,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				}
 			}
 
-			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['created'] );
-			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['modified'] );
+			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['created'], new DateTimeZone( 'America/Denver' ) );
+			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['modified'], new DateTimeZone( 'America/Denver' ) );
 
 			$caption = '';
 
@@ -258,9 +323,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			// check image param, if not empty, it is a blob
 			if ( ! empty( $row['image'] ) ) {
 				echo WP_CLI::colorize( '%wHandling blob...' ) . "\n";
-				$filename = $row['image']['filename'];
+				$filename              = $row['image']['filename'];
 				$destination_file_path = WP_CONTENT_DIR . '/uploads/' . $filename;
-				$file_blob_path = WP_CONTENT_DIR . '/high_country_news/blobs/' . $row['image']['blob_path'];
+				$file_blob_path        = WP_CONTENT_DIR . '/high_country_news/blobs/' . $row['image']['blob_path'];
 				file_put_contents( $destination_file_path, file_get_contents( $file_blob_path ) );
 
 				$result = media_handle_sideload(
@@ -271,13 +336,13 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					0,
 					$row['description'],
 					[
-						'post_title' => $row['id'] ?? '',
-						'post_author' => $post_author,
-						'post_excerpt' => $caption,
-						'post_content' => $row['description'] ?? '',
-						'post_date' => $created_at->format( 'Y-m-d H:i:s' ),
-						'post_date_gmt' => $created_at->format( 'Y-m-d H:i:s' ),
-						'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
+						'post_title'        => $row['id'] ?? '',
+						'post_author'       => $post_author,
+						'post_excerpt'      => $caption,
+						'post_content'      => $row['description'] ?? '',
+						'post_date'         => $created_at->format( 'Y-m-d H:i:s' ),
+						'post_date_gmt'     => $created_at->format( 'Y-m-d H:i:s' ),
+						'post_modified'     => $updated_at->format( 'Y-m-d H:i:s' ),
 						'post_modified_gmt' => $updated_at->format( 'Y-m-d H:i:s' ),
 					]
 				);
@@ -299,13 +364,13 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					echo WP_CLI::colorize( "%gImage {$row['id']} created.%n" ) . "\n";
 					wp_update_post(
 						[
-							'ID' => $attachment_id,
-							'post_author' => $post_author,
-							'post_excerpt' => $caption,
-							'post_content' => $row['description'] ?? '',
-							'post_date' => $created_at->format( 'Y-m-d H:i:s' ),
-							'post_date_gmt' => $created_at->format( 'Y-m-d H:i:s' ),
-							'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
+							'ID'                => $attachment_id,
+							'post_author'       => $post_author,
+							'post_excerpt'      => $caption,
+							'post_content'      => $row['description'] ?? '',
+							'post_date'         => $created_at->format( 'Y-m-d H:i:s' ),
+							'post_date_gmt'     => $created_at->format( 'Y-m-d H:i:s' ),
+							'post_modified'     => $updated_at->format( 'Y-m-d H:i:s' ),
 							'post_modified_gmt' => $updated_at->format( 'Y-m-d H:i:s' ),
 						]
 					);
@@ -317,3 +382,323 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			}
 		}
 	}
+
+	/**
+	 * Migrate publication issues from JSON file.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @throws Exception
+	 */
+	public function cmd_migrate_issues_from_json( $args, $assoc_args ) {
+		$file_path = $args[0];
+		$start     = $assoc_args['start'] ?? 0;
+		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
+
+		$iterator = ( new FileImportFactory() )->get_file( $file_path )
+		                                       ->set_start( $start )
+		                                       ->set_end( $end )
+		                                       ->getIterator();
+
+		$parent_category_id = wp_create_category( 'Issues' );
+
+		foreach ( $iterator as $row_number => $row ) {
+			$description = '';
+
+			if ( ! empty( $row['title'] ) ) {
+				$description .= $row['title'] . "\n\n";
+			}
+
+			$description .= $row['description'] . "\n\n";
+			$description .= 'Volume: ' . $row['publicationVolume'] . "\n";
+			$description .= 'Issue: ' . $row['publicationIssue'] . "\n";
+
+			$publication_date = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $row['publicationDate'] );
+
+			if ( $publication_date instanceof DateTime ) {
+				$description .= 'Date: ' . $publication_date->format( 'l, F jS, Y' ) . "\n";
+			}
+
+			wp_insert_category(
+				[
+					'taxonomy'             => 'category',
+					'cat_name'             => $row['id'],
+					'category_description' => $description,
+					'category_nicename'    => $row['title'],
+					'category_parent'      => $parent_category_id,
+				]
+			);
+		}
+	}
+
+	/**
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @throws Exception
+	 */
+	public function cmd_migrate_articles_from_json( $args, $assoc_args ) {
+		$file_path = $args[0];
+		$start     = $assoc_args['start'] ?? 0;
+		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
+
+		$iterator = ( new FileImportFactory() )->get_file( $file_path )
+		                                       ->set_start( $start )
+		                                       ->set_end( $end )
+		                                       ->getIterator();
+
+		// Need to create some additional parent categories based off of live site.
+		$main_categories = [
+			'Features',
+			'Public Lands',
+			'Indigenous Affairs',
+			'Water',
+			'Climate Change',
+			'Wildfire',
+			'Arts & Culture',
+		];
+
+		foreach ( $main_categories as $category ) {
+			wp_create_category( $category );
+		}
+
+		foreach ( $iterator as $row_number => $row ) {
+			echo WP_CLI::colorize( 'Handling Row Number: ' . "%b$row_number%n" . ' - ' . $row['@id'] ) . "\n";
+
+			$post_date     = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $row['effective'], new DateTimeZone( 'America/Denver' ) );
+			$post_modified = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $row['modified'], new DateTimeZone( 'America/Denver' ) );
+
+			$post_data               = [
+				'post_category' => [],
+				'meta_input'    => [],
+			];
+			$post_data['post_title'] = $row['title'];
+			$post_data['post_date']  = $post_date->format( 'Y-m-d H:i:s' );
+			$post_date->setTimezone( new DateTimeZone( 'GMT' ) );
+			$post_data['post_date_gmt'] = $post_date->format( 'Y-m-d H:i:s' );
+			$post_data['post_modified'] = $post_modified->format( 'Y-m-d H:i:s' );
+			$post_modified->setTimezone( new DateTimeZone( 'GMT' ) );
+			$post_data['post_modified_gmt'] = $post_modified->format( 'Y-m-d H:i:s' );
+
+			if ( str_contains( $row['@id'], '/issues/' ) ) {
+				$issue_category_id = get_cat_ID( 'Issues' );
+
+				if ( 0 !== $issue_category_id ) {
+					$post_data['post_category'][] = $issue_category_id;
+				}
+
+				$issues_position = strpos( $row['@id'], '/issues/' ) + 8;
+				$issue_number    = substr( $row['@id'], $issues_position, strpos( $row['@id'], '/', $issues_position ) - $issues_position );
+
+				$issue_number_category_id = get_cat_ID( $issue_number );
+
+				if ( 0 !== $issue_number_category_id ) {
+					$post_data['post_category'][] = $issue_number_category_id;
+				}
+			} else {
+				$main_categories      = array_intersect( $row['subjects'], $main_categories );
+				$remaining_categories = array_diff( $row['subjects'], $main_categories );
+
+				$main_category_id = 0;
+
+				if ( count( $main_categories ) >= 1 ) {
+					$main_category_id             = wp_create_category( $main_categories[0] );
+					$post_data['post_category'][] = $main_category_id;
+				}
+
+				foreach ( $remaining_categories as $category ) {
+					$category_id                  = wp_create_category( $category, $main_category_id );
+					$post_data['post_category'][] = $category_id;
+				}
+			}
+
+			// Author Section.
+			$author_id = 0;
+
+			if ( ! empty( $row['creators'] ) ) {
+				$author_by_login = get_user_by( 'login', $row['creators'][0] );
+
+				if ( $author_by_login instanceof WP_User ) {
+					$author_id = $author_by_login->ID;
+				}
+			}
+
+			$post_data['post_author'] = $author_id;
+
+			if ( ! empty( $row['author'] ) ) {
+				$guest_author_names      = explode( ' ', $row['author'] );
+				$guest_author_last_name  = array_pop( $guest_author_names );
+				$guest_author_first_name = implode( ' ', $guest_author_names );
+				$this->coauthorsplus_logic->create_guest_author(
+					[
+						'display_name' => $row['author'],
+						'first_name'   => $guest_author_first_name,
+						'last_name'    => $guest_author_last_name,
+					]
+				);
+			}
+
+			$post_data['meta_input']['newspack_post_subtitle'] = $row['subheadline'];
+
+			$post_content = '';
+
+			if ( ! empty( $row['intro'] ) ) {
+				$intro = htmlspecialchars( $row['intro'], ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+				$intro = $this->replace_weird_chars( $intro );
+				$intro = utf8_decode( $intro );
+				$intro = html_entity_decode( $intro, ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+
+				$dom = new DOMDocument();
+				$dom->encoding = 'utf-8';
+				@$dom->loadHTML( $intro );
+//				var_dump([$dom->childNodes, $dom->firstChild, $dom->firstChild->childNodes, $dom->lastChild]);die();
+				foreach ( $dom->lastChild->firstChild->childNodes as $child ) {
+					if ( $child instanceof DOMElement ) {
+						$this->remove_attributes( $child );
+					}
+				}
+				$post_content .= $this->inner_html( $dom->lastChild->firstChild );
+			}
+
+			if ( ! empty( $row['text'] ) ) {
+				$text = htmlspecialchars( $row['text'], ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+				$text = $this->replace_weird_chars( $text );
+				$text = utf8_decode( $text );
+				$text = html_entity_decode( $text, ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+
+				$dom = new DOMDocument();
+				$dom->encoding = 'utf-8';
+				@$dom->loadHTML( $text );
+				foreach ( $dom->lastChild->firstChild->childNodes as $child ) {
+					if ( $child instanceof DOMElement ) {
+						$this->remove_attributes( $child );
+					}
+				}
+				$script_tags = $dom->getElementsByTagName( 'script' );
+
+				foreach ( $script_tags as $script_tag ) {
+//					var_dump( [ 'tag' => $script_tag->ownerDocument->saveHTML( $script_tag), 'name' => $script_tag->nodeName, 'parent' => $script_tag->parentNode->nodeName ] );
+					$script_tag->nodeValue = '';
+				}
+
+				$post_content .= $this->inner_html( $dom->lastChild->firstChild );
+			}
+
+			// handle redirects.
+			// handle featured image.
+			//
+
+			var_dump( $post_content );die();
+			// Add featured image.
+
+//			wp_insert_post( $post_data );
+		}
+	}
+
+	private function replace_weird_chars( $string ): string {
+		return strtr(
+			$string,
+			[
+				'“' => '"',
+				'”' => '"',
+				'‘' => "'",
+				'’' => "'",
+				'…' => '...',
+			]
+		);
+	}
+
+	private function remove_attributes( DOMElement $element, $level = "\t" ) {
+//		echo "{$level}Removing attributes from $element->nodeName\n";
+
+		$attribute_names = [];
+		foreach ( $element->attributes as $attribute ) {
+			$attribute_names[] = $attribute->name;
+		}
+
+		foreach ( $attribute_names as $attribute_name ) {
+			if ( ! in_array( $attribute_name, [ 'src', 'href' ] ) ) {
+				$element->removeAttribute( $attribute_name );
+			}
+		}
+
+		foreach ( $element->childNodes as $child ) {
+			$level .= "\t";
+//			echo "{$level}Child: $child->nodeName\n";
+			if ( $child instanceof DOMElement ) {
+				$this->remove_attributes( $child, $level );
+			}
+		}
+	}
+
+	private function inner_html( DOMElement $element ) {
+		$inner_html = '';
+
+		$doc = $element->ownerDocument;
+
+		foreach ( $element->childNodes as $node ) {
+
+			if ( $node instanceof DOMElement ) {
+				if ( $node->childNodes->length > 1 && ! in_array( $node->nodeName, [ 'a', 'em', 'strong' ] ) ) {
+					$inner_html .= $this->inner_html( $node );
+				} else if ( 'a' === $node->nodeName ) {
+					$html = $doc->saveHTML( $node );
+
+					if ( $node->previousSibling && '#text' === $node->previousSibling->nodeName ) {
+						$html = " $html";
+					}
+
+					if ( $node->nextSibling && '#text' === $node->nextSibling->nodeName ) {
+						$text_content = trim( $node->nextSibling->textContent );
+						$first_character = substr( $text_content, 0, 1 );
+
+						if ( ! in_array( $first_character, [ '.', ':' ] ) ) {
+							$html = "$html ";
+						}
+					}
+
+					$inner_html .= $html;
+				} else {
+					$inner_html .= $doc->saveHTML( $node );
+				}
+			} else {
+
+				if ( '#text' === $node->nodeName ) {
+					$text_content = $node->textContent;
+
+					if ( $node->previousSibling && 'a' == $node->previousSibling->nodeName ) {
+						$text_content = ltrim( $text_content );
+					}
+
+					if ( $node->nextSibling && 'a' == $node->nextSibling->nodeName ) {
+						$text_content = rtrim( $text_content );
+					}
+
+					// If this text is surrounded on both ends by links, probably doesn't need any page breaks in between text
+					// Also removing page breaks if the parent element is a <p> tag
+					if (
+						( $node->previousSibling && $node->nextSibling && 'a' == $node->previousSibling->nodeName && 'a' == $node->nextSibling->nodeName ) ||
+						'p' === $element->nodeName
+					){
+						$text_content = preg_replace("/\s+/", " ", $text_content);
+					}
+
+					$inner_html .= $text_content;
+				} else {
+					$inner_html .= $doc->saveHTML( $node );
+				}
+			}
+		}
+
+		if ( 'p' === $element->nodeName && ! empty( $inner_html ) ) {
+			if ( $element->hasAttributes() && 'post-aside' === $element->getAttribute( 'class' ) ) {
+				return '<p class="post-aside">' . $inner_html . '</p>';
+			}
+
+			return '<p>' . $inner_html . '</p>';
+		}
+
+		return $inner_html;
+	}
+}
