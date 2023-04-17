@@ -1,4 +1,5 @@
 <?php
+declare(ticks=1);
 
 namespace NewspackCustomContentMigrator;
 
@@ -9,9 +10,25 @@ use \WP_CLI;
  */
 class PluginSetup {
 	/**
+	 * Register a tick callback to check the if we exceed the memory limit.
+	 */
+	public static function register_ticker() {
+		register_tick_function(
+			function() {
+				$memory_usage = memory_get_usage( false );
+
+				if ( $memory_usage > 912680550 ) { // 0.85 GB in bytes, since the limit on Atomic is 1GB.
+					print_r( 'Exit due to memory usage: ' . $memory_usage );
+					exit( 1 );
+				}
+			}
+		);
+	}
+
+	/**
 	 * Registers migrators' commands.
 	 *
-	 * @param $migrator_classes Array of Command\InterfaceCommand classes.
+	 * @param array $migrator_classes Array of Command\InterfaceCommand classes.
 	 */
 	public static function register_migrators( $migrator_classes ) {
 		foreach ( $migrator_classes as $migrator_class ) {
