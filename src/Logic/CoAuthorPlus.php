@@ -193,6 +193,36 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
+	 * 
+	 * @param WP_User|int $wp_user ID of the User or a WP_User object
+	 * 
+	 * @return false|object Guest author object.
+	 */
+	public function get_or_create_guest_author_from_user( $wp_user ) {
+
+		// Convert IDs to WP User objects.
+		if ( is_int( $wp_user ) ) {
+			$wp_user = get_user_by( 'id', $wp_user );
+		}
+
+		// Make sure it's a valid user.
+		if ( ! is_a( $wp_user, 'WP_User' ) ) {
+			return false;
+		}
+
+		// Get the GA by using the user login.
+		$guest_author = $this->get_guest_author_by_user_login( $wp_user->data->user_login );
+		if ( ! $guest_author ) {
+			// Doesn't exist, let's create it!
+			$guest_author = $this->create_guest_author_from_wp_user( $wp_user->ID );
+		}
+
+		return $guest_author;
+
+	}
+
+	/**
 	 * Gets Post's Guest Authors.
 	 *
 	 * @param int $post_id Post ID.
@@ -313,9 +343,8 @@ class CoAuthorPlus {
 	public function get_all_gas() {
 		global $wpdb;
 
-		// This query was taken directly from \CoAuthors_Guest_Authors::get_guest_author_by but added post_status,
-		// because otherwise it picks up 'auto-draft's, which are not valid GA objects.
-		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'guest-author' and post_status = 'publish';" );
+		// This query was taken directly from \CoAuthors_Guest_Authors::get_guest_author_by.
+		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'guest-author';" );
 
 		$all_gas = [];
 		foreach ( $post_ids as $post_id ) {

@@ -5,13 +5,57 @@ namespace NewspackCustomContentMigrator\Logic;
 use WP_Query;
 use WP_CLI;
 
+/**
+ * Posts logic class.
+ */
 class Posts {
 	/**
-	 * Gets IDs of all the Pages.
+	 * @param string|array $post_type   Post type(s).
+	 * @param array        $post_status Post statuses.
+	 * @param boolean      $nopaging    Deprecated usage, optional param kept for backward compatibility. Always defaults to true.
 	 *
-	 * @return array Pages IDs.
+	 * @return array
 	 */
 	public function get_all_posts_ids( $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $nopaging = true ) {
+		global $wpdb;
+
+		// Create $post_type statement placeholders.
+		if ( ! is_array( $post_type ) ) {
+			$post_type = [ $post_type ];
+		}
+		$post_type_placeholders = implode( ',', array_fill( 0, count( $post_type ), '%s' ) );
+
+		// Create $post_status statement placeholders.
+		$post_status_placeholders = implode( ',', array_fill( 0, count( $post_status ), '%s' ) );
+
+		// phpcs:disable -- used wpdb's prepare() and placeholders.
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"select ID
+			from {$wpdb->posts}
+			where post_type IN ( $post_type_placeholders )
+			and post_status IN ( $post_status_placeholders ) ;",
+				array_merge( $post_type, $post_status )
+			)
+		);
+		// phpcs:enable
+
+		return $ids;
+	}
+
+	/**
+
+	 * Gets IDs of all the Posts.
+	 * Uses WP_Query::get_posts. If $nopaging=true is used, might break on larger DBs on Atomic. Deprecation notice below.
+	 *
+	 * @deprecated May break on large DBs on Atomic due to Atomic resource restrictions, replaced by self::get_all_posts_ids().
+	 * @param string|array $post_type   $post_type argument for \WP_Query::get_posts.
+	 * @param array        $post_status $post_status argument for \WP_Query::get_posts.
+	 * @param boolean      $nopaging    $nopaging argument for \WP_Query::get_posts.
+	 *
+	 * @return array Post IDs.
+	 */
+	public function get_all_posts_ids_old( $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $nopaging = true ) {
 		$ids = array();
 
 		// Arguments in \WP_Query::parse_query .
@@ -107,6 +151,7 @@ SQL;
 		global $wpdb;
 
 		$post_types = [];
+		// phpcs:ignore
 		$results    = $wpdb->get_results( "SELECT DISTINCT post_type FROM {$wpdb->posts}" );
 		foreach ( $results as $result ) {
 			$post_types[] = $result->post_type;
@@ -124,15 +169,15 @@ SQL;
 	 *      }
 	 * ```
 	 *
+	 * @param string $taxonomy   Taxonomy.
+	 * @param int    $term_id    term_id.
 	 * @param array  $post_types Post types.
-	 * @param string $taxonomy Taxonomy.
-	 * @param int    $term_id term_id.
 	 *
 	 * @return \WP_Post[]
 	 */
 	public function get_post_objects_with_taxonomy_and_term( $taxonomy, $term_id, $post_types = array( 'post', 'page' ) ) {
 		return get_posts(
-            [
+			[
 				'posts_per_page' => -1,
 				// Target all post_types.
 				'post_type'      => $post_types,
@@ -144,21 +189,21 @@ SQL;
 					],
 				],
 			]
-        );
+		);
 	}
 
 	/**
 	 * Gets taxonomy with custom meta.
 	 *
-	 * @param            $meta_key
-	 * @param            $meta_value
-	 * @param string     $taxonomy
+	 * @param string $meta_key   Meta key.
+	 * @param string $meta_value Meta value.
+	 * @param string $taxonomy   Taxonomy.
 	 *
 	 * @return int|\WP_Error|\WP_Term[]
 	 */
 	public function get_terms_with_meta( $meta_key, $meta_value, $taxonomy = 'category' ) {
-        return get_terms(
-            [
+		return get_terms(
+			[
 				'hide_empty' => false,
 				'meta_query' => [
 					[
@@ -169,14 +214,15 @@ SQL;
 				],
 				'taxonomy'   => $taxonomy,
 			]
-        );
+		);
 	}
 
 	/**
 	 * Gets all Posts which has the meta key and value.
 	 *
-	 * @param string $meta_key
-	 * @param string $meta_value
+	 * @param string $meta_key   Meta key.
+	 * @param string $meta_value Meta value.
+	 * @param array  $post_types Post types.
 	 *
 	 * @return array|null
 	 */
@@ -195,16 +241,18 @@ SQL;
 			array_push( $args_prepare, $post_type );
 		}
 
+		// phpcs:disable -- Used wpdb's prepare() and safely sanitized placeholders.
 		$results_meta_post_ids = $wpdb->get_results(
 			$wpdb->prepare(
 				"select post_id from {$wpdb->prefix}postmeta pm
 				join {$wpdb->prefix}posts p on p.id = pm.post_id
 				where pm.meta_key = %s and pm.meta_value = %s
-			    and p.post_type in ( $post_types_placeholders )",
+			    and p.post_type in ( $post_types_placeholders ); ",
 				$args_prepare
 			),
 			ARRAY_A
 		);
+		// phpcs:enable
 
 		if ( empty( $results_meta_post_ids ) ) {
 			return [];
@@ -224,26 +272,35 @@ SQL;
 	 * @return array
 	 */
 	public function get_all_existing_categories() {
-        $cats_ids_all = [];
-        $cats_parents = get_categories( [ 'hide_empty' => false, ] );
-        foreach ( $cats_parents as $cat_parent ) {
-            $cats_ids_all[] = $cat_parent->term_id;
-            $cats_children  = get_categories( [ 'parent' => $cat_parent->term_id, 'hide_empty' => false, ] );
-            if ( empty( $cats_children ) ) {
+		$cats_ids_all = [];
+		$cats_parents = get_categories( [ 'hide_empty' => false ] );
+		foreach ( $cats_parents as $cat_parent ) {
+			$cats_ids_all[] = $cat_parent->term_id;
+			$cats_children  = get_categories(
+				[
+					'parent'     => $cat_parent->term_id,
+					'hide_empty' => false,
+				]
+			);
+			if ( empty( $cats_children ) ) {
 				continue;
-            }
+			}
 
-            foreach ( $cats_children as $cat_child ) {
-                $cats_ids_all[] = $cat_child->term_id;
-            }
-        }
-        $cats_ids_all = array_unique( $cats_ids_all );
+			foreach ( $cats_children as $cat_child ) {
+				$cats_ids_all[] = $cat_child->term_id;
+			}
+		}
+		$cats_ids_all = array_unique( $cats_ids_all );
 
-        return $cats_ids_all;
+		return $cats_ids_all;
 	}
 
 	/**
 	 * Returns all posts' IDs.
+	 * Warning -- might break on Atomic with larger DBs due to resource restrictions. Try using self::get_all_posts_ids() instead.
+	 *
+	 * @param string|array $post_type   Post type.
+	 * @param array        $post_status Post status.
 	 *
 	 * @return int[]|\WP_Post[]
 	 */
@@ -342,7 +399,10 @@ SQL;
 	public function generate_jetpack_slideshow_block_from_media_posts( $post_ids ) {
 		$posts = [];
 		foreach ( $post_ids as $post_id ) {
-			$posts[] = get_post( $post_id );
+			$post = get_post( $post_id );
+			if ( $post ) {
+				$posts[] = get_post( $post_id );
+			}
 		}
 
 		if ( empty( $posts ) ) {
@@ -362,7 +422,7 @@ SQL;
 	/**
 	 * Generate Jetpack Slideshow Block code from Media Posts.
 	 *
-	 * @param int[] $post_ids Media Posts IDs.
+	 * @param int[] $images Media Posts IDs.
 	 * @return string Jetpack Slideshow block code to be add to the post content.
 	 */
 	public function generate_jetpack_slideshow_block_from_pictures( $images ) {
@@ -412,7 +472,7 @@ SQL;
 		global $wpdb;
 		$results = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT post_parent as post_ID, COUNT(ID) as num_of_revisions 
+				"SELECT post_parent as post_ID, COUNT(ID) as num_of_revisions
 					FROM $wpdb->posts WHERE post_type = 'revision'
 					GROUP BY post_parent
 					HAVING COUNT(ID) > %d",
@@ -463,5 +523,94 @@ SQL;
 			)
 		);
 		return $deleted;
+	}
+
+	/**
+	 * Fixes duplicate post_name entries for given post types.
+	 *
+	 * @param array $post_types Post types.
+	 *
+	 * @return array $updated {
+	 *     Resulting updated records.
+	 *
+	 *     @type int ID                   Live Post ID.
+	 *     @type string post_name_old     Previous post_name.
+	 *     @type string post_name_updated New post_name.
+	 * }
+	 */
+	public function fix_duplicate_slugs( array $post_types ): array {
+		global $wpdb;
+
+		$updated = [];
+
+		// Query which post_names have dupes.
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		// phpcs:disable -- Placeholders used and query sanitized
+		$results                 = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT post_name, COUNT(*) counter
+				FROM $wpdb->posts
+				WHERE post_type IN ( $post_types_placeholders )
+					AND post_status = 'publish'
+				GROUP BY post_name HAVING counter > 1 ;",
+				$post_types
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		// Get the post_names.
+		$post_names = [];
+		foreach ( $results as $result ) {
+			$post_names[] = $result['post_name'];
+		}
+
+		foreach ( $post_names as $key_post_name => $post_name ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) fixing %s ...', $key_post_name + 1, count( $post_names ), $post_name ) );
+
+			// Get IDs with this post_name. Order by post_modified and ID descending.
+			// phpcs:disable -- Placeholders used and query sanitized
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID
+					FROM $wpdb->posts
+					WHERE post_name = %s
+			        AND post_type IN ( $post_types_placeholders )
+					ORDER BY post_modified, ID DESC;",
+					array_merge( [ $post_name ], $post_types )
+				)
+			);
+			// phpcs:enable
+
+			// Fix dupe post_names.
+			foreach ( $post_ids as $key_post_id => $post_id ) {
+				// Leave first/last one.
+				if ( 0 === $key_post_id ) {
+					continue;
+				}
+
+				// Rename slugs of previous one(s) by appending "-1" to them.
+				$post_name_updated = $post_name . '-' . ( $key_post_id + 1 );
+				$updated_res       = $wpdb->update(
+					$wpdb->posts,
+					[ 'post_name' => $post_name_updated ],
+					[ 'ID' => $post_id ],
+				);
+				if ( 1 === $updated_res ) {
+					$updated[] = [
+						'ID'                => $post_id,
+						'post_name_old'     => $post_name,
+						'post_name_updated' => $post_name_updated,
+					];
+
+					WP_CLI::log( sprintf( 'Updated ID %d post_name to %s', $post_id, $post_name_updated ) );
+				}
+			}
+		}
+
+		// Needed for $wpdb->update.
+		wp_cache_flush();
+
+		return $updated;
 	}
 }
