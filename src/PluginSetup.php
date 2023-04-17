@@ -17,7 +17,7 @@ class PluginSetup {
 			function() {
 				$memory_usage = memory_get_usage( false );
 
-				if ( $memory_usage > 912680550 ) { // 0.85 GB in bytes, since the limit on Atomic is 1GB.
+				if ( $memory_usage > 490000000 ) { // 490 MB in bytes, since the limit on Atomic is 512 MB.
 					print_r( 'Exit due to memory usage: ' . $memory_usage );
 					exit( 1 );
 				}
