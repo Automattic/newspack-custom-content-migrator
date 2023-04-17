@@ -267,7 +267,6 @@ class TownNewsMigrator implements InterfaceCommand {
 		$post_id = $this->get_post_by_tn_id( $tn_id );
 
 		if ( $post_id ) {
-			return $post_id;
 			return false;
 		}
 
