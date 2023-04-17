@@ -156,6 +156,22 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			]
 		);
 
+		\WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-author-names',
+			[ $this, 'cmd_author_names' ],
+			[
+				'shortdesc' => 'Makes sure authors have full names.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
+			]
+		);
+
 	}
 
 	/**
@@ -290,6 +306,67 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				add_post_meta( $post_id, self::META_PREFIX . 'import_data', $article );
 				add_post_meta( $post_id, self::META_PREFIX . 'guid', $article['guid'] );
 			}
+
+		}
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-author-names`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_author_names( $args, $assoc_args ) {
+		global $wpdb;
+		$this->log( 'Adding Newsroom NZ author names...' );
+
+		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
+			$this->dryrun = true;
+			$this->log( 'Performing a dry-run. No changes will be made.' );
+		}
+
+		// Get all the user IDs and emails for users without a first name.
+		$users = $wpdb->get_results(
+			"SELECT ID, user_email FROM {$wpdb->users} INNER JOIN {$wpdb->usermeta} ON {$wpdb->users}.ID = {$wpdb->usermeta}.user_id WHERE {$wpdb->usermeta}.meta_key = 'first_name' AND {$wpdb->usermeta}.meta_value IS NULL OR {$wpdb->usermeta}.meta_value = ''",
+		);
+
+		foreach ( $users as $user ) {
+			// Find this user's data.
+			$import_data = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT meta_value
+					FROM {$wpdb->postmeta}
+					WHERE meta_key = %s
+					AND meta_value
+					LIKE %s",
+					self::META_PREFIX . 'import_data',
+					'%' . $user->user_email . '%'
+				)
+			);
+			if ( ! $import_data ) {
+				$this->log( sprintf( 'No import data found with email %s', $user->user_email ), 'warning' );
+				continue;
+			}
+
+			// We might need to serialize the data here.
+			$import_data = maybe_unserialize( $import_data );
+
+			// Update the user's first and last name.
+			$update = ( $this->dryrun ) ? true : wp_update_user(
+				[
+					'ID'           => $user->ID,
+					'first_name'   => $import_data['author_firstname'],
+					'last_name'    => $import_data['author_lastname'],
+					'display_name' => $import_data['author_firstname'] . ' ' . $import_data['author_lastname'],
+				]
+			);
+			if ( is_wp_error( $update ) ) {
+				$this->log( sprintf( 'Failed to update user %s', $user->user_email ), 'warning' );
+				continue;
+			}
+
+			$this->log( sprintf( 'Added names for user with email %s and ID %d', $user->user_email, $user->ID ), 'success' );
 
 		}
 
@@ -500,10 +577,16 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$username = $this->create_username( $fields['author_firstname'], $fields['author_lastname'], $value );
 
 			// Create the user.
-			$user_id = ( $this->dryrun ) ? 1 : wp_create_user(
-				$username,
-				wp_generate_password( 20 ),
-				$value
+			$user_id = ( $this->dryrun ) ? 1 : wp_insert_user(
+				[
+					'user_login'   => $username,
+					'user_pass'    => wp_generate_password( 20 ),
+					'role'		   => 'author',
+					'user_email'   => $value,
+					'first_name'   => $fields['author_firstname'],
+					'last_name'    => $fields['author_lastname'],
+					'display_name' => $fields['author_firstname'] . ' ' . $fields['author_lastname'],
+				]
 			);
 			if ( is_wp_error( $user_id ) ) {
 				$this->log( sprintf( 'Failed to create user for email %s', $value ), 'warning' );
