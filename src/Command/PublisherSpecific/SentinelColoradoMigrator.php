@@ -543,7 +543,7 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 				if ( is_wp_error( $result ) ) {
 					$this->log( self::ACCORDION_LOGS, 'Failed to update post: ' . $post->ID );
 				} else {
-					// update_post_meta( $post->ID, '_newspack_migrated_accordion', true );
+					update_post_meta( $post->ID, '_newspack_migrated_accordion', true );
 					$this->log( self::ACCORDION_LOGS, 'Updated post: ' . $post->ID );
 				}
 			}
