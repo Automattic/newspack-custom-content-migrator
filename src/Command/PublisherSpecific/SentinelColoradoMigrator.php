@@ -519,7 +519,10 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 						}
 
 						foreach ( $accordion_options['content'] as $accordion_content ) {
-							$migrated_content_blocks[] = $this->gutenberg_block_generator->get_accordion( $accordion_content['header'], nl2br( $accordion_content['body'] ), true );
+							$content = nl2br( $accordion_content['body'] );
+							$content = preg_replace( '#<br />(\s*<br />)\s*&nbsp;#', '&nbsp;', $content );
+
+							$migrated_content_blocks[] = $this->gutenberg_block_generator->get_accordion( $accordion_content['header'], $content, true );
 						}
 					}
 				} else {
@@ -540,7 +543,7 @@ class SentinelColoradoMigrator implements InterfaceCommand {
 				if ( is_wp_error( $result ) ) {
 					$this->log( self::ACCORDION_LOGS, 'Failed to update post: ' . $post->ID );
 				} else {
-					update_post_meta( $post->ID, '_newspack_migrated_accordion', true );
+					// update_post_meta( $post->ID, '_newspack_migrated_accordion', true );
 					$this->log( self::ACCORDION_LOGS, 'Updated post: ' . $post->ID );
 				}
 			}
