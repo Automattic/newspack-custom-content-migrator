@@ -185,6 +185,52 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-fix-weird-chars',
+			[ $this, 'cmd_fix_weird_chars' ],
+			[
+				'shortdesc' => 'Fix weird chars in post content.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'Path to the JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start',
+						'description' => 'Start row (default: 0)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end',
+						'description' => 'End row (default: PHP_INT_MAX)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-fix-related-link-text',
+			[ $this, 'fix_related_link_text' ],
+			[
+				'shortdesc' => 'Copies ACF subtitles to post_excerpt and .',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'Path to the JSON file.',
+						'optional'    => false,
+					]
+				],
+			]
+		);
 	}
 
 	public function cmd_migrate_authors_from_scrape() {
@@ -446,6 +492,191 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		}
 	}
 
+	public function cmd_fix_weird_chars( $args, $assoc_args ) {
+		global $wpdb;
+
+		$file_path = $args[0];
+		$start     = $assoc_args['start'] ?? 0;
+		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
+
+		$iterator = ( new FileImportFactory() )->get_file( $file_path )
+		                                       ->set_start( $start )
+		                                       ->set_end( $end )
+		                                       ->getIterator();
+
+		foreach ( $iterator as $row_number => $row ) {
+			echo WP_CLI::colorize( "Handling Row Number: %B$row_number%n\n" );
+			$post_content = '';
+
+			if ( ! empty( $row['intro'] ) ) {
+				$intro = htmlspecialchars( $row['intro'], ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+				$intro = $this->replace_weird_chars( $intro );
+				$intro = utf8_decode( $intro );
+				$intro = html_entity_decode( $intro, ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+
+				$dom = new DOMDocument();
+				$dom->encoding = 'utf-8';
+				@$dom->loadHTML( $intro );
+//				var_dump([$dom->childNodes, $dom->firstChild, $dom->firstChild->childNodes, $dom->lastChild]);die();
+				foreach ( $dom->lastChild->firstChild->childNodes as $child ) {
+					if ( $child instanceof DOMElement ) {
+						$this->remove_attributes( $child );
+					}
+				}
+				$post_content .= $this->inner_html( $dom->lastChild->firstChild );
+			}
+
+			if ( ! empty( $row['text'] ) ) {
+				$text = htmlspecialchars( $row['text'], ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+				$text = $this->replace_weird_chars( $text );
+				$text = utf8_decode( $text );
+				$text = html_entity_decode( $text, ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
+				$text = trim( $text );
+
+				if ( ! empty( $text ) ) {
+					$dom           = new DOMDocument();
+					$dom->encoding = 'utf-8';
+					@$dom->loadHTML( $text );
+					foreach ( $dom->lastChild->firstChild->childNodes as $child ) {
+						if ( $child instanceof DOMElement ) {
+							$this->remove_attributes( $child );
+						}
+					}
+
+					$script_tags = $dom->getElementsByTagName( 'script' );
+
+					foreach ( $script_tags as $script_tag ) {
+//					var_dump( [ 'tag' => $script_tag->ownerDocument->saveHTML( $script_tag), 'name' => $script_tag->nodeName, 'parent' => $script_tag->parentNode->nodeName ] );
+						$script_tag->nodeValue = '';
+					}
+
+					$img_tags = $dom->getElementsByTagName( 'img' );
+
+					foreach ( $img_tags as $img_tag ) {
+						/* @var DOMElement $img_tag */
+						// $src should look like this: resolveuid/191b2acc464b44f592c547229b393b4e.
+						$src         = $img_tag->getAttribute( 'src' );
+						$uid         = str_replace( 'resolveuid/', '', $src );
+						$first_slash = strpos( $uid, '/' );
+						if ( is_numeric( $first_slash ) ) {
+							$uid = substr( $uid, 0, $first_slash );
+						}
+						echo WP_CLI::colorize( "%BImage SRC: $src - UID: $uid%n\n" );
+						$attachment_id = $wpdb->get_var( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'UID' AND meta_value = '$uid'" );
+
+						if ( $attachment_id ) {
+							$attachment_url = wp_get_attachment_url( $attachment_id );
+							echo WP_CLI::colorize( "%wImage found, URL: $attachment_url%n\n" );
+							$img_tag->setAttribute( 'src', $attachment_url );
+						} else {
+							$filename = trim( basename( $src ) );
+							echo WP_CLI::colorize( "%BImage filename: $filename%n\n" );
+							$attachment_id = $wpdb->get_var(
+								"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value = '%$filename'"
+							);
+
+							if ( $attachment_id ) {
+								$attachment_url = wp_get_attachment_url( $attachment_id );
+								echo WP_CLI::colorize( "%wImage found, URL: $attachment_url%n\n" );
+								$img_tag->setAttribute( 'src', $attachment_url );
+							} else {
+								echo WP_CLI::colorize( "%yImage not found...%n\n" );
+							}
+						}
+					}
+
+					$post_content .= $this->inner_html( $dom->lastChild->firstChild );
+				}
+			}
+
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'UID' AND meta_value = %s",
+					$row['UID']
+				)
+			);
+
+			echo WP_CLI::colorize( "%GUpdating Post ID: {$post_id}%n\n" );
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $post_content,
+				],
+				[
+					'ID' => $post_id,
+				]
+			);
+		}
+	}
+
+	public function fix_related_link_text( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+			"SELECT ID, post_title, post_content FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[RELATED:%'"
+		);
+
+		$articles = json_decode( file_get_contents( $args[0] ), true );
+
+		$article_link_and_uid = [];
+		foreach ( $articles as $article ) {
+			$article_link_and_uid[ $article['@id'] ] = $article['UID'];
+		}
+
+		foreach ( $posts as $post ) {
+			echo WP_CLI::colorize( "Main Post ID: %B{$post->ID}%n\n" );
+			preg_match_all( '/\[RELATED:(.*?)\]/', $post->post_content, $matches, PREG_SET_ORDER );
+
+			$update = false;
+			$post_content = $post->post_content;
+			foreach ( $matches as $match ) {
+				echo WP_CLI::colorize( "%w{$match[1]}%n\n" );
+
+				if ( array_key_exists( $match[1], $article_link_and_uid ) ) {
+					echo WP_CLI::colorize( "%wFound link in articles file...%n\n" );
+					$uid     = $article_link_and_uid[ $match[1] ];
+					$post_id = $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'UID' AND meta_value = %s",
+							$uid
+						)
+					);
+
+					if ( $post_id ) {
+						echo WP_CLI::colorize( "%gFound related post ID: {$post_id}%n\n" );
+						$update = true;
+						$permalink   = get_permalink( $post_id );
+						$post_title  = get_the_title( $post_id );
+						$replacement = "<p><strong>RELATED:</strong> <a href='{$permalink}' target='_blank'>{$post_title}</a></p>";
+						$post_content = str_replace( $match[0], $replacement, $post_content );
+					} else {
+						echo WP_CLI::colorize( "%rNo post ID found%n\n" );
+					}
+				}
+			}
+
+			if ( $update ) {
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_content' => $post_content,
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					echo WP_CLI::colorize( "%gUpdated post content.%n\n" );
+				} else {
+					echo WP_CLI::colorize( "%rFailed to update post content.%n\n" );
+				}
+			} else {
+				echo WP_CLI::colorize( "%rNo matching link(s) found in articles file...%n\n" );
+			}
+		}
+	}
+
 	/**
 	 * @param array $args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
@@ -611,7 +842,19 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 							echo WP_CLI::colorize( "%wImage found, URL: $attachment_url%n\n" );
 							$img_tag->setAttribute( 'src', $attachment_url );
 						} else {
-							echo WP_CLI::colorize( "%yImage not found...%n\n" );
+							$filename = trim( basename( $src ) );
+							echo WP_CLI::colorize( "%BImage filename: $filename%n\n" );
+							$attachment_id = $wpdb->get_var(
+								"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value = '%$filename'"
+							);
+
+							if ( $attachment_id ) {
+								$attachment_url = wp_get_attachment_url( $attachment_id );
+								echo WP_CLI::colorize( "%wImage found, URL: $attachment_url%n\n" );
+								$img_tag->setAttribute( 'src', $attachment_url );
+							} else {
+								echo WP_CLI::colorize( "%yImage not found...%n\n" );
+							}
 						}
 					}
 
@@ -687,12 +930,22 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				'‘' => "'",
 				'’' => "'",
 				'…' => '...',
+				'―' => '-',
+				'—' => '-',
+				'–' => '-',
+				' ' => ' ',
 			]
 		);
 	}
 
 	private function remove_attributes( DOMElement $element, $level = "\t" ) {
 //		echo "{$level}Removing attributes from $element->nodeName\n";
+		if ( 'blockquote' === $element->nodeName ) {
+			$class = $element->getAttribute( 'class' );
+			if ( str_contains( $class, 'instagram-media' ) ) {
+				return;
+			}
+		}
 
 		$attribute_names = [];
 		foreach ( $element->attributes as $attribute ) {
