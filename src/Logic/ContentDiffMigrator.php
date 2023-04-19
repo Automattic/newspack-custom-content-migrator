@@ -160,7 +160,7 @@ class ContentDiffMigrator {
 		// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
 		// phpcs:disable
 		$sql_replace_table = $this->wpdb->prepare(
-			"SELECT ID, post_name, post_title, post_status, post_date, post_modified
+			"SELECT ID, post_name, post_title, post_status, post_type, post_date, post_modified
 				FROM {TABLE}
 				WHERE post_type IN ( $post_types_placeholders_csv )
 				AND post_status IN ( $post_statuses_placeholders_csv );",

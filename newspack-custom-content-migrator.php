@@ -21,6 +21,7 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 
 require_once ABSPATH . 'wp-settings.php';
 
+PluginSetup::register_ticker();
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
 	array(
@@ -57,6 +58,9 @@ PluginSetup::register_migrators(
 		Command\General\ContentFixerMigrator::class,
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
+		Command\General\MetroMirgator::class,
+		Command\General\ProfilePress::class,
+		Command\General\TownNewsMigrator::class,
 
 		// Publisher specific.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -72,6 +76,13 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
 		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
+		Command\PublisherSpecific\RetroReportMigrator::class,
+		Command\PublisherSpecific\BillyPennMigrator::class,
+		Command\PublisherSpecific\IndyWeekMigrator::class,
+		Command\PublisherSpecific\Moco360Migrator::class,
+		Command\PublisherSpecific\Umbria24Migrator::class,
+		Command\PublisherSpecific\SaportaReportMigrator::class,
+		Command\PublisherSpecific\MusicallyMigrator::class,
 		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
 	)
 );
