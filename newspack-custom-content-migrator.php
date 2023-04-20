@@ -83,5 +83,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
+		Command\PublisherSpecific\LatinFinanceMigrator::class,
 	)
 );
