@@ -50,8 +50,20 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	/**
 	 * Callable for 'newspack-content-migrator latinfinance-import-from-mssql'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
 	 */
-	public function cmd_import_from_mssql() {
-		echo 123;
+	public function cmd_import_from_mssql( $pos_args, $assoc_args ) {
+		
+		WP_CLI::line( "All code goes here 😉" );
+
+		// Here's how you can use the class-newspack-wxr-exporter.php
+		$xml_exporter = new \Newspack_WXR_Exporter();
+		
+		// You'll probably want to use the \PDO and create a connection to your local DB.
+
+		// Next pull out the data, and finally create WXR XMLs.
+
 	}
 }
