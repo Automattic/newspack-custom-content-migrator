@@ -6,11 +6,10 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
+use \NewspackCustomContentMigrator\Logic\Posts;
 
 /* External dependencies */
-use stdClass;
 use WP_CLI;
-use WP_Query;
 
 /**
  * Custom migration scripts for Soccer America.
@@ -513,7 +512,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$comment_id = $this->import_comment( $row );
 
 			// Add the original data to the comment as meta.
-			if ( ! $this->dryrun ) {
+			if ( ! $this->dryrun && ! is_wp_error( $comment_id ) ) {
 				add_comment_meta( $comment_id, self::META_PREFIX . 'import_data', $row );
 				add_comment_meta( $comment_id, self::META_PREFIX . 'comment_id', $original_comment_id );
 			}
@@ -535,7 +534,8 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 		}
 
 		// Are we dealing with article types or SUB article types?
-		$type_header = ( array_key_exists( 'subtypes', $assoc_args ) ) ? 'articlet_subype_id' : 'articlet_type_id';
+		// The misspellings here match the actual data.
+		$type_header = ( array_key_exists( 'subtypes', $assoc_args ) ) ? 'articlet_subype_id' : 'article_type_id';
 		$meta_key    = ( array_key_exists( 'subtypes', $assoc_args ) ) ? 'subtype_id' : 'type_id';
 
 		// Make sure there is a path to CSV provided.
@@ -573,6 +573,9 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				$category,
 				self::META_PREFIX . $meta_key
 			);
+
+			// Try to improve memory usage.
+			$this->stop_the_insanity();
 		}
 
 		$this->log( 'Imported article types.', 'success' );
@@ -1192,6 +1195,8 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			// Update the comment count for the post.
 			wp_update_comment_count( $post_id );
 		}
+
+		return $comment;
 	}
 
 	/**
@@ -1325,21 +1330,17 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 *
 	 * @param string $article_id Article as provided by the CSV export.
 	 *
-	 * @return int|bool Post ID if it exists, false otherwise.
+	 * @return int|null Post ID if it exists, null otherwise.
 	 */
 	private function post_exists( $article_id ) {
-
-		$query_args = [
-			'post_type'  => 'post',
-			'meta_query' => [
-				[
-					'key'   => self::META_PREFIX . 'article_id',
-					'value' => $article_id,
-				],
-			],
-		];
-		$posts = get_posts( $query_args );
-		return ( ! empty( $posts ) && is_a( $posts[0], 'WP_Post' ) ) ? $posts[0]->ID : false;
+		global $wpdb;
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+				self::META_PREFIX . 'article_id',
+				$article_id
+			)
+		);
 	}
 
 	/**
@@ -1369,21 +1370,17 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 *
 	 * @param string $author_id Author ID as provided by the CSV export.
 	 *
-	 * @return int|bool User ID if it exists, false otherwise.
+	 * @return int|null User ID if it exists, null otherwise.
 	 */
 	private function user_exists( $author_id ) {
 		global $wpdb;
-		$users = $wpdb->get_results( $wpdb->prepare(
-			"SELECT user_id FROM $wpdb->usermeta WHERE meta_key = %s AND meta_value = %d",
-			self::META_PREFIX . 'author_id',
-			$author_id
-		) );
-
-		if ( is_null( $users ) || empty( $users ) ) {
-			return false;
-		}
-
-		return $users[0]->user_id;
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT user_id FROM $wpdb->usermeta WHERE meta_key = %s AND meta_value = %d",
+				self::META_PREFIX . 'author_id',
+				$author_id
+			)
+		);
 	}
 
 	/**
@@ -1391,18 +1388,17 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * 
 	 * @param int $id The comment ID.
 	 * 
-	 * @return bool True if it exists, false otherwise.
+	 * @return int|null Comment ID if it exists, null otherwise.
 	 */
 	private function comment_exists( $id ) {
-		$comments = get_comments(
-			[
-				'meta_key'   => self::META_PREFIX . 'comment_id',
-				'meta_value' => $id,
-				'number'     => 1,
-			]
+		global $wpdb;
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT comment_id FROM $wpdb->commentmeta WHERE meta_key = %s AND meta_value = %s",
+				self::META_PREFIX . 'comment_id',
+				$id
+			)
 		);
-
-		return ( $comments && ! empty( $comments ) );
 	}
 
 	/**
@@ -1606,6 +1602,9 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 						$post->post_title
 					)
 				);
+
+				// Remove the meta key so we don't do this again.
+				delete_post_meta( $post->ID, $meta_key, $type_id );
 			}
 		}
 	}
@@ -1642,6 +1641,44 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 		}
 
 		return $data;
+	}
+
+	private function stop_the_insanity() {
+		self::reset_local_object_cache();
+		self::reset_db_query_log();
+	}
+
+	/**
+	 * Reset the local WordPress object cache
+	 *
+	 * This only cleans the local cache in WP_Object_Cache, without
+	 * affecting memcache (copied from VIP Go MU Plugins)
+	 */
+	private function reset_local_object_cache() {
+		global $wp_object_cache;
+
+		if ( ! is_object( $wp_object_cache ) ) {
+			return;
+		}
+
+		$wp_object_cache->group_ops      = array();
+		$wp_object_cache->memcache_debug = array();
+		$wp_object_cache->cache          = array();
+
+		if ( method_exists( $wp_object_cache, '__remoteset' ) ) {
+			$wp_object_cache->__remoteset(); // important
+		}
+	}
+
+	/**
+	 * Reset the WordPress DB query log
+	 * 
+	 * (copied from VIP Go MU Plugins)
+	 */
+	private function reset_db_query_log() {
+		global $wpdb;
+
+		$wpdb->queries = array();
 	}
 
 }
