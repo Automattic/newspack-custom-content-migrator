@@ -359,6 +359,22 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator soccer-america-fix-missing-content',
+			[ $this, 'cmd_fix_missing_content' ],
+			[
+				'shortdesc' => 'Fixes posts where content is missing.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
+			]
+		);
+
 	}
 
 	/**
@@ -368,7 +384,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_missing_articles( $args, $assoc_args ) {
-		$this->log( 'Checking for missing Soccer America articles...' );
+		$this->log( 'Checking for missing Soccer America articles...', 'line' );
 
 		// Make sure there is a path to CSV provided.
 		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
@@ -378,15 +394,20 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 		// Open the CSV file.
 		$csv = fopen( $args[0], 'r' );
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( 'Finding missing articles', $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		global $wpdb;
 
-		$progress = \WP_CLI\Utils\make_progress_bar( 'Finding missing articles', 58415 );
-
 		// Loop through the CSV rows.
 		while ( $row = fgetcsv( $csv, null, "\t" ) ) {
+			$progress->tick();
+
 			$article_id = $this->get_field_from_row( 'article_id', $row );
 
 			// Check if the article exists.
@@ -402,8 +423,6 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			if ( is_null( $post_id ) ) {
 				file_put_contents( $args[1], implode( "\t", $row ) . PHP_EOL, FILE_APPEND );
 			}
-
-			$progress->tick();
 		}
 
 		$progress->finish();
@@ -416,11 +435,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_articles( $args, $assoc_args ) {
-		$this->log( 'Importing Soccer America articles...' );
+		$this->log( 'Importing Soccer America articles...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -434,11 +453,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d articles', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
+
+			$progress->tick();
 
 			// Don't attempt to re-import anything.
 			$post_exists = $this->post_exists( $this->get_field_from_row( 'article_id', $row ) );
@@ -461,6 +487,8 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			}
 		}
 
+		$progress->finish();
+
 	}
 
 	/**
@@ -470,11 +498,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_comments( $args, $assoc_args ) {
-		$this->log( 'Importing Soccer America comments...' );
+		$this->log( 'Importing Soccer America comments...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -488,11 +516,19 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d comments', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
+
+			$progress->tick();
+
 			// There is no comment ID, so create our own.
 			$original_comment_id = md5( json_encode( $row ) );
 
@@ -517,6 +553,8 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				add_comment_meta( $comment_id, self::META_PREFIX . 'comment_id', $original_comment_id );
 			}
 		}
+
+		$progress->finish();
 	}
 
 	/**
@@ -526,11 +564,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_article_types( $args, $assoc_args ) {
-		$this->log( 'Importing Soccer America article types...' );
+		$this->log( 'Importing Soccer America article types...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Are we dealing with article types or SUB article types?
@@ -549,11 +587,19 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d article types', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
+
+			$progress->tick();
+
 			// Check if we've already imported this as a category.
 			$category = ( $this->dryrun ) ? 1 : $this->get_or_create_category( $this->get_field_from_row( 'name', $row ) );
 			if ( ! $category ) {
@@ -578,7 +624,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->stop_the_insanity();
 		}
 
-		$this->log( 'Imported article types.', 'success' );
+		$progress->finish();
 	}
 
 	/**
@@ -588,11 +634,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_tags( $args, $assoc_args ) {
-		$this->log( 'Importing Soccer America tags...' );
+		$this->log( 'Importing Soccer America tags...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -606,11 +652,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d tags', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
+			$progress->tick();
+
 			// Check if we've already imported this as a category.
 			$tag = ( $this->dryrun ) ? 1 : $this->get_or_create_tag(
 				$this->get_field_from_row( 'name', $row ),
@@ -627,7 +680,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			}
 		}
 
-		$this->log( 'Imported tags.', 'success' );
+		$progress->finish();
 	}
 
 	/**
@@ -637,11 +690,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_assign_tags( $args, $assoc_args ) {
-		$this->log( 'Assigning Soccer America tags...' );
+		$this->log( 'Assigning Soccer America tags...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -658,15 +711,13 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 		// Convert the CSV to an associate array where keys are post IDs and values are arrays of tag IDs.
 		$articles = $this->csv_to_assoc_array( $csv );
 
-		$this->log(
-			sprintf(
-				'Assigning tags to %d posts...',
-				count( $articles )
-			)
-		);
+		// Start the progress bar.
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Assigning tags to %d articles', count( $articles ) ), count( $articles ) );
 
 		// Run through each article and assign the tags.
 		foreach ( $articles as $article_id => $tag_ids ) {
+			$progress->tick();
+
 			$post_id = $this->post_exists( $article_id );
 			if ( ! $post_id ) {
 				$this->log(
@@ -719,10 +770,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					'Assigned %d tags to post %s',
 					count( $tags ),
 					$post_id
-				),
-				'success'
+				)
 			);
 		}
+
+		$progress->finish();
 	}
 
 	/**
@@ -732,11 +784,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_users( $args, $assoc_args ) {
-		$this->log( 'Assigning Soccer America users...' );
+		$this->log( 'Assigning Soccer America users...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -750,18 +802,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d users', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
 
-			$this->log(
-				sprintf(
-					'Attempting to import user with author_id %s',
-					$this->get_field_from_row( 'author_id', $row )
-				)
-			);
+			$progress->tick();
 
 			// Don't attempt to re-import anything.
 			$user_exists = $this->user_exists( $this->get_field_from_row( 'author_id', $row ) );
@@ -788,10 +840,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				sprintf(
 					'Imported user with author_id %s',
 					$this->get_field_from_row( 'author_id', $row )
-				),
-				'success'
+				)
 			);
 		}
+
+		$progress->finish();
 	}
 
 	/**
@@ -801,11 +854,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_assign_users( $args, $assoc_args ) {
-		$this->log( 'Assigning Soccer America tags...' );
+		$this->log( 'Assigning Soccer America tags...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -819,19 +872,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Assigning %d users', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
 
-			$this->log(
-				sprintf(
-					'Attempting to assign user with author_id %s to post with article_id %s',
-					$this->get_field_from_row( 'author_id', $row ),
-					$this->get_field_from_row( 'article_id', $row )
-				)
-			);
+			$progress->tick();
 
 			// Make sure the user exists.
 			$user_id = $this->user_exists( $this->get_field_from_row( 'author_id', $row ) );
@@ -870,8 +922,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 						'Could not assign user %d to post %d',
 						$user_id,
 						$post_id
-					),
-					'warning'
+					)
 				);
 				continue;
 			}
@@ -881,10 +932,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					'Assigned user %d to post %d',
 					$user_id,
 					$post_id
-				),
-				'success'
+				)
 			);
 		}
+
+		$progress->finish();
 	}
 
 	/**
@@ -894,11 +946,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_images( $args, $assoc_args ) {
-		$this->log( 'Importing Soccer America images...' );
+		$this->log( 'Importing Soccer America images...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -912,11 +964,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d images', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
+
+			$progress->tick();
 
 			// Don't attempt to re-import anything.
 			$image_exists = $this->image_exists( $this->get_field_from_row( 'articleimage_id', $row ) );
@@ -937,8 +996,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					sprintf(
 						'Failed to import image with articleimage_id %s.',
 						$this->get_field_from_row( 'articleimage_id', $row )
-					),
-					'warning'
+					)
 				);
 				continue;
 			}
@@ -953,10 +1011,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				sprintf(
 					'Imported image %s',
 					$this->get_field_from_row( 'image_file', $row )
-				),
-				'success'
+				)
 			);
 		}
+
+		$progress->finish();
 
 	}
 
@@ -967,11 +1026,11 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_assign_images( $args, $assoc_args ) {
-		$this->log( 'Assigning Soccer America images...' );
+		$this->log( 'Assigning Soccer America images...', 'line' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -985,19 +1044,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$this->log( 'Could not open CSV file.', 'error' );
 		}
 
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Assigning %d images', $count[0] ), $count[0] );
+
 		// Get the first row of the CSV, which should be the column headers.
 		$this->csv_headers = fgetcsv( $csv, null, "\t" );
 
 		// Run through the CSV and import each row.
 		while ( ( $row = fgetcsv( $csv, null, "\t" ) ) !== false ) {
 
-			$this->log(
-				sprintf(
-					'Attempting to assign image with image_id %s to post with article_id %s',
-					$this->get_field_from_row( 'image_id', $row ),
-					$this->get_field_from_row( 'article_id', $row )
-				)
-			);
+			$progress->tick();
 
 			// Make sure the attachment has imported.
 			$attachment_id = $this->user_exists( $this->get_field_from_row( 'image_id', $row ) );
@@ -1031,8 +1089,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 						'Could not assign attachment %d to post %d',
 						$attachment_id,
 						$post_id
-					),
-					'warning'
+					)
 				);
 				continue;
 			}
@@ -1042,10 +1099,72 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					'Assigned attachment %d to post %d',
 					$attachment_id,
 					$post_id
-				),
-				'success'
+				)
 			);
 		}
+
+		$progress->finish();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator soccer-america-fix-missing-content`
+	 */
+	public function cmd_fix_missing_content( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Set dry-run.
+		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
+			$this->dryrun = true;
+			$this->log( 'Performing a dry-run. No changes will be made.', 'line' );
+		}
+
+		// Get all the posts with no content.
+		$posts = $wpdb->get_results(
+			"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content = '' AND post_status = 'publish'"
+		);
+
+		// Start the CLI progress bar.
+		$progress = \WP_CLI\Utils\make_progress_bar(
+			sprintf( 'Fixing %d posts', count( $posts ) ),
+			count( $posts )
+		);
+
+		// Loop through the posts and update the content.
+		foreach ( $posts as $post ) {
+
+			// Increment the progress bar.
+			$progress->tick();
+
+			// Get the content from meta.
+			$content = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key = %s",
+					$post->ID,
+					self::META_PREFIX . 'body'
+				)
+			);
+			if ( ! $content ) {
+				$this->log( sprintf( 'No content found for post %d', $post->ID ) );
+				continue;
+			}
+
+			// Update the post.
+			$updated = ( $this->dryrun ) ? true : $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $content,
+				],
+				[
+					'ID' => $post->ID,
+				]
+			);
+			if ( ! $updated ) {
+				$this->log( sprintf( 'Failed to update post %d', $post->ID ) );
+			}
+		}
+
+		// Finish the progress bar.
+		$progress->finish();
 	}
 
 	/**
@@ -1101,8 +1220,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				sprintf(
 					'Failed to create post for guid %s',
 					$this->get_field_from_row( 'article_id', $fields )
-				),
-				'warning'
+				)
 			);
 		} else {
 			$this->log(
@@ -1110,8 +1228,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					'Successfully imported "%s" as ID %d',
 					$this->get_field_from_row( 'headline', $fields ),
 					$post
-				),
-				'success'
+				)
 			);
 		}
 
@@ -1137,8 +1254,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				sprintf(
 					'Could not find post for article_id %s to add comment',
 					$this->get_field_from_row( 'article_id', $fields )
-				),
-				'warning'
+				)
 			);
 			return false;
 		} else {
@@ -1178,8 +1294,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					'Failed to create comment for article_id %s and user_id %s',
 					$this->get_field_from_row( 'article_id', $fields ),
 					$this->get_field_from_row( 'user_id', $fields )
-				),
-				'warning'
+				)
 			);
 		} else {
 			$this->log(
@@ -1188,12 +1303,8 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 					$this->get_field_from_row( 'article_id', $fields ),
 					$this->get_field_from_row( 'user_id', $fields ),
 					$comment
-				),
-				'success'
+				)
 			);
-
-			// Update the comment count for the post.
-			wp_update_comment_count( $post_id );
 		}
 
 		return $comment;
@@ -1444,7 +1555,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @param string         $message Log message.
 	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
 	 */
-	private function log( $message, $level = 'line' ) {
+	private function log( $message, $level = false ) {
 		$this->logger->log( 'soccer-america', $message, $level );
 	}
 
@@ -1462,8 +1573,6 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 		// If not, create it.
 		if ( 0 === $category_id ) {
-			$this->log( sprintf( 'Category %s not found. Creating it....', $name ) );
-
 			// Create the category, under it's parent if required.
 			$category_id = ( $this->dryrun ) ? false : wp_create_category( $name );
 			if ( is_wp_error( $category_id ) ) {
