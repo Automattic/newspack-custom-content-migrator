@@ -74,7 +74,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * List of CSV headers.
-	 * 
+	 *
 	 * @var array
 	 */
 	private $csv_headers;
@@ -375,6 +375,51 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator soccer-america-helper-update-exisitng-user-displaynames',
+			[ $this, 'cmd_helper__updateexisting_user_displaynames' ],
+			[
+				'shortdesc' => 'Updates existing Users and sets their display_name to be first name + last name.',
+			]
+		);
+
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_helper__updateexisting_user_displaynames( $args, $assoc_args ) {
+
+		$log = 'socceram__updateexisting_user_displaynames.log';
+
+		// Get all users.
+		$users = get_users();
+		foreach ( $users as $user ) {
+			// Get user meta.
+			$first_name = get_user_meta( $user->ID, 'first_name', true );
+			$last_name  = get_user_meta( $user->ID, 'last_name', true );
+			// If first name and last name are set, update display name.
+			if ( $first_name && $last_name ) {
+				$display_name = $first_name . ' ' . $last_name;
+				$updated = wp_update_user(
+					[
+						'ID'           => $user->ID,
+						'display_name' => $display_name,
+					]
+				);
+				if ( is_wp_error( $updated ) ) {
+					$this->logger->log( $log, 'Error updating user ' . $user->ID . ' ' . $user->data->user_login . ': ' . $updated->get_error_message(), 'warning' );
+				}
+			} else {
+				$this->logger->log( $log, 'User ' . $user->ID . ' does not have first name and last name set.', 'warning' );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::success( 'Done!' );
 	}
 
 	/**
@@ -480,7 +525,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 			// Import the post.
 			$post_id = $this->import_post( $row );
-			
+
 			// Add the original data to the post as meta.
 			if ( ! $this->dryrun ) {
 				add_post_meta( $post_id, self::META_PREFIX . 'import_data', $row );
@@ -829,7 +874,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 			// Import the user.
 			$user_id = $this->import_user( $row );
-			
+
 			// Add the original data to the post as meta.
 			if ( ! $this->dryrun ) {
 				update_user_meta( $user_id, self::META_PREFIX . 'import_data', $row );
@@ -1000,7 +1045,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				);
 				continue;
 			}
-			
+
 			// Add the original data to the post as meta.
 			if ( ! $this->dryrun ) {
 				add_post_meta( $attachment_id, self::META_PREFIX . 'import_data', $row );
@@ -1194,14 +1239,14 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			$formatter_function = $this->get_content_formatter( $field );
 
 			if ( $this->is_post_field( $field ) ) {
-				
+
 				// Get the post field that we need to assign this field to.
 				$post_field = $this->core_fields_mapping[ $field ];
 
 				// Add the formatted value to the post args array.
 				$post_args[ $post_field ] = call_user_func( $formatter_function, $value );
 
-			} else {				
+			} else {
 
 				// Set the meta key using our special prefix, or a pre-defined key.
 				$meta_key = ( isset( $this->meta_fields_mapping[ $field ] ) ) ?
@@ -1240,7 +1285,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * Import the comment!
 	 */
 	private function import_comment( $fields ) {
-		
+
 		// Set up the comment args array with defaults.
 		$comment_args = [
 			'comment_approved' => 1,
@@ -1312,9 +1357,9 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Import a user.
-	 * 
+	 *
 	 * @param array $data User data from the CSV file.
-	 * 
+	 *
 	 * @return int|WP_Error The user ID on success, or a WP_Error object on failure.
 	 */
 	private function import_user( $data ) {
@@ -1348,7 +1393,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			// Add the user's first and last name.
 			update_user_meta( $user_id, 'first_name', $first_name );
 			update_user_meta( $user_id, 'last_name', $last_name );
-	
+
 			// Add the user's bio
 			update_user_meta( $user_id, 'description', $bio );
 		}
@@ -1371,7 +1416,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 				)
 			);
 		}
-		
+
 		return $attachment_id;
 	}
 
@@ -1426,10 +1471,10 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Get the value of a field from a row.
-	 * 
+	 *
 	 * @param string $field The field to get the value of.
 	 * @param array  $row   The row to get the field from.
-	 * 
+	 *
 	 * @return string The value of the field.
 	 */
 	private function get_field_from_row( $field, $row ) {
@@ -1496,9 +1541,9 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Check if a comment has been imported already by checking the comment ID.
-	 * 
+	 *
 	 * @param int $id The comment ID.
-	 * 
+	 *
 	 * @return int|null Comment ID if it exists, null otherwise.
 	 */
 	private function comment_exists( $id ) {
@@ -1619,9 +1664,9 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Get a tag by the original ID from the import.
-	 * 
+	 *
 	 * @param int $original_id Original ID for the tag, taken from the CSV.
-	 * 
+	 *
 	 * @return WP_Term|false The tag object, or false if not found.
 	 */
 	private function get_tag_by_original_id( $original_id ) {
@@ -1641,12 +1686,12 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Add a category to all posts with a given article type.
-	 * 
+	 *
 	 * @param int    $type_id   The article type ID.
 	 * @param string $name      The article type name.
 	 * @param int    $category  The category ID.
 	 * @param string $meta_key  The meta key to use for the article type.
-	 * 
+	 *
 	 * @return void
 	 */
 	private function add_category_to_posts( $type_id, $name, $category, $meta_key = null ) {
@@ -1720,9 +1765,9 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Convert a CSV showing one-to-one relationships to an association array.
-	 * 
+	 *
 	 * @param string $csv File pointer to the CSV.
-	 * 
+	 *
 	 * @return array The converted CSV.
 	 */
 	private function csv_to_assoc_array( $csv ) {
@@ -1781,7 +1826,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 
 	/**
 	 * Reset the WordPress DB query log
-	 * 
+	 *
 	 * (copied from VIP Go MU Plugins)
 	 */
 	private function reset_db_query_log() {
