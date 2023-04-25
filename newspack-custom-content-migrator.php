@@ -83,6 +83,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\Moco360Migrator::class,
 		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
+		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
 	)
 );
