@@ -110,6 +110,9 @@ class TownNewsMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
+		// Already imported posts original IDs.
+		$imported_original_ids = $this->get_imported_original_ids();
+
 		$export_dir_iterator = new DirectoryIterator( $export_dir_path );
 		foreach ( $export_dir_iterator as $year_dir ) {
 			$year = intval( $year_dir->getFilename() );
@@ -134,7 +137,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
-						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $default_author_id );
+						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $imported_original_ids, $default_author_id );
 
 						if ( $post_id ) {
 							$this->logger->log( self::LOG_FILE, sprintf( 'Post %d is imported from %s', $post_id, $file->getFilename() ), Logger::SUCCESS );
@@ -146,15 +149,32 @@ class TownNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Get imported posts original IDs.
+	 *
+	 * @return array
+	 */
+	private function get_imported_original_ids() {
+		global $wpdb;
+
+		return $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s",
+				self::TOWN_NEWS_ORIGINAL_ID_META_KEY
+			)
+		);
+	}
+
+	/**
 	 * Import a TownNews post from the exported XML file.
 	 *
 	 * @param string $xml_path The post XML.
 	 * @param string $dir_path The post XML directory path.
+	 * @param array  $imported_original_ids Already imported posts original IDs.
 	 * @param ?int   $default_author_id Default author ID for posts without author in case it's set.
 	 *
 	 * @return int|false    The imported post ID, false otherwise.
 	 */
-	private function import_post_from_xml( $xml_path, $dir_path, $default_author_id ) {
+	private function import_post_from_xml( $xml_path, $dir_path, $imported_original_ids, $default_author_id ) {
 		if ( ! file_exists( $xml_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'not found ' . $xml_path );
 			return false;
@@ -169,7 +189,14 @@ class TownNewsMigrator implements InterfaceCommand {
 			return false;
 		}
 
-		$tn_id           = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+		$tn_id = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+
+		// Skip already imported posts.
+		if ( in_array( $tn_id, $imported_original_ids, true ) ) {
+			$this->logger->log( self::LOG_FILE, sprintf( "Skipping post '%s' as it already exists", $tn_id ) );
+			return false;
+		}
+
 		$status          = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:docdata', 'management-status' );
 		$featured_image  = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:head/tn:meta[@name="tncms-view-preview"]', 'content' );
 		$title           = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
@@ -190,8 +217,8 @@ class TownNewsMigrator implements InterfaceCommand {
 			$xml_doc->xpath( '//tn:head/tn:docdata/tn:key-list/tn:keyword' )
 		);
 
-		// Add article if it doesn't exists, else skip it.
-		$post_id = $this->create_post_if_new( $tn_id, $title, 'usable' === $status ? 'publish' : 'draft', $pubdate );
+		// Add article.
+		$post_id = $this->create_post( $tn_id, $title, 'usable' === $status ? 'publish' : 'draft', $pubdate );
 		if ( ! $post_id ) {
 			$this->logger->log( self::LOG_FILE, sprintf( "Skipping post '%s' as it already exists", $tn_id ) );
 			return;
@@ -201,7 +228,9 @@ class TownNewsMigrator implements InterfaceCommand {
 		$this->set_post_author( $post_id, $author_fullname, $author_meta, $default_author_id );
 
 		// Set post content.
-		$post_content = 'collection' === $file_type ? $this->get_collection_content( $xml_doc, $dir_path, $post_id ) : $this->get_article_content( $xml_doc, $dir_path, $post_id );
+		$post_content = 'collection' === $file_type
+		? $this->get_collection_content( $xml_doc, $dir_path, $post_id )
+		: $this->get_article_content( $xml_doc, $dir_path, $post_id );
 
 		wp_update_post(
 			[
@@ -255,7 +284,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Create empty post from the TownNews ID if it doesn't exists.
+	 * Create empty post from the TownNews ID.
 	 *
 	 * @param string $tn_id The post TownNews original ID.
 	 * @param string $title The post title.
@@ -263,13 +292,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @param string $pubdate The post publication date.
 	 * @return int|false The new Post ID, false if it already exists.
 	 */
-	private function create_post_if_new( $tn_id, $title, $status, $pubdate ) {
-		$post_id = $this->get_post_by_tn_id( $tn_id );
-
-		if ( $post_id ) {
-			return false;
-		}
-
+	private function create_post( $tn_id, $title, $status, $pubdate ) {
 		$post_id = wp_insert_post(
 			[
 				'post_title'  => $title,
@@ -564,8 +587,6 @@ class TownNewsMigrator implements InterfaceCommand {
 				' . $caption_tag . '
 			  </figure>';
 			default:
-				$this->logger->log( self::LOG_FILE, sprintf( "Media type '%s' not processed, please add it to the code.", $media_type ), Logger::WARNING );
-				die();
 				return false;
 		}
 	}
