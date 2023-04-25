@@ -46,7 +46,7 @@ class MauiTimesMigrator implements InterfaceCommand {
 			'newspack-content-migrator maui-times-fix-subtitles',
 			[ $this, 'cmd_fix_subtitles' ],
 			[
-				'shortdesc' => 'Copies ACF subtitles to post_excerpt and .',
+				'shortdesc' => 'Copies ACF subtitles to post_excerpt and newspack_post_subtitle metadata.',
 				'synopsis'  => [],
 			]
 		);
