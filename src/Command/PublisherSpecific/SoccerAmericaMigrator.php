@@ -590,13 +590,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			}
 
 			// Import the comment.
-			$comment_id = $this->import_comment( $row );
-
-			// Add the original data to the comment as meta.
-			if ( ! $this->dryrun && ! is_wp_error( $comment_id ) ) {
-				add_comment_meta( $comment_id, self::META_PREFIX . 'import_data', $row );
-				add_comment_meta( $comment_id, self::META_PREFIX . 'comment_id', $original_comment_id );
-			}
+			$this->import_comment( $row );
 		}
 
 		$progress->finish();
@@ -1289,7 +1283,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 		// Set up the comment args array with defaults.
 		$comment_args = [
 			'comment_approved' => 1,
-			'comment_type'     => '',
+			'comment_type'     => 'comment',
 			'comment_meta'     => [],
 		];
 
@@ -1324,13 +1318,18 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 			if ( array_key_exists( $field, $this->comment_fields_mapping ) ) {
 				$comment_field = $this->comment_fields_mapping[ $field ];
 			} else {
-				// Skip this field, because it doesn't map to a comment field.
 				continue;
 			}
 
 			// Add the formatted value to the comment args array.
-			$comment_args[ $comment_field ] = call_user_func( $formatter_function, $value );
+			$value = call_user_func( $formatter_function, $value );
+
+			$comment_args[ $comment_field ] = $value;
 		}
+
+		// Add the original data and comment ID as meta.
+		$comment_args['comment_meta'][ self::META_PREFIX . 'import_data' ] = $fields;
+		$comment_args['comment_meta'][ self::META_PREFIX . 'comment_id' ] = md5( json_encode( $fields ) );
 
 		$comment = ( $this->dryrun ) ? true : wp_insert_comment( $comment_args, true );
 		if ( is_wp_error( $comment ) ) {
