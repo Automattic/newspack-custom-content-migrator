@@ -2,13 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-/* Internal dependencies */
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\Posts;
-
-/* External dependencies */
 use WP_CLI;
 
 /**
