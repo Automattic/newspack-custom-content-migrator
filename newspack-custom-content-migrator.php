@@ -59,6 +59,7 @@ PluginSetup::register_migrators(
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\MetroMirgator::class,
+		Command\General\PloneCMSMigrator::class,
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
 
