@@ -76,6 +76,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
 		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
+		Command\PublisherSpecific\SentinelColoradoMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
