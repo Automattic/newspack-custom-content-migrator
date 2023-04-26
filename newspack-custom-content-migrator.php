@@ -21,6 +21,7 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 
 require_once ABSPATH . 'wp-settings.php';
 
+PluginSetup::register_ticker();
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
 	array(
@@ -82,6 +83,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\Moco360Migrator::class,
 		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
+		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
 	)
 );
