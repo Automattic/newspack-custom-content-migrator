@@ -217,6 +217,36 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-set-issues-as-categories',
+			[ $this, 'add_issues_as_categories' ],
+			[
+				'shortdesc' => 'Process article json and set Issue categories.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file',
+						'description' => 'Path to the JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start',
+						'description' => 'Start row (default: 0)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end',
+						'description' => 'End row (default: PHP_INT_MAX)',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		)
+
+		WP_CLI::add_command(
 			'newspack-content-migrator highcountrynews-fix-related-link-text',
 			[ $this, 'fix_related_link_text' ],
 			[
@@ -917,6 +947,61 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				}
 			} else {
 				echo WP_CLI::colorize("%rError creating post: {$result->get_error_message()}%n\n");
+			}
+		}
+	}
+
+	/**
+	 * HCN has magazines which they publish and identify online with 'issues' in the URL.
+	 * For any URL containing 'issue' we want to find the corresponding issue number
+	 * as a category and set both the main Issues category as well as the
+	 * issue number category to the post. Any other category that may
+	 * have been set is removed.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 * @throws Exception
+	 */
+	public function add_issues_as_categories( $args, $assoc_args ) {
+		global $wpdb;
+
+		$file_path = $args[0];
+		$start     = $assoc_args['start'] ?? 0;
+		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
+
+		$iterator = ( new FileImportFactory() )->get_file( $file_path )
+		                                       ->set_start( $start )
+		                                       ->set_end( $end )
+		                                       ->getIterator();
+
+		foreach ( $iterator as $row ) {
+			if ( str_contains( $row['@id'], '/issues/' ) ) {
+				$post_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_article_UID' AND meta_value = %s",
+						$row['UID']
+					)
+				);
+
+				$issue_category_id = get_cat_ID( 'Issues' );
+				$category_ids = [];
+
+				if ( 0 !== $issue_category_id ) {
+					$category_ids[] = $issue_category_id;
+				}
+
+				$issues_position = strpos( $row['@id'], '/issues/' ) + 8;
+				$issue_number    = substr( $row['@id'], $issues_position, strpos( $row['@id'], '/', $issues_position ) - $issues_position );
+
+				$issue_number_category_id = get_cat_ID( $issue_number );
+
+				if ( 0 !== $issue_number_category_id ) {
+					$category_ids[] = $issue_number_category_id;
+				}
+
+				wp_set_post_categories( $post_id, $category_ids, false );
 			}
 		}
 	}
