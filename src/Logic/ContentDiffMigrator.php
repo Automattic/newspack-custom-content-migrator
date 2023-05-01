@@ -209,6 +209,9 @@ class ContentDiffMigrator {
 					&& $live_post['post_status'] == $local_post['post_status']
 					&& $live_post['post_date'] == $local_post['post_date']
 				) {
+					// Remove the local post which was found (break; was done), to make the next search a bit faster.
+					unset( $results_local_posts[ $key_local_post ] );
+
 					$found = true;
 					break;
 				}
@@ -217,9 +220,6 @@ class ContentDiffMigrator {
 			// Unique on live, add to $ids.
 			if ( false === $found ) {
 				$ids[] = $live_post['ID'];
-
-				// Remove the local post which was found (break; was done), to make the next search a bit faster.
-				unset( $results_local_posts[ $key_local_post ] );
 			}
 		}
 
@@ -2965,6 +2965,7 @@ class ContentDiffMigrator {
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
+			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );
