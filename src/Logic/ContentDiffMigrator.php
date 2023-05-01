@@ -1212,6 +1212,11 @@ class ContentDiffMigrator {
 			$block_innerhtml_updated    = $block['innerHTML'];
 			$block_innercontent_updated = $block['innerContent'][0];
 
+			// We've seen some wp:image blocks with no ID, skip them.
+			if ( ! isset( $block_updated['attrs']['id'] ) ) {
+				continue;
+			}
+
 			// Get attachment ID from block header.
 			$att_id = $block_updated['attrs']['id'];
 
