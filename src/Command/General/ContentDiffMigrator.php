@@ -339,7 +339,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$results_live_attachments  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 			$results_local_attachments = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 
-			WP_CLI::log( 'Fetched %s total from live site. Searching new ones...' );
+			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_attachments ) ) );
 			$new_live_attachment_ids = self::$logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
 			$new_live_ids            = array_merge( $new_live_ids, $new_live_attachment_ids );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_attachment_ids ) ) );
