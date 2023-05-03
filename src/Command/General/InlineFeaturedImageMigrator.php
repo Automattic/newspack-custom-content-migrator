@@ -190,7 +190,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			/**
 			 * Replacement 1: Search for image block of featured image in post content by referencing attachment ID.
 			 */
-			$regex    = '#\s*(<!-- wp:image[^{]*{[^}]*"id":' . absint( $thumbnail_id ) . '.*\/wp:image -->)#isU';
+			$regex    = '#^(<!-- wp:image[^{]*{[^}]*"id":' . absint( $thumbnail_id ) . '.*\/wp:image -->)#isU';
 			$content  = get_post_field( 'post_content', $id );
 			$replaced = preg_replace( $regex, '', $content, 1 );
 
@@ -206,7 +206,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				$image_path = wp_parse_url( $image_src[0] )['path'];
 				$image_path = explode( '.', $image_path )[0]; // Remove media extension (jpg, etc.).
 
-				$src_regex = '#<!-- wp:image.*' . addslashes( $image_path ) . '.*\/wp:image -->#isU';
+				$src_regex = '#^<!-- wp:image.*' . addslashes( $image_path ) . '.*\/wp:image -->#isU';
 				$replaced  = preg_replace( $src_regex, '', $content, 1 );
 			}
 
@@ -221,7 +221,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 				$page_path = wp_parse_url( $image_page )['path'];
 
-				$page_regex = '#<!-- wp:image.*' . addslashes( $page_path ) . '.*\/wp:image -->#isU';
+				$page_regex = '#^<!-- wp:image.*' . addslashes( $page_path ) . '.*\/wp:image -->#isU';
 				$replaced   = preg_replace( $page_regex, '', $content, 1 );
 			}
 
@@ -236,7 +236,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				 * - [^"]* means "zero or more characters that are not a double quote".
 				 * - #isU means "case insensitive, single line".
 				 */
-				$img_element_regex = '#<img[^>]*src="' . addslashes( $src ) . '[^"]*"[^>]*>#isU';
+				$img_element_regex = '#^<img[^>]*src="' . addslashes( $src ) . '[^"]*"[^>]*>#isU';
 				$replaced          = preg_replace( $img_element_regex, '', $content, 1 );
 			}
 
