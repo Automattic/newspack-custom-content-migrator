@@ -81,6 +81,83 @@ class Taxonomy {
 	}
 
 	/**
+	 * Gets a term_id by its taxonomy, name and parent ID.
+	 * For example, you can search for a category with a name and optional parent ID.
+	 *
+	 * @param string $taxonomy       Taxonomy, e.g. 'category'.
+	 * @param string $name           Taxonomy name, e.g. 'Some category name'.
+	 * @param int    $parent_term_id Parent term_id, e.g. 123 or 0.
+	 *
+	 * @return string|null Term ID or null if not found.
+	 */
+	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) : null|string {
+		global $wpdb;
+
+		$existing_term_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"select t.term_id 
+					from {$wpdb->terms} t
+					join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+					where tt.taxonomy = %s and t.name = %s and tt.parent = %d;",
+				$taxonomy,
+				$name,
+				$parent_term_id
+			)
+		);
+
+		return $existing_term_id;
+	}
+
+	/**
+	 * Gets or creates a category by its name and parent term_id.
+	 *
+	 * @param string $cat_name      Category name.
+	 * @param int    $cat_parent_id Category's parent term_id.
+	 *
+	 * @throws \RuntimeException If nonexisting $cat_parent_id is given.
+	 *
+	 * @return string Category term ID.
+	 */
+	public function get_or_create_category_by_name_and_parent_id( string $cat_name, int $cat_parent_id = 0 ) : string|null {
+		global $wpdb;
+
+		// Get term_id if it exists.
+
+		$existing_term_id = $this->get_term_id_by_taxonmy_name_and_parent( 'category', $cat_name, $cat_parent_id );
+		if ( ! is_null( $existing_term_id ) ) {
+			return $existing_term_id;
+		}
+
+		// If it doesn't exist, then create it.
+
+		// Double check this parent exists.
+		if ( 0 != $cat_parent_id ) {
+			$existing_cat_parent_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"select t.term_id 
+						from {$wpdb->terms} t
+						join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+						where tt.taxonomy = 'category' and tt.term_id = %d;",
+					$cat_parent_id
+				)
+			);
+			if ( is_null( $existing_cat_parent_id ) ) {
+				throw new \RuntimeException( sprintf( 'Wrong parent category term_id=%d given, does not exist.', $cat_parent_id ) );
+			}
+		}
+
+		// Create cat.
+		$cat_id = wp_insert_category(
+			[
+				'cat_name'        => $cat_name,
+				'category_parent' => $cat_parent_id,
+			]
+		);
+
+		return $cat_id;
+	}
+
+	/**
 	 * Gets duplicate term slugs.
 	 *
 	 * @return array

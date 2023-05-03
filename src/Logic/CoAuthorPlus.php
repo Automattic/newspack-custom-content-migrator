@@ -194,9 +194,9 @@ class CoAuthorPlus {
 
 	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
-	 * 
+	 *
 	 * @param WP_User|int $wp_user ID of the User or a WP_User object
-	 * 
+	 *
 	 * @return false|object Guest author object.
 	 */
 	public function get_or_create_guest_author_from_user( $wp_user ) {
@@ -223,7 +223,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Gets Post's Guest Authors.
+	 * Gets Post's Guest Authors, leaving out WP User authors.
 	 *
 	 * @param int $post_id Post ID.
 	 *
@@ -234,8 +234,7 @@ class CoAuthorPlus {
 
 		$coauthors = get_coauthors( $post_id );
 
-		// Sometimes get_coauthors() returns the WP_User/Author, too; this could have been a lapse on some end, but just in case,
-		// let's filter out the \WP_User objects.
+		// Also returns \WP_User type authors. Let's filter those out.
 		foreach ( $coauthors as $coauthor ) {
 			if ( $coauthor instanceof \WP_User ) {
 				continue;

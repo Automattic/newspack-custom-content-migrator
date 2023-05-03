@@ -11,6 +11,9 @@ use \WP_CLI;
 use \WP_Query;
 use WP_User_Query;
 
+/**
+ * Class for migrating Co-Authors Plus Guest Authors.
+ */
 class CoAuthorPlusMigrator implements InterfaceCommand {
 
 	/**
@@ -21,17 +24,23 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	private $tag_author_prefix = 'author:';
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
 
 	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * Co-Authors Plus.
+	 *
+	 * @var CoAuthorPlus $coauthorsplus_logic Co-Authors Plus logic.
 	 */
 	private $coauthorsplus_logic;
 
 	/**
-	 * @var Posts $posts_logic
+	 * Posts logic.
+	 *
+	 * @var Posts $posts_logic Posts logic.
 	 */
 	private $posts_logic;
 
@@ -275,7 +284,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			'newspack-content-migrator co-authors-fix-gas-post-counts',
 			[ $this, 'cmd_fix_gas_post_counts' ],
 			[
-				'shortdesc' => "Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.",
+				'shortdesc' => 'Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.',
 			]
 		);
 		WP_CLI::add_command(
@@ -294,6 +303,42 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-export-posts-and-gas',
+			[ $this, 'cmd_export_posts_gas' ],
+			[
+				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file. The command exports just the GAs names associated to post IDs, not WP Users -- if a post has a WP User author but no GAs, that ID will have a null value.',
+				'synopsis'  => [],
+			],
+		);
+	}
+
+	/**
+	 * Saves a list of all posts and their GAs to an array file. Does not export WP Users authors.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_export_posts_gas( array $args, array $assoc_args ) {
+		$guest_author_names = [];
+
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			$guest_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );
+			foreach ( $guest_authors as $guest_author ) {
+				$guest_author_names[ $post_id ][] = $guest_author->display_name;
+			}
+			if ( empty( $guest_authors ) ) {
+				$guest_author_names[ $post_id ] = null;
+			}
+		}
+
+		$php_file = 'post_ids_ga_display_names.php';
+		// phpcs:ignore
+		file_put_contents( $php_file, '<?php' . "\n" . 'return ' . var_export( $guest_author_names, true ) . ';' );
+
+		WP_CLI::success( sprintf( 'Done. Post IDs with GA names saved to %s. Just use `$posts_gas = include( %s );`', $php_file, $php_file ) );
 	}
 
 	/**
