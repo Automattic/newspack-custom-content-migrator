@@ -75,7 +75,7 @@ class TownNewsMigrator implements InterfaceCommand {
 			'newspack-content-migrator town-news-migrate-content',
 			array( $this, 'cmd_migrate_content' ),
 			[
-				'shortdesc' => 'Migrate TownNews content.',
+				'shortdesc' => 'Migrate TownNews content. It is recommended to run this command by feeding it one yyyy/ folder at a time.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -146,6 +146,8 @@ class TownNewsMigrator implements InterfaceCommand {
 				}
 			}
 		}
+
+		WP_CLI::warning( "Finished successfully. However, please rerun this exact same command a couple of times to make sure it picked up all the XMLs and posts." );
 	}
 
 	/**
