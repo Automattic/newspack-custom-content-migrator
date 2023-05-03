@@ -63,10 +63,10 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator de-dupe-featured-images',
-			[ $this, 'cmd_de_dupe_featured_images' ],
+			'newspack-content-migrator remove-featured-images-from-beginning-of-postcontent',
+			[ $this, 'cmd_remove_featured_images_from_beginning_of_postcontent' ],
 			[
-				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured image from Post content -- warning, it does not remove just the first occurrence, but all usages of the image in post_content.',
+				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured image from beginning of Post content.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -165,12 +165,12 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for de-dupe-featured-images command.
+	 * Callable for remove-featured-images-from-beginning-of-postcontent command.
 	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_de_dupe_featured_images( $args, $assoc_args ) {
+	public function cmd_remove_featured_images_from_beginning_of_postcontent( $args, $assoc_args ) {
 		$post_ids = isset( $assoc_args['post-ids-csv'] )
 			? explode( ',', $assoc_args['post-ids-csv'] )
 			: $this->post_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending' ] );
