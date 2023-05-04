@@ -64,54 +64,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		
 		WP_CLI::line( "Doing latinfinance-import-from-mssql..." );
 		
-		// Use PDO to create a connection to the DB.
-		// requires: php.ini => extension=pdo_sqlsrv
-		try {  
-			$this->pdo = new PDO( "sqlsrv:Server=;Database=LatinFinanceUmbraco", NULL, NULL);   
-			$this->pdo->setAttribute( PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );  
-		}  
-		catch( PDOException $e ) {  
-			WP_CLI::error( 'SQL Server error ' . $e->getCode() . ': ' . $e->getMessage() );
-		}  
-
-		// Set Authors
-		// todo: how to load existing email addreses for authors?  WXR is hard-coded to @example
-		// just do this with local WP db connection? Needs IP address whitelisted!
+		$this->set_pdo();
 		$this->set_authors();
-		$this->export_to_csv( $this->authors, \WP_CONTENT_DIR  . '/latinfinance-authors.csv');
-		$this->check_author_emails();
-		$this->check_author_slugs();
-
-		// Set tags (convert to Categories under a parent category named 'Topics')
-		// result will look like:
-		//		Topics
-		//			-> Bonds
-		//		DailyBriefs
-		//		etc
-		// todo: how to pre-load these into WP?  
-		// just use local WP db connection?
-		// The WXR doesn't have <wp:category> nodes inside <channel>.  Need this for slug/heirarchy
-		// todo: handle duplicate child categories names across different parents
-		// todo: do we need to import Descriptions from some categories?
 		$this->set_tags();
 		$this->set_tags_parent_slugs();
-		$this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
-		$this->check_tags_slugs();
-
-		exit();
-
-		// Setup data array WXR for post content
-		$data = [
-			'site_title'  => "LatinFinance",
-			'site_url'    => 'https://www.latinfinance.com',
-			'export_file' => \WP_CONTENT_DIR  . '/latinfinance-wxr-export.xml',
-			'posts'       => [],
-		];
 
 		// Get published content types to migrate
-		// todo: to catch changes compare: postmeta newspack_lf_checksum
 		$sql = "
-			select top 100
+			select top 1000
 				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
 				cmsContentXML.xml
 			from cmsDocument
@@ -123,33 +83,65 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		";
 		$result = $this->pdo->query( $sql );   
 
+		// Setup data array WXR for post content
+		$data = [
+			'site_title'  => "LatinFinance",
+			'site_url'    => 'https://www.latinfinance.com',
+			'export_file' => \WP_CONTENT_DIR  . '/latinfinance-wxr-export.xml',
+			'posts'       => [],
+		];
+		
+		$slugs = array();
+
 		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
 
-			// print_r( $row );   
-
 			$xml = simplexml_load_string( $row['xml'] );
-			// print_r($xml);
 			
-			$post_authors = $this->get_authors_from_list( (string) $xml->authors );
+			$authors = $this->get_authors_from_node( (string) $xml->authors );
 
+			// Test dublicate content slugs
+			$slug = (string) $xml['urlName'];
+			if( isset( $slugs[$slug] ) ) {
+				$slugs[$slug]++;
+				WP_CLI::warning( 'Duplicate content "' . $slug .'" for row: ' . print_r( $row , true) );				
+			}
+			else {
+				$slugs[$slug] = 1;
+			}
+			
 			$post = [
-				'author'  => $post_authors,
-				'categories' => $this->get_categories_from_list( (string) $xml->tags ),
+
+				// todo: how to load existing email addreses for authors?  WXR is hard-coded to @example
+				// just do this with local WP db connection? wp_create_user()
+				'author'  => $authors,
+
+				// todo: how to pre-load these into WP?  
+				// just use local WP db connection?
+				// The WXR doesn't have <wp:category> nodes inside <channel>.  Need this for slug/heirarchy		
+				'categories' => $this->get_categories_from_node( (string) $xml->tags ),
+				
 				'content' => (string) $xml->body,
+				
 				// todo: attribute createDate?
 				'date'    => (string) $xml->displayDate,
+				
 				// todo: column expireDate?
+				
 				'excerpt' => (string) $xml->snippet,
+				
 				'meta'    => [
-					'newspack_lf_author' => $post_authors, 
+					'newspack_lf_author' => $authors, 
+					
+					// todo: catch changes from previous imports
 					'newspack_lf_checksum' => md5( serialize( $row ) ),
-					'newspack_lf_original_id' => $row['nodeId'],
-					'newspack_lf_original_url' => $this->get_url_from_path( $xml['path'] ),
-					'newspack_lf_original_version' => $row['versionId'],
+					
+					'newspack_lf_original_id' => (string) $row['nodeId'],
+					'newspack_lf_original_url' => $this->get_url_from_path( (string) $xml['path'] ),
+					'newspack_lf_original_version' => (string) $row['versionId'],
 				],
+				
 				'title'   => (string) $xml['nodeName'],
-				// todo: test existing slugs across different content types for duplicates
-				'url'    => (string) $xml['urlName'],
+				'url'    => $slug,
 			];
 
 			// Convert "content type" to a category
@@ -158,9 +150,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				case 'magazineArticle': $post['categories'][] = 'Magazine'; break;
 				case 'webArticle': $post['categories'][] = 'Web Articles'; break;
 			}
-						
+				
+			if ( (int) $xml->isFree === 1 ) {
+				$post['categories'][] = 'Free Content';
+			}
+
+			// todo: add keywords as Tags?
 			// <metaKeywords><![CDATA[bond buyback, liability management, Arcos Dorados, McDonald's, Argentina]]></metaKeywords>
-			// <isFree>0</isFree>
+
 			// <image><![CDATA[64047]]></image>
 			// body: <img
 
@@ -170,8 +167,18 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		} // while content
 
-		// print_r($data);
-		exit();
+		$this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt');
+
+		// todo: handle duplicate emails
+		// todo: do we need to care about duplicate author slugs as they aren't currently used?
+		$this->check_author_emails();
+		$this->check_author_slugs();
+		$this->export_to_csv( $this->authors, \WP_CONTENT_DIR  . '/latinfinance-authors.csv');
+
+		// todo: handle duplicate child categories names across different parents
+		// todo: do we need to import Descriptions from some categories?
+		$this->check_tags_slugs();
+		$this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
 
 		// Create WXR file
 		// Newspack_WXR_Exporter::generate_export( $data );
@@ -179,12 +186,20 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Checks
+	 *
+	 */
+	
 	private function check_author_emails() {
 
 		$emails = array();
 
 		foreach( $this->authors as $id => $node ) {
 			
+			// must have post content
+			if( $node['post_count'] === 0 ) continue;
+
 			// email to test
 			$email = $node['email'];
 
@@ -208,6 +223,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		foreach( $this->authors as $id => $node ) {
 			
+			// must have post content
+			if( $node['post_count'] === 0 ) continue;
+
 			// slug to test
 			$slug = $node['slug'];
 
@@ -229,6 +247,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		foreach( $this->tags as $id => $node ) {
 			
+			// must have post content
+			if( $node['post_count'] === 0 ) continue;
+
 			// slug to test
 			$slug = $node['slug'];
 
@@ -244,6 +265,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Exports
+	 *
+	 */
+
 	private function export_to_csv( $data, $path ) {
 		$file = fopen($path, 'w');
 		
@@ -257,17 +283,29 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		fclose($file);
 	}
 
+	private function export_to_dump( $data, $path ) {
+		ob_start();
+		var_dump( $data );
+		file_put_contents( $path, ob_get_clean() );
+	}
+
+	/**
+	 * Getters
+	 *
+	 */
+
 	// null
 	// single id
 	// id,id,id
-	private function get_authors_from_list( $list ) {
+	private function get_authors_from_node( $node ) {
 
-		if( empty( $list ) ) return array();
-		$ids = explode(',', $list );
+		if( empty( $node ) ) return array();
+		$ids = explode(',', $node );
 		
 		$out = array();
 		foreach( $ids as $id ) {
 			$out[] = $this->authors[$id];
+			$this->authors[$id]['post_count']++;
 		}
 
 		return $out;
@@ -277,23 +315,20 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// null
 	// single id
 	// id,id,id
-	private function get_categories_from_list( $list ) {
+	private function get_categories_from_node( $node ) {
 
-		if( empty( $list ) ) return array();
-		$ids = explode(',', $list );
+		if( empty( $node ) ) return array();
+		$ids = explode(',', $node );
 		
 		$out = array();
 		foreach( $ids as $id ) {
-			var_dump($this->tags[$id]);
-			// nodeName="Funds" urlName="funds" 
-			exit();
-			$out[] = $this->tags[$id];
+			$out[] = $this->tags[$id]['slug'];
+			$this->tags[$id]['post_count']++;
 		}
 
 		return $out;
 
 	}
-
 
 	// example: "-1,1051,1080,32617,32834,32876,32886" (last element is current element)
 	// used by content and tags
@@ -323,6 +358,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Setters
+	 *
+	 */
+
 	private function set_authors() {
 
 		$result = $this->pdo->prepare("
@@ -345,12 +385,34 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'name' => (string) $xml['nodeName'],
 				'slug' => (string) $xml['urlName'],
 				'email' => (string) $xml->email,
+				'post_count' => 0,
 			];
 
 		}  
 
 	}
 
+	// Use PDO to create a connection to the DB.
+	// php requires: php.ini => extension=pdo_sqlsrv
+	// client requires: IP Address whitelisted
+	private function set_pdo() {
+
+		try {  
+			$this->pdo = new PDO( "sqlsrv:Server=;Database=LatinFinanceUmbraco", NULL, NULL);   
+			$this->pdo->setAttribute( PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );  
+		}  
+		catch( PDOException $e ) {  
+			WP_CLI::error( 'SQL Server error ' . $e->getCode() . ': ' . $e->getMessage() );
+		}  
+
+	}
+
+	// Set tags (convert to Categories under a parent category named 'Topics')
+	// result will look like:
+	//		Topics
+	//			-> Bonds
+	//		DailyBriefs
+	//		etc
 	private function set_tags( ) {
 
 		$result = $this->pdo->prepare("
@@ -372,7 +434,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'id' => (string) $row['nodeId'],
 				'name' => (string) $xml['nodeName'],
 				'slug' => (string) $xml['urlName'],
+				'post_count' => 0,
 				'parent_id' => (string) $xml['parentID'],
+				'parent_slug' => '',
 				'url' => $this->get_url_from_path( (string) $xml['path'] ),
 				'description' => (string) $xml->sidebarWidget,
 			];
@@ -404,6 +468,5 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		}
 
 	}
-
 
 }
