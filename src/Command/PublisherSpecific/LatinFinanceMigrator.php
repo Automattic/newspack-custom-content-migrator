@@ -72,7 +72,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// Get published content types to migrate
 		$sql = "
-			select top 10
+			select top 50
 				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
 				cmsContentXML.xml
 			from cmsDocument
@@ -98,8 +98,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$xml = simplexml_load_string( $row['xml'] );
 			
-			$authors = $this->get_authors_and_increment( (string) $xml->authors );
-
 			// Test dublicate content slugs
 			$slug = (string) $xml['urlName'];
 			if( isset( $slugs[$slug] ) ) {
@@ -110,11 +108,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				$slugs[$slug] = 1;
 			}
 			
+			$authors = $this->get_authors_and_increment( (string) $xml->authors );
+
 			$post = [
 
-				// todo: how to load existing email addreses for authors?  WXR is hard-coded to @example
-				// just do this with local WP db connection? wp_create_user()
-				'author'  => $authors,
+				// head.<wp:author>.<wp:author_login> will create a user accounts
+				// but post.<dc:creator> doesn't support multiple authors so no point in creating user accounts...
+				// do this post migration using: postmeta.newspack_lf_author
+				'author'  => '', // was: $authors['basic']
 
 				// todo: how to pre-load these into WP?  
 				// just use local WP db connection?
@@ -131,7 +132,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'excerpt' => (string) $xml->snippet,
 				
 				'meta'    => [
-					'newspack_lf_author' => $authors,
+					'newspack_lf_author' => $authors['full'],
 					// todo: catch changes from previous imports
 					'newspack_lf_checksum' => md5( serialize( $row ) ),
 					'newspack_lf_original_id' => (string) $row['nodeId'],
@@ -166,17 +167,16 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		} // while content
 
-		// $this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt');
+		$this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt');
+		exit();
 
 		// todo: handle duplicate emails
-		// todo: do we need to care about duplicate author slugs as they aren't currently used?  don't care on their slugs!
 		// $this->check_author_emails();
-		// $this->check_author_slugs();
 		// $this->export_to_csv( $this->authors, \WP_CONTENT_DIR  . '/latinfinance-authors.csv');
 
 		// todo: handle duplicate child categories names across different parents
 		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
-		// test for custom_tag_slugs
+		// todo: test for $this->custom_tag_slugs
 		// $this->check_tags_slugs();
 		// $this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
 
@@ -216,30 +216,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 			else {
 				$emails[$email] = 1;
-			}
-		
-		}
-	}
-
-	private function check_author_slugs() {
-
-		$slugs = array();
-
-		foreach( $this->authors as $id => $node ) {
-			
-			// must have post content
-			if( $node['post_count'] === 0 ) continue;
-
-			// slug to test
-			$slug = $node['slug'];
-
-			// test if already exists (can't have duplicate slugs)
-			if( isset( $slugs[$slug] ) ) {
-				$slugs[$slug]++;
-				WP_CLI::warning( 'Duplicate author "' . $slug .'" for node: ' . print_r( $node , true) );				
-			}
-			else {
-				$slugs[$slug] = 1;
 			}
 		
 		}
@@ -303,16 +279,25 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// id,id,id
 	private function get_authors_and_increment( $node ) {
 
-		if( empty( $node ) ) return array();
-		$ids = explode(',', $node );
-		
-		$out = array();
-		foreach( $ids as $id ) {
-			$out[] = $this->authors[$id];
-			$this->authors[$id]['post_count']++;
-		}
+		$basic = array();
+		$full = array();
 
-		return $out;
+		if( ! empty( $node ) ) {
+
+			$ids = explode(',', $node );
+			foreach( $ids as $id ) {
+				// only add matching key/values to each output
+				$basic[] = array_intersect_key( $this->authors[$id], array( 'name' => '', 'email' => '') );
+				$full[] = array_intersect_key( $this->authors[$id], array( 'id' => '', 'name' => '', 'email' => '', 'slug' => '') );
+				$this->authors[$id]['post_count']++;
+			}
+
+		} // not empty
+
+		return [
+			'basic' => $basic,
+			'full' => $full,
+		];
 
 	}
 
@@ -326,10 +311,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		
 		$out = array();
 		foreach( $ids as $id ) {
-			$out[] = array(
-				'name' => $this->tags[$id]['name'],
-				'slug' => $this->tags[$id]['slug'],
-			);
+			// only add matching key/values to each output
+			$out[] = array_intersect_key( $this->tags[$id], array( 'name' => '', 'slug' => '') );
 			$this->tags[$id]['post_count']++;
 		}
 
