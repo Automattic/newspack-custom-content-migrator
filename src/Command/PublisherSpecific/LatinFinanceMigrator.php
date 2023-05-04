@@ -15,6 +15,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	private $pdo = null;
 	private $authors = array();
 	private $tags = array();
+	private $custom_tag_slugs = array( 'daily-briefs', 'free-content', 'magazine', 'web-articles' );
 
 	/**
 	 * @var null|InterfaceCommand Instance.
@@ -71,7 +72,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// Get published content types to migrate
 		$sql = "
-			select top 1000
+			select top 10
 				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
 				cmsContentXML.xml
 			from cmsDocument
@@ -97,7 +98,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$xml = simplexml_load_string( $row['xml'] );
 			
-			$authors = $this->get_authors_from_node( (string) $xml->authors );
+			$authors = $this->get_authors_and_increment( (string) $xml->authors );
 
 			// Test dublicate content slugs
 			$slug = (string) $xml['urlName'];
@@ -118,23 +119,21 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				// todo: how to pre-load these into WP?  
 				// just use local WP db connection?
 				// The WXR doesn't have <wp:category> nodes inside <channel>.  Need this for slug/heirarchy		
-				'categories' => $this->get_categories_from_node( (string) $xml->tags ),
+				'categories' => $this->get_cats_and_increment( (string) $xml->tags ),
 				
 				'content' => (string) $xml->body,
 				
-				// todo: attribute createDate?
+				// todo: attribute createDate? this is old and doesn't matter!!!
 				'date'    => (string) $xml->displayDate,
 				
-				// todo: column expireDate?
+				// todo: column expireDate? quick test if something in the future needs to be expired.  don't worry!
 				
 				'excerpt' => (string) $xml->snippet,
 				
 				'meta'    => [
-					'newspack_lf_author' => $authors, 
-					
+					'newspack_lf_author' => $authors,
 					// todo: catch changes from previous imports
 					'newspack_lf_checksum' => md5( serialize( $row ) ),
-					
 					'newspack_lf_original_id' => (string) $row['nodeId'],
 					'newspack_lf_original_url' => $this->get_url_from_path( (string) $xml['path'] ),
 					'newspack_lf_original_version' => (string) $row['versionId'],
@@ -155,7 +154,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				$post['categories'][] = 'Free Content';
 			}
 
-			// todo: add keywords as Tags?
+			// todo: add keywords as Tags? do this!!!
 			// <metaKeywords><![CDATA[bond buyback, liability management, Arcos Dorados, McDonald's, Argentina]]></metaKeywords>
 
 			// <image><![CDATA[64047]]></image>
@@ -167,22 +166,27 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		} // while content
 
-		$this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt');
+		// $this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt');
 
 		// todo: handle duplicate emails
-		// todo: do we need to care about duplicate author slugs as they aren't currently used?
-		$this->check_author_emails();
-		$this->check_author_slugs();
-		$this->export_to_csv( $this->authors, \WP_CONTENT_DIR  . '/latinfinance-authors.csv');
+		// todo: do we need to care about duplicate author slugs as they aren't currently used?  don't care on their slugs!
+		// $this->check_author_emails();
+		// $this->check_author_slugs();
+		// $this->export_to_csv( $this->authors, \WP_CONTENT_DIR  . '/latinfinance-authors.csv');
 
 		// todo: handle duplicate child categories names across different parents
-		// todo: do we need to import Descriptions from some categories?
-		$this->check_tags_slugs();
-		$this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
+		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
+		// test for custom_tag_slugs
+		// $this->check_tags_slugs();
+		// $this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
+
+		// Append neccessary Categories to WXR heade
+		// $data['categories] = todo
 
 		// Create WXR file
-		// Newspack_WXR_Exporter::generate_export( $data );
-		// WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
+
+		Newspack_WXR_Exporter::generate_export( $data );
+		WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
 
 	}
 
@@ -297,7 +301,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// null
 	// single id
 	// id,id,id
-	private function get_authors_from_node( $node ) {
+	private function get_authors_and_increment( $node ) {
 
 		if( empty( $node ) ) return array();
 		$ids = explode(',', $node );
@@ -315,14 +319,17 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// null
 	// single id
 	// id,id,id
-	private function get_categories_from_node( $node ) {
+	private function get_cats_and_increment( $node ) {
 
 		if( empty( $node ) ) return array();
 		$ids = explode(',', $node );
 		
 		$out = array();
 		foreach( $ids as $id ) {
-			$out[] = $this->tags[$id]['slug'];
+			$out[] = array(
+				'name' => $this->tags[$id]['name'],
+				'slug' => $this->tags[$id]['slug'],
+			);
 			$this->tags[$id]['post_count']++;
 		}
 
@@ -395,6 +402,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// Use PDO to create a connection to the DB.
 	// php requires: php.ini => extension=pdo_sqlsrv
 	// client requires: IP Address whitelisted
+	// todo: fix collation/character sets
+	// plan on my local
 	private function set_pdo() {
 
 		try {  
