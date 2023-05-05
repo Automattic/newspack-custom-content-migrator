@@ -6,11 +6,12 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
-
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 /* External dependencies */
 use stdClass;
 use WP_CLI;
 use WP_Query;
+use WP_User;
 
 /**
  * Custom migration scripts for Retro Report.
@@ -37,6 +38,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @var null|Attachments
 	 */
 	private $attachments;
+
+	/**
+	 * Co-Authors Plys logic.
+	 *
+	 * @var null|CoAuthorsPlus
+	 */
+	private $coauthorsplus;
 
 	/**
 	 * Dry run mode - set to true to prevent changes.
@@ -67,12 +75,21 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	private $content_formatters;
 
 	/**
+	 * Headers from the CSV file we're currently importing, if any.
+	 *
+	 * @var array
+	 */
+	private $csv_headers;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
 
 		$this->attachments = new Attachments();
+
+		$this->coauthorsplus = new CoAuthorPlus();
 
 		// Define where each XML field should import to.
 		$this->core_fields_mapping = [
@@ -162,6 +179,50 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			[
 				'shortdesc' => 'Makes sure authors have full names.',
 				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
+			]
+		);
+
+		\WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-import-users',
+			[ $this, 'cmd_import_users' ],
+			[
+				'shortdesc' => 'Makes sure authors have full names.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'csv',
+						'optional'    => false,
+						'description' => 'A CSV containing user data.',
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
+			]
+		);
+
+		\WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-find-missing-articles',
+			[ $this, 'cmd_find_missing_articles' ],
+			[
+				'shortdesc' => 'Find missing articles.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'dir',
+						'optional'    => false,
+						'description' => 'A directory containing XML files of articles.',
+					],
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
@@ -267,11 +328,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_import_articles( $args, $assoc_args ) {
-		$this->log( 'Importing Newsroom NZ articles...' );
+		$this->log( 'Importing Newsroom NZ articles...', 'info' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
-			$this->log( 'Performing a dry-run. No changes will be made.' );
+			$this->log( 'Performing a dry-run. No changes will be made.', 'info' );
 		}
 
 		// Make sure there is a path to XML provided.
@@ -281,7 +342,14 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		// Format the XML into a nice array of objects and iterate.
 		$articles = $this->xml_to_json( $args[0] );
+
+		$progress = \WP_CLI\Utils\make_progress_bar(
+			sprintf( 'Importing %d articles', count( $articles ) ),
+			count( $articles )
+		);
+
 		foreach ( $articles as $article ) {
+			$progress->tick();
 
 			// Don't attempt to re-import anything.
 			$post_exists = $this->post_exists( $article['guid'] );
@@ -296,8 +364,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			// Get a list of the fields we explicitly need to import.
-
 			// Import the post.
 			$post_id = $this->import_post( $article );
 
@@ -308,6 +374,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 
 		}
+
+		$progress->finish();
 
 	}
 
@@ -373,6 +441,153 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-import-users`
+	 */
+	public function cmd_import_users( $args, $assoc_args ) {
+		$this->log( 'Adding Newsroom NZ author names...', 'info' );
+
+		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
+			$this->dryrun = true;
+			$this->log( 'Performing a dry-run. No changes will be made.', 'info' );
+		}
+
+		// Make sure there is a path to CSV provided.
+		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
+			$this->log( 'Please provide a path to an CSV file.', 'error' );
+		}
+
+		// Open the CSV file.
+		$csv = fopen( $args[0], 'r' );
+		if ( false === $csv ) {
+			$this->log( 'Could not open CSV file.', 'error' );
+		}
+
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d users', $count[0] ), $count[0] );
+
+		// Get the first row of the CSV, which should be the column headers.
+		$this->csv_headers = fgetcsv( $csv );
+
+		// Run through the CSV and import each row.
+		while ( ( $row = fgetcsv( $csv ) ) !== false ) {
+			$progress->tick();
+
+			// Unpack the fields into the format expected by WordPress.
+			$user = [
+				'first_name'    => $row[0],
+				'last_name'     => $row[1],
+				'user_login'    => $row[2],
+				'user_nicename' => $row[0] . ' ' . $row[1],
+				'user_pass'     => wp_generate_password( 20 ),
+				'display_name'  => $row[0] . ' ' . $row[1],
+				'user_email'    => $row[3],
+				'role'          => $this->fix_role( $row[4] ),
+				'description'   => $row[9],
+				'meta_input'    => [
+					self::META_PREFIX . 'import_data' => $row,
+				],
+			];
+
+			// If the user exists, attempt to update it.
+			if ( $this->user_exists( $user['user_email'] ) ) {
+				$this->maybe_update_user( $user );
+				continue;
+			}
+
+			// No user, so let's check if we're creating a user account or a guest author.
+			if ( empty( $user['role'] ) ) {
+				// Create guest author
+				$guest_author = ( $this->dryrun ) ? true : $this->coauthorsplus->create_guest_author( $user );
+				
+				// Now add the meta data to the guest author.
+				if ( ! $this->dryrun ) {
+					add_post_meta( $guest_author, self::META_PREFIX . 'import_data', $row );
+				}
+			} else {
+				// Create WP User.
+				$user_id = ( $this->dryrun ) ? true : wp_insert_user( $user );
+				if ( is_wp_error( $user_id ) ) {
+					$this->log( sprintf( 'Failed to create user %s', $user['user_email'] ) );
+					continue;
+				}
+			}
+		}
+
+		$progress->finish();
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-find-missing-articles`
+	 * 
+	 * @param array $args       The arguments passed to the command.
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 * 
+	 * @return void
+	 */
+	public function cmd_find_missing_articles( $args, $assoc_args ) {
+		$this->log( 'Finding missing articles...', 'info' );
+
+		// Make sure there is a directory path provided.
+		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
+			$this->log( 'Please provide a path to a directory of XML files.', 'error' );
+		}
+
+		$dir = trailingslashit( $args[0] );
+
+		// Make sure the directory exists.
+		if ( ! is_dir( $dir ) ) {
+			$this->log( 'The directory provided does not exist.', 'error' );
+		}
+
+		// Get the list of XML files.
+		$files = glob( $dir . 'articles_*.xml' );
+		if ( empty( $files ) ) {
+			$this->log( 'No XML files found in the directory provided.', 'error' );
+		}
+
+		// Create a new XML file to store the missing articles.
+		$missing_articles = 'missing_articles.xml';
+		file_put_contents( $missing_articles, '<?xml version="1.0" encoding="UTF-8"?><articles>' );
+
+		// Loop through each file.
+		foreach ( $files as $file ) {
+
+			$this->log( sprintf( 'Processing file %s', $file ), 'info' );
+
+			// Format the XML into a nice array of objects and iterate.
+			$articles = $this->xml_to_json( $file );
+
+			// Start the progress bar.
+			$progress = \WP_CLI\Utils\make_progress_bar(
+				sprintf( 'Processing %d articles', count( $articles ) ),
+				count( $articles )
+			);
+
+			// Loop through each article.
+			foreach ( $articles as $article ) {
+
+				$progress->tick();
+
+				// Check if the article exists.
+				if ( $this->post_exists( $article['guid'] ) ) {
+					continue;
+				}
+
+				// Log the missing article.
+				file_put_contents( $missing_articles, $this->article_to_xml( $article ), FILE_APPEND );
+
+			}
+
+			$progress->finish();
+			file_put_contents( $missing_articles, '</articles>', FILE_APPEND );
+
+		}
+	}
+
+	/**
 	 * Import the post!
 	 */
 	private function import_post( $fields ) {
@@ -418,9 +633,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		$post = ( $this->dryrun ) ? true : wp_insert_post( $post_args, true );
 		if ( is_wp_error( $post ) ) {
-			$this->log( sprintf( 'Failed to create post for guid %s', $import_fields['guid'] ), 'warning' );
+			$this->log( sprintf( 'Failed to create post for guid %s', $import_fields['guid'] ), );
 		} else {
-			$this->log( sprintf( 'Successfully imported "%s" as ID %d', $import_fields['title'], $post ), 'success' );
+			$this->log( sprintf( 'Successfully imported "%s" as ID %d', $import_fields['title'], $post ) );
 		}
 
 		return $post;
@@ -444,7 +659,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		// Load the XML so we can parse it.
 		$xml = simplexml_load_file( $path, null, LIBXML_NOCDATA );
 		if ( ! $xml ) {
-			$this->log( 'Failed to parse XML.' );
+			$this->log( 'Failed to parse XML.', 'error' );
 		}
 
 		// We need to reconfigure the XML to move the `distribution` element into articles.
@@ -477,6 +692,34 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		return $articles;
 
 	}
+
+	/**
+	 * Convert an article object to XML.
+	 *
+	 * @param array $article Article object.
+	 *
+	 * @return string XML string.
+	 */
+	private function article_to_xml( $article ) {
+		
+		$xml = new \SimpleXMLElement( '<article></article>' );
+		$this->array_to_xml( $article, $xml );
+		return $xml->asXML();
+
+	}
+
+	private function array_to_xml( $data, &$xml ) {
+		foreach ( $data as $key => $value ) {
+			if ( is_array( $value ) ) {
+				$child = $xml->addChild( $key );
+				$this->array_to_xml( $value, $child );
+			} else {
+				$value = ( empty( $value ) ) ? '' : $value;
+				$xml->addChild( $key, htmlspecialchars( $value ) );
+			}
+		}
+	}
+	
 
 	/**
 	 * Determine which formatter to use for each field.
@@ -572,20 +815,25 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		if ( is_a( $user, 'WP_User' ) ) {
 			$user_id = $user->ID;
 		} else {
-
-			// Create a username.
-			$username = $this->create_username( $fields['author_firstname'], $fields['author_lastname'], $value );
+			
+			// Set the user details.
+			$user_email   = $value;
+			$first_name   = ( ! empty( $fields['author_firstname' ] ) ) ? $fields['author_firstname'] : '';
+			$last_name    = ( ! empty( $fields['author_lastname' ] ) ) ? $fields['author_lastname'] : '';
+			$display_name = $first_name . ' ' . $last_name;
+			$user_login   = $this->create_username( $fields['author_firstname'], $fields['author_lastname'], $user_email );
+			$user_pass    = wp_generate_password( 20 );
 
 			// Create the user.
 			$user_id = ( $this->dryrun ) ? 1 : wp_insert_user(
 				[
-					'user_login'   => $username,
-					'user_pass'    => wp_generate_password( 20 ),
+					'user_login'   => $user_login,
+					'user_pass'    => $user_pass,
 					'role'		   => 'author',
-					'user_email'   => $value,
-					'first_name'   => $fields['author_firstname'],
-					'last_name'    => $fields['author_lastname'],
-					'display_name' => $fields['author_firstname'] . ' ' . $fields['author_lastname'],
+					'user_email'   => $user_email,
+					'first_name'   => $first_name,
+					'last_name'    => $last_name,
+					'display_name' => $display_name,
 				]
 			);
 			if ( is_wp_error( $user_id ) ) {
@@ -616,7 +864,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		// If it doesn't already exist, import it.
 		if ( is_null( $attachment_id ) ) {
 			$attachment_id = ( $this->dryrun ) ? null : $this->attachments->import_external_file(
-				$value['url'],     // Image URL.
+				trim( $value['url'] ),     // Image URL.
 				$caption, // Title.
 				$caption, // Caption.
 				$caption, // Description.
@@ -767,12 +1015,85 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Get the user based on an email address.
+	 * 
+	 * @param string $email Email address to search on.
+	 * 
+	 * @return int|bool The user ID if found, false if not.
+	 */
+	private function user_exists( $email ) {
+		$user = get_user_by( 'email', $email );
+		return ( $user ) ? $user->ID : false;
+	}
+
+	/**
+	 * Update a user's details if we need to.
+	 * 
+	 * @param array $user_data The user data to update.
+	 * 
+	 * @return WP_User|false The updated user object, false if failed.
+	 */
+	private function maybe_update_user( $user_data ) {
+		
+		// Check if the user exists.
+		$user_id = $this->user_exists( $user_data['user_email'] );
+		if ( ! $user_id ) {
+			return false;
+		}
+
+		// Get the existing user object.
+		$user = get_user_by( 'id', $user_id );
+
+		// Check if we need to update the user.
+		$diff = strcmp( json_encode( $user_data ), json_encode( $user->to_array() ) );
+		if ( 0 !== $diff ) {
+			$updated_user = wp_parse_args( $user_data, $user->to_array() );
+			$user_id      = ( $this->dryrun ) ? true : wp_update_user( $updated_user );
+			if ( is_wp_error( $user_id ) ) {
+				$this->log( sprintf( 'Failed to update user %s', $user->user_login ) );
+				$user_id = false;
+			}
+		}
+
+		return $user_id;
+	}
+
+	/**
+	 * Fix the role values from the import spreadsheet.
+	 * 
+	 * @param string $role The role to fix.
+	 * 
+	 * @return string The fixed role.
+	 */
+	private function fix_role( $role ) {
+		switch ( $role ) {
+			case 'Authors':
+			case 'Author':
+				$role = 'author';
+				break;
+			case 'Contributors':
+				$role = 'contributor';
+				break;
+			case 'Publishers':
+				$role = 'editor';
+				break;
+			case 'Administrator':
+				$role = 'administrator';
+				break;
+			default:
+				$role = 'subscriber';
+				break;
+		}
+		return $role;
+	}
+
+	/**
 	 * Simple file logging.
 	 *
 	 * @param string         $message Log message.
 	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
 	 */
-	private function log( $message, $level = 'line' ) {
+	private function log( $message, $level = false ) {
 		$this->logger->log( 'newsroomnz', $message, $level );
 	}
 
