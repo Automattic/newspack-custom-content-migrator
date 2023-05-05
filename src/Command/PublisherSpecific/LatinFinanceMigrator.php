@@ -72,7 +72,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// Get published content types to migrate
 		$sql = "
-			select top 50
+			select top 100
 				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
 				cmsContentXML.xml
 			from cmsDocument
@@ -102,12 +102,17 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			$slug = (string) $xml['urlName'];
 			if( isset( $slugs[$slug] ) ) {
 				$slugs[$slug]++;
-				WP_CLI::warning( 'Duplicate content "' . $slug .'" for row: ' . print_r( $row , true) );				
+				WP_CLI::warning( 'Duplicate content "' . $slug .'" for row: ' . print_r( $row , true) );
 			}
 			else {
 				$slugs[$slug] = 1;
 			}
 			
+			// Test expireDate
+			if( null !== $row['expireDate'] ) {
+				WP_CLI::warning( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
+			}
+
 			$authors = $this->get_authors_and_increment( (string) $xml->authors );
 
 			$post = [
@@ -119,7 +124,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 				// todo: how to pre-load these into WP?  
 				// just use local WP db connection?
-				// The WXR doesn't have <wp:category> nodes inside <channel>.  Need this for slug/heirarchy		
+				// The WXR doesn't have <wp:category> nodes inside <channel>.
+				// Need this for slug/heirarchy
 				'categories' => $this->get_cats_and_increment( (string) $xml->tags ),
 				
 				'content' => (string) $xml->body,
@@ -127,19 +133,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				// todo: attribute createDate? this is old and doesn't matter!!!
 				'date'    => (string) $xml->displayDate,
 				
-				// todo: column expireDate? quick test if something in the future needs to be expired.  don't worry!
-				
 				'excerpt' => (string) $xml->snippet,
 				
 				'meta'    => [
-					'newspack_lf_author' => $authors['full'],
+
+					// todo: command to load these as Guest Authors in CoAuthorsPlus and connect to PostId
+					'newspack_lf_author' => json_encode( $authors['full'] ),
+
 					// todo: catch changes from previous imports
-					'newspack_lf_checksum' => md5( serialize( $row ) ),
 					'newspack_lf_original_id' => (string) $row['nodeId'],
-					'newspack_lf_original_url' => $this->get_url_from_path( (string) $xml['path'] ),
 					'newspack_lf_original_version' => (string) $row['versionId'],
+					'newspack_lf_checksum' => md5( serialize( $row ) ),
+
+					'newspack_lf_original_url' => $this->get_url_from_path( (string) $xml['path'] ),
 				],
 				
+				// Convert <metaKeywords><![CDATA[Arcos Dorados, McDonald's, Argentina]]></metaKeywords> to Tags (trimmed)
+				'tags' => preg_split( '/,\s*/', trim( (string) $xml->metaKeywords ), -1, PREG_SPLIT_NO_EMPTY ),
+
 				'title'   => (string) $xml['nodeName'],
 				'url'    => $slug,
 			];
@@ -155,9 +166,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				$post['categories'][] = 'Free Content';
 			}
 
-			// todo: add keywords as Tags? do this!!!
-			// <metaKeywords><![CDATA[bond buyback, liability management, Arcos Dorados, McDonald's, Argentina]]></metaKeywords>
-
 			// <image><![CDATA[64047]]></image>
 			// body: <img
 
@@ -167,8 +175,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		} // while content
 
-		$this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt');
-		exit();
+		// $this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt'); exit();
 
 		// todo: handle duplicate emails
 		// $this->check_author_emails();
@@ -332,7 +339,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$result = $this->pdo->prepare("
 			SELECT
 			CAST(cmsContentXml.xml as xml).value('(/*/@urlName)[1]', 'varchar(max)') as urlName,
-			CAST( cmsContentXml.xml as xml).value('(/*/@level)[1]', 'int') as level
+			CAST(cmsContentXml.xml as xml).value('(/*/@level)[1]', 'int') as level
 			FROM cmsContentXml
 			WHERE nodeId in(" . implode(',', array_fill(0, count($nodes), '?')) . ")
 			ORDER by level
