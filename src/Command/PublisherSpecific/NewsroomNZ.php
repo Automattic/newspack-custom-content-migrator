@@ -771,6 +771,153 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-import-users`
+	 */
+	public function cmd_import_users( $args, $assoc_args ) {
+		$this->log( 'Adding Newsroom NZ author names...', 'info' );
+
+		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
+			$this->dryrun = true;
+			$this->log( 'Performing a dry-run. No changes will be made.', 'info' );
+		}
+
+		// Make sure there is a path to CSV provided.
+		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
+			$this->log( 'Please provide a path to an CSV file.', 'error' );
+		}
+
+		// Open the CSV file.
+		$csv = fopen( $args[0], 'r' );
+		if ( false === $csv ) {
+			$this->log( 'Could not open CSV file.', 'error' );
+		}
+
+		// Start the progress bar.
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d users', $count[0] ), $count[0] );
+
+		// Get the first row of the CSV, which should be the column headers.
+		$this->csv_headers = fgetcsv( $csv );
+
+		// Run through the CSV and import each row.
+		while ( ( $row = fgetcsv( $csv ) ) !== false ) {
+			$progress->tick();
+
+			// Unpack the fields into the format expected by WordPress.
+			$user = [
+				'first_name'    => $row[0],
+				'last_name'     => $row[1],
+				'user_login'    => $row[2],
+				'user_nicename' => $row[0] . ' ' . $row[1],
+				'user_pass'     => wp_generate_password( 20 ),
+				'display_name'  => $row[0] . ' ' . $row[1],
+				'user_email'    => $row[3],
+				'role'          => $this->fix_role( $row[4] ),
+				'description'   => $row[9],
+				'meta_input'    => [
+					self::META_PREFIX . 'import_data' => $row,
+				],
+			];
+
+			// If the user exists, attempt to update it.
+			if ( $this->user_exists( $user['user_email'] ) ) {
+				$this->maybe_update_user( $user );
+				continue;
+			}
+
+			// No user, so let's check if we're creating a user account or a guest author.
+			if ( empty( $user['role'] ) ) {
+				// Create guest author
+				$guest_author = ( $this->dryrun ) ? true : $this->coauthorsplus->create_guest_author( $user );
+				
+				// Now add the meta data to the guest author.
+				if ( ! $this->dryrun ) {
+					add_post_meta( $guest_author, self::META_PREFIX . 'import_data', $row );
+				}
+			} else {
+				// Create WP User.
+				$user_id = ( $this->dryrun ) ? true : wp_insert_user( $user );
+				if ( is_wp_error( $user_id ) ) {
+					$this->log( sprintf( 'Failed to create user %s', $user['user_email'] ) );
+					continue;
+				}
+			}
+		}
+
+		$progress->finish();
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-find-missing-articles`
+	 * 
+	 * @param array $args       The arguments passed to the command.
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 * 
+	 * @return void
+	 */
+	public function cmd_find_missing_articles( $args, $assoc_args ) {
+		$this->log( 'Finding missing articles...', 'info' );
+
+		// Make sure there is a directory path provided.
+		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
+			$this->log( 'Please provide a path to a directory of XML files.', 'error' );
+		}
+
+		$dir = trailingslashit( $args[0] );
+
+		// Make sure the directory exists.
+		if ( ! is_dir( $dir ) ) {
+			$this->log( 'The directory provided does not exist.', 'error' );
+		}
+
+		// Get the list of XML files.
+		$files = glob( $dir . 'articles_*.xml' );
+		if ( empty( $files ) ) {
+			$this->log( 'No XML files found in the directory provided.', 'error' );
+		}
+
+		// Create a new XML file to store the missing articles.
+		$missing_articles = 'missing_articles.xml';
+		file_put_contents( $missing_articles, '<?xml version="1.0" encoding="UTF-8"?><articles>' );
+
+		// Loop through each file.
+		foreach ( $files as $file ) {
+
+			$this->log( sprintf( 'Processing file %s', $file ), 'info' );
+
+			// Format the XML into a nice array of objects and iterate.
+			$articles = $this->xml_to_json( $file );
+
+			// Start the progress bar.
+			$progress = \WP_CLI\Utils\make_progress_bar(
+				sprintf( 'Processing %d articles', count( $articles ) ),
+				count( $articles )
+			);
+
+			// Loop through each article.
+			foreach ( $articles as $article ) {
+
+				$progress->tick();
+
+				// Check if the article exists.
+				if ( $this->post_exists( $article['guid'] ) ) {
+					continue;
+				}
+
+				// Log the missing article.
+				file_put_contents( $missing_articles, $this->article_to_xml( $article ), FILE_APPEND );
+
+			}
+
+			$progress->finish();
+			file_put_contents( $missing_articles, '</articles>', FILE_APPEND );
+
+		}
+	}
+
+	/**
 	 * Import the post!
 	 */
 	private function import_post( $fields ) {
