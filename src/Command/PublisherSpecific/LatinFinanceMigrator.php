@@ -5,6 +5,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \Newspack_WXR_Exporter;
 use \PDO, \PDOException;
+use PHPCompatibility\Sniffs\Keywords\ForbiddenNamesAsDeclaredSniff;
+use stdClass;
 use \WP_CLI;
 
 /**
@@ -68,11 +70,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->set_pdo();
 		$this->set_authors();
 		$this->set_tags();
-		$this->set_tags_parent_slugs();
+		$this->set_tags_parent_slugs(); // only for CSV output
 
 		// Get published content types to migrate
 		$sql = "
-			select top 100
+			select top 50
 				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
 				cmsContentXML.xml
 			from cmsDocument
@@ -125,7 +127,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				// todo: how to pre-load these into WP?  
 				// just use local WP db connection?
 				// The WXR doesn't have <wp:category> nodes inside <channel>.
-				// Need this for slug/heirarchy
+				// Need this for slug/hierarchy
 				'categories' => $this->get_cats_and_increment( (string) $xml->tags ),
 				
 				'content' => (string) $xml->body,
@@ -185,10 +187,12 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
 		// todo: test for $this->custom_tag_slugs
 		// $this->check_tags_slugs();
-		// $this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
+		$this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
 
-		// Append neccessary Categories to WXR heade
-		// $data['categories] = todo
+		// Append neccessary Categories to WXR <channel>
+		// todo: only need to do this once!
+		$terms = $this->get_tags_as_terms();
+		if( ! empty( $terms ) ) $data['terms'] = $terms;
 
 		// Create WXR file
 
@@ -294,8 +298,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			$ids = explode(',', $node );
 			foreach( $ids as $id ) {
 				// only add matching key/values to each output
-				$basic[] = array_intersect_key( $this->authors[$id], array( 'name' => '', 'email' => '') );
-				$full[] = array_intersect_key( $this->authors[$id], array( 'id' => '', 'name' => '', 'email' => '', 'slug' => '') );
+				$basic[] = array_intersect_key( $this->authors[$id], array( 'name' => 1, 'email' => 1) );
+				$full[] = array_intersect_key( $this->authors[$id], array( 'id' => 1, 'name' => 1, 'email' => 1, 'slug' => 1) );
 				$this->authors[$id]['post_count']++;
 			}
 
@@ -319,11 +323,34 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$out = array();
 		foreach( $ids as $id ) {
 			// only add matching key/values to each output
-			$out[] = array_intersect_key( $this->tags[$id], array( 'name' => '', 'slug' => '') );
+			$out[] = array_intersect_key( $this->tags[$id], array( 'name' => 1, 'slug' => 1) );
 			$this->tags[$id]['post_count']++;
 		}
 
 		return $out;
+
+	}
+
+	private function get_tags_as_terms() {
+		
+		$terms = array();
+		
+		foreach( $this->tags as $id => $tag ) {
+
+			// only create terms if used for a post
+			if( $tag['post_count'] === 0 ) continue;
+
+			$term = new stdClass();
+			$term->taxonomy = 'category';
+			$term->name = $tag['name'];
+			$term->slug = $tag['slug'];
+			$term->parent = $tag['parent'];
+			
+			$terms[ $id ] = $term;
+
+		}
+
+		return $terms;
 
 	}
 
@@ -414,14 +441,17 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	//		etc
 	private function set_tags( ) {
 
+		// Order by level to assure WXR importing will create parent before child
 		$result = $this->pdo->prepare("
-			select cmsDocument.nodeId, cmsContentXML.xml
+			select cmsDocument.nodeId, cmsContentXML.xml,
+				CAST(cmsContentXML.xml as xml).value('(/*/@level)[1]', 'int') as level
 			from cmsDocument
 			join cmsContentXML on cmsContentXML.nodeId = cmsDocument.nodeId
 			join cmsContent on cmsContent.nodeId = cmsDocument.nodeId
 			join cmsContentType on cmsContentType.nodeId = cmsContent.contentType
 				and cmsContentType.alias in('tag','tags')
 			where cmsDocument.published = 1	
+			order by level
 		");
 		$result->execute();
 
@@ -434,7 +464,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'name' => (string) $xml['nodeName'],
 				'slug' => (string) $xml['urlName'],
 				'post_count' => 0,
-				'parent_id' => (string) $xml['parentID'],
+				'parent' => (string) $xml['parentID'],
 				'parent_slug' => '',
 				'url' => $this->get_url_from_path( (string) $xml['path'] ),
 				'description' => (string) $xml->sidebarWidget,
@@ -448,21 +478,21 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		foreach( $this->tags as $id => $node ) {
 			
-			$parent_id = $node['parent_id'];
+			$parent = $node['parent'];
 
 			// special case for top level category where parent is "1051/Home"
-			if( $parent_id == '1051' ) {
+			if( $parent == '1051' ) {
 				$this->tags[$id]['parent_slug'] = '';
 				continue;	
 			}
 
 			// if parent id doesn't match a node
-			if ( !isset( $this->tags[$parent_id] ) ) {
-				WP_CLI::error( 'Tag parent_id not found for node: ' . print_r( $this->tags[$id] , true) );				
+			if ( !isset( $this->tags[$parent] ) ) {
+				WP_CLI::error( 'Tag parent not found for node: ' . print_r( $this->tags[$id] , true) );				
 			}
 
 			// set node's parent slug from parent node's slug
-			$this->tags[$id]['parent_slug'] = $this->tags[$parent_id]['slug'];
+			$this->tags[$id]['parent_slug'] = $this->tags[$parent]['slug'];
 			
 		}
 
