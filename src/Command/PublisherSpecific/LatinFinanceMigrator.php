@@ -80,13 +80,20 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->set_tags();
 				
 		// Setup query vars for MSSQL DB for content types
-		$limit = 2000; // row limit per batch
-		$start_id = 1; // rows greater than or equal to this ID value
+		$limit = 1000; // row limit per batch
+		$start_id = 65000; // 1; // rows greater than or equal to this ID value
 
 		// Export posts while return value isn't null
 		// ...and set the new start_id equal to the returned id (last id processed) plus 1
 		while( null !== ( $start_id = $this->export_posts( $limit, $start_id ) ) ) {
 			$start_id += 1;
+		}
+		
+		// Check for duplicate post slugs
+		foreach ( $this->post_slugs as $slug => $urls ) {
+			if( count( $urls ) > 1 ) {
+				WP_CLI::warning( 'Duplicate content "' . $slug .'" for urls: ' . print_r( $urls, true ) );
+			}
 		}
 
 		exit();
@@ -158,14 +165,21 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// load xml column
 			$xml = simplexml_load_string( $row['xml'] );
 			
-			// Test dublicate content slugs
+			// get authors for this post
+			$authors = $this->get_authors_and_increment( (string) $xml->authors );
+
+			// build url to this post on the old site
+			$url_from_path = $this->get_url_from_path( (string) $xml['path'] );
+			
+			// set slug
 			$slug = (string) $xml['urlName'];
+
+			// Track dublicate content slugs
 			if( isset( $this->post_slugs[$slug] ) ) {
-				$this->post_slugs[$slug]++;
-				//todo: WP_CLI::warning( 'Duplicate content "' . $slug .'" for row: ' . print_r( $row , true) );
+				$this->post_slugs[$slug][] = $url_from_path;
 			}
 			else {
-				$this->post_slugs[$slug] = 1;
+				$this->post_slugs[$slug] = array( $url_from_path );
 			}
 			
 			// Test expireDate
@@ -173,10 +187,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				WP_CLI::warning( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
 			}
 
-			// print_r($row);
-			// echo $this->get_url_from_path( (string) $xml['path'] );
-			$authors = $this->get_authors_and_increment( (string) $xml->authors );
-
+			// Add values to a single post array
 			$post = [
 
 				// head.<wp:author>.<wp:author_login> will create a user accounts
@@ -207,7 +218,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 					'newspack_lf_original_version' => (string) $row['versionId'],
 					'newspack_lf_checksum' => md5( serialize( $row ) ),
 
-					'newspack_lf_original_url' => $this->get_url_from_path( (string) $xml['path'] ),
+					'newspack_lf_original_url' => $url_from_path,
 				],
 				
 				// Convert <metaKeywords><![CDATA[Arcos Dorados, McDonald's, Argentina]]></metaKeywords> to Tags (trimmed)
@@ -215,7 +226,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 				'title'   => (string) $xml['nodeName'],
 				'url'    => $slug,
-			];
+			
+			]; // post
 
 			// Convert "content type" to a category
 			switch( $xml['nodeTypeAlias'] ) {
