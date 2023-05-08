@@ -5,8 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \Newspack_WXR_Exporter;
 use \PDO, \PDOException;
-use PHPCompatibility\Sniffs\Keywords\ForbiddenNamesAsDeclaredSniff;
-use stdClass;
+use \stdClass;
 use \WP_CLI;
 
 /**
@@ -14,10 +13,16 @@ use \WP_CLI;
  */
 class LatinFinanceMigrator implements InterfaceCommand {
 
+	private $site_title  = 'LatinFinance';
+	private $site_url    = 'https://www.latinfinance.com';
+	private $export_path = \WP_CONTENT_DIR;
+
 	private $pdo = null;
 	private $authors = array();
 	private $tags = array();
 	private $custom_tag_slugs = array( 'daily-briefs', 'free-content', 'magazine', 'web-articles' );
+	private $post_slugs = array();
+
 
 	/**
 	 * @var null|InterfaceCommand Instance.
@@ -70,44 +75,91 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->set_pdo();
 		$this->set_authors();
 		$this->set_tags();
-		$this->set_tags_parent_slugs(); // only for CSV output
+				
+		$limit = 5000;
+		$start_id = 0;
+		while( null !== $start_id ) {
+			$new_id = $this->export_posts( $limit, $start_id );
+			$start_id = ($new_id > $start_id) ? $new_id : null;			
+		}
 
-		// Get published content types to migrate
-		$sql = "
-			select top 50
-				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
-				cmsContentXML.xml
-			from cmsDocument
-			join cmsContentXML on cmsContentXML.nodeId = cmsDocument.nodeId
-			join cmsContent on cmsContent.nodeId = cmsDocument.nodeId
-			join cmsContentType on cmsContentType.nodeId = cmsContent.contentType
-				and cmsContentType.alias in('dailyBriefArticle', 'magazineArticle', 'webArticle')
-			where cmsDocument.published = 1	
-		";
-		$result = $this->pdo->query( $sql );   
+		// todo: handle duplicate emails
+		// $this->check_author_emails();
+		// $this->log_to_csv( $this->authors, $this->export_path  . '/latinfinance-authors.csv');
+
+		// $this->set_tags_parent_slugs(); // only for CSV output
+		// todo: handle duplicate child categories names across different parents
+		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
+		// todo: test for $this->custom_tag_slugs
+		// $this->check_tags_slugs();
+		// $this->log_to_csv( $this->tags, $this->export_path  . '/latinfinance-tags.csv');
+
+		// Append neccessary Categories to WXR <channel>
+		$data = [
+			'site_title'  => $this->site_title,
+			'site_url'    => $this->site_url,
+			'export_file' => $this->export_path  . '/latinfinance-categories.xml',
+			'posts'       => [],
+			'terms'       => $this->get_tags_as_terms(),
+		];
+		// if( ! empty( $terms ) ) $data['terms'] = $terms;
+		Newspack_WXR_Exporter::generate_export( $data );
+		WP_CLI::success( sprintf( "\n" . 'Categories exported to file %s ...', $data[ 'export_file' ] ) );
+
+	}
+
+
+	/**
+	 * Exports
+	 * 
+	 */
+
+	private function export_posts( $limit, $start_id = 0 ) {
 
 		// Setup data array WXR for post content
 		$data = [
-			'site_title'  => "LatinFinance",
-			'site_url'    => 'https://www.latinfinance.com',
-			'export_file' => \WP_CONTENT_DIR  . '/latinfinance-wxr-export.xml',
+			'site_title'  => $this->site_title,
+			'site_url'    => $this->site_url,
+			'export_file' => $this->export_path  . '/latinfinance-posts-' . $start_id . '.xml',
 			'posts'       => [],
 		];
-		
-		$slugs = array();
 
+		// Get published posts within content types
+
+
+		$result = $this->pdo->prepare("
+			SELECT TOP " . intval( $limit ) . "
+				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
+				cmsContentXML.xml
+			FROM cmsDocument
+			JOIN cmsContentXML on cmsContentXML.nodeId = cmsDocument.nodeId
+			JOIN cmsContent on cmsContent.nodeId = cmsDocument.nodeId
+			JOIN cmsContentType on cmsContentType.nodeId = cmsContent.contentType
+				and cmsContentType.alias in('dailyBriefArticle', 'magazineArticle', 'webArticle')
+			WHERE cmsDocument.published = 1	
+			AND cmsDocument.nodeId > " . intval( $start_id ) . "
+			ORDER BY cmsDocument.nodeId
+		");
+		$result->execute();
+
+		$new_id = $start_id;
 		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
 
+			// increment id
+			$new_id = (int) $row['nodeId'];
+
+
+			// load xml column
 			$xml = simplexml_load_string( $row['xml'] );
 			
 			// Test dublicate content slugs
 			$slug = (string) $xml['urlName'];
-			if( isset( $slugs[$slug] ) ) {
-				$slugs[$slug]++;
-				WP_CLI::warning( 'Duplicate content "' . $slug .'" for row: ' . print_r( $row , true) );
+			if( isset( $this->post_slugs[$slug] ) ) {
+				$this->post_slugs[$slug]++;
+				//todo: WP_CLI::warning( 'Duplicate content "' . $slug .'" for row: ' . print_r( $row , true) );
 			}
 			else {
-				$slugs[$slug] = 1;
+				$this->post_slugs[$slug] = 1;
 			}
 			
 			// Test expireDate
@@ -122,7 +174,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				// head.<wp:author>.<wp:author_login> will create a user accounts
 				// but post.<dc:creator> doesn't support multiple authors so no point in creating user accounts...
 				// do this post migration using: postmeta.newspack_lf_author
-				'author'  => '', // was: $authors['basic']
+				'author'  => 'temp-import-user', // was: $authors['basic']
 
 				// todo: how to pre-load these into WP?  
 				// just use local WP db connection?
@@ -132,7 +184,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				
 				'content' => (string) $xml->body,
 				
-				// todo: attribute createDate? this is old and doesn't matter!!!
+				// just use one date value, ignore createDate
 				'date'    => (string) $xml->displayDate,
 				
 				'excerpt' => (string) $xml->snippet,
@@ -177,29 +229,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		} // while content
 
-		// $this->export_to_dump( $data['posts'], \WP_CONTENT_DIR  . '/latinfinance-posts.txt'); exit();
-
-		// todo: handle duplicate emails
-		// $this->check_author_emails();
-		// $this->export_to_csv( $this->authors, \WP_CONTENT_DIR  . '/latinfinance-authors.csv');
-
-		// todo: handle duplicate child categories names across different parents
-		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
-		// todo: test for $this->custom_tag_slugs
-		// $this->check_tags_slugs();
-		$this->export_to_csv( $this->tags, \WP_CONTENT_DIR  . '/latinfinance-tags.csv');
-
-		// Append neccessary Categories to WXR <channel>
-		// todo: only need to do this once!
-		$terms = $this->get_tags_as_terms();
-		if( ! empty( $terms ) ) $data['terms'] = $terms;
-
+		// $this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts.txt'); exit();
+		
 		// Create WXR file
-
 		Newspack_WXR_Exporter::generate_export( $data );
-		WP_CLI::success( sprintf( "\n" . 'Exported to file %s ...', $data[ 'export_file' ] ) );
+		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $data[ 'export_file' ] ) );
 
+		return $new_id;
 	}
+
 
 	/**
 	 * Checks
@@ -254,30 +292,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 		
 		}
-	}
-
-	/**
-	 * Exports
-	 *
-	 */
-
-	private function export_to_csv( $data, $path ) {
-		$file = fopen($path, 'w');
-		
-		$header = array_keys(reset($data));
-		fputcsv($file, $header);
-
-		foreach ($data as $row) {
-			fputcsv($file, $row);
-		}
-
-		fclose($file);
-	}
-
-	private function export_to_dump( $data, $path ) {
-		ob_start();
-		var_dump( $data );
-		file_put_contents( $path, ob_get_clean() );
 	}
 
 	/**
@@ -338,7 +352,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		foreach( $this->tags as $id => $tag ) {
 
 			// only create terms if used for a post
-			if( $tag['post_count'] === 0 ) continue;
+			// todo: if( $tag['post_count'] === 0 ) continue;
 
 			$term = new stdClass();
 			$term->taxonomy = 'category';
@@ -381,6 +395,32 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		return $url;
 
 	}
+
+
+	/**
+	 * Logging
+	 *
+	 */
+
+	 private function log_to_csv( $data, $path ) {
+		$file = fopen($path, 'w');
+		
+		$header = array_keys(reset($data));
+		fputcsv($file, $header);
+
+		foreach ($data as $row) {
+			fputcsv($file, $row);
+		}
+
+		fclose($file);
+	}
+
+	private function log_to_dump( $data, $path ) {
+		ob_start();
+		var_dump( $data );
+		file_put_contents( $path, ob_get_clean() );
+	}
+
 
 	/**
 	 * Setters
