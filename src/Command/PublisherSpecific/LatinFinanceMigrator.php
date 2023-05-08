@@ -72,16 +72,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		
 		WP_CLI::line( "Doing latinfinance-import-from-mssql..." );
 		
+		// Setup MSSQL DB connection
 		$this->set_pdo();
+
+		// Load all Authors and Tags (we'll convert to Categories) from the MSSQL DB
 		$this->set_authors();
 		$this->set_tags();
 				
-		$limit = 5000;
-		$start_id = 0;
-		while( null !== $start_id ) {
-			$new_id = $this->export_posts( $limit, $start_id );
-			$start_id = ($new_id > $start_id) ? $new_id : null;			
+		// Setup query vars for MSSQL DB for content types
+		$limit = 2000; // row limit per batch
+		$start_id = 1; // rows greater than or equal to this ID value
+
+		// Export posts while return value isn't null
+		// ...and set the new start_id equal to the returned id (last id processed) plus 1
+		while( null !== ( $start_id = $this->export_posts( $limit, $start_id ) ) ) {
+			$start_id += 1;
 		}
+
+		exit();
 
 		// todo: handle duplicate emails
 		// $this->check_author_emails();
@@ -114,7 +122,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 * 
 	 */
 
-	private function export_posts( $limit, $start_id = 0 ) {
+
+	// returns null or the last id (integer) of nodeId that was processed
+	private function export_posts( $limit, $start_id ) {
 
 		// Setup data array WXR for post content
 		$data = [
@@ -124,9 +134,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			'posts'       => [],
 		];
 
-		// Get published posts within content types
-
-
+		// Get published posts for the content types
 		$result = $this->pdo->prepare("
 			SELECT TOP " . intval( $limit ) . "
 				cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.expireDate,
@@ -137,17 +145,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			JOIN cmsContentType on cmsContentType.nodeId = cmsContent.contentType
 				and cmsContentType.alias in('dailyBriefArticle', 'magazineArticle', 'webArticle')
 			WHERE cmsDocument.published = 1	
-			AND cmsDocument.nodeId > " . intval( $start_id ) . "
+			AND cmsDocument.nodeId >= " . intval( $start_id ) . "
 			ORDER BY cmsDocument.nodeId
 		");
 		$result->execute();
 
-		$new_id = $start_id;
+		// keep track of last row processed
+		$last_id = null;
+
 		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
-
-			// increment id
-			$new_id = (int) $row['nodeId'];
-
 
 			// load xml column
 			$xml = simplexml_load_string( $row['xml'] );
@@ -167,6 +173,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				WP_CLI::warning( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
 			}
 
+			// print_r($row);
+			// echo $this->get_url_from_path( (string) $xml['path'] );
 			$authors = $this->get_authors_and_increment( (string) $xml->authors );
 
 			$post = [
@@ -227,7 +235,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$data['posts'][] = $post;
 
+			// increment last id processed
+			$last_id = (int) $row['nodeId'];
+
 		} // while content
+
+		// return from function at this point if no rows were processed
+		// todo: set a return line above the while loop if PDO->rowCount() could return a consistant "0 results" row count...
+		if( $last_id === null ) return null;
 
 		// $this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts.txt'); exit();
 		
@@ -235,7 +250,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		Newspack_WXR_Exporter::generate_export( $data );
 		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $data[ 'export_file' ] ) );
 
-		return $new_id;
+		return $last_id;
+
 	}
 
 
@@ -311,10 +327,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$ids = explode(',', $node );
 			foreach( $ids as $id ) {
+
+				// if the author doesn't exist, we can't do anything...just continue
+				if( empty( $this->authors[$id] ) ) continue;
+
 				// only add matching key/values to each output
 				$basic[] = array_intersect_key( $this->authors[$id], array( 'name' => 1, 'email' => 1) );
 				$full[] = array_intersect_key( $this->authors[$id], array( 'id' => 1, 'name' => 1, 'email' => 1, 'slug' => 1) );
 				$this->authors[$id]['post_count']++;
+
 			}
 
 		} // not empty
