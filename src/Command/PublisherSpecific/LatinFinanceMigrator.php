@@ -81,7 +81,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				
 		// Setup query vars for MSSQL DB for content types
 		$limit = 1000; // row limit per batch
-		$start_id = 65000; // 1; // rows greater than or equal to this ID value
+		$start_id = 1; // 1; rows greater than or equal to this ID value
 
 		// Export posts while return value isn't null
 		// ...and set the new start_id equal to the returned id (last id processed) plus 1
@@ -89,14 +89,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			$start_id += 1;
 		}
 		
+		exit();
+
 		// Check for duplicate post slugs
 		foreach ( $this->post_slugs as $slug => $urls ) {
 			if( count( $urls ) > 1 ) {
 				WP_CLI::warning( 'Duplicate content "' . $slug .'" for urls: ' . print_r( $urls, true ) );
 			}
 		}
-
-		exit();
 
 		// todo: handle duplicate emails
 		// $this->check_author_emails();
@@ -168,11 +168,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// get authors for this post
 			$authors = $this->get_authors_and_increment( (string) $xml->authors );
 
-			// build url to this post on the old site
-			$url_from_path = $this->get_url_from_path( (string) $xml['path'] );
-			
-			// set slug
+			// set slug and old site url
 			$slug = (string) $xml['urlName'];
+			$url_from_path = $this->get_url_from_path( (string) $xml['path'] );
 
 			// Track dublicate content slugs
 			if( isset( $this->post_slugs[$slug] ) ) {
@@ -222,27 +220,46 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 					// helpful for redirects if needed
 					'newspack_lf_original_url' => $url_from_path,
+
 				],
 							
 			]; // post
 
-			// Convert "content type" to a category
+			// Add "content type" category
 			switch( (string) $xml['nodeTypeAlias'] ) {
 				case 'dailyBriefArticle': $post['categories'][] = 'Daily Briefs'; break;
 				case 'magazineArticle': $post['categories'][] = 'Magazine'; break;
 				case 'webArticle': $post['categories'][] = 'Web Articles'; break;
 			}
-				
+			
+			// Add additional category
 			if ( (int) $xml->isFree === 1 ) {
 				$post['categories'][] = 'Free Content';
 			}
 
-			// <image><![CDATA[64047]]></image>
+			// Featured image: <image><![CDATA[64047]]></image>
+			if( ! empty ( $xml->image ) ) {
+
+				// must be single integer
+				if( ! preg_match('/^[0-9]+$/', (string) $xml->image ) ) {
+					WP_CLI::error( 'Featured image is not single integer ' . (string) $xml->image .' for node ' . $row['nodeId']);
+				}
+				
+				$featured_image = $this->get_featured_image( (string) $xml->image );
+
+				if( null !== $featured_image ) {
+
+					$post['featured_image'] = $featured_image['url'];
+					$post['meta']['newspack_lf_featured_image'] = json_encode( $featured_image );
+					$post['meta']['newspack_lf_featured_image_checksum'] = md5( serialize( $featured_image ) );
+				
+				} // null featured image
+
+			} // xml->image
+
+			// todo: body: <img
 			
-			// body: <img
-
-			// print_r($post); exit();
-
+			// Append to data posts
 			$data['posts'][] = $post;
 
 			// increment last id processed
@@ -257,7 +274,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// $this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts.txt'); exit();
 		
 		// Create WXR file
-		Newspack_WXR_Exporter::generate_export( $data );
+		// Newspack_WXR_Exporter::generate_export( $data );
 		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $data[ 'export_file' ] ) );
 
 		return $last_id;
@@ -373,6 +390,47 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		}
 
 		return $out;
+
+	}
+
+	/*
+		<Image id="1333" key="d0c96cf0-bb9d-44aa-8122-bd1fee73617c" parentID="1156" level="3" creatorID="0" sortOrder="3" createDate="2017-09-05T13:30:33" updateDate="2018-11-13T15:00:15" nodeName="2013Oscars_Hagenbuch_Academy.jpg" urlName="2013oscars_hagenbuch_academyjpg" path="-1,53377,1156,1333" isDoc="" nodeType="1032" writerName="bgilbert@w3trends.com" writerID="0" version="cd8c6c5e-fd3d-4968-9b4f-12bd60d91302" template="0" nodeTypeAlias="Image"><umbracoFile><![CDATA[{src: '/media/1004/2013oscars_hagenbuch_academy.jpg', crops: []}]]></umbracoFile><umbracoWidth><![CDATA[1826]]></umbracoWidth><umbracoHeight><![CDATA[1323]]></umbracoHeight><umbracoBytes><![CDATA[190068]]></umbracoBytes><umbracoExtension><![CDATA[jpg]]></umbracoExtension></Image>
+
+		<umbracoFile><![CDATA[{src: '/media/6252/casa-dos-ventos-rio-do-vento.jpg', crops: []}]]>
+		https://www.latinfinance.com/media/6252/casa-dos-ventos-rio-do-vento.jpg
+		
+		<umbracoFile><![CDATA[{src: '/media/6296/iberdrola-mexico-cogeneración-bajío-power-plant.png', crops: []}]]></umbracoFile>
+		https://www.latinfinance.com/media/6296/iberdrola-mexico-cogeneraci%C3%B3n-baj%C3%ADo-power-plant.png
+
+		<umbracoFile><![CDATA[{src: '/media/2133/avianca_767-200_at_el_dorado.jpg', crops: []}]]></umbracoFile>
+		https://www.latinfinance.com/media/2133/avianca_767-200_at_el_dorado.jpg
+	*/
+	private function get_featured_image( $node_id ) {
+
+		$result = $this->pdo->prepare("
+			SELECT xml
+			FROM cmsContentXml
+			WHERE nodeId = ?
+		");
+		$result->execute( array( $node_id ) );
+			
+		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
+		
+			$xml = simplexml_load_string( $row['xml'] );
+			
+			// umbracoFile is not proper JSON so use preg_match
+			preg_match("/CDATA\[{src: '([^']+)'/", $row['xml'], $image_matches);
+
+			return [
+				'id' => (string) $xml['id'],
+				'name' => (string) $xml['nodeName'],
+				'url' => $image_matches[1],
+				'xml' => $row['xml'], // for checksum and postmeta
+			];
+		
+		}  
+
+		return null;
 
 	}
 
