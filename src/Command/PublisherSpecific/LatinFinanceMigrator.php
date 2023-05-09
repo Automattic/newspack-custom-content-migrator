@@ -190,47 +190,44 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// Add values to a single post array
 			$post = [
 
-				// head.<wp:author>.<wp:author_login> will create a user accounts
-				// but post.<dc:creator> doesn't support multiple authors so no point in creating user accounts...
-				// do this post migration using: postmeta.newspack_lf_author
-				'author'  => 'temp-import-user', // was: $authors['basic']
-
-				// todo: how to pre-load these into WP?  
-				// just use local WP db connection?
-				// The WXR doesn't have <wp:category> nodes inside <channel>.
-				// Need this for slug/hierarchy
-				'categories' => $this->get_cats_and_increment( (string) $xml->tags ),
-				
+				'title'   => (string) $xml['nodeName'],
+				'url'    => $slug,
 				'content' => (string) $xml->body,
-				
+				'excerpt' => (string) $xml->snippet,
+				'categories' => $this->get_cats_and_increment( (string) $xml->tags ),
+
+				// WXR <wp:author><wp:author_login> will create user accounts
+				// but <item><dc:creator> doesn't support multiple authors so no point in creating user accounts...
+				// do this post migration using: postmeta.newspack_lf_author
+				// 'author'  => $authors['basic']
+
 				// just use one date value, ignore createDate
 				'date'    => (string) $xml->displayDate,
-				
-				'excerpt' => (string) $xml->snippet,
-				
+
+				// Convert to tags: <metaKeywords><![CDATA[Arcos Dorados, McDonald's, Argentina]]></metaKeywords>
+				'tags' => preg_split( '/,\s*/', trim( (string) $xml->metaKeywords ), -1, PREG_SPLIT_NO_EMPTY ),
+
 				'meta'    => [
 
-					// todo: command to load these as Guest Authors in CoAuthorsPlus and connect to PostId
+					// these will be converted to Guest Authors in CoAuthorsPlus
 					'newspack_lf_author' => json_encode( $authors['full'] ),
 
-					// todo: catch changes from previous imports
+					// this will be used for yoast primary category
+					'newspack_lf_original_type' => (string) $xml['nodeTypeAlias'],
+
+					// helpful to catch changes in future imports
 					'newspack_lf_original_id' => (string) $row['nodeId'],
 					'newspack_lf_original_version' => (string) $row['versionId'],
 					'newspack_lf_checksum' => md5( serialize( $row ) ),
 
+					// helpful for redirects if needed
 					'newspack_lf_original_url' => $url_from_path,
 				],
-				
-				// Convert <metaKeywords><![CDATA[Arcos Dorados, McDonald's, Argentina]]></metaKeywords> to Tags (trimmed)
-				'tags' => preg_split( '/,\s*/', trim( (string) $xml->metaKeywords ), -1, PREG_SPLIT_NO_EMPTY ),
-
-				'title'   => (string) $xml['nodeName'],
-				'url'    => $slug,
-			
+							
 			]; // post
 
 			// Convert "content type" to a category
-			switch( $xml['nodeTypeAlias'] ) {
+			switch( (string) $xml['nodeTypeAlias'] ) {
 				case 'dailyBriefArticle': $post['categories'][] = 'Daily Briefs'; break;
 				case 'magazineArticle': $post['categories'][] = 'Magazine'; break;
 				case 'webArticle': $post['categories'][] = 'Web Articles'; break;
@@ -241,6 +238,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 
 			// <image><![CDATA[64047]]></image>
+			
 			// body: <img
 
 			// print_r($post); exit();
