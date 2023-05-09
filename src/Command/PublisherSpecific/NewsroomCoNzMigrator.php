@@ -67,6 +67,13 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 				'shortdesc' => 'Imports postmeta by the Scraper plugin.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroomconz-populate-primary-category',
+			[ $this, 'cmd_populate_primary_category' ],
+			[
+				'shortdesc' => 'Populates Yoast Primary category for posts missing it.',
+			]
+		);
 	}
 
 	/**
@@ -180,5 +187,56 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 
 		// Required for the $wpdb->update() sink in.
 		wp_cache_flush();
+	}
+
+	/**
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_populate_primary_category( $args, $assoc_args ) {
+		global $wpdb;
+		$meta_key = '_yoast_wpseo_primary_category';
+		$dry_run = WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
+
+		$posts_without_primary = $wpdb->get_col(
+			$wpdb->prepare( "select ID from $wpdb->posts where post_status = 'publish' and ID NOT IN( SELECT post_id from wp_postmeta where meta_key = %s )", $meta_key )
+		);
+
+		WP_CLI::log( count($posts_without_primary) . ' posts without primary category.' );
+		$count = 0;
+
+		foreach ( $posts_without_primary as $post_id ) {
+			$categories = get_the_category( $post_id );
+				
+			// This only applies for posts with more than one category.
+			if ( count( $categories ) < 2 ) {
+				WP_CLI::log( 'Skipping post ' . $post_id . ' with ' . count( $categories ) . ' categories.' );
+				continue;
+			}
+
+			WP_CLI::log( ' ==== Processing post ' . $post_id . ' ====' );
+
+			$primary_category = 999999999;
+
+			// Let's set the category with the lowest ID as the primary.
+			foreach ( $categories as $cat ) {
+				WP_CLI::log( 'Found category ' . $cat->term_id );
+				if ( $cat->term_id < $primary_category ) {
+					$primary_category = $cat->term_id;
+				}
+			}
+
+			WP_CLI::log( 'Chosen primary category: ' . $primary_category );
+			if ( ! $dry_run ) {
+				update_post_meta( $post_id, $meta_key, $primary_category );
+				WP_CLI::success( 'Updated post ' . $post_id . ' with primary category ' . $primary_category );
+			}
+			$count ++;
+		}
+		if ( ! $dry_run ) {
+			WP_CLI::success( 'Done!. Updated ' . $count . ' posts.' );
+		} else {
+			WP_CLI::success( 'Done!. Would have updated ' . $count . ' posts.' );
+		}
 	}
 }
