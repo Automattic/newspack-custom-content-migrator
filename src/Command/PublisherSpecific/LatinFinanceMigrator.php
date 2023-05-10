@@ -78,9 +78,10 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// Load all Authors and Tags (we'll convert to Categories) from the MSSQL DB
 		$this->set_authors();
 		$this->set_tags();
+		$this->set_tags_parent_slugs();
 				
 		// Setup query vars for MSSQL DB for content types
-		$limit = 5000; // row limit per batch
+		$limit = 2500; // row limit per batch
 		$start_id = 1; // 1; rows greater than or equal to this ID value
 
 		// Export posts while return value isn't null
@@ -90,6 +91,10 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		}
 		
 		exit();
+
+
+		// test duplicate slugs with built-in WP redirects????
+
 
 		// Check for duplicate post slugs
 		foreach ( $this->post_slugs as $slug => $urls ) {
@@ -102,7 +107,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// $this->check_author_emails();
 		// $this->log_to_csv( $this->authors, $this->export_path  . '/latinfinance-authors.csv');
 
-		// $this->set_tags_parent_slugs(); // only for CSV output
 		// todo: handle duplicate child categories names across different parents
 		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
 		// todo: test for $this->custom_tag_slugs
@@ -165,8 +169,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// load xml column
 			$xml = simplexml_load_string( $row['xml'] );
 			
-			// get authors for this post
+			// get info for this post
 			$authors = $this->get_authors_and_increment( (string) $xml->authors );
+			$categories = $this->get_cats_and_increment( (string) $xml->tags );
 
 			// set slug and old site url
 			$slug = (string) $xml['urlName'];
@@ -192,12 +197,12 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'url'    => $slug,
 				'content' => (string) $xml->body,
 				'excerpt' => (string) $xml->snippet,
-				'categories' => $this->get_cats_and_increment( (string) $xml->tags ),
+				'categories' => $categories['basic'],
 
 				// WXR <wp:author><wp:author_login> will create user accounts
 				// but <item><dc:creator> doesn't support multiple authors so no point in creating user accounts...
-				// do this post migration using: postmeta.newspack_lf_author
-				// 'author'  => $authors['basic']
+				// do this post migration using: postmeta.newspack_lf_authors
+				'author'  => 'LF Import User', // $authors['basic']
 
 				// just use one date value, ignore createDate
 				'date'    => (string) $xml->displayDate,
@@ -208,18 +213,22 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'meta'    => [
 
 					// these will be converted to Guest Authors in CoAuthorsPlus
-					'newspack_lf_author' => json_encode( $authors['full'] ),
+					'newspack_lf_authors' => json_encode( $authors['full'] ),
+					
+					// could be used to clean up an duplicate category issues
+					'newspack_lf_categories' => json_encode( $categories['full'] ),
 
 					// this will be used for yoast primary category
-					'newspack_lf_original_type' => (string) $xml['nodeTypeAlias'],
+					'newspack_lf_content_type' => (string) $xml['nodeTypeAlias'],
 
 					// helpful to catch changes in future imports
-					'newspack_lf_original_id' => (string) $row['nodeId'],
-					'newspack_lf_original_version' => (string) $row['versionId'],
+					'newspack_lf_node_id' => (string) $row['nodeId'],
+					'newspack_lf_version_id' => (string) $row['versionId'],
 					'newspack_lf_checksum' => md5( serialize( $row ) ),
 
 					// helpful for redirects if needed
-					'newspack_lf_original_url' => $url_from_path,
+					'newspack_lf_slug' => $slug,
+					'newspack_lf_url' => $url_from_path,
 
 				],
 							
@@ -252,9 +261,10 @@ class LatinFinanceMigrator implements InterfaceCommand {
 					$post['featured_image'] = $featured_image['url'];
 
 					// todo: fix focal points or crops?
-					// todo: apply captions?
-					$post['meta']['newspack_lf_featured_image'] = json_encode( $featured_image );
-					$post['meta']['newspack_lf_featured_image_checksum'] = md5( serialize( $featured_image ) );
+					// todo: captions?
+					// test for utf8 characters
+					$post['meta']['newspack_lf_featured_image'] = $featured_image['url'];
+					$post['meta']['newspack_lf_featured_image_node'] = json_encode( $featured_image );
 				
 				} // null featured image
 
@@ -380,17 +390,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// id,id,id
 	private function get_cats_and_increment( $node ) {
 
-		if( empty( $node ) ) return array();
-		$ids = explode(',', $node );
-		
-		$out = array();
-		foreach( $ids as $id ) {
-			// only add matching key/values to each output
-			$out[] = array_intersect_key( $this->tags[$id], array( 'name' => 1, 'slug' => 1) );
-			$this->tags[$id]['post_count']++;
-		}
+		$basic = array();
+		$full = array();
 
-		return $out;
+		if( ! empty( $node ) ) {
+
+			$ids = explode(',', $node );		
+			foreach( $ids as $id ) {
+				$basic[] = array_intersect_key( $this->tags[$id], array( 'name' => 1, 'slug' => 1) );
+				$full[] = array_intersect_key( $this->tags[$id], array( 'id' => 1, 'name' => 1, 'slug' => 1, 'parent' => 1, 'parent_slug' => 1, 'url' => 1) );
+				$this->tags[$id]['post_count']++;
+			}
+
+		} // not empty
+
+		return [
+			'basic' => $basic,
+			'full' => $full,
+		];
 
 	}
 
@@ -641,3 +658,4 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	}
 
 }
+
