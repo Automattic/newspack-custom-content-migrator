@@ -80,7 +80,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->set_tags();
 				
 		// Setup query vars for MSSQL DB for content types
-		$limit = 1000; // row limit per batch
+		$limit = 5000; // row limit per batch
 		$start_id = 1; // 1; rows greater than or equal to this ID value
 
 		// Export posts while return value isn't null
@@ -250,14 +250,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				if( null !== $featured_image ) {
 
 					$post['featured_image'] = $featured_image['url'];
+
+					// todo: fix focal points or crops?
+					// todo: apply captions?
 					$post['meta']['newspack_lf_featured_image'] = json_encode( $featured_image );
 					$post['meta']['newspack_lf_featured_image_checksum'] = md5( serialize( $featured_image ) );
 				
 				} // null featured image
 
 			} // xml->image
-
-			// todo: body: <img
 			
 			// Append to data posts
 			$data['posts'][] = $post;
@@ -274,7 +275,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// $this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts.txt'); exit();
 		
 		// Create WXR file
-		// Newspack_WXR_Exporter::generate_export( $data );
+		Newspack_WXR_Exporter::generate_export( $data );
 		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $data[ 'export_file' ] ) );
 
 		return $last_id;
@@ -396,6 +397,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	/*
 		<Image id="1333" key="d0c96cf0-bb9d-44aa-8122-bd1fee73617c" parentID="1156" level="3" creatorID="0" sortOrder="3" createDate="2017-09-05T13:30:33" updateDate="2018-11-13T15:00:15" nodeName="2013Oscars_Hagenbuch_Academy.jpg" urlName="2013oscars_hagenbuch_academyjpg" path="-1,53377,1156,1333" isDoc="" nodeType="1032" writerName="bgilbert@w3trends.com" writerID="0" version="cd8c6c5e-fd3d-4968-9b4f-12bd60d91302" template="0" nodeTypeAlias="Image"><umbracoFile><![CDATA[{src: '/media/1004/2013oscars_hagenbuch_academy.jpg', crops: []}]]></umbracoFile><umbracoWidth><![CDATA[1826]]></umbracoWidth><umbracoHeight><![CDATA[1323]]></umbracoHeight><umbracoBytes><![CDATA[190068]]></umbracoBytes><umbracoExtension><![CDATA[jpg]]></umbracoExtension></Image>
 
+		<Image id="68831" key="45555c24-8d66-46fa-bcea-13c153aca843" parentID="68829" level="4" creatorID="32" sortOrder="1" createDate="2022-10-04T04:31:20" updateDate="2022-10-05T16:35:42" nodeName="Cover-Q4 500px LF.com.jpg" urlName="cover-q4-500px-lfcomjpg" path="-1,50126,65838,68829,68831" isDoc="" nodeType="1032" writerName="taimur.ahmad@latinfinance.com" writerID="32" version="257e4df4-caf7-462f-9536-73842c72a993" template="0" nodeTypeAlias="Image"><umbracoFile><![CDATA[{
+			"src": "/media/5556/cover-q4-500px-lfcom.jpg",
+			"focalPoint": {
+				"left": 0.5,
+				"top": 0.5
+			}
+			}]]></umbracoFile><umbracoWidth><![CDATA[786]]></umbracoWidth><umbracoHeight><![CDATA[1056]]></umbracoHeight><umbracoBytes><![CDATA[291127]]></umbracoBytes><umbracoExtension><![CDATA[jpg]]></umbracoExtension></Image>
+
 		<umbracoFile><![CDATA[{src: '/media/6252/casa-dos-ventos-rio-do-vento.jpg', crops: []}]]>
 		https://www.latinfinance.com/media/6252/casa-dos-ventos-rio-do-vento.jpg
 		
@@ -418,8 +427,12 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		
 			$xml = simplexml_load_string( $row['xml'] );
 			
-			// umbracoFile is not proper JSON so use preg_match
-			preg_match("/CDATA\[{src: '([^']+)'/", $row['xml'], $image_matches);
+			// umbracoFile is not proper JSON (or atleast earlier values are not) so use preg_match
+			preg_match('/src[\'"]?: [\'\"]([^\'\"]+)[\'\"]/', $row['xml'], $image_matches);
+
+			if( 2 != count( $image_matches ) ) {
+				WP_CLI::error( 'Malformated featured image url for node: ' . print_r( $row['xml'] , true) );				
+			}
 
 			return [
 				'id' => (string) $xml['id'],
