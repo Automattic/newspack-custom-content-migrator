@@ -20,7 +20,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	private $pdo = null;
 	private $authors = array();
 	private $tags = array();
-	private $custom_tag_slugs = array( 'daily-briefs', 'free-content', 'magazine', 'web-articles' );
 	private $post_slugs = array();
 
 
@@ -90,40 +89,23 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			$start_id += 1;
 		}
 		
-		exit();
-
-
-		// test duplicate slugs with built-in WP redirects????
-
-
 		// Check for duplicate post slugs
-		foreach ( $this->post_slugs as $slug => $urls ) {
-			if( count( $urls ) > 1 ) {
-				WP_CLI::warning( 'Duplicate content "' . $slug .'" for urls: ' . print_r( $urls, true ) );
-			}
-		}
+		// let WordPress handle this and test by hand
+		// foreach ( $this->post_slugs as $slug => $urls ) {
+		// 	if( count( $urls ) > 1 ) {
+		// 		WP_CLI::warning( 'Duplicate content "' . $slug .'" for urls: ' . print_r( $urls, true ) );
+		// 	}
+		// }
 
-		// todo: handle duplicate emails
-		// $this->check_author_emails();
-		// $this->log_to_csv( $this->authors, $this->export_path  . '/latinfinance-authors.csv');
+		// clean up duplicate authors after import: $this->check_author_emails();
+		$this->log_to_csv( $this->authors, $this->export_path  . '/latinfinance-authors.csv');
 
-		// todo: handle duplicate child categories names across different parents
-		// todo: do we need to import Descriptions from some categories? don't worry!! they can recreate by hand, 
-		// todo: test for $this->custom_tag_slugs
-		// $this->check_tags_slugs();
-		// $this->log_to_csv( $this->tags, $this->export_path  . '/latinfinance-tags.csv');
+		// clean up duplicate tags after import: $this->check_tags_slugs();
+		// tag descriptions can be recreated by hand if desired
+		$this->log_to_csv( $this->tags, $this->export_path  . '/latinfinance-tags.csv');
 
-		// Append neccessary Categories to WXR <channel>
-		$data = [
-			'site_title'  => $this->site_title,
-			'site_url'    => $this->site_url,
-			'export_file' => $this->export_path  . '/latinfinance-categories.xml',
-			'posts'       => [],
-			'terms'       => $this->get_tags_as_terms(),
-		];
-		// if( ! empty( $terms ) ) $data['terms'] = $terms;
-		Newspack_WXR_Exporter::generate_export( $data );
-		WP_CLI::success( sprintf( "\n" . 'Categories exported to file %s ...', $data[ 'export_file' ] ) );
+		// export categories
+		$this->export_categories();
 
 	}
 
@@ -133,6 +115,29 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 * 
 	 */
 
+	private function export_categories() {
+
+		$terms = $this->get_tags_as_terms();
+
+		if( empty( $terms ) ) {
+			WP_CLI::warning( 'No terms to export' );
+			return;
+		}
+
+		// Append Categories as terms to WXR <channel>
+		$data = [
+			'site_title'  => $this->site_title,
+			'site_url'    => $this->site_url,
+			'export_file' => $this->export_path  . '/latinfinance-categories.xml',
+			'posts'       => [],
+			'terms'       => $terms,
+		];
+		
+		// requires Newspack_WXR_Exporter: line 52 => // die( "Missing data to generate export file" );
+		Newspack_WXR_Exporter::generate_export( $data );
+		WP_CLI::success( sprintf( "\n" . 'Categories exported to file %s ...', $data[ 'export_file' ] ) );
+
+	}
 
 	// returns null or the last id (integer) of nodeId that was processed
 	private function export_posts( $limit, $start_id ) {
@@ -259,10 +264,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				if( null !== $featured_image ) {
 
 					$post['featured_image'] = $featured_image['url'];
-
-					// todo: fix focal points or crops?
-					// todo: captions?
-					// test for utf8 characters
 					$post['meta']['newspack_lf_featured_image'] = $featured_image['url'];
 					$post['meta']['newspack_lf_featured_image_node'] = json_encode( $featured_image );
 				
@@ -282,7 +283,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// todo: set a return line above the while loop if PDO->rowCount() could return a consistant "0 results" row count...
 		if( $last_id === null ) return null;
 
-		// $this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts.txt'); exit();
+		$this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts-' . $start_id . '-dump.txt',);
 		
 		// Create WXR file
 		Newspack_WXR_Exporter::generate_export( $data );
@@ -471,7 +472,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		foreach( $this->tags as $id => $tag ) {
 
 			// only create terms if used for a post
-			// todo: if( $tag['post_count'] === 0 ) continue;
+			// clean up by hand after import: if( $tag['post_count'] === 0 ) continue;
 
 			$term = new stdClass();
 			$term->taxonomy = 'category';
@@ -578,8 +579,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// Use PDO to create a connection to the DB.
 	// php requires: php.ini => extension=pdo_sqlsrv
 	// client requires: IP Address whitelisted
-	// todo: fix collation/character sets
-	// plan on my local
 	private function set_pdo() {
 
 		try {  
@@ -618,10 +617,17 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$xml = simplexml_load_string( $row['xml'] );
 			
+			$slug = (string) $xml['urlName'];
+
+			$custom_tag_slugs = array( 'daily-briefs', 'magazine', 'web-articles', 'free-content' );
+			if( in_array( $slug, $custom_tag_slugs ) ) {
+				WP_CLI::error( 'Custom tag can not be used twice: ' . $slug . ' ' . print_r( $row['xml'] , true) );				
+			}
+
 			$this->tags[ (string) $row['nodeId'] ] = [
 				'id' => (string) $row['nodeId'],
 				'name' => (string) $xml['nodeName'],
-				'slug' => (string) $xml['urlName'],
+				'slug' => $slug,
 				'post_count' => 0,
 				'parent' => (string) $xml['parentID'],
 				'parent_slug' => '',
