@@ -9,7 +9,7 @@ use \stdClass;
 use \WP_CLI;
 
 /**
- * Custom migration scripts for Latin Finance.
+ * Custom migration scripts for Latin Finance (Umbraco / .NET / MSSQL / SQLServer)
  */
 class LatinFinanceMigrator implements InterfaceCommand {
 
