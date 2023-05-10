@@ -290,8 +290,15 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 			\WP_CLI::success( 'Done! No posts found.' );
 		}
 
-		$processed = 0;
+		$processed    = 0;
+		$memory_usage = memory_get_usage( false );
 		foreach ( $post_ids as $post_id ) {
+			$memory_usage = memory_get_usage( false );
+			if ( $memory_usage > 966367641 ) { // 0.9 GB, since the limit on Atomic is 1GB.
+				\WP_CLI::warning( 'Exit due to memory usage.' );
+				exit( 1 );
+			}
+
 			$migrated = $this->migrate_subtitle( $post_id, $is_dry_run );
 			if ( $migrated ) {
 				$processed ++;
@@ -311,7 +318,7 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 	public function filter_posts_where( $where ) {
 		global $wpdb;
 
-		$where .= " AND post_content REGEXP '^[[:space:]]*<!--[[:space:]]*wp:paragraph[[:space:]]*-->[[:space:]]*<p>(<strong><em>|<em><strong>|<bold><em>|<em><bold>|<bold><i>|<i><bold>|<strong><i>|<i>|<strong>)'";
+		$where .= " AND post_content REGEXP '^[[:space:]]*<!--[[:space:]]*wp:paragraph[[:space:]]*-->[[:space:]]*<p>(<strong><em>|<em><strong>|<b><em>|<em><b>|<b><i>|<i><b>|<strong><i>|<i><strong>)'";
 
 		// Only run once.
 		\remove_filter( 'posts_where', [ $this, 'filter_posts_where' ] );
