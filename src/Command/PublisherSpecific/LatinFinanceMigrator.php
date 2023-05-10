@@ -423,6 +423,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 			}]]></umbracoFile><umbracoWidth><![CDATA[786]]></umbracoWidth><umbracoHeight><![CDATA[1056]]></umbracoHeight><umbracoBytes><![CDATA[291127]]></umbracoBytes><umbracoExtension><![CDATA[jpg]]></umbracoExtension></Image>
 
+		<File id="57037" key="7380a79f-94c2-497e-9715-4c685e2e9931" parentID="3210" level="2" creatorID="20" sortOrder="189" createDate="2019-09-26T20:19:10" updateDate="2019-09-26T20:19:10" nodeName="Argentina - map image.jfif (1)" urlName="argentina-map-imagejfif-1" path="-1,3210,57037" isDoc="" nodeType="1033" writerName="daniel.bases@latinfinance.com" writerID="20" version="e3930c55-3628-4fdc-a838-3c9fcb9eb6a0" template="0" nodeTypeAlias="File"><umbracoFile><![CDATA[/media/2177/argentina-map-image.jfif]]></umbracoFile><umbracoExtension><![CDATA[jfif]]></umbracoExtension><umbracoBytes><![CDATA[6500]]></umbracoBytes></File>
+
+
 		<umbracoFile><![CDATA[{src: '/media/6252/casa-dos-ventos-rio-do-vento.jpg', crops: []}]]>
 		https://www.latinfinance.com/media/6252/casa-dos-ventos-rio-do-vento.jpg
 		
@@ -444,18 +447,41 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
 		
 			$xml = simplexml_load_string( $row['xml'] );
-			
-			// umbracoFile is not proper JSON (or atleast earlier values are not) so use preg_match
-			preg_match('/src[\'"]?: [\'\"]([^\'\"]+)[\'\"]/', $row['xml'], $image_matches);
 
-			if( 2 != count( $image_matches ) ) {
-				WP_CLI::error( 'Malformated featured image url for node: ' . print_r( $row['xml'] , true) );				
+			$url = null;
+
+			// for <Image nodes
+			switch ( (int) $xml['nodeType'] ) {
+
+				// <Image nodes
+				case 1032:
+
+					// umbracoFile may not be proper JSON in some cases, so use preg_match
+					preg_match('/src[\'"]?: [\'\"]([^\'\"]+)[\'\"]/', (string) $xml->umbracoFile, $image_matches);
+					
+					if( 2 != count( $image_matches ) ) {
+						WP_CLI::error( 'Malformated featured image url for node: ' . print_r( $row['xml'] , true) );				
+					}
+
+					$url = $image_matches[1];
+
+					break;
+				
+				// <File nodes
+				case 1033:
+					$url = (string) $xml->umbracoFile;
+					break;
+
+			} // switch
+
+			if ( null === $url ) {
+				WP_CLI::error( 'Unknow featured image node type: ' . print_r( $row['xml'] , true) );				
 			}
 
 			return [
 				'id' => (string) $xml['id'],
 				'name' => (string) $xml['nodeName'],
-				'url' => $image_matches[1],
+				'url' => $url,
 				'xml' => $row['xml'], // for checksum and postmeta
 			];
 		
