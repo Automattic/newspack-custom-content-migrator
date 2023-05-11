@@ -6,7 +6,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 /* External dependencies */
 use stdClass;
 use WP_CLI;
@@ -45,6 +46,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @var null|CoAuthorsPlus
 	 */
 	private $coauthorsplus;
+
+	/**
+	 * Simple Local Avatars logic.
+	 * 
+	 * @var null|SimpleLocalAvatars
+	 */
+	private $simple_local_avatars;
 
 	/**
 	 * Dry run mode - set to true to prevent changes.
@@ -90,6 +98,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		$this->attachments = new Attachments();
 
 		$this->coauthorsplus = new CoAuthorPlus();
+
+		$this->simple_local_avatars = new SimpleLocalAvatars();
 
 		// Define where each XML field should import to.
 		$this->core_fields_mapping = [
@@ -194,6 +204,28 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			[ $this, 'cmd_import_users' ],
 			[
 				'shortdesc' => 'Makes sure authors have full names.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'csv',
+						'optional'    => false,
+						'description' => 'A CSV containing user data.',
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
+			]
+		);
+
+		\WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-import-user-avatars',
+			[ $this, 'cmd_import_user_avatars' ],
+			[
+				'shortdesc' => 'Makes sure authors have avatars.',
 				'synopsis'  => [
 					[
 						'type'        => 'positional',
@@ -517,6 +549,97 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		$progress->finish();
 
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator newsroom-nz-import-user-avatars`
+	 * 
+	 * @param array $args       The arguments passed to the command.
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 * 
+	 * @return void
+	 */
+	public function cmd_import_user_avatars( $args, $assoc_args ){
+		$this->log( 'Importing user avatars...', 'info' );
+
+		// Do we log warnings to the screen?
+		$log_info    = false;
+		$log_warning = false;
+
+		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
+			$this->dryrun = true;
+			$this->log( 'Performing a dry-run. No changes will be made.', 'info' );
+			$log_info    = 'info';
+			$log_warning = 'warning';
+		}
+
+		// Make sure there is a path to CSV provided.
+		if ( ! isset( $args[0] ) || empty( $args[0] ) ) {
+			$this->log( 'Please provide a path to an CSV file.', 'error' );
+		}
+
+		// Open the CSV file.
+		$csv = fopen( $args[0], 'r' );
+		if ( false === $csv ) {
+			$this->log( 'Could not open CSV file.', 'error' );
+		}
+
+		// Start the progress bar (live run only).
+		$count = 0;
+		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
+		$this->log( sprintf( 'Importing %d user avatars', $count[0] ), $log_info );
+		if ( ! $this->dryrun ) {
+			$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d user avatars', $count[0] ), $count[0] );
+		}
+
+		// Get the first row of the CSV, which should be the column headers.
+		$this->csv_headers = fgetcsv( $csv );
+
+		// Run through the CSV and import each row.
+		while ( ( $row = fgetcsv( $csv ) ) !== false ) {
+			if ( ! $this->dryrun ) {
+				$progress->tick();
+			}
+
+			// Unpack the fields into the format expected by WordPress.
+			$avatar_url = $row[10];
+			if ( empty( $avatar_url ) ) {
+				$this->log( sprintf( 'No avatar URL provided for user %s', $row[3] ), $log_warning );
+				continue;
+			}
+			
+			$this->log( sprintf( 'Importing avatar %s to user %s', $row[10], $row[3] ), $log_info );
+
+			// Check that the user exists.
+			$user_id = $this->user_exists( $row[3] );
+			if ( ! $user_id ) {
+				$this->log( sprintf( 'User %s does not exist.', $row[3] ), $log_warning );
+				continue;
+			}
+
+			// Get the attachment if it already exists.
+			$attachment_id = $this->attachments->get_attachment_by_filename( basename( $avatar_url ) );
+			if ( ! $attachment_id ) {
+				// Download the image.
+				$attachment_id = ( $this->dryrun ) ? 1 : $this->attachments->import_external_file( $avatar_url );
+				if ( ! $attachment_id ) {
+					$this->log( sprintf( 'Failed to sideload image %s', $avatar_url ), $log_warning );
+					continue;
+				}
+			}
+
+			// Add the avatar to the user.
+			$attach = ( $this->dryrun ) ? true : $this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
+			if ( ! $attach ) {
+				$this->log( sprintf( 'Failed to add avatar to user %s', $row[3] ), $log_warning );
+				continue;
+			}
+
+		}
+
+		if ( ! $this->dryrun ) {
+			$progress->finish();
+		}
 	}
 
 	/**
