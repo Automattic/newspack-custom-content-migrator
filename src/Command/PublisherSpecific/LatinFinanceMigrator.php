@@ -52,24 +52,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator latinfinance-import-from-mssql',
-			[ $this, 'cmd_import_from_mssql' ],
+			'newspack-content-migrator latinfinance-export-from-mssql',
+			[ $this, 'cmd_export_from_mssql' ],
 			[
-				'shortdesc' => 'Imports content from MS SQL DB as posts.',
+				'shortdesc' => 'Exports content from MS SQL DB to WXR files.',
 				'synopsis'  => [],
 			]
 		);
 	}
 
 	/**
-	 * Callable for 'newspack-content-migrator latinfinance-import-from-mssql'.
+	 * Callable for 'newspack-content-migrator latinfinance-export-from-mssql'.
 	 * 
 	 * @param array $pos_args   WP CLI command positional arguments.
 	 * @param array $assoc_args WP CLI command positional arguments.
 	 */
-	public function cmd_import_from_mssql( $pos_args, $assoc_args ) {
+	public function cmd_export_from_mssql( $pos_args, $assoc_args ) {
 		
-		WP_CLI::line( "Doing latinfinance-import-from-mssql..." );
+		WP_CLI::line( "Doing latinfinance-export-from-mssql..." );
 		
 		// Setup MSSQL DB connection
 		$this->set_pdo();
@@ -80,12 +80,13 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->set_tags_parent_slugs();
 				
 		// Setup query vars for MSSQL DB for content types
-		$limit = 2500; // row limit per batch
+		$limit = 500; // row limit per batch
 		$start_id = 1; // 1; rows greater than or equal to this ID value
+		$max_id = 2147483647; // useful if upper range is needed. max Int for SQL Server = 2147483647
 
 		// Export posts while return value isn't null
 		// ...and set the new start_id equal to the returned id (last id processed) plus 1
-		while( null !== ( $start_id = $this->export_posts( $limit, $start_id ) ) ) {
+		while( null !== ( $start_id = $this->export_posts( $limit, $start_id, $max_id ) ) ) {
 			$start_id += 1;
 		}
 		
@@ -140,13 +141,13 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	}
 
 	// returns null or the last id (integer) of nodeId that was processed
-	private function export_posts( $limit, $start_id ) {
+	private function export_posts( $limit, $start_id, $max_id ) {
 
 		// Setup data array WXR for post content
 		$data = [
 			'site_title'  => $this->site_title,
 			'site_url'    => $this->site_url,
-			'export_file' => $this->export_path  . '/latinfinance-posts-' . $start_id . '.xml',
+			'export_file' => '',
 			'posts'       => [],
 		];
 
@@ -162,6 +163,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				and cmsContentType.alias in('dailyBriefArticle', 'magazineArticle', 'webArticle')
 			WHERE cmsDocument.published = 1	
 			AND cmsDocument.nodeId >= " . intval( $start_id ) . "
+			AND cmsDocument.nodeId <= " . intval( $max_id ) . "
 			ORDER BY cmsDocument.nodeId
 		");
 		$result->execute();
@@ -283,11 +285,13 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// todo: set a return line above the while loop if PDO->rowCount() could return a consistant "0 results" row count...
 		if( $last_id === null ) return null;
 
-		$this->log_to_dump( $data['posts'], $this->export_path  . '/latinfinance-posts-' . $start_id . '-dump.txt',);
-		
+		$fileslug = $this->export_path  . '/latinfinance-posts-' . $start_id . '-' . $last_id;
+		$data['export_file'] = $fileslug . '.xml';
+
 		// Create WXR file
+		// $this->log_to_dump( $data['posts'], $fileslug . '-dump.txt');
 		Newspack_WXR_Exporter::generate_export( $data );
-		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $data[ 'export_file' ] ) );
+		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $data['export_file'] ) );
 
 		return $last_id;
 
@@ -610,6 +614,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		try {  
 			$this->pdo = new PDO( "sqlsrv:Server=;Database=LatinFinanceUmbraco", NULL, NULL);   
 			$this->pdo->setAttribute( PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );  
+			// debug: echo $this->pdo->getAttribute( PDO::SQLSRV_ATTR_ENCODING ); // show charset/collation
 		}  
 		catch( PDOException $e ) {  
 			WP_CLI::error( 'SQL Server error ' . $e->getCode() . ': ' . $e->getMessage() );
