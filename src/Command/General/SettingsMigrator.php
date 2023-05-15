@@ -100,7 +100,7 @@ class SettingsMigrator implements InterfaceCommand {
 					'type'        => 'assoc',
 					'name'        => 'input-dir',
 					'description' => 'Input directory full path (no ending slash).',
-					'optional'    => false,
+					'optional'    => true,
 					'repeating'   => false,
 				],
 			],
@@ -185,37 +185,51 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_import_customize_site_identity_settings( $args, $assoc_args ) {
+
+		// Accept a directory via the --input-dir argument or read from STDIN.
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
-		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
-			WP_CLI::error( 'Invalid input dir.' );
+		if ( ! is_null( $input_dir ) && is_dir( $input_dir ) ) {
+
+			// Check there is a valid input file.
+			$import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
+			if ( ! is_file( $import_file ) ) {
+				WP_CLI::error( sprintf( 'Site Identity settings file not found %s.', $import_file ) );
+			}
+
+			WP_CLI::line( 'Importing default Site Identity settings from ' . $import_file . '...'  );
+			$imported_mods_and_options = json_decode( file_get_contents( $import_file ) );
+
+		} else {
+			WP_CLI::line( 'Importing default pages settings from STDIN...'  );
+			$stdin    = fopen( 'php://stdin', 'r' );
+			if ( false === $stdin ) {
+				WP_CLI::error( 'Could not find settings in STDIN.' );
+			}
+
+			$imported_mods_and_options = json_decode( fread( $stdin, 1000000 ) );
+			fclose( $stdin );
 		}
 
-		$options_import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
-		if ( ! is_file( $options_import_file ) ) {
-			WP_CLI::warning( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
-			exit(1);
+		// Ensure we have valid JSON.
+		if ( is_null( $imported_mods_and_options ) ) {
+			WP_CLI::error( 'Invalid JSON input.' );
 		}
-
-		WP_CLI::line( 'Importing site identity settings from ' . $options_import_file . ' ...' );
-
-		// Update current Theme mods.
-		$imported_mods_and_options = json_decode( file_get_contents( $options_import_file ), true );
 
 		// Import and set logo.
 		$logo_id = null;
-		if ( isset( $imported_mods_and_options['custom_logo_file'] ) && ! empty( $imported_mods_and_options['custom_logo_file'] ) ) {
-			$logo_file = $imported_mods_and_options['custom_logo_file'];
+		if ( isset( $imported_mods_and_options->custom_logo_file ) && ! empty( $imported_mods_and_options->custom_logo_file ) ) {
+			$logo_file = $imported_mods_and_options->custom_logo_file;
 			if ( file_exists( $logo_file ) ) {
-				$logo_id = $this->attachments_logic->import_media_from_path( $logo_file );
+				$logo_id = $this->attachments_logic->import_external_file( $logo_file );
 			}
 		}
 
 		// Import and set footer logo.
 		$footer_logo_id = null;
-		if ( isset( $imported_mods_and_options['newspack_footer_logo_file'] ) && ! empty( $imported_mods_and_options['newspack_footer_logo_file'] ) ) {
-			$footer_logo_file = $imported_mods_and_options['newspack_footer_logo_file'];
+		if ( isset( $imported_mods_and_options->newspack_footer_logo_file ) && ! empty( $imported_mods_and_options->newspack_footer_logo_file ) ) {
+			$footer_logo_file = $imported_mods_and_options->newspack_footer_logo_file;
 			if ( file_exists( $footer_logo_file ) ) {
-				$footer_logo_id = $this->attachments_logic->import_media_from_path( $footer_logo_file );
+				$footer_logo_id = $this->attachments_logic->import_external_file( $footer_logo_file );
 			}
 		}
 
@@ -223,10 +237,10 @@ class SettingsMigrator implements InterfaceCommand {
 		$this->update_theme_mod_site_identity_post_ids( $logo_id, $footer_logo_id );
 
 		// Import and set the site icon.
-		if ( isset( $imported_mods_and_options['site_icon_file'] ) && ! empty( $imported_mods_and_options['site_icon_file'] ) ) {
-			$icon_file = $imported_mods_and_options['site_icon_file'];
+		if ( isset( $imported_mods_and_options->site_icon_file ) && ! empty( $imported_mods_and_options->site_icon_file ) ) {
+			$icon_file = $imported_mods_and_options->site_icon_file;
 			if ( file_exists( $icon_file ) ) {
-				$icon_id = $this->attachments_logic->import_media_from_path( $icon_file );
+				$icon_id = $this->attachments_logic->import_external_file( $icon_file );
 				if ( is_numeric( $icon_id ) ) {
 					update_option( 'site_icon', $icon_id );
 				}
