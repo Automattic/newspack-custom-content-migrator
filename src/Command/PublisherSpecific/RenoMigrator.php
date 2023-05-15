@@ -399,6 +399,7 @@ class RenoMigrator implements InterfaceCommand {
 
 		$recovered_images = [];
 		$missing_images = [];
+		$affected_posts = [];
 
 		WP_CLI::line( 'Found' . count( $posts ) . ' posts with missing images.' );
 
@@ -460,6 +461,11 @@ class RenoMigrator implements InterfaceCommand {
 				WP_CLI::line( 'Updating post content.' );
 				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content ], [ 'ID' => $post_id ] );
 				WP_CLI::line( '============================================' );
+
+				$affected_posts[] = [
+					'ID' => $post_id,
+					'url' => get_permalink( $post_id ),
+				]
 			}
 
 		}
@@ -470,6 +476,7 @@ class RenoMigrator implements InterfaceCommand {
 		WP_CLI::line( 'Recovered images: ' . count( $recovered_images ) . ' - see recovered-images.log' );
 		$this->log( 'missing-images.log', print_r( $missing_images, true ) );
 		$this->log( 'recovered-images.log', print_r( $recovered_images, true ) );
+		$this->log( 'affected-posts.log', print_r( $affected_posts, true ) );
 
 	}
 
