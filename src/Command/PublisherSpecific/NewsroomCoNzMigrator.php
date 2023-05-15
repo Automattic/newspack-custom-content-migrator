@@ -34,6 +34,37 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 	private $attachment_logic;
 
 	/**
+	 * PIJF IDs to categories mapping.
+	 *
+	 * @var array
+	 */
+	private $pijf_category_mapping = [
+		'pijf-0011' => 'PIJF: The Detail',
+		'pijf_0011' => 'PIJF: The Detail',
+		'pijf-0033' => 'PIJF: South PIJF',
+		'pijf-0053' => 'PIJF: Maori Ed PIJF',
+		'pijf-0058' => 'PIJF: PIJF Training',
+		'pijf-0070' => 'PIJF: Investigates 2022',
+		'pijf-0077' => 'PIJF: Climate Change PIJF series',
+		'pijf-0090' => 'PIJF PIJF: Video Content Prod',
+		'pijf-0093' => 'PIJF: Tova Today FM Project',
+	];
+
+	/**
+	 * Category ID for the parent "PIJF" category.
+	 *
+	 * @var int
+	 */
+	private $pijf_parent_category_id;
+
+	/**
+	 * PIJF category IDs.
+	 *
+	 * @var array
+	 */
+	private $pijf_category_ids = [];
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -79,6 +110,22 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_subtitles' ],
 			[
 				'shortdesc' => 'Migrate subtitles from post content to meta.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Whether to do a dry run.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroomconz-handle-pijf',
+			[ $this, 'cmd_handle_pijf' ],
+			[
+				'shortdesc' => 'Convert PIJF tags to category assignments.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
@@ -365,6 +412,131 @@ class NewsroomCoNzMigrator implements InterfaceCommand {
 		}
 
 		\WP_CLI::log( sprintf( 'Subtitle %smigrated for post %d with subtitle: "%s"' . "\n", $is_dry_run ? 'would be ' : '', $post_id, $subtitle ) );
+
+		return $migrated;
+	}
+
+	/**
+	 * Find posts with a PIJF tag in migration data and assign a corresponding category.
+	 *
+	 * @param array $args Positional args.
+	 * @param array $assoc_args Associative args.
+	 */
+	public function cmd_handle_pijf( $args, $assoc_args ) {
+		$is_dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		if ( $is_dry_run ) {
+			\WP_CLI::log( "\n===================\n=     Dry Run     =\n===================\n" );
+		}
+
+		\WP_CLI::log( "Fetching posts with PIJF tags...\n\n" );
+
+		$post_ids = \get_posts(
+			[
+				'post_type'      => 'post',
+				'posts_per_page' => -1,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'meta_query'     => [
+					'relation' => 'OR',
+					[
+						'key'     => 'newspack_nnz_import_data',
+						'value'   => 'pijf_00',
+						'compare' => 'LIKE',
+					],
+					[
+						'key'     => 'newspack_nnz_import_data',
+						'value'   => 'pijf-00',
+						'compare' => 'LIKE',
+					],
+				],
+			]
+		);
+
+		if ( empty( $post_ids ) ) {
+			return \WP_CLI::success( 'Done! No posts found.' );
+		}
+
+		$processed    = 0;
+		$memory_usage = memory_get_usage( false );
+		foreach ( $post_ids as $post_id ) {
+			$memory_usage = memory_get_usage( false );
+			if ( $memory_usage > 966367641 / 2 ) { // 0.45 GB, since the limit on Atomic is 512 MB.
+				\WP_CLI::warning( 'Exit due to memory usage.' );
+				exit( 1 );
+			}
+
+			$migrated = $this->convert_pijf( $post_id, $is_dry_run );
+			if ( $migrated ) {
+				$processed ++;
+			}
+		}
+
+		\WP_CLI::success( sprintf( 'Done! %d post%s processed.', $processed, 1 < $processed ? 's' : '' ) );
+	}
+
+	/**
+	 * Convert PIJF tag to corresponding category assignment.
+	 *
+	 * @param int  $post_id The post ID.
+	 * @param bool $is_dry_run Whether to do a dry run.
+	 * @return bool Whether the subtitle was migrated.
+	 */
+	public function convert_pijf( $post_id, $is_dry_run = false ) {
+		// Cache term ID of PIJF parent category.
+		if ( empty( $this->pijf_parent_category_id ) ) {
+			$pijf_parent_category = \get_term_by( 'name', 'PIJF', 'category' );
+
+			if ( ! empty( $pijf_parent_category->term_id ) ) {
+				$this->pijf_parent_category_id = $pijf_parent_category->term_id;
+			}
+		}
+
+		// Cache term IDs for PIJF categories.
+		if ( empty( $this->pijf_category_ids ) ) {
+			foreach ( $this->pijf_category_mapping as $pijf_id => $category_name ) {
+				$pijf_category = \get_term_by( 'name', $category_name, 'category' );
+
+				if ( ! empty( $pijf_category->term_id ) ) {
+					$this->pijf_category_ids[ $pijf_id ] = $pijf_category->term_id;
+				}
+			}
+		}
+
+		// Get PIJF tag from post meta.
+		$import_data = \get_post_meta( $post_id, 'newspack_nnz_import_data', true );
+		$migrated    = false;
+		$pijf_id     = null;
+		$term_id     = null;
+
+		if ( isset( $import_data['extended_attribs']['pijf'] ) ) {
+			$pijf_id = $import_data['extended_attribs']['pijf'];
+
+			if ( empty( $pijf_id ) ) {
+				return $migrated;
+			}
+
+			if ( ! empty( $this->pijf_category_ids[ $pijf_id ] ) ) {
+				$term_id = $this->pijf_category_ids[ $pijf_id ];
+			}
+
+			if ( empty( $term_id ) ) {
+				\WP_CLI::warning( sprintf( 'Post ID %d not processed. Category not found for %s.', $post_id, $pijf_id ) );
+				return $migrated;
+			}
+
+			$migrated = ! $is_dry_run ? \wp_set_post_categories( $post_id, [ $this->pijf_parent_category_id, $term_id ], true ) : true;
+		} else {
+			return $migrated;
+		}
+
+		// Error.
+		if ( ! $migrated ) {
+			\WP_CLI::warning( sprintf( 'Could not process post with ID %d.', $post_id ) );
+			return $migrated;
+		}
+
+		\WP_CLI::log( sprintf( 'Category "%s" %sapplied to post %d.' . "\n", $this->pijf_category_mapping[ $pijf_id ], $is_dry_run ? 'would be ' : '', $post_id ) );
 
 		return $migrated;
 	}
