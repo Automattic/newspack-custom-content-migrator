@@ -62,6 +62,24 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	private $dryrun;
 
 	/**
+	 * Info log level string.
+	 * 
+	 * Set to false to avoid logging to the screen. E.g. while using a progress bar.
+	 * 
+	 * @var string|bool
+	 */
+	private $log_info;
+
+	/**
+	 * Warning log level string.
+	 * 
+	 * Set to false to avoid logging to the screen. E.g. while using a progress bar.
+	 * 
+	 * @var string|bool
+	 */
+	private $log_warning;
+
+	/**
 	 * Mapping of core post fields to XML fields.
 	 *
 	 * @var array
@@ -475,7 +493,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * Callable for `newspack-content-migrator newsroom-nz-import-users`
 	 */
 	public function cmd_import_users( $args, $assoc_args ) {
-		$this->log( 'Adding Newsroom NZ author names...', 'info' );
+		$this->log( 'Adding Newsroom NZ users...', 'info' );
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
@@ -516,6 +534,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				'user_email'    => $row[3],
 				'role'          => $this->fix_role( $row[4] ),
 				'description'   => $row[9],
+				'avatar'        => ( isset( $row[10] ) ) ? $row[10] : '',
 				'meta_input'    => [
 					self::META_PREFIX . 'import_data' => $row,
 				],
@@ -528,7 +547,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 
 			// No user, so let's check if we're creating a user account or a guest author.
-			if ( empty( $user['role'] ) ) {
+			if ( empty( $user['role'] ) || 'Guest Author' == $user['role'] ) {
 				// Create guest author
 				$guest_author = ( $this->dryrun ) ? true : $this->coauthorsplus->create_guest_author( $user );
 				
@@ -562,14 +581,14 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		$this->log( 'Importing user avatars...', 'info' );
 
 		// Do we log warnings to the screen?
-		$log_info    = false;
-		$log_warning = false;
+		$this->log_info    = false;
+		$this->log_warning = false;
 
 		if ( array_key_exists( 'dry-run', $assoc_args ) ) {
 			$this->dryrun = true;
 			$this->log( 'Performing a dry-run. No changes will be made.', 'info' );
-			$log_info    = 'info';
-			$log_warning = 'warning';
+			$this->log_info    = 'info';
+			$this->log_warning = 'warning';
 		}
 
 		// Make sure there is a path to CSV provided.
@@ -586,7 +605,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		// Start the progress bar (live run only).
 		$count = 0;
 		exec( ' wc -l ' . escapeshellarg( $args[0] ), $count );
-		$this->log( sprintf( 'Importing %d user avatars', $count[0] ), $log_info );
+		$this->log( sprintf( 'Importing %d user avatars', $count[0] ), $this->log_info );
 		if ( ! $this->dryrun ) {
 			$progress = \WP_CLI\Utils\make_progress_bar( sprintf( 'Importing %d user avatars', $count[0] ), $count[0] );
 		}
@@ -600,39 +619,16 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$progress->tick();
 			}
 
-			// Unpack the fields into the format expected by WordPress.
+			// Check we have an avatar URL.
 			$avatar_url = $row[10];
 			if ( empty( $avatar_url ) ) {
-				$this->log( sprintf( 'No avatar URL provided for user %s', $row[3] ), $log_warning );
+				$this->log( sprintf( 'No avatar URL provided for user %s', $row[3] ), $this->log_warning );
 				continue;
 			}
 			
-			$this->log( sprintf( 'Importing avatar %s to user %s', $row[10], $row[3] ), $log_info );
-
-			// Check that the user exists.
-			$user_id = $this->user_exists( $row[3] );
-			if ( ! $user_id ) {
-				$this->log( sprintf( 'User %s does not exist.', $row[3] ), $log_warning );
-				continue;
-			}
-
-			// Get the attachment if it already exists.
-			$attachment_id = $this->attachments->get_attachment_by_filename( basename( $avatar_url ) );
-			if ( ! $attachment_id ) {
-				// Download the image.
-				$attachment_id = ( $this->dryrun ) ? 1 : $this->attachments->import_external_file( $avatar_url );
-				if ( ! $attachment_id ) {
-					$this->log( sprintf( 'Failed to sideload image %s', $avatar_url ), $log_warning );
-					continue;
-				}
-			}
-
-			// Add the avatar to the user.
-			$attach = ( $this->dryrun ) ? true : $this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
-			if ( ! $attach ) {
-				$this->log( sprintf( 'Failed to add avatar to user %s', $row[3] ), $log_warning );
-				continue;
-			}
+			// Do the import.
+			$this->log( sprintf( 'Importing avatar %s to user %s', $avatar_url, $row[3] ), $this->log_info );
+			$this->import_user_avatar( $row[3], $avatar_url );
 
 		}
 
@@ -765,6 +761,41 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Import user avatar.
+	 * 
+	 * @param int    $user_id    The user ID.
+	 * @param string $avatar_url The URL of the avatar.
+	 * 
+	 * @return void
+	 */
+	private function import_user_avatar( $user_id, $avatar_url ) {
+		// Check that the user exists.
+		$user_id = $this->user_exists( $user_id );
+		if ( ! $user_id ) {
+			$this->log( sprintf( 'User %s does not exist.', $user_id ), $this->log_warning );
+			return;
+		}
+
+		// Get the attachment if it already exists.
+		$attachment_id = $this->attachments->get_attachment_by_filename( basename( $avatar_url ) );
+		if ( ! $attachment_id ) {
+			// Download the image.
+			$attachment_id = ( $this->dryrun ) ? 1 : $this->attachments->import_external_file( $avatar_url );
+			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+				$this->log( sprintf( 'Failed to sideload image %s', $avatar_url ), $this->log_warning );
+				return;
+			}
+		}
+
+		// Add the avatar to the user.
+		$attach = ( $this->dryrun ) ? true : $this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
+		if ( ! $attach ) {
+			$this->log( sprintf( 'Failed to add avatar to user %s', $user_id ), $this->log_warning );
+			return;
+		}
+	}
+
+	/**
 	 * Load XML from a file and convert to JSON.
 	 *
 	 * @param string $path Path to the XML file.
@@ -775,7 +806,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		// Check the XML file exists.
 		if ( ! file_exists( $path ) ) {
-			$this->log( sprintf( 'Failed to find log file at %s', $xml ), 'error' );
+			$this->log( sprintf( 'Failed to find log file at %s', $path ), 'error' );
 		}
 
 		// Load the XML so we can parse it.
@@ -1165,6 +1196,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		// Get the existing user object.
 		$user = get_user_by( 'id', $user_id );
 
+		// Separate the avatar out.
+		$user_avatar = isset( $user_data['user_avatar'] ) ? $user_data['user_avatar'] : null;
+		unset( $user_data['user_avatar'] );
+
 		// Check if we need to update the user.
 		$diff = strcmp( json_encode( $user_data ), json_encode( $user->to_array() ) );
 		if ( 0 !== $diff ) {
@@ -1174,6 +1209,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$this->log( sprintf( 'Failed to update user %s', $user->user_login ) );
 				$user_id = false;
 			}
+		}
+
+		// Also check if we need to update the avatar.
+		if ( ! $this->simple_local_avatars->user_has_avatar( $user_id ) && ! empty( $user_avatar ) ) {
+			$this->import_user_avatar( $user_id, $user_avatar );
 		}
 
 		return $user_id;
@@ -1187,18 +1227,25 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @return string The fixed role.
 	 */
 	private function fix_role( $role ) {
+		if ( 'Guest Author' == $role ) {
+			return $role;
+		}
+
 		switch ( $role ) {
 			case 'Authors':
 			case 'Author':
 				$role = 'author';
 				break;
 			case 'Contributors':
+			case 'Contributor':
 				$role = 'contributor';
 				break;
 			case 'Publishers':
+			case 'Publisher':
 				$role = 'editor';
 				break;
 			case 'Administrator':
+			case 'Administrators':
 				$role = 'administrator';
 				break;
 			default:
