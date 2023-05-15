@@ -87,7 +87,7 @@ class SettingsMigrator implements InterfaceCommand {
 					'type'        => 'assoc',
 					'name'        => 'output-dir',
 					'description' => 'Output directory full path (no ending slash).',
-					'optional'    => false,
+					'optional'    => true,
 					'repeating'   => false,
 				],
 			],
@@ -120,9 +120,6 @@ class SettingsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_export_customize_site_identity_settings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
-		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
-			WP_CLI::error( 'Invalid output dir.' );
-		}
 
 		WP_CLI::line( sprintf( 'Exporting site identity settings...' ) );
 
@@ -143,7 +140,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 *
 	 * @return bool Success.
 	 */
-	private function export_current_theme_site_identity( $output_dir ) {
+	private function export_current_theme_site_identity( $output_dir = null ) {
 		wp_cache_flush();
 
 		// Get theme mods with IDs.
@@ -169,11 +166,16 @@ class SettingsMigrator implements InterfaceCommand {
 			return false;
 		}
 
-		// Write JSON file.
-		$file = $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
-		WP_CLI::line( 'Writing to file ' . $file );
+		// Write JSON file or send to STDOUT.
+		if ( is_null( $output_dir ) ) {
+			WP_CLI::line( json_encode( $json_data ) );
+			return true;
+		} else {
+			$file = $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
+			WP_CLI::line( 'Writing to file ' . $file );
+			return file_put_contents( $file, json_encode( $json_data ) );
+		}
 
-		return file_put_contents( $file, json_encode( $json_data ) );
 	}
 
 	/**
