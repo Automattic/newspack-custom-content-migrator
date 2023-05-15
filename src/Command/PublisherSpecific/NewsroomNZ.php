@@ -700,10 +700,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 
 			$progress->finish();
-			file_put_contents( $missing_articles, '</articles>', FILE_APPEND );
-
 		}
-	}
+		
+		file_put_contents( $missing_articles, '</articles>', FILE_APPEND );
+	}	
 
 	/**
 	 * Import the post!
