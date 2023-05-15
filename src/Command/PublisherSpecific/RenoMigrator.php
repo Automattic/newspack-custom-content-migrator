@@ -465,7 +465,7 @@ class RenoMigrator implements InterfaceCommand {
 				$affected_posts[] = [
 					'ID' => $post_id,
 					'url' => get_permalink( $post_id ),
-				]
+				];
 			}
 
 		}
