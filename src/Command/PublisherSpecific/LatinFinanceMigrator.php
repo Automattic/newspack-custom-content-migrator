@@ -10,7 +10,7 @@ use \WP_CLI;
 use \WP_Query;
 
 /**
- * Custom migration scripts for Latin Finance (Umbraco / .NET / MSSQL / SQLServer)
+ * Custom migration scripts for Latin Finance (Umbraco / .NET / MSSQL / SQLServer).
  */
 class LatinFinanceMigrator implements InterfaceCommand {
 
