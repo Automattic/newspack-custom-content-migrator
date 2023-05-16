@@ -67,7 +67,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			[ $this, 'cmd_set_primary_categories' ],
 			[
 				'shortdesc' => 'Sets Yoast primary category from old content type.',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to process per batch. (Integer) (-1 => all)',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => 100,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batches',
+						'description' => 'Batches to process per run. (Integer) (-1 => all)',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => -1,
+					],
+				],
 			]
 		);
 
@@ -130,60 +147,32 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 */
 	public function cmd_set_primary_categories( $pos_args, $assoc_args ) {
 
+		$posts_per_batch = isset( $assoc_args[ 'posts-per-batch' ] ) ? (int) $assoc_args['posts-per-batch'] : 100;
+		$batches = isset( $assoc_args[ 'batches' ] ) ? (int) $assoc_args['batches'] : -1;
+
+		if( -1 > $posts_per_batch ) {
+			WP_CLI::error( "Posts per batch argument must be -1 or greater." );
+		}
+
+		if( -1 > $batches ) {
+			WP_CLI::error( "Batches argument must be -1 or greater." );
+		}
+
 		WP_CLI::line( "Doing latinfinance-set-primary-categories..." );
 
-		// get term ids for primary categories keyed by slug
-		$categories = array_flip( get_categories( [
-			'slug'   => [ 'daily-briefs', 'magazine', 'web-articles' ],
-			'fields' => 'id=>slug',
-		]));
+		// do each batch
+		for( $i = $batches; $i > 0 || $batches == -1;  $i-- ) {
 
-		// select all posts with old content type where primary category isn't set
-		$query = new WP_Query ( [
-			'posts_per_page' => -1,
-			'post_type'     => 'post',
-			'category__in'  => array_values( $categories ),
-			'fields'		=> 'ids',
-			'meta_query'    => [
-				[
-					'key'     => 'newspack_lf_content_type',
-					'compare' => 'EXISTS',
-				],
-				[
-					'key'     => '_yoast_wpseo_primary_category',
-					'compare' => 'NOT EXISTS',
-				],
-			]
-		]);
+			$count = $this->set_primary_categories( $posts_per_batch );
 
-		WP_CLI::line('Processing ' . $query->post_count . ' rows...');
-
-		while ( $query->have_posts() ) {
-
-			$query->the_post();
-
-			// there are limited cases where 'newspack_lf_content_type' could have multiple values
-			// - this is when the WXR importer saved different posts as one
-			// - for this code below, just use what ever value is returned
-			$content_type = get_post_meta( get_the_ID(), 'newspack_lf_content_type', true );
-
-			$category_id = null;
-			switch( $content_type ) {
-				case 'dailyBriefArticle': $category_id = $categories['daily-briefs']; break;
-				case 'magazineArticle': $category_id = $categories['magazine']; break;
-				case 'webArticle': $category_id = $categories['web-articles']; break;
+			if( 0 === $count ) {
+				WP_CLI::line('No more rows to process.');
+				break; // stop if no more rows
 			}
 
-			// this case should not happen
-			if( null === $category_id ) {
-				WP_CLI::error('Unknown old content type "' . $content_type . '", no category found.');
-			}
+			WP_CLI::line('Processed ' . $count . ' rows...');
 
-			update_post_meta( get_the_ID(), '_yoast_wpseo_primary_category', $category_id );
-
-		} // foreach
-
-		wp_reset_postdata();
+		}
 
 		WP_CLI::success( 'Done' );
 	}
@@ -697,6 +686,71 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		catch( PDOException $e ) {  
 			WP_CLI::error( 'SQL Server error ' . $e->getCode() . ': ' . $e->getMessage() );
 		}  
+
+	}
+
+	/**
+	 * Set Yoast primary categories from old content types
+	 *
+	 * @param int $posts_per_page
+	 * @return int $count posts processed
+	 */
+	private function set_primary_categories( $posts_per_page ) {
+
+		// get term ids for primary categories keyed by slug
+		$categories = array_flip( get_categories( [
+			'slug'   => [ 'daily-briefs', 'magazine', 'web-articles' ],
+			'fields' => 'id=>slug',
+		]));
+
+		// select posts with old content type where primary category isn't set
+		$query = new WP_Query ( [
+			'posts_per_page' => $posts_per_page,
+			'post_type'     => 'post',
+			'category__in'  => array_values( $categories ),
+			'fields'		=> 'ids',
+			'meta_query'    => [
+				[
+					'key'     => 'newspack_lf_content_type',
+					'compare' => 'EXISTS',
+				],
+				[
+					'key'     => '_yoast_wpseo_primary_category',
+					'compare' => 'NOT EXISTS',
+				],
+			]
+		]);
+
+		$count = $query->post_count;
+
+		while ( $query->have_posts() ) {
+
+			$query->the_post();
+
+			// there are limited cases where 'newspack_lf_content_type' could have multiple values
+			// - this is when the WXR importer saved different posts as one
+			// - for this code below, just use what ever value is returned
+			$content_type = get_post_meta( get_the_ID(), 'newspack_lf_content_type', true );
+
+			$category_id = null;
+			switch( $content_type ) {
+				case 'dailyBriefArticle': $category_id = $categories['daily-briefs']; break;
+				case 'magazineArticle': $category_id = $categories['magazine']; break;
+				case 'webArticle': $category_id = $categories['web-articles']; break;
+			}
+
+			// this case should not happen
+			if( null === $category_id ) {
+				WP_CLI::error('Unknown old content type "' . $content_type . '", no category found.');
+			}
+
+			update_post_meta( get_the_ID(), '_yoast_wpseo_primary_category', $category_id );
+
+		} // foreach
+
+		if( $count > 0) wp_reset_postdata();
+
+		return $count;
 
 	}
 
