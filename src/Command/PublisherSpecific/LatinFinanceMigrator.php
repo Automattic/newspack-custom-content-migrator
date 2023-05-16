@@ -7,6 +7,7 @@ use \Newspack_WXR_Exporter;
 use \PDO, \PDOException;
 use \stdClass;
 use \WP_CLI;
+use \WP_Query;
 
 /**
  * Custom migration scripts for Latin Finance (Umbraco / .NET / MSSQL / SQLServer)
@@ -51,6 +52,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public function register_commands() {
+
 		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-export-from-mssql',
 			[ $this, 'cmd_export_from_mssql' ],
@@ -59,6 +61,16 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-set-primary-categories',
+			[ $this, 'cmd_set_primary_categories' ],
+			[
+				'shortdesc' => 'Sets Yoast primary category from old content type.',
+				'synopsis'  => [],
+			]
+		);
+
 	}
 
 	/**
@@ -108,6 +120,72 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// export categories
 		$this->export_categories();
 
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-set-primary-categories'.
+	 *
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_set_primary_categories( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-set-primary-categories..." );
+
+		// get term ids for primary categories keyed by slug
+		$categories = array_flip( get_categories( [
+			'slug'   => [ 'daily-briefs', 'magazine', 'web-articles' ],
+			'fields' => 'id=>slug',
+		]));
+
+		// select all posts with old content type where primary category isn't set
+		$query = new WP_Query ( [
+			'posts_per_page' => -1,
+			'post_type'     => 'post',
+			'category__in'  => array_values( $categories ),
+			'fields'		=> 'ids',
+			'meta_query'    => [
+				[
+					'key'     => 'newspack_lf_content_type',
+					'compare' => 'EXISTS',
+				],
+				[
+					'key'     => '_yoast_wpseo_primary_category',
+					'compare' => 'NOT EXISTS',
+				],
+			]
+		]);
+
+		WP_CLI::line('Processing ' . $query->post_count . ' rows...');
+
+		while ( $query->have_posts() ) {
+
+			$query->the_post();
+
+			// there are limited cases where 'newspack_lf_content_type' could have multiple values
+			// - this is when the WXR importer saved different posts as one
+			// - for this code below, just use what ever value is returned
+			$content_type = get_post_meta( get_the_ID(), 'newspack_lf_content_type', true );
+
+			$category_id = null;
+			switch( $content_type ) {
+				case 'dailyBriefArticle': $category_id = $categories['daily-briefs']; break;
+				case 'magazineArticle': $category_id = $categories['magazine']; break;
+				case 'webArticle': $category_id = $categories['web-articles']; break;
+			}
+
+			// this case should not happen
+			if( null === $category_id ) {
+				WP_CLI::error('Unknown old content type "' . $content_type . '", no category found.');
+			}
+
+			update_post_meta( get_the_ID(), '_yoast_wpseo_primary_category', $category_id );
+
+		} // foreach
+
+		wp_reset_postdata();
+
+		WP_CLI::success( 'Done' );
 	}
 
 
