@@ -86,6 +86,5 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
-		Command\PublisherSpecific\LatinFinanceMigrator::class,
 	)
 );
