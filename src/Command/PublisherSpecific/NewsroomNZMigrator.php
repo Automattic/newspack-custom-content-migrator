@@ -49,7 +49,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Simple Local Avatars logic.
-	 * 
+	 *
 	 * @var null|SimpleLocalAvatars
 	 */
 	private $simple_local_avatars;
@@ -63,18 +63,18 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Info log level string.
-	 * 
+	 *
 	 * Set to false to avoid logging to the screen. E.g. while using a progress bar.
-	 * 
+	 *
 	 * @var string|bool
 	 */
 	private $log_info;
 
 	/**
 	 * Warning log level string.
-	 * 
+	 *
 	 * Set to false to avoid logging to the screen. E.g. while using a progress bar.
-	 * 
+	 *
 	 * @var string|bool
 	 */
 	private $log_warning;
@@ -282,7 +282,284 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				]
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-fix-authors2',
+			[ $this, 'cmd_fix_authors2' ],
+			[
+				'shortdesc' => 'Recreates all users.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-csv-file',
+						'description' => 'Convert spreadsheet to CSV by loading it to GDocs > Export > CSV.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
 
+	/**
+	 * Loads XML file with users and creates them.
+	 *
+	 * @param $pos_args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_authors2( $pos_args, $assoc_args ) {
+		// Get users from CSV.
+		$path = $assoc_args['users-csv-file'];
+		if ( ! file_exists( $path ) ) {
+			WP_CLI::error( 'File does not exist: ' . $path );
+		}
+
+
+		// Adminnewspack used to reassign posts authors.
+		$adminnewspack_wpuser = get_user_by( 'email', 'newspack@a8c.com' );
+		if ( ! $adminnewspack_wpuser ) {
+			WP_CLI::error( 'adminnewspack not found' );
+		}
+
+
+		/**
+		 * Will not use CSV's "Role" column, using these hardcoded roles instead.
+		 */
+		$data_admins = [
+			'tim.murphy@newsroom.co.nz',
+			'Cassandra.Mason@newsroom.co.nz',
+			'Janine.Sinclair@newsroom.co.nz',
+			'karen.duggan@newsroom.co.nz',
+		];
+		$data_editors = [
+			'Jonathan.Milne@newsroom.co.nz',
+			'sam.sachdeva@newsroom.co.nz',
+			'Chris.Hall@newsroom.co.nz',
+			'David.Williams@newsroom.co.nz',
+		];
+		$data_authors = [
+			'jo.moir@newsroom.co.nz',
+			'marc.daalder@newsroom.co.nz',
+		];
+		$data_contributors = [
+			'Nikki.Mandow@newsroom.co.nz',
+			'andrew.bevin@newsroom.co.nz',
+			'hugo.stewart@newsroom.co.nz',
+			'matthew.scott@newsroom.co.nz',
+			'stephen11@xtra.co.nz',
+			'rod.oram@nz2050.com',
+			'andrew.patterson@newsroom.co.nz',
+			'bonnie.harrison@newsroom.co.nz',
+			'bonnie.sumner@newsroom.co.nz',
+			'Sarah.Robson@newsroom.co.nz',
+			'sharon.brettkelly@newsroom.co.nz',
+			'Alexia.Russell@newsroom.co.nz',
+			'tom.kitchin@newsroom.co.nz',
+			'aaron.smale@newsroom.co.nz',
+			'Emma.Hatton@newsroom.co.nz',
+			'Paul.Enticott@newsroom.co.nz',
+			'mark.jennings@newsroom.co.nz',
+			'anthony@doesburg.net.nz',
+			'merryn.anderson@newsroom.co.nz',
+			'Suzanne.McFadden@newsroom.co.nz',
+		];
+
+
+		// \WP_CLI::line( 'Loading existing users...' );
+		// $existing_wpusers_all = get_users();
+		// $existing_gas_all = $this->cap_logic->get_all_gas();
+		//      // $filtered_existing_wpuser = $this->filter_wpuser_by_email( $existing_wpusers_all, $row['Email'] );
+		//      // $filtered_existing_ga = $this->filter_existing_gas_all( $existing_gas_all, $row['Email'] );
+
+
+		// Loop through CSV.
+		$handle = fopen( $path, 'r' );
+		$header = fgetcsv( $handle, 0 );
+		$i = 0;
+		while ( ! feof( $handle ) ) {
+			$i++;
+			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
+
+
+			// Get correct role.
+			if ( in_array( $row['Email'], $data_admins ) ) {
+				$correct_role = 'administrator';
+			} elseif ( in_array( $row['Email'], $data_editors ) ) {
+				$correct_role = 'editor';
+			} elseif ( in_array( $row['Email'], $data_authors ) ) {
+				$correct_role = 'author';
+			} elseif ( in_array( $row['Email'], $data_contributors ) ) {
+				$correct_role = 'contributor';
+			} else {
+				// Will be GA.
+				$correct_role = false;
+			}
+
+
+			// Load existing WP user and GA.
+			$existing_wpuser         = get_user_by( 'email', $row['Email'] );
+			$existing_ga_displayname = $this->cap_logic->get_guest_author_by_display_name( $row['First Name'] . ' ' . $row['Last Name'] );
+			$existing_ga_email       = $this->cap_logic->get_guest_author_by_email( $row['Email'] );
+			// Validate loaded GA objects -- fetching by email and display_name should be same.
+			if ( ( $existing_ga_displayname && ! $existing_ga_email ) || ( ! $existing_ga_displayname && $existing_ga_email ) ) {
+				$this->logger->log( 'nnzfixusers__loaded_gas_mismatch.log', 'GA mismatch: ' . $row['Email'] );
+				continue;
+			}
+
+
+			// Get some user row data.
+			$display_name = $row['First Name']
+			                . ( ( ! empty( $row['First Name'] ) && ! empty( $row['Last Name'] ) ) ? ' ' : '' )
+			                . $row['Last Name'];
+
+
+			/**
+			 * Update or create WPUser or GA.
+			 */
+			if ( false !== $correct_role ) {
+				// Should be WPUser.
+
+				// If WPUser exists, update its role(s).
+				if ( $existing_wpuser ) {
+					$user_updated = false;
+
+					// Get roles.
+					$current_roles = (array) $existing_wpuser->roles;
+					$remove_roles  = array_diff( $current_roles, [ $correct_role ] );
+					// Remove extra roles.
+					foreach ( $remove_roles as $remove_role ) {
+						$user_updated = true;
+						$existing_wpuser->remove_role( $remove_role );
+					}
+					// Set correct role.
+					if ( ! in_array( $correct_role, $current_roles ) ) {
+						$user_updated = true;
+						$existing_wpuser->set_role( $correct_role );
+					}
+
+					// Log.
+					if ( true === $user_updated ) {
+						$this->logger->log( 'nnzfixusers__wpusers_existingchanged.log', 'Updated WPUser ' . $existing_wpuser->ID );
+					} else {
+						$this->logger->log( 'nnzfixusers__wpusers_existingunchanged.log', 'Unchanged WPUser ' . $existing_wpuser->ID );
+					}
+
+				} else {
+					// If WPUser does not exist, create it.
+
+					$created_wpuser_id = wp_create_user(
+						$row['Username'],
+						wp_generate_password( 12, true ),
+						$row['Email']
+					);
+					if ( is_wp_error( $created_wpuser_id ) || ! $created_wpuser_id ) {
+						$this->logger->log( 'nnzfixusers__wpusers_createfailed.log', 'Error creating user ' . $row['Email'] . ' ' . $created_wpuser_id->get_error_message() );
+						continue;
+					}
+					wp_update_user( [
+						'ID' => $created_wpuser_id,
+						'role' => $correct_role,
+						'first_name' => $row['First Name'],
+						'last_name' => $row['Last Name'],
+						'user_login' => $row['Username'],
+						'user_nicename' => $display_name,
+						'display_name' => $display_name,
+						'user_email' => $row['Email'],
+						'description' => $row['Bio'],
+					] );
+
+					$this->logger->log( 'nnzfixusers__wpusers_newlycreated.log', 'Created WPUser ' . $created_wpuser_id . ' ' . $row['Email'] );
+				}
+
+				// Delete existing GA.
+				if ( $existing_ga_displayname ) {
+					$deleted = $this->cap_logic->delete_ga( $existing_ga_displayname->ID );
+					if ( is_wp_error( $deleted ) ) {
+						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_displayname->ID . ' ' . $deleted->get_error_message() );
+						continue;
+					} else {
+						$this->logger->log( 'nnzfixusers__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_displayname->ID . ' ' . $row['Email'] );
+					}
+				}
+				if ( $existing_ga_email && ( $existing_ga_email->ID !== $existing_ga_displayname->ID ) ) {
+					$deleted = $this->cap_logic->delete_ga( $existing_ga_email->ID );
+					if ( is_wp_error( $deleted ) ) {
+						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_displayname->ID . ' ' . $deleted->get_error_message() );
+						continue;
+					} else {
+						$this->logger->log( 'nnzfixusers__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_email->ID . ' ' . $row['Email'] );
+					}
+				}
+
+			} else {
+				// Should be GA.
+
+				// If GA exists, leave it as is.
+				if ( $existing_ga_email ) {
+					$this->logger->log( 'nnzfixusers__gas_existing.log', $row['Email'] );
+				} else {
+					// If GA does not exist, create it.
+					$create_guest_author_args = [
+						'display_name' => $display_name,
+						'user_login' => $row['Username'],
+						'first_name' => $row['First Name'],
+						'last_name' => $row['Last Name'],
+						'user_email' => $row['Email'],
+						'description' => $row['Bio'],
+					];
+					$ga_id = $this->cap_logic->create_guest_author( $create_guest_author_args );
+
+					$this->logger->log( 'nnzfixusers__gas_created.log', 'Created GA: ' . $ga_id . ' ' . $row['Email'] );
+				}
+
+				// Delete existing WPUser, and keep its posts temporarily reassign them to adminnewspack.
+				$this->logger->log( 'nnzfixusers__gas_wpusersdeleted.log', 'Deleted WPUser ' . $existing_wpuser->ID . ' ' . $row['Email'] );
+				$deleted = wp_delete_user( $existing_wpuser->ID, $adminnewspack_wpuser->ID );
+				if ( true !== $deleted ) {
+					$this->logger->log( 'nnzfixusers__gas_errordeletingwpusers.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
+				}
+			}
+
+		}
+
+
+		// Loop through all posts and reassign authors.
+		// ...
+	}
+
+	/**
+	 * Loops through given array of WPUsers and returns the one with the given email.
+	 *
+	 * @param $existing_wpusers_all Array of GA objects.
+	 * @param $email                Email.
+	 *
+	 * @return WPUser|null
+	 */
+	private function filter_wpuser_by_email( $existing_wpusers_all, $email ) {
+		foreach ( $existing_wpusers_all as $existing_wpuser ) {
+			if ( $existing_wpuser->user_email === $email ) {
+				return $existing_wpuser;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Loops through given array of GA objects and returns the one with the given email.
+	 *
+	 * @param $existing_gas_all Array of GA objects.
+	 * @param $email            Email.
+	 *
+	 * @return object|null
+	 */
+	private function filter_existing_gas_all( $existing_gas_all, $email ) {
+		foreach ( $existing_gas_all as $existing_ga ) {
+			if ( $existing_ga->user_email === $email ) {
+				return $existing_ga;
+			}
+		}
+
+		return null;
 	}
 
 	/**
@@ -550,7 +827,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			if ( empty( $user['role'] ) || 'Guest Author' == $user['role'] ) {
 				// Create guest author
 				$guest_author = ( $this->dryrun ) ? true : $this->coauthorsplus->create_guest_author( $user );
-				
+
 				// Now add the meta data to the guest author.
 				if ( ! $this->dryrun ) {
 					add_post_meta( $guest_author, self::META_PREFIX . 'import_data', $row );
@@ -571,10 +848,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Callable for `newspack-content-migrator newsroom-nz-import-user-avatars`
-	 * 
+	 *
 	 * @param array $args       The arguments passed to the command.
 	 * @param array $assoc_args The associative arguments passed to the command.
-	 * 
+	 *
 	 * @return void
 	 */
 	public function cmd_import_user_avatars( $args, $assoc_args ){
@@ -625,7 +902,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$this->log( sprintf( 'No avatar URL provided for user %s', $row[3] ), $this->log_warning );
 				continue;
 			}
-			
+
 			// Do the import.
 			$this->log( sprintf( 'Importing avatar %s to user %s', $avatar_url, $row[3] ), $this->log_info );
 			$this->import_user_avatar( $row[3], $avatar_url );
@@ -639,10 +916,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Callable for `newspack-content-migrator newsroom-nz-find-missing-articles`
-	 * 
+	 *
 	 * @param array $args       The arguments passed to the command.
 	 * @param array $assoc_args The associative arguments passed to the command.
-	 * 
+	 *
 	 * @return void
 	 */
 	public function cmd_find_missing_articles( $args, $assoc_args ) {
@@ -701,9 +978,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 			$progress->finish();
 		}
-		
+
 		file_put_contents( $missing_articles, '</articles>', FILE_APPEND );
-	}	
+	}
 
 	/**
 	 * Import the post!
@@ -762,10 +1039,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Import user avatar.
-	 * 
+	 *
 	 * @param int    $user_id    The user ID.
 	 * @param string $avatar_url The URL of the avatar.
-	 * 
+	 *
 	 * @return void
 	 */
 	private function import_user_avatar( $user_id, $avatar_url ) {
@@ -854,7 +1131,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @return string XML string.
 	 */
 	private function article_to_xml( $article ) {
-		
+
 		$xml = new \SimpleXMLElement( '<article></article>' );
 		$this->array_to_xml( $article, $xml );
 		return $xml->asXML();
@@ -872,7 +1149,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 		}
 	}
-	
+
 
 	/**
 	 * Determine which formatter to use for each field.
@@ -968,7 +1245,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		if ( is_a( $user, 'WP_User' ) ) {
 			$user_id = $user->ID;
 		} else {
-			
+
 			// Set the user details.
 			$user_email   = $value;
 			$first_name   = ( ! empty( $fields['author_firstname' ] ) ) ? $fields['author_firstname'] : '';
@@ -1168,9 +1445,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Get the user based on an email address.
-	 * 
+	 *
 	 * @param string $email Email address to search on.
-	 * 
+	 *
 	 * @return int|bool The user ID if found, false if not.
 	 */
 	private function user_exists( $email ) {
@@ -1180,13 +1457,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Update a user's details if we need to.
-	 * 
+	 *
 	 * @param array $user_data The user data to update.
-	 * 
+	 *
 	 * @return WP_User|false The updated user object, false if failed.
 	 */
 	private function maybe_update_user( $user_data ) {
-		
+
 		// Check if the user exists.
 		$user_id = $this->user_exists( $user_data['user_email'] );
 		if ( ! $user_id ) {
@@ -1221,9 +1498,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 	/**
 	 * Fix the role values from the import spreadsheet.
-	 * 
+	 *
 	 * @param string $role The role to fix.
-	 * 
+	 *
 	 * @return string The fixed role.
 	 */
 	private function fix_role( $role ) {
