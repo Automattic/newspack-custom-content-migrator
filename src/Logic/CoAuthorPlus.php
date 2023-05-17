@@ -178,6 +178,17 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets the Guest Author object by `email` (as defined by the CAP plugin).
+	 *
+	 * @param string $ga_email Guest Author email.
+	 *
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_email( string $ga_email ) {
+		return $this->coauthors_guest_authors->get_guest_author_by( 'email', $ga_email );
+	}
+
+	/**
 	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
 	 *
 	 * @param string $display_name Guest Author ID.
