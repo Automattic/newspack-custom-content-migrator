@@ -298,6 +298,95 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-fix-authors2-reassign-to-posts',
+			[ $this, 'cmd_fix_authors2_reassign_to_posts' ],
+			[
+				'shortdesc' => 'Recreates all users.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'path-to-xmls',
+						'description' => 'Full path to XML files, no ending slash.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	public function cmd_fix_authors2_reassign_to_posts( $pos_args, $assoc_args ) {
+		$path = $assoc_args['path-to-xmls'];
+
+		global $wpdb;
+
+		// Get all XML files from the directory.
+		$files = glob( $path . '/*.xml' );
+		$excluded_files = [
+			'assets.xml',
+		];
+		foreach ( $files as $file ) {
+			if ( in_array( $file, $excluded_files ) ) {
+				continue;
+			}
+
+			WP_CLI::success( $file );
+			$articles = $this->xml_to_json( $file );
+			foreach ( $articles as $key_article => $article ) {
+				WP_CLI::line( sprintf( '(%s)/(%s) %s', $key_article + 1, count( $articles ), $article['guid'] ) );
+
+				// Get post with guid postmeta.
+				$post_id = $wpdb->get_var( $wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'newspack_nnz_guid' AND meta_value = %s",
+					$article['guid']
+				));
+				if ( ! $post_id ) {
+					$this->logger->log( 'nnzfixusers__reassignauthors_guidnotfound.log', 'Post GUID not found ' . $article['guid'] );
+					continue;
+				}
+
+				// Work with lowercase email.
+				$email = strtolower( $article['author_email'] );
+
+				WP_CLI::line( sprintf( 'Post ID %s author email %s', $post_id, $email ) );
+				$author_assigned = false;
+
+				// Assign WPUser or GA.
+				$existing_wpuser = get_user_by( 'email', $email );
+				if ( $existing_wpuser ) {
+
+					// Set WPUser author.
+					$wpdb->update( $wpdb->posts, [ 'post_author' => $existing_wpuser->ID ], [ 'ID' => $post_id ] );
+
+					$author_assigned = true;
+					$this->logger->log( 'nnzfixusers__reassignauthors_assignedwpuser.log', 'Post ID ' . $post_id . ' WP User ' . $existing_wpuser->ID );
+
+				} else {
+
+					// Set GA author.
+					$existing_ga_email = $this->coauthorsplus->get_guest_author_by_email( $email );
+
+					if ( $existing_ga_email ) {
+						$this->coauthorsplus->assign_guest_authors_to_post(
+							[ $existing_ga_email->ID ],
+							$post_id,
+							false
+						);
+
+						$author_assigned = true;
+						$this->logger->log( 'nnzfixusers__reassignauthors_assignedga.log', 'Post ID ' . $post_id . ' GA ' . $existing_ga_email->ID );
+					}
+				}
+
+				if ( false === $author_assigned ) {
+					WP_CLI::warning( 'Author not assigned to post.' );
+					$this->logger->log( 'nnzfixusers__reassignauthors_errornotassigned.log', $post_id . ' GUID ' . $article['guid'] . ' email ' . $email . ' authorfirstname ' . $article['author_firstname'] . ' author_firstname ' . $article['author_firstname'] . ' author_lastname ' . $article['author_lastname'] );
+				}
+
+				$d = 1;
+			}
+		}
 	}
 
 	/**
@@ -410,6 +499,16 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 			WP_CLI::line( "($i)/($total_lines) " . $email );
 
+
+// ~~~ DEV helper.
+// $check_emails = [
+// ];
+// // 'xxx Dave Frame',
+// // if ( $i < 15008) {
+// if ( ! in_array( strtolower($email), $check_emails ) ) {
+// 	WP_CLI::line( "Skipping..." );
+// 	continue;
+// }
 
 			// Get correct role.
 			if ( in_array( $email, $data_admins ) ) {
@@ -537,7 +636,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 
 		// Next loop through all posts and reassign authors.
-		WP_CLI::line( "To finish up, call command to reassign authors ``" );
+		WP_CLI::line( "To finish up, run this command to reassign authors to existing posts `newspack-content-migrator newsroom-nz-fix-authors2-reassign-to-posts --path-to-xmls=`" );
 		// ...
 
 	}
