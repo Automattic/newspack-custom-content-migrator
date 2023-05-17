@@ -7,6 +7,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 /* External dependencies */
 use stdClass;
@@ -46,6 +47,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @var null|CoAuthorsPlus
 	 */
 	private $coauthorsplus;
+
+	/**
+	 * @var Posts Logic.
+	 */
+	private $posts_logic;
 
 	/**
 	 * Simple Local Avatars logic.
@@ -118,6 +124,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		$this->coauthorsplus = new CoAuthorPlus();
 
 		$this->simple_local_avatars = new SimpleLocalAvatars();
+
+		$this->posts_logic = new Posts();
 
 		// Define where each XML field should import to.
 		$this->core_fields_mapping = [
@@ -303,88 +311,53 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			[ $this, 'cmd_fix_authors2_reassign_authors_for_all_existing_posts' ],
 			[
 				'shortdesc' => 'Recreates all users.',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'path-to-xmls',
-						'description' => 'Full path to XML files, no ending slash.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-				],
 			]
 		);
 	}
 
 	public function cmd_fix_authors2_reassign_authors_for_all_existing_posts( $pos_args, $assoc_args ) {
-		$path = $assoc_args['path-to-xmls'];
-
 		global $wpdb;
 
-		// Get all XML files from the directory.
-		$files = glob( $path . '/*.xml' );
-		$excluded_files = [
-			'assets.xml',
-		];
-		foreach ( $files as $file ) {
-			if ( in_array( $file, $excluded_files ) ) {
-				continue;
-			}
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '(%s)/(%s) %s', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
-			WP_CLI::success( $file );
-			$articles = $this->xml_to_json( $file );
-			foreach ( $articles as $key_article => $article ) {
-				WP_CLI::line( sprintf( '(%s)/(%s) %s', $key_article + 1, count( $articles ), $article['guid'] ) );
+			$newspack_nnz_import_data = get_post_meta( $post_id, 'newspack_nnz_import_data', true );
 
-				// Get post with guid postmeta.
-				$post_id = $wpdb->get_var( $wpdb->prepare(
-					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'newspack_nnz_guid' AND meta_value = %s",
-					$article['guid']
-				));
-				if ( ! $post_id ) {
-					$this->logger->log( 'nnzfixusers__reassignauthors_guidnotfound.log', 'Post GUID not found ' . $article['guid'] );
-					continue;
-				}
+			// Work with lowercase emails.
+			$email = strtolower( $newspack_nnz_import_data['author_email'] );
 
-				// Work with lowercase email.
-				$email = strtolower( $article['author_email'] );
+			// Assign WPUser or GA.
+			$author_assigned = false;
+			$existing_wpuser = get_user_by( 'email', $email );
+			if ( $existing_wpuser ) {
 
-				WP_CLI::line( sprintf( 'Post ID %s author email %s', $post_id, $email ) );
-				$author_assigned = false;
+				// Set WPUser author.
+				$wpdb->update( $wpdb->posts, [ 'post_author' => $existing_wpuser->ID ], [ 'ID' => $post_id ] );
 
-				// Assign WPUser or GA.
-				$existing_wpuser = get_user_by( 'email', $email );
-				if ( $existing_wpuser ) {
+				$author_assigned = true;
+				$this->logger->log( 'nnzfixusers__reassignauthors_assignedwpuser.log', sprintf( 'PostID %d assigned WPUser %d %s', $post_id, $existing_wpuser->ID, $email ) );
 
-					// Set WPUser author.
-					$wpdb->update( $wpdb->posts, [ 'post_author' => $existing_wpuser->ID ], [ 'ID' => $post_id ] );
+			} else {
+
+				// Set GA author.
+				$existing_ga_email = $this->coauthorsplus->get_guest_author_by_email( $email );
+
+				if ( $existing_ga_email ) {
+					$this->coauthorsplus->assign_guest_authors_to_post(
+						[ $existing_ga_email->ID ],
+						$post_id,
+						false
+					);
 
 					$author_assigned = true;
-					$this->logger->log( 'nnzfixusers__reassignauthors_assignedwpuser.log', 'Post ID ' . $post_id . ' WP User ' . $existing_wpuser->ID );
-
-				} else {
-
-					// Set GA author.
-					$existing_ga_email = $this->coauthorsplus->get_guest_author_by_email( $email );
-
-					if ( $existing_ga_email ) {
-						$this->coauthorsplus->assign_guest_authors_to_post(
-							[ $existing_ga_email->ID ],
-							$post_id,
-							false
-						);
-
-						$author_assigned = true;
-						$this->logger->log( 'nnzfixusers__reassignauthors_assignedga.log', 'Post ID ' . $post_id . ' GA ' . $existing_ga_email->ID );
-					}
+					$this->logger->log( 'nnzfixusers__reassignauthors_assignedga.log', sprintf( 'PostID %d assigned GA %d %s', $post_id, $existing_ga_email->ID, $email ) );
 				}
+			}
 
-				if ( false === $author_assigned ) {
-					WP_CLI::warning( 'Author not assigned to post.' );
-					$this->logger->log( 'nnzfixusers__reassignauthors_errornotassigned.log', $post_id . ' GUID ' . $article['guid'] . ' email ' . $email . ' authorfirstname ' . $article['author_firstname'] . ' author_firstname ' . $article['author_firstname'] . ' author_lastname ' . $article['author_lastname'] );
-				}
-
-				$d = 1;
+			if ( false === $author_assigned ) {
+				WP_CLI::warning( 'Author not assigned to post.' );
+				$this->logger->log( 'nnzfixusers__reassignauthors_errornotassigned.log', sprintf( "PostId %d not found user email %s", $post_id, $email ) );
 			}
 		}
 	}
@@ -636,7 +609,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 
 		// Next loop through all posts and reassign authors.
-		WP_CLI::line( "To finish up, run this command to reassign authors to existing posts `newspack-content-migrator newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts --path-to-xmls=`" );
+		WP_CLI::line( "To finish up, run this command to reassign authors to existing posts `newspack-content-migrator newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts`" );
 		// ...
 
 	}
