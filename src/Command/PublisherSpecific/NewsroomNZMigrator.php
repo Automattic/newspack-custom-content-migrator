@@ -301,7 +301,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Loads XML file with users and creates them.
+	 * Second version of fixing authors.
+	 * This creates Loads CSV (from latest XML converted to CSV) with users and updates/creates them.
 	 *
 	 * @param $pos_args
 	 * @param $assoc_args
@@ -380,6 +381,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$i++;
 			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
 			WP_CLI::line( "($i)/($total_lines) " . $row['Email'] );
+
 
 			// Get correct role.
 			if ( in_array( $row['Email'], $data_admins ) ) {
@@ -527,6 +529,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				}
 			}
 		}
+
+
+		WP_CLI::line( "Done. Note that 'total number of lines' is leteral and does not represent total CSV records." );
 
 
 		// Next loop through all posts and reassign authors.
