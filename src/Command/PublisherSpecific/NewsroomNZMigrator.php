@@ -365,11 +365,30 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		];
 
 
-		// \WP_CLI::line( 'Loading existing users...' );
-		// $existing_wpusers_all = get_users();
-		// $existing_gas_all = $this->coauthorsplus->get_all_gas();
-		//      // $filtered_existing_wpuser = $this->filter_wpuser_by_email( $existing_wpusers_all, $email );
-		//      // $filtered_existing_ga = $this->filter_existing_gas_all( $existing_gas_all, $email );
+		// Delete existing WPUsers and GAs.
+		\WP_CLI::line( 'Deleting all existing users except adminnewspack...' );
+		$existing_wpusers_all = get_users();
+		foreach ( $existing_wpusers_all as $key_existing_wpuser => $existing_wpuser ) {
+			WP_CLI::line( $key_existing_wpuser + 1 . '/' . count( $existing_wpusers_all ) . ' Deleting ' . $existing_wpuser->ID );
+			if ( $existing_wpuser->ID == $adminnewspack_wpuser->ID ) {
+				WP_CLI::line( 'Skipping adminnewspack...' );
+				continue;
+			}
+			$deleted = wp_delete_user( $existing_wpuser->ID, $adminnewspack_wpuser->ID );
+			if ( true !== $deleted ) {
+				$this->logger->log( 'nnzfixusers__deletewpusers_error.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
+			}
+		}
+
+		\WP_CLI::line( 'Deleting allGAs...' );
+		$existing_gas_all = $this->coauthorsplus->get_all_gas();
+		foreach ( $existing_gas_all as $key_existing_ga => $existing_ga ) {
+			WP_CLI::line( $key_existing_ga + 1 . '/' . count( $existing_gas_all ) . ' Deleting ' . $existing_ga->ID );
+			$deleted = $this->coauthorsplus->delete_ga( $existing_ga->ID );
+			if ( is_wp_error( $deleted ) ) {
+				$this->logger->log( 'nnzfixusers__deletegas_error.log', 'Failed to delete GA ' . $existing_ga->ID . ' ' . $deleted->get_error_message() );
+			}
+		}
 
 
 		// Loop through CSV.
@@ -387,7 +406,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			                . $row['Last Name'];
 			// Use lower case since differently cased emails may be given in different sources.
 			$email = strtolower( $row['Email'] );
-
 
 
 			WP_CLI::line( "($i)/($total_lines) " . $email );
@@ -410,17 +428,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 			// Load existing WP user and GA.
 			$existing_wpuser         = get_user_by( 'email', $email );
-			$existing_ga_displayname = $this->coauthorsplus->get_guest_author_by_display_name( $row['First Name'] . ' ' . $row['Last Name'] );
-			if ( ! $existing_ga_displayname ) {
-				// Could have been created by Phil not taking into account the space difference.
-				$existing_ga_displayname = $this->coauthorsplus->get_guest_author_by_display_name( $display_name );
-			}
 			$existing_ga_email       = $this->coauthorsplus->get_guest_author_by_email( $email );
-			// Validate loaded GA objects -- fetching by email and display_name should be same.
-			if ( ( $existing_ga_displayname && $existing_ga_email ) && ( $existing_ga_displayname->ID != $existing_ga_email->ID ) ) {
-				$this->logger->log( 'nnzfixusers__loaded_gas_mismatch.log', 'GA mismatch: GA_by_display_name ' . $existing_ga_displayname->ID . ' GA_by_email ' . $existing_ga_email->ID );
-				continue;
-			}
 
 
 			/**
@@ -482,19 +490,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				}
 
 				// Delete existing GA(s).
-				if ( $existing_ga_displayname ) {
-					$deleted = $this->coauthorsplus->delete_ga( $existing_ga_displayname->ID );
-					if ( is_wp_error( $deleted ) ) {
-						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_displayname->ID . ' ' . $deleted->get_error_message() );
-						continue;
-					} else {
-						$this->logger->log( 'nnzfixusers__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_displayname->ID . ' ' . $email );
-					}
-				}
-				if ( $existing_ga_email && ( $existing_ga_email->ID !== $existing_ga_displayname->ID ) ) {
+				if ( $existing_ga_email ) {
 					$deleted = $this->coauthorsplus->delete_ga( $existing_ga_email->ID );
 					if ( is_wp_error( $deleted ) ) {
-						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_displayname->ID . ' ' . $deleted->get_error_message() );
+						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_email->ID . ' ' . $deleted->get_error_message() );
 						continue;
 					} else {
 						$this->logger->log( 'nnzfixusers__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_email->ID . ' ' . $email );
@@ -534,11 +533,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 		}
 
-		WP_CLI::line( "Done. Note that 'total number of lines' is leteral and does not represent total CSV records." );
+		WP_CLI::line( "Done. Note that 'total number of lines' " . $total_lines . " is leteral for CSV file and does not represent total CSV records." );
 
 
 		// Next loop through all posts and reassign authors.
+		WP_CLI::line( "To finish up, call command to reassign authors ``" );
 		// ...
+
 	}
 
 	/**
