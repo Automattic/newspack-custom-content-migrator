@@ -642,6 +642,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 			// No user found at all, something is very wrong.
 			if ( ! is_object( $user ) ) {
+
 				$this->log(
 					sprintf(
 						'Failed to find a user for %s %s <%s> to add to post %d',
@@ -1522,7 +1523,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		// Also check if we need to update the avatar.
 		if ( ! $this->simple_local_avatars->user_has_avatar( $user_id ) && ! empty( $user_avatar ) ) {
-			// $this->import_user_avatar( $user_id, $user_avatar );
+			$this->import_user_avatar( $user_id, $user_avatar );
 		}
 
 		return $user_id;
