@@ -366,19 +366,20 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		// \WP_CLI::line( 'Loading existing users...' );
 		// $existing_wpusers_all = get_users();
-		// $existing_gas_all = $this->cap_logic->get_all_gas();
+		// $existing_gas_all = $this->coauthorsplus->get_all_gas();
 		//      // $filtered_existing_wpuser = $this->filter_wpuser_by_email( $existing_wpusers_all, $row['Email'] );
 		//      // $filtered_existing_ga = $this->filter_existing_gas_all( $existing_gas_all, $row['Email'] );
 
 
 		// Loop through CSV.
+		$total_lines = count( explode( "\n", file_get_contents( $path ) ) ) - 1;
 		$handle = fopen( $path, 'r' );
 		$header = fgetcsv( $handle, 0 );
 		$i = 0;
 		while ( ! feof( $handle ) ) {
 			$i++;
 			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
-
+			WP_CLI::line( "($i)/($total_lines) " . $row['Email'] );
 
 			// Get correct role.
 			if ( in_array( $row['Email'], $data_admins ) ) {
@@ -395,21 +396,25 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 
 
-			// Load existing WP user and GA.
-			$existing_wpuser         = get_user_by( 'email', $row['Email'] );
-			$existing_ga_displayname = $this->cap_logic->get_guest_author_by_display_name( $row['First Name'] . ' ' . $row['Last Name'] );
-			$existing_ga_email       = $this->cap_logic->get_guest_author_by_email( $row['Email'] );
-			// Validate loaded GA objects -- fetching by email and display_name should be same.
-			if ( ( $existing_ga_displayname && ! $existing_ga_email ) || ( ! $existing_ga_displayname && $existing_ga_email ) ) {
-				$this->logger->log( 'nnzfixusers__loaded_gas_mismatch.log', 'GA mismatch: ' . $row['Email'] );
-				continue;
-			}
-
-
 			// Get some user row data.
 			$display_name = $row['First Name']
 			                . ( ( ! empty( $row['First Name'] ) && ! empty( $row['Last Name'] ) ) ? ' ' : '' )
 			                . $row['Last Name'];
+
+
+			// Load existing WP user and GA.
+			$existing_wpuser         = get_user_by( 'email', $row['Email'] );
+			$existing_ga_displayname = $this->coauthorsplus->get_guest_author_by_display_name( $row['First Name'] . ' ' . $row['Last Name'] );
+			if ( ! $existing_ga_displayname ) {
+				// Could have been created by Phil not taking into account the space difference.
+				$existing_ga_displayname = $this->coauthorsplus->get_guest_author_by_display_name( $display_name );
+			}
+			$existing_ga_email       = $this->coauthorsplus->get_guest_author_by_email( $row['Email'] );
+			// Validate loaded GA objects -- fetching by email and display_name should be same.
+			if ( ( $existing_ga_displayname && $existing_ga_email ) && ( $existing_ga_displayname->ID != $existing_ga_email->ID ) ) {
+				$this->logger->log( 'nnzfixusers__loaded_gas_mismatch.log', 'GA mismatch: GA_by_display_name ' . $existing_ga_displayname->ID . ' GA_by_email ' . $existing_ga_email->ID );
+				continue;
+			}
 
 
 			/**
@@ -470,9 +475,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					$this->logger->log( 'nnzfixusers__wpusers_newlycreated.log', 'Created WPUser ' . $created_wpuser_id . ' ' . $row['Email'] );
 				}
 
-				// Delete existing GA.
+				// Delete existing GA(s).
 				if ( $existing_ga_displayname ) {
-					$deleted = $this->cap_logic->delete_ga( $existing_ga_displayname->ID );
+					$deleted = $this->coauthorsplus->delete_ga( $existing_ga_displayname->ID );
 					if ( is_wp_error( $deleted ) ) {
 						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_displayname->ID . ' ' . $deleted->get_error_message() );
 						continue;
@@ -481,7 +486,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					}
 				}
 				if ( $existing_ga_email && ( $existing_ga_email->ID !== $existing_ga_displayname->ID ) ) {
-					$deleted = $this->cap_logic->delete_ga( $existing_ga_email->ID );
+					$deleted = $this->coauthorsplus->delete_ga( $existing_ga_email->ID );
 					if ( is_wp_error( $deleted ) ) {
 						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_displayname->ID . ' ' . $deleted->get_error_message() );
 						continue;
@@ -506,23 +511,25 @@ class NewsroomNZMigrator implements InterfaceCommand {
 						'user_email' => $row['Email'],
 						'description' => $row['Bio'],
 					];
-					$ga_id = $this->cap_logic->create_guest_author( $create_guest_author_args );
+					$ga_id = $this->coauthorsplus->create_guest_author( $create_guest_author_args );
 
 					$this->logger->log( 'nnzfixusers__gas_created.log', 'Created GA: ' . $ga_id . ' ' . $row['Email'] );
 				}
 
 				// Delete existing WPUser, and keep its posts temporarily reassign them to adminnewspack.
-				$this->logger->log( 'nnzfixusers__gas_wpusersdeleted.log', 'Deleted WPUser ' . $existing_wpuser->ID . ' ' . $row['Email'] );
-				$deleted = wp_delete_user( $existing_wpuser->ID, $adminnewspack_wpuser->ID );
-				if ( true !== $deleted ) {
-					$this->logger->log( 'nnzfixusers__gas_errordeletingwpusers.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
+				if ( $existing_wpuser ) {
+					$deleted = wp_delete_user( $existing_wpuser->ID, $adminnewspack_wpuser->ID );
+					if ( true === $deleted ) {
+						$this->logger->log( 'nnzfixusers__gas_wpusersdeleted.log', 'Deleted WPUser ' . $existing_wpuser->ID . ' ' . $row['Email'] );
+					} else {
+						$this->logger->log( 'nnzfixusers__gas_errordeletingwpusers.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
+					}
 				}
 			}
-
 		}
 
 
-		// Loop through all posts and reassign authors.
+		// Next loop through all posts and reassign authors.
 		// ...
 	}
 
