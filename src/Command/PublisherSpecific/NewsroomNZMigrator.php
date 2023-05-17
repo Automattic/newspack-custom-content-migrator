@@ -299,8 +299,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator newsroom-nz-fix-authors2-reassign-to-posts',
-			[ $this, 'cmd_fix_authors2_reassign_to_posts' ],
+			'newspack-content-migrator newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts',
+			[ $this, 'cmd_fix_authors2_reassign_authors_for_all_existing_posts' ],
 			[
 				'shortdesc' => 'Recreates all users.',
 				'synopsis'  => [
@@ -316,7 +316,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function cmd_fix_authors2_reassign_to_posts( $pos_args, $assoc_args ) {
+	public function cmd_fix_authors2_reassign_authors_for_all_existing_posts( $pos_args, $assoc_args ) {
 		$path = $assoc_args['path-to-xmls'];
 
 		global $wpdb;
@@ -636,7 +636,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 
 		// Next loop through all posts and reassign authors.
-		WP_CLI::line( "To finish up, run this command to reassign authors to existing posts `newspack-content-migrator newsroom-nz-fix-authors2-reassign-to-posts --path-to-xmls=`" );
+		WP_CLI::line( "To finish up, run this command to reassign authors to existing posts `newspack-content-migrator newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts --path-to-xmls=`" );
 		// ...
 
 	}
