@@ -193,6 +193,17 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Get Guest Author by email
+	 * 
+	 * @param string $email Guest Author email.
+	 * 
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_email( $email ) {
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_email', $email );
+	}
+
+	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
 	 *
 	 * @param WP_User|int $wp_user ID of the User or a WP_User object
