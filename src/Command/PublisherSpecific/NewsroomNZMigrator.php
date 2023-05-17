@@ -593,15 +593,23 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		}
 
 		global $wpdb;
-		$posts = $wpdb->get_results( "SELECT ID FROM {$wpdb->prefix}posts WHERE post_author = '0' AND post_type = 'post'" );
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT pm.post_id FROM {$wpdb->prefix}postmeta AS pm JOIN {$wpdb->prefix}posts AS p ON pm.post_id = p.ID WHERE pm.meta_key = %s AND p.post_type = 'post'",
+				self::META_PREFIX . 'import_data'
+			)
+		);
 		if ( ! $posts || empty( $posts ) ) {
 			$this->log( 'No posts found to process', 'error' );
 		}
 
 		// Convert the array of objects into a simple array of integer IDs.
-		$posts = array_map( function( $post ) {
-			return intval( $post->ID );
-		}, $posts );
+		$posts = array_map(
+			function( $post ) {
+				return intval( $post->post_id );
+			},
+			$posts
+		);
 
 		// Go forth and fix!
 		foreach ( $posts as $post_id ) {
@@ -628,14 +636,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			// Attempt to get the user by email.
 			$user = get_user_by( 'email', $import_data['author_email'] );
 			if ( ! $user ) {
-				$user = get_user_by(
-					'login',
-					$this->create_username( $import_data['author_firstname'], $import_data['author_lastname'], $import_data['author_email'] )
-				);
+				// Check for a Guest Author.
+				$user = $this->coauthorsplus->get_guest_author_by_email( $import_data['author_email'] );
 			}
 
 			// No user found at all, something is very wrong.
-			if ( ! $user ) {
+			if ( ! is_object( $user ) ) {
+
 				$this->log(
 					sprintf(
 						'Failed to find a user for %s %s <%s> to add to post %d',
@@ -649,17 +656,27 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			// Assign the found user to the post.
-			$update = ( $this->dryrun ) ? true : wp_update_post(
-				[
-					'ID'          => $post_id,
-					'post_author' => $user->ID,
-				]
-			);
-			if ( is_wp_error( $update ) ) {
-				$this->log( sprintf( 'Failed to update post %d with author %d', $post_id, $user->id ), 'warning' );
+			if ( is_a( $user, 'WP_User' ) ) {
+				// Assign the found user to the post.
+				$update = ( $this->dryrun ) ? true : wp_update_post(
+					[
+						'ID'          => $post_id,
+						'post_author' => $user->ID,
+					]
+				);
 			} else {
-				$this->log( sprintf( 'Added user %d to post %d', $user->ID, $post_id ), 'success' );
+				// Assign the found Guest Author to the post.
+				$update = ( $this->dryrun ) ? true : $this->coauthorsplus->assign_guest_authors_to_post(
+					[ $user->ID ],
+					$post_id
+				);
+			}
+
+			$ga_or_user = ( is_a( $user, 'WP_User' ) ) ? 'User' : 'Guest Author';
+			if ( ! $update || is_wp_error( $update ) ) {
+				$this->log( sprintf( 'Failed to update post %d with %s %d', $post_id, $ga_or_user, $user->ID ), 'warning' );
+			} else {
+				$this->log( sprintf( 'Added %s %d to post %d', $ga_or_user, $user->ID, $post_id ), 'success' );
 			}
 		}
 	}
@@ -841,7 +858,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 			// No user, so let's check if we're creating a user account or a guest author.
 			if ( empty( $user['role'] ) || 'Guest Author' == $user['role'] ) {
-				// Create guest author
+				// Create guest author.
 				$guest_author = ( $this->dryrun ) ? true : $this->coauthorsplus->create_guest_author( $user );
 
 				// Now add the meta data to the guest author.
@@ -1540,9 +1557,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			case 'Administrator':
 			case 'Administrators':
 				$role = 'administrator';
-				break;
-			default:
-				$role = 'subscriber';
 				break;
 		}
 		return $role;
