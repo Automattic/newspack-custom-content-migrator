@@ -7,6 +7,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
 
 /**
@@ -36,6 +37,11 @@ class CCMMigrator implements InterfaceCommand {
 	private $gutenberg_block_generator;
 
 	/**
+	 * @var AttachmentsLogic.
+	 */
+	private $attachments_logic;
+
+	/**
 	 * @var Logger.
 	 */
 	private $logger;
@@ -47,6 +53,7 @@ class CCMMigrator implements InterfaceCommand {
 		$this->coauthorsplus_logic               = new CoAuthorPlusLogic();
 		$this->squarebracketselement_manipulator = new SquareBracketsElementManipulator();
 		$this->gutenberg_block_generator         = new GutenbergBlockGenerator();
+		$this->attachments_logic                 = new AttachmentsLogic();
 		$this->logger                            = new Logger();
 	}
 
@@ -115,6 +122,78 @@ class CCMMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ccm-migrate-primary-category',
+			[ $this, 'cmd_migrate_primary_category' ],
+			[
+				'shortdesc' => 'Migrate primary category from meta.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ccm-migrate-galleries-and-featured-image',
+			[ $this, 'cmd_migrate_galleries_and_featured_image' ],
+			[
+				'shortdesc' => 'Migrate galleries and featured images from meta.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ccm-migrate-co-authors',
+			[ $this, 'cmd_migrate_co_authors' ],
+			[
+				'shortdesc' => 'Migrate co-authors from meta.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -127,8 +206,41 @@ class CCMMigrator implements InterfaceCommand {
 		$log_file        = 'ccm_brands_migration.log';
 		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$grouped_brands  = [
+			'Brighton Standard Blade'        => 'Digital North',
+			'Westminster Window'             => 'Digital North',
+			'Northglenn/Thornton Sentinel'   => 'Digital North',
+			'Fort Lupton Press'              => 'Digital North',
+			'Commerce City Sentinel Express' => 'Digital North',
 
-		$meta_query = [
+			'Castle Rock News Press'         => 'Digital South',
+			'Castle Pines News Press'        => 'Digital South',
+			'Highlands Ranch Herald'         => 'Digital South',
+			'Douglas County News Press'      => 'Digital South',
+			'Littleton Independent'          => 'Digital South',
+			'Englewood Herald'               => 'Digital South',
+			'Centennial Citizen'             => 'Digital South',
+
+			'Elbert County News'             => 'Digital East',
+
+			'Arvada Press'                   => 'Digital West',
+			'Clear Creek Courant'            => 'Digital West',
+			'Wheat Ridge Transcript'         => 'Digital West',
+
+			'Parker Chronicle'               => '',
+			'Lone Tree Voice'                => '',
+			'Colorado Community Media'       => '',
+			'Washington Park Profile'        => '',
+			'Life on Capitol Hill'           => '',
+			'Denver Herald Dispatch'         => '',
+			'285 Hustler'                    => '',
+			'South Platte Independent'       => '',
+			'Lakewood Sentinel'              => '',
+			'Jeffco Transcript'              => '',
+			'Golden Transcript'              => '',
+			'Canyon Courier'                 => '',
+		];
+		$meta_query      = [
 			[
 				'key'     => '_newspack_migration_set_as_archive',
 				'compare' => 'NOT EXISTS',
@@ -258,6 +370,293 @@ class CCMMigrator implements InterfaceCommand {
 			update_post_meta( $post->ID, '_newspack_migration_is_archive', true );
 
 			update_post_meta( $post->ID, '_newspack_migration_set_as_archive', true );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator ccm-migrate-primary-category`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_migrate_primary_category( $args, $assoc_args ) {
+		$log_file        = 'ccm_primary_category_migration.log';
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migration_migrate_primary_category',
+				'compare' => 'NOT EXISTS',
+			],
+			[
+				'key'     => 'ccm_brands',
+				'compare' => 'EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts       = $query->get_posts();
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			WP_CLI::line( sprintf( 'Post %d/%d', $index + 1, $total_posts ) );
+
+			$primary_category = get_post_meta( $post->ID, 'ccm_primary_category', true );
+
+			if ( $primary_category ) {
+				$terms = get_terms(
+					[
+						'taxonomy'   => 'category',
+						'name'       => $primary_category,
+						'hide_empty' => false,
+					]
+				);
+
+				if ( count( $terms ) !== 1 ) {
+					$this->logger->log( $log_file, sprintf( "Can't find the category %s", $primary_category ), Logger::WARNING );
+				}
+
+				$category = $terms[0];
+
+				update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+				$this->logger->log( $log_file, sprintf( 'Primary category for the post %d is set to: %s', $post->ID, $primary_category ), Logger::SUCCESS );
+			}
+
+			update_post_meta( $post->ID, '_newspack_migration_migrate_primary_category', true );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator ccm-migrate-galleries-and-featured-image`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_migrate_galleries_and_featured_image( $args, $assoc_args ) {
+		$galleries_log_file      = 'ccm_galleries_migration.log';
+		$featured_image_log_file = 'ccm_featured_image_migration.log';
+		$posts_per_batch         = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch                   = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migration_migrate_gallery_and_thumbnmail',
+				'compare' => 'NOT EXISTS',
+			],
+			[
+				'key'     => 'ccm_images',
+				'compare' => 'EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts       = $query->get_posts();
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			WP_CLI::line( sprintf( 'Post %d/%d', $index + 1, $total_posts ) );
+
+			$image_urls = json_decode( get_post_meta( $post->ID, 'ccm_images', true ), true );
+
+			if ( ! empty( $image_urls ) ) {
+				// Import images, and create Jetpack Slideshow galleries.
+				$image_ids = [];
+				foreach ( $image_urls as $image_url ) {
+					$image_id = $this->attachments_logic->import_external_file( $image_url, null, null, null, null, $post->ID );
+					if ( is_wp_error( $image_id ) ) {
+						$this->logger->log( $galleries_log_file, sprintf( "Can't import image %s: %s", $image_url, $image_id->get_error_message() ), Logger::WARNING );
+					} else {
+						$image_ids[] = $image_id;
+					}
+				}
+
+				if ( ! empty( $image_ids ) ) {
+					// Create Jetpack Slideshow gallery.
+					$slideshow_block = $this->gutenberg_block_generator->get_jetpack_slideshow( $image_ids );
+
+					// Update post content by adding the slideshow block on the top of the content.
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => serialize_block( $slideshow_block ) . $post->post_content,
+						]
+					);
+
+					$this->logger->log( $galleries_log_file, sprintf( 'Gallery for post %d is created: %s', $post->ID, implode( ',', $image_ids ) ), Logger::SUCCESS );
+
+					// Set the first image as featured image.
+					$featured_image_id = $image_ids[0];
+					$set_featured      = set_post_thumbnail( $post->ID, $featured_image_id );
+					if ( ! $set_featured ) {
+						$this->logger->log( $featured_image_log_file, sprintf( "Can't set featured image for post %d", $post->ID ), Logger::WARNING );
+					} else {
+						$this->logger->log( $featured_image_log_file, sprintf( 'Featured image for post %d is set: %s', $post->ID, $featured_image_id ), Logger::SUCCESS );
+					}
+				}
+			}
+
+			update_post_meta( $post->ID, '_newspack_migration_migrate_gallery_and_thumbnmail', true );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator ccm-migrate-co-authors`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_migrate_co_authors( $args, $assoc_args ) {
+		$log_file        = 'ccm_cp_authors_migration.log';
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+		}
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migration_migrate_co_authors',
+				'compare' => 'NOT EXISTS',
+			],
+			[
+				'key'     => 'ccm_coauthors',
+				'compare' => 'EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts       = $query->get_posts();
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			WP_CLI::line( sprintf( 'Post %d/%d', $index + 1, $total_posts ) );
+
+			$raw_co_authors = get_post_meta( $post->ID, 'ccm_coauthors', true );
+
+			// Author names come in many formats:
+			// - "Alex K.W. Schultz<br>
+			// Special to Colorado Community Media"
+			// - "<a href="http://coloradocommunitymedia.com/detail.html?sub_id=928c8e2931">Tayler Shaw</a> <br>tshaw@coloradocommunitymedia.com"
+			// - "Staff Report"
+			// - "Bruce Goldberg<br>
+			// Special to Colorado Community Media"
+			// - "Olivia Prentzel<br>
+			// The Colorado Sun"
+			// - "By Jonathan Maness"
+			// - "<a href="http://coloradocommunitymedia.com/detail.html?sub_id=b32cff5255">Ellis Arnold</a> and Haley Lena <br>earnold@coloradocommunitymedia.com"
+			// - "Chancy J. Gatlin-Anderson  Special to Colorado Community Media"
+			// - "Sandra Fish, Jesse Paul and Delaney Nelson - The Colorado Sun"
+			// - "Olivia Prentzel  and  Marvis Gutierrez<br>
+			// The Colorado Sun"
+			// - "Column by Judy Allison"
+			// - "Brandon Davis/special to Colorado Community Media"
+			// - "Photo by Mark Harden"
+			// - "Guest column by Elicia Hesselgrave"
+			// - "By By: Hames O'Hern"
+			// - "By By: Henry F Bohne &amp; William Mattocks"
+
+			$cleaned_co_authors = array_filter(
+				array_map(
+					function( $co_author ) {
+						$co_author = trim( $co_author );
+						// Remove "By By:" prefix.
+						$co_author = preg_replace( '/^By By:\s*/', '', $co_author );
+						// Remove "By" prefix.
+						$co_author = trim( preg_replace( '/^By\s*/', '', $co_author ), ':' );
+						// Remove "Column by", "Guest column by", "Special to Colorado Community Media", "The Colorado Sun", and "Photo by" prefixes and suffixes.
+						$co_author = preg_replace( '/\s*(Column|Guest column|Special to Colorado Community Media|The Colorado Sun|Photo)\s*(by)?\s*/i', '', $co_author );
+						// Remove email addresses.
+						$co_author = preg_replace( '/\S+@\S+\.\S+/', '', $co_author );
+
+						return empty( $co_author ) ? null : $co_author;
+					},
+					preg_split(
+						'/<br>|\s+and\s+|,|\n|\/|-|&amp;/',
+						wp_kses( preg_replace( '/\s+/', ' ', $raw_co_authors ), [ 'br' => [] ] )
+					)
+				)
+			);
+
+			if ( empty( $cleaned_co_authors ) ) {
+				// Set default Staff author.
+				$default_co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => 'Staff' ] );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $default_co_author_id ], $post->ID );
+				update_post_meta( $post->ID, '_newspack_post_with_default_author', true );
+
+				$this->logger->log( $log_file, sprintf( 'Setting post %d default author: %s', $post->ID, 'Staff' ), Logger::SUCCESS );
+			} else {
+				$co_author_ids = [];
+				foreach ( $cleaned_co_authors as $cleaned_co_author ) {
+					$co_author_ids[] = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $cleaned_co_author ] );
+				}
+
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_author_ids, $post->ID );
+				$this->logger->log( $log_file, sprintf( 'Setting post %d co-author(s): %s', $post->ID, join( ', ', $cleaned_co_authors ) ), Logger::SUCCESS );
+			}
+
+			update_post_meta( $post->ID, '_newspack_migration_migrate_gallery_and_thumbnmail', true );
 		}
 	}
 }
