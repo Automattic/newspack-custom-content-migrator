@@ -185,7 +185,7 @@ class CoAuthorPlus {
 	 * @return false|object Guest Author object.
 	 */
 	public function get_guest_author_by_email( string $ga_email ) {
-		return $this->coauthors_guest_authors->get_guest_author_by( 'email', $ga_email );
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_email', $ga_email );
 	}
 
 	/**
@@ -197,10 +197,26 @@ class CoAuthorPlus {
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
-		// This class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'.
-		$user_login = sanitize_title( $display_name );
+		/**
+		 * These two don't work as expected:
+		 *
+		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'display_name', $display_name );
+		 *
+		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'post_title', $display_name );
+		 */
 
-		return $this->get_guest_author_by_user_login( $user_login );
+		// Manually querying ID from DB.
+		global $wpdb;
+		$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s AND post_type = 'guest-author';", $display_name ) );
+		$ga = $this->get_guest_author_by_id( $post_id );
+
+		return $ga;
+
+		/**
+		 * Another possible approach, get using user_login, since this class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'
+		 *      $user_login = sanitize_title( $display_name );
+		 *      return $this->get_guest_author_by_user_login( $user_login );
+		 */
 	}
 
 	/**
