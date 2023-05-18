@@ -123,6 +123,148 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Updates Guest Author's data.
+	 *
+	 * @param int   $ga_id Guest Author ID.
+	 * @param array $args  {
+	 *     The $args param that can be updated (for the \CoAuthors_Guest_Authors::create method).
+	 *
+	 *     @type string $display_name
+	 *     @type string $first_name
+	 *     @type string $last_name
+	 *     @type string $user_email
+	 *     @type string $website
+	 *     @type string $description
+	 *     @type int    $avatar       Attachment ID for the Avatar image.
+	 * }
+	 *
+	 * user_login field can presently not be updated. If needed, it can probably be done by updating:
+	 *      - wp_postmeta.meta_value where meta_key = 'cap-user_login'
+	 *      - wp_terms.name where term_id matches $ga_id post_id
+	 *      - wp_terms.slug where term_id matches $ga_id post_id
+	 *
+	 * @throws \UnexpectedValueException If $args contains an unsupported key.
+	 */
+	public function update_guest_author( int $ga_id, array $args ) {
+		global $wpdb;
+
+		// Validate args keys.
+		$allowed_args_keys = [
+			'display_name',
+			'first_name',
+			'last_name',
+			'user_email',
+			'website',
+			'description',
+			'avatar',
+		];
+		foreach ( $args as $key => $value ) {
+			if ( ! in_array( $key, $allowed_args_keys, true ) ) {
+				throw new \UnexpectedValueException( 'The `' . $key . '` param is not allowed for Guest Author update.' );
+			}
+		}
+
+		// Sanitize args.
+		$args_sanitized = [];
+		foreach ( $args as $key => $value ) {
+			$key_sanitized                    = esc_sql( $key );
+			$value_sanitized                  = esc_sql( $value );
+			$args_sanitized[ $key_sanitized ] = $value_sanitized;
+		}
+
+		// Update display name.
+		if ( isset( $args_sanitized['display_name'] ) && ! empty( $args_sanitized['display_name'] ) ) {
+			$wpdb->update(
+				$wpdb->posts,
+				[ 'post_title' => $args_sanitized['display_name'] ],
+				[ 'ID' => $ga_id ]
+			);
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['display_name'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => 'cap-display_name',
+				]
+			);
+		}
+
+		// Update first_name.
+		if ( isset( $args_sanitized['first_name'] ) && ! empty( $args_sanitized['first_name'] ) ) {
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['first_name'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => 'cap-first_name',
+				]
+			);
+		}
+
+		// Update last_name.
+		if ( isset( $args_sanitized['last_name'] ) && ! empty( $args_sanitized['last_name'] ) ) {
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['last_name'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => 'cap-last_name',
+				]
+			);
+		}
+
+		// Update user_email.
+		if ( isset( $args_sanitized['user_email'] ) && ! empty( $args_sanitized['user_email'] ) ) {
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['user_email'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => 'cap-user_email',
+				]
+			);
+		}
+
+		// Update website.
+		if ( isset( $args_sanitized['website'] ) && ! empty( $args_sanitized['website'] ) ) {
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['website'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => 'cap-website',
+				]
+			);
+		}
+
+		// Update description.
+		if ( isset( $args_sanitized['description'] ) && ! empty( $args_sanitized['description'] ) ) {
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['description'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => 'cap-description',
+				]
+			);
+		}
+
+		// Update avatar attachment ID.
+		if ( isset( $args_sanitized['avatar'] ) && ! empty( $args_sanitized['avatar'] ) ) {
+			$wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $args_sanitized['avatar'] ],
+				[
+					'post_id'  => $ga_id,
+					'meta_key' => '_thumbnail_id',
+				]
+			);
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
 	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
 	 *
 	 * @param array $guest_author_ids Guest Author IDs.
@@ -197,6 +339,7 @@ class CoAuthorPlus {
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
+		// phpcs:disable
 		/**
 		 * These two don't work as expected:
 		 *
@@ -204,11 +347,12 @@ class CoAuthorPlus {
 		 *
 		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'post_title', $display_name );
 		 */
+		// phpcs:enable
 
 		// Manually querying ID from DB.
 		global $wpdb;
 		$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s AND post_type = 'guest-author';", $display_name ) );
-		$ga = $this->get_guest_author_by_id( $post_id );
+		$ga      = $this->get_guest_author_by_id( $post_id );
 
 		return $ga;
 
@@ -236,7 +380,7 @@ class CoAuthorPlus {
 	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
 	 *
-	 * @param WP_User|int $wp_user ID of the User or a WP_User object
+	 * @param WP_User|int $wp_user ID of the User or a WP_User object.
 	 *
 	 * @return false|object Guest author object.
 	 */
