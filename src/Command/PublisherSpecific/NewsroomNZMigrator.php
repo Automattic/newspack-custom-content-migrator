@@ -313,6 +313,68 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				'shortdesc' => 'Recreates all users.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-fix-authors2-get-existing-user-avatars',
+			[ $this, 'cmd_fix_authors2_get_existing_user_avatars' ],
+			[
+				'shortdesc' => 'Goes through all WP users and GAs and produces a file with user email and attachment ID.',
+			]
+		);
+	}
+
+	public function cmd_fix_authors2_get_existing_user_avatars( $pos_args, $assoc_args ) {
+
+		//
+
+		/**
+		 * Gravatars get picked up automatically via emails:
+		 *      WPUser https://newsroomnz.local/wp-admin/user-edit.php?user_id=17570
+		 *      GA     https://newsroomnz.local/wp-admin/post.php?post=73002&action=edit
+		 *
+		 * Local avatars
+		 *      WPUser https://newsroomnz.local/wp-admin/user-edit.php?user_id=27923
+		 *      GA     https://newsroomnz.local/wp-admin/post.php?post=75183&action=edit
+		 */
+
+		$emails_to_attachment_ids = [];
+
+		// Get WP users' avatars.
+		\WP_CLI::line( 'Searching WPUsers...' );
+		$existing_wpusers_all = get_users();
+		foreach ( $existing_wpusers_all as $key_existing_wpuser => $existing_wpuser ) {
+			$att_id = $this->simple_local_avatars->get_local_avatar_attachment_id( $existing_wpuser->ID );
+			if ( $att_id ) {
+				$emails_to_attachment_ids[ $existing_wpuser->user_email ] = $att_id;
+			}
+		}
+
+		\WP_CLI::line( 'Searching GAs...' );
+		$existing_gas_all = $this->coauthorsplus->get_all_gas();
+		foreach ( $existing_gas_all as $key_existing_ga => $existing_ga ) {
+			$att_id = $this->coauthorsplus->get_guest_authors_avatar_attachment_id( $existing_ga->ID );
+			if ( $att_id ) {
+				if ( ! $existing_ga->user_email ) {
+					WP_CLI::warning( sprintf( "- GA %s has no email but does have attachment ID %s", $existing_ga->ID, $att_id ) );
+					continue;
+				}
+				$emails_to_attachment_ids[ $existing_ga->user_email ] = $att_id;
+			}
+		}
+
+		// Save to file.
+		if ( ! empty( $emails_to_attachment_ids ) ) {
+			$log = '';
+			foreach ( $emails_to_attachment_ids as $email => $attachment_id ) {
+				$log .= ( ! empty( $log ) ? "\n" : '' )
+					. sprintf( '%s,%d', $email, $attachment_id );
+			}
+			$this->logger->log( 'newsroom-nz-fix-authors2-get-existing-user-avatars.log', $log, false );
+			WP_CLI::line( 'Saved to newsroom-nz-fix-authors2-get-existing-user-avatars.log' );
+		} else {
+			WP_CLI::line( 'No avatars found.' );
+		}
+
+		WP_CLI::line( 'Done.' );
 	}
 
 	public function cmd_fix_authors2_reassign_authors_for_all_existing_posts( $pos_args, $assoc_args ) {
@@ -1594,7 +1656,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		}
 
 		// Also check if we need to update the avatar.
-		if ( ! $this->simple_local_avatars->user_has_avatar( $user_id ) && ! empty( $user_avatar ) ) {
+		if ( ! $this->simple_local_avatars->user_has_local_avatar( $user_id ) && ! empty( $user_avatar ) ) {
 			$this->import_user_avatar( $user_id, $user_avatar );
 		}
 
