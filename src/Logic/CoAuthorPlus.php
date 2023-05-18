@@ -220,6 +220,20 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets Guest Author's avatar attachment ID.
+	 *
+	 * @param int $ga_id GA ID.
+	 *
+	 * @return int|null Attachment ID or null.
+	 */
+	public function get_guest_authors_avatar_attachment_id( int $ga_id ) {
+		$_thumbnail_id = get_post_meta( $ga_id, '_thumbnail_id', true );
+		$attachment_id = is_numeric( $_thumbnail_id ) ? (int) $_thumbnail_id : null;
+
+		return $attachment_id;
+	}
+
+	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
 	 *
 	 * @param WP_User|int $wp_user ID of the User or a WP_User object
