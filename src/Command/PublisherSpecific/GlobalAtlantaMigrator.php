@@ -50,6 +50,15 @@ class GlobalAtlantaMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator global-atlanta-migrate-region-tax',
+			[ $this, 'cmd_global_atlanta_migrate_region_tax' ],
+			[
+				'shortdesc' => 'Migrate region taxonomy',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -125,6 +134,41 @@ class GlobalAtlantaMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator global-atlanta-migrate-region-tax`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_global_atlanta_migrate_region_tax( $args, $assoc_args ) {
+		global $wpdb;
+
+		$posts = $wpdb->get_results(
+            "SELECT p.ID, t.name, t.term_id
+		FROM wp_posts p
+		INNER JOIN wp_term_relationships tr ON (p.ID = tr.object_id)
+		INNER JOIN wp_term_taxonomy tt ON (tr.term_taxonomy_id = tt.term_taxonomy_id)
+		INNER JOIN wp_terms t ON (tt.term_id = t.term_id)
+		WHERE p.post_type = 'post'
+		AND p.post_status = 'publish'
+		AND tt.taxonomy = 'region';"
+        );
+
+		foreach ( $posts as $post ) {
+			update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $post->term_id );
+			WP_CLI::success( sprintf( 'Primary category for the post %d is set to: %s', $post->ID, $post->name ) );
+		}
+
+		// Switch 'region' taxonomy to 'category' taxonomy.
+		$wpdb->update(
+			$wpdb->term_taxonomy,
+			[ 'taxonomy' => 'category' ],
+			[ 'taxonomy' => 'region' ],
+			[ '%s' ],
+			[ '%s' ]
+		);
 	}
 
 	/**
