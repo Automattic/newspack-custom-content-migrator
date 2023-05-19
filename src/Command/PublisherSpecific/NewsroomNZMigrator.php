@@ -310,7 +310,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			'newspack-content-migrator newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts',
 			[ $this, 'cmd_fix_authors2_reassign_authors_for_all_existing_posts' ],
 			[
-				'shortdesc' => 'Recreates all users.',
+				'shortdesc' => 'Reassigns authors for all existing posts.',
 			]
 		);
 		WP_CLI::add_command(
@@ -320,14 +320,130 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				'shortdesc' => 'Goes through all WP users and GAs and produces a file with user email and attachment ID.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv',
+			[ $this, 'cmd_fix_authors2_update_existing_user_avatars_from_csv' ],
+			[
+				'shortdesc' => 'Updates user avatars from users.csv',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-csv-file',
+						'description' => 'The users CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+	}
+
+	/**
+	 *
+	 *
+	 * @param $pos_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_authors2_update_existing_user_avatars_from_csv( $pos_args, $assoc_args ) {
+		$csv_file = $assoc_args['users-csv-file'];
+
+		// Get emails and avatar URLs from CSV.
+		$handle = fopen( $csv_file, 'r' );
+		$header = fgetcsv( $handle, 0 );
+		$total_lines = count( explode( "\n", file_get_contents( $csv_file ) ) ) - 1;
+		$i = 0;
+		while ( ! feof( $handle ) ) {
+			$i ++;
+
+			// Get row and some row data.
+			$csv_entry = fgetcsv( $handle, 0 );
+			if ( count( $csv_entry ) != count( $header ) ) {
+				// At a certain point, the CSV file has 32 or 33 columns instead of 34. We can add dummy two columns, avatar URL remains at index position 10.
+				if ( ( count( $csv_entry ) == 32) && ( count( $header ) == 34 ) ) {
+					$csv_entry[32] = '';
+					$csv_entry[33] = '';
+				} elseif ( ( count( $csv_entry ) == 33) && ( count( $header ) == 34 ) ) {
+					$csv_entry[33] = '';
+				} else {
+					// Actual error.
+					$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__error_readingcsvfile.log', sprintf( "ERROR CSV PARSING row %d record %s", $i, implode( ',', $csv_entry ) ), $this->logger::WARNING );
+					continue;
+				}
+			}
+			$row = array_combine( $header, $csv_entry );
+			// Always use lowercase emails.
+			$email      = strtolower( $row['Email'] );
+			$avatar_url = $row['Profile Image'];
+
+			// Continue if no avatar.
+			if ( empty( $avatar_url ) ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( "(%d)/(%d)", $i, $total_lines ) );
+
+			// Validate that email should always exist.
+			if ( empty( $email ) && ! empty( $avatar_url ) ) {
+				$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__error_userrownoemail.log', sprintf( "Row %s: Avatar URL exists but email is empty %s %s %s", $i, $row['First Name'], $row['Last Name'], $row['Username'] ), $this->logger::WARNING );
+				continue;
+			} elseif ( ! empty( $email ) && ! empty( $avatar_url ) ) {
+
+				// Attachment URL and file name.
+				$avatarurl_pathinfo    = pathinfo( $avatar_url );
+				$basename              = $avatarurl_pathinfo['basename'];
+				$filename_wo_extension = substr( $basename, 0, strrpos( $basename, '.' ) );
+
+				// Get the attachment if it already exists or download it.
+				$attachment_id = $this->attachments->get_attachment_by_filename( $filename_wo_extension );
+				if ( ! $attachment_id ) {
+					WP_CLI::line( sprintf( 'Downloading %s ...', $avatar_url ) );
+					$attachment_id = $this->attachments->import_external_file( $avatar_url );
+					// Log error if failed to download.
+					if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+						$err = is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '0';
+						$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__error_attdownload.log', sprintf( 'ERR downloading URL %s error: %s', $avatar_url, $err ) );
+						continue;
+					}
+
+					$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__downloadedurls.log', 'Downloaded attID ' . $attachment_id . ' URL ' . $avatar_url );
+				}
+
+				// Update avatar if WP user.
+				$existing_wpuser = get_user_by( 'email', $email );
+				if ( $existing_wpuser ) {
+					$updated = $this->simple_local_avatars->assign_avatar( $existing_wpuser->ID, $attachment_id );
+					if ( $updated ) {
+						$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__updatedwpuser.log', 'Updated WPUser ' . $existing_wpuser->ID );
+					} else {
+						$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__error_setavatartowpuser.log', sprintf( 'Error updating WPUserID %s attachmentID %s URL %s', $existing_wpuser->ID, $attachment_id, $avatar_url ) );
+						continue;
+					}
+				}
+
+				// Update avatar if GA.
+				$existing_ga_email = $this->coauthorsplus->get_guest_author_by_email( $email );
+				if ( $existing_ga_email ) {
+					$this->coauthorsplus->update_guest_author( $existing_ga_email->ID, [ 'avatar' => $attachment_id ] );
+					$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__updatedga.log', 'Updated GA ' . $existing_ga_email->ID );
+				}
+
+				// Not found user.
+				if ( ! $existing_wpuser && ! $existing_ga_email ) {
+					$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__error_usernotfound.log', sprintf( "Not found user with email %s", $email ), $this->logger::WARNING );
+					continue;
+				}
+			}
+		}
+
+		WP_CLI::line( 'Done.' );
 	}
 
 	public function cmd_fix_authors2_get_existing_user_avatars( $pos_args, $assoc_args ) {
 
-		//
-
 		/**
-		 * Gravatars get picked up automatically via emails:
+		 * Gravatars get picked up and displayed automatically by CAP and SLA via existing users' emails:
 		 *      WPUser https://newsroomnz.local/wp-admin/user-edit.php?user_id=17570
 		 *      GA     https://newsroomnz.local/wp-admin/post.php?post=73002&action=edit
 		 *
@@ -450,43 +566,17 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		 * will not use csv's "role" column, using these hardcoded roles instead.
 		 */
 		$data_admins = [
-			'tim.murphy@newsroom.co.nz',
-			'cassandra.mason@newsroom.co.nz',
-			'janine.sinclair@newsroom.co.nz',
-			'karen.duggan@newsroom.co.nz',
 		];
 		$data_editors = [
-			'jonathan.milne@newsroom.co.nz',
-			'sam.sachdeva@newsroom.co.nz',
-			'chris.hall@newsroom.co.nz',
-			'david.williams@newsroom.co.nz',
 		];
 		$data_authors = [
-			'jo.moir@newsroom.co.nz',
-			'marc.daalder@newsroom.co.nz',
 		];
 		$data_contributors = [
-			'nikki.mandow@newsroom.co.nz',
-			'andrew.bevin@newsroom.co.nz',
-			'hugo.stewart@newsroom.co.nz',
-			'matthew.scott@newsroom.co.nz',
-			'stephen11@xtra.co.nz',
-			'rod.oram@nz2050.com',
-			'andrew.patterson@newsroom.co.nz',
-			'bonnie.harrison@newsroom.co.nz',
-			'bonnie.sumner@newsroom.co.nz',
-			'sarah.robson@newsroom.co.nz',
-			'sharon.brettkelly@newsroom.co.nz',
-			'alexia.russell@newsroom.co.nz',
-			'tom.kitchin@newsroom.co.nz',
-			'aaron.smale@newsroom.co.nz',
-			'emma.hatton@newsroom.co.nz',
-			'paul.enticott@newsroom.co.nz',
-			'mark.jennings@newsroom.co.nz',
-			'anthony@doesburg.net.nz',
-			'merryn.anderson@newsroom.co.nz',
-			'suzanne.mcfadden@newsroom.co.nz',
 		];
+
+		if ( empty( $data_admins ) || empty( $data_editors ) || empty( $data_authors ) || empty( $data_contributors ) ) {
+			WP_CLI::error( 'Enter emails in $data_* arrays. This command is using hardcoded emails instead of reading from spreadsheet/csv, but not committing these emails to repo since they are private info.' );
+		}
 
 
 		// Delete existing WPUsers and GAs.
@@ -667,7 +757,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 		}
 
-		WP_CLI::line( "Done. Note that 'total number of lines' " . $total_lines . " is leteral for CSV file and does not represent total CSV records." );
+		WP_CLI::line( "Done. Note that 'total number of lines' " . $total_lines . " is leteral for CSV file and not equal to total CSV records." );
 
 
 		// Next loop through all posts and reassign authors.
@@ -1232,7 +1322,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		}
 
 		// Add the avatar to the user.
-		$attach = ( $this->dryrun ) ? true : $this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
+		$attach = ( $this->dryrun ) ? true : $this->simple_local_avatars->assign_avatar( $user_id, $attachment_id );
 		if ( ! $attach ) {
 			$this->log( sprintf( 'Failed to add avatar to user %s', $user_id ), $this->log_warning );
 			return;
