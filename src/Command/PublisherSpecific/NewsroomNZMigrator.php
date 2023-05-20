@@ -625,16 +625,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			WP_CLI::line( "($i)/($total_lines) " . $email );
 
 
-// ~~~ DEV helper.
-// $check_emails = [
-// ];
-// // 'xxx Dave Frame',
-// // if ( $i < 15008) {
-// if ( ! in_array( strtolower($email), $check_emails ) ) {
-// 	WP_CLI::line( "Skipping..." );
-// 	continue;
-// }
-
 			// Get correct role.
 			if ( in_array( $email, $data_admins ) ) {
 				$correct_role = 'administrator';
@@ -651,8 +641,8 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 
 			// Load existing WP user and GA.
-			$existing_wpuser         = get_user_by( 'email', $email );
-			$existing_ga_email       = $this->coauthorsplus->get_guest_author_by_email( $email );
+			$existing_wpuser   = get_user_by( 'email', $email );
+			$existing_ga_email = $this->coauthorsplus->get_guest_author_by_email( $email );
 
 
 			/**
@@ -719,9 +709,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					if ( is_wp_error( $deleted ) ) {
 						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_email->ID . ' ' . $deleted->get_error_message() );
 						continue;
-					} else {
-						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_email->ID . ' ' . $email );
 					}
+
+					$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_email->ID . ' ' . $email );
 				}
 
 			} else {
