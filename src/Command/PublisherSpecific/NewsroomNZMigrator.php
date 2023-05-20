@@ -514,7 +514,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$wpdb->update( $wpdb->posts, [ 'post_author' => $existing_wpuser->ID ], [ 'ID' => $post_id ] );
 
 				$author_assigned = true;
-				$this->logger->log( 'nnzfixusers__reassignauthors_assignedwpuser.log', sprintf( 'PostID %d assigned WPUser %d %s', $post_id, $existing_wpuser->ID, $email ) );
+				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__reassignauthors_assignedwpuser.log', sprintf( 'PostID %d assigned WPUser %d %s', $post_id, $existing_wpuser->ID, $email ) );
 
 			} else {
 
@@ -529,13 +529,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					);
 
 					$author_assigned = true;
-					$this->logger->log( 'nnzfixusers__reassignauthors_assignedga.log', sprintf( 'PostID %d assigned GA %d %s', $post_id, $existing_ga_email->ID, $email ) );
+					$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__reassignauthors_assignedga.log', sprintf( 'PostID %d assigned GA %d %s', $post_id, $existing_ga_email->ID, $email ) );
 				}
 			}
 
 			if ( false === $author_assigned ) {
 				WP_CLI::warning( 'Author not assigned to post.' );
-				$this->logger->log( 'nnzfixusers__reassignauthors_errornotassigned.log', sprintf( "PostId %d not found user email %s", $post_id, $email ) );
+				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__reassignauthors_errornotassigned.log', sprintf( "PostId %d not found user email %s", $post_id, $email ) );
 			}
 		}
 	}
@@ -590,7 +590,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 			$deleted = wp_delete_user( $existing_wpuser->ID, $adminnewspack_wpuser->ID );
 			if ( true !== $deleted ) {
-				$this->logger->log( 'nnzfixusers__deletewpusers_error.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
+				$this->logger->log( 'newsroom-nz-fix-authors2__deletewpusers_error.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
 			}
 		}
 
@@ -600,7 +600,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			WP_CLI::line( $key_existing_ga + 1 . '/' . count( $existing_gas_all ) . ' Deleting ' . $existing_ga->ID );
 			$deleted = $this->coauthorsplus->delete_ga( $existing_ga->ID );
 			if ( is_wp_error( $deleted ) ) {
-				$this->logger->log( 'nnzfixusers__deletegas_error.log', 'Failed to delete GA ' . $existing_ga->ID . ' ' . $deleted->get_error_message() );
+				$this->logger->log( 'newsroom-nz-fix-authors2__deletegas_error.log', 'Failed to delete GA ' . $existing_ga->ID . ' ' . $deleted->get_error_message() );
 			}
 		}
 
@@ -681,9 +681,9 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 					// Log.
 					if ( true === $user_updated ) {
-						$this->logger->log( 'nnzfixusers__wpusers_existingchanged.log', 'Updated WPUser ' . $existing_wpuser->ID );
+						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_existingchanged.log', 'Updated WPUser ' . $existing_wpuser->ID );
 					} else {
-						$this->logger->log( 'nnzfixusers__wpusers_existingunchanged.log', 'Unchanged WPUser ' . $existing_wpuser->ID );
+						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_existingunchanged.log', 'Unchanged WPUser ' . $existing_wpuser->ID );
 					}
 
 				} else {
@@ -695,7 +695,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 						$email
 					);
 					if ( is_wp_error( $created_wpuser_id ) || ! $created_wpuser_id ) {
-						$this->logger->log( 'nnzfixusers__wpusers_createfailed.log', 'Error creating user ' . $email . ' ' . $created_wpuser_id->get_error_message() );
+						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_createfailed.log', 'Error creating user ' . $email . ' ' . $created_wpuser_id->get_error_message() );
 						continue;
 					}
 					wp_update_user( [
@@ -710,17 +710,17 @@ class NewsroomNZMigrator implements InterfaceCommand {
 						'description' => $row['Bio'],
 					] );
 
-					$this->logger->log( 'nnzfixusers__wpusers_newlycreated.log', 'Created WPUser ' . $created_wpuser_id . ' ' . $email );
+					$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_newlycreated.log', 'Created WPUser ' . $created_wpuser_id . ' ' . $email );
 				}
 
 				// Delete existing GA(s).
 				if ( $existing_ga_email ) {
 					$deleted = $this->coauthorsplus->delete_ga( $existing_ga_email->ID );
 					if ( is_wp_error( $deleted ) ) {
-						$this->logger->log( 'nnzfixusers__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_email->ID . ' ' . $deleted->get_error_message() );
+						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_gasdeletefailed.log', 'Failed to delete GA ' . $existing_ga_email->ID . ' ' . $deleted->get_error_message() );
 						continue;
 					} else {
-						$this->logger->log( 'nnzfixusers__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_email->ID . ' ' . $email );
+						$this->logger->log( 'newsroom-nz-fix-authors2__wpusers_gasdeleted.log', 'Deleted GA ' . $existing_ga_email->ID . ' ' . $email );
 					}
 				}
 
@@ -729,7 +729,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 				// If GA exists, leave it as is.
 				if ( $existing_ga_email ) {
-					$this->logger->log( 'nnzfixusers__gas_existing.log', $email );
+					$this->logger->log( 'newsroom-nz-fix-authors2__gas_existing.log', $email );
 				} else {
 					// If GA does not exist, create it.
 					$create_guest_author_args = [
@@ -742,16 +742,16 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					];
 					$ga_id = $this->coauthorsplus->create_guest_author( $create_guest_author_args );
 
-					$this->logger->log( 'nnzfixusers__gas_created.log', 'Created GA: ' . $ga_id . ' ' . $email );
+					$this->logger->log( 'newsroom-nz-fix-authors2__gas_created.log', 'Created GA: ' . $ga_id . ' ' . $email );
 				}
 
 				// Delete existing WPUser, and keep its posts temporarily reassign them to adminnewspack.
 				if ( $existing_wpuser ) {
 					$deleted = wp_delete_user( $existing_wpuser->ID, $adminnewspack_wpuser->ID );
 					if ( true === $deleted ) {
-						$this->logger->log( 'nnzfixusers__gas_wpusersdeleted.log', 'Deleted WPUser ' . $existing_wpuser->ID . ' ' . $email );
+						$this->logger->log( 'newsroom-nz-fix-authors2__gas_wpusersdeleted.log', 'Deleted WPUser ' . $existing_wpuser->ID . ' ' . $email );
 					} else {
-						$this->logger->log( 'nnzfixusers__gas_errordeletingwpusers.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
+						$this->logger->log( 'newsroom-nz-fix-authors2__gas_errordeletingwpusers.log', 'Error deleting WPUser ' . $existing_wpuser->ID );
 					}
 				}
 			}
@@ -761,9 +761,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 
 		// Next loop through all posts and reassign authors.
-		WP_CLI::line( "To finish up, run this command to reassign authors to existing posts `newspack-content-migrator newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts`" );
-		// ...
-
+		WP_CLI::line( "To finish up, run the command to reassign authors to all posts, and the command to update avatars." );
 	}
 
 	/**
