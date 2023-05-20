@@ -501,6 +501,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( '(%s)/(%s) %s', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$newspack_nnz_import_data = get_post_meta( $post_id, 'newspack_nnz_import_data', true );
+			if ( empty( $newspack_nnz_import_data ) ) {
+				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__erroremptypostmeta.log', sprintf( "Empty meta for post ID %d", $post_id ) );
+				continue;
+			}
 
 			// Work with lowercase emails.
 			$email = strtolower( $newspack_nnz_import_data['author_email'] );
@@ -514,7 +518,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$wpdb->update( $wpdb->posts, [ 'post_author' => $existing_wpuser->ID ], [ 'ID' => $post_id ] );
 
 				$author_assigned = true;
-				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__reassignauthors_assignedwpuser.log', sprintf( 'PostID %d assigned WPUser %d %s', $post_id, $existing_wpuser->ID, $email ) );
+				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__assignedwpuser.log', sprintf( 'PostID %d assigned WPUser %d %s', $post_id, $existing_wpuser->ID, $email ) );
 
 			} else {
 
@@ -529,13 +533,13 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					);
 
 					$author_assigned = true;
-					$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__reassignauthors_assignedga.log', sprintf( 'PostID %d assigned GA %d %s', $post_id, $existing_ga_email->ID, $email ) );
+					$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__assignedga.log', sprintf( 'PostID %d assigned GA %d %s', $post_id, $existing_ga_email->ID, $email ) );
 				}
 			}
 
 			if ( false === $author_assigned ) {
 				WP_CLI::warning( 'Author not assigned to post.' );
-				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__reassignauthors_errornotassigned.log', sprintf( "PostId %d not found user email %s", $post_id, $email ) );
+				$this->logger->log( 'newsroom-nz-fix-authors2-reassign-authors-for-all-existing-posts__errornotassigned.log', sprintf( "PostId %d not found user email %s", $post_id, $email ) );
 			}
 		}
 	}
