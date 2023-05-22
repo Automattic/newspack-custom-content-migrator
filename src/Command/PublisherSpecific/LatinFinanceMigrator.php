@@ -7,6 +7,7 @@ use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \Newspack_WXR_Exporter;
 use \PDO, \PDOException;
 use \stdClass;
+use stringEncode\Encode;
 use \WP_CLI;
 use \WP_Query;
 
@@ -54,6 +55,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public function register_commands() {
+
+		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-check-redirects',
+			[ $this, 'cmd_check_redirects' ],
+			[
+				'shortdesc' => 'Check all old site urls against current site. Only run after Yoast primary categories and permlinks are set.  Yoast and Redirection plugins must be active.  CSVs will be exported.',
+				'synopsis'  => [],
+			]
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-export-from-mssql',
@@ -115,6 +125,163 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-check-redirects'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_check_redirects( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-check-redirects..." );
+
+		// todo: make sure Redirects plugin is active
+		// todo: make sure Yoast is on for get_permalink() to work. ... or just redirect to /?p=ID
+		// todo: make sure permalink is set too ... or just redirect to /?p=ID
+
+		$report = array(
+			'daily-brief-ascii'        => 0,
+			'daily-brief-unicode'      => 0,
+			'needs-redirect'           => 0,
+			'redirect-exists'          => 0,
+			'skip-differing'           => 0,
+			'url-to-post-id-matched'   => 0,
+			'url-to-post-id-mis-match' => 0,
+			'url-to-post-id-mis-match-ids' => array(),
+		);
+
+		// get and export old redirects
+		$old_redirects = $this->hack_get_old_redirects();
+		$this->log_to_csv( $old_redirects, $this->export_path  . '/latinfinance-redirects-1.csv', 'single-with-keys' );
+
+		// get all old urls
+		$args = [
+			'posts_per_page' => -1,
+			'post_type'     => 'post',
+			'fields'		=> 'ids',
+			'meta_query'    => [
+				[
+					'key'     => 'newspack_lf_url',
+					'compare' => 'EXISTS',
+				],
+			],
+		];
+		$query = new WP_Query ( $args );
+		WP_CLI::line( sprintf( 'Found %s posts.', $query->post_count ) );
+
+		// set array for new redirects
+		$redirects = [];
+		
+		foreach ($query->posts as $post_id ) {
+
+			// get old url
+			$meta = get_post_meta( $post_id, 'newspack_lf_url');
+						
+			// we still have issues with duplicate postmetas...
+			if( 2 < count( $meta ) ) {
+				WP_CLI::error('Post ' . $post_id . ' has more than 2 rows for old url.' );
+			}
+			// if there are 2 metas, and they are different, skip
+			else if( 2 == count( $meta ) && $meta[0] != $meta[1]) {
+				// WP_CLI::warning( 'Skipping differing old urls for post ' . $post_id );
+				$report['skip-differing']++;
+				continue;
+			}
+
+			// set variable
+			$url = $meta[0];
+
+			// Since the Redirection plugin will run before checking against the posts table, check redirects first
+			// if found, no new redirect needed
+			if( isset( $old_redirects[ $url ] ) ) {
+				$report['redirect-exists']++;
+				continue;
+			}
+
+			// Test if the old url returns it's same post_id
+			$found_post_id = url_to_postid( $url );
+
+			// if old url returns the same post id, no redirect needed
+			if( $found_post_id == $post_id ) {
+				$report['url-to-post-id-matched']++;
+				continue;
+			}
+
+			// if something was found, but it wasn't the same id, something is wrong...
+			if( $found_post_id > 0 ) {
+				// WP_CLI::line( sprintf( 'Checking post %d with url: %s', $post_id, $url ) );
+				// WP_CLI::error( 'Different post id was found?' );
+				$report['url-to-post-id-mis-match']++;
+				$report['url-to-post-id-mis-match-ids'][] = $post_id;
+				continue;
+			}
+
+			// The remaining urls may need a redirct
+
+			// for Daily Briefs urls, they have /year/mon/day/ in them
+			//   so Wordpress may be able to find a 301 using date and slug
+			if( preg_match( '/^\/daily-briefs/', $url ) ) {
+				
+				// $post = get_post( $post_id );
+				
+				// the following could (?) still be an issue if multiple slugs for same day
+				// ...in a different category?
+
+				// from: wp load/init => _find_post_by_old_slug
+				// SELECT post_id
+				// FROM wp_postmeta, wp_posts
+				// WHERE ID = post_id AND post_type = 'post'
+				// AND meta_key = '_wp_old_slug'
+				// AND meta_value = 'gafisa-names-new-ceo'
+				// AND YEAR(post_date) = 2023 AND MONTH(post_date) = 2 AND DAYOFMONTH(post_date) = 1
+
+				// from: wp load/init => redirect_guess_404_permalink()
+				// 	SELECT ID
+				// 	FROM wp_posts 
+				// 	WHERE post_name LIKE 'gafisa-names-new-ceo%' 
+				// 	AND post_type IN ('post') AND YEAR(post_date) = 2023 AND MONTH(post_date) = 2 
+				// 	AND DAYOFMONTH(post_date) = 1 AND post_status IN ('publish')
+
+				// but for unicode, a urlencoded _wp_old_slug must be set
+				if ( strlen( $url ) != mb_strlen( $url ) ) {
+					$report['daily-brief-unicode']++;
+					// update_post_meta( $post_id, '_wp_old_slug', urlencode( get_post_meta( $post_id, 'newspack_lf_slug', true ) ) );
+				}
+				else $report['daily-brief-ascii']++;
+
+				// for now, let's just add a redirect for all of them.
+				// continue;
+
+			}
+
+			$report['needs-redirect']++;
+
+			$redirects[] = [ 
+				'source URL' => $url, 
+				'target URL' => str_replace( home_url(), '', get_permalink ( $post_id ) ),
+			];
+
+			// // WP_CLI::line( sprintf( 'Checking post %d with url: %s', $post_id, $url ) );
+			// WP_CLI::line( sprintf( "'%s','%s'", $url, get_permalink ( $post_id ) ) );
+			
+			// need redirects for these as they don't have full /year/mon/day/ in urls
+			//  they will match a "category" rewrite rule
+			// if( !preg_match( '/^\/magazine/', $url )
+			// 	&& !preg_match( '/^\/web-/', $url )
+			// 	&& !preg_match( '/^\/awards/', $url )
+			// 	&& !preg_match( '/^\/archive/', $url )
+			//  ) { echo $url; exit(); }
+			
+			print_r($report);
+
+		}
+
+		// todo: change this to use the Redirection API?
+		// @link: https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Logic/Redirection.php#L20
+		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-2.csv');
 
 	}
 
@@ -697,15 +864,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	 *
 	 */
 
-	 private function log_to_csv( $data, $path ) {
+	 private function log_to_csv( $data, $path, $dimensions = 'two' ) {
+		
 		$file = fopen($path, 'w');
 		
-		$header = array_keys(reset($data));
-		fputcsv($file, $header);
-
-		foreach ($data as $row) {
-			fputcsv($file, $row);
+		// simple array
+		if( 'single-with-keys' == $dimensions ) {
+			foreach ($data as $key=>$value) {
+				fputcsv($file, array($key, $value));
+			}
 		}
+		// array of array
+		else if( 'two' == $dimensions ) {
+			$header = array_keys(reset($data));
+			fputcsv($file, $header);
+			foreach ($data as $row) {
+				fputcsv($file, $row);
+			}
+	 	}
 
 		fclose($file);
 	}
@@ -960,5 +1136,176 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Hacks...
+	 */
+
+	private function hack_get_old_redirects() {
+
+		// as of 2023-04 (first import)
+		// @link https://docs.google.com/spreadsheets/d/1SG-pJBbY1Vc2S0wwhMp3uG7j_HKcjkeRjEYKqAmMyEQ/edit#gid=398957389
+
+		return array(
+			'/2019-q2' => 'http://read.nxtbook.com/latinfinance/magazine/2019_q2/index.html',
+			'/2019-q3' => 'http://read.nxtbook.com/latinfinance/magazine/2019_q3/index.html',
+			'/2019-q4-issue' => 'https://read.nxtbook.com/latinfinance/magazine/2019_q4/index.html',
+			'/2020-q1' => 'http://read.nxtbook.com/latinfinance/magazine/2020_q1/index.html',
+			'/2020-q2' => 'http://read.nxtbook.com/latinfinance/magazine/2020_q2/index.html',
+			'/2020-q3' => 'https://read.nxtbook.com/latinfinance/magazine/2020_q3/cover.html',
+			'/argentinaprez' => '/daily-briefs/2019/10/29/argentinas-next-president-faces-a-rough-road-to-restructuring',
+			'/argsubsov' => 'https://latinfinance.azurewebsites.net/media/1524/argentina-sub-sov-2017-summary.pdf',
+			'/awardalerts' => 'https://latinfinance.us16.list-manage.com/subscribe?u=3f72033fc318b70e76ee07ccf&id=99ca3c32e4',
+			'/awards/banks-of-the-year-awards/2019/bank-of-the-year-nicaragua-banco-lafise-bicentro' => '/awards/banks-of-the-year-awards/2019/bank-of-the-year-nicaragua-banco-lafise-bancentro',
+			'/awards/deals-of-the-year/2018' => '/awards/deals-of-the-year-awards/2018',
+			'/awards/deals-of-the-year/2018/corporate-issuer-of-the-year-petrobras' => '/awards/deals-of-the-year/2018/corporate-issuer-corporate-liability-management-and-syndicated-loan-of-the-year-petrobras',
+			'/awards/deals-of-the-year/2018/corporate-liability-management-of-the-year-petrobras' => '/awards/deals-of-the-year/2018/corporate-issuer-corporate-liability-management-and-syndicated-loan-of-the-year-petrobras',
+			'/awards/deals-of-the-year/2018/investment-bank-and-ma-house-of-the-year-bank-of-america-merril-lynch' => '/awards/deals-of-the-year/2018/investment-bank-and-ma-house-of-the-year-bank-of-america-merrill-lynch',
+			'/awards/deals-of-the-year/2018/syndicated-loan-of-the-year-petrobras' => '/awards/deals-of-the-year/2018/corporate-issuer-corporate-liability-management-and-syndicated-loan-of-the-year-petrobras',
+			'/awards/project-infrastructure-finance-awards/2019/renewable-energy-financing-of-the-year-and-project-sponsor-of-the-year-enel-green-power' => '/awards/project-infrastructure-finance-awards/2019/renewable-energy-financing-of-the-year-enel-green-power',
+			'/banksoftheyear' => '/awards/banks-of-the-year-awards/2022',
+			'/bestcorporates' => '/awards/best-corporates-in-the-capital-markets/2018',
+			'/boty' => '/awards/banks-of-the-year-awards/2021',
+			'/boty/dinner/reservation' => 'http://www.latinfinanceevents.com/d/myqzy1/4W?ct=6f1ecc35-0921-44f1-9530-e709c13da9c9&RefID=Single+Seat+Registration',
+			'/boty2018' => '/awards/banks-of-the-year-awards/2018',
+			'/botywinners' => '/awards/banks-of-the-year-awards/2019',
+			'/brazilforum' => 'https://www.latinfinanceevents.com/d/fyqqyz/',
+			'/brazilforum/workbook' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/cce187bb69db4943b3faf27c5a231ac4.pdf',
+			'/caribbean/interest' => '/events',
+			'/caribbean/register' => 'http://www.latinfinanceevents.com/d/p6q0m9/8K?RefID=Custom+Fees',
+			'/caribbean/workbook' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/b35f4623bef24fc591dde2509d73f5a3.pdf',
+			'/centam/2020' => 'https://cvent.me/3ERD8Q',
+			'/centam/agenda' => 'https://read.nxtbook.com/latinfinance/events/the_6th_central_america_finan/agenda.html',
+			'/centam/register' => 'https://mailchi.mp/ae6e885c42c9/2020-central-america-finance-investment-forum',
+			'/centam/workbook' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/31c2629b04294193b73aab72144175dd.pdf',
+			'/confirm' => 'http://eepurl.com/c8RU0z',
+			'/cumbremx/agenda' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/30a18e02411344fd8e7863d4ef982fda.pdf',
+			'/cumbremx/register' => 'http://www.latinfinanceevents.com/d/f6qqzf/8K?RefID=Custom+Fees',
+			'/cumbremx/workbook' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/2fc10f4d02174598bbbf7f38d01efdc2.pdf',
+			'/daily-brief/2021/2/26/exclusive-posadas-checks-out-of-restructuring-talks' => '/web-articles/2021/2/exclusive-posadas-checks-out-of-restructuring-talks',
+			'/daily-briefs/2020/10/23/suriname-invokes-30-day-grace-period-on-debt-payments' => '/web-articles/2020/10/suriname-invokes-30-day-grace-period-on-debt-payments',
+			'/daily-briefs/2020/11/20/exclusive-braskem-weighs-transition-bond-for-2021' => '/web-articles/2020/11/exclusive-braskem-weighs-transition-bond-for-2021',
+			'/daily-briefs/2020/11/20/exclusive-brazil-must-observe-spending-ceiling-in-2021-deputy-minister' => '/web-articles/2020/11/exclusive-brazil-must-observe-spending-ceiling-in-2021-deputy-minister',
+			'/daily-briefs/2020/11/20/exclusive-brazil-plans-to-add-two-ports-to-privatization-pipeline' => '/web-articles/2020/11/exclusive-brazil-plans-to-add-two-ports-to-privatization-pipeline',
+			'/daily-briefs/2020/11/20/exclusive-brazil-to-keep-international-debt-focused-on-us-european-markets' => '/web-articles/2020/11/exclusive-brazil-to-keep-international-debt-focused-on-us-european-markets',
+			'/daily-briefs/2020/12/15/perus-head-of-public-treasury-resigns' => '/web-articles/2020/12/perus-head-of-public-treasury-resigns',
+			'/daily-briefs/2020/3/2/ypf-lines-up-a-three-class-bond-issue' => '/web-articles/2020/2/ypf-lines-up-a-three-class-bond-issue',
+			'/daily-briefs/2020/3/20/latam-2020-economic-recovery-will-not-happen-imf' => '/web-articles/2020/3/latam-2020-economic-recovery-will-not-happen-imf',
+			'/daily-briefs/2020/3/24/ecuador-seeking-emergency-financing-to-help-battle-covid-19' => '/web-articles/2020/3/ecuador-seeking-emergency-financing-to-help-battle-covid-19',
+			'/daily-briefs/2020/3/5/idb-says-monitoring-coronavirus-annual-meeting-still-on-track' => '/web-articles/2020/3/idb-says-monitoring-coronavirus-annual-meeting-still-on-track',
+			'/daily-briefs/2020/3/9/argentina-provinces-fate-tied-to-sovereign-debt-restructure-chaco-governor' => '/web-articles/2020/3/argentina-provinces-fate-tied-to-sovereign-debt-restructure-chaco-governor',
+			'/daily-briefs/2020/4/13/latin-american-q1-deal-activity-underpinned-by-banner-january' => '/daily-briefs/2020/4/13/latin-american-q1-2020-deal-activity-underpinned-by-banner-january',
+			'/daily-briefs/2020/4/15/santander-m%c3%a9xico-breaks-cross-border-ice-with-five-year-bonds' => '/web-articles/2020/4/santander-m%c3%a9xico-breaks-cross-border-ice-with-five-year-bonds',
+			'/daily-briefs/2020/4/20/bondholder-groups-reject-argentinas-restructuring-offer' => '/web-articles/2020/4/bondholder-groups-reject-argentinas-restructuring-offer',
+			'/daily-briefs/2020/4/20/ecuador-get-bondholder-consent-for-suspension-of-debt-service-until-august' => '/daily-briefs/2020/4/20/ecuador-gets-bondholder-consent-for-suspension-of-debt-service-until-august',
+			'/daily-briefs/2020/4/20/interview-peru-s-new-debt-boosts-to-13-billion-resources-to-combat-covid-19' => '/daily-briefs/2020/4/20/interview-peru-s-new-debt-boosts-covid-19-fighting-resources-to-13-billion',
+			'/daily-briefs/2020/4/21/bondholder-groups-reject-argentinas-restructuring-offer' => '/web-articles/2020/4/bondholder-groups-reject-argentinas-restructuring-offer',
+			'/daily-briefs/2020/4/27/interview-mexico-went-for-cash-6-billion-worth-before-market-gets-crowded-deputy-minister' => '/daily-briefs/2020/4/27/interview-mexico-goes-for-cash-before-bond-market-gets-crowded',
+			'/daily-briefs/2020/4/28/interview-latin-america-needs-to-save-lives-but-also-livelihoods-idb-s-moreno' => '/daily-briefs/2020/4/28/interview-latam-needs-to-save-lives-but-also-livelihoods-idbs-moreno',
+			'/daily-briefs/2020/5/11/argentina-extends-restructuring-offer-to-monday' => '/web-articles/2020/5/argentina-extends-restructuring-offer-to-monday',
+			'/daily-briefs/2020/5/26/argentina-investors-unfazed-at-restructuring-extension' => '/web-articles/2020/5/argentina-investors-unfazed-at-restructuring-extension',
+			'/daily-briefs/2020/6/1/argentina-and-creditors-detail-new-debt-proposals-government-warns-challenges-remain' => '/web-articles/2020/5/argentina-and-creditors-detail-new-debt-proposals-government-warns-challenges-remain',
+			'/daily-briefs/2020/6/1/imf-extends-credit-line-to-peru' => '/web-articles/2020/5/imf-extends-credit-line-to-peru',
+			'/daily-briefs/2020/6/23/exclusive-brazil-looks-to-green-bonds-to-reduce-amazon-deforestation' => '/web-articles/2020/6/exclusive-brazil-looks-to-green-bonds-to-reduce-amazon-deforestation',
+			'/daily-briefs/2020/6/8/buenos-aires-extends-deadline-for-restructuring-offer-possible-enhancements' => '/web-articles/2020/6/buenos-aires-extends-deadline-for-restructuring-offer-possible-enhancements',
+			'/daily-briefs/2020/7/7/argentinas-new-bond-offer-attracting-investors-markets-rally' => '/web-articles/2020/7/argentinas-new-bond-offer-attracting-investors-markets-rally',
+			'/daily-briefs/2020/8/14/isa-issues-first-green-bonds-in-colombia' => '/daily-briefs/2020/8/14/isa-issues-green-bonds-in-colombia',
+			'/daily-briefs/2020/8/5/argentina-reaches-restructuring-deal-with-creditors' => '/web-articles/2020/8/argentina-reaches-restructuring-deal-with-creditors',
+			'/daily-briefs/2020/9/9/cemex-to-buy-out-latam-busines' => '/daily-briefs/2020/9/9/cemex-to-buy-out-latam-business',
+			'/daily-briefs/2021/1/26/inter-american-development-bank-to-hold-virtual-annual-meeting-for-second-time' => '/web-articles/2021/1/inter-american-development-bank-to-hold-virtual-annual-meeting-for-second-time',
+			'/daily-briefs/2021/2/15/exclusive-brazils-novonor-seeks-partners-ahead-of-listing-in-2022' => '/web-articles/2021/2/exclusive-brazils-novonor-seeks-partners-ahead-of-listing-in-2022',
+			'/daily-briefs/2021/3/8/ypf-to-seek-financing-for-investment-program' => '/web-articles/2021/3/ypf-to-seek-financing-for-investment-program',
+			'/dbtrial' => 'https://lfp.dragonforms.com/lfp_lf_newtrial',
+			'/dealsoftheyear' => '/awards/deals-of-the-year-awards/2022',
+			'/doty' => '/awards/deals-of-the-year-awards/2021',
+			'/doty2019/brochure' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/307bf219479c488c8557ce3caecff1e1.pdf',
+			'/doty2019/invite' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/7273b2898a4e4c07bf808ee6cd850bc1.pdf',
+			'/dotywinners' => 'http://read.nxtbook.com/latinfinance/latinfinance/2020_q1/deals_of_the_year_awards.html',
+			'/editorialcalendar' => '/media/2294/lf-mk-2020_editorial-contentcal.pdf',
+			'/esg' => '/topics/esg',
+			'/esgfocus' => '/topics/esg',
+			'/factbox' => '/daily-briefs/2020/5/15/factbox-51520-latin-america-moves-to-mitigate-impact-of-covid-19',
+			'/felaban' => 'https://myaccount.latinfinance.com/subcnew.aspx?PC=LF&pk=rtrial&utm_source=lf&utm_medium=print&utm_campaign=felaban',
+			'/fintech' => '/magazine/2018/may-june-2018/plotting-the-future-a-discussion-on-fintechs-in-brazil',
+			'/freetrial' => 'https://lfp.dragonforms.com/lfp_lf_newtrial',
+			'/idb-breakfast-2019' => 'https://www.latinfinanceevents.com/d/0yqmd8/',
+			'/idb19/register' => 'http://www.latinfinanceevents.com/d/0yqmd8/4W',
+			'/idb19/register/cacibguest' => 'http://www.latinfinanceevents.com/d/0yqmd8/4W?ct=f866a3cd-2226-4cf1-924d-8569cf09f05d&RefID=SPcAcIBFree',
+			'/idb19/register/cliffordchanceguest' => 'http://www.latinfinanceevents.com/d/0yqmd8/4W?ct=f866a3cd-2226-4cf1-924d-8569cf09f05d&RefID=SpCChanceVip',
+			'/idbbreakfast/agenda' => 'https://read.nxtbook.com/latinfinance/events/latin_america_sovereign_debt_/agenda.html',
+			'/idforum/2020' => 'https://cvent.me/870E4E',
+			'/idforum/agenda' => 'https://read.nxtbook.com/latinfinance/events/1st_integration_development_f/agenda_spanish.html',
+			'/idforum/register' => 'https://mailchi.mp/ec46daf0cc22/2020-fonplata-request-pass-english',
+			'/idforum/workbook' => 'https://read.nxtbook.com/latinfinance/events/1st_integration_development_f/agenda_spanish.html',
+			'/julyoffer' => 'https://myaccount.latinfinance.com/subcnew.aspx?PC=LF&pk=rtrial&utm_source=lf&utm_medium=print&utm_campaign=db-trial&utm_content=july-august-2018-magazine-spread',
+			'/lacapmkts/agenda' => 'https://read.nxtbook.com/latinfinance/events/capital_markets_summit/agenda.html',
+			'/lacif/agenda' => 'https://custom.cvent.com/6F68ACCBE09541E581894A6AFB845055/files/ee05b84da13b4e40808b274b4d11230b.pdf',
+			'/lacif/register' => 'http://www.latinfinanceevents.com/d/jgqc7y/8K?RefID=Custom+Fees',
+			'/lf-overview' => '/media/2388/lf-media-kit-2020-about-latinfinance.pdf',
+			'/lf-q3-2019' => '/media/2111/lf-q3-no-rates.pdf',
+			'/lf25' => 'http://www.nxtbook.com/nxtbooks/latinfinance/89456RBM/index.php',
+			'/lf30' => 'https://latinfinance.us16.list-manage.com/subscribe?u=3f72033fc318b70e76ee07ccf&id=a643fad7cc',
+			'/linkedin-factbox' => '/daily-briefs/2020/5/15/factbox-51520-latin-america-moves-to-mitigate-impact-of-covid-19?utm_source=linkedin&utm_medium=paid&utm_campaign=coronavirus-factbox',
+			'/magazine-archive' => 'http://nxtbook.com/fx/archives/view.php?id=c5b7929c8d31642b174723b97634c67a',
+			'/magazine/2018/november-december-2018/bank-of-the-year-2018-el-slavador-banco-agrícola' => '/magazine/2018/november-december-2018/bank-of-the-year-2018-el-salvador-banco-agrícola',
+			'/magazine/2019/2019q3/2019-project-infrastructure-finance-awards' => '/awards/project-infrastructure-finance-awards/2019',
+			'/magazine/2019/2019q3/read-digital-edtion' => 'http://read.nxtbook.com/latinfinance/latinfinance/2019_q3/latinfinance_2019_q3_the_esg_.html',
+			'/magazine/2019/q4/banks-of-the-year-awards' => '/awards/banks-of-the-year-awards/2019',
+			'/magazine/2019/q4/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/latinfinance/2019_q4/index.html',
+			'/magazine/2019/spring-2019/read-digital-edition' => 'https://latinfinance.us16.list-manage.com/subscribe?u=3f72033fc318b70e76ee07ccf&id=a643fad7cc',
+			'/magazine/2020/q1/deals-of-the-year-awards' => '/awards/deals-of-the-year-awards/2019',
+			'/magazine/2020/q1/read-digital-edition' => 'http://read.nxtbook.com/latinfinance/latinfinance/2020_q1/cover.html',
+			'/magazine/2020/q2/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2020_q2/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2020-q2-issue',
+			'/magazine/2020/q3/2020-project-infrastructure-finance-awards' => '/awards/project-infrastructure-finance-awards/2020',
+			'/magazine/2020/q3/latinfinances-2020-project-infrastructure-finance-awards' => '/awards/project-infrastructure-finance-awards/2020',
+			'/magazine/2020/q3/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2020_q3/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2020-q3-issue',
+			'/magazine/2020/q4-coping-with-covid/2020-banks-of-the-year-awards' => '/awards/banks-of-the-year-awards/2020',
+			'/magazine/2020/q4-coping-with-covid/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2020_q4/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2020-q4-issue',
+			'/magazine/2021/q1-the-covid-rebuild/2020-deals-of-the-year-awards' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q1/doty.html?utm_source=lf&utm_medium=referral&utm_campaign=2021-q1-issue',
+			'/magazine/2021/q1-the-covid-rebuild/podcast-timing-is-everything' => '/web-articles/2021/3/podcast-timing-is-everything',
+			'/magazine/2021/q1-the-covid-rebuild/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q1/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2021-q1-issue',
+			'/magazine/2021/q2-visions-of-the-new-world/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q2/q2.html',
+			'/magazine/2021/q3q4-the-long-road/2021-project-infrastructure-finance-awards' => '/awards/project-infrastructure-finance-awards/2021',
+			'/magazine/2021/q3q4-the-long-road/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q3_q4/index.html',
+			'/magazine/2022/q1-bank-to-the-future/2021-banks-of-the-year-awards' => '/awards/banks-of-the-year-awards/2021',
+			'/magazine/2022/q1-bank-to-the-future/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q1/index.html',
+			'/magazine/2022/q2-on-the-edge/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q2/cover.html',
+			'/magazine/2022/q3-the-commodities-promise' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q3/cover.html',
+			'/magazine/2022/q4-in-the-balance/project-infrastructure-finance-awards' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q4/winners.html',
+			'/magazine/2022/q4-in-the-balance/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q4/q4_2022.html',
+			'/magazine/2023/q1-beyond-the-horizon/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2023_q1/cover.html',
+			'/magazine/2023/q2-when-the-wind-blows/read-digital-edition' => 'https://read.nxtbook.com/latinfinance/magazine/2023_q2/cover.html',
+			'/mexicosubsov' => 'http://www.latinfinanceevents.com/d/9gqcqz?RefID=LnkP1',
+			'/mxsubnational/interest' => '/events',
+			'/mxsubsov/workbook' => 'https://read.nxtbook.com/latinfinance/events/2019_mexico_subsov_summit/cover.html',
+			'/pafif/2020' => 'https://cvent.me/GV5Gxw',
+			'/pafif/agenda' => 'https://read.nxtbook.com/latinfinance/events/pacific_alliance_finance_inve/agenda.html',
+			'/pafif/register' => 'https://mailchi.mp/f29100d51837/2020-pacific-alliance-forum-request-pass-english',
+			'/pif/dinner/reservation' => 'http://www.latinfinanceevents.com/d/1yqksj/4W?ct=6f1ecc35-0921-44f1-9530-e709c13da9c9&RefID=Single+Seat+Registration',
+			'/pif/register' => 'http://www.latinfinanceevents.com/d/myqp7l/8K?RefID=Custom+Fees',
+			'/pif/workbook' => 'https://read.nxtbook.com/latinfinance/latinfinance/lf_events_pif_summit/the_4th_latinfinance_project_.html',
+			'/pifawards' => '/awards/project-infrastructure-finance-awards/2022',
+			'/projectinfra/agenda' => 'http://www.latinfinanceevents.com/events/latin-america-project-infrastructure-finance-summit/agenda-b55ac659a4af4fd2b00d386ea6c7b6ea.aspx?RefID=MLFW',
+			'/q2' => '/media/2386/q2-2020-latinfinance.pdf',
+			'/scotiasub' => 'https://myaccount.latinfinance.com/LF/register.aspx?PC=LF&BC=SBANK',
+			'/trial' => 'https://myaccount.latinfinance.com/subcnew.aspx?PC=LF&pk=rtrial',
+			'/web-articles/2018/2/investors-brace-for-election-nafta-renegotiation-outcomes' => '/web-articles/2018/2/investors-brace-for-election-nafta-renegotiation',
+			'/web-articles/2018/3/qa-albright-capital-talks-latam-ventures' => '/web-articles/2018/3/albright-capital-talks-latam-ventures',
+			'/web-articles/2019/10/barbados-reaches-debt-restructuring-deal-with-creditors' => '/daily-briefs/2019/10/21/barbados-reaches-debt-restructuring-deal-with-creditors',
+			'/web-articles/2020/1/live-stream-the-5th-latin-america-capital-markets-summit' => '/web-articles/2020/1/video-replay-the-5th-latin-america-capital-markets-summit',
+			'/web-articles/2020/10/q32020-magazine-picking-up-the-pieces' => 'https://read.nxtbook.com/latinfinance/magazine/2020_q3/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2020-q3-issue',
+			'/web-articles/2020/12/q42020-magazine-coping-with-covid' => 'https://read.nxtbook.com/latinfinance/magazine/2020_q4/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2020-q4-issue',
+			'/web-articles/2020/2/live-stream-the-1st-integration-development-forum' => '/web-articles/2020/3/live-stream-the-1st-integration-development-forum',
+			'/web-articles/2020/3/live-stream-the-1st-integration-development-forum' => '/web-articles/2020/3/video-the-1st-integration-development-forum',
+			'/web-articles/2021/12/q1-magazine-bank-to-the-future' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q1/index.html',
+			'/web-articles/2021/3/q12021-magazine-the-covid-rebuild' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q1/cover.html?utm_source=lf&utm_medium=referral&utm_campaign=2021-q1-issue',
+			'/web-articles/2021/6/q2-2021-magazine-visions-of-the-new-world' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q2/q2.html',
+			'/web-articles/2021/9/q3q4-magazine-the-long-road' => 'https://read.nxtbook.com/latinfinance/magazine/2021_q3_q4/index.html',
+			'/web-articles/2022/12/q1-magazine-beyond-the-horizon' => 'https://read.nxtbook.com/latinfinance/magazine/2023_q1/cover.html',
+			'/web-articles/2022/7/q3-magazine-the-commodities-promise' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q3/cover.html',
+			'/web-articles/2022/9/q4-magazine-in-the-balance' => 'https://read.nxtbook.com/latinfinance/magazine/2022_q4/q4_2022.html',
+			'/web-articles/2023/3/q2-magazine-when-the-wind-blows' => 'https://read.nxtbook.com/latinfinance/magazine/2023_q2/cover.html',
+		);
+
+	}
 }
 
