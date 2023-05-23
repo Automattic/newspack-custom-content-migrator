@@ -179,86 +179,37 @@ class CoAuthorPlus {
 				[ 'post_title' => $args_sanitized['display_name'] ],
 				[ 'ID' => $ga_id ]
 			);
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['display_name'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => 'cap-display_name',
-				]
-			);
+			update_post_meta( $ga_id, 'cap-display_name', $args_sanitized['display_name'] );
 		}
 
 		// Update first_name.
 		if ( isset( $args_sanitized['first_name'] ) && ! empty( $args_sanitized['first_name'] ) ) {
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['first_name'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => 'cap-first_name',
-				]
-			);
+			update_post_meta( $ga_id, 'cap-first_name', $args_sanitized['first_name'] );
 		}
 
 		// Update last_name.
 		if ( isset( $args_sanitized['last_name'] ) && ! empty( $args_sanitized['last_name'] ) ) {
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['last_name'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => 'cap-last_name',
-				]
-			);
+			update_post_meta( $ga_id, 'cap-last_name', $args_sanitized['last_name'] );
 		}
 
 		// Update user_email.
 		if ( isset( $args_sanitized['user_email'] ) && ! empty( $args_sanitized['user_email'] ) ) {
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['user_email'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => 'cap-user_email',
-				]
-			);
+			update_post_meta( $ga_id, 'cap-user_email', $args_sanitized['user_email'] );
 		}
 
 		// Update website.
 		if ( isset( $args_sanitized['website'] ) && ! empty( $args_sanitized['website'] ) ) {
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['website'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => 'cap-website',
-				]
-			);
+			update_post_meta( $ga_id, 'cap-website', $args_sanitized['website'] );
 		}
 
 		// Update description.
 		if ( isset( $args_sanitized['description'] ) && ! empty( $args_sanitized['description'] ) ) {
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['description'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => 'cap-description',
-				]
-			);
+			update_post_meta( $ga_id, 'cap-description', $args_sanitized['description'] );
 		}
 
 		// Update avatar attachment ID.
 		if ( isset( $args_sanitized['avatar'] ) && ! empty( $args_sanitized['avatar'] ) ) {
-			$wpdb->update(
-				$wpdb->postmeta,
-				[ 'meta_value' => $args_sanitized['avatar'] ],
-				[
-					'post_id'  => $ga_id,
-					'meta_key' => '_thumbnail_id',
-				]
-			);
+			update_post_meta( $ga_id, '_thumbnail_id', $args_sanitized['avatar'] );
 		}
 
 		wp_cache_flush();
