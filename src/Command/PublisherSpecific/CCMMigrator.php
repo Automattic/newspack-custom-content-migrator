@@ -220,29 +220,30 @@ class CCMMigrator implements InterfaceCommand {
 			'Littleton Independent'          => 'Digital South',
 			'Englewood Herald'               => 'Digital South',
 			'Centennial Citizen'             => 'Digital South',
+			'Lone Tree Voice'                => 'Digital South',
 
 			'Elbert County News'             => 'Digital East',
+			'Parker Chronicle'               => 'Digital East',
 
 			'Arvada Press'                   => 'Digital West',
 			'Clear Creek Courant'            => 'Digital West',
 			'Wheat Ridge Transcript'         => 'Digital West',
+			'Lakewood Sentinel'              => 'Digital West',
+			'Golden Transcript'              => 'Digital West',
+			'Jeffco Transcript'              => 'Digital West',
+			'Canyon Courier'                 => 'Digital West',
 
-			'Parker Chronicle'               => '',
-			'Lone Tree Voice'                => '',
+			'Washington Park Profile'        => 'Digital Denver',
+			'Life on Capitol Hill'           => 'Digital Denver',
+			'Denver Herald Dispatch'         => 'Digital Denver',
+
 			'Colorado Community Media'       => '',
-			'Washington Park Profile'        => '',
-			'Life on Capitol Hill'           => '',
-			'Denver Herald Dispatch'         => '',
 			'285 Hustler'                    => '',
 			'South Platte Independent'       => '',
-			'Lakewood Sentinel'              => '',
-			'Jeffco Transcript'              => '',
-			'Golden Transcript'              => '',
-			'Canyon Courier'                 => '',
 		];
 		$meta_query      = [
 			[
-				'key'     => '_newspack_migration_set_as_archive',
+				'key'     => '_newspack_mgration_brand_migrated',
 				'compare' => 'NOT EXISTS',
 			],
 			[
@@ -253,6 +254,7 @@ class CCMMigrator implements InterfaceCommand {
 
 		$total_query = new \WP_Query(
 			[
+				// 'p'              => 5,
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
 				'fields'         => 'ids',
@@ -265,6 +267,7 @@ class CCMMigrator implements InterfaceCommand {
 
 		$query = new \WP_Query(
 			[
+				// 'p'              => 5,
 				'post_type'      => 'post',
 				'paged'          => $batch,
 				'posts_per_page' => $posts_per_batch,
@@ -272,27 +275,51 @@ class CCMMigrator implements InterfaceCommand {
 			]
 		);
 
-		$posts       = $query->get_posts();
-		$total_posts = count( $posts );
+		$posts = $query->get_posts();
 
-		foreach ( $posts as $index => $post ) {
-			WP_CLI::line( sprintf( 'Post %d/%d', $index + 1, $total_posts ) );
-
+		foreach ( $posts as $post ) {
+			// print_r( $post->ID . "\n" );
 			$raw_brands = get_post_meta( $post->ID, 'ccm_brands', true );
+			// If the post has no brands, we don't need to do anything.
+			$post_handled = true;
+
+			if ( '[]' === $raw_brands ) {
+				$this->logger->log( $log_file, sprintf( 'Post %d doesn\'t belong to any brand', $post->ID ) );
+			}
+
 			if ( $raw_brands ) {
 				$brands = json_decode( $raw_brands, true );
 				// Create brands under the `Brand` taxonomy if they don't exist, and set them to the post.
-				$brand_ids = [];
+				$brand_ids    = [];
+				$brand_titles = [];
 				foreach ( $brands as $brand ) {
+					// We need to have only brands from the grouped list.
+					if ( ! array_key_exists( $brand, $grouped_brands ) ) {
+						// If the brand is not on the list, we need to re-treat the post next time.
+						$post_handled = false;
+						continue;
+					}
+
+					$brand = $grouped_brands[ $brand ];
+
 					// Check if the brand exists.
+					if ( '' === $brand ) {
+						// If it's the main brand "Colorado Community Media", we need to re-treat the post next time.
+						continue;
+					}
+
 					$term = get_term_by( 'name', $brand, 'brand' );
 					if ( $term ) {
-						$brand_ids[] = $term->term_id;
+						$brand_ids[]    = $term->term_id;
+						$brand_titles[] = $brand;
 					} else {
 						// Create the brand.
 						$term = wp_insert_term( $brand, 'brand' );
 						if ( ! is_wp_error( $term ) ) {
-							$brand_ids[] = $term['term_id'];
+							$brand_ids[]    = $term['term_id'];
+							$brand_titles[] = $brand;
+						} else {
+							$this->logger->log( $log_file, sprintf( 'Error adding the brand `%s` for the post %d: %s', $brand, $post->ID, $term->get_error_message() ) );
 						}
 					}
 				}
@@ -300,21 +327,25 @@ class CCMMigrator implements InterfaceCommand {
 				// Set the brands to the post.
 				if ( ! empty( $brand_ids ) ) {
 					wp_set_post_terms( $post->ID, $brand_ids, 'brand' );
-					$this->logger->log( $log_file, sprintf( 'Setting brands for the post %d: %s', $post->ID, implode( ', ', $brands ) ) );
-				}
+					$this->logger->log( $log_file, sprintf( 'Setting brands for the post %d: %s', $post->ID, implode( ', ', array_unique( $brand_titles ) ) ) );
 
-				// Setting primary brand if it exists.
-				$primary_brand = get_post_meta( $post->ID, 'ccm_primary_brand', true );
-				if ( $primary_brand ) {
-					$term = get_term_by( 'name', $primary_brand, 'brand' );
-					if ( $term ) {
-						update_post_meta( $post->ID, '_primary_brand', $term->term_id );
-						$this->logger->log( $log_file, sprintf( 'Setting primary brand for the post %d: %s', $post->ID, $primary_brand ) );
+					// Setting primary brand if it exists.
+					$primary_brand = get_post_meta( $post->ID, 'ccm_primary_brand', true );
+					if ( $primary_brand ) {
+						$term = get_term_by( 'name', $primary_brand, 'brand' );
+						if ( $term ) {
+							update_post_meta( $post->ID, '_primary_brand', $term->term_id );
+							$this->logger->log( $log_file, sprintf( 'Setting primary brand for the post %d: %s', $post->ID, $primary_brand ) );
+						}
 					}
 				}
 			}
 
-			update_post_meta( $post->ID, '_newspack_migration_gallery_migrated_', true );
+			if ( $post_handled ) {
+				update_post_meta( $post->ID, '_newspack_mgration_brand_migrated', true );
+			} else {
+				$this->logger->log( $log_file, sprintf( 'Post %d brands are not in the list: %s', $post->ID, implode( ', ', $brands ) ) );
+			}
 		}
 	}
 
