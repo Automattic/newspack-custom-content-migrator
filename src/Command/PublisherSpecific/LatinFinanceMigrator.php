@@ -66,6 +66,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-check-redirects-magazine-issues',
+			[ $this, 'cmd_check_redirects_magazine_issues' ],
+			[
+				'shortdesc' => 'Check all old site Magazine Issues against current site. Only run after latinfinance-check-redirects CSVs are uploaded. Redirection plugins must be active.  CSV will be exported.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-export-from-mssql',
 			[ $this, 'cmd_export_from_mssql' ],
 			[
@@ -282,6 +291,123 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// todo: change this to use the Redirection API?
 		// @link: https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Logic/Redirection.php#L20
 		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-2.csv');
+
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-check-redirects-magazine-issues'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_check_redirects_magazine_issues( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-check-redirects-magazine-issues..." );
+
+		// make sure Redirects plugin is active
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
+		// make sure previous redirects are already set
+		if( count( \Red_Item::get_all() ) < 8000 ) {
+			WP_CLI::error( 'Previous redirects not found.' );
+		} 
+
+		// Setup MSSQL DB connection
+		$this->set_pdo();
+
+		// Get posts for the content types
+		$result = $this->pdo->prepare("
+			SELECT cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.text, cmsDocument.updateDate, cmsDocument.expireDate,
+				cmsContentXML.xml
+			FROM cmsDocument
+			JOIN cmsContentXML on cmsContentXML.nodeId = cmsDocument.nodeId
+			JOIN cmsContent on cmsContent.nodeId = cmsDocument.nodeId
+			JOIN cmsContentType on cmsContentType.nodeId = cmsContent.contentType
+				and cmsContentType.alias in('magazineIssue')
+			WHERE cmsDocument.published = 1	
+			ORDER BY cmsDocument.nodeId
+		");
+		$result->execute();
+
+		// set array for new redirects
+		$redirects = [];
+
+		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
+
+			// load xml column
+			$xml = simplexml_load_string( $row['xml'] );
+
+			// Test expireDate
+			if( null !== $row['expireDate'] ) {
+				WP_CLI::warning( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
+			}
+
+			$display_date_xml_timestamp = strtotime( (string) $xml->displayDate );
+
+			// set slug and old site url
+			$issue = [
+
+				// titles
+				'text_row' => $row['text'],
+				'name_xml' => (string) $xml['nodeName'],
+
+				// dates
+				'update_date_row' => date('Y-m-d', strtotime( $row['updateDate'] ) ),
+				'update_date_xml' => date('Y-m-d', strtotime( (string) $xml['updateDate'] ) ),
+				'create_date_xml' => date('Y-m-d', strtotime( (string) $xml['createDate'] ) ),
+				'display_date_xml' => date('Y-m-d', $display_date_xml_timestamp ),
+				
+				// Redirection exists
+				'existing_redirect' => false,
+				'redirect_to' => '/magazine/' . date('Y', $display_date_xml_timestamp) . '/' . date('m', $display_date_xml_timestamp) . '/',
+
+				// urls
+				'slug' => (string) $xml['urlName'],
+				'url' => $this->get_url_from_path( (string) $xml['path'] ),
+
+				// image
+				'featured_image_id' => (string) $xml->image,
+				'featured_image_url' => '',
+
+				// content
+				'snippet' => (string) $xml->snippet,
+			];
+	
+			if( ! empty ( $xml->image ) ) {
+
+				// must be single integer
+				if( ! preg_match('/^[0-9]+$/', (string) $xml->image ) ) {
+					WP_CLI::error( 'Featured image is not single integer ' . (string) $xml->image .' for node ' . $row['nodeId']);
+				}
+				
+				$featured_image = $this->get_featured_image( (string) $xml->image );
+
+				if( null !== $featured_image ) {
+
+					$issue['featured_image_url'] = $featured_image['url'];
+				
+				} // null featured image
+
+			} // xml->image
+
+			// test for redirect
+			$matches = \Red_Item::get_for_matched_url( $issue['url'] );
+			$issue['existing_redirect'] = ( !empty( $matches) );
+
+			WP_CLI::line( print_r( $issue, true ) );
+		
+			$redirects[] = $issue;
+
+		} // while
+
+		// todo: change this to use the Redirection API?
+		// @link: https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Logic/Redirection.php#L20
+
+		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-3.csv');
+
+		WP_CLI::success( 'Done. CSV exported to WP_CONTENT_DIR.' );
+
 
 	}
 
