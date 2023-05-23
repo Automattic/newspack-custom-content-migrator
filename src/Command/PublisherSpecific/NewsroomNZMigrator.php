@@ -336,6 +336,97 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				]
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-fix-authors2-get-avatars-and-emails',
+			[ $this, 'cmd_fix_authors2_get_avatars_and_emails' ],
+			[
+				'shortdesc' => 'Pulls out a list of avatar image URLs and user emails from users CSV file.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-csv-file',
+						'description' => 'Users CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+	}
+
+	public function cmd_fix_authors2_get_avatars_and_emails( $pos_args, $assoc_args ) {
+		$csv_file = $assoc_args['users-csv-file'];
+
+		$emails_avatars = [];
+
+		// Get emails and avatar URLs from CSV.
+		$handle = fopen( $csv_file, 'r' );
+		$header = fgetcsv( $handle, 0 );
+		$total_lines = count( explode( "\n", file_get_contents( $csv_file ) ) ) - 1;
+		$i = 0;
+		while ( ! feof( $handle ) ) {
+			$i ++;
+
+			// Get row and some row data.
+			$csv_entry = fgetcsv( $handle, 0 );
+			if ( count( $csv_entry ) != count( $header ) ) {
+				// At a certain point, the CSV file has 32 or 33 columns instead of 34. We can add dummy two columns, avatar URL remains at index position 10.
+				if ( ( count( $csv_entry ) == 32 ) && ( count( $header ) == 34 ) ) {
+					$csv_entry[32] = '';
+					$csv_entry[33] = '';
+				} elseif ( ( count( $csv_entry ) == 33 ) && ( count( $header ) == 34 ) ) {
+					$csv_entry[33] = '';
+				} else {
+					// Actual error.
+					$this->logger->log( 'newsroom-nz-fix-authors2-update-existing-user-avatars-from-csv__error_readingcsvfile.log',
+						sprintf( "ERROR CSV PARSING row %d record %s", $i, implode( ',', $csv_entry ) ),
+						$this->logger::WARNING );
+					continue;
+				}
+			}
+			$row = array_combine( $header, $csv_entry );
+
+			if ( ! empty( $row['Profile Image'] ) ) {
+				$emails_avatars[ $row['Email'] ] = $row['Profile Image'];
+			}
+		}
+
+		$log = '';
+		foreach ( $emails_avatars as $email => $avatar_url ) {
+			$log .= sprintf( "%s,%s\n", $email, $avatar_url );
+		}
+		file_put_contents( 'emails_avatars.log', $log );
+
+
+		$i = 0;
+		foreach ( $emails_avatars as $email => $avatar_url ) {
+			$i++;
+			WP_CLI::line( sprintf( '%d/%d', $i, count( $emails_avatars ) ) );
+
+			// Download attachment.
+			$att_id = $this->attachments->import_external_file( $avatar_url );
+			if ( is_wp_error( $att_id ) ) {
+				$this->logger->log( 'newsroom-nz-fix-authors2-get-avatars-and-emails__errorDownloadingAvatars.log', sprintf( "%s,%s,error:%s", $email, $avatar_url, $att_id->get_error_message() ), $this->logger::WARNING );
+				continue;
+			}
+
+
+			// Get GA.
+			$existing_guest_author = $this->coauthorsplus->get_guest_author_by_email( $email );
+			if ( ! $existing_guest_author ) {
+				$this->logger->log( 'newsroom-nz-fix-authors2-get-avatars-and-emails__errorEmailNotFound.log', $email );
+				WP_CLI::warning( sprintf( 'Not found GA by email %s', $email ) );
+				continue;
+			}
+
+			// Set Avatar.
+			$this->coauthorsplus->update_guest_author( $existing_guest_author->ID, [ 'avatar' => $att_id ] );
+
+			// Log.
+			$display_name_encoded = urlencode($existing_guest_author->display_name);
+			$this->logger->log( 'newsroom-nz-fix-authors2-get-avatars-and-emails__importedAttIds.log', "Updated email: {$email} , GAID: {$existing_guest_author->ID} , attID: {$att_id} , https://newsroomnz.local/wp-admin/users.php?page=view-guest-authors&s={$display_name_encoded}&filter=show-all&paged=1", $this->logger::SUCCESS );
+			$debug = 1;
+		}
 	}
 
 	/**
