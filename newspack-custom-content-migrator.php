@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.0.2
+ * Version:     1.3.1
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -78,13 +78,16 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
 		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
+		Command\PublisherSpecific\SentinelColoradoMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,
 		Command\PublisherSpecific\BillyPennMigrator::class,
 		Command\PublisherSpecific\IndyWeekMigrator::class,
 		Command\PublisherSpecific\Moco360Migrator::class,
 		Command\PublisherSpecific\Umbria24Migrator::class,
 		Command\PublisherSpecific\SaportaReportMigrator::class,
+		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
+		Command\PublisherSpecific\LatinFinanceMigrator::class,
 	)
 );
