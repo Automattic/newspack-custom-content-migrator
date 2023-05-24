@@ -290,6 +290,27 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				]
 			]
 		);
+		\WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-import-missing-articles2',
+			[ $this, 'cmd_import_missing_articles2' ],
+			[
+				'shortdesc' => 'Find and import missing articles.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'dir',
+						'optional'    => false,
+						'description' => 'A directory containing XML files of articles.',
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'import',
+						'optional'    => true,
+						'description' => 'If used, will actually import the missing articles.',
+					],
+				]
+			]
+		);
 		WP_CLI::add_command(
 			'newspack-content-migrator newsroom-nz-fix-authors2',
 			[ $this, 'cmd_fix_authors2' ],
@@ -1323,6 +1344,75 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * @param array $args       The arguments passed to the command.
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 *
+	 * @return void
+	 */
+	public function cmd_import_missing_articles2( $args, $assoc_args ) {
+		global $wpdb;
+
+		$dir    = trailingslashit( $assoc_args['dir'] );
+		$import = isset( $assoc_args['import'] ) ? true : false;
+
+		// Get files.
+		if ( ! is_dir( $dir ) ) {
+			WP_CLI::error( 'The directory provided does not exist.' );
+		}
+		$files = glob( $dir . 'articles_*.xml' );
+		if ( empty( $files ) ) {
+			WP_CLI::error( 'No XML files found in the directory provided.' );
+		}
+
+		$postmeta_guid = self::META_PREFIX . 'guid';
+
+		// Loop through XMLs.
+		foreach ( $files as $key_file => $file ) {
+			WP_CLI::line( sprintf( "===== (%d)/(%d) %s", $key_file + 1, count( $files ), $file ) );
+
+if (  ($key_file + 1) < 9 ) { continue; }
+
+			// Format the XML into a nice array of objects and iterate.
+			$articles = $this->xml_to_json( $file );
+
+			// Loop through articles.
+			foreach ( $articles as $key_article => $article ) {
+				WP_CLI::line( sprintf( '(%d)/(%d) -- (%d)/(%d) %s', $key_file + 1, count( $files ), $key_article + 1, count( $articles ), $article['guid'] ) );
+
+				// Check if the article exists.
+				$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s", $postmeta_guid, $article['guid'] ) );
+				if ( $post_id ) {
+					continue;
+				}
+
+				$this->logger->log(
+					'newsroom-nz-find-missing-articles__detectedMissingArticles.log',
+					sprintf( "file:%s guid:%s", $file, $article['guid'] )
+				);
+				if ( ! $import) {
+					WP_CLI::line( 'Skipping.' );
+					continue;
+				}
+
+				$post_id = $this->import_post( $article );
+				if ( is_wp_error( $post_id ) || ( ! $post_id ) ) {
+					WP_CLI::warning( sprintf( 'Failed to import guid:%s -- nnz_importpost_ERROR.log %s', $article['guid'], $post_id->get_error_message() ) );
+					continue;
+				}
+				$this->logger->log(
+					'newsroom-nz-find-missing-articles__imported.log',
+					sprintf( "postid:%d file:%s guid:%s", $post_id, $file, $article['guid'] )
+				);
+			}
+		}
+
+		WP_CLI::line( 'Done.' );
+		if ( false === $import ) {
+			WP_CLI::warning( '--import flag was not used, dry-run was performed and posts were not actually imported. See logs.' );
+		}
+	}
+
+	/**
 	 * Import the post!
 	 */
 	private function import_post( $fields ) {
@@ -1366,15 +1456,20 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 		}
 
-		$post = ( $this->dryrun ) ? true : wp_insert_post( $post_args, true );
-		if ( is_wp_error( $post ) ) {
-			$this->log( sprintf( 'Failed to create post for guid %s', $import_fields['guid'] ), );
-		} else {
-			$this->log( sprintf( 'Successfully imported "%s" as ID %d', $import_fields['title'], $post ) );
+		$post_id = ( $this->dryrun ) ? true : wp_insert_post( $post_args, true );
+		if ( is_wp_error( $post_id ) || ( ! $post_id ) ) {
+			$this->logger->log(
+				'nnz_importpost_ERROR.log',
+				sprintf(
+					'guid:%s err:%s',
+					$import_fields['guid'],
+					( is_wp_error( $post_id ) ) ? $post_id->get_error_message() : '0'
+				),
+				$this->logger::WARNING
+			);
 		}
 
-		return $post;
-
+		return $post_id;
 	}
 
 	/**
