@@ -1460,7 +1460,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				'nnz_importpost_ERROR.log',
 				sprintf(
 					'guid:%s err:%s',
-					$import_fields['guid'],
+					$fields['guid'],
 					( is_wp_error( $post_id ) ) ? $post_id->get_error_message() : '0'
 				),
 				$this->logger::WARNING
