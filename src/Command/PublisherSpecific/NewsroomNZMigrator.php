@@ -1370,8 +1370,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		foreach ( $files as $key_file => $file ) {
 			WP_CLI::line( sprintf( "===== (%d)/(%d) %s", $key_file + 1, count( $files ), $file ) );
 
-if (  ($key_file + 1) < 9 ) { continue; }
-
 			// Format the XML into a nice array of objects and iterate.
 			$articles = $this->xml_to_json( $file );
 
