@@ -318,8 +318,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// Get posts for the content types
 		$result = $this->pdo->prepare("
-			SELECT cmsDocument.nodeId, cmsDocument.versionId, cmsDocument.text, cmsDocument.updateDate, cmsDocument.expireDate,
-				cmsContentXML.xml
+			SELECT cmsDocument.nodeId, cmsDocument.expireDate, cmsContentXML.xml
 			FROM cmsDocument
 			JOIN cmsContentXML on cmsContentXML.nodeId = cmsDocument.nodeId
 			JOIN cmsContent on cmsContent.nodeId = cmsDocument.nodeId
@@ -333,6 +332,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// set array for new redirects
 		$redirects = [];
 
+		// save old data for CPT archive headers?
+		// $issues = [];
+
 		while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
 
 			// load xml column
@@ -340,71 +342,153 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			// Test expireDate
 			if( null !== $row['expireDate'] ) {
-				WP_CLI::warning( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
+				WP_CLI::error( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
 			}
 
-			$display_date_xml_timestamp = strtotime( (string) $xml->displayDate );
+			$slug = (string) $xml['urlName'];
+			$url = $this->get_url_from_path( (string) $xml['path'] );
+			$display_date_timestamp = strtotime( (string) $xml->displayDate );
 
-			// set slug and old site url
-			$issue = [
+			// set slug and old site url if we want to setup a CPT for archive headers
+			// $issue = [
 
 				// titles
-				'text_row' => $row['text'],
-				'name_xml' => (string) $xml['nodeName'],
+				// 'text_row' => $row['text'],
+				// 'name_xml' => (string) $xml['nodeName'],
 
 				// dates
-				'update_date_row' => date('Y-m-d', strtotime( $row['updateDate'] ) ),
-				'update_date_xml' => date('Y-m-d', strtotime( (string) $xml['updateDate'] ) ),
-				'create_date_xml' => date('Y-m-d', strtotime( (string) $xml['createDate'] ) ),
-				'display_date_xml' => date('Y-m-d', $display_date_xml_timestamp ),
+				// 'display_date_xml' => date('Y-m-d', $display_date_timestamp ),
 				
-				// Redirection exists
-				'existing_redirect' => false,
-				'redirect_to' => '/magazine/' . date('Y', $display_date_xml_timestamp) . '/' . date('m', $display_date_xml_timestamp) . '/',
-
 				// urls
-				'slug' => (string) $xml['urlName'],
-				'url' => $this->get_url_from_path( (string) $xml['path'] ),
+				// 'slug' => $slug,
+				// 'url' => $url,
 
 				// image
-				'featured_image_id' => (string) $xml->image,
-				'featured_image_url' => '',
+				// 'featured_image_id' => (string) $xml->image,
+				// 'featured_image_url' => '',
 
 				// content
-				'snippet' => (string) $xml->snippet,
-			];
-	
-			if( ! empty ( $xml->image ) ) {
+				// 'snippet' => (string) $xml->snippet,
 
-				// must be single integer
-				if( ! preg_match('/^[0-9]+$/', (string) $xml->image ) ) {
-					WP_CLI::error( 'Featured image is not single integer ' . (string) $xml->image .' for node ' . $row['nodeId']);
-				}
+			// ];
+
+			// if( ! empty ( $xml->image ) ) {
+
+			// 	// must be single integer
+			// 	if( ! preg_match('/^[0-9]+$/', (string) $xml->image ) ) {
+			// 		WP_CLI::error( 'Featured image is not single integer ' . (string) $xml->image .' for node ' . $row['nodeId']);
+			// 	}
 				
-				$featured_image = $this->get_featured_image( (string) $xml->image );
+			// 	$featured_image = $this->get_featured_image( (string) $xml->image );
 
-				if( null !== $featured_image ) {
+			// 	if( null !== $featured_image ) {
 
-					$issue['featured_image_url'] = $featured_image['url'];
+			// 		$issue['featured_image_url'] = $featured_image['url'];
 				
-				} // null featured image
+			// 	} // null featured image
 
-			} // xml->image
+			// } // xml->image
 
-			// test for redirect
-			$matches = \Red_Item::get_for_matched_url( $issue['url'] );
-			$issue['existing_redirect'] = ( !empty( $matches) );
-
-			WP_CLI::line( print_r( $issue, true ) );
+			// WP_CLI::line( print_r( $issue, true ) );
 		
-			$redirects[] = $issue;
+			// $issues[] = $issue;
+
+			// test for existing redirect
+			if( ! empty( \Red_Item::get_for_matched_url( $url ) ) ) {
+				WP_CLI::warning( 'Skipping existing redirect for ' . $url );
+				continue;
+			}
+
+			// fix some that don't fit the pattern
+			$fixes = [
+
+				'10th-anniversary-1998' 					=> 'july-1998',
+				
+				'august-2001-latin-banking-guide-directory' => 'august-2001',
+				'august-2002-latin-banking-guide-directory' => 'august-2001',
+				'august-2003-latin-banking-guide-directory' => 'august-2003',
+				
+				'latin-banking-guide-directory-2004' 		=> 'july-2004',
+				'latin-banking-guide-directory-2005' 		=> 'july-2005',
+				
+				'december-2005' 				=> 'november-2005',
+				'february-2005' 				=> 'january-2005',
+				'july-2005' 					=> 'june-2005',
+				'june-2005' 					=> 'may-2005',
+				'november-2005' 				=> 'october-2005',
+				'october-2005' 					=> 'september-2005',
+				
+				'august-2006' 					=> 'july-2006',
+				'december-2006' 				=> 'november-2006',
+				'february-2006' 				=> 'january-2006',
+				'july-2006' 					=> 'june-2006',
+				'june-2006' 					=> 'may-2006',
+				'november-2006' 				=> 'october-2006',
+				'october-2006' 					=> 'september-2006',
+				'september-2006' 				=> 'august-2006',
+				
+				'april-2007' 					=> 'march-2007',
+				'december-2007' 				=> 'november-2007',
+				'february-2007' 				=> 'january-2007',
+				'july-august-2007' 				=> 'june-2007',
+				'june-2007' 					=> 'may-2007',
+				'march-2007' 					=> 'february-2007',
+				'may-2007' 						=> 'april-2007',
+				'november-2007' 				=> 'october-2007',
+				'october-2007' 					=> 'september-2007',
+				
+				'june-2008' 					=> 'may-2008',
+				'march-2008' 					=> 'february-2008',
+
+				'february-2009' 				=> 'january-2009',
+				
+				'july-august-2013' 				=> 'june-2013',
+				
+				'july-august-2018' 				=> 'august-2018',
+				'may-june-2018' 				=> 'june-2018',
+				'september-october-2018' 		=> 'october-2018',
+				
+				'25th-anniversary-articles' 	=> 'september-2013',
+			
+				// when in doubt, set to the "read digital edition" publish date
+				'q2-when-the-wind-blows' 		=> 'march-2023',
+
+			];
+			$slug = ( $fixes[$slug] ) ?? $slug;
+
+			$timestamp = false;
+
+			// try old style slugs (month-month-YYYY)
+			preg_match( '/([a-z]+)-([a-z]+)-(\d{2,4})$/', $slug, $matches );
+			if( 4 == count( $matches ) ) {
+				$timestamp = strtotime( $matches[1] . '-' . $matches[3] ); // returns false if no date
+			} 
+
+			// try old style slugs (month-YYYY)
+			if( ! $timestamp ) {
+				$timestamp = strtotime( $slug ); // returns false if no date
+			}
+
+			// try newer quarterly slugs (using display date) if timestamp is false
+			if( ! $timestamp ) {
+				$timestamp = $display_date_timestamp;
+			}
+
+			$new_url = '/magazine/' . date('Y/m/', $timestamp);
+
+			// add domains for testing
+			// $url = 'https://www.latinfinance.com' . $url;
+			// $new_url = 'https://latinfinance-newspack.newspackstaging.com' . $new_url;
+
+			$redirects[$url] =  $new_url;
 
 		} // while
 
 		// todo: change this to use the Redirection API?
 		// @link: https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Logic/Redirection.php#L20
 
-		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-3.csv');
+		ksort( $redirects );
+		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-3.csv', 'single-with-keys' );
 
 		WP_CLI::success( 'Done. CSV exported to WP_CONTENT_DIR.' );
 
