@@ -66,6 +66,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-check-redirects-digital-editions',
+			[ $this, 'cmd_check_redirects_digital_editions' ],
+			[
+				'shortdesc' => 'Gets existing read-digital editions redirects. Redirection plugins must be active. CSV will be exported.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-check-redirects-magazine-issues',
 			[ $this, 'cmd_check_redirects_magazine_issues' ],
 			[
@@ -291,6 +300,62 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// todo: change this to use the Redirection API?
 		// @link: https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Logic/Redirection.php#L20
 		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-2.csv');
+
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-check-redirects-digital-editions'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_check_redirects_digital_editions( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-check-redirects-digital-editions..." );
+
+		// make sure Redirects plugin is active
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
+		// make sure previous redirects are already set
+		if( count( \Red_Item::get_all() ) < 8000 ) {
+			WP_CLI::error( 'Previous redirects not found.' );
+		} 
+
+		global $wpdb;
+
+		$results = $wpdb->get_results("
+			select meta_value, ID
+			from wp_postmeta 
+			join wp_posts on wp_posts.ID = wp_postmeta.post_id
+			where meta_key = 'newspack_lf_url' and meta_value like '%read-digital%';
+		");
+
+		$redirects = [];
+
+		foreach( $results as $row ) {
+			
+			// from url is
+			$from = str_replace( home_url(), '', get_permalink ( $row->ID ) );
+
+			// to url is
+			$redirect = \Red_Item::get_for_matched_url( $row->meta_value );
+
+			// if no "to" url, then skip
+			if( empty( $redirect[0]->match->url ) ) {
+				WP_CLI::warning( 'Skipping ' . print_r( $row ) );
+				continue;
+			}
+
+			$redirects[$from] = $redirect[0]->match->url;
+
+		}
+
+		ksort( $redirects );
+		$this->log_to_csv( $redirects, $this->export_path  . '/latinfinance-redirects-4-read-digital.csv', 'single-with-keys' );
+
+		WP_CLI::success( 'Done. CSV exported to WP_CONTENT_DIR.' );
+
 
 	}
 
