@@ -84,6 +84,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-delete-duplicate-meta',
+			[ $this, 'cmd_delete_duplicate_meta' ],
+			[
+				'shortdesc' => 'Deletes duplicate postmeta that was added from imports that ran twice.  CSV report will be exported.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'query-limit',
+						'description' => 'SQL LIMIT for group by query. (Integer)',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => 1000,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-export-from-mssql',
 			[ $this, 'cmd_export_from_mssql' ],
 			[
@@ -561,6 +579,38 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for 'newspack-content-migrator latinfinance-delete-duplicate-meta'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_delete_duplicate_meta( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-delete-duplicate-meta..." );
+
+		$query_limit = isset( $assoc_args[ 'query-limit' ] ) ? (int) $assoc_args['query-limit'] : 1000;
+
+		if( 1 > $query_limit ) {
+			WP_CLI::error( "Query limit argument must be 1 or greater." );
+		}
+
+		$report = array();
+
+		// do multiple queries until no more results.
+		do {
+			
+			$count = $this->delete_duplicate_meta( $query_limit , $report );
+			WP_CLI::line ( 'Deleted ' . $count . '.' );
+
+		} while ( $count > 0 );
+
+		$this->log_to_csv( $report, $this->export_path  . '/latinfinance-delete-duplicate-meta-report.csv', 'single-with-keys' );
+	
+		WP_CLI::success( 'Done. Report exported to WP_CONTENT_DIR.' );
+
+	}
+
+	/**
 	 * Callable for 'newspack-content-migrator latinfinance-export-from-mssql'.
 	 * 
 	 * @param array $pos_args   WP CLI command positional arguments.
@@ -939,6 +989,55 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		
 		}
 	}
+
+
+	/**
+	 * Deletes
+	 * 
+	 */
+
+	 private function delete_duplicate_meta( $limit, &$report ) {
+		
+		global $wpdb;
+
+		// get postmeta where meta key is duplicated for the same post
+		$results = $wpdb->get_results( $wpdb->prepare("
+			SELECT post_id, meta_key, meta_value,
+				min(meta_id) as min_id, max(meta_id) max_id, count(*) as count
+			FROM {$wpdb->postmeta}
+			GROUP BY post_id, meta_key, meta_value
+			HAVING min_id <> max_id
+			LIMIT %d",
+			$limit
+		));
+
+		foreach ( $results as $row ) {
+
+			if( $row->min_id == $row->max_id ) {
+				WP_CLI::error( 'Error deleting where min-max are equal' . print_r( $row, true ) );
+			}
+			if( 2 != $row->count ) {
+				WP_CLI::error( 'Error deleting where count is not 2 ' . print_r( $row, true ) );
+			}
+
+			// delete one of the meta_ids...just do the max id...
+			$wpdb->query( $wpdb->prepare( "
+				DELETE FROM {$wpdb->postmeta} WHERE meta_id = %d",
+				$row->max_id
+			));
+		
+			if( isset( $report[$row->post_id] ) ) {
+				$report[$row->post_id]++;
+			}
+			else {
+				$report[$row->post_id] = 1;
+			}
+		}
+
+		return count( $results );
+
+	}
+
 
 	/**
 	 * Getters
