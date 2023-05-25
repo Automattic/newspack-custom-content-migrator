@@ -1862,7 +1862,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 
 		// If not, create it.
 		if ( 0 === $category_id ) {
-			$this->log( sprintf( 'Category %s not found. Creating it....', $name ) );
 
 			// Create the category, under it's parent if required.
 			$category_id = ( $this->dryrun ) ? false : wp_create_category( $name );
@@ -1871,6 +1870,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$category_id = false;
 			}
 
+			$this->log( sprintf( 'Category %s was not found. Created ID %d ...', $name, $category_id ) );
 		}
 
 		return $category_id;
