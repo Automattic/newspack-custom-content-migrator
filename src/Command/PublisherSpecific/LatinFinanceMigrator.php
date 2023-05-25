@@ -102,6 +102,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-delete-error-imports',
+			[ $this, 'cmd_delete_error_imports' ],
+			[
+				'shortdesc' => 'Deletes posts that were merged incorrectly by wp import. Must be run after latinfinance-delete-duplicate-meta.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-export-from-mssql',
 			[ $this, 'cmd_export_from_mssql' ],
 			[
@@ -607,6 +616,101 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->log_to_csv( $report, $this->export_path  . '/latinfinance-delete-duplicate-meta-report.csv', 'single-with-keys' );
 	
 		WP_CLI::success( 'Done. Report exported to WP_CONTENT_DIR.' );
+
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-delete-error-imports'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_delete_error_imports( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-delete-error-imports..." );
+
+		global $wpdb;
+
+		// select rows that had duplicate meta_keys with differing values
+		$ids = $wpdb->get_col("
+			SELECT DISTINCT pm1.post_id
+			FROM wp_postmeta pm1
+			JOIN wp_postmeta pm2 on pm2.post_id = pm1.post_id 
+				and pm2.meta_key = pm1.meta_key 
+				and pm2.meta_value <> pm1.meta_value
+		");
+		
+		// make sure it's the same set of posts indentified locally
+		if ( count( $ids ) != 48 ) {
+			WP_CLI::error( 'ID result set does not match  48 rows.');
+		}
+
+		// Setup MSSQL DB connection
+		$this->set_pdo();
+
+		// set output
+		$csv = array();
+
+		// get posts
+		$args = array(
+			'posts_per_page' => -1,
+			'post__in' => $ids,
+			'orderby' => array( 'date' => 'ASC', 'title' => 'ASC' ),
+		);
+		$query = new WP_Query ( $args );
+		
+		foreach ($query->posts as $post ) {
+			
+			$node_ids = get_post_meta( $post->ID, 'newspack_lf_node_id' );
+
+			$output = array( 
+				'WP_URL' => 'https://latinfinance-newspack.newspackstaging.com/?p=' . $post->ID,
+				'WP_ID' => $post->ID, 
+				'WP_post_date' => $post->post_date,
+				'WP_post_title' => $post->post_title,
+				// 'post_name' => $post->post_name,
+				// 'old_node_ids' => implode( ", ", $node_ids ),
+			);
+
+			// Get old content
+			$result = $this->pdo->prepare("
+				SELECT cmsDocument.nodeId, cmsContentXML.xml
+				FROM cmsDocument
+				JOIN cmsContentXML on cmsContentXML.nodeId = cmsDocument.nodeId
+				WHERE cmsDocument.published = 1	
+				AND cmsDocument.nodeId in(" . implode(',', array_fill(0, count( $node_ids ), '?')) . ")
+				ORDER BY cmsDocument.nodeId
+			");
+			$result->execute( $node_ids );
+
+			$node_index = 0;
+
+			while ( $row = $result->fetch( PDO::FETCH_ASSOC ) ){   
+
+				$node_index++;
+
+				// load xml column
+				$xml = simplexml_load_string( $row['xml'] );
+
+				$output['old_node_id_' . $node_index] = $row['nodeId'];
+				$output['old_node_name_' . $node_index] = (string) $xml['nodeName'];
+				$output['old_node_date_' . $node_index] = (string) $xml->displayDate;
+				$output['old_node_url_' . $node_index] = 'https://www.latinfinance.com' . $this->get_url_from_path( (string) $xml['path'] );
+
+			} // while nodes
+		
+			// $urls = get_post_meta( $post->ID, 'newspack_lf_url');
+			// for( $i = 0; $i < count ( $urls) ; $i++ ) {
+			// 	$output['old_url_' . ($i + 1)] = 'https://www.latinfinance.com' . $urls[$i];
+			// }
+
+			$csv[] = $output;
+
+		}
+		
+		$this->log_to_csv( $csv, $this->export_path . '/latinfinance-error-imports.csv' );
+
+		WP_CLI::success( 'Done.  Report was exported to WP_CONTENT_DIR.  Nothing was deleted, do by hand using WP_URL column in export.' );
 
 	}
 
