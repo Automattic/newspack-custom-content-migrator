@@ -1969,7 +1969,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
 	 */
 	private function log( $message, $level = false ) {
-		$this->logger->log( 'newsroomnz', $message, $level );
+		$this->logger->log( 'newsroomnz.log', $message, $level );
 	}
 
 }
