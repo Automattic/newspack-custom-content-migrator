@@ -10,6 +10,7 @@ use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 /* External dependencies */
+use Symfony\Component\DomCrawler\Crawler;
 use stdClass;
 use WP_CLI;
 use WP_Query;
@@ -52,6 +53,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 * @var Posts Logic.
 	 */
 	private $posts_logic;
+
+	/**
+	 * @var Crawler Logic.
+	 */
+	private $crawler;
 
 	/**
 	 * Simple Local Avatars logic.
@@ -118,14 +124,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
-
 		$this->attachments = new Attachments();
-
 		$this->coauthorsplus = new CoAuthorPlus();
-
 		$this->simple_local_avatars = new SimpleLocalAvatars();
-
 		$this->posts_logic = new Posts();
+		$this->crawler = new Crawler();
 
 		// Define where each XML field should import to.
 		$this->core_fields_mapping = [
@@ -373,6 +376,418 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				]
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-get-slugs-for-author-scraping',
+			[ $this, 'cmd_get_slugs_for_author_scraping' ],
+			[
+				'shortdesc' => "Pulls out a list of original post slugs to scrape for multiple authors.",
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-scrape-slugs',
+			[ $this, 'cmd_scrape_slugs' ],
+			[
+				'shortdesc' => "Scrapes list of slugs produced by `newsroom-nz-get-slugs-for-author-scraping` command.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'slugs-json-file',
+						'description' => 'JSON file with slugs.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'from-index',
+						'description' => 'Scrape slugs-json-file slugs beginning from this index.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-dir',
+						'description' => 'Save body responses to this path.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'to-index',
+						'description' => 'Scrape slugs-json-file slugs ending with this index.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-crawl-and-update-authors-from-scraped-html-files',
+			[ $this, 'cmd_crawl_and_update_authors_from_scraped_html_files' ],
+			[
+				'shortdesc' => "Crawls .html files produced by `newsroom-nz-scrape-slugs` command and updates post authors.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'dir',
+						'description' => 'Dir with scraped .html files.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newsroom-nz-helper-update-ga-usernames',
+			[ $this, 'cmd_helper_update_ga_usernames' ],
+			[
+				'shortdesc' => "Updates GA usernames with plain numeric value fixing messed up exponential format from Google Sheets.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-csv-file-orig',
+						'description' => 'Original users CSV used to create GAs.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-csv-file-fixed',
+						'description' => 'Fixed users CSV with plain number formats instead of scientific exponential notation.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+
+	}
+
+	public function cmd_helper_update_ga_usernames( $pos_args, $assoc_args ) {
+		$csv_file_orig = $assoc_args['users-csv-file-orig'];
+		$csv_file_fixed = $assoc_args['users-csv-file-fixed'];
+
+		$email_usernames = [];
+
+		$handle = fopen( $csv_file_orig, 'r' );
+		$header = fgetcsv( $handle, 0 );
+		while ( ! feof( $handle ) ) {
+			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
+			$email_usernames[ strtolower( $row['Email'] ) ]['Username_old'] = $row['Username'];
+		}
+
+		$handle = fopen( $csv_file_fixed, 'r' );
+		$header = fgetcsv( $handle, 0 );
+		while ( ! feof( $handle ) ) {
+			$row = array_combine( $header, fgetcsv( $handle, 0 ) );
+			$email_usernames[ strtolower( $row['Email'] ) ]['Username_fixed'] = $row['Username'];
+		}
+
+		foreach ( $email_usernames as $email => $element ) {
+			if ( $element['Username_old'] == $element['Username_fixed'] ) {
+				unset( $email_usernames[ $email ] );
+			}
+		}
+
+		// Validate.
+		$pattern_old = '/^\d\.\d{1,5}E\+\d{2}$/';
+		$pattern_new = '/^\d{16}$/';
+		foreach ( $email_usernames as $email => $element ) {
+			preg_match( $pattern_old, $element['Username_old'], $matches );
+			if ( ! isset( $matches[0] ) || ( $element['Username_old'] !== $matches[0] ) ) {
+				// different 'Username_old' than expected
+				$d = 1;
+			}
+			preg_match( $pattern_new, $element['Username_fixed'], $matches );
+			if ( ! isset( $matches[0] ) || ( $element['Username_fixed'] !== $matches[0] ) ) {
+				// different 'Username_fixed' than expected
+				$d = 1;
+			}
+		}
+
+		// Validated all usernames are in correct format.
+		// Proceed to update GA fields.
+		foreach ( $email_usernames as $email => $element ) {
+			$existing_guest_author = $this->coauthorsplus->get_guest_author_by_email( $email );
+			if ( ! $existing_guest_author ) {
+				$d = 1;
+			}
+
+			$this->update_ga_login( $existing_guest_author->ID, $element['Username_old'], $element['Username_fixed'] );
+		}
+	}
+
+	private function update_ga_login( $post_id, $username_old, $username_fixed ) {
+
+		$sqls_to_fix_ga_username = <<<SQL
+
+orig 6.20386E+15
+new 6203864856881790
+		select * from wp_posts where ID = 75262;
+		-- post_name "cap-6-20386e15"
+		-- post_name "cap-6203864856881790"
+=> 6-20386e15 => 6203864856881790
+??? sanitized A: 1) . => - 2) E => e 3) + => delete
+		select * from wp_postmeta where post_id = 75262;
+		-- cap-user_login 6.20386E+15
+=> 6.20386E+15 => 6203864856881790
++++ orig => new
+		-- 6203864856881790
+		select * from wp_term_relationships  where object_id = 75262;
+		-- term_taxonomy_id = 4069
+		select * from wp_term_taxonomy  where term_taxonomy_id = 4069;
+		-- term_id 4069
+		-- description "350 Aotearoa 350 Aotearoa 6.20386E 15 75262 350@350.org.nz"
+		-- => "350 Aotearoa 350 Aotearoa 6203864856881790 75262 350@350.org.nz"
+=> 6.20386E 15 => 6203864856881790
+??? stripped: 1) + => space
+		select * from wp_terms  where term_id = 4069;
+		-- name "6.20386E 15"
+		-- => name "6203864856881790"
+=> 6.20386E 15 => 6203864856881790
+??? stripped: 1) + => space
+		-- slug "cap-6-20386e-15"
+		-- => slug "cap-6203864856881790"
+=> 6-20386e-15 => 6203864856881790
+??? sanitized: 1) . => - 2) E => e 3) + => -
+
+SQL;
+
+	}
+
+	public function cmd_scrape_slugs( $pos_args, $assoc_args ) {
+		$slugs_data = json_decode( file_get_contents( $assoc_args['slugs-json-file'] ), true );
+		$dir        = $assoc_args['destination-dir'];
+		$from_index = $assoc_args['from-index'];
+		$to_index   = $assoc_args['to-index'];
+		if ( ! is_dir( $dir ) ) {
+			WP_CLI::error( 'Destination dir does not exist.' );
+		}
+
+		$get_retries       = 3;
+		$get_sleep_between = 2;
+
+		foreach ( $slugs_data as $key_data => $data ) {
+			WP_CLI::line( sprintf( "%d/%d", $key_data, count( $slugs_data ) - 1 ) );
+			if ( $key_data < $from_index || $key_data > $to_index ) {
+				continue;
+			}
+
+			$guid     = $data['guid'];
+			$post_id  = $data['post_id'];
+			$filename = sprintf( 'postid-%d_guid-%s.html', $post_id, $guid );
+
+			// Skip if file exists.
+			if ( file_exists( $dir . '/' . $filename ) ) {
+				WP_CLI::line( 'Already exists, skipping.' );
+				continue;
+			}
+
+			// Scrape with retries.
+			$i       = 1;
+			$url     = 'https://www.newsroom.co.nz/' . $data['slug'];
+			$success = false;
+			while( ( false === $success ) && ( $i <= $get_retries ) ) {
+				$response = wp_remote_get( $url, [ 'timeout' => 120 ] );
+				$success  = ( 200 == $response['response']['code'] ) ? true : false;
+				if ( ! $success ) {
+					sleep( $get_sleep_between );
+				}
+				$i++;
+			}
+			if ( false === $success ) {
+				WP_CLI::warning( sprintf( "Failed to get %s", $url ) );
+				$this->logger->log( 'newsroom-nz-scrape-slugs__errFailedDownloading.log', sprintf( "ERR scraping GUID %s postID %s %s", $guid, $post_id, $url ), $this->logger::WARNING );
+				continue;
+			}
+
+			// Save to file.
+			$body = wp_remote_retrieve_body( $response );
+			WP_CLI::line( sprintf( "Saving $filename", $filename ) );
+			file_put_contents( $dir . '/' . $filename , $body );
+		}
+
+		WP_CLI::line( 'Done.' );
+	}
+
+	/**
+	 * Get WP User ID by display name.
+	 *
+	 * @param string $display_name WP User Display name
+	 *
+	 * @return string|null WP User ID or null if not found.
+	 */
+	private function get_wpuser_id_by_display_name( $display_name ) {
+		global $wpdb;
+
+		return $wpdb->get_var( $wpdb->prepare(
+            "select `ID` from {$wpdb->users} where display_name = %s ; ",
+			$display_name
+        ) );
+	}
+
+	public function cmd_crawl_and_update_authors_from_scraped_html_files( $pos_args, $assoc_args ) {
+		$dir = $assoc_args['dir'];
+
+		// $wpuser_id = $this->get_wpuser_id_by_display_name( 'Adam Julian' );
+
+		$authors_all = $this->coauthorsplus->get_all_authors_for_post( 98614 );
+
+		$gaHaRim = $this->coauthorsplus->get_guest_author_by_id( 75261 );
+		$ga350Aotearoa = $this->coauthorsplus->get_guest_author_by_id( 75262 );
+		$gagaivantest1  = $this->coauthorsplus->get_guest_author_by_id( 98671 );
+		$wpuAlexiaRussell = get_user_by( 'ID', 27966 );
+		$wpuBenStanley = get_user_by( 'ID', 28050 );
+		$authors_all = [
+			// $gaHaRim,
+			$ga350Aotearoa,
+			// $gagaivantest1,
+			// $wpuBenStanley,
+			// $wpuAlexiaRussell,
+		];
+
+		// // This existing function should work but doesn't.
+		// $this->coauthorsplus->assign_guest_authors_to_post( [75261], 98619 );
+
+		// This work with WPUsers !, but for some reason not with GAs... Probably for same reason the one above doesnt' either.
+		$this->coauthorsplus->assign_authors_to_post( $authors_all, 98666 );
+
+		// => test this code on cap.local... it must work there first. then get a new staging export and try with that.
+
+return;
+		$authors_all = $this->coauthorsplus->get_all_authors_for_post( 98614 );
+		$authors_gas = $this->coauthorsplus->get_guest_authors_for_post( 98614 );
+return;
+
+		$files = glob( $dir . '/' . '*.html' );
+$files = [ '/Users/ivanuravic/www/newsroomnz/app/setup4_multipleauthors/scraped/postid-26261_guid-breaking-point-over-plan-to-excavate-pristine-reef.html' ];
+		foreach ( $files as $key_file => $file ) {
+			WP_CLI::line( sprintf( "%d/%d", $key_file + 1, count( $files ) ) );
+			$filename = basename( $file );
+if ( 'postid-26261_guid-breaking-point-over-plan-to-excavate-pristine-reef.html' != $filename ) {
+	continue;
+}
+
+			// Mach post_id from $filename.
+			$pattern = '/postid-(\d+)_guid-(.+)\.html/';
+			preg_match( $pattern, $filename, $matches );
+			if ( ! isset( $matches[1] ) || empty( $matches[1] ) ) {
+				$this->logger->log( 'newsroom-nz-scrape-slugs__errNoPostID.log', sprintf( "ERR no postID in filename %s", $filename ), $this->logger::WARNING );
+				continue;
+			}
+			$post_id = $matches[1];
+			// Get guid from postmeta/
+			$guid = get_post_meta( $post_id, 'newspack_nnz_guid', true );
+
+
+			// Get authors from body.
+			$author_names = [];
+			$body    = file_get_contents( $file );
+			$this->crawler->clear();
+			$this->crawler->add( $body );
+			$author_divs = $this->crawler->filter( 'div[class="content-author__name"]' );
+			if ( empty( $author_divs ) ) {
+				$this->logger->log( 'newsroom-nz-scrape-slugs__errNoArticleAuthor.log', sprintf( "ERR no author found post_id %d %s", $post_id, $filename ), $this->logger::WARNING );
+				continue;
+			}
+			foreach ( $author_divs->getIterator() as $author_div ) {
+				$author_names[] = $author_div->textContent;
+			}
+
+
+			// Log author names.
+			WP_CLI::line( sprintf( "Found %d authors", count( $author_names ) ) );
+			$log_msg = json_encode( [
+				'post_id' => $post_id,
+				'guid'    => $guid,
+				'authors' => $author_names,
+			] );
+			$this->logger->log( 'newsroom-nz-scrape-slugs__postidAuthornames.log', $log_msg );
+
+
+			/**
+			 * Get existing authors IDs from author names:
+			 *      - could be GAs, WPUsers, or a combination of those
+			 *      - if multiple authors found, we should pick one with more posts and log everything
+			 */
+			// List of author names and their types.
+			$authors = [];
+			foreach ( $author_names as $author_name ) {
+
+				// First try and pick a WP User.
+
+				// $existin
+
+				// Then pick a GA. But multiple GAs exist with same name, so pick one with most posts.
+
+				// ========== One WP User
+
+				// === Multiple:
+				// $res = $this->coauthorsplus->get_guest_author_by_display_name( 'Andrew Jones' );
+				// === Single:
+				// $res = $this->coauthorsplus->get_guest_author_by_display_name( '350 Aotearoa' );
+
+				// Get single or multiple GAs with that display name.
+				$res = $this->coauthorsplus->get_guest_author_by_display_name( 'Andrew Jones' );
+
+				// If it's a single author.
+				if ( is_object( $res ) ) {
+					$top_level_author = $res;
+				} elseif ( is_array( $res  ) ) {
+					 // If it's multiple authors, pick the author with most posts.
+					$top_level_author       = null;
+					$top_level_author_count = 0;
+					foreach ( $res as $author_res ) {
+						$posts = $this->coauthorsplus->get_all_posts_for_guest_author( $author_res->ID );
+						// If this author has more posts than the current top level author, or if we don't have a top level author yet, set this author as the top level author.
+						if ( ( count( $posts ) > $top_level_author_count ) || ( null === $top_level_author ) ) {
+							$top_level_author       = $author_res;
+							$top_level_author_count = count( $posts );
+						}
+					}
+
+					// Log that multiple GAs were found with that name, and which one was picked.
+				}
+
+
+			}
+			// GA & GA.
+
+			// GA & WPUser.
+
+			// WPUser & WPUser.
+
+			// Get existing author.
+			$d=1;
+		}
+
+	}
+
+	public function cmd_get_slugs_for_author_scraping( $pos_args, $assoc_args ) {
+
+		$scraping_data = [];
+
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( "%d/%d", $key_post_id + 1, count( $post_ids ) ) );
+
+			$guid      = get_post_meta( $post_id, 'newspack_nnz_guid', true );
+			$orig_data = get_post_meta( $post_id, 'newspack_nnz_import_data', true );
+			if ( ! $guid || ! $orig_data ) {
+				$this->logger->log( 'newsroom-nz-get-slugs-for-author-scraping__errMissingMeta.log', sprintf( '%d Missing GUID and/or orig.data', $post_id ), $this->logger::WARNING );
+				continue;
+			}
+
+			$scraping_data[] = [
+				'guid' => $orig_data['slug'],
+				'post_id' => $post_id,
+				'slug' => $orig_data['slug'],
+			];
+		}
+
+		// Save data
+		$this->logger->log( 'newsroom-nz-get-slugs-for-author-scraping__data.json', json_encode( $scraping_data ), false );
+
+		WP_CLI::line( 'Done.' );
 	}
 
 	public function cmd_fix_authors2_get_avatars_and_emails( $pos_args, $assoc_args ) {
