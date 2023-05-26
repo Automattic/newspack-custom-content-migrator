@@ -286,7 +286,7 @@ class CoAuthorPlus {
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return false|object Guest Author object.
+	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
@@ -302,10 +302,20 @@ class CoAuthorPlus {
 
 		// Manually querying ID from DB.
 		global $wpdb;
-		$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s AND post_type = 'guest-author';", $display_name ) );
-		$ga      = $this->get_guest_author_by_id( $post_id );
+		$post_ids_results = $wpdb->get_results( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s AND post_type = 'guest-author';", $display_name ), ARRAY_A );
 
-		return $ga;
+		$gas = [];
+		foreach ( $post_ids_results as $post_id_result ) {
+			$gas[] = $this->get_guest_author_by_id( $post_id_result['ID'] );
+		}
+
+		if ( 1 === count( $post_ids_results ) ) {
+			return $gas[0];
+		}
+
+		return $gas;
+
+
 
 		/**
 		 * Another possible approach, get using user_login, since this class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'
