@@ -18,14 +18,14 @@ class BillyPennMigrator implements InterfaceCommand {
 
 	/**
 	 * Instance of BillyPennMigrator
-	 * 
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
 
 	/**
 	 * Instance of \Logic\SimpleLocalAvatars
-	 * 
+	 *
 	 * @var null|SimpleLocalAvatars Instance.
 	 */
 	private $sla_logic;
@@ -108,7 +108,7 @@ class BillyPennMigrator implements InterfaceCommand {
 			'posts_per_page' => -1,
 			'post_status'    => 'publish,draft',
 		);
-		
+
 		$query = new WP_Query( $args );
 
 		$posts = $query->posts;
@@ -117,7 +117,7 @@ class BillyPennMigrator implements InterfaceCommand {
 
 		foreach ( $posts as $post ) {
 			$found = preg_match_all( $shortcode_pattern, $post->post_content, $matches );
-			
+
 			if ( $found == 0 ) {
 				continue;
 			}
@@ -156,11 +156,11 @@ class BillyPennMigrator implements InterfaceCommand {
 				$credit = array();
 
 				if ( isset( $shortcode_atts['credit'] ) ) {
-					$credit['credit'] = urldecode( $shortcode_atts['credit'] );	
+					$credit['credit'] = urldecode( $shortcode_atts['credit'] );
 				}
 
 				if ( isset( $shortcode_atts['credit_link'] ) ) {
-					$credit['url'] = urldecode( $shortcode_atts['credit_link'] );	
+					$credit['url'] = urldecode( $shortcode_atts['credit_link'] );
 				}
 
 				if ( ! empty( $credit ) && $attachment_id ) {
@@ -215,7 +215,7 @@ class BillyPennMigrator implements InterfaceCommand {
 
 		foreach ( $users as $user ) {
 			$user_bio = get_user_meta( $user->ID, 'user_bio_extended', true );
-			
+
 			if ( ! $user_bio ) {
 				continue;
 			}
@@ -252,14 +252,14 @@ class BillyPennMigrator implements InterfaceCommand {
 
 		foreach ( $users as $user ) {
 			$avatar_id = get_user_meta( $user->ID, 'wp_user_img', true );
-			
+
 			if ( ! $avatar_id ) {
 				continue;
 			}
 
 			WP_CLI::log( sprintf( 'Migrating avatar for user #%d', $user->ID ) );
 
-			$this->sla_logic->import_avatar( $user->ID, $avatar_id );
+			$this->sla_logic->assign_avatar( $user->ID, $avatar_id );
 		}
 
 		WP_CLI::success( 'Done!' );
@@ -286,7 +286,7 @@ class BillyPennMigrator implements InterfaceCommand {
 
 	/**
 	 * Convert a custom post type to a taxonomy.
-	 * 
+	 *
 	 * @param string $post_type The custom post type.
 	 * @param string $taxonomy The taxonomy (category, post_tag etc.).
 	 */
@@ -313,11 +313,11 @@ class BillyPennMigrator implements InterfaceCommand {
 				),
 			);
 
-			$wp_term = get_term_by( 'name', $term->post_title, $taxonomy );		
+			$wp_term = get_term_by( 'name', $term->post_title, $taxonomy );
 
 			if ( false == $wp_term ) {
 				WP_CLI::log( sprintf( 'Creating the term %s', $term->post_title ) );
-			
+
 				$new_term = wp_insert_term(
 					$term->post_title,
 					$taxonomy,
@@ -327,7 +327,7 @@ class BillyPennMigrator implements InterfaceCommand {
 				);
 
 				$term_id = $new_term['term_id'];
-	
+
 				if ( is_wp_error( $new_term ) ) {
 					WP_CLI::warning( 'Could not create term...' );
 					WP_CLI::warning( $new_term->get_error_message() );
@@ -364,7 +364,7 @@ class BillyPennMigrator implements InterfaceCommand {
 		if ( isset( $credit['url'] ) ) {
 			update_post_meta( $attachment_id, $credit_url_meta, $credit['url'] );
 		}
-		
+
 	}
 
 	public function generate_image_block( $args ) {

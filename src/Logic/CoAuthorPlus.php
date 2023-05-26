@@ -123,6 +123,99 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Updates Guest Author's data.
+	 *
+	 * @param int   $ga_id Guest Author ID.
+	 * @param array $args  {
+	 *     The $args param that can be updated (for the \CoAuthors_Guest_Authors::create method).
+	 *
+	 *     @type string $display_name
+	 *     @type string $first_name
+	 *     @type string $last_name
+	 *     @type string $user_email
+	 *     @type string $website
+	 *     @type string $description
+	 *     @type int    $avatar       Attachment ID for the Avatar image.
+	 * }
+	 *
+	 * user_login field can presently not be updated. If needed, it can probably be done by updating:
+	 *      - wp_postmeta.meta_value where meta_key = 'cap-user_login'
+	 *      - wp_terms.name where term_id matches $ga_id post_id
+	 *      - wp_terms.slug where term_id matches $ga_id post_id
+	 *
+	 * @throws \UnexpectedValueException If $args contains an unsupported key.
+	 */
+	public function update_guest_author( int $ga_id, array $args ) {
+		global $wpdb;
+
+		// Validate args keys.
+		$allowed_args_keys = [
+			'display_name',
+			'first_name',
+			'last_name',
+			'user_email',
+			'website',
+			'description',
+			'avatar',
+		];
+		foreach ( $args as $key => $value ) {
+			if ( ! in_array( $key, $allowed_args_keys, true ) ) {
+				throw new \UnexpectedValueException( 'The `' . $key . '` param is not allowed for Guest Author update.' );
+			}
+		}
+
+		// Sanitize args.
+		$args_sanitized = [];
+		foreach ( $args as $key => $value ) {
+			$key_sanitized                    = esc_sql( $key );
+			$value_sanitized                  = esc_sql( $value );
+			$args_sanitized[ $key_sanitized ] = $value_sanitized;
+		}
+
+		// Update display name.
+		if ( isset( $args_sanitized['display_name'] ) && ! empty( $args_sanitized['display_name'] ) ) {
+			$wpdb->update(
+				$wpdb->posts,
+				[ 'post_title' => $args_sanitized['display_name'] ],
+				[ 'ID' => $ga_id ]
+			);
+			update_post_meta( $ga_id, 'cap-display_name', $args_sanitized['display_name'] );
+		}
+
+		// Update first_name.
+		if ( isset( $args_sanitized['first_name'] ) && ! empty( $args_sanitized['first_name'] ) ) {
+			update_post_meta( $ga_id, 'cap-first_name', $args_sanitized['first_name'] );
+		}
+
+		// Update last_name.
+		if ( isset( $args_sanitized['last_name'] ) && ! empty( $args_sanitized['last_name'] ) ) {
+			update_post_meta( $ga_id, 'cap-last_name', $args_sanitized['last_name'] );
+		}
+
+		// Update user_email.
+		if ( isset( $args_sanitized['user_email'] ) && ! empty( $args_sanitized['user_email'] ) ) {
+			update_post_meta( $ga_id, 'cap-user_email', $args_sanitized['user_email'] );
+		}
+
+		// Update website.
+		if ( isset( $args_sanitized['website'] ) && ! empty( $args_sanitized['website'] ) ) {
+			update_post_meta( $ga_id, 'cap-website', $args_sanitized['website'] );
+		}
+
+		// Update description.
+		if ( isset( $args_sanitized['description'] ) && ! empty( $args_sanitized['description'] ) ) {
+			update_post_meta( $ga_id, 'cap-description', $args_sanitized['description'] );
+		}
+
+		// Update avatar attachment ID.
+		if ( isset( $args_sanitized['avatar'] ) && ! empty( $args_sanitized['avatar'] ) ) {
+			update_post_meta( $ga_id, '_thumbnail_id', $args_sanitized['avatar'] );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
 	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
 	 *
 	 * @param array $guest_author_ids Guest Author IDs.
@@ -178,24 +271,77 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets the Guest Author object by `email` (as defined by the CAP plugin).
+	 *
+	 * @param string $ga_email Guest Author email.
+	 *
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_email( string $ga_email ) {
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_email', $ga_email );
+	}
+
+	/**
 	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return false|object Guest Author object.
+	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
-		// This class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'.
-		$user_login = sanitize_title( $display_name );
+		// phpcs:disable
+		/**
+		 * These two don't work as expected:
+		 *
+		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'display_name', $display_name );
+		 *
+		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'post_title', $display_name );
+		 */
+		// phpcs:enable
 
-		return $this->get_guest_author_by_user_login( $user_login );
+		// Manually querying ID from DB.
+		global $wpdb;
+		$post_ids_results = $wpdb->get_results( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s AND post_type = 'guest-author';", $display_name ), ARRAY_A );
+
+		$gas = [];
+		foreach ( $post_ids_results as $post_id_result ) {
+			$gas[] = $this->get_guest_author_by_id( $post_id_result['ID'] );
+		}
+
+		if ( 1 === count( $post_ids_results ) ) {
+			return $gas[0];
+		}
+
+		return $gas;
+
+
+
+		/**
+		 * Another possible approach, get using user_login, since this class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'
+		 *      $user_login = sanitize_title( $display_name );
+		 *      return $this->get_guest_author_by_user_login( $user_login );
+		 */
+	}
+
+	/**
+	 * Gets Guest Author's avatar attachment ID.
+	 *
+	 * @param int $ga_id GA ID.
+	 *
+	 * @return int|null Attachment ID or null.
+	 */
+	public function get_guest_authors_avatar_attachment_id( int $ga_id ) {
+		$_thumbnail_id = get_post_meta( $ga_id, '_thumbnail_id', true );
+		$attachment_id = is_numeric( $_thumbnail_id ) ? (int) $_thumbnail_id : null;
+
+		return $attachment_id;
 	}
 
 	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
 	 *
-	 * @param WP_User|int $wp_user ID of the User or a WP_User object
+	 * @param WP_User|int $wp_user ID of the User or a WP_User object.
 	 *
 	 * @return false|object Guest author object.
 	 */
@@ -220,6 +366,17 @@ class CoAuthorPlus {
 
 		return $guest_author;
 
+	}
+
+	/**
+	 * Gets all Post's authors, both Guest Authors and WP User authors.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return mixed|void
+	 */
+	public function get_all_authors_for_post( $post_id ) {
+		return get_coauthors( $post_id );
 	}
 
 	/**
