@@ -73,5 +73,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\MusicallyMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
+		Command\PublisherSpecific\InsightCrimeMigrator::class,
 	)
 );
