@@ -120,6 +120,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-fix-duplicate-categories',
+			[ $this, 'cmd_fix_duplicate_categories' ],
+			[
+				'shortdesc' => 'Resets duplicate categories that wp importer merged.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-set-coauthors-plus',
 			[ $this, 'cmd_set_coauthors_plus' ],
 			[
@@ -764,6 +773,61 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for 'newspack-content-migrator latinfinance-fix-duplicate-categories'.
+	 *
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_fix_duplicate_categories( $pos_args, $assoc_args ) {
+
+		// display "do by hand" notice
+		WP_CLI::line( "\n" . 'You may need to do the following by hand if not already done:' );
+		WP_CLI::line( '- change existing category "Energy > Hydro" slug to "energy-hydro"' );
+		WP_CLI::line( '- create new category "Wind" with parent "Energy" and slug "energy-wind"' );
+		WP_CLI::line( '- create new category "Solar" with parent "Energy" and slug "energy-solar"' );
+		WP_CLI::line( '- create new category "Hydro" with parent "ESG" and slug "hydro"' . "\n");
+
+		// try to proceed
+		$topics_id = $this->get_wp_category_id_else_die( 'topics', 0 );
+		$energy_id = $this->get_wp_category_id_else_die( 'energy', $topics_id );
+		$esg_id = $this->get_wp_category_id_else_die( 'esg', $topics_id );
+
+		$cats = [
+			[
+				'id' => $this->get_wp_category_id_else_die( 'energy-hydro', $energy_id ),
+				'old_path' => '/topics/energy/hydro',
+			],
+			[
+				'id' => $this->get_wp_category_id_else_die( 'energy-solar', $energy_id ),
+				'old_path' => '/topics/energy/solar',
+			],
+			[
+				'id' => $this->get_wp_category_id_else_die( 'energy-wind', $energy_id ),
+				'old_path' => '/topics/energy/wind',
+			],
+			[
+				'id' => $this->get_wp_category_id_else_die( 'hydro', $esg_id ),
+				'old_path' => '/topics/esg/hydro',
+			],
+			[
+				'id' => $this->get_wp_category_id_else_die( 'solar', $esg_id ),
+				'old_path' => '/topics/esg/solar',
+			],
+			[
+				'id' => $this->get_wp_category_id_else_die( 'wind', $esg_id ),
+				'old_path' => '/topics/esg/wind',
+			],
+		];
+
+		WP_CLI::line( 'All categories found!  Proceeding...' );
+
+		foreach( $cats as $cat ) {
+			$this->set_correct_wp_category( $cat['id'], $cat['old_path'] );
+		}
+
+	}
+
+	/**
 	 * Callable for 'newspack-content-migrator latinfinance-set-coauthors-plus'.
 	 *
 	 * @param array $pos_args   WP CLI command positional arguments.
@@ -1336,6 +1400,18 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	}
 
+	private function get_wp_category_id_else_die( $slug, $parent_id = null ) {
+		
+		$cat = term_exists( $slug, 'category', $parent_id );
+		
+		if( null === $cat ) {
+			WP_CLI::error( 'WP category not found for slug "' . $slug . '" and parent_id "' . $parent_id . '"' );
+		}
+
+		return $cat['term_id'];
+
+	}
+
 
 	/**
 	 * Logging
@@ -1459,6 +1535,58 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		return $query->post_count;
 
+	}
+
+	private function set_correct_wp_category( $cat_id, $old_path ) {
+
+		// remove all current posts from this category
+		$args = [
+			'posts_per_page' 	=> -1,
+			'post_type' 		=> 'post',
+			'fields'			=> 'ids',
+			'cat' 				=> $cat_id,
+		];
+		$query = new WP_Query ( $args );
+		
+		WP_CLI::line( "\n" . sprintf( 'Removing %s posts in category %d.', $query->post_count, $cat_id ) );
+
+		foreach ($query->posts as $post_id ) {
+			
+			// NOTE: wp_remove_object_terms expects $cat_id as INT else will look for string/slug
+			wp_remove_object_terms( $post_id, (int) $cat_id, 'category' );
+
+		}
+
+		// add only posts that match old postmeta
+		$args = [
+			'posts_per_page' 	=> -1,
+			'post_type' 		=> 'post',
+			'fields'			=> 'ids',
+			'meta_query'		=> [
+				[
+					'key'		=> 'newspack_lf_categories',
+					'value' 	=> str_replace('/', '\\/', $old_path), // match db json string format (e.g.: '\/topics\/esg\/solar')
+					'compare'	=> 'LIKE'
+				],
+			],
+		];
+		$query = new WP_Query ( $args );
+		
+		WP_CLI::line( sprintf( 'Updating %s posts for category %d using old path %s.', $query->post_count, $cat_id, $old_path ) );
+
+		foreach ($query->posts as $post_id ) {
+			
+			// get old category list
+			$old_cats = get_post_meta( $post_id, 'newspack_lf_categories' );
+			
+			if( empty( $old_cats ) || 1 != count( $old_cats ) ) {
+				WP_CLI::error( 'Incorrect newspack_lf_categories count for post_id: ' . $post_id );
+			}
+
+			wp_set_post_terms( $post_id, (int) $cat_id, 'category', true );
+
+		}
+		
 	}
 
 	// Use PDO to create a connection to the DB.
