@@ -216,7 +216,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
+	 * Assigns Guest Authors to the Post.
 	 *
 	 * @param array $guest_author_ids Guest Author IDs.
 	 * @param int   $post_id          Post IDs.
@@ -229,6 +229,29 @@ class CoAuthorPlus {
 			$coauthors[]  = $guest_author->user_nicename;
 		}
 		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users );
+	}
+
+	/**
+	 * Assigns either GAs and/or WPUsers authors to Post.
+	 *
+	 * @param array $authors                  Array of mixed Guest Author \stdClass objects and/or \WP_User objects.
+	 * @param int   $post_id                  Post IDs.
+	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
+	 *
+	 * @throws \UnexpectedValueException If $authors contains an unsupported class.
+	 */
+	public function assign_authors_to_post( array $authors, $post_id, bool $append_to_existing_users = false ) {
+		$coauthors_nicenames = [];
+		foreach ( $authors as $author ) {
+			if ( 'stdClass' === $author::class ) {
+				$coauthors_nicenames[] = $author->user_nicename;
+			} elseif ( 'WP_User' === $author::class ) {
+				$coauthors_nicenames[] = $author->data->user_nicename;
+			} else {
+				throw new \UnexpectedValueException( 'The `' . $author::class . '` class is not allowed for Guest Author update.' );
+			}
+		}
+		$this->coauthors_plus->add_coauthors( $post_id, $coauthors_nicenames, $append_to_existing_users );
 	}
 
 	/**
