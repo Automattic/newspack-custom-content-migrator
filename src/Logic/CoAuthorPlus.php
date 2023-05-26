@@ -369,6 +369,17 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Gets all Post's authors, both Guest Authors and WP User authors.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return mixed|void
+	 */
+	public function get_all_authors_for_post( $post_id ) {
+		return get_coauthors( $post_id );
+	}
+
+	/**
 	 * Gets Post's Guest Authors, leaving out WP User authors.
 	 *
 	 * @param int $post_id Post ID.
