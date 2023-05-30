@@ -129,6 +129,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-fix-images-in-content',
+			[ $this, 'cmd_fix_images_in_content' ],
+			[
+				'shortdesc' => 'Fixes images in-conent that we not imported properly by the wp importer.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-set-coauthors-plus',
 			[ $this, 'cmd_set_coauthors_plus' ],
 			[
@@ -824,6 +833,56 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		foreach( $cats as $cat ) {
 			$this->set_correct_wp_category( $cat['id'], $cat['old_path'] );
 		}
+
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-fix-images-in-content'.
+	 *
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_fix_images_in_content( $pos_args, $assoc_args ) {
+
+		WP_CLI::line( "Doing latinfinance-fix-images-in-content..." );
+
+		global $wpdb;
+
+		$report = [
+			'posts-with-images' 		=> 0,
+			'img-base64-skipped'		=> 0,
+			'img-old-assets-skipped' 	=> 0,
+			'img-off-site-skipped'	 	=> 0,
+			'img-staging-skipped'	 	=> 0,
+			'fixed'						=> 0,
+			'fix-by-hand'				=> [],
+		];
+
+		// select all post content with images in the content
+		$results = $wpdb->get_results( "
+			SELECT ID, post_content
+			FROM {$wpdb->posts}
+			WHERE post_content like '%<img%'		
+		");
+	
+		$report['posts-with-images'] = count( $results );			
+		WP_CLI::line( 'Found ' . $report['posts-with-images'] . ' posts with images.' );
+
+		foreach( $results as $row ) {
+			
+			// get full img element
+			preg_match_all( '/<img[^<]*?src=[^>]*>/i', $row->post_content, $matches );
+
+			// die on error
+			if( empty( $matches ) || count( $matches[0] ) == 0 ) {
+				WP_CLI::error( 'Preg match all returned no results for post ' . $row->ID );
+			}
+
+			$this->set_images_in_content( $row->ID, $matches[0], $report );
+
+		}
+
+		print_r( $report );
 
 	}
 
@@ -1588,6 +1647,95 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		}
 		
 	}
+
+	private function set_images_in_content( $post_id, $imgs, &$report ) {
+
+		// images per post content
+		foreach( $imgs as $img ) {
+				
+			// DOMAIN: skip aleady set images
+			if( preg_match( '#src=.{0,1}http(s)?://latinfinance-newspack#i', $img ) ) {
+				$report['img-staging-skipped']++;
+				continue;
+			}
+
+			// DOMAIN: images on domain
+			if( preg_match( '#src=.{0,1}http(s)?://([a-z]\.)?latinfinance.com#i', $img ) ) {
+				$report['fix-by-hand'][] = 'Fix by hand: post id ' . $post_id . ' => ' . $img;
+				continue;
+			}
+
+			// DOMAIN: all other domains (offsite)
+			if( preg_match( '#src=.{0,1}http(s)?://#i', $img ) ) {
+				$report['img-off-site-skipped']++;
+				continue;
+			}
+
+			// ignore old_assets images for now
+			if( preg_match( '#src=.{0,1}/old_assets/#i', $img ) ) {
+				$report['img-old-assets-skipped']++;
+				continue;
+			}
+
+			// skip base64 images
+			if( preg_match( '#src=.{0,1}data:image/#i', $img ) ) {
+				$report['img-base64-skipped']++;
+				continue;
+			}
+
+			// media urls
+			if( preg_match( '#src=.{0,1}(/media/[^\'"]+)[\'"]#i', $img, $matches ) ) {
+
+				if( 2 != count( $matches ) ) {
+					WP_CLI::error( 'Regex error for /media/ in ' . $post_id . ' => ' . $img );
+				}
+
+				$this->set_image_url_in_post( $post_id, $matches[1] );
+				$report['fixed']++;
+				continue;
+
+			}
+
+			// anything else remaining fix by hand
+			$report['fix-by-hand'][] = 'Fix by hand: post id ' . $post_id . ' => ' . $img;
+
+		}
+
+	}
+
+	private function set_image_url_in_post( $post_id, $img_url ) {
+
+		global $wpdb;
+
+		// get the image
+		// don't worry about query string width/height, this was already handled when importer grabbed the image
+		// but replace &amp; with & due to importer CDATA WXR issue
+		$attachment_id = $wpdb->get_var( $wpdb->prepare( "
+			SELECT ID
+			FROM wp_posts 
+			WHERE post_type = 'attachment'
+			AND post_title = %s
+		", str_replace( '&amp;', '&', $img_url, ) ) );
+
+		if( null === $attachment_id ) {
+			WP_CLI::error( 'DB image not found for attachment ' . $post_id . ' and image ' . $img_url );
+		}
+		
+		// get new url
+		if( ! ( $new_url = wp_get_attachment_url( $attachment_id ) ) ) {
+			WP_CLI::error( 'Attachment url not found for attachment_id ' . $attachment_id );
+		}
+
+		// replace post content
+		$wpdb->query( $wpdb->prepare( "
+			UPDATE {$wpdb->posts} 
+			SET post_content = REPLACE(post_content, %s, %s)
+			WHERE ID = %d
+		", $img_url, $new_url, $post_id ) );
+
+	}
+
+
 
 	// Use PDO to create a connection to the DB.
 	// php requires: php.ini => extension=pdo_sqlsrv
