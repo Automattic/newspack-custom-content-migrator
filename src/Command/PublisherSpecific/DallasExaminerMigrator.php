@@ -96,7 +96,7 @@ class DallasExaminerMigrator implements InterfaceCommand {
 
 		$posts = $wpdb->get_results( 
             $wpdb->prepare(
-                "SELECT ID, SUBSTRING_INDEX(post_content, '\n', 5) as post_content FROM $wpdb->posts WHERE post_type = 'post' and post_author = 3 and SUBSTRING_INDEX(post_content, '\n', 5) like binary '%By%' AND ID >= %d",
+                "SELECT ID, SUBSTRING_INDEX(post_content, '\n', 5) as post_content FROM $wpdb->posts WHERE post_type = 'post' and SUBSTRING_INDEX(post_content, '\n', 5) like binary '%By%' AND ID >= %d",
                 $initial_post
             )
          );
@@ -113,6 +113,8 @@ class DallasExaminerMigrator implements InterfaceCommand {
 			$found = false;
 			$posts_authors[$post->ID] = [];
 			foreach( $lines as $line ) {
+                $line = htmlentities($line);
+                $line = str_replace( '&nbsp;', ' ', $line);
 				if ( preg_match( '/By (.+)$/', $line, $matches ) ) {
 					$user = $matches[1];
 					$user = strtoupper( $user ); // names are already uppercase. but we have AND and "and"
