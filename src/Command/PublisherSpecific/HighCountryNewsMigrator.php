@@ -41,9 +41,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$class = get_called_class();
 
 		if ( null === self::$instance ) {
-			self::$instance = new $class();
+			self::$instance                      = new $class();
 			self::$instance->coauthorsplus_logic = new CoAuthorPlus();
-			self::$instance->redirection = new Redirection();
+			self::$instance->redirection         = new Redirection();
 		}
 
 		return self::$instance;
@@ -119,7 +119,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
-				]
+				],
 			]
 		);
 
@@ -149,7 +149,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
-				]
+				],
 			]
 		);
 
@@ -244,7 +244,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					],
 				],
 			]
-		)
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator highcountrynews-fix-related-link-text',
@@ -257,9 +257,39 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						'name'        => 'file',
 						'description' => 'Path to the JSON file.',
 						'optional'    => false,
-					]
+					],
 				],
 			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-categories',
+			array( $this, 'hcn_fix_categories' ),
+			array(
+				'shortdesc' => 'Fix posts without featured images.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'articles-json',
+						'description' => 'Path to the Articles JSON file.',
+						'optional'    => false,
+					],
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
 		);
 	}
 
@@ -317,9 +347,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+											   ->set_start( $start )
+											   ->set_end( $end )
+											   ->getIterator();
 
 		foreach ( $iterator as $row_number => $row ) {
 			WP_CLI::log( 'Row Number: ' . $row_number . ' - ' . $row['username'] );
@@ -365,9 +395,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+											   ->set_start( $start )
+											   ->set_end( $end )
+											   ->getIterator();
 
 		$creators = [];
 
@@ -443,7 +473,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					echo WP_CLI::colorize( "%gImage {$row['id']} created.%n" ) . "\n";
 					update_post_meta( $result, 'UID', $row['UID'] );
 				}
-			} else if ( ! empty( $row['legacyPath'] ) ) {
+			} elseif ( ! empty( $row['legacyPath'] ) ) {
 				echo WP_CLI::colorize( '%wHandling legacyPath...' ) . "\n";
 				// download image and upload it
 				$attachment_id = media_sideload_image( $row['@id'] );
@@ -487,9 +517,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+											   ->set_start( $start )
+											   ->set_end( $end )
+											   ->getIterator();
 
 		$parent_category_id = wp_create_category( 'Issues' );
 
@@ -530,9 +560,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+											   ->set_start( $start )
+											   ->set_end( $end )
+											   ->getIterator();
 
 		foreach ( $iterator as $row_number => $row ) {
 			echo WP_CLI::colorize( "Handling Row Number: %B$row_number%n\n" );
@@ -544,10 +574,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				$intro = utf8_decode( $intro );
 				$intro = html_entity_decode( $intro, ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
 
-				$dom = new DOMDocument();
+				$dom           = new DOMDocument();
 				$dom->encoding = 'utf-8';
 				@$dom->loadHTML( $intro );
-//				var_dump([$dom->childNodes, $dom->firstChild, $dom->firstChild->childNodes, $dom->lastChild]);die();
+				// var_dump([$dom->childNodes, $dom->firstChild, $dom->firstChild->childNodes, $dom->lastChild]);die();
 				foreach ( $dom->lastChild->firstChild->childNodes as $child ) {
 					if ( $child instanceof DOMElement ) {
 						$this->remove_attributes( $child );
@@ -576,14 +606,15 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					$script_tags = $dom->getElementsByTagName( 'script' );
 
 					foreach ( $script_tags as $script_tag ) {
-//					var_dump( [ 'tag' => $script_tag->ownerDocument->saveHTML( $script_tag), 'name' => $script_tag->nodeName, 'parent' => $script_tag->parentNode->nodeName ] );
+						// var_dump( [ 'tag' => $script_tag->ownerDocument->saveHTML( $script_tag), 'name' => $script_tag->nodeName, 'parent' => $script_tag->parentNode->nodeName ] );
 						$script_tag->nodeValue = '';
 					}
 
 					$img_tags = $dom->getElementsByTagName( 'img' );
 
 					foreach ( $img_tags as $img_tag ) {
-						/* @var DOMElement $img_tag */
+						/*
+						 @var DOMElement $img_tag */
 						// $src should look like this: resolveuid/191b2acc464b44f592c547229b393b4e.
 						$src         = $img_tag->getAttribute( 'src' );
 						$uid         = str_replace( 'resolveuid/', '', $src );
@@ -657,7 +688,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			echo WP_CLI::colorize( "Main Post ID: %B{$post->ID}%n\n" );
 			preg_match_all( '/\[RELATED:(.*?)\]/', $post->post_content, $matches, PREG_SET_ORDER );
 
-			$update = false;
+			$update       = false;
 			$post_content = $post->post_content;
 			foreach ( $matches as $match ) {
 				echo WP_CLI::colorize( "%w{$match[1]}%n\n" );
@@ -674,10 +705,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 					if ( $post_id ) {
 						echo WP_CLI::colorize( "%gFound related post ID: {$post_id}%n\n" );
-						$update = true;
-						$permalink   = get_permalink( $post_id );
-						$post_title  = get_the_title( $post_id );
-						$replacement = "<p><strong>RELATED:</strong> <a href='{$permalink}' target='_blank'>{$post_title}</a></p>";
+						$update       = true;
+						$permalink    = get_permalink( $post_id );
+						$post_title   = get_the_title( $post_id );
+						$replacement  = "<p><strong>RELATED:</strong> <a href='{$permalink}' target='_blank'>{$post_title}</a></p>";
 						$post_content = str_replace( $match[0], $replacement, $post_content );
 					} else {
 						echo WP_CLI::colorize( "%rNo post ID found%n\n" );
@@ -721,9 +752,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+											   ->set_start( $start )
+											   ->set_end( $end )
+											   ->getIterator();
 
 		// Need to create some additional parent categories based off of live site.
 		$main_categories = [
@@ -743,18 +774,18 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		foreach ( $iterator as $row_number => $row ) {
 			echo WP_CLI::colorize( 'Handling Row Number: ' . "%b$row_number%n" . ' - ' . $row['@id'] ) . "\n";
 
-			$post_date_string = $row['effective'] ?? $row['created'] ?? '1970-01-01T00:00:00+00:00';
+			$post_date_string     = $row['effective'] ?? $row['created'] ?? '1970-01-01T00:00:00+00:00';
 			$post_modified_string = $row['modified'] ?? '1970-01-01T00:00:00+00:00';
-			$post_date     = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_date_string, new DateTimeZone( 'America/Denver' ) );
-			$post_modified = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_modified_string, new DateTimeZone( 'America/Denver' ) );
+			$post_date            = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_date_string, new DateTimeZone( 'America/Denver' ) );
+			$post_modified        = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_modified_string, new DateTimeZone( 'America/Denver' ) );
 
-			$post_data               = [
+			$post_data                = [
 				'post_category' => [],
 				'meta_input'    => [],
 			];
-			$post_data['post_title'] = $row['title'];
+			$post_data['post_title']  = $row['title'];
 			$post_data['post_status'] = 'public' === $row['review_state'] ? 'publish' : 'draft';
-			$post_data['post_date']  = $post_date->format( 'Y-m-d H:i:s' );
+			$post_data['post_date']   = $post_date->format( 'Y-m-d H:i:s' );
 			$post_date->setTimezone( new DateTimeZone( 'GMT' ) );
 			$post_data['post_date_gmt'] = $post_date->format( 'Y-m-d H:i:s' );
 			$post_data['post_modified'] = $post_modified->format( 'Y-m-d H:i:s' );
@@ -807,7 +838,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			$post_data['post_author'] = $author_id;
 
 			$post_data['meta_input']['newspack_post_subtitle'] = $row['subheadline'];
-			$post_data['meta_input']['UID'] = $row['UID'];
+			$post_data['meta_input']['UID']                    = $row['UID'];
 
 			$post_content = '';
 
@@ -817,10 +848,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				$intro = utf8_decode( $intro );
 				$intro = html_entity_decode( $intro, ENT_QUOTES | ENT_DISALLOWED | ENT_HTML5, 'UTF-8' );
 
-				$dom = new DOMDocument();
+				$dom           = new DOMDocument();
 				$dom->encoding = 'utf-8';
 				@$dom->loadHTML( $intro );
-//				var_dump([$dom->childNodes, $dom->firstChild, $dom->firstChild->childNodes, $dom->lastChild]);die();
+				// var_dump([$dom->childNodes, $dom->firstChild, $dom->firstChild->childNodes, $dom->lastChild]);die();
 				foreach ( $dom->lastChild->firstChild->childNodes as $child ) {
 					if ( $child instanceof DOMElement ) {
 						$this->remove_attributes( $child );
@@ -849,14 +880,15 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					$script_tags = $dom->getElementsByTagName( 'script' );
 
 					foreach ( $script_tags as $script_tag ) {
-//					var_dump( [ 'tag' => $script_tag->ownerDocument->saveHTML( $script_tag), 'name' => $script_tag->nodeName, 'parent' => $script_tag->parentNode->nodeName ] );
+						// var_dump( [ 'tag' => $script_tag->ownerDocument->saveHTML( $script_tag), 'name' => $script_tag->nodeName, 'parent' => $script_tag->parentNode->nodeName ] );
 						$script_tag->nodeValue = '';
 					}
 
 					$img_tags = $dom->getElementsByTagName( 'img' );
 
 					foreach ( $img_tags as $img_tag ) {
-						/* @var DOMElement $img_tag */
+						/*
+						 @var DOMElement $img_tag */
 						// $src should look like this: resolveuid/191b2acc464b44f592c547229b393b4e.
 						$src         = $img_tag->getAttribute( 'src' );
 						$uid         = str_replace( 'resolveuid/', '', $src );
@@ -897,10 +929,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			// handle featured image.
 			if ( ! empty( $row['image'] ) ) {
 				$attachment_id = $wpdb->get_var(
-					"SELECT post_id 
-					FROM $wpdb->postmeta 
-					WHERE meta_key = '_wp_attached_file' 
-					  AND meta_value LIKE '%{$row['image']['filename']}' 
+					"SELECT post_id
+					FROM $wpdb->postmeta
+					WHERE meta_key = '_wp_attached_file'
+					  AND meta_value LIKE '%{$row['image']['filename']}'
 					LIMIT 1"
 				);
 
@@ -915,7 +947,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 			if ( ! is_wp_error( $result ) ) {
 				// handle redirects.
-				echo WP_CLI::colorize( "%gPost successfully created, Post ID: $result%n\n");
+				echo WP_CLI::colorize( "%gPost successfully created, Post ID: $result%n\n" );
 
 				foreach ( $row['aliases'] as $alias ) {
 					$old_url = str_replace( '/hcn/hcn/', 'https://hcn.org/', $alias );
@@ -931,7 +963,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					$guest_author_names      = explode( ' ', $row['author'] );
 					$guest_author_last_name  = array_pop( $guest_author_names );
 					$guest_author_first_name = implode( ' ', $guest_author_names );
-					$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
+					$guest_author_id         = $this->coauthorsplus_logic->create_guest_author(
 						[
 							'display_name' => $row['author'],
 							'first_name'   => $guest_author_first_name,
@@ -946,7 +978,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_id, $result );
 				}
 			} else {
-				echo WP_CLI::colorize("%rError creating post: {$result->get_error_message()}%n\n");
+				echo WP_CLI::colorize( "%rError creating post: {$result->get_error_message()}%n\n" );
 			}
 		}
 	}
@@ -972,9 +1004,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+											   ->set_start( $start )
+											   ->set_end( $end )
+											   ->getIterator();
 
 		foreach ( $iterator as $row ) {
 			if ( str_contains( $row['@id'], '/issues/' ) ) {
@@ -986,7 +1018,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				);
 
 				$issue_category_id = get_cat_ID( 'Issues' );
-				$category_ids = [];
+				$category_ids      = [];
 
 				if ( 0 !== $issue_category_id ) {
 					$category_ids[] = $issue_category_id;
@@ -1004,6 +1036,94 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				wp_set_post_categories( $post_id, $category_ids, false );
 			}
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-fix-categories`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_fix_categories( $args, $assoc_args ) {
+		global $wpdb;
+		$articles_list   = json_decode( file_get_contents( $assoc_args['articles-json'] ), true );
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_set_primary_category',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 570892,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 570892,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$plone_article_uid      = get_post_meta( $post->ID, 'plone_article_UID', true );
+			$original_article_index = array_search( $plone_article_uid, array_column( $articles_list, 'UID' ) );
+
+			if ( false === $original_article_index ) {
+				WP_CLI::warning( "Article UID $plone_article_uid not found in articles list: " . $post->ID );
+				continue;
+			}
+
+				$original_article = $articles_list[ $original_article_index ];
+
+			if ( ! empty( $original_article['subjects'] ) ) {
+				$category_ids = [];
+				foreach ( $original_article['subjects'] as $subject ) {
+					$category_id = get_cat_ID( $subject );
+
+					if ( ! $category_id ) {
+						// Add category.
+						$category_id = wp_insert_category(
+							[
+								'cat_name' => $subject,
+								'taxonomy' => 'category',
+							]
+						);
+					}
+
+					$category_ids[] = $category_id;
+				}
+
+				if ( ! empty( $category_ids ) ) {
+					wp_set_post_categories( $post->ID, $category_ids, true );
+					// Set yoast primary category.
+					update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category_ids[0] );
+				}
+			}
+
+			update_post_meta( $post->ID, '_newspack_set_primary_category', true );
+		}
+
+		wp_cache_flush();
 	}
 
 	private function replace_weird_chars( $string ): string {
@@ -1024,7 +1144,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	}
 
 	private function remove_attributes( DOMElement $element, $level = "\t" ) {
-//		echo "{$level}Removing attributes from $element->nodeName\n";
+		// echo "{$level}Removing attributes from $element->nodeName\n";
 		if ( 'blockquote' === $element->nodeName ) {
 			$class = $element->getAttribute( 'class' );
 			if ( str_contains( $class, 'instagram-media' ) ) {
@@ -1045,7 +1165,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 		foreach ( $element->childNodes as $child ) {
 			$level .= "\t";
-//			echo "{$level}Child: $child->nodeName\n";
+			// echo "{$level}Child: $child->nodeName\n";
 			if ( $child instanceof DOMElement ) {
 				$this->remove_attributes( $child, $level );
 			}
@@ -1062,7 +1182,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			if ( $node instanceof DOMElement ) {
 				if ( $node->childNodes->length > 1 && ! in_array( $node->nodeName, [ 'a', 'em', 'strong' ] ) ) {
 					$inner_html .= $this->inner_html( $node );
-				} else if ( 'a' === $node->nodeName ) {
+				} elseif ( 'a' === $node->nodeName ) {
 					$html = $doc->saveHTML( $node );
 
 					if ( $node->previousSibling && '#text' === $node->previousSibling->nodeName ) {
@@ -1070,7 +1190,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					}
 
 					if ( $node->nextSibling && '#text' === $node->nextSibling->nodeName ) {
-						$text_content = trim( $node->nextSibling->textContent );
+						$text_content    = trim( $node->nextSibling->textContent );
 						$first_character = substr( $text_content, 0, 1 );
 
 						if ( ! in_array( $first_character, [ '.', ':' ] ) ) {
@@ -1100,8 +1220,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					if (
 						( $node->previousSibling && $node->nextSibling && 'a' == $node->previousSibling->nodeName && 'a' == $node->nextSibling->nodeName ) ||
 						'p' === $element->nodeName
-					){
-						$text_content = preg_replace("/\s+/", " ", $text_content);
+					) {
+						$text_content = preg_replace( '/\s+/', ' ', $text_content );
 					}
 
 					$inner_html .= $text_content;
