@@ -456,18 +456,27 @@ class NewsroomNZMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'skip-emails-csv',
+						'description' => 'CSV of email GA user accounts that should be skipped.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				]
 			]
 		);
-
 	}
 
 	public function cmd_helper_update_ga_usernames( $pos_args, $assoc_args ) {
 		$csv_file_orig = $assoc_args['users-csv-file-orig'];
 		$csv_file_fixed = $assoc_args['users-csv-file-fixed'];
+		$skip_emails = ( isset( $assoc_args['skip-emails-csv'] ) && ! empty( $assoc_args['skip-emails-csv'] ) ) ? explode( ',', $assoc_args['skip-emails-csv'] ) : [];
+		global $wpdb;
 
 		$email_usernames = [];
 
+		// Read first CSV with wrong usernames.
 		$handle = fopen( $csv_file_orig, 'r' );
 		$header = fgetcsv( $handle, 0 );
 		while ( ! feof( $handle ) ) {
@@ -475,6 +484,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$email_usernames[ strtolower( $row['Email'] ) ]['Username_old'] = $row['Username'];
 		}
 
+		// Read second CSV with fixed usernames.
 		$handle = fopen( $csv_file_fixed, 'r' );
 		$header = fgetcsv( $handle, 0 );
 		while ( ! feof( $handle ) ) {
@@ -482,13 +492,14 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$email_usernames[ strtolower( $row['Email'] ) ]['Username_fixed'] = $row['Username'];
 		}
 
+		// Get array with data old => new/fixed.
 		foreach ( $email_usernames as $email => $element ) {
 			if ( $element['Username_old'] == $element['Username_fixed'] ) {
 				unset( $email_usernames[ $email ] );
 			}
 		}
 
-		// Validate.
+		// Validate if the data we filtered is just the "exponential scientific abbreviated math numbers".
 		$pattern_old = '/^\d\.\d{1,5}E\+\d{2}$/';
 		$pattern_new = '/^\d{16}$/';
 		foreach ( $email_usernames as $email => $element ) {
@@ -504,54 +515,200 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			}
 		}
 
-		// Validated all usernames are in correct format.
 		// Proceed to update GA fields.
+		$i = 0;
 		foreach ( $email_usernames as $email => $element ) {
+			$i++;
+			WP_CLI::line( sprintf( '%d/%d', $i, count( $email_usernames ) ) );
+
+			// Skipped emails will be done manually.
+			if ( in_array( $email, $skip_emails ) || in_array( strtolower( $email ), $skip_emails ) ) {
+				WP_CLI::line( 'Skipping.' );
+				continue;
+			}
+
 			$existing_guest_author = $this->coauthorsplus->get_guest_author_by_email( $email );
 			if ( ! $existing_guest_author ) {
 				$d = 1;
 			}
 
-			$this->update_ga_login( $existing_guest_author->ID, $element['Username_old'], $element['Username_fixed'] );
+			// e.g. 3.42488E+15
+			$username_current = $element['Username_old'];
+			// e.g. 3424876595474020
+			$username_new     = $element['Username_fixed'];
+
+
+			/**
+			 * Update all GA fields.
+			 */
+			$ga_post_id = $existing_guest_author->ID;
+
+			/**
+			 * wp_posts , e.g. ID = 75261 (post_title = ', _____ ___')
+			 *  - current post_name = cap-3-42488e15
+			 *                            3-42488e15
+			 *  - new     post_name = cap-3424876595474020
+			 */
+			$post_row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE ID = %d", $ga_post_id ), ARRAY_A );
+			if ( ! $post_row || empty( $post_row ) ) {
+				$debug = 1;
+			}
+			$post_name_current = 'cap-' . sanitize_title( $username_current );
+			$post_name_new     = 'cap-' . sanitize_title( $username_new );
+			// Validate
+			if ( $post_name_current !== $post_row['post_name'] ) {
+				$debug = 1;
+			}
+			// Update
+			$updated = $wpdb->update(
+				$wpdb->posts,
+				[ 'post_name' => $post_name_new, ],
+				[ 'ID' => $ga_post_id, ]
+			);
+			if ( 1 !== $updated ) {
+				$debug = 1;
+			}
+
+
+			/**
+			 * wp_postmeta where meta_key = 'cap-user_login'
+			 *  - current meta_value = 3.42488E+15
+			 *  - new     meta_value = 3424876595474020
+			 */
+			$postmeta_row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->postmeta WHERE post_id = %d and meta_key = 'cap-user_login'", $ga_post_id ), ARRAY_A );
+			if ( ! $postmeta_row || empty( $postmeta_row ) ) {
+				$debug = 1;
+			}
+			$meta_value_current = $username_current;
+			$meta_value_new     = $username_new;
+			// Validate
+			if ( $meta_value_current !== $postmeta_row['meta_value'] ) {
+				$debug = 1;
+			}
+			// Update
+			$updated = $wpdb->update(
+				$wpdb->postmeta,
+				[ 'meta_value' => $meta_value_new, ],
+				[ 'meta_id' => $postmeta_row['meta_id'], ]
+			);
+			if ( 1 !== $updated ) {
+				$debug = 1;
+			}
+
+
+			// Get wp_term_relationships.term_taxonomy_id where object_id = post_id
+			$term_taxonomy_id = $wpdb->get_var( $wpdb->prepare( "SELECT term_taxonomy_id FROM $wpdb->term_relationships WHERE object_id = %d", $ga_post_id ) );
+			if ( ! $term_taxonomy_id ) {
+				$debug = 1;
+			}
+
+
+			/**
+			 * wp_term_taxonomy where term_taxonomy_id and taxonomy = 'author'
+			 *  - current description = ", _____ ___ , _____ ___ 3.42488E 15 75261 _____.___@mfat.govt.nz"
+			 *  - new description = ", _____ ___ , _____ ___ 3424876595474020 75261 _____.___@mfat.govt.nz"
+			 *
+			 * get term_id
+			 */
+			$term_taxonomy_row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->term_taxonomy where term_taxonomy_id = %d and taxonomy = 'author'", $term_taxonomy_id ), ARRAY_A );
+			if ( ! $term_taxonomy_row || empty( $term_taxonomy_row ) ) {
+				$debug = 1;
+			}
+			$description_part_current = str_replace( '+', ' ', $username_current );
+			$description_part_new     = $username_new;
+			$description_current      = $term_taxonomy_row['description'];
+			$description_new          = str_replace( $description_part_current, $description_part_new, $description_current );
+			$term_id                  = $term_taxonomy_row['term_id'];
+			// Validate
+			if ( false === strpos( $term_taxonomy_row['description'], $description_part_current ) ) {
+				$debug = 1;
+			}
+			// Update
+			$updated = $wpdb->update(
+				$wpdb->term_taxonomy,
+				[ 'description' => $description_new, ],
+				[ 'term_taxonomy_id' => $term_taxonomy_id, ]
+			);
+			if ( 1 !== $updated ) {
+				$debug = 1;
+			}
+
+			/**
+			 * wp_terms where term_id
+			 *  - current name = "3.42488E 15"
+			 *  - new name     = "3424876595474020"
+			 *  - current slug = "cap-3-42488e-15"
+			 *  - new slug     = "cap-3424876595474020"
+			 */
+			$terms_row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->terms where term_id = %d", $term_id ), ARRAY_A );
+			if ( ! $terms_row || empty( $terms_row ) ) {
+				$debug = 1;
+			}
+			$name_current = str_replace( '+', ' ', $username_current );
+			$name_new     = $username_new;
+			$slug_current = 'cap-' . strtolower( str_replace( '+', '-', str_replace( '.', '-', $username_current ) ) );
+			$slug_new     = 'cap-' . $username_new;
+			// Validate
+			if ( $name_current !== $terms_row['name'] ) {
+				$debug = 1;
+			}
+			if ( $slug_current !== $terms_row['slug'] ) {
+				$debug = 1;
+			}
+			// Update
+			$updated = $wpdb->update(
+				$wpdb->terms,
+				[
+					'name' => $name_new,
+					'slug' => $slug_new,
+				],
+				[ 'term_id' => $term_id, ]
+			);
+			if ( 1 !== $updated ) {
+				$debug = 1;
+			}
+
+			// Log.
+			$msg = sprintf(
+				"%s %s
+ - username_current         %s
+ - username_new             %s
+ - post_name_current        %s
+ - post_name_new            %s
+ - meta_value_current       %s
+ - meta_value_new           %s
+ - term_taxonomy_id         %s
+ - description_part_current %s
+ - description_part_new     %s
+ - description_current      %s
+ - description_new          %s
+ - term_id                  %s
+ - name_current             %s
+ - name_new                 %s
+ - slug_current             %s
+ - slug_new                 %s",
+				$ga_post_id, $email,
+				$username_current,
+				$username_new,
+				$post_name_current,
+				$post_name_new,
+				$meta_value_current,
+				$meta_value_new,
+				$term_taxonomy_id,
+				$description_part_current,
+				$description_part_new,
+				$description_current,
+				$description_new,
+				$term_id,
+				$name_current,
+				$name_new,
+				$slug_current,
+				$slug_new
+			);
+			$this->logger->log( 'newsroom-nz-helper-update-ga-usernames__updated.log', $msg );
 		}
-	}
 
-	private function update_ga_login( $post_id, $username_old, $username_fixed ) {
-
-		$sqls_to_fix_ga_username = <<<SQL
-
-orig 6.20386E+15
-new 6203864856881790
-		select * from wp_posts where ID = 75262;
-		-- post_name "cap-6-20386e15"
-		-- post_name "cap-6203864856881790"
-=> 6-20386e15 => 6203864856881790
-??? sanitized A: 1) . => - 2) E => e 3) + => delete
-		select * from wp_postmeta where post_id = 75262;
-		-- cap-user_login 6.20386E+15
-=> 6.20386E+15 => 6203864856881790
-+++ orig => new
-		-- 6203864856881790
-		select * from wp_term_relationships  where object_id = 75262;
-		-- term_taxonomy_id = 4069
-		select * from wp_term_taxonomy  where term_taxonomy_id = 4069;
-		-- term_id 4069
-		-- description "350 Aotearoa 350 Aotearoa 6.20386E 15 75262 350@350.org.nz"
-		-- => "350 Aotearoa 350 Aotearoa 6203864856881790 75262 350@350.org.nz"
-=> 6.20386E 15 => 6203864856881790
-??? stripped: 1) + => space
-		select * from wp_terms  where term_id = 4069;
-		-- name "6.20386E 15"
-		-- => name "6203864856881790"
-=> 6.20386E 15 => 6203864856881790
-??? stripped: 1) + => space
-		-- slug "cap-6-20386e-15"
-		-- => slug "cap-6203864856881790"
-=> 6-20386e-15 => 6203864856881790
-??? sanitized: 1) . => - 2) E => e 3) + => -
-
-SQL;
-
+		WP_CLI::line( 'Done.' );
 	}
 
 	public function cmd_scrape_slugs( $pos_args, $assoc_args ) {
