@@ -85,6 +85,137 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				'shortdesc' => "Runs through all the Posts, and in case it doesn't have a featured image, finds the first <img> element in Post content and sets it as featured image.",
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator hide-featured-image-if-used-in-post-content',
+			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
+			[
+				'shortdesc' => 'Hides featured image for post if that same image is used in post_content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids-csv',
+						'description' => 'Post IDs to process.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-from',
+						'description' => 'Process post IDs from this ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-to',
+						'description' => 'Process post IDs to this ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator hide-featured-image-if-used-in-post-content` command.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_hide_featured_image_if_used_in_post_content( $pos_args, $assoc_args ) {
+		$post_ids     = isset( $assoc_args['post-ids-csv'] ) && ! empty( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+		$post_id_from = isset( $assoc_args['post-id-from'] ) && ! empty( $assoc_args['post-id-from'] ) ? $assoc_args['post-id-from'] : null;
+		$post_id_to   = isset( $assoc_args['post-id-to'] ) && ! empty( $assoc_args['post-id-to'] ) ? $assoc_args['post-id-to'] : null;
+
+		// If --post-ids-csv, can't use --post-id-from and --post-id-to.
+		if ( $post_ids && ( $post_id_from || $post_id_to ) ) {
+			WP_CLI::error( "Can't use both --post-ids-csv and --post-id-from/--post-id-to." );
+		}
+
+		// If --post-id-from used, must use --post-id-to too.
+		if ( ( $post_id_from && ! $post_id_to ) || ( ! $post_id_from && $post_id_to ) ) {
+			WP_CLI::error( 'Muse provide both --post-id-from and --post-id-to.' );
+		}
+
+		global $wpdb;
+		$log = 'hide-featured-image-if-used-in-post-content.log';
+
+		// Will first use --post-ids-csv if provided.
+		if ( $post_ids ) {
+			WP_CLI::line( 'Checking provided --post-ids-csv...' );
+		}
+
+		// Get post ID range if specified.
+		if ( ! $post_ids && ( $post_id_from && $post_id_to ) ) {
+			WP_CLI::line( sprintf( 'Fetching post IDs in range between %d and %d...', $post_id_from, $post_id_to ) );
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select ID
+					from {$wpdb->posts}
+					where post_type = 'post'
+					and post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ) 
+					and ID >= %d
+					and ID <= %d ;",
+					$post_id_from,
+					$post_id_to
+				)
+			);
+			if ( empty( $post_ids ) ) {
+				WP_CLI::error( 'No post IDs found in range.' );
+			}
+		}
+
+		// Use all posts if no post IDs specified.
+		if ( ! $post_ids ) {
+			WP_CLI::line( 'Fetching all post IDs...' );
+			$post_ids = $this->post_logic->get_all_posts_ids();
+		}
+
+		// Go through IDs.
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$post_id_exists = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+			if ( ! $post_id_exists ) {
+				$this->logger->log( $log, sprintf( 'Post ID does not exist %d', $post_id ), $this->logger::WARNING );
+				continue;
+			}
+
+			// Get featured image ID.
+			$thumbnail_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key = '_thumbnail_id'", $post_id ) );
+			if ( ! $thumbnail_id ) {
+				$this->logger->log( $log, sprintf( 'Post has no featured image %d', $post_id ) );
+				continue;
+			}
+
+			// Get post_content.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+			if ( ! $post_content ) {
+				$this->logger->log( $log, sprintf( 'Post has no post_content %d', $post_id ) );
+				continue;
+			}
+
+			// Get featured image URL.
+			$featured_image_url                  = wp_get_attachment_url( $thumbnail_id );
+			$featured_image_url_no_host          = str_replace( home_url(), '', $featured_image_url );
+			$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_url_no_host );
+			if ( ! $featured_image_used_in_post_content ) {
+				$this->logger->log( $log, sprintf( 'Featured image not found in post_content %d', $post_id ) );
+				continue;
+			}
+
+			// Set featured image as hidden if it's used in post_content.
+			if ( $featured_image_used_in_post_content ) {
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+				$this->logger->log( $log, sprintf( 'Featured image hidden %d', $post_id ) );
+				continue;
+			}
+
+			$this->logger->log( $log, sprintf( 'No changes to post %d', $post_id ) );
+		}
+
+		WP_CLI::line( sprintf( 'Done. See %s', $log ) );
 	}
 
 	/**
