@@ -782,47 +782,37 @@ class NewsroomNZMigrator implements InterfaceCommand {
         ) );
 	}
 
+	/**
+	 * Get WP User ID by username.
+	 *
+	 * @param string $display_name WP User Display name.
+	 *
+	 * @return WP_User|null WP User object or null if not found.
+	 */
+	private function get_wp_user_by_display_name( string $display_name ): ?WP_User {
+		global $wpdb;
+
+		$user_id = $wpdb->get_var( $wpdb->prepare( "select ID FROM $wpdb->users where display_name = %s", $display_name ) );
+		if ( $user_id ) {
+			$user = get_user_by( 'ID', $user_id );
+			return $user;
+		}
+
+		return null;
+	}
+
 	public function cmd_crawl_and_update_authors_from_scraped_html_files( $pos_args, $assoc_args ) {
 		$dir = $assoc_args['dir'];
 
-		// $wpuser_id = $this->get_wpuser_id_by_display_name( 'Adam Julian' );
-
-		$authors_all = $this->coauthorsplus->get_all_authors_for_post( 98614 );
-
-		$gaHaRim = $this->coauthorsplus->get_guest_author_by_id( 75261 );
-		$ga350Aotearoa = $this->coauthorsplus->get_guest_author_by_id( 75262 );
-		$gagaivantest1  = $this->coauthorsplus->get_guest_author_by_id( 98671 );
-		$wpuAlexiaRussell = get_user_by( 'ID', 27966 );
-		$wpuBenStanley = get_user_by( 'ID', 28050 );
-		$authors_all = [
-			// $gaHaRim,
-			$ga350Aotearoa,
-			// $gagaivantest1,
-			// $wpuBenStanley,
-			// $wpuAlexiaRussell,
-		];
-
-		// // This existing function should work but doesn't.
-		// $this->coauthorsplus->assign_guest_authors_to_post( [75261], 98619 );
-
-		// This work with WPUsers !, but for some reason not with GAs... Probably for same reason the one above doesnt' either.
-		$this->coauthorsplus->assign_authors_to_post( $authors_all, 98666 );
-
-		// => test this code on cap.local... it must work there first. then get a new staging export and try with that.
-
-return;
-		$authors_all = $this->coauthorsplus->get_all_authors_for_post( 98614 );
-		$authors_gas = $this->coauthorsplus->get_guest_authors_for_post( 98614 );
-return;
-
 		$files = glob( $dir . '/' . '*.html' );
-$files = [ '/Users/ivanuravic/www/newsroomnz/app/setup4_multipleauthors/scraped/postid-26261_guid-breaking-point-over-plan-to-excavate-pristine-reef.html' ];
 		foreach ( $files as $key_file => $file ) {
-			WP_CLI::line( sprintf( "%d/%d", $key_file + 1, count( $files ) ) );
+
+// if ( ($key_file + 1) < 691 ) {
+// 	continue;
+// }
+
+			WP_CLI::line( sprintf( "%d/%d FILES", $key_file + 1, count( $files ) ) );
 			$filename = basename( $file );
-if ( 'postid-26261_guid-breaking-point-over-plan-to-excavate-pristine-reef.html' != $filename ) {
-	continue;
-}
 
 			// Mach post_id from $filename.
 			$pattern = '/postid-(\d+)_guid-(.+)\.html/';
@@ -832,91 +822,58 @@ if ( 'postid-26261_guid-breaking-point-over-plan-to-excavate-pristine-reef.html'
 				continue;
 			}
 			$post_id = $matches[1];
-			// Get guid from postmeta/
 			$guid = get_post_meta( $post_id, 'newspack_nnz_guid', true );
-
 
 			// Get authors from body.
 			$author_names = [];
-			$body    = file_get_contents( $file );
+			$body         = file_get_contents( $file );
 			$this->crawler->clear();
 			$this->crawler->add( $body );
 			$author_divs = $this->crawler->filter( 'div[class="content-author__name"]' );
 			if ( empty( $author_divs ) ) {
-				$this->logger->log( 'newsroom-nz-scrape-slugs__errNoArticleAuthor.log', sprintf( "ERR no author found post_id %d %s", $post_id, $filename ), $this->logger::WARNING );
+				$this->logger->log( 'newsroom-nz-crawl-and-update-authors-from-scraped-html-files__ERR_AuthorNotFoundInScraping.log', sprintf( "ERR author not found in HTML, ID %d -- %s", $post_id, $filename ), $this->logger::WARNING );
 				continue;
 			}
 			foreach ( $author_divs->getIterator() as $author_div ) {
 				$author_names[] = $author_div->textContent;
 			}
 
-
-			// Log author names.
-			WP_CLI::line( sprintf( "Found %d authors", count( $author_names ) ) );
-			$log_msg = json_encode( [
-				'post_id' => $post_id,
-				'guid'    => $guid,
-				'authors' => $author_names,
-			] );
-			$this->logger->log( 'newsroom-nz-scrape-slugs__postidAuthornames.log', $log_msg );
-
-
-			/**
-			 * Get existing authors IDs from author names:
-			 *      - could be GAs, WPUsers, or a combination of those
-			 *      - if multiple authors found, we should pick one with more posts and log everything
-			 */
-			// List of author names and their types.
+			// Get author objects -- could either be a WP_User, or a Guest Author, or null for not found.
+			$log     = sprintf( 'postID %d', $post_id );
 			$authors = [];
+			$i_missing_authors = 0;
 			foreach ( $author_names as $author_name ) {
-
-				// First try and pick a WP User.
-
-				// $existin
-
-				// Then pick a GA. But multiple GAs exist with same name, so pick one with most posts.
-
-				// ========== One WP User
-
-				// === Multiple:
-				// $res = $this->coauthorsplus->get_guest_author_by_display_name( 'Andrew Jones' );
-				// === Single:
-				// $res = $this->coauthorsplus->get_guest_author_by_display_name( '350 Aotearoa' );
-
-				// Get single or multiple GAs with that display name.
-				$res = $this->coauthorsplus->get_guest_author_by_display_name( 'Andrew Jones' );
-
-				// If it's a single author.
-				if ( is_object( $res ) ) {
-					$top_level_author = $res;
-				} elseif ( is_array( $res  ) ) {
-					 // If it's multiple authors, pick the author with most posts.
-					$top_level_author       = null;
-					$top_level_author_count = 0;
-					foreach ( $res as $author_res ) {
-						$posts = $this->coauthorsplus->get_all_posts_for_guest_author( $author_res->ID );
-						// If this author has more posts than the current top level author, or if we don't have a top level author yet, set this author as the top level author.
-						if ( ( count( $posts ) > $top_level_author_count ) || ( null === $top_level_author ) ) {
-							$top_level_author       = $author_res;
-							$top_level_author_count = count( $posts );
-						}
+				// First get a WP_User, then a Guest Author.
+				$author = $this->get_wp_user_by_display_name( $author_name );
+				if ( ! $author ) {
+					$author = $this->coauthorsplus->get_guest_author_by_display_name( $author_name );
+					// If multiple GAs found, take the first one.
+					if ( is_array( $author ) ) {
+						$author = $author[0];
 					}
-
-					// Log that multiple GAs were found with that name, and which one was picked.
 				}
 
-
+				$log .= sprintf( "\n - %s %s", ( isset( $author->ID ) ? $author->ID : 'null' ), $author_name );
+				if ( $author ) {
+					$authors[] = $author;
+				} else {
+					$i_missing_authors++;
+				}
 			}
-			// GA & GA.
 
-			// GA & WPUser.
+			$log .= sprintf( "\n = authors %d", count( $authors ) );
+			$log .= sprintf( "\n = missing %d", $i_missing_authors );
 
-			// WPUser & WPUser.
+			// Assign authors to post.
+			if ( ! empty( $authors ) ) {
+				$this->coauthorsplus->assign_authors_to_post( $post_id, $authors );
+			}
 
-			// Get existing author.
-			$d=1;
+			// Log.
+			$this->logger->log( 'newsroom-nz-crawl-and-update-authors-from-scraped-html-files.log', $log );
 		}
 
+		WP_CLI::line( 'Done.' );
 	}
 
 	public function cmd_get_slugs_for_author_scraping( $pos_args, $assoc_args ) {
