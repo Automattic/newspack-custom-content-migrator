@@ -218,6 +218,8 @@ class CoAuthorPlus {
 	/**
 	 * Assigns Guest Authors to the Post.
 	 *
+	 * @deprecated Use \CoAuthors_Guest_Authors::assign_guest_authors_to_post instead which supports assigning both GA and WP_User author types.
+	 *
 	 * @param array $guest_author_ids Guest Author IDs.
 	 * @param int   $post_id          Post IDs.
 	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
@@ -232,7 +234,9 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Assigns either GAs and/or WPUsers authors to Post.
+	 * Assigns GAs and/or WPUsers authors to Post.
+	 * As opposed tho the assign_guest_authors_to_post() method which only works with GA objects, this method accepts mixed author
+	 * types and assigns them to post.
 	 *
 	 * @param array $authors                  Array of mixed Guest Author \stdClass objects and/or \WP_User objects.
 	 * @param int   $post_id                  Post IDs.
