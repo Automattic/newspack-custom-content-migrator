@@ -804,12 +804,18 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	public function cmd_crawl_and_update_authors_from_scraped_html_files( $pos_args, $assoc_args ) {
 		$dir = $assoc_args['dir'];
 
+		// TODO -- dev, insert display names substitutions if they should be used.
+		$author_names_substitute = [
+			// E.g.
+			//'Phil O’Reilly' => "Phil O'Reilly",
+		];
+
+		// Debugging.
+		$res = [];
+		$author_names_not_found = [];
+
 		$files = glob( $dir . '/' . '*.html' );
 		foreach ( $files as $key_file => $file ) {
-
-// if ( ($key_file + 1) < 691 ) {
-// 	continue;
-// }
 
 			WP_CLI::line( sprintf( "%d/%d FILES", $key_file + 1, count( $files ) ) );
 			$filename = basename( $file );
@@ -843,6 +849,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$authors = [];
 			$i_missing_authors = 0;
 			foreach ( $author_names as $author_name ) {
+
+				if ( array_key_exists( $author_name, $author_names_substitute ) ) {
+					$author_name = $author_names_substitute[ $author_name ];
+				}
+
 				// First get a WP_User, then a Guest Author.
 				$author = $this->get_wp_user_by_display_name( $author_name );
 				if ( ! $author ) {
@@ -853,12 +864,27 @@ class NewsroomNZMigrator implements InterfaceCommand {
 					}
 				}
 
+				// Debugging.
+				if ( is_null( $author ) ) {
+					$res[ $post_id ][ $author_name ] = null;
+					$author_names_not_found[ $author_name ] = $author_name;
+				} elseif ( 'stdClass' === $author::class ) {
+					$res[ $post_id ][ $author_name ][ 'stdClass' ] = $author->ID;
+				} elseif ( 'WP_User' === $author::class ) {
+					$res[ $post_id ][ $author_name ][ 'WP_User' ] = $author->ID;
+				}
+
 				$log .= sprintf( "\n - %s %s", ( isset( $author->ID ) ? $author->ID : 'null' ), $author_name );
 				if ( $author ) {
 					$authors[] = $author;
 				} else {
 					$i_missing_authors++;
 				}
+			}
+
+			// Debugging.
+			if ( empty( $author_names ) ) {
+				$res[ $post_id ] = 'null';
 			}
 
 			$log .= sprintf( "\n = authors %d", count( $authors ) );
@@ -873,6 +899,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			$this->logger->log( 'newsroom-nz-crawl-and-update-authors-from-scraped-html-files.log', $log );
 		}
 
+		$this->logger->log( 'newsroom-nz-crawl-and-update-authors-from-scraped-html-files_res.json', json_encode( $res ), false );
 		WP_CLI::line( 'Done.' );
 	}
 
