@@ -89,7 +89,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			'newspack-content-migrator hide-featured-image-if-used-in-post-content',
 			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
 			[
-				'shortdesc' => 'Hides featured image for post if that same image is used anywhere in post_content.',
+				'shortdesc' => 'Hides featured image for post but only if that same image is used anywhere in post_content.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
