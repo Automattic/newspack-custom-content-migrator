@@ -110,6 +110,27 @@ class CoAuthorPlus {
 		// If not provided, automatically set `user_login` from display_name.
 		if ( ! isset( $args['user_login'] ) ) {
 			$args['user_login'] = sanitize_title( $args['display_name'] );
+		} else {
+			/**
+			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
+			 * CAP saves and then retrieves it.
+			 *
+			 * see \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
+			 *   - because they do:
+			 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
+			 *
+			 *   - so for example, if create() gets 'user_login' = '3.42488E+15',
+			 *      - `post_name` will be == 'cap' + sanitize_title(            '3.42488E+15'   ) == "cap-6-20386e15"
+			 *      - but `slug` will be  == 'cap' + sanitize_title( urldecode( '3.42488E+15' ) ) == "cap-6-20386e-15"
+			 *      - which are different.
+			 *
+			 *      => And this is an edge case bug. These GAs will fail with errors if you try and assign them to Posts.
+			 *
+			 * Additionally see \CoAuthors_Plus::update_author_term where wp_insert_term() causes:
+			 *      - wp_terms.name will be == "6.20386e 15"  (comes from get_guest_author_by()'s `user_login`)
+			 *      - while description will contain "6-20386e-15"
+			 */
+			$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
 		}
 
 		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args['user_login'] );
@@ -218,8 +239,6 @@ class CoAuthorPlus {
 	/**
 	 * Assigns Guest Authors to the Post.
 	 *
-	 * @deprecated Use \CoAuthors_Guest_Authors::assign_guest_authors_to_post instead which supports assigning both GA and WP_User author types.
-	 *
 	 * @param array $guest_author_ids Guest Author IDs.
 	 * @param int   $post_id          Post IDs.
 	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
@@ -234,17 +253,15 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Assigns GAs and/or WPUsers authors to Post.
-	 * As opposed tho the assign_guest_authors_to_post() method which only works with GA objects, this method accepts mixed author
-	 * types and assigns them to post.
+	 * Assigns either GAs and/or WPUsers authors to Post.
 	 *
-	 * @param int   $post_id                  Post ID.
-	 * @param array $authors                  Mixed array of Guest Author \stdClass objects and/or \WP_User objects.
+	 * @param array $authors                  Array of mixed Guest Author \stdClass objects and/or \WP_User objects.
+	 * @param int   $post_id                  Post IDs.
 	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
 	 *
 	 * @throws \UnexpectedValueException If $authors contains an unsupported class.
 	 */
-	public function assign_authors_to_post( int $post_id, array $authors, bool $append_to_existing_users = false ) {
+	public function assign_authors_to_post( array $authors, $post_id, bool $append_to_existing_users = false ) {
 		$coauthors_nicenames = [];
 		foreach ( $authors as $author ) {
 			if ( 'stdClass' === $author::class ) {
@@ -309,11 +326,11 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Gets the Guest Author object (or an array of multiple objects) by `display_name` (as defined by the CAP plugin).
+	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return null|object|array A single Guest Author object, or an array of multiple Guest Author objects, or null.
+	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
@@ -336,11 +353,7 @@ class CoAuthorPlus {
 			$gas[] = $this->get_guest_author_by_id( $post_id_result['ID'] );
 		}
 
-		if ( 0 === count( $gas ) ) {
-			return null;
-		}
-
-		if ( 1 === count( $gas ) ) {
+		if ( 1 === count( $post_ids_results ) ) {
 			return $gas[0];
 		}
 
