@@ -216,7 +216,9 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
+	 * Assigns Guest Authors to the Post.
+	 *
+	 * @deprecated Use \CoAuthors_Guest_Authors::assign_guest_authors_to_post instead which supports assigning both GA and WP_User author types.
 	 *
 	 * @param array $guest_author_ids Guest Author IDs.
 	 * @param int   $post_id          Post IDs.
@@ -229,6 +231,31 @@ class CoAuthorPlus {
 			$coauthors[]  = $guest_author->user_nicename;
 		}
 		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users );
+	}
+
+	/**
+	 * Assigns GAs and/or WPUsers authors to Post.
+	 * As opposed tho the assign_guest_authors_to_post() method which only works with GA objects, this method accepts mixed author
+	 * types and assigns them to post.
+	 *
+	 * @param int   $post_id                  Post ID.
+	 * @param array $authors                  Mixed array of Guest Author \stdClass objects and/or \WP_User objects.
+	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
+	 *
+	 * @throws \UnexpectedValueException If $authors contains an unsupported class.
+	 */
+	public function assign_authors_to_post( int $post_id, array $authors, bool $append_to_existing_users = false ) {
+		$coauthors_nicenames = [];
+		foreach ( $authors as $author ) {
+			if ( 'stdClass' === $author::class ) {
+				$coauthors_nicenames[] = $author->user_nicename;
+			} elseif ( 'WP_User' === $author::class ) {
+				$coauthors_nicenames[] = $author->data->user_nicename;
+			} else {
+				throw new \UnexpectedValueException( 'The `' . $author::class . '` class is not allowed for Guest Author update.' );
+			}
+		}
+		$this->coauthors_plus->add_coauthors( $post_id, $coauthors_nicenames, $append_to_existing_users );
 	}
 
 	/**
@@ -282,11 +309,11 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
+	 * Gets the Guest Author object (or an array of multiple objects) by `display_name` (as defined by the CAP plugin).
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
+	 * @return null|object|array A single Guest Author object, or an array of multiple Guest Author objects, or null.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
@@ -309,7 +336,11 @@ class CoAuthorPlus {
 			$gas[] = $this->get_guest_author_by_id( $post_id_result['ID'] );
 		}
 
-		if ( 1 === count( $post_ids_results ) ) {
+		if ( 0 === count( $gas ) ) {
+			return null;
+		}
+
+		if ( 1 === count( $gas ) ) {
 			return $gas[0];
 		}
 
