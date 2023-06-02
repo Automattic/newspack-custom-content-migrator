@@ -21,6 +21,8 @@ class VTDiggerMigrator implements InterfaceCommand {
 	const OLYMPICS_BLOG_CPT = 'olympics';
 	const NEWSBRIEF_CPT = 'news-brief';
 	const ELECTION_CPT = 'election_brief';
+	const CARTOONS_CPT = 'cartoons';
+	const BUSINESSBRIEFS_CPT = 'business_briefs';
 
 	// GAs for CPTs.
 	const OBITUARIES_GA_NAME = 'VTD Obituaries';
@@ -44,6 +46,8 @@ class VTDiggerMigrator implements InterfaceCommand {
 	const OLYMPICS_BLOG_CAT_NAME = 'Olympics Blog';
 	const OBITUARIES_CAT_NAME = 'Obituaries';
 	const ELECTION_BLOG_CAT_NAME = 'Election Blog';
+	const CARTOONS_CAT_NAME = 'Cartoons';
+	const BUSINESSBRIEFS_CAT_NAME = 'Business Briefs';
 
 	// This postmeta will tell us which CPT this post was originally, e.g. 'liveblog'.
 	const META_VTD_CPT = 'newspack_vtd_cpt';
@@ -196,6 +200,76 @@ class VTDiggerMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-cartoons-cpt',
+			[ $this, 'cmd_cartoons' ],
+			[
+				'shortdesc' => 'Convert Cartoons CTP to posts.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-businessbriefs-cpt',
+			[ $this, 'cmd_businessbriefs' ],
+			[
+				'shortdesc' => 'Convert Business Briefs CTP to posts.',
+			]
+		);
+	}
+
+	public function cmd_businessbriefs( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+		$log = 'vtd_businessbriefs.log';
+
+		$cat_id = get_cat_ID( self::BUSINESSBRIEFS_CAT_NAME );
+		if ( 0 == $cat_id ) {
+			$cat_id = wp_insert_category( [ 'cat_name' => self::BUSINESSBRIEFS_CAT_NAME ] );
+		}
+
+		$businessbriefs_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type = %s;", self::BUSINESSBRIEFS_CPT ) );
+
+		foreach ( $businessbriefs_ids as $key_businessbriefs_id => $businessbrief_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_businessbriefs_id + 1, count( $businessbriefs_ids ), $businessbrief_id ) );
+
+			// Convert to 'post' type.
+			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $businessbrief_id ) );
+
+			update_post_meta( $businessbrief_id, self::META_VTD_CPT, self::BUSINESSBRIEFS_CPT );
+
+			wp_set_post_categories( $businessbrief_id, [ $cat_id ], false );
+		}
+
+		$this->logger->log( $log, implode( ',', $businessbriefs_ids ), false );
+
+		wp_cache_flush();
+		WP_CLI::log( sprintf( "Done; see %s", $log ) );
+	}
+
+	public function cmd_cartoons( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+		$log = 'vtd_cartoons.log';
+
+		$cat_id = get_cat_ID( self::CARTOONS_CAT_NAME );
+		if ( 0 == $cat_id ) {
+			$cat_id = wp_insert_category( [ 'cat_name' => self::CARTOONS_CAT_NAME ] );
+		}
+
+		$cartoons_ids = $wpdb->get_col( $wpdb->prepare( "select ID from {$wpdb->posts} where post_type = %s;", self::CARTOONS_CPT ) );
+
+		foreach ( $cartoons_ids as $key_cartoon_id => $cartoon_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_cartoon_id + 1, count( $cartoons_ids ), $cartoon_id ) );
+
+			// Convert to 'post' type.
+			$wpdb->query( $wpdb->prepare( "update {$wpdb->posts} set post_type='post' where ID=%d;", $cartoon_id ) );
+
+			update_post_meta( $cartoon_id, self::META_VTD_CPT, self::CARTOONS_CPT );
+
+			wp_set_post_categories( $cartoon_id, [ $cat_id ], false );
+		}
+
+		$this->logger->log( $log, implode( ',', $cartoons_ids ), false );
+
+		wp_cache_flush();
+		WP_CLI::log( sprintf( "Done; see %s", $log ) );
 	}
 
 	/**
