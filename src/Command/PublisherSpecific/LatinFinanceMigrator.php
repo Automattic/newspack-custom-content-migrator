@@ -851,7 +851,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$report = [
 			'posts-with-images' 		=> 0,
 			'img-base64-skipped'		=> 0,
-			'img-old-assets-skipped' 	=> 0,
+			'img-old-assets-removed' 	=> 0,
+			// 'img-old-assets-skipped' 	=> 0,
 			'img-off-site-skipped'	 	=> 0,
 			'img-staging-skipped'	 	=> 0,
 			'fixed'						=> 0,
@@ -1650,6 +1651,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	private function set_images_in_content( $post_id, $imgs, &$report ) {
 
+		global $wpdb;
+
 		// images per post content
 		foreach( $imgs as $img ) {
 				
@@ -1672,8 +1675,22 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 
 			// ignore old_assets images for now
+			// if( preg_match( '#src=.{0,1}/old_assets/#i', $img ) ) {
+			// 	$report['img-old-assets-skipped']++;
+			// 	continue;
+			// }
+
+			// remove old_assets 
 			if( preg_match( '#src=.{0,1}/old_assets/#i', $img ) ) {
-				$report['img-old-assets-skipped']++;
+
+				// remove full tag: <img alt="ECM rank by volume" src="/old_assets/Media/images/latin-finance/novdec2016/pg4_table.gif" width="500" ... >
+				$wpdb->query( $wpdb->prepare( "
+					UPDATE {$wpdb->posts} 
+					SET post_content = REPLACE(post_content, %s, %s)
+					WHERE ID = %d
+				", $img, '', $post_id ) );
+
+				$report['img-old-assets-removed']++;
 				continue;
 			}
 
