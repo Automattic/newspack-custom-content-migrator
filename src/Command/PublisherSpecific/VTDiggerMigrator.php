@@ -214,6 +214,156 @@ class VTDiggerMigrator implements InterfaceCommand {
 				'shortdesc' => 'Convert Business Briefs CTP to posts.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-restore-reusable-blocks-in-local-posts-from-live-table',
+			[ $this, 'cmd_restore_reusable_blocks_in_local_posts_from_live_table' ],
+			[
+				'shortdesc' => "In order to restore usage of reusable blocks (which have been removed from local posts' post_content), runs through all local published posts, finds these records in live posts table (table name hardcoded) and sets local posts' post_content to those in live table.",
+			],
+		);
+	}
+
+	/**
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_restore_reusable_blocks_in_local_posts_from_live_table( array $pos_args, array $assoc_args ) {
+		$live_posts_table_name = 'livevtdWP_posts';
+		$qa_path                  = getcwd() . '/' . 'log_QAUpdatedPostContent';
+		if ( ! file_exists( $qa_path ) ) {
+			mkdir( $qa_path, 0777, true );
+		}
+
+		global $wpdb;
+
+		// Insert Reusable blocks which keep the same IDs.
+		$reusable_blocks_ids = [ 331411,333919,287702,292966,294143,294383,301399,306744,307109,310386,310997,313107,313203,315093,315566,316739,316908,319091,319446,319930,319934,320680,320764,322846,325577,326130,326131,326286,326405,326484,327395,328038,328824,328966,329459,329747,330401,331412,333921,335042,336393,339931,340591,340707,340755,341483,344897,344939,345130,349010,349835,350925,352401,352683,355836,356288,362916,370675,371526,372498,375812,375816,375948,376333,376463,382204,386426,390259,401522,408146,408494,410046,410893 ];
+		foreach ( $reusable_blocks_ids as $id ) {
+			$live_reusable_block = $wpdb->get_row( $wpdb->prepare( "select * from {$live_posts_table_name} where ID = %d", $id ), ARRAY_A );
+			if ( ! $live_reusable_block ) {
+				WP_CLI::error( "Live reusable block ID {$id} not found." );
+			}
+			$inserted = $wpdb->insert(
+				$wpdb->posts,
+				[
+					// Keeps the same ID.
+					"ID" => $live_reusable_block["ID"],
+					// Hardcoded adminnewspack for simplicity.
+					"post_author" => 1788,
+					"post_date" => $live_reusable_block["post_date"],
+					"post_date_gmt" => $live_reusable_block["post_date_gmt"],
+					"post_content" => $live_reusable_block["post_content"],
+					"post_title" => $live_reusable_block["post_title"],
+					"post_excerpt" => $live_reusable_block["post_excerpt"],
+					"post_status" => $live_reusable_block["post_status"],
+					"comment_status" => $live_reusable_block["comment_status"],
+					"ping_status" => $live_reusable_block["ping_status"],
+					"post_password" => $live_reusable_block["post_password"],
+					"post_name" => $live_reusable_block["post_name"],
+					"to_ping" => $live_reusable_block["to_ping"],
+					"pinged" => $live_reusable_block["pinged"],
+					"post_modified" => $live_reusable_block["post_modified"],
+					"post_modified_gmt" => $live_reusable_block["post_modified_gmt"],
+					"post_content_filtered" => $live_reusable_block["post_content_filtered"],
+					"post_parent" => $live_reusable_block["post_parent"],
+					"guid" => $live_reusable_block["guid"],
+					"menu_order" => $live_reusable_block["menu_order"],
+					"post_type" => $live_reusable_block["post_type"],
+					"post_mime_type" => $live_reusable_block["post_mime_type"],
+					"comment_count" => $live_reusable_block["comment_count"],
+				]
+			);
+			if ( ! $inserted ) {
+				WP_CLI::error( "Failed to insert reusable block ID {$id}." );
+			} else {
+				WP_CLI::log( "Inserted reusable block with same ID {$id}." );
+			}
+		}
+
+		// Insert Reusable blocks which will change their IDs.
+		$reusable_blocks_ids = [ 412947,412949,412951,413143,413146,413157,413158,413162,413163,414673,418408 ];
+		foreach ( $reusable_blocks_ids as $id ) {
+			$live_reusable_block = $wpdb->get_row( $wpdb->prepare( "select * from {$live_posts_table_name} where ID = %d", $id ), ARRAY_A );
+			if ( ! $live_reusable_block ) {
+				WP_CLI::error( "Live reusable block ID {$id} not found." );
+			}
+			$inserted = $wpdb->insert(
+				$wpdb->posts,
+				[
+					// Hardcoded adminnewspack for simplicity.
+					"post_author" => 1788,
+					"post_date" => $live_reusable_block["post_date"],
+					"post_date_gmt" => $live_reusable_block["post_date_gmt"],
+					"post_content" => $live_reusable_block["post_content"],
+					"post_title" => $live_reusable_block["post_title"],
+					"post_excerpt" => $live_reusable_block["post_excerpt"],
+					"post_status" => $live_reusable_block["post_status"],
+					"comment_status" => $live_reusable_block["comment_status"],
+					"ping_status" => $live_reusable_block["ping_status"],
+					"post_password" => $live_reusable_block["post_password"],
+					"post_name" => $live_reusable_block["post_name"],
+					"to_ping" => $live_reusable_block["to_ping"],
+					"pinged" => $live_reusable_block["pinged"],
+					"post_modified" => $live_reusable_block["post_modified"],
+					"post_modified_gmt" => $live_reusable_block["post_modified_gmt"],
+					"post_content_filtered" => $live_reusable_block["post_content_filtered"],
+					"post_parent" => $live_reusable_block["post_parent"],
+					"guid" => $live_reusable_block["guid"],
+					"menu_order" => $live_reusable_block["menu_order"],
+					"post_type" => $live_reusable_block["post_type"],
+					"post_mime_type" => $live_reusable_block["post_mime_type"],
+					"comment_count" => $live_reusable_block["comment_count"],
+				]
+			);
+			if ( ! $inserted ) {
+				WP_CLI::error( "Failed to insert reusable block ID {$id}." );
+			} else {
+				$this->logger->log( 'vtdigger-restore-reusable-blocks-in-local-posts-from-live-table__newReusableBlockIds.log', "inserted Reusable Block live:{$id} local:{$wpdb->insert_id}" );
+			}
+		}
+
+		// Update post_content.
+		$post_ids = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			// Match that post in local and live table.
+			$local_post = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d", $post_id ), ARRAY_A );
+			$live_post  = $wpdb->get_row(
+				$wpdb->prepare(
+					"select * from {$live_posts_table_name}
+	                where post_name = %s
+					and post_title = %s
+					and post_status = %s
+					and post_date = %s
+					and post_type <> 'revision' ; ",
+					$local_post['post_name'],
+					$local_post['post_title'],
+					$local_post['post_status'],
+					$local_post['post_date']
+				),
+				ARRAY_A
+			);
+			if ( ! $live_post ) {
+				$this->logger->log( 'vtdigger-restore-reusable-blocks-in-local-posts-from-live-table__postNotFoundInLive.log', "Could not find post in live table: {$post_id}", $this->logger::WARNING );
+				continue;
+			}
+
+			// Update local post's post_content with live post's post_content.
+			if ( ! empty( $live_post['post_content'] ) && ( $live_post['post_content'] !== $local_post['post_content'] ) ) {
+				$updated = $wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $live_post['post_content'] ],
+					[ 'ID' => $post_id ],
+				);
+				if ( ( false !== $updated ) && ( $updated > 0 ) ) {
+					$this->logger->log( 'vtdigger-restore-reusable-blocks-in-local-posts-from-live-table__updatedPostId.log', "Updated Post ID: {$post_id}" );
+					file_put_contents( $qa_path . '/' . $post_id . '_1before.txt', $local_post['post_content'] );
+					file_put_contents( $qa_path . '/' . $post_id . '_2after.txt', $live_post['post_content'] );
+				}
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	public function cmd_businessbriefs( array $pos_args, array $assoc_args ) {
