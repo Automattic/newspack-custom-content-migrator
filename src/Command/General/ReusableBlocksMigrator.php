@@ -370,12 +370,14 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	public function cmd_update_reusable_blocks_id( $pos_args, $assoc_args ) {
 		$id_old = $assoc_args['id-old'] ?? null;
 		$id_new = $assoc_args['id-new'] ?? null;
-		if ( is_null( $id_old ) || ! is_null( $id_new ) ) {
+		if ( is_null( $id_old ) || is_null( $id_new ) ) {
 			WP_CLI::error( 'Params --id-old and --id-new are required.' );
 		}
 
 		global $wpdb;
 		$blocks_id_changes[ $id_old ] = $id_new;
+
+		WP_CLI::line( sprintf( 'Searching all posts and pages and and updating their content to use Reusable Block new ID %d instead of old ID %d ...', $id_new, $id_old ) );
 
 		// Get Public Posts and Pages which contain Reusable Blocks.
 		$query_public_posts = new \WP_Query(
@@ -388,25 +390,26 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 			]
 		);
 		if ( ! $query_public_posts->have_posts() ) {
+			WP_CLI::warning( 'No public Posts or Pages found.' );
 			return;
 		}
 
 		$posts = $query_public_posts->get_posts();
 		foreach ( $posts as $key_posts => $post ) {
-			WP_CLI::line( sprintf( '(%d/%d) ID %d', $key_posts + 1, count( $posts ), $post->ID ) );
-
 			// Replace Block IDs.
 			$post_content_updated = $this->update_block_ids( $post->post_content, $blocks_id_changes );
 
 			// Update the Post content.
 			if ( $post->post_content != $post_content_updated ) {
 				$wpdb->update( $wpdb->prefix . 'posts', [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
-				WP_CLI::success( 'Updated ID.' );
+				WP_CLI::success( sprintf( 'Updated post ID %d.', $post->ID ) );
 			}
 		}
 
 		// Let the $wpdb->update() sink in.
 		wp_cache_flush();
+
+		WP_CLI::line( 'Done.' );
 	}
 
 	/**
