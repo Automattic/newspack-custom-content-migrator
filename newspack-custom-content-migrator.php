@@ -75,5 +75,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
 		Command\PublisherSpecific\InsightCrimeMigrator::class,
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
+		Command\PublisherSpecific\BenitoLinkMigrator::class,
 	)
 );
