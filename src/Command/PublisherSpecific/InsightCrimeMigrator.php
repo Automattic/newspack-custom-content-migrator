@@ -3,7 +3,9 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 /**
@@ -24,10 +26,24 @@ class InsightCrimeMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var GutenbergBlockGenerator.
+	 */
+	private $gutenberg_block_generator;
+
+	/**
+	 * Logger.
+	 *
+	 * @var Logger $logger Logger instance.
+	 */
+	private $logger;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->logger                    = new Logger();
+		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -69,6 +85,38 @@ class InsightCrimeMigrator implements InterfaceCommand {
 						'description' => 'Output folder path.',
 						'optional'    => false,
 						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator insight-crime-migrate-acf-modified-date',
+			[ $this, 'cmd_migrate_acf_modified_date' ],
+			[
+				'shortdesc' => 'Migrate modified date added via ACF.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'force',
+						'description' => 'Force running the changes.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator insight-crime-migrate-investigation-content',
+			[ $this, 'cmd_migrate_investigation_content' ],
+			[
+				'shortdesc' => 'Migrate investigation content added via ACF.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'investigations-category-id',
+						'description' => 'Investigations category ID.',
+						'optional'    => false,
 					],
 				],
 			]
@@ -197,13 +245,14 @@ class InsightCrimeMigrator implements InterfaceCommand {
 
 		$total_query = new \WP_Query(
 			[
-				'posts_per_page' => -1,
-				'post_type'      => 'events',
+				'posts_per_page'   => -1,
+				'post_type'        => 'events',
+				'suppress_filters' => true,
 				// 'p'              => 570892,
-				'post_status'    => 'any',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+				'post_status'      => 'any',
+				'fields'           => 'ids',
+				'no_found_rows'    => true,
+				'meta_query'       => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			]
 		);
 
@@ -211,11 +260,12 @@ class InsightCrimeMigrator implements InterfaceCommand {
 
 		$query = new \WP_Query(
 			[
-				'post_type'      => 'events',
+				'post_type'        => 'events',
+				'suppress_filters' => true,
 				// 'p'              => 199581,
-				'post_status'    => 'any',
-				'posts_per_page' => -1,
-				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+				'post_status'      => 'any',
+				'posts_per_page'   => -1,
+				'meta_query'       => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			]
 		);
 
@@ -335,6 +385,169 @@ class InsightCrimeMigrator implements InterfaceCommand {
 		} else {
 			WP_CLI::line( 'There are no events to import!' );
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator insight-crime-migrate-acf-modified-date`.
+	 *
+	 * @param array $args       Command arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 */
+	public function cmd_migrate_acf_modified_date( $args, $assoc_args ) {
+		global $wpdb;
+
+		$force          = isset( $assoc_args['force'] );
+		$spanish_months = [ 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre' ];
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_modified_date',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page'   => -1,
+				'post_type'        => 'post',
+				'suppress_filters' => true,
+				// 'p'              => 11,
+				'post_status'      => 'any',
+				'fields'           => 'ids',
+				'no_found_rows'    => true,
+				'meta_query'       => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'        => 'post',
+				'suppress_filters' => true,
+				// 'p'              => 11,
+				'post_status'      => 'any',
+				'posts_per_page'   => -1,
+				'meta_query'       => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			if ( in_array( $post->ID, [ 198697, 179947, 179954, 179938, 179943, 179923, 179916, 179911, 179891, 2199, 7038, 1576, 7021, 4863, 2236, 6357, 127151, 126989, 117737, 114134, 88516, 83323, 79836, 79997, 79860 ] ) ) {
+				update_post_meta( $post->ID, '_newspack_migrated_modified_date', true );
+				continue;
+			}
+
+			$modified_date_meta = get_post_meta( $post->ID, 'modified_date', true );
+			if ( ! empty( $modified_date_meta ) ) {
+				$modified_date = gmdate( 'Y-m-d', strtotime( $modified_date_meta ) );
+				if ( '1970-01-01' === $modified_date ) {
+					// check if the date is in Spanish in this format 14 de febrero, 2023.
+					preg_match( '/(?<day>\d{1,2}) de (?<month>[a-z]+), (?<year>\d{4})/i', $modified_date_meta, $matches );
+					if ( ! empty( $matches ) ) {
+
+						$modified_date = gmdate( 'Y-m-d', strtotime( $matches['year'] . '-' . ( array_search( $matches['month'], $spanish_months ) + 1 ) . '-' . $matches['day'] ) );
+					}
+				}
+
+				if ( $force ) {
+					$wpdb->update(
+						$wpdb->posts,
+						[
+							'post_date'     => $modified_date,
+							'post_date_gmt' => $modified_date,
+						],
+						[ 'ID' => $post->ID ]
+					);
+					$this->logger->log( 'post_date_migration.log', sprintf( 'Post ID %d modified date updated from %s to %s', $post->ID, $post->post_date, $modified_date ) );
+				} else {
+					WP_CLI::line( sprintf( '%d =====> %s =====> %s', $post->ID, $modified_date_meta, $modified_date ) );
+				}
+			}
+
+			if ( $force ) {
+				update_post_meta( $post->ID, '_newspack_migrated_modified_date', true );
+			}
+		}
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator insight-crime-migrate-investigation-content`.
+	 *
+	 * @param array $args       Command arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 */
+	public function cmd_migrate_investigation_content( $args, $assoc_args ) {
+		global $wpdb;
+
+		$investigations_category_id = intval( $assoc_args['investigations-category-id'] );
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_investigations_content',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page'   => -1,
+				'post_type'        => 'post',
+				'cat'              => $investigations_category_id,
+				'suppress_filters' => true,
+				// 'p'              => 11,
+				'post_status'      => 'any',
+				'fields'           => 'ids',
+				'no_found_rows'    => true,
+				'meta_query'       => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'        => 'post',
+				'cat'              => $investigations_category_id,
+				'suppress_filters' => true,
+				// 'p'              => 11,
+				'post_status'      => 'any',
+				'posts_per_page'   => -1,
+				'meta_query'       => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$chapter_pdf_id = get_post_meta( $post->ID, 'chapter_pdf', true );
+
+			if ( $chapter_pdf_id ) {
+				$chapter_pdf_url = wp_get_attachment_url( $chapter_pdf_id );
+
+				if ( $chapter_pdf_url ) {
+					$button_content = serialize_block( $this->gutenberg_block_generator->get_button( 'Download PDF', $chapter_pdf_url ) );
+
+					$new_content = $post->post_content . $button_content;
+
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => $new_content,
+						]
+					);
+
+					$this->logger->log( 'investigations_content_migration.log', sprintf( 'Post ID %d content updated', $post->ID ), Logger::SUCCESS );
+				}
+			}
+
+			update_post_meta( $post->ID, '_newspack_migrated_investigations_content', true );
+		}
+
+		wp_cache_flush();
 	}
 
 	/**

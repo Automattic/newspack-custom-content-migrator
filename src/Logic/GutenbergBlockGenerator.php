@@ -175,7 +175,7 @@ class GutenbergBlockGenerator {
 	}
 
 	/**
-	 * Generate a Jetpack Slideshow Block.
+	 * Generate a Gallery Block.
 	 *
 	 * @param int[]   $attachment_ids Attachments IDs to be used in the tiled gallery.
 	 * @param int     $images_per_row Images per row.
@@ -221,7 +221,7 @@ class GutenbergBlockGenerator {
 	}
 
 	/**
-	 * Generate a List Block item.
+	 * Generate an Image Block.
 	 *
 	 * @param \WP_Post $attachment_post Image Post.
 	 * @param string   $size Image size, full by default.
@@ -585,6 +585,34 @@ class GutenbergBlockGenerator {
 				null,
 				'</div></details></div>',
 			],
+		];
+	}
+
+	/**
+	 * Generate a Button Block.
+	 *
+	 * @param string $content Button content.
+	 * @param string $url Button URL.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_button( $content, $url ) {
+		$inner_html = '<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="' . $url . '" target="_blank" rel="noreferrer noopener">' . $content . '</a></div>';
+
+		return [
+			'blockName'    => 'core/buttons',
+			'attrs'        => [],
+			'innerBlocks'  => [
+				[
+					'blockName'    => 'core/button',
+					'attrs'        => [],
+					'innerBlocks'  => [],
+					'innerHTML'    => $inner_html,
+					'innerContent' => [ $inner_html ],
+				],
+			],
+			'innerHTML'    => '<div class="wp-block-buttons"></div>',
+			'innerContent' => [ '<div class="wp-block-buttons">', null, '</div>' ],
 		];
 	}
 
