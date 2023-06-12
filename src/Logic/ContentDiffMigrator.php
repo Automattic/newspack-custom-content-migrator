@@ -209,6 +209,9 @@ class ContentDiffMigrator {
 					&& $live_post['post_status'] == $local_post['post_status']
 					&& $live_post['post_date'] == $local_post['post_date']
 				) {
+					// Remove the local post which was found (break; was done), to make the next search a bit faster.
+					unset( $results_local_posts[ $key_local_post ] );
+
 					$found = true;
 					break;
 				}
@@ -217,9 +220,6 @@ class ContentDiffMigrator {
 			// Unique on live, add to $ids.
 			if ( false === $found ) {
 				$ids[] = $live_post['ID'];
-
-				// Remove the local post which was found (break; was done), to make the next search a bit faster.
-				unset( $results_local_posts[ $key_local_post ] );
 			}
 		}
 
@@ -1211,6 +1211,11 @@ class ContentDiffMigrator {
 			$block_updated              = $block;
 			$block_innerhtml_updated    = $block['innerHTML'];
 			$block_innercontent_updated = $block['innerContent'][0];
+
+			// We've seen some wp:image blocks with no ID, skip them.
+			if ( ! isset( $block_updated['attrs']['id'] ) ) {
+				continue;
+			}
 
 			// Get attachment ID from block header.
 			$att_id = $block_updated['attrs']['id'];

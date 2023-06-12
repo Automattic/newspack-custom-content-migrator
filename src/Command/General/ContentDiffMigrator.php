@@ -292,7 +292,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
 		$export_dir        = $assoc_args['export-dir'] ?? false;
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
-		$post_types        = $assoc_args['post-types-csv'] ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
+		$post_types        = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
 
 		global $wpdb;
 		$this->validate_dbs( $live_table_prefix, [ 'options' ] );
@@ -315,7 +315,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		// Get list of post types except attachments.
 		$post_types_non_attachments = $post_types;
-		$key = array_search( 'attachment', $post_types_non_attachments );
+		$key                        = array_search( 'attachment', $post_types_non_attachments );
 		if ( false !== $key ) {
 			unset( $post_types_non_attachments[ $key ] );
 			$post_types_non_attachments = array_values( $post_types_non_attachments );
@@ -327,7 +327,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$results_live_posts  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 			$results_local_posts = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 
-			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching for new ones...', count( $results_live_posts ) ) );
+			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_posts ) ) );
 			$new_live_ids = self::$logic->filter_new_live_ids( $results_live_posts, $results_local_posts );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_ids ) ) );
 
@@ -339,7 +339,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$results_live_attachments  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 			$results_local_attachments = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 
-			WP_CLI::log( 'Fetched %s total from live site. Searching for new ones...', count( $results_live_attachments ) );
+			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_attachments ) ) );
 			$new_live_attachment_ids = self::$logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
 			$new_live_ids            = array_merge( $new_live_ids, $new_live_attachment_ids );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_attachment_ids ) ) );

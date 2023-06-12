@@ -78,6 +78,13 @@ class RenoMigrator implements InterfaceCommand {
 				'shortdesc' => 'Imports Reno\'s Postgres archive content.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator reno-fetch-missing-images',
+			[ $this, 'cmd_fetch_missing_images' ],
+			[
+				'shortdesc' => 'Imports Reno\'s Images that were under the media/images folder.',
+			]
+		);
 	}
 
 	/**
@@ -380,6 +387,97 @@ class RenoMigrator implements InterfaceCommand {
 		}
 
 		return null;
+	}
+
+	public function cmd_fetch_missing_images() {
+		global $wpdb;
+
+		// I also looked for src="/media/" and got the same results. This seems to cover everything we need.
+		$posts = $wpdb->get_results( "SELECT ID, post_content FROM $wpdb->posts WHERE post_content LIKE '%media/images/%'" );
+
+		$images_url = 'https://www.newsreview.com/media/images/%s';
+
+		$recovered_images = [];
+		$missing_images = [];
+		$affected_posts = [];
+
+		WP_CLI::line( 'Found' . count( $posts ) . ' posts with missing images.' );
+
+		foreach ( $posts as $post ) {
+			$post_id = $post->ID;
+			$post_content = $post->post_content;
+
+			WP_CLI::line( 'Processing post ' . $post_id );
+
+			$matches = [];
+			preg_match_all( '/media\/images\/([^"]+)/', $post_content, $matches );
+			if ( ! empty( $matches[1] ) ) {
+
+				WP_CLI::line( 'Found ' . count( $matches[1] ) . ' missing images.' );
+
+				foreach ( $matches[1] as $image_path ) {
+
+					WP_CLI::line( 'Processing image ' . $image_path );
+					
+					if ( ! empty( $recovered_images[ $image_path ] ) ) {
+						$post_content = str_replace( '/media/images/' . $image_path, $recovered_images[ $image_path ], $post_content );
+						WP_CLI::line( 'Image was recovered before.' );
+						WP_CLI::line( 'Replaced image /media/images/' . $image_path . ' with ' . $recovered_images[ $image_path ] );
+						continue;
+					}
+
+					$image_full_url = sprintf( $images_url, $image_path );
+					WP_CLI::line( 'Downloading image ' . $image_full_url );
+
+					$tmp_file = download_url( $image_full_url );
+					if ( is_wp_error( $tmp_file ) ) {
+						$missing_images[] = $image_path;
+						WP_CLI::line( 'Failed to download image ' . $image_full_url );
+						continue;
+					}
+
+					$file_array = [
+						'name' => basename( $image_path ),
+						'tmp_name' => $tmp_file,
+					];
+
+					$attachment_id = media_handle_sideload( $file_array, $post_id );
+
+					if ( is_wp_error( $attachment_id ) ) {
+						$missing_images[] = $image_path;
+						WP_CLI::line( 'Failed to sideload image ' . $image_full_url );
+						continue;
+					}
+
+					
+					$new_url = wp_get_attachment_url( $attachment_id );
+					WP_CLI::line( 'New attachment created: ID ' . $attachment_id . ' -  ' . $new_url );
+					$recovered_images[ $image_path ] = $new_url;
+					$post_content = str_replace( '/media/images/' . $image_path, $new_url, $post_content );
+					WP_CLI::line( 'Replaced image /media/images/' . $image_path . ' with ' . $new_url );
+					
+				}
+
+				WP_CLI::line( 'Updating post content.' );
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content ], [ 'ID' => $post_id ] );
+				WP_CLI::line( '============================================' );
+
+				$affected_posts[] = [
+					'ID' => $post_id,
+					'url' => get_permalink( $post_id ),
+				];
+			}
+
+		}
+
+		wp_cache_flush();
+		WP_CLI::line( 'Summary:');
+		WP_CLI::line( 'Missing images: ' . count( $missing_images ) . ' - see missing-images.log' );
+		WP_CLI::line( 'Recovered images: ' . count( $recovered_images ) . ' - see recovered-images.log' );
+		$this->log( 'missing-images.log', print_r( $missing_images, true ) );
+		$this->log( 'recovered-images.log', print_r( $recovered_images, true ) );
+		$this->log( 'affected-posts.log', print_r( $affected_posts, true ) );
+
 	}
 
 	/**
