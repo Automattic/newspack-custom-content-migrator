@@ -260,6 +260,10 @@ class VTDiggerMigrator implements InterfaceCommand {
 				}
 			}
 
+			if ( false === $matched ) {
+				continue;
+			}
+
 			if ( true === $matched && count( $authors ) > 1 ) {
 				$post_ids_with_multiple_coauthors[] = $post_id;
 				WP_CLI::warning( sprintf( 'Multiple coauthors' ) );
@@ -276,6 +280,15 @@ class VTDiggerMigrator implements InterfaceCommand {
 			// log deleted post
 			$this->logger->log( 'vtdigger-delete-pressrelease-content__deletedPost.log', sprintf( "Deleted postID %d", $post_id ), $this->logger::SUCCESS );
 		}
+
+		if ( empty( $post_ids_with_multiple_coauthors ) ) {
+			WP_CLI::success( 'No $post_ids_with_multiple_coauthors' );
+		} else {
+			WP_CLI::warning( 'See $post_ids_with_multiple_coauthors' );
+			$this->logger->log( 'vtdigger-delete-pressrelease-content__postsWMultipleAuthors.log', implode( "\n", $post_ids_with_multiple_coauthors ), false );
+		}
+
+		$debug = 1;
 	}
 
 	private function get_wpuser_by_display_name( $display_name ) {
