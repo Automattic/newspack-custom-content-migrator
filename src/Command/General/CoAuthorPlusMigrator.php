@@ -308,7 +308,15 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			[ $this, 'cmd_export_posts_gas' ],
 			[
 				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file. The command exports just the GAs names associated to post IDs, not WP Users -- if a post has a WP User author but no GAs, that ID will have a null value.',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'post-ids-csv',
+						'description' => 'Export Guest Author names for these Post IDs only.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			],
 		);
 	}
@@ -320,9 +328,13 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_export_posts_gas( array $args, array $assoc_args ) {
+		$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+
 		$guest_author_names = [];
 
-		$post_ids = $this->posts_logic->get_all_posts_ids();
+		if ( ! $post_ids ) {
+			$post_ids = $this->posts_logic->get_all_posts_ids();
+		}
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$guest_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );

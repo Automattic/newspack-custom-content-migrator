@@ -197,6 +197,12 @@ class VTDiggerMigrator implements InterfaceCommand {
 						'optional'  => false,
 						'repeating' => false,
 					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'dry-run',
+						'optional'  => true,
+						'repeating' => false,
+					],
 				],
 			],
 		);
@@ -434,6 +440,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 	public function cmd_import_posts_gas( array $args, array $assoc_args ) {
 		$php_file               = $assoc_args['php-file'];
 		$imported_post_ids_file = $assoc_args['imported-post-ids-file'];
+		$dry_run                = isset( $assoc_args['dry-run'] ) ? true : false;
 		if ( ! file_exists( $php_file ) || ! file_exists( $imported_post_ids_file ) ) {
 			WP_CLI::error( 'Wrong files provided.' );
 		}
@@ -460,8 +467,12 @@ class VTDiggerMigrator implements InterfaceCommand {
 				// Get or create GA by display name.
 				$guest_author = $this->cap_logic->get_guest_author_by_display_name( $ga_display_name );
 				if ( ! $guest_author ) {
-					$ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => $ga_display_name ] );
-					$this->logger->log( $log_created_gas, sprintf( "Created Guest Author %s ID %s", $ga_display_name, $ga_id ) );
+					if ( ! $dry_run ) {
+						$ga_id = $this->cap_logic->create_guest_author( [ 'display_name' => $ga_display_name ] );
+						$this->logger->log( $log_created_gas, sprintf( "Created Guest Author %s ID %s", $ga_display_name, $ga_id ) );
+					} else {
+						WP_CLI::line( sprintf( "Created Guest Author %s ID %s", $ga_display_name, "n/a" ) );
+					}
 				} else {
 					$ga_id = $guest_author->ID;
 				}
@@ -469,8 +480,10 @@ class VTDiggerMigrator implements InterfaceCommand {
 			}
 
 			// Get new ID and assign.
-			$new_post_id = isset( $post_ids_old_new_map[ $post_id ] ) ? $post_ids_old_new_map[ $post_id ] : $post_id;
-			$this->cap_logic->assign_guest_authors_to_post( $ga_ids, $new_post_id );
+			if ( ! $dry_run ) {
+				$new_post_id = isset( $post_ids_old_new_map[ $post_id ] ) ? $post_ids_old_new_map[ $post_id ] : $post_id;
+				$this->cap_logic->assign_guest_authors_to_post( $ga_ids, $new_post_id );
+			}
 		}
 
 		WP_CLI::success( sprintf( 'Done. See %s', $log_created_gas ) );
