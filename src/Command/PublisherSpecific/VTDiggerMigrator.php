@@ -227,6 +227,77 @@ class VTDiggerMigrator implements InterfaceCommand {
 				'shortdesc' => "In order to restore usage of reusable blocks (which have been removed from local posts' post_content), runs through all local published posts, finds these records in live posts table (table name hardcoded) and sets local posts' post_content to those in live table.",
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-delete-pressrelease-content',
+			[ $this, 'cmd_delete_pressrelease_content' ],
+		);
+	}
+
+	public function cmd_delete_pressrelease_content( array $pos_args, array $assoc_args ) {
+		$author = 'Press Release';
+		$ga_existing = $this->cap_logic->get_guest_author_by_display_name( $author );
+		if ( ! $ga_existing ) {
+			WP_CLI::error( "Guest Author $author does not exist." );
+		}
+		$wpuser_existing = $this->get_wpuser_by_display_name( $author );
+		if ( ! $wpuser_existing ) {
+			WP_CLI::error( "WP User $author does not exist." );
+		}
+
+		$post_ids_with_multiple_coauthors = [];
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$authors = $this->cap_logic->get_all_authors_for_post( $post_id );
+
+			$matched = false;
+			foreach ( $authors as $author ) {
+				if ( 'stdClass' === $author::class && $ga_existing->ID == $author->ID ) {
+					$matched = true;
+				} elseif ( 'WP_User' === $author::class && $wpuser_existing->ID == $author->ID ) {
+					$matched = true;
+				}
+			}
+
+			if ( false === $matched ) {
+				continue;
+			}
+
+			if ( true === $matched && count( $authors ) > 1 ) {
+				$post_ids_with_multiple_coauthors[] = $post_id;
+				WP_CLI::warning( sprintf( 'Multiple coauthors' ) );
+				continue;
+			}
+
+			$deleted = wp_delete_post( $post_id, true );
+			if ( false === $deleted || is_null( $deleted ) || empty( $deleted ) ) {
+				// log err deleting post
+				$this->logger->log( 'vtdigger-delete-pressrelease-content__errDeletingPost.log', sprintf( "Error deleting postID %d", $post_id ), $this->logger::WARNING );
+				continue;
+			}
+
+			// log deleted post
+			$this->logger->log( 'vtdigger-delete-pressrelease-content__deletedPost.log', sprintf( "Deleted postID %d", $post_id ), $this->logger::SUCCESS );
+		}
+
+		if ( empty( $post_ids_with_multiple_coauthors ) ) {
+			WP_CLI::success( 'No $post_ids_with_multiple_coauthors' );
+		} else {
+			WP_CLI::warning( 'See $post_ids_with_multiple_coauthors' );
+			$this->logger->log( 'vtdigger-delete-pressrelease-content__postsWMultipleAuthors.log', implode( "\n", $post_ids_with_multiple_coauthors ), false );
+		}
+
+		$debug = 1;
+	}
+
+	private function get_wpuser_by_display_name( $display_name ) {
+		global $wpdb;
+
+		$user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) );
+		$user = get_user_by( 'ID', $user_id );
+
+		return $user;
 	}
 
 	/**
