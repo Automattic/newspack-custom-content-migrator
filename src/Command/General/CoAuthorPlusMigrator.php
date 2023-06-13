@@ -319,6 +319,58 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category',
+			[ $this, 'cmd_set_ga_as_author_of_all_posts_in_category' ],
+			[
+				'shortdesc' => 'Sets a GA as author for all posts in category. Does not append GA, sets as only author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'category-id',
+						'description' => 'Category ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ga-id',
+						'description' => 'GA ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_set_ga_as_author_of_all_posts_in_category( array $pos_args, array $assoc_args ) {
+		$cat_id = $assoc_args['category-id'];
+		$ga_id  = $assoc_args['ga-id'];
+
+		$category = get_category( $cat_id );
+		if ( is_wp_error( $category ) || ! $category ) {
+			WP_CLI::error( sprintf( 'Category with ID %d not found.', $cat_id ) );
+		}
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+		if ( false === $ga || ! $ga ) {
+			WP_CLI::error( sprintf( 'Guest Author with ID %d not found.', $ga_id ) );
+		}
+
+		// Get all Post IDs in category and set GA.
+		$post_ids = $this->posts_logic->get_all_posts_ids_in_category( 'post', [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $cat_id );
+		foreach ( $post_ids as $post_id ) {
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id, false );
+			WP_CLI::success( sprintf( 'Updated Post ID %d.', $post_id ) );
+		}
 	}
 
 	/**
