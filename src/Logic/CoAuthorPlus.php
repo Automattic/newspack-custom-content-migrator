@@ -413,17 +413,6 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Gets all Post's authors, both Guest Authors and WP User authors.
-	 *
-	 * @param int $post_id Post ID.
-	 *
-	 * @return mixed|void
-	 */
-	public function get_all_authors_for_post( $post_id ) {
-		return get_coauthors( $post_id );
-	}
-
-	/**
 	 * Gets Post's Guest Authors, leaving out WP User authors.
 	 *
 	 * @param int $post_id Post ID.
@@ -445,6 +434,19 @@ class CoAuthorPlus {
 		}
 
 		return $guest_authors;
+	}
+
+	/**
+	 * Gets all Post authors, both Guest Authors and WP User authors.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return mixed|void
+	 */
+	public function get_all_authors_for_post( $post_id ) {
+		$coauthors = get_coauthors( $post_id );
+
+		return $coauthors;
 	}
 
 	/**
@@ -485,7 +487,7 @@ class CoAuthorPlus {
 	 * @param int  $ga_id Guest Author ID (Post ID).
 	 * @param bool $get_post_objects Flag which determines whether to return array of Post IDs, or Post Objects.
 	 *
-	 * @return int[]|WP_Post[]
+	 * @return int[]|WP_Post[] Array of Post IDs if $get_post_objects is false, or Post Objects if $get_post_objects is true.
 	 */
 	public function get_all_posts_for_guest_author( int $ga_id, bool $get_post_objects = false ) {
 		global $wpdb;

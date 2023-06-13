@@ -308,9 +308,69 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			[ $this, 'cmd_export_posts_gas' ],
 			[
 				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file. The command exports just the GAs names associated to post IDs, not WP Users -- if a post has a WP User author but no GAs, that ID will have a null value.',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'post-ids-csv',
+						'description' => 'Export Guest Author names for these Post IDs only.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category',
+			[ $this, 'cmd_set_ga_as_author_of_all_posts_in_category' ],
+			[
+				'shortdesc' => 'Sets a GA as author for all posts in category. Does not append GA, sets as only author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'category-id',
+						'description' => 'Category ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ga-id',
+						'description' => 'GA ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_set_ga_as_author_of_all_posts_in_category( array $pos_args, array $assoc_args ) {
+		$cat_id = $assoc_args['category-id'];
+		$ga_id  = $assoc_args['ga-id'];
+
+		$category = get_category( $cat_id );
+		if ( is_wp_error( $category ) || ! $category ) {
+			WP_CLI::error( sprintf( 'Category with ID %d not found.', $cat_id ) );
+		}
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+		if ( false === $ga || ! $ga ) {
+			WP_CLI::error( sprintf( 'Guest Author with ID %d not found.', $ga_id ) );
+		}
+
+		// Get all Post IDs in category and set GA.
+		$post_ids = $this->posts_logic->get_all_posts_ids_in_category( 'post', [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $cat_id );
+		foreach ( $post_ids as $post_id ) {
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id, false );
+			WP_CLI::success( sprintf( 'Updated Post ID %d.', $post_id ) );
+		}
 	}
 
 	/**
@@ -320,9 +380,13 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_export_posts_gas( array $args, array $assoc_args ) {
+		$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+
 		$guest_author_names = [];
 
-		$post_ids = $this->posts_logic->get_all_posts_ids();
+		if ( ! $post_ids ) {
+			$post_ids = $this->posts_logic->get_all_posts_ids();
+		}
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$guest_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );
