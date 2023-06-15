@@ -112,7 +112,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			'newspack-content-migrator vtdigger-migrate-liveblogs',
 			[ $this, 'cmd_liveblogs' ],
 			[
-				'shortdesc' => 'Migrates the Liveblog CPT to regular posts with category.',
+				'shortdesc' => 'Migrates the Liveblog CPTs.',
 				'synopsis'  => [],
 			]
 		);
@@ -120,7 +120,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			'newspack-content-migrator vtdigger-migrate-letterstotheeditor',
 			[ $this, 'cmd_letterstotheeditor' ],
 			[
-				'shortdesc' => 'Migrates the Letters to the Editor CPT to regular posts with category.',
+				'shortdesc' => 'Migrates the Letters to the Editor CPT.',
 				'synopsis'  => [],
 			]
 		);
@@ -128,7 +128,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			'newspack-content-migrator vtdigger-migrate-obituaries',
 			[ $this, 'cmd_obituaries' ],
 			[
-				'shortdesc' => 'Migrates the Obituaries CPT to regular posts with category.',
+				'shortdesc' => 'Migrates the Obituaries CPT.',
 				'synopsis'  => [],
 			]
 		);
@@ -254,6 +254,12 @@ class VTDiggerMigrator implements InterfaceCommand {
 						'optional'  => false,
 						'repeating' => false,
 					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'live-post-ids-to-categories-data-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
 				],
 			],
 		);
@@ -345,7 +351,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 		file_put_contents( 'live_post_ids_to_categories_data.php', '<?php return ' . $printable_array . ';' );
 	}
 
-	public function cmd_update_categories_import_to_staging( array $args, array $assoc_args ) {
+	public function cmd_update_categories_import_to_staging( array $pos_args, array $assoc_args ) {
 		/**
 		 * IMPORT CATEGORIES TO STAGING
 		 * get file data
@@ -360,6 +366,8 @@ class VTDiggerMigrator implements InterfaceCommand {
 		 * update post categories
 		 */
 		global $wpdb;
+
+		$mem_usage_mb_start = memory_get_usage()/1024/1024;
 
 		// Get ID mappings from cdiff log.
 		$cdiff_log = $assoc_args['content-diff-imported-post-ids-log-file'];
@@ -380,7 +388,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 		}
 
 		// Get live post ID category data from pre-generated php file.
-		$old_post_ids_to_categories_data = require 'live_post_ids_to_categories_data.php';
+		$old_post_ids_to_categories_data = require $assoc_args['live-post-ids-to-categories-data-php-file'];
 		if ( ! $old_post_ids_to_categories_data ) {
 			WP_CLI::error( 'File not found: live_post_ids_to_categories_data.php' );
 		}
@@ -408,19 +416,51 @@ class VTDiggerMigrator implements InterfaceCommand {
 			}
 		}
 
+		// prepare special CPT categories
+		$liveblog_cpt_special_category_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
+		if ( ! $liveblog_cpt_special_category_id ) {
+			$liveblog_cpt_special_category_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
+		}
+		$olympics_cpt_special_category_id = get_cat_ID( self::OLYMPICS_BLOG_CAT_NAME );
+		if ( ! $olympics_cpt_special_category_id ) {
+			$olympics_cpt_special_category_id = wp_insert_category( [ 'cat_name' => self::OLYMPICS_BLOG_CAT_NAME ] );
+		}
+		$election_cpt_special_category_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
+		if ( ! $election_cpt_special_category_id ) {
+			$election_cpt_special_category_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
+		}
+		$obituaries_cpt_special_category_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
+		if ( ! $obituaries_cpt_special_category_id ) {
+			$obituaries_cpt_special_category_id = wp_insert_category( [ 'cat_name' => self::OBITUARIES_CAT_NAME ] );
+		}
+
 		// Get new Counties Categories IDs.
 		$county_name_to_cat_id = $this->get_county_to_category_tree();
 
+		// Get last processed key.
+		$log_last_processed_post_id_key = 'vtdigger-update-categories-import-to-staging__lastProcessedPostIdKey.log';
+		$last_processed_post_id_key = null;
+		if ( file_exists( $log_last_processed_post_id_key ) ) {
+			$last_processed_post_id_key = file_get_contents( $log_last_processed_post_id_key );
+		}
+
 		// loop through all posts, match them by meta and cdiff log
 		// 		 - log if post not found
+		// 		 - reset and reassign categories to posts
 		$post_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
+			if ( $last_processed_post_id_key && $key_post_id <= $last_processed_post_id_key ) {
+				continue;
+			}
+
 			WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			// Get old post ID.
 			$old_post_id = array_search( $post_id, $post_ids_mapping );
 			if ( ! $old_post_id ) {
-				$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingNotFoundOnLive.log', $post_id );
+				$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingNotFoundOnLive.log', $post_id, false );
+				WP_CLI::line( 'Skip' );
+				file_put_contents( $log_last_processed_post_id_key, $key_post_id );
 				continue;
 			}
 
@@ -439,18 +479,24 @@ class VTDiggerMigrator implements InterfaceCommand {
 			// Get CPT special category.
 			$cpt_special_category_id = null;
 			if ( self::LIVEBLOG_CPT == $post_data['post_type'] ) {
-				$cpt_special_category_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
+				$cpt_special_category_id = $liveblog_cpt_special_category_id;
 			} elseif ( self::OLYMPICS_BLOG_CPT == $post_data['post_type'] ) {
-				$cpt_special_category_id = get_cat_ID( self::OLYMPICS_BLOG_CAT_NAME );
+				$cpt_special_category_id = $olympics_cpt_special_category_id;
 			} elseif ( self::ELECTION_CPT == $post_data['post_type'] ) {
-				$cpt_special_category_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
+				$cpt_special_category_id = $election_cpt_special_category_id;
 			} elseif ( self::OBITUARY_CPT == $post_data['post_type'] ) {
-				$cpt_special_category_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
+				$cpt_special_category_id = $obituaries_cpt_special_category_id;
 			}
 
 			// Get Counties categories.
 			$counties_categories = [];
 			foreach ( $post_data['counties'] as $county_name ) {
+				if ( empty( $county_name ) ) {
+					$hold_up = 1;
+				}
+				if ( ! isset( $county_name_to_cat_id[ $county_name ] ) ) {
+					throw new \Exception( 'County not found: ' . $county_name );
+				}
 				$counties_categories[] = $county_name_to_cat_id[ $county_name ];
 			}
 
@@ -474,10 +520,21 @@ class VTDiggerMigrator implements InterfaceCommand {
 			}
 
 			// Set cats.
-			wp_set_post_categories( $post_id, $all_post_categories, $append = false  );
-			$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingUpdated.log', $post_id );
+			if ( ! empty( $all_post_categories ) ) {
+				$set = wp_set_post_categories( $post_id, $all_post_categories, $append = false  );
+				if ( false == $set || is_wp_error( $set ) ) {
+					$this->logger->log( 'vtdigger-update-categories-import-to-staging__errSettingCats.log', sprintf( "ErrSettingCats postID %d cats '%s' err '%s'", $post_id, json_encode( $all_post_categories ), ( is_wp_error( $set ) ? $set->get_error_message() : 'na' ) ), $this->logger::WARNING );
+				}
+				$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingUpdated.log', sprintf( "Updated postID %d total cats %d", $post_id, count( $all_post_categories ) ), $this->logger::SUCCESS );
+			} else {
+				$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingNoCategories.log', "No cats for postID ${post_id}", $this->logger::WARNING );
+			}
+
+			file_put_contents( $log_last_processed_post_id_key, $key_post_id );
 		}
 
+		$mem_usage_mb_end = memory_get_usage()/1024/1024;
+		WP_CLI::line( 'Done.' );
 	}
 
 	public function cmd_update_thumb_ids( array $args, array $assoc_args ) {
@@ -553,6 +610,8 @@ class VTDiggerMigrator implements InterfaceCommand {
 			}
 			file_put_contents( $log_last_processed_post_id_key, $key_post_id );
 		}
+
+		$mem_usage_mb_end = memory_get_usage()/1024/1024;
 
 		$d=1;
 	}
@@ -1554,8 +1613,8 @@ HTML;
 
 		$log = 'vtd_counties.log';
 
-		WP_CLI::log( "Getting or creating category tree..." );
-		$county_id_to_cat_id = $this->get_county_to_category_tree();
+		WP_CLI::log( "Creating/fetching county category tree..." );
+		$county_name_to_cat_id = $this->get_county_to_category_tree();
 
 		// Get all term_ids, term_taxonomy_ids and term names with 'counties' taxonomy.
 		$counties_terms = $wpdb->get_results(
@@ -1586,7 +1645,7 @@ HTML;
 			);
 
 			// Get the destination category.
-			$destination_cat_id = $county_id_to_cat_id[$term_name] ?? null;
+			$destination_cat_id = $county_name_to_cat_id[$term_name] ?? null;
 			// We should have all 'counties' on record. Double check.
 			if ( is_null( $destination_cat_id ) ) {
 				throw new \RuntimeException( sprintf( "County term_id=%d term_taxonomy_id=%d name=%s is not mapped by the migrator script.", $term_id, $term_taxonomy_id, $term_name ) );
