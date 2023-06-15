@@ -458,9 +458,16 @@ class VTDiggerMigrator implements InterfaceCommand {
 		$post_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 
-if ( $post_id != 418811 ) {
-	continue;
-}
+// $test_ids = [
+// 	// 282679,476380,477523,478014,479374,479686,480119,480235,480315,409660,
+// ];
+// if ( ! in_array( $post_id, $test_ids ) ) {
+// 	continue;
+// }
+
+// if ( 423976 != $post_id ) {
+// 	continue;
+// }
 
 			if ( $last_processed_post_id_key && $key_post_id <= $last_processed_post_id_key ) {
 				continue;
@@ -471,16 +478,48 @@ if ( $post_id != 418811 ) {
 			// Get old post ID.
 			$old_post_id = array_search( $post_id, $post_ids_mapping );
 			if ( ! $old_post_id ) {
-				$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingNotFoundOnLive.log', $post_id, false );
-				WP_CLI::line( 'Skip' );
-				file_put_contents( $log_last_processed_post_id_key, $key_post_id );
-				continue;
+
+				// Search in `live_posts` and check if ID same.
+				$local_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d", $post_id ), ARRAY_A );
+				$live_row = $wpdb->get_row( $wpdb->prepare( "select * from live_posts where ID = %d", $post_id ), ARRAY_A );
+				if ( $local_row && $live_row ) {
+					if (
+						$live_row['post_title'] == $local_row['post_title']
+						&& $live_row['post_name'] == $local_row['post_name']
+						&& $live_row['post_date'] == $local_row['post_date']
+					) {
+						// Same ID.
+						$old_post_id = $post_id;
+						$this->logger->log( 'vtdigger-update-categories-import-to-staging__matchedSamePostIDLiveAsStaging.log', $post_id, false );
+					}
+				}
+				// Log not found ID.
+				if ( ! $old_post_id ) {
+					$this->logger->log( 'vtdigger-update-categories-import-to-staging__postIdsStagingNotFoundOnLive.log', $post_id, false );
+					WP_CLI::line( 'Live postID not found, skip' );
+					file_put_contents( $log_last_processed_post_id_key, $key_post_id );
+					continue;
+				}
+			} else {
+				$live_row = $local_row = null;
 			}
 
 			//
 			// Get post categories data.
 			//
 			$post_data = $old_post_ids_to_categories_data[ $old_post_id ];
+			if ( ! $post_data && $old_post_id ) {
+				if ( $live_row && ( 'business_briefs' == $live_row['post_type'] ) ) {
+					$post_data['post_type'] = self::BUSINESSBRIEFS_CPT;
+				} elseif ( $live_row && ( self::CARTOONS_CPT == $live_row['post_type'] ) ) {
+					$post_data['post_type'] = self::CARTOONS_CPT;
+				} else {
+					$missing_cpt = 1;
+				}
+			}
+			if ( ! $post_data ) {
+				$hold_up = 1;
+			}
 
 			// Get plain categories IDs.
 			// $post_data['categories'] is Array[ with Subarrays[ containing 'category_term_id' and 'category_name' ] ]
@@ -491,7 +530,7 @@ if ( $post_id != 418811 ) {
 			} elseif ( self::BUSINESSBRIEFS_CPT == $post_data['post_type'] ) {
 				// Business briefs should get just that one category, no appending to existing categories.
 				$categories_plain_ids[] = $businessbriefs_cat_id;
-			} elseif ( self::CARTOONS_CAT_NAME == $post_data['post_type'] ) {
+			} elseif ( self::CARTOONS_CPT == $post_data['post_type'] ) {
 				// Cartoons should get just that one category, no appending to existing categories.
 				$categories_plain_ids[] = $cartoons_cat_id;
 			} elseif ( self::OBITUARY_CPT == $post_data['post_type'] ) {
@@ -499,7 +538,11 @@ if ( $post_id != 418811 ) {
 				$categories_plain_ids[] = $obituaries_cat_id;
 			} else {
 				foreach ( $post_data['categories'] as $category_data ) {
-					$categories_plain_ids[] = get_cat_ID( $category_data['category_name'] );
+					$cat_data_id = get_cat_ID( $category_data['category_name'] );
+					if ( 0 == $cat_data_id || ! $cat_data_id ) {
+						$cat_data_id = wp_insert_category( [ 'cat_name' => $category_data['category_name'] ] );
+					}
+					$categories_plain_ids[] = $cat_data_id;
 				}
 			}
 
