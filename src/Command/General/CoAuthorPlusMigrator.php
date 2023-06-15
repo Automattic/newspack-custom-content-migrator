@@ -366,7 +366,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 
 		// Get all Post IDs in category and set GA.
-		$post_ids = $this->posts_logic->get_all_posts_ids_in_category( 'post', [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $cat_id );
+		$post_ids = $this->posts_logic->get_all_posts_ids_in_category( $cat_id, 'post', [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ] );
 		foreach ( $post_ids as $post_id ) {
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id, false );
 			WP_CLI::success( sprintf( 'Updated Post ID %d.', $post_id ) );
