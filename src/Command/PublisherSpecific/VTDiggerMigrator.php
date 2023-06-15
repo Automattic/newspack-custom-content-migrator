@@ -429,9 +429,17 @@ class VTDiggerMigrator implements InterfaceCommand {
 		if ( ! $election_cpt_special_category_id ) {
 			$election_cpt_special_category_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
 		}
-		$obituaries_cpt_special_category_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
-		if ( ! $obituaries_cpt_special_category_id ) {
-			$obituaries_cpt_special_category_id = wp_insert_category( [ 'cat_name' => self::OBITUARIES_CAT_NAME ] );
+		$obituaries_cat_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
+		if ( ! $obituaries_cat_id ) {
+			$obituaries_cat_id = wp_insert_category( [ 'cat_name' => self::OBITUARIES_CAT_NAME ] );
+		}
+		$businessbriefs_cat_id = get_cat_ID( self::BUSINESSBRIEFS_CAT_NAME );
+		if ( 0 == $businessbriefs_cat_id ) {
+			$businessbriefs_cat_id = wp_insert_category( [ 'cat_name' => self::BUSINESSBRIEFS_CAT_NAME ] );
+		}
+		$cartoons_cat_id = get_cat_ID( self::CARTOONS_CAT_NAME );
+		if ( 0 == $cartoons_cat_id ) {
+			$cartoons_cat_id = wp_insert_category( [ 'cat_name' => self::CARTOONS_CAT_NAME ] );
 		}
 
 		// Get new Counties Categories IDs.
@@ -449,6 +457,11 @@ class VTDiggerMigrator implements InterfaceCommand {
 		// 		 - reset and reassign categories to posts
 		$post_ids = $this->posts_logic->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+if ( $post_id != 418811 ) {
+	continue;
+}
+
 			if ( $last_processed_post_id_key && $key_post_id <= $last_processed_post_id_key ) {
 				continue;
 			}
@@ -472,8 +485,22 @@ class VTDiggerMigrator implements InterfaceCommand {
 			// Get plain categories IDs.
 			// $post_data['categories'] is Array[ with Subarrays[ containing 'category_term_id' and 'category_name' ] ]
 			$categories_plain_ids = [];
-			foreach ( $post_data['categories'] as $category_data ) {
-				$categories_plain_ids[] = get_cat_ID( $category_data['category_name'] );
+			// Newsbriefs should remain uncategorized.
+			if ( self::NEWSBRIEF_CPT == $post_data['post_type'] ) {
+				$categories_plain_ids = [];
+			} elseif ( self::BUSINESSBRIEFS_CPT == $post_data['post_type'] ) {
+				// Business briefs should get just that one category, no appending to existing categories.
+				$categories_plain_ids[] = $businessbriefs_cat_id;
+			} elseif ( self::CARTOONS_CAT_NAME == $post_data['post_type'] ) {
+				// Cartoons should get just that one category, no appending to existing categories.
+				$categories_plain_ids[] = $cartoons_cat_id;
+			} elseif ( self::OBITUARY_CPT == $post_data['post_type'] ) {
+				// Obituaries should get just that one category, no appending to existing categories.
+				$categories_plain_ids[] = $obituaries_cat_id;
+			} else {
+				foreach ( $post_data['categories'] as $category_data ) {
+					$categories_plain_ids[] = get_cat_ID( $category_data['category_name'] );
+				}
 			}
 
 			// Get CPT special category.
@@ -484,8 +511,22 @@ class VTDiggerMigrator implements InterfaceCommand {
 				$cpt_special_category_id = $olympics_cpt_special_category_id;
 			} elseif ( self::ELECTION_CPT == $post_data['post_type'] ) {
 				$cpt_special_category_id = $election_cpt_special_category_id;
-			} elseif ( self::OBITUARY_CPT == $post_data['post_type'] ) {
-				$cpt_special_category_id = $obituaries_cpt_special_category_id;
+			}
+			// All liveblogs categories are subcategories of that liveblog.
+			if ( ! is_null( $cpt_special_category_id ) && ! empty( $categories_plain_ids ) ) {
+				$new_categories_plain_ids = [];
+				foreach ( $categories_plain_ids as $category_plain_id ) {
+					$category_name = get_cat_name( $category_plain_id );
+					$new_category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $category_name, $cpt_special_category_id );
+					if ( is_null( $new_category_id ) || ! $new_category_id ) {
+						$hold_up = 1;
+					}
+					$new_categories_plain_ids[] = $new_category_id;
+				}
+				if ( count( $new_categories_plain_ids ) != count( $categories_plain_ids ) ) {
+					$hold_up = 1;
+				}
+				$categories_plain_ids = $new_categories_plain_ids;
 			}
 
 			// Get Counties categories.
@@ -1036,7 +1077,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 		/**
 		 * Liveblogs.
 		 */
-		WP_CLI::log( sprintf( 'Migrating %s ...', self::LIVEBLOG_CPT ) );
+			WP_CLI::log( sprintf( 'Migrating %s ...', self::LIVEBLOG_CPT ) );
 		$log = 'vtd_cpt_liveblog.log';
 		$ga_id = $this->get_or_create_ga_id_by_display_name( self::LIVEBLOG_GA_NAME );
 		$parent_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
@@ -1145,14 +1186,18 @@ class VTDiggerMigrator implements InterfaceCommand {
 				 */
 
 				$category_ids = wp_get_post_categories( $post_id );
+
+				// First empty current cats.
+				wp_set_post_categories( $post_id, [], false );
+
 				foreach ( $category_ids as $category_id ) {
 					$category = get_category( $category_id );
 
 					// Get or recreate this category under $parent_cat_id parent.
 					$new_category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $category->name, $parent_cat_id );
 
-					// Assign
-					wp_set_post_categories( $post_id, [ $new_category_id ], false );
+					// Assign by appending
+					wp_set_post_categories( $post_id, [ $new_category_id ], true );
 				}
 				// Or if no category, set $parent_cat_id.
 				if ( empty( $category_ids ) ) {
