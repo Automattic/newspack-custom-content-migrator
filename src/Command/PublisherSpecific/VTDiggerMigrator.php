@@ -509,6 +509,9 @@ class VTDiggerMigrator implements InterfaceCommand {
 			//
 			$post_data = $old_post_ids_to_categories_data[ $old_post_id ];
 			if ( ! $post_data && $old_post_id ) {
+				if ( ! $live_row ) {
+					$live_row = $wpdb->get_row( $wpdb->prepare( "select * from live_posts where ID = %d", $old_post_id ), ARRAY_A );
+				}
 				if ( $live_row && ( 'business_briefs' == $live_row['post_type'] ) ) {
 					$post_data['post_type'] = self::BUSINESSBRIEFS_CPT;
 				} elseif ( $live_row && ( self::CARTOONS_CPT == $live_row['post_type'] ) ) {
