@@ -290,7 +290,27 @@ class VTDiggerMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'      => 'assoc',
-						'name'      => 'postIDs-mapping-live2staging-all-php-file',
+						'name'      => 'mapping-ids-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
+			],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-update-categories-import-to-staging-3-import-categories-to-staging',
+			[ $this, 'cmd_update_categories_import_to_staging__3_import_categories_to_staging' ],
+			[
+				'synopsis'  => [
+					[
+						'type'      => 'assoc',
+						'name'      => 'mapping-ids-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'path-to-logs',
 						'optional'  => false,
 						'repeating' => false,
 					],
@@ -385,6 +405,14 @@ class VTDiggerMigrator implements InterfaceCommand {
 		file_put_contents( 'live_post_ids_to_categories_data.php', '<?php return ' . $printable_array . ';' );
 	}
 
+	/**
+	 * Gets all live_post_ID => staging_post_ID mappings.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
 	public function cmd_update_categories_import_to_staging__1_get_post_ids_mapping( array $pos_args, array $assoc_args ) {
 		global $wpdb;
 
@@ -481,140 +509,401 @@ class VTDiggerMigrator implements InterfaceCommand {
 		$hol_up = true;
 	}
 
-	public function cmd_update_categories_import_to_staging__2_get_all_posts_categories( array $pos_args, array $assoc_args ) {
-		$postIDs_mapping_live2staging_all_php_file = $assoc_args['postIDs-mapping-live2staging-all-php-file'];
+	/**
+	 * Reimports all categories to staging, and reimports series tags.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_update_categories_import_to_staging__3_import_categories_to_staging( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$path_to_logs = $assoc_args['path-to-logs'];
+		// postIDs_mapping_live2staging_all.php
+		$postIDs_mapping_live2staging_all_php_file = $assoc_args['mapping-ids-php-file'];
 		if ( ! file_exists( $postIDs_mapping_live2staging_all_php_file ) ) {
 			WP_CLI::error( 'File not found: ' . $postIDs_mapping_live2staging_all_php_file );
 		}
+		
+		$post_ids_mapping = require $postIDs_mapping_live2staging_all_php_file;
 
+		// // First unset all categories.
+		// WP_CLI::log( 'Unsetting all categories...' );
+		// foreach ( $post_ids_mapping as $old_id => $new_id ) {
+		// 	// Sets "Uncategorized" category.
+		// 	wp_set_post_categories( $new_id, [], true );
+		// }
+
+		// NEWSBRIEF_CPT
+		// None : 'vtd_categories__newsbriefsIDs_LiveIDsNotFoundOnStaging.log';
+		$newsbriefs_ids = 'vtd_categories__newsbriefsIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ] )
+		// should remain uncategorized
+		$newsbrief_parent_cat_id = null;
+
+		// LIVEBLOG_CPT
+		$liveblogs_parent_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
+		if ( 0 == $liveblogs_parent_cat_id ) {
+			$liveblogs_parent_cat_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
+		}
+		// None : 'vtd_categories__liveblogIDs_LiveIDsNotFoundOnStaging.log';
+		$newsbriefs_ids = 'vtd_categories__liveblogIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
+		$has_categories;
+		if ( $has_categories ) {
+			// Get or recreate this category under $parent_cat_id parent.
+		} else {
+			// Set just the parent category.
+			$liveblogs_parent_cat_id;
+		}
+
+		// OLYMPICS_BLOG_CPT
+		// None : 'vtd_categories__olympicsIDs_LiveIDsNotFoundOnStaging.log'
+		$olympics_ids = 'vtd_categories__olympicsIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
+		$parent_cat_id = get_cat_ID( self::OLYMPICS_BLOG_CAT_NAME );
+		if ( 0 == $parent_cat_id ) {
+			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::OLYMPICS_BLOG_CAT_NAME ] );
+		}
+		$has_categories;
+		if ( $has_categories ) {
+			// Get or recreate this category under $parent_cat_id parent.
+		} else {
+			// Set just the parent category.
+			$liveblogs_parent_cat_id;
+		}
+
+		// ELECTION_CPT
+		// None : 'vtd_categories__electionbriefsIDs_LiveIDsNotFoundOnStaging.log'
+		$electionbriefs_ids = 'vtd_categories__electionbriefsIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
+		$parent_cat_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
+		if ( 0 == $parent_cat_id ) {
+			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
+		}
+		$has_categories;
+		if ( $has_categories ) {
+			// Get or recreate this category under $parent_cat_id parent.
+		} else {
+			// Set just the parent category.
+			$liveblogs_parent_cat_id;
+		}
+
+		// LETTERS_TO_EDITOR_CPT
+		$letters_missing_ids = 'vtd_categories__letterstoeditorIDs_LiveIDsNotFoundOnStaging.log';
+		$letters_ids = 'vtd_categories__letterstoeditorIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
+		// Keep just basic categories. Letters get a tag.
+
+
+		// OBITUARY_CPT
+		// None : 'vtd_categories__obituariesIDs_LiveIDsNotFoundOnStaging.log'
+		$obituaries_ids = 'vtd_categories__obituariesIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ]
+		$obituaries_cat_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
+		if ( ! $obituaries_cat_id ) {
+			$obituaries_cat_id = wp_insert_category( [ 'cat_name' => self::OBITUARIES_CAT_NAME ] );
+		}
+		// Just this one cat.
+
+
+		// COUNTIES_TAXONOMY
+		$counties_ids_not_found_on_staging = 'vtd_categories__countiesIDs_LiveIDsNotFoundOnStaging.log';
+		$counties_ids = 'vtd_categories__countiesIDs.log';
+		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'county_name' => $term_name ] )
+		$county_name_to_cat_id = $this->get_county_to_category_tree();
+		// Get the destination category.
+		$destination_cat_id = $county_name_to_cat_id[$term_name] ?? null;
+		// Assign the destination category to all objects.
+		foreach ( $object_ids as $object_id ) {
+			wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
+		}
+
+		// SERIES_TAXONOMY
+		// Assign the tag to posts/objects.
+		foreach ( $object_ids as $object_id ) {
+			// Tag, append.
+			// $series_tag_specific_name; ??? $term_name probably
+			wp_set_post_tags( $object_id, [ self::SERIES_TAG_NAME, $series_tag_specific_name ], true );
+		}
+
+	}
+
+	/**
+	 * Pulls all categories from all live posts into log files.
+	 * Pulls series tags into log files as well.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_update_categories_import_to_staging__2_get_all_posts_categories( array $pos_args, array $assoc_args ) {
 		global $wpdb;
 
-		$post_ids_mapping = require $postIDs_mapping_live2staging_all_php_file;
-		foreach ( $post_ids_mapping as $old_id => $new_id ) {
-
-			// == cmd_liveblogs
-			// NEWSBRIEF_CPT
-			$parent_cat_id = null;
-			$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s ;", self::NEWSBRIEF_CPT ) );
-			// should be uncategorized
-
-			// LIVEBLOG_CPT
-			$parent_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
-			if ( 0 == $parent_cat_id ) {
-				$parent_cat_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
-			}
-			$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s;", self::LIVEBLOG_CPT ) );
-			// Get post_id categories
-			$categories;
-			// check if has categories (including Uncategorized)
-			$has_categories;
-			if ( $has_categories ) {
-				// Get or recreate this category under $parent_cat_id parent.
-			} else {
-				// Set just the parent category.
-			}
-
-			// OLYMPICS_BLOG_CPT
-			$parent_cat_id = get_cat_ID( self::OLYMPICS_BLOG_CAT_NAME );
-			if ( 0 == $parent_cat_id ) {
-				$parent_cat_id = wp_insert_category( [ 'cat_name' => self::OLYMPICS_BLOG_CAT_NAME ] );
-			}
-			$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s;", self::OLYMPICS_BLOG_CPT ) );
-			// Same ...
-
-			// ELECTION_CPT
-			$parent_cat_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
-			if ( 0 == $parent_cat_id ) {
-				$parent_cat_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
-			}
-			$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s ;", self::ELECTION_CPT ) );
-			// Same ...
-
-
-			
-			// LETTERS_TO_EDITOR_CPT
-			$letters_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type = %s;", self::LETTERS_TO_EDITOR_CPT ) );
-			// Keep just basic categories. Letters get a tag.
-
-
-
-			// OBITUARY_CPT
-			$obituaries_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type='%s';", self::OBITUARY_CPT ) );
-			// Cat.
-			$obituaries_cat_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
-			if ( ! $obituaries_cat_id ) {
-				$obituaries_cat_id = wp_insert_category( [ 'cat_name' => self::OBITUARIES_CAT_NAME ] );
-			}
-
-
-			// COUNTIES_TAXONOMY
-			$county_name_to_cat_id = $this->get_county_to_category_tree();
-			// Get all term_ids, term_taxonomy_ids and term names with 'counties' taxonomy.
-			$counties_terms = $wpdb->get_results(
-				$wpdb->prepare(
-					"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name 
-					from live_term_taxonomy tt
-					join live_terms t on t.term_id = tt.term_id 
-					where tt.taxonomy = '%s';",
-					self::COUNTIES_TAXONOMY
-				),
-				ARRAY_A
-			);
-			// Loop through all 'counties' terms.
-			foreach ( $counties_terms as $key_county_term => $county_term ) {
-				$term_id = $county_term['term_id'];
-				$term_taxonomy_id = $county_term['term_taxonomy_id'];
-				$term_name = $county_term['name'];
-				// Get the destination category.
-				$destination_cat_id = $county_name_to_cat_id[$term_name] ?? null;
-				// Get all objects for this 'county' term's term_taxonomy_id.
-				$object_ids = $wpdb->get_col(
-					$wpdb->prepare(
-						"select object_id from live_term_relationships vwtr where term_taxonomy_id = %d;",
-						$term_taxonomy_id
-					)
-				);
-				// Assign the destination category to all objects.
-				foreach ( $object_ids as $object_id ) {
-					wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
-				}
-			}
-
-
-
-			// SERIES_TAXONOMY
-			$seriess_terms = $wpdb->get_results(
-				$wpdb->prepare(
-					"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name 
-					from live_term_taxonomy tt
-					join live_terms t on t.term_id = tt.term_id 
-					where tt.taxonomy = '%s';",
-					self::SERIES_TAXONOMY
-				),
-				ARRAY_A
-			);
-
-			// Loop through all 'series' terms.
-			foreach ( $seriess_terms as $key_series_term => $series_term ) {
-				$term_id = $series_term['term_id'];
-				$term_taxonomy_id = $series_term['term_taxonomy_id'];
-				$term_name = $series_term['name'];
-				// Get all objects for this 'series' term's term_taxonomy_id.
-				$object_ids = $wpdb->get_col(
-					$wpdb->prepare(
-						"select object_id from live_term_relationships vwtr where term_taxonomy_id = %d;",
-						$term_taxonomy_id
-					)
-				);
-				// Assign the tag to posts/objects.
-				foreach ( $object_ids as $object_id ) {
-					// Tag, append.
-					// $series_tag_specific_name; ??? $term_name probably
-					wp_set_post_tags( $object_id, [ self::SERIES_TAG_NAME, $series_tag_specific_name ], true );
-				}
-			}
-
+		// postIDs_mapping_live2staging_all.php
+		$postIDs_mapping_live2staging_all_php_file = $assoc_args['mapping-ids-php-file'];
+		if ( ! file_exists( $postIDs_mapping_live2staging_all_php_file ) ) {
+			WP_CLI::error( 'File not found: ' . $postIDs_mapping_live2staging_all_php_file );
 		}
+		$post_ids_mapping = require $postIDs_mapping_live2staging_all_php_file;
+
+		/*
+		 * == cmd_liveblogs
+		 */
+
+		WP_CLI::log( self::NEWSBRIEF_CPT . ' ...' );
+		$live_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s ;", self::NEWSBRIEF_CPT ) );
+		foreach ( $live_ids as $live_id ) {
+			$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+			if ( ! is_null( $staging_id ) ) {
+				$this->logger->log( 'vtd_categories__newsbriefsIDs.log', json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ] ) );
+			} else {
+				$this->logger->log( 'vtd_categories__newsbriefsIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+			}
+		}
+
+		WP_CLI::log( self::LIVEBLOG_CPT . ' ...' );
+		$live_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s;", self::LIVEBLOG_CPT ) );
+		foreach ( $live_ids as $live_id) {
+			$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+			if ( ! is_null( $staging_id ) ) {
+				$categories = $this->get_categories_for_post( 'live_', $live_id );
+
+				$category_names = [];
+				if ( ! empty( $categories ) ) {
+					// Get category names.
+					foreach ( $categories as $category ) {
+						// Check if any parents are != 0.
+						if ( 0 != $category['parent'] ) {
+							// Non-0 parent.
+							$d=1;
+						}
+						if ( 'Uncategorized' == $category['name'] ) {
+							continue;
+						}
+
+						$category_names[] = html_entity_decode( $category['name'] );
+					}
+				}
+
+				$this->logger->log( 'vtd_categories__liveblogIDs.log',
+					json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
+				);
+			} else {
+				$this->logger->log( 'vtd_categories__liveblogIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+			}
+		}
+
+		// OLYMPICS_BLOG_CPT
+		WP_CLI::log( self::OLYMPICS_BLOG_CPT . ' ...' );
+		$live_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s;", self::OLYMPICS_BLOG_CPT ) );
+		foreach ( $live_ids as $live_id) {
+			$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+			if ( ! is_null( $staging_id ) ) {
+				$categories = $this->get_categories_for_post( 'live_', $live_id );
+
+				$category_names = [];
+				if ( ! empty( $categories ) ) {
+					// Get category names.
+					foreach ( $categories as $category ) {
+						// Check if any parents are != 0.
+						if ( 0 != $category['parent'] ) {
+							// Non-0 parent.
+							$d=1;
+						}
+						if ( 'Uncategorized' == $category['name'] ) {
+							continue;
+						}
+
+						$category_names[] = html_entity_decode( $category['name'] );
+					}
+				}
+
+				$this->logger->log( 'vtd_categories__olympicsIDs.log',
+					json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
+				);
+			} else {
+				$this->logger->log( 'vtd_categories__olympicsIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+			}
+		}
+
+		// ELECTION_CPT
+		WP_CLI::log( self::ELECTION_CPT . ' ...' );
+		$live_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type=%s ;", self::ELECTION_CPT ) );
+		foreach ( $live_ids as $live_id) {
+			$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+			if ( ! is_null( $staging_id ) ) {
+				$categories = $this->get_categories_for_post( 'live_', $live_id );
+				$category_names = [];
+				if ( ! empty( $categories ) ) {
+					// Get category names.
+					foreach ( $categories as $category ) {
+						// Check if any parents are != 0.
+						if ( 0 != $category['parent'] ) {
+							// Non-0 parent.
+							$d=1;
+						}
+						if ( 'Uncategorized' == $category['name'] ) {
+							continue;
+						}
+						$category_names[] = html_entity_decode( $category['name'] );
+					}
+				}
+
+				$this->logger->log( 'vtd_categories__electionbriefsIDs.log',
+					json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
+				);
+			} else {
+				$this->logger->log( 'vtd_categories__electionbriefsIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+			}
+		}
+
+		WP_CLI::log( self::LETTERS_TO_EDITOR_CPT . ' ...' );
+		$live_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type = %s;", self::LETTERS_TO_EDITOR_CPT ) );
+		foreach ( $live_ids as $live_id) {
+			$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+			if ( ! is_null( $staging_id ) ) {
+				$categories = $this->get_categories_for_post( 'live_', $live_id );
+				$category_names = [];
+				if ( ! empty( $categories ) ) {
+					// Get category names.
+					foreach ( $categories as $category ) {
+						// Check if any parents are != 0.
+						if ( 0 != $category['parent'] ) {
+							// Non-0 parent.
+							$d=1;
+						}
+						if ( 'Uncategorized' == $category['name'] ) {
+							continue;
+						}
+						$category_names[] = html_entity_decode( $category['name'] );
+					}
+				}
+
+				$this->logger->log( 'vtd_categories__letterstoeditorIDs.log',
+					json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
+				);
+			} else {
+				$this->logger->log( 'vtd_categories__letterstoeditorIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+			}
+		}
+
+		// OBITUARY_CPT
+		$live_ids = $wpdb->get_col( $wpdb->prepare( "select ID from live_posts where post_type='%s';", self::OBITUARY_CPT ) );
+		foreach ( $live_ids as $live_id ) {
+			$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+			if ( ! is_null( $staging_id ) ) {
+				$this->logger->log( 'vtd_categories__obituariesIDs.log', json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ] ) );
+			} else {
+				$this->logger->log( 'vtd_categories__obituariesIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+			}
+		}
+
+		// COUNTIES_TAXONOMY
+		// Get all term_ids, term_taxonomy_ids and term names with 'counties' taxonomy.
+		$counties_terms = $wpdb->get_results(
+			$wpdb->prepare(
+				"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name
+				from live_term_taxonomy tt
+				join live_terms t on t.term_id = tt.term_id
+				where tt.taxonomy = '%s';",
+				self::COUNTIES_TAXONOMY
+			),
+			ARRAY_A
+		);
+		// Loop through all 'counties' terms.
+		foreach ( $counties_terms as $key_county_term => $county_term ) {
+			$term_id = $county_term['term_id'];
+			$term_taxonomy_id = $county_term['term_taxonomy_id'];
+			$term_name = html_entity_decode( $county_term['name'] );
+
+			// Get all objects for this 'county' term's term_taxonomy_id.
+			$live_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select object_id from live_term_relationships vwtr where term_taxonomy_id = %d;",
+					$term_taxonomy_id
+				)
+			);
+			foreach ( $live_ids as $live_id ) {
+				$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+				if ( ! is_null( $staging_id ) ) {
+					$this->logger->log( 'vtd_categories__countiesIDs.log', json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'county_name' => $term_name ] ) );
+				} else {
+					$this->logger->log( 'vtd_categories__countiesIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+				}
+			}
+		}
+
+		// SERIES_TAXONOMY
+		$series_terms = $wpdb->get_results(
+			$wpdb->prepare(
+				"select tt.term_id as term_id, tt.term_taxonomy_id as term_taxonomy_id, t.name as name
+				from live_term_taxonomy tt
+				join live_terms t on t.term_id = tt.term_id
+				where tt.taxonomy = '%s';",
+				self::SERIES_TAXONOMY
+			),
+			ARRAY_A
+		);
+		// Loop through all 'series' terms.
+		foreach ( $series_terms as $key_series_term => $series_term ) {
+			$term_id = $series_term['term_id'];
+			$term_taxonomy_id = $series_term['term_taxonomy_id'];
+			$term_name = html_entity_decode( $series_term['name'] );
+			// Get all objects for this 'series' term's term_taxonomy_id.
+			$live_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select object_id from live_term_relationships vwtr where term_taxonomy_id = %d;",
+					$term_taxonomy_id
+				)
+			);
+			foreach ( $live_ids as $live_id ) {
+				$staging_id = isset( $post_ids_mapping[$live_id] ) ? $post_ids_mapping[$live_id] : null;
+				if ( ! is_null( $staging_id ) ) {
+					$this->logger->log( 'vtd_tags__seriesIDs.log', json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'tag_name' => $term_name ] ) );
+				} else {
+					$this->logger->log( 'vtd_tags__seriesIDs_LiveIDsNotFoundOnStaging.log', $live_id );
+				}
+			}
+		}
+
+	}
+
+	/**
+	 * @param $table_prefix
+	 * @param $post_id
+	 *
+	 * @return array {
+	 * Associative array with sub arrays containing data about categories with keys:
+	 *      'term_id' Cat term_id
+	 *      'parent' Cat parent
+	 *      'name' Cat name
+	 * }
+	 */
+	private function get_categories_for_post( $table_prefix, $post_id ) {
+		global $wpdb;
+
+		$table_term_relationships = esc_sql( $table_prefix . 'term_relationships' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+		$table_terms = esc_sql( $table_prefix . 'terms' );
+
+		$results = $wpdb->get_results(
+			$wpdb->prepare(
+				"select wtt.term_id, wtt.parent, wt.name
+				from {$table_term_relationships} wtr 
+				join {$table_term_taxonomy} wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id 
+				join {$table_terms} wt on wt.term_id = wtt.term_id
+				where wtr.object_id = %d
+				and wtt.taxonomy = 'category'; ",
+				$post_id
+			),
+			ARRAY_A
+		);
+
+		return $results;
 	}
 
 	public function cmd_update_categories_import_to_staging( array $pos_args, array $assoc_args ) {
