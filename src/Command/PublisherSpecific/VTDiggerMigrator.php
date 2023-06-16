@@ -878,10 +878,6 @@ class VTDiggerMigrator implements InterfaceCommand {
 
 			// Get categories.
 			$categories = $this->get_categories_for_post( 'live_', $live_id );
-			// Live doesn't have children cats, debug-check anyways.
-			if ( 0 != $categories['parent'] ) {
-				$d = 1;
-			}
 			// Remove categories.
 			if ( 1 == count( $categories ) && ( 'Uncategorized' == $categories[0]['name'] ) ) {
 				$set = wp_set_post_categories( $staging_id, [], $append = false );
