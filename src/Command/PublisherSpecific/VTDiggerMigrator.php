@@ -298,6 +298,26 @@ class VTDiggerMigrator implements InterfaceCommand {
 			],
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-update-categories-import-to-staging-3-set-all-regular-posts-categories',
+			[ $this, 'cmd_update_categories_import_to_staging__3_set_all_regular_posts_categories' ],
+			[
+				'synopsis'  => [
+					[
+						'type'      => 'assoc',
+						'name'      => 'mapping-ids-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+					// [
+					// 	'type'      => 'assoc',
+					// 	'name'      => 'path-to-logs',
+					// 	'optional'  => false,
+					// 	'repeating' => false,
+					// ],
+				],
+			],
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator vtdigger-update-categories-import-to-staging-3-import-categories-to-staging',
 			[ $this, 'cmd_update_categories_import_to_staging__3_import_categories_to_staging' ],
 			[
@@ -760,7 +780,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$staging_id = $line_decoded['staging_id'];
 			$county_name = $line_decoded['county_name'];
 			// Progress.
-			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d originalCountyName %s", self::OBITUARY_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id, $county_name ) );
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d originalCountyName %s", self::COUNTIES_TAXONOMY, $key_line+1, count($lines)-1, $live_id, $staging_id, $county_name ) );
 
 			// Get the destination category.
 			$destination_cat_id = $county_name_to_cat_id[$county_name] ?? null;
@@ -795,7 +815,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 			$staging_id = $line_decoded['staging_id'];
 			$tag_name = $line_decoded['tag_name'];
 			// Progress.
-			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d seriesName %s", self::OBITUARY_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id, $tag_name ) );
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d seriesName %s", self::SERIES_TAXONOMY, $key_line+1, count($lines)-1, $live_id, $staging_id, $tag_name ) );
 
 			// Tags, append.
 			// $series_tag_specific_name;
@@ -806,6 +826,149 @@ class VTDiggerMigrator implements InterfaceCommand {
 			}
 
 		}
+
+	}
+
+	public function cmd_update_categories_import_to_staging__3_set_all_regular_posts_categories( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		// postIDs_mapping_live2staging_all.php
+		$postIDs_mapping_live2staging_all_php_file = $assoc_args['mapping-ids-php-file'];
+		if ( ! file_exists( $postIDs_mapping_live2staging_all_php_file ) ) {
+			WP_CLI::error( 'File not found: ' . $postIDs_mapping_live2staging_all_php_file );
+		}
+		$post_ids_mapping = require $postIDs_mapping_live2staging_all_php_file;
+		// $path_to_logs     = $assoc_args['path-to-logs'];
+
+		$post_type_post_ids_staging = $wpdb->get_col(
+			"select ID
+			from vtdWP_posts vwp 
+			where vwp.post_type = 'post'
+			and vwp.ID not in(
+				select wpm.post_id ID 
+				from vtdWP_postmeta wpm
+				join vtdWP_posts wp
+				on wp.ID = wpm.post_id 
+				where wpm.meta_key = 'newspack_vtd_cpt'	
+			);"
+		);
+
+
+		// Get last processed key.
+		$log_last_processed_post_id_key = 'regularposts__lastProcessedPostIdKey.log';
+		$last_processed_post_id_key = null;
+		if ( file_exists( $log_last_processed_post_id_key ) ) {
+			$last_processed_post_id_key = file_get_contents( $log_last_processed_post_id_key );
+		}
+
+		foreach ( $post_type_post_ids_staging as $key_staging_id => $staging_id ) {
+
+			if ( $last_processed_post_id_key && $key_staging_id <= $last_processed_post_id_key ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_staging_id+1, count($post_type_post_ids_staging), $staging_id ) );
+
+			// Get live_id.
+			$live_id = array_search( $staging_id, $post_ids_mapping );
+			if ( ! $live_id ) {
+				$this->logger->log( 'regularposts_stagingIds_NotFoundLiveIds.log', $staging_id );
+				continue;
+			}
+
+			// Get categories.
+			$categories = $this->get_categories_for_post( 'live_', $live_id );
+			// Live doesn't have children cats, debug-check anyways.
+			if ( 0 != $categories['parent'] ) {
+				$d = 1;
+			}
+			// Remove categories.
+			if ( 1 == count( $categories ) && ( 'Uncategorized' == $categories[0]['name'] ) ) {
+				$set = wp_set_post_categories( $staging_id, [], $append = false );
+				continue;
+			}
+
+			// Get local category IDs.
+			$post_cat_ids = [];
+			foreach ( $categories as $category ) {
+				$cat_name = $category['name'];
+				$cat_id = get_cat_ID( $cat_name );
+				if ( ! $cat_id ) {
+					// Create.
+					$cat_id = wp_insert_category( [ 'cat_name' => $cat_name ] );
+					if ( ! $cat_id || is_wp_error( $cat_id ) ) {
+						$d = 1;
+						$this->logger->log( 'regularposts_ERRCatNotInserted.log', $cat_name );
+						continue;
+					}
+				}
+
+				$post_cat_ids[] = $cat_id;
+			}
+
+			// Set cats -- do not append.
+			$set = wp_set_post_categories( $staging_id, $post_cat_ids, $append = false  );
+			if ( false == $set || is_wp_error( $set ) ) {
+				$this->logger->log( 'regularposts_ERRSettingCats.log', sprintf( "ErrSettingCats postID %d cats '%s' err '%s'", $post_id, json_encode( $all_post_categories ), ( is_wp_error( $set ) ? $set->get_error_message() : 'na' ) ), $this->logger::WARNING );
+			}
+
+			file_put_contents( $log_last_processed_post_id_key, $key_staging_id );
+
+		}
+
+		// Execution planning.
+		// series is a taxonomy. regular post_type = 'posts' are using it.
+		// should we reassign categories for regular posts like this then?
+		// regular posts should get reassigned categories first of all, because additional modifiers are,
+		//      categories
+		//      counties -- appended
+		//      (tags, not cats -- series)
+		// So solution is to run category reassignment for regular posts first, then run for counties once again
+		//  --> appending twice won't change anything. TEST THIS
+
+
+		// ==============================
+		// Alternative way for getting regular post_type = 'post' IDs is as follows, though more complicated.
+
+		// // Get all IDs from logs.
+		// $files = [
+		// 	'vtd_categories__countiesIDs.log',
+		// 	'vtd_categories__electionbriefsIDs.log',
+		// 	'vtd_categories__letterstoeditorIDs.log',
+		// 	'vtd_categories__liveblogIDs.log',
+		// 	'vtd_categories__newsbriefsIDs.log',
+		// 	'vtd_categories__obituariesIDs.log',
+		// 	'vtd_categories__olympicsIDs.log',
+		// ];
+		//
+		// $all_cpt_ids = [];
+		// foreach ( $files as $file ) {
+		// 	$lines = explode( "\n", file_get_contents( $path_to_logs . '/' . $file ) );
+		// 	foreach ( $lines as $key_line => $line ) {
+		// 		if ( empty( $line ) ) {
+		// 			continue;
+		// 		}
+		// 		// Decode line.
+		// 		$line_decoded = json_decode( $line, true );
+		// 		if ( ! $line_decoded ) {
+		// 			$d = 1;
+		// 		}
+		//
+		// 		// Get data
+		// 		$live_id = $line_decoded['live_id'];
+		// 		$staging_id = $line_decoded['staging_id'];
+		// 		$all_cpt_ids[ $live_id ] = $staging_id;
+		// 	}
+		// }
+		//
+		// // we don't need to work on these because they're on live only, and we're reimporting on staging.
+		// $files_live_ids_not_found_on_staging = [
+		// 	'vtd_categories__countiesIDs_LiveIDsNotFoundOnStaging.log',
+		// 	'vtd_categories__letterstoeditorIDs_LiveIDsNotFoundOnStaging.log',
+		// ];
+
+		// Get all posts on staging which weren't cpts.
+		// Get their categories.
 
 	}
 
