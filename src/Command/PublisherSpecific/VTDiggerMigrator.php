@@ -526,107 +526,285 @@ class VTDiggerMigrator implements InterfaceCommand {
 		if ( ! file_exists( $postIDs_mapping_live2staging_all_php_file ) ) {
 			WP_CLI::error( 'File not found: ' . $postIDs_mapping_live2staging_all_php_file );
 		}
-		
+
 		$post_ids_mapping = require $postIDs_mapping_live2staging_all_php_file;
 
-		// // First unset all categories.
-		// WP_CLI::log( 'Unsetting all categories...' );
-		// foreach ( $post_ids_mapping as $old_id => $new_id ) {
-		// 	// Sets "Uncategorized" category.
-		// 	wp_set_post_categories( $new_id, [], true );
-		// }
 
-		// NEWSBRIEF_CPT
+		/**
+		 * Start import.
+		 */
+
+
+		WP_CLI::line( self::NEWSBRIEF_CPT . ' ...' );
 		// None : 'vtd_categories__newsbriefsIDs_LiveIDsNotFoundOnStaging.log';
-		$newsbriefs_ids = 'vtd_categories__newsbriefsIDs.log';
-		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ] )
-		// should remain uncategorized
-		$newsbrief_parent_cat_id = null;
+		$lines = explode( "\n", file_get_contents( $path_to_logs .'/'. 'vtd_categories__newsbriefsIDs.log' ) );
+		foreach ( $lines as $key_line => $line ) {
+			if ( empty( $line ) ) {
+				continue;
+			}
+			// Decode line.
+			$line_decoded = json_decode( $line, true );
+			if ( ! $line_decoded ) {
+				$d = 1;
+			}
+
+			// Get data.
+			// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ] )
+			$live_id = $line_decoded['live_id'];
+			$staging_id = $line_decoded['staging_id'];
+			// Progress.
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d", self::NEWSBRIEF_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id ) );
+
+			// Should remain uncategorized. Remove all categories.
+			$set = wp_set_post_categories( $staging_id, [], $append = false );
+			if ( ! $set || is_wp_error( $set ) ) {
+				$d = 1;
+				$this->logger->log( 'ERR_newsbriefs_catNotReset.log', $staging_id );
+			}
+		}
+
 
 		// LIVEBLOG_CPT
 		$liveblogs_parent_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
 		if ( 0 == $liveblogs_parent_cat_id ) {
 			$liveblogs_parent_cat_id = wp_insert_category( [ 'cat_name' => self::LIVEBLOGS_CAT_NAME ] );
 		}
-		// None : 'vtd_categories__liveblogIDs_LiveIDsNotFoundOnStaging.log';
-		$newsbriefs_ids = 'vtd_categories__liveblogIDs.log';
-		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
-		$has_categories;
-		if ( $has_categories ) {
-			// Get or recreate this category under $parent_cat_id parent.
-		} else {
-			// Set just the parent category.
-			$liveblogs_parent_cat_id;
+		if ( ! $liveblogs_parent_cat_id ) {
+			WP_CLI::error( 'Could not get or create parent category: ' . self::LIVEBLOGS_CAT_NAME );
 		}
+		WP_CLI::line( self::LIVEBLOG_CPT . ' ...' );
+		// None : 'vtd_categories__liveblogIDs_LiveIDsNotFoundOnStaging.log';
+		$lines = explode( "\n", file_get_contents( $path_to_logs .'/'. 'vtd_categories__liveblogIDs.log' ) );
+		foreach ( $lines as $key_line => $line ) {
+			if ( empty( $line ) ) {
+				continue;
+			}
+			// Decode line.
+			$line_decoded = json_decode( $line, true );
+			if ( ! $line_decoded ) {
+				$d = 1;
+			}
+
+			// Get data.
+			// // json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ] )
+			$live_id = $line_decoded['live_id'];
+			$staging_id = $line_decoded['staging_id'];
+			$category_names = $line_decoded['category_names'];
+			// Progress.
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d", self::LIVEBLOG_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id ) );
+
+			// If no categories, assign parent liveblogs category.
+			if ( empty( $category_names ) ) {
+
+				$set = wp_set_post_categories( $staging_id, [ $liveblogs_parent_cat_id ], $append = false );
+				if ( ! $set || is_wp_error( $set ) ) {
+					$d = 1;
+					$this->logger->log( 'ERR_liveblogs_catNotSet.log', $staging_id );
+				}
+
+			} else {
+
+				// Get or recreate this category under $parent_cat_id parent.
+				$post_categories = [];
+				foreach ( $category_names as $category_name ) {
+					$subcat_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $category_name, $liveblogs_parent_cat_id );
+					if ( ! $subcat_id ) {
+						$d = 1;
+						$this->logger->log( 'ERR_liveblogs_catNotCreated.log', "cat_name '{$category_name}' liveblogs_parent_cat_id {$liveblogs_parent_cat_id}" );
+					}
+					$post_categories[] = $subcat_id;
+				}
+
+				$set = wp_set_post_categories( $staging_id, $post_categories, $append = false );
+				if ( ! $set || is_wp_error( $set ) ) {
+					$d = 1;
+					$this->logger->log( 'ERR_liveblogs_catNotSet.log', $staging_id );
+				}
+
+			}
+		}
+
 
 		// OLYMPICS_BLOG_CPT
 		// None : 'vtd_categories__olympicsIDs_LiveIDsNotFoundOnStaging.log'
-		$olympics_ids = 'vtd_categories__olympicsIDs.log';
+		// $olympics_ids = 'vtd_categories__olympicsIDs.log';
 		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
-		$parent_cat_id = get_cat_ID( self::OLYMPICS_BLOG_CAT_NAME );
-		if ( 0 == $parent_cat_id ) {
-			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::OLYMPICS_BLOG_CAT_NAME ] );
-		}
-		$has_categories;
-		if ( $has_categories ) {
-			// Get or recreate this category under $parent_cat_id parent.
-		} else {
-			// Set just the parent category.
-			$liveblogs_parent_cat_id;
-		}
+		// JUST ONE POST -- DO MANUALLY.
+
 
 		// ELECTION_CPT
+		$election_parent_cat_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
+		if ( 0 == $election_parent_cat_id ) {
+			$election_parent_cat_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
+		}
+		if ( ! $election_parent_cat_id ) {
+			WP_CLI::error( 'Could not get or create parent category: ' . self::ELECTION_BLOG_CAT_NAME );
+		}
+		WP_CLI::line( self::ELECTION_CPT . ' ...' );
 		// None : 'vtd_categories__electionbriefsIDs_LiveIDsNotFoundOnStaging.log'
-		$electionbriefs_ids = 'vtd_categories__electionbriefsIDs.log';
-		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
-		$parent_cat_id = get_cat_ID( self::ELECTION_BLOG_CAT_NAME );
-		if ( 0 == $parent_cat_id ) {
-			$parent_cat_id = wp_insert_category( [ 'cat_name' => self::ELECTION_BLOG_CAT_NAME ] );
+		$lines = explode( "\n", file_get_contents( $path_to_logs .'/'. 'vtd_categories__electionbriefsIDs.log' ) );
+		foreach ( $lines as $key_line => $line ) {
+			if ( empty( $line ) ) {
+				continue;
+			}
+			// Decode line.
+			$line_decoded = json_decode( $line, true );
+			if ( ! $line_decoded ) {
+				$d = 1;
+			}
+
+			// Get data.
+			// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
+			$live_id = $line_decoded['live_id'];
+			$staging_id = $line_decoded['staging_id'];
+			$category_names = $line_decoded['category_names'];
+			// Progress.
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d", self::ELECTION_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id ) );
+
+			// If no categories, assign parent electionblogs category.
+			if ( empty( $category_names ) ) {
+
+				$set = wp_set_post_categories( $staging_id, [ $election_parent_cat_id ], $append = false );
+				if ( ! $set || is_wp_error( $set ) ) {
+					$d = 1;
+					$this->logger->log( 'ERR_electionblogs_catNotSet.log', $staging_id );
+				}
+
+			} else {
+
+				// Get or recreate this category under $parent_cat_id parent.
+				$post_categories = [];
+				foreach ( $category_names as $category_name ) {
+					$subcat_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $category_name, $election_parent_cat_id );
+					if ( ! $subcat_id ) {
+						$d = 1;
+						$this->logger->log( 'ERR_electionblogs_catNotCreated.log', "cat_name '{$category_name}' electionblogs_parent_cat_id {$election_parent_cat_id}" );
+					}
+					$post_categories[] = $subcat_id;
+				}
+
+				$set = wp_set_post_categories( $staging_id, $post_categories, $append = false );
+				if ( ! $set || is_wp_error( $set ) ) {
+					$d = 1;
+					$this->logger->log( 'ERR_electionblogs_catNotSet.log', $staging_id );
+				}
+
+			}
 		}
-		$has_categories;
-		if ( $has_categories ) {
-			// Get or recreate this category under $parent_cat_id parent.
-		} else {
-			// Set just the parent category.
-			$liveblogs_parent_cat_id;
-		}
+
 
 		// LETTERS_TO_EDITOR_CPT
 		$letters_missing_ids = 'vtd_categories__letterstoeditorIDs_LiveIDsNotFoundOnStaging.log';
 		$letters_ids = 'vtd_categories__letterstoeditorIDs.log';
 		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'category_names' => $category_names ]
-		// Keep just basic categories. Letters get a tag.
+		// NONE OF THESE HAVE CATEGORIES.
+		// ON STAGING THESE GOT "OPINION" CATEGORY. I WASN'T AWARE OF THAT AND I WOULD HAVE REMOVED ALL CATS, BUT AM LEAVING "OPINION".
+		// SPECIAL TAG IS OK, not touching that either.
 
 
 		// OBITUARY_CPT
-		// None : 'vtd_categories__obituariesIDs_LiveIDsNotFoundOnStaging.log'
-		$obituaries_ids = 'vtd_categories__obituariesIDs.log';
-		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ]
 		$obituaries_cat_id = get_cat_ID( self::OBITUARIES_CAT_NAME );
 		if ( ! $obituaries_cat_id ) {
 			$obituaries_cat_id = wp_insert_category( [ 'cat_name' => self::OBITUARIES_CAT_NAME ] );
 		}
-		// Just this one cat.
+		if ( ! $obituaries_cat_id ) {
+			WP_CLI::error( 'Could not get or create parent category: ' . self::OBITUARIES_CAT_NAME );
+		}
+		WP_CLI::line( self::OBITUARY_CPT . ' ...' );
+		// None : 'vtd_categories__obituariesIDs_LiveIDsNotFoundOnStaging.log'
+		$lines = explode( "\n", file_get_contents( $path_to_logs .'/'. 'vtd_categories__obituariesIDs.log' ) );
+		foreach ( $lines as $key_line => $line ) {
+			if ( empty( $line ) ) {
+				continue;
+			}
+			// Decode line.
+			$line_decoded = json_decode( $line, true );
+			if ( ! $line_decoded ) {
+				$d = 1;
+			}
 
+			// Get data.
+			// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id ]
+			$live_id = $line_decoded['live_id'];
+			$staging_id = $line_decoded['staging_id'];
+			// Progress.
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d", self::OBITUARY_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id ) );
 
-		// COUNTIES_TAXONOMY
-		$counties_ids_not_found_on_staging = 'vtd_categories__countiesIDs_LiveIDsNotFoundOnStaging.log';
-		$counties_ids = 'vtd_categories__countiesIDs.log';
-		// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'county_name' => $term_name ] )
-		$county_name_to_cat_id = $this->get_county_to_category_tree();
-		// Get the destination category.
-		$destination_cat_id = $county_name_to_cat_id[$term_name] ?? null;
-		// Assign the destination category to all objects.
-		foreach ( $object_ids as $object_id ) {
-			wp_set_post_categories( $object_id, [ $destination_cat_id ], true );
+			// Just this one cat.
+			$set = wp_set_post_categories( $staging_id, [ $obituaries_cat_id ], $append = false );
+			if ( ! $set || is_wp_error( $set ) ) {
+				$d = 1;
+				$this->logger->log( 'ERR_obituaries_catNotSet.log', $staging_id );
+			}
+
 		}
 
-		// SERIES_TAXONOMY
-		// Assign the tag to posts/objects.
-		foreach ( $object_ids as $object_id ) {
-			// Tag, append.
-			// $series_tag_specific_name; ??? $term_name probably
-			wp_set_post_tags( $object_id, [ self::SERIES_TAG_NAME, $series_tag_specific_name ], true );
+
+		WP_CLI::line( self::COUNTIES_TAXONOMY . ' ...' );
+		$county_name_to_cat_id = $this->get_county_to_category_tree();
+		$counties_ids_not_found_on_staging = 'vtd_categories__countiesIDs_LiveIDsNotFoundOnStaging.log';
+		$lines = explode( "\n", file_get_contents( $path_to_logs .'/'. 'vtd_categories__countiesIDs.log' ) );
+		foreach ( $lines as $key_line => $line ) {
+			if ( empty( $line ) ) {
+				continue;
+			}
+			// Decode line.
+			$line_decoded = json_decode( $line, true );
+			if ( ! $line_decoded ) {
+				$d = 1;
+			}
+
+			// Get data.
+			// json_encode( [ 'live_id' => $live_id, 'staging_id' => $staging_id, 'county_name' => $term_name ] )
+			$live_id = $line_decoded['live_id'];
+			$staging_id = $line_decoded['staging_id'];
+			$county_name = $line_decoded['county_name'];
+			// Progress.
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d originalCountyName %s", self::OBITUARY_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id, $county_name ) );
+
+			// Get the destination category.
+			$destination_cat_id = $county_name_to_cat_id[$county_name] ?? null;
+			if ( is_null( $destination_cat_id ) ) {
+				$d = 1;
+			}
+			// APPEND the destination County category.
+			$set = wp_set_post_categories( $staging_id, [ $destination_cat_id ], $append = true );
+			if ( ! $set || is_wp_error( $set ) ) {
+				$d = 1;
+				$this->logger->log( 'ERR_counties_catNotSet.log', $staging_id );
+			}
+		}
+
+
+		WP_CLI::line( self::SERIES_TAXONOMY . ' ...' );
+		$series_ids_not_found_on_staging = 'vtd_tags__seriesIDs_LiveIDsNotFoundOnStaging.log';
+		$lines = explode( "\n", file_get_contents( $path_to_logs .'/'. 'vtd_tags__seriesIDs.log' ) );
+		foreach ( $lines as $key_line => $line ) {
+			if ( empty( $line ) ) {
+				continue;
+			}
+			// Decode line.
+			$line_decoded = json_decode( $line, true );
+			if ( ! $line_decoded ) {
+				$d = 1;
+			}
+
+			// Get data.
+			// {"live_id":"192218","staging_id":"444938","tag_name":"Bill Mathis"}
+			$live_id = $line_decoded['live_id'];
+			$staging_id = $line_decoded['staging_id'];
+			$tag_name = $line_decoded['tag_name'];
+			// Progress.
+			WP_CLI::line( sprintf( "%s (%d)/(%d) liveID %d stagingID %d seriesName %s", self::OBITUARY_CPT, $key_line+1, count($lines)-1, $live_id, $staging_id, $tag_name ) );
+
+			// Tags, append.
+			// $series_tag_specific_name;
+			$set = wp_set_post_tags( $staging_id, [ self::SERIES_TAG_NAME, $tag_name ], $append = true );
+			if ( ! $set || is_wp_error( $set ) ) {
+				$d = 1;
+				$this->logger->log( 'ERR_series_tagNotSet.log', $staging_id );
+			}
+
 		}
 
 	}
@@ -1678,7 +1856,7 @@ class VTDiggerMigrator implements InterfaceCommand {
 		/**
 		 * Liveblogs.
 		 */
-			WP_CLI::log( sprintf( 'Migrating %s ...', self::LIVEBLOG_CPT ) );
+		WP_CLI::log( sprintf( 'Migrating %s ...', self::LIVEBLOG_CPT ) );
 		$log = 'vtd_cpt_liveblog.log';
 		$ga_id = $this->get_or_create_ga_id_by_display_name( self::LIVEBLOG_GA_NAME );
 		$parent_cat_id = get_cat_ID( self::LIVEBLOGS_CAT_NAME );
