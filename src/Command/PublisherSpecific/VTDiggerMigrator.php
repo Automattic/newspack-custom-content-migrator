@@ -337,6 +337,70 @@ class VTDiggerMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-reset-postcontent-and-hiding-of-featured-images',
+			[ $this, 'cmd_reset_post_content_and_hiding_of_feat_imgs' ],
+			[
+				'synopsis'  => [
+					[
+						'type'      => 'assoc',
+						'name'      => 'mapping-ids-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
+			],
+		);
+	}
+
+	public function cmd_reset_post_content_and_hiding_of_feat_imgs( array $args, array $assoc_args ) {
+		global $wpdb;
+
+		// postIDs_mapping_live2staging_all.php
+		$postIDs_mapping_live2staging_all_php_file = $assoc_args['mapping-ids-php-file'];
+		if ( ! file_exists( $postIDs_mapping_live2staging_all_php_file ) ) {
+			WP_CLI::error( 'File not found: ' . $postIDs_mapping_live2staging_all_php_file );
+		}
+		$post_ids_mapping = require $postIDs_mapping_live2staging_all_php_file;
+
+		$path = 'restoredpostcontent';
+		if ( ! file_exists( $path ) ) {
+			mkdir( $path );
+		}
+
+		$post_ids_all = $this->posts_logic->get_all_posts_ids( 'post', [ 'publish', 'future' ] );
+
+		$i = 0;
+		foreach ( $post_ids_mapping as $live_id => $staging_id ) {
+			WP_CLI::line( sprintf( "(%d)/(%d) liveID %d => stagingID %d", $i+1, count($post_ids_mapping), $live_id, $staging_id ) );
+
+			// Restore post_content.
+			$live_row   = $wpdb->get_row( $wpdb->prepare( "select ID, post_content from live_posts where ID = %d", $live_id ), ARRAY_A );
+			$local_row  = $wpdb->get_row( $wpdb->prepare( "select ID, post_content from {$wpdb->posts} where ID = %d", $staging_id ), ARRAY_A );
+			if ( ! $live_row || ! $local_row || ! $live_row['ID'] || ! $local_row['ID'] ) {
+				$d = 1;
+			}
+
+			$wpdb->update(
+				$wpdb->posts,
+				[ 'post_content' => $live_row['post_content'], ],
+				[ 'ID' => $staging_id, ]
+			);
+
+			file_put_contents( $path . "/{$staging_id}_1_before.txt", $local_row['post_content'] );
+			file_put_contents( $path . "/{$staging_id}_2_after.txt", $live_row['post_content'] );
+
+			$key_staging_id_in_posts_ids_all = array_search( $staging_id, $post_ids_all );
+			if ( $key_staging_id_in_posts_ids_all ) {
+				unset( $post_ids_all[$key_staging_id_in_posts_ids_all] );
+			}
+
+			$i++;
+		}
+
+		// save unaffected IDs
+		file_put_contents( 'restoredpostcontent_postIdsStagingNotFoundOnLive.php', '<?php return ' . var_export( $post_ids_all, true ) . ';' );
+
 	}
 
 	public function cmd_update_categories_export_from_live( array $args, array $assoc_args ) {
