@@ -193,21 +193,21 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			// Validate post ID.
 			$post_id_exists = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE ID = %d", $post_id ) );
 			if ( ! $post_id_exists ) {
-				$this->logger->log( $log, sprintf( 'Post ID does not exist %d', $post_id ), $this->logger::WARNING );
+				WP_CLI::warning( sprintf( 'Post %d does not exist, skipping', $post_id ) );
 				continue;
 			}
 
 			// Get featured image ID.
 			$thumbnail_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key = '_thumbnail_id'", $post_id ) );
 			if ( ! $thumbnail_id ) {
-				$this->logger->log( $log, sprintf( 'Post has no featured image %d', $post_id ) );
+				WP_CLI::line( sprintf( 'Post %d has no featured image, skipping', $post_id ) );
 				continue;
 			}
 
 			// Get post_content.
 			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
 			if ( ! $post_content ) {
-				$this->logger->log( $log, sprintf( 'Post has no post_content %d', $post_id ) );
+				WP_CLI::warning( sprintf( 'Post %d has no post_content , skipping', $post_id ) );
 				continue;
 			}
 
@@ -228,7 +228,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				// Check if image url is used anywhere in post_content.
 				$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_no_host );
 				if ( ! $featured_image_used_in_post_content ) {
-					$this->logger->log( $log, sprintf( 'Featured image not found in post_content %d', $post_id ) );
+					WP_CLI::line( sprintf( 'Featured image not used inline.', $post_id ) );
 					continue;
 				}
 
@@ -237,7 +237,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					if ( ! $dry_run ) {
 						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 					}
-					$this->logger->log( $log, sprintf( 'Featured image hidden %d', $post_id ), $this->logger::SUCCESS );
+					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $this->logger::SUCCESS );
 					continue;
 				}
 
@@ -254,7 +254,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				 * Search 1: Search for image block with featured image at beginning of post_content by referencing attachment ID.
 				 */
 				$pattern_subject_begins_w_wpimage_w_attachment_id = '|
-					\A          # Beginning of subject string
+					\A          # Start at beginning of string
 					\<\!--\swp:image    # image block opening
 					[^{]*       # anything but opening curly brace
 					{           # opening curly brace
@@ -283,17 +283,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				 */
 				if ( ! $post_content_starts_with_featured_image ) {
 					if ( $image_src ) {
-						$sprintf_regex_img_block_with_any_string_inside = '|
-							\A                     # Beginning of subject string
+						$sprintf_regex_beginning_img_block = '|
+							\A                        # Start at beginning of string
 							<!--\swp:image
-							.*?                    # Match any character zero or more times
-							%s                     # use sprintf() to insert string for this placeholder
-							.*?                    # Match any character zero or more times
+							.*                        # Match any character zero or more times
 							\<\!--\s/wp:image\s--\>
-							|xims';
-						$regex_image_block_with_imagepath_inside = sprintf( $sprintf_regex_img_block_with_any_string_inside, addslashes( $image_path ) );
-						preg_match( $regex_image_block_with_imagepath_inside, $content, $matches );
-						$post_content_starts_with_featured_image = isset( $matches[0] ) ? true : false;
+							|ximsU';
+						preg_match( $sprintf_regex_beginning_img_block, $content, $matches );
+						if ( isset( $matches[0] ) ) {
+							// Check if image URL used inside matched block.
+							$post_content_starts_with_featured_image = false !== strpos( $matches[0], addslashes( $image_path ) );
+						}
 					}
 				}
 
@@ -302,20 +302,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				 */
 				if ( ! $post_content_starts_with_featured_image ) {
 					$img_element_regex = '|
-						\A          # Beginning of subject string
-						(?:<p>)?    # Optional <p> tag at the beginning -- Gutenberg inserts it sometimes.
+						\A          # Start at beginning of string
+						(?:<p>)?    # Optional <p> tag at the beginning -- Gutenberg may insert it.
 						<img
 						[^>]*       # anything but closing bracket
-						src="
-						[^"]*       # anything but double quote -- this allows for relative URLs
-						' . addslashes( $image_path ) . '
-						[^"]*       # anything but double quote -- this allows for GET params
-						"
-						[^>]*       # anything but closing bracket -- this allows for img element tags
-						>
-						|xims';
+						>           # end of image element
+						|ximsU';
 					preg_match( $img_element_regex, $content, $matches );
-					$post_content_starts_with_featured_image = isset( $matches[0] ) ? true : false;
+					if ( isset( $matches[0] ) ) {
+						// Check if image URL used inside matched element.
+						$post_content_starts_with_featured_image = false !== strpos( $matches[0], addslashes( $image_path ) );
+					}
 				}
 
 				// Hide featured image if image found at beginning of post_content.
@@ -323,13 +320,11 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					if ( ! $dry_run ) {
 						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 					}
-					$this->logger->log( $log, sprintf( 'Featured image hidden %d', $post_id ), $this->logger::SUCCESS );
+					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $this->logger::SUCCESS );
 					continue;
 				}
 
 			}
-
-			$this->logger->log( $log, sprintf( 'No changes to post %d', $post_id ) );
 		}
 
 		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
