@@ -7,6 +7,7 @@ use NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Taxonomy as TaxonomyLogic;
 use \NewspackCustomContentMigrator\Logic\Posts as PostLogic;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use \NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
 use \WP_CLI;
 
 /**
@@ -81,6 +82,11 @@ class VTDiggerMigrator implements InterfaceCommand {
 	private $cap_logic;
 
 	/**
+	 * @var ContentDiffMigrator Instance.
+	 */
+	private $contentdiff;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -88,6 +94,8 @@ class VTDiggerMigrator implements InterfaceCommand {
 		$this->taxonomy_logic = new TaxonomyLogic();
 		$this->posts_logic = new PostLogic();
 		$this->cap_logic = new CoAuthorPlusLogic();
+		global $wpdb;
+		$this->contentdiff = new ContentDiffMigrator( $wpdb );
 	}
 
 	/**
@@ -284,6 +292,20 @@ class VTDiggerMigrator implements InterfaceCommand {
 			],
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-update-categories-import-to-staging-1-get-attachments-ids-mapping',
+			[ $this, 'cmd_update_categories_import_to_staging__1_get_attachments_ids_mapping' ],
+			[
+				'synopsis'  => [
+					[
+						'type'      => 'assoc',
+						'name'      => 'content-diff-imported-post-ids-log-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+				],
+			],
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator vtdigger-update-categories-import-to-staging-2-get-all-posts-categories',
 			[ $this, 'cmd_update_categories_import_to_staging__2_get_all_posts_categories' ],
 			[
@@ -338,6 +360,38 @@ class VTDiggerMigrator implements InterfaceCommand {
 			],
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-update-categories-import-to-staging-3-update-attachment-ids-in-post-content-after-reimport',
+			[ $this, 'cmd_update_categories_import_to_staging__3_update_att_ids_in_postcontent_after_reimport' ],
+			[
+				'synopsis'  => [
+					[
+						'type'      => 'assoc',
+						'name'      => 'att-ids-mapping-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'mapping-post-ids-php-file',
+						'optional'  => false,
+						'repeating' => false,
+					],
+					[
+						'type'      => 'assoc',
+						'name'      => 'local-hostname-aliases-csv',
+						'optional'  => false,
+						'repeating' => false,
+					],
+					// [
+					// 	'type'      => 'assoc',
+					// 	'name'      => 'logs-path',
+					// 	'optional'  => false,
+					// 	'repeating' => false,
+					// ],
+				],
+			],
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator vtdigger-reset-postcontent-and-hiding-of-featured-images',
 			[ $this, 'cmd_reset_post_content_and_hiding_of_feat_imgs' ],
 			[
@@ -351,6 +405,64 @@ class VTDiggerMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator vtdigger-featimgs-hiding',
+			[ $this, 'cmd_featimgs_hiding' ],
+		);
+	}
+
+	public function cmd_featimgs_hiding( array $args, array $assoc_args ) {
+		$was_hidden   = require '/Users/ivanuravic/www/vtdiggerstaging/app/setup5_featimgs/postIDs_where_featimg_is_hidden.php';
+		$newly_hidden = require '/Users/ivanuravic/www/vtdiggerstaging/app/setup5_featimgs/hide-featured-image-newly-hidden.php';
+
+		// $was_hidden   = [ 11, 22, 33, 44 ];
+		// $newly_hidden =         [ 33, 44, 55, 66 ];
+
+		$will_be_unhidden = array_diff( $was_hidden, $newly_hidden );
+		$will_be_hidden   = array_diff( $newly_hidden, $was_hidden );
+		// Other IDs will remain as they are.
+
+		global $wpdb;
+		$dont_have_feat = [];
+		$have_feat = [];
+		foreach ( $will_be_unhidden as $unhide_post_id ) {
+			$meta = $wpdb->get_var( "select post_id from {$wpdb->postmeta} where meta_key = '_thumbnail_id' and post_id = $unhide_post_id" );
+			if ( $meta ) {
+				$have_feat[] = $unhide_post_id;
+			} else {
+				$dont_have_feat[] = $unhide_post_id;
+			}
+		}
+
+		$will_be_unhidden = $have_feat;
+
+		file_put_contents( '/Users/ivanuravic/www/vtdiggerstaging/app/setup5_featimgs/featimg_recap__when_writing_this.txt', 'Max published post on live when writing this is 547803 ' );
+		file_put_contents( '/Users/ivanuravic/www/vtdiggerstaging/app/setup5_featimgs/featimg_recap__will_be_unhidden.txt', implode( "\n", $will_be_unhidden ) );
+		file_put_contents( '/Users/ivanuravic/www/vtdiggerstaging/app/setup5_featimgs/featimg_recap__will_be_hidden.txt', implode( "\n", $will_be_hidden ) );
+
+	}
+
+	public function cmd_update_categories_import_to_staging__3_update_att_ids_in_postcontent_after_reimport( array $args, array $assoc_args ) {
+		// $logs_path = $assoc_args['logs-path'];
+		$local_hostname_aliases = explode( ",", $assoc_args['local-hostname-aliases-csv'] );
+		if ( empty( $local_hostname_aliases ) ) {
+			WP_CLI::error( 'No local hostnames provided' );
+		}
+		$att_ids_mapping_file = $assoc_args['att-ids-mapping-php-file'];
+		if ( ! file_exists( $att_ids_mapping_file ) ) {
+			WP_CLI::error( 'File not found: ' . $att_ids_mapping_file );
+		}
+		$post_ids_mapping_file = $assoc_args['mapping-post-ids-php-file'];
+		if ( ! file_exists( $post_ids_mapping_file ) ) {
+			WP_CLI::error( 'File not found: ' . $post_ids_mapping_file );
+		}
+
+		$att_ids_mapping = require $att_ids_mapping_file;
+		$post_ids_mapping = require $post_ids_mapping_file;
+
+		$this->contentdiff->update_blocks_ids( array_values( $post_ids_mapping ), $att_ids_mapping, $local_hostname_aliases, $logs_path = null );
+
+		WP_CLI::line( 'Done' );
 	}
 
 	public function cmd_reset_post_content_and_hiding_of_feat_imgs( array $args, array $assoc_args ) {
@@ -487,6 +599,110 @@ class VTDiggerMigrator implements InterfaceCommand {
 		// Write to php file as readable array.
 		$printable_array = var_export( $data, true );
 		file_put_contents( 'live_post_ids_to_categories_data.php', '<?php return ' . $printable_array . ';' );
+	}
+
+	/**
+	 * Gets all live_post_ID => staging_post_ID mappings.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_update_categories_import_to_staging__1_get_attachments_ids_mapping( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		/*
+		 * Get all post IDs mappings.
+		 */
+
+		// Get ID mappings from DB.
+		$att_ids_mapping_db = [];
+		$postmeta_att_ids_updates = $wpdb->get_results(
+			"select pm.post_id as new_post_id, pm.meta_value as old_post_id
+			from {$wpdb->postmeta} pm
+			join {$wpdb->posts} p on p.ID = pm.post_id 
+			where pm.meta_key = 'newspackcontentdiff_live_id'
+			and p.post_type = 'attachment';",
+			ARRAY_A
+		);
+		foreach ( $postmeta_att_ids_updates as $postmeta_att_ids_update ) {
+			$att_ids_mapping_db[ $postmeta_att_ids_update['old_post_id'] ] = $postmeta_att_ids_update['new_post_id'];
+		}
+
+		// Get ID mappings from cdiff log.
+		$att_ids_mapping_cdiff = [];
+		$cdiff_log = $assoc_args['content-diff-imported-post-ids-log-file'];
+		if ( ! file_exists( $cdiff_log ) ) {
+			WP_CLI::error( 'File not found: ' . $cdiff_log );
+		}
+		$cdiff_lines = explode( "\n", file_get_contents( $cdiff_log) );
+		foreach ( $cdiff_lines as $cdiff_line ) {
+			$line_decoded = json_decode( $cdiff_line, true );
+			if ( ! $line_decoded ) {
+				continue;
+			}
+			if ( 'attachment' != $line_decoded['post_type'] ) {
+				continue;
+			}
+			$att_ids_mapping_cdiff[ $line_decoded['id_old'] ] = $line_decoded['id_new'];
+		}
+
+		// Merge with cdiff log data.
+		foreach ( $att_ids_mapping_cdiff as $id_old => $id_new ) {
+			if ( ! isset( $att_ids_mapping_db[ $id_old ] ) ) {
+				$att_ids_mapping_db[ $id_old ] = $id_new;
+			}
+		}
+
+		// Final tally -- map all existing post ids from all sources, plus fill in the blanks directly from live_posts.
+		$att_ids_mapping = [];
+		$staging_ids_not_found_on_live = [];
+		$att_ids = $this->posts_logic->get_all_posts_ids( 'attachment' );
+		foreach ( $att_ids as $key_att_id => $att_id ) {
+
+			WP_CLI::line( sprintf( '(%d)/(%d) %d', $key_att_id + 1, count( $att_ids ), $att_id ) );
+
+			// Fill from $post_ids_mapping_db.
+			$old_att_id = array_search( $att_id, $att_ids_mapping_db );
+			if ( $old_att_id ) {
+				$att_ids_mapping[ $old_att_id ] = $att_id;
+				continue;
+			}
+
+			// Fill from $post_ids_mapping_cdiff.
+			$old_att_id = array_search( $att_id, $att_ids_mapping_cdiff );
+			if ( $old_att_id ) {
+				$att_ids_mapping[ $old_att_id ] = $att_id;
+				continue;
+			}
+
+			// If still null, fill from live_posts.
+			$old_att_id = null;
+			$local_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d", $att_id ), ARRAY_A );
+			$live_row  = $wpdb->get_row( $wpdb->prepare( "select * from live_posts where ID = %d", $att_id ), ARRAY_A );
+			if ( $local_row && $live_row ) {
+				if (
+					$live_row['post_title'] == $local_row['post_title']
+					&& $live_row['post_name'] == $local_row['post_name']
+					&& $live_row['post_date'] == $local_row['post_date']
+				) {
+					// It's the same ID.
+					$old_att_id = $att_id;
+				}
+			}
+			if ( $old_att_id ) {
+				$att_ids_mapping[ $old_att_id ] = $att_id;
+				continue;
+			}
+
+			// No match found.
+			$staging_ids_not_found_on_live[] = $att_id;
+		}
+
+		file_put_contents( 'attIDs_mapping_live2staging_all.php', '<?php return ' . var_export( $att_ids_mapping, true ) . ';' );
+		file_put_contents( 'attIDs_staging_NOT_FOUND_ON_LIVE.log', implode( "\n", $staging_ids_not_found_on_live ) );
+		$hol_up = true;
 	}
 
 	/**
