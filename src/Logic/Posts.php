@@ -46,13 +46,13 @@ class Posts {
 	/**
 	 * Returns all Post IDs in a given category.
 	 *
+	 * @param int          $category_term_id Category ID.
 	 * @param string|array $post_type        Post type(s).
 	 * @param array        $post_status      Post statuses.
-	 * @param int          $category_term_id Category ID.
 	 *
 	 * @return array
 	 */
-	public function get_all_posts_ids_in_category( $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ], $category_term_id ) {
+	public function get_all_posts_ids_in_category( $category_term_id, $post_type = 'post', $post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ] ) {
 		global $wpdb;
 
 		// Create $post_type statement placeholders.
@@ -69,7 +69,7 @@ class Posts {
 			$wpdb->prepare(
 				"select term_taxonomy_id from {$wpdb->term_taxonomy} where term_id = %d;",
 				$category_term_id
-			) 
+			)
 		);
 		if ( ! $term_taxonomy_id ) {
 			throw new \UnexpectedValueException( sprintf( 'Term taxonomy ID not found for term_id %s.', $category_term_id ) );

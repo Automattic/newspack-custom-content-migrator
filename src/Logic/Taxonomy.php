@@ -100,7 +100,7 @@ class Taxonomy {
 					join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
 					where tt.taxonomy = %s and t.name = %s and tt.parent = %d;",
 				$taxonomy,
-				$name,
+				htmlentities( $name ),
 				$parent_term_id
 			)
 		);
