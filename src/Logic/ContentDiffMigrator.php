@@ -1318,9 +1318,6 @@ class ContentDiffMigrator {
 				return $content_updated;
 			}
 
-			// Cast to integer type for proper JSON encoding.
-			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
-
 			// Get the first <audio> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
 			if ( is_null( $matches ) || ! isset( $matches[0][0][0] ) || empty( $matches[0][0][0] ) ) {
@@ -1357,6 +1354,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole audio HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
