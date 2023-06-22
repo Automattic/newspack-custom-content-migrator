@@ -451,7 +451,7 @@ $posts = [ $posts[0] ];
 					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
 					WP_CLI::warning( $attachment_id->get_error_message() );
 				} else {
-					$this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
+					$this->simple_local_avatars->assign_avatar( $user_id, $attachment_id );
 				}
 			}
 		}

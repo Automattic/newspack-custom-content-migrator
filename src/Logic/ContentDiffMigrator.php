@@ -209,6 +209,9 @@ class ContentDiffMigrator {
 					&& $live_post['post_status'] == $local_post['post_status']
 					&& $live_post['post_date'] == $local_post['post_date']
 				) {
+					// Remove the local post which was found (break; was done), to make the next search a bit faster.
+					unset( $results_local_posts[ $key_local_post ] );
+
 					$found = true;
 					break;
 				}
@@ -217,9 +220,6 @@ class ContentDiffMigrator {
 			// Unique on live, add to $ids.
 			if ( false === $found ) {
 				$ids[] = $live_post['ID'];
-
-				// Remove the local post which was found (break; was done), to make the next search a bit faster.
-				unset( $results_local_posts[ $key_local_post ] );
 			}
 		}
 
@@ -1212,8 +1212,16 @@ class ContentDiffMigrator {
 			$block_innerhtml_updated    = $block['innerHTML'];
 			$block_innercontent_updated = $block['innerContent'][0];
 
+			// We've seen some wp:image blocks with no ID, skip them.
+			if ( ! isset( $block_updated['attrs']['id'] ) ) {
+				continue;
+			}
+
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1251,6 +1259,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1302,7 +1313,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <audio> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
@@ -1340,6 +1354,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole audio HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
@@ -1388,7 +1405,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <video> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerhtml_updated );
@@ -1426,6 +1446,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole video HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $video_html, $video_html_updated, $block_innerhtml_updated );
@@ -1474,7 +1497,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <a> elementa from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerhtml_updated );
@@ -1512,6 +1538,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole a HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $a_html, $a_html_updated, $block_innerhtml_updated );
@@ -1560,7 +1589,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1598,6 +1630,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1649,7 +1684,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get mediaID (attachment ID) from block header.
-			$att_id = $block_updated['attrs']['mediaId'];
+			$att_id = isset( $block_updated['attrs']['mediaId'] ) ? $block_updated['attrs']['mediaId'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1688,10 +1726,8 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			// If it's the same ID, don't update anything.
-			if ( $att_id === $new_att_id ) {
-				continue;
-			}
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1784,6 +1820,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1883,6 +1922,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1984,6 +2026,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'id', [ $att_id => $new_att_id ], $img_html_updated );
