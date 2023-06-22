@@ -342,6 +342,175 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-convert-wpuser-to-guestauthor',
+			[ $this, 'cmd_convert_wpuser_to_ga' ],
+			[
+				'shortdesc' => 'Sets a GA as author for all posts in category. Does not append GA, sets as only author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'dry-run',
+						'description' => 'Dry run.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'wpuser-id',
+						'description' => 'WP User ID.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ga-id',
+						'description' => 'Optional GA ID -- if provided will use this GA ID, otherwise will create a new one.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_convert_wpuser_to_ga( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$dry_run   = $assoc_args['dry-run'];
+		$wpuser_id = $assoc_args['wpuser-id'];
+		$ga_id     = isset( $assoc_args['ga-id'] ) ? $assoc_args['ga-id'] : null;
+
+		// Validate WP User ID.
+		$wpuser = get_user_by( 'ID', $wpuser_id );
+		if ( ! $wpuser ) {
+			WP_CLI::error( sprintf( 'WP User with ID %d not found.', $wpuser_id ) );
+		}
+
+		// Use existing or create GA.
+		if ( $ga_id ) {
+
+			$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+			if ( ! $ga ) {
+				WP_CLI::error( sprintf( 'Guest Author with ID %d not found.', $ga_id ) );
+			}
+
+		} else {
+
+			// Unlink this WP_User if it's linked to any GA.
+			$existing_ga_with_linked_wpuser = $this->coauthorsplus_logic->get_guest_author_by_linked_wpusers_user_login( $wpuser->user_login );
+			if ( $existing_ga_with_linked_wpuser ) {
+				WP_CLI::warning( sprintf( "WP_user ID %d (user_login '%s') is linked to GA %d (user_login '%s') -- unmapping now.", $wpuser->ID, $wpuser->user_login, $existing_ga_with_linked_wpuser->ID, $existing_ga_with_linked_wpuser->user_login ) );
+				if ( ! $dry_run ) {
+					$this->coauthorsplus_logic->unlink_wp_user_from_guest_author( $existing_ga_with_linked_wpuser->ID, $wpuser );
+					WP_CLI::success( 'Unlinked.' );
+					wp_cache_flush();
+				}
+			}
+
+			/**
+			 * Check if GA exists with same user_login.
+			 * @see \CoAuthors_Guest_Authors::create, says "The user login field shouldn't collide with any existing users".
+			 */
+			$existing_coauthor = $this->coauthorsplus_logic->get_guest_author_by_user_login( $wpuser->user_login );
+			if ( $existing_coauthor ) {
+				WP_CLI::error( sprintf( "GA ID %d already exists with same user_login '%s'. Either rerun this command by using --ga-id=%d parameter to assign all posts from WP_User to this existing GA, or delete this GA so that a new GA can be created and used.", $existing_coauthor->ID, $wpuser->user_login, $existing_coauthor->ID ) );
+			}
+
+			// Create GA.
+			$ga_id = $this->coauthorsplus_logic->create_guest_author_from_wp_user( $wpuser->ID );
+			if ( ! $ga_id || is_wp_error( $ga_id ) ) {
+				WP_CLI::error( sprintf( "Error when attempting to create create Guest Author from WP User.%s", is_wp_error( $ga_id ) ? "\nError message: " . $ga_id->get_error_message() : '' ) );
+			}
+			WP_CLI::success( sprintf( "Created GA with ID %d", $ga_id ) );
+
+			// And finally unlink newly created GA from the $wpuser.
+			$this->coauthorsplus_logic->unlink_wp_user_from_guest_author( $ga_id, $wpuser );
+			wp_cache_flush();
+
+			// Get the created GA object.
+			$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+
+		}
+
+
+		/**
+		 * Get all post IDs by $wpuser.
+		 *
+		 * Posts can be authored by WP_User by wp_posts.post_author. But WP_User could have been a CoAuthor, so we should check
+		 * CAP's meta. Therefore, we need to loop through all posts.
+		 */
+		$post_ids = $this->posts_logic->get_all_posts_ids();
+$post_ids = [12,13  ,18,21];
+		// $post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_author = %d", $wpuser_id ) );
+		// $this->coauthorsplus_logic->get_all_posts_by_guest_author( $wpuser_id);
+
+		// Reassign posts from $wpuser to $ga.
+		$reassigned_post_ids = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+// if ( 13 != $post_id ) { continue;  }
+			WP_CLI::line( sprintf( "(%d)/(%d) %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			// Get all authors for post -- WP_User could have been a CoAuthor.
+			$all_authors = $this->coauthorsplus_logic->get_all_authors_for_post( $post_id );
+
+			// Replace the WP_User one with GA.
+			// $wpuser_is_coauthor  = false;
+			$all_authors_updated = $all_authors;
+			foreach ( $all_authors_updated as $key_author => $author ) {
+				if ( is_object( $author ) && 'WP_User' === $author::class && $author->ID == $wpuser_id ) {
+					$all_authors_updated[ $key_author ] = $ga;
+					// $wpuser_is_coauthor = true;
+				}
+			}
+
+			/**
+			 * Here's the trick -- at least one WP_User type author must be present for the post.
+			 * @see \CoAuthors_Plus::add_coauthors "Uh oh, no WP_Users assigned to the post" note where it simply breaks.
+			 * The workaround is to assign this current WP_User ID before assigning the new GA.
+			 */
+			$current_wpuser_id = get_current_user_id();
+
+			// if ( ! $wpuser_is_coauthor ) {
+			//
+			// }
+
+			// Update authors.
+			if ( $all_authors_updated != $all_authors ) {
+				$assigned = $this->coauthorsplus_logic->assign_authors_to_post( $all_authors_updated, $post_id );
+
+				// Log.
+				$reassigned_post_ids[] = $post_id;
+				WP_CLI::success( 'Updated authors.' );
+			}
+		}
+
+		if ( ! empty( $reassigned_post_ids ) ) {
+			$log_file = sprintf( 'reassigned_ids_from_wpuser_%d_to_ga_%d.log', $wpuser->ID, $ga_id );
+			file_put_contents( $log_file, implode( "\n", $reassigned_post_ids ) );
+		}
+
+		WP_CLI::success(
+			sprintf(
+				"Done 👍 Reassigned %d posts to GA ID %d"
+				. "\n --> feel free to delete the WP_User -- $ wp user delete %d"
+				. "%s",
+				count( $reassigned_post_ids ),
+				$ga_id,
+				$wpuser_id,
+				( empty( $reassigned_post_ids ) ? '' : "\n --> see '{$log_file}' log for affected post IDs" )
+			)
+		);
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -991,7 +1160,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		// Get GAs with zero posts.
 		$gas_to_delete = [];
 		foreach ( $all_gas as $ga ) {
-			if ( 0 === count( $this->coauthorsplus_logic->get_all_posts_for_guest_author( $ga->ID ) ) ) {
+			if ( 0 === count( $this->coauthorsplus_logic->get_all_posts_by_guest_author( $ga->ID ) ) ) {
 				$gas_to_delete[] = $ga;
 			}
 		}
