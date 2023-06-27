@@ -10,7 +10,10 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Utils\Logger;
+use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
+use NewspackCustomContentMigrator\Logic\Attachments;
 use \WP_CLI;
 
 class HighCountryNewsMigrator implements InterfaceCommand {
@@ -33,6 +36,23 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	private $redirection;
 
 	/**
+	 * @var Logger.
+	 */
+	private $logger;
+
+	/**
+	 * @var GutenbergBlockGenerator.
+	 */
+	private $gutenberg_block_generator;
+
+	/**
+	 * Instance of Attachments Login
+	 *
+	 * @var null|Attachments
+	 */
+	private $attachments;
+
+	/**
 	 * Get Instance.
 	 *
 	 * @return HighCountryNewsMigrator
@@ -41,9 +61,12 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$class = get_called_class();
 
 		if ( null === self::$instance ) {
-			self::$instance                      = new $class();
-			self::$instance->coauthorsplus_logic = new CoAuthorPlus();
-			self::$instance->redirection         = new Redirection();
+			self::$instance                            = new $class();
+			self::$instance->coauthorsplus_logic       = new CoAuthorPlus();
+			self::$instance->redirection               = new Redirection();
+			self::$instance->logger                    = new Logger();
+			self::$instance->gutenberg_block_generator = new GutenbergBlockGenerator();
+			self::$instance->attachments               = new Attachments();
 		}
 
 		return self::$instance;
@@ -266,7 +289,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			'newspack-content-migrator hcn-fix-categories',
 			array( $this, 'hcn_fix_categories' ),
 			array(
-				'shortdesc' => 'Fix posts without featured images.',
+				'shortdesc' => 'Fix posts categories and tags.',
 				'synopsis'  => array(
 					[
 						'type'        => 'assoc',
@@ -288,6 +311,134 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-generate-redirects-csv',
+			array( $this, 'hcn_generate_redirects_csv' ),
+			array(
+				'shortdesc' => 'Generate redirects CSV file.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'articles-json',
+						'description' => 'Path to the Articles JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'output-dir',
+						'description' => 'Path to the output directory.',
+						'optional'    => false,
+					],
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-migrate-headlines',
+			array( $this, 'hcn_migrate_headlines' ),
+			array(
+				'shortdesc' => 'Migrate Headlines.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'articles-json',
+						'description' => 'Path to the Articles JSON file.',
+						'optional'    => false,
+					],
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-copy-subhead-to-excerpt',
+			array( $this, 'hcn_copy_subhead_to_excerpt' ),
+			array(
+				'shortdesc' => 'Migrate Headlines.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-migrate-issues-meta-data',
+			array( $this, 'hcn_migrate_issues_meta_data' ),
+			array(
+				'shortdesc' => 'Migrate Issues meta data.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'issues-json',
+						'description' => 'Path to the Issues JSON file.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blobs-folder-path',
+						'description' => 'Path to the blobs folder.',
+						'optional'    => false,
+					],
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-issues-categories-slug',
+			array( $this, 'hcn_fix_issues_categories_slug' ),
+			array(
+				'shortdesc' => 'Fix Issues categories slug.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'issues-json',
+						'description' => 'Path to the Issues JSON file.',
+						'optional'    => false,
+					],
 				),
 			)
 		);
@@ -1046,13 +1197,48 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	 */
 	public function hcn_fix_categories( $args, $assoc_args ) {
 		global $wpdb;
+
 		$articles_list   = json_decode( file_get_contents( $assoc_args['articles-json'] ), true );
 		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 
+		// The main categories are Articles, Issues, and Departments.
+		$articles_category_id    = $this->get_or_create_category( 'Articles' );
+		$issues_category_id      = $this->get_or_create_category( 'Issues' );
+		$departments_category_id = $this->get_or_create_category( 'Departments' );
+
+		// Switch all the categories to tags except the main categories, and the categories with main categories as parent.
+		$categories = get_categories(
+			[
+				'hide_empty' => false,
+			]
+		);
+
+		$categories_to_update_ids = [];
+		foreach ( $categories as $category ) {
+			if ( in_array( $category->cat_ID, [ $articles_category_id, $issues_category_id, $departments_category_id ], true ) ) {
+				continue;
+			}
+
+			if ( 0 !== $category->category_parent ) {
+				$parent_category = get_category( $category->category_parent );
+
+				if ( in_array( $parent_category->cat_ID, [ $articles_category_id, $issues_category_id, $departments_category_id ], true ) ) {
+					continue;
+				}
+			}
+
+			$categories_to_update_ids[] = $category->cat_ID;
+			$this->logger->log( 'taxonomies_fix.log', sprintf( 'Switched category %s(%d) to tag', $category->name, $category->cat_ID ), Logger::SUCCESS );
+		}
+
+		if ( ! empty( $categories_to_update_ids ) ) {
+			$wpdb->query( "UPDATE $wpdb->term_taxonomy SET taxonomy = 'post_tag' WHERE term_id IN (" . implode( ',', $categories_to_update_ids ) . ')' );
+		}
+
 		$meta_query = [
 			[
-				'key'     => '_newspack_set_primary_category',
+				'key'     => '_newspack_fixed_taxonomies',
 				'compare' => 'NOT EXISTS',
 			],
 		];
@@ -1061,7 +1247,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			[
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
-				// 'p'              => 570892,
+				// 'p'              => 118921,
 				'post_status'    => 'any',
 				'fields'         => 'ids',
 				'no_found_rows'  => true,
@@ -1074,7 +1260,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$query = new \WP_Query(
 			[
 				'post_type'      => 'post',
-				// 'p'              => 570892,
+				// 'p'              => 118921,
 				'post_status'    => 'any',
 				'paged'          => $batch,
 				'posts_per_page' => $posts_per_batch,
@@ -1093,37 +1279,442 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				continue;
 			}
 
-				$original_article = $articles_list[ $original_article_index ];
+			$original_article = $articles_list[ $original_article_index ];
 
-			if ( ! empty( $original_article['subjects'] ) ) {
-				$category_ids = [];
-				foreach ( $original_article['subjects'] as $subject ) {
-					$category_id = get_cat_ID( $subject );
+			$is_issue =
+				array_key_exists( 'parent', $original_article )
+				&& is_array( $original_article['parent'] )
+				&& array_key_exists( '@type', $original_article['parent'] )
+				&& 'Issue' === $original_article['parent']['@type'];
 
-					if ( ! $category_id ) {
-						// Add category.
-						$category_id = wp_insert_category(
-							[
-								'cat_name' => $subject,
-								'taxonomy' => 'category',
-							]
-						);
-					}
+			if ( $is_issue ) {
+				wp_set_post_categories( $post->ID, [ $issues_category_id, $departments_category_id ], false );
 
-					$category_ids[] = $category_id;
+				// Setting the department as category if it exists.
+				if ( array_key_exists( 'department', $original_article ) ) {
+					$department_category_id = $this->get_or_create_category( $original_article['department'], $departments_category_id );
+					wp_set_post_categories( $post->ID, [ $department_category_id ], true );
 				}
 
-				if ( ! empty( $category_ids ) ) {
-					wp_set_post_categories( $post->ID, $category_ids, true );
-					// Set yoast primary category.
-					update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category_ids[0] );
+				// Setting the issue number as category if it exists.
+				// The issue number is found in the parent @id attribute: https://www.hcn.org/issues/49.16
+				if ( array_key_exists( '@id', $original_article['parent'] ) ) {
+					$issue_number             = substr( $original_article['parent']['@id'], strrpos( $original_article['parent']['@id'], '/' ) + 1 );
+					$issue_number_category_id = $this->get_or_create_category( $issue_number, $issues_category_id );
+					wp_set_post_categories( $post->ID, [ $issue_number_category_id ], true );
+				}
+			} else {
+				wp_set_post_categories( $post->ID, [ $articles_category_id ], false );
+			}
+
+			update_post_meta( $post->ID, '_newspack_fixed_taxonomies', true );
+		}
+
+		// update meta key from _yoast_wpseo_primary_category to _yoast_wpseo_primary_post_tag.
+		$wpdb->query( "UPDATE $wpdb->postmeta SET meta_key = '_yoast_wpseo_primary_post_tag' WHERE meta_key = '_yoast_wpseo_primary_category'" );
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-migrate-headlines`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_migrate_headlines( $args, $assoc_args ) {
+		$articles_list   = json_decode( file_get_contents( $assoc_args['articles-json'] ), true );
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_headline',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 118921,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 118921,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$plone_article_uid      = get_post_meta( $post->ID, 'plone_article_UID', true );
+			$original_article_index = array_search( $plone_article_uid, array_column( $articles_list, 'UID' ) );
+
+			if ( false === $original_article_index ) {
+				WP_CLI::warning( "Article UID $plone_article_uid not found in articles list: " . $post->ID );
+				continue;
+			}
+
+			$original_article = $articles_list[ $original_article_index ];
+
+			if ( array_key_exists( 'subheadline', $original_article ) && ! empty( $original_article['subheadline'] ) ) {
+				if ( $post->post_title !== $original_article['subheadline'] ) {
+					$subheadline        = rtrim( trim( $original_article['subheadline'] ) );
+					$headline_text      = 'This article appeared in the print edition of the magazine with the headline <strong>' . $subheadline . '</strong>';
+					$headline_last_char = substr( $subheadline, -1 );
+
+					if ( ! in_array( $headline_last_char, [ '.', '?', '!' ] ) ) {
+						$headline_text .= '.';
+					}
+					$updated_post_content = $post->post_content . serialize_block(
+						$this->gutenberg_block_generator->get_paragraph( $headline_text )
+					);
+
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => $updated_post_content,
+						]
+					);
+
+
+					$this->logger->log( 'migrate_headlines.log', sprintf( 'Updated post content for post %d', $post->ID ), Logger::SUCCESS );
 				}
 			}
 
-			update_post_meta( $post->ID, '_newspack_set_primary_category', true );
+			update_post_meta( $post->ID, '_newspack_migrated_headline', true );
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-copy-subhead-to-excerpt`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_copy_subhead_to_excerpt( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_subhead_copied_to_excerpt',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 118921,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 118921,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			// copy post meta newspack_post_subtitle to the post excerpt.
+			$post_subtitle = get_post_meta( $post->ID, 'newspack_post_subtitle', true );
+
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_excerpt' => $post_subtitle,
+				]
+			);
+
+			$this->logger->log( 'copy_subhead_to_excerpt.log', sprintf( 'Updated post excerpt for post %d', $post->ID ), Logger::SUCCESS );
+
+			update_post_meta( $post->ID, '_newspack_subhead_copied_to_excerpt', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-migrate-issues-meta-data`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_migrate_issues_meta_data( $args, $assoc_args ) {
+		global $wpdb;
+
+		$issues_list                = json_decode( file_get_contents( $assoc_args['issues-json'] ), true );
+		$blobs_folder               = rtrim( $assoc_args['blobs-folder-path'], '/' ) . '/';
+		$issues_category_id         = $this->get_or_create_category( 'Issues' );
+		$already_processed_ids_file = 'already_processed_ids.log';
+		// read already processed ids from file.
+		$already_processed_ids = [];
+		if ( file_exists( $already_processed_ids_file ) ) {
+			// read lines to array.
+			$already_processed_ids = file( $already_processed_ids_file, FILE_IGNORE_NEW_LINES );
+		}
+
+		foreach ( $issues_list as $issue ) {
+			// skip already processed issues.
+			if ( in_array( $issue['@id'], $already_processed_ids, true ) ) {
+				continue;
+			}
+			// to-delete.
+			// if ( 'https://www.hcn.org/issues/47.1' !== $issue['@id'] ) {
+			// continue;
+			// }
+			// to-delete.
+			// if ( empty( $issue['digitalEditionURL'] ) ) {
+			// continue;
+			// }
+			// to-delete.
+			// $issue['image']['blob_path'] = '0x03eea5b01bc001dd.blob';
+
+			// Category name is in the @id field as https://www.hcn.org/issues/category_name.
+			$category_name = substr( $issue['@id'], strrpos( $issue['@id'], '/' ) + 1 );
+
+			$category_id           = $this->get_or_create_category( $category_name, $issues_category_id );
+			$issue_date            = gmdate( 'F j, Y', strtotime( $issue['effective'] ) );
+			$issue_raw_description = $issue['description'];
+
+			$issue_thumbnail_id = $this->get_attachment_id_from_issue_image( $issue['image'], $blobs_folder );
+
+			if ( is_wp_error( $issue_thumbnail_id ) ) {
+				$this->logger->log( 'issues-meta.log', sprintf( 'Error getting attachment ID for issue %s: %s', $issue['@id'], $issue_thumbnail_id->get_error_message() ), Logger::WARNING );
+				$issue_thumbnail = '';
+			} else {
+				$issue_thumbnail_url = wp_get_attachment_url( $issue_thumbnail_id );
+				$issue_thumbnail     = '<img class="size-medium wp-image-' . $issue_thumbnail_id . '" src="' . $issue_thumbnail_url . '" alt="" width="248" height="300" />';
+			}
+
+			$digital_issue_link = '';
+			if ( ! empty( $issue['digitalEditionURL'] ) ) {
+				$digital_issue_id = $this->attachments->import_external_file( $issue['digitalEditionURL'] );
+
+				if ( is_wp_error( $digital_issue_id ) ) {
+					$this->logger->log( 'issues-meta.log', sprintf( 'Error getting digital edition for issue %s: %s', $issue['@id'], $digital_issue_id->get_error_message() ), Logger::WARNING );
+					$digital_issue_link = '';
+					// to-delete.
+					// continue;
+				} else {
+					$digital_issue_url  = wp_get_attachment_url( $digital_issue_id );
+					$digital_issue_link = '<a href="' . $digital_issue_url . '"><b>Read the digital Issue</b></a>';
+				}
+			}
+
+			$category_description = '<h1><strong>Magazine - </strong>' . $issue_date . '</h1>
+			' . $issue_thumbnail . '
+
+			' . $issue_raw_description . '
+
+			' . $digital_issue_link;
+
+			// update category description and title to the issue date.
+			$wpdb->update( $wpdb->term_taxonomy, [ 'description' => $category_description ], [ 'term_id' => $category_id ] );
+			// $wpdb->update( $wpdb->terms, [ 'name' => $issue_date ], [ 'term_id' => $category_id ] );
+
+			$this->logger->log( 'issues-meta.log', sprintf( 'Updated category %s(%d) with description and title', $category_name, $category_id ), Logger::SUCCESS );
+			// die();
+
+			// write to the processed issues log file.
+			file_put_contents( $already_processed_ids_file, $issue['@id'] . PHP_EOL, FILE_APPEND );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-fix-issues-categories-slug`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_fix_issues_categories_slug( $args, $assoc_args ) {
+		$issues_list                = json_decode( file_get_contents( $assoc_args['issues-json'] ), true );
+		$issues_category_id         = $this->get_or_create_category( 'Issues' );
+		$already_processed_ids_file = 'already_processed_issues_ids.log';
+		// read already processed ids from file.
+		$already_processed_ids = [];
+		if ( file_exists( $already_processed_ids_file ) ) {
+			// read lines to array.
+			$already_processed_ids = file( $already_processed_ids_file, FILE_IGNORE_NEW_LINES );
+		}
+
+		foreach ( $issues_list as $issue ) {
+			// skip already processed issues.
+			if ( in_array( $issue['@id'], $already_processed_ids, true ) ) {
+				continue;
+			}
+
+			// Category name is in the @id field as https://www.hcn.org/issues/category_name.
+			$category_name = substr( $issue['@id'], strrpos( $issue['@id'], '/' ) + 1 );
+			$category_id   = $this->get_or_create_category( $category_name, $issues_category_id );
+
+			wp_update_term( $category_id, 'category', [ 'slug' => $category_name ] );
+
+			$this->logger->log( 'issues-slug.log', sprintf( 'Updated category %s(%d) slug', $category_name, $category_id ), Logger::SUCCESS );
+
+			// write to the processed issues log file.
+			file_put_contents( $already_processed_ids_file, $issue['@id'] . PHP_EOL, FILE_APPEND );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-generate-redirects-csv`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_generate_redirects_csv( $args, $assoc_args ) {
+		$articles_list    = json_decode( file_get_contents( $assoc_args['articles-json'] ), true );
+		$posts_per_batch  = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch            = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$output_file_path = rtrim( $assoc_args['output-dir'], '/' ) . "/redirects-$batch.csv";
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_aliases',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 118921,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 118921,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts        = $query->get_posts();
+		$redirections = [];
+
+		foreach ( $posts as $post ) {
+			$plone_article_uid      = get_post_meta( $post->ID, 'plone_article_UID', true );
+			$original_article_index = array_search( $plone_article_uid, array_column( $articles_list, 'UID' ) );
+
+			if ( false === $original_article_index ) {
+				WP_CLI::warning( "Article UID $plone_article_uid not found in articles list: " . $post->ID );
+				continue;
+			}
+
+			$original_article = $articles_list[ $original_article_index ];
+
+			if ( array_key_exists( 'aliases', $original_article ) ) {
+				foreach ( $original_article['aliases'] as $alias ) {
+					$redirections[] = [
+						'old_url' => $alias,
+						'new_url' => str_replace( home_url(), '', get_permalink( $post->ID ) ),
+					];
+				}
+			}
+
+			update_post_meta( $post->ID, '_newspack_migrated_aliases', true );
+		}
+
+		if ( ! empty( $redirections ) ) {
+			$fp = fopen( $output_file_path, 'w' );
+			foreach ( $redirections as $redirection ) {
+				fputcsv( $fp, $redirection );
+			}
+			fclose( $fp );
+
+			WP_CLI::success( "Redirects CSV file generated: $output_file_path" );
+		}
+	}
+
+	/**
+	 * Get category ID if it exists, otherwise create it.
+	 *
+	 * @param string $category_name Category name to get/create.
+	 * @param int    $parent_id     Parent category ID.
+	 * @return int  Category ID.
+	 */
+	private function get_or_create_category( $category_name, $parent_id = 0 ) {
+		$category_id = get_cat_ID( $category_name );
+
+		if ( ! $category_id ) {
+			// Add category.
+			$category_id = wp_insert_category(
+				[
+					'cat_name'        => $category_name,
+					'taxonomy'        => 'category',
+					'category_parent' => $parent_id,
+				]
+			);
+		}
+
+		return $category_id;
+	}
+
+	/**
+	 * Get attachment ID from issue image.
+	 *
+	 * @param array  $image_data Image data ['blob_path', 'filename'].
+	 * @param string $blob_path Blob path.
+	 * @return int|WP_error attachment ID.
+	 */
+	private function get_attachment_id_from_issue_image( $image_data, $blob_path ) {
+		$filename                  = $image_data['filename'];
+		$tmp_destination_file_path = WP_CONTENT_DIR . '/uploads/' . $filename;
+		$file_blob_path            = $blob_path . $image_data['blob_path'];
+		file_put_contents( $tmp_destination_file_path, file_get_contents( $file_blob_path ) );
+
+		$attachment_id = $this->attachments->import_external_file( $tmp_destination_file_path, $image_data['filename'] );
+
+		wp_delete_file( $tmp_destination_file_path );
+		return $attachment_id;
 	}
 
 	private function replace_weird_chars( $string ): string {
