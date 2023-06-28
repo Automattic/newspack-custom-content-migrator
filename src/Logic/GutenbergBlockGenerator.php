@@ -547,14 +547,17 @@ class GutenbergBlockGenerator {
 
 		// Inner content.
 		$inner_content = array_fill( 1, count( $elements ), null );
-		array_unshift( $inner_content, '<ol>' );
-		array_push( $inner_content, '</ol>' );
+
+		$list_tag = $ordered ? 'ol' : 'ul';
+
+		array_unshift( $inner_content, "<$list_tag>" );
+		array_push( $inner_content, "</$list_tag>" );
 
 		return [
 			'blockName'    => 'core/list',
 			'attrs'        => $attrs,
 			'innerBlocks'  => array_map( [ $this, 'get_list_item' ], $elements ),
-			'innerHTML'    => '<ol></ol>',
+			'innerHTML'    => "<$list_tag></$list_tag>",
 			'innerContent' => $inner_content,
 		];
 	}
