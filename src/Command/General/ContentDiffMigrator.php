@@ -306,7 +306,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 					'live-table-prefix' => $live_table_prefix,
 					'mode'              => 'generous',
 					'skip-tables'       => 'options',
-				] 
+				]
 			);
 		}
 
@@ -421,7 +421,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 					'live-table-prefix' => $live_table_prefix,
 					'mode'              => 'generous',
 					'skip-tables'       => 'options',
-				] 
+				]
 			);
 		}
 
@@ -1071,7 +1071,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		foreach ( $tables_with_differing_collations as $result ) {
 			WP_CLI::log( 'Addressing ' . $result['table'] );
-			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, ! is_null( $backup_prefix ) ? $backup_prefix : null );
+			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
 		}
 	}
 
