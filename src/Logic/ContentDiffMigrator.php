@@ -1070,11 +1070,6 @@ class ContentDiffMigrator {
 		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
 
 		foreach ( $results as $key_result => $result ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_result % 2000 ) {
-				echo '.';
-			}
-
 			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
 			$post_id = $result['post_id'] ?? null;
 			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
