@@ -614,7 +614,7 @@ class ContentDiffMigrator {
 		if ( 0 == $category_tree['parent'] ) {
 
 			// Get or create this top parent category.
-			$category_top_parent_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], 0 );
+			$category_top_parent_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], 0 );
 			$category_top_parent_term_id = $category_top_parent_row['term_id'] ?? null;
 			if ( ! $category_top_parent_term_id ) {
 				// Insert it if it doesn't exist.
@@ -639,7 +639,7 @@ class ContentDiffMigrator {
 		}
 
 		// For a non-top-parent category, get or create its tree and return.
-		$category_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], $current_parent_tree['term_id'] );
+		$category_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], $current_parent_tree['term_id'] );
 		$category_term_id = $category_row['term_id'] ?? null;
 		if ( ! $category_term_id ) {
 			$category_term_id = $this->wp_insert_category(
@@ -736,7 +736,47 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets a category array with all the related data.
+	 * Gets category by its name and parent.
+	 *
+	 * @param string $table_prefix    DB table prefix.
+	 * @param string $cat_name        Category name.
+	 * @param string $cat_parent      Category parent's term_id.
+	 *
+	 * @return array {
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent's term_id.
+	 * }
+	 */
+	public function get_category_array_by_name_and_parent( $table_prefix, $cat_name, $cat_parent ) {
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$category = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+					FROM $table_terms t
+			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
+					WHERE tt.taxonomy = 'category'
+					AND tt.parent = %s
+					AND t.name = %s;",
+				$cat_parent,
+				$cat_name
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $category;
+	}
+
+	/**
+	 * Gets category by its name, description and parent
 	 *
 	 * @param string $table_prefix    DB table prefix.
 	 * @param string $cat_name        Category name.
@@ -1030,11 +1070,6 @@ class ContentDiffMigrator {
 		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
 
 		foreach ( $results as $key_result => $result ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_result % 2000 ) {
-				echo '.';
-			}
-
 			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
 			$post_id = $result['post_id'] ?? null;
 			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
