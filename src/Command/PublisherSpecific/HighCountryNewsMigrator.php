@@ -382,6 +382,36 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator hcn-migrate-related-stories',
+			array( $this, 'hcn_migrate_related_stories' ),
+			array(
+				'shortdesc' => 'Migrate related stories.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'articles-json',
+						'description' => 'Path to the Articles JSON file.',
+						'optional'    => false,
+					],
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator hcn-copy-subhead-to-excerpt',
 			array( $this, 'hcn_copy_subhead_to_excerpt' ),
 			array(
@@ -1398,6 +1428,121 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			}
 
 			update_post_meta( $post->ID, '_newspack_migrated_headline', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-migrate-related-stories`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_migrate_related_stories( $args, $assoc_args ) {
+		global $wpdb;
+		$articles_list   = json_decode( file_get_contents( $assoc_args['articles-json'] ), true );
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_migrated_related_posts',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 94456,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 94456,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$plone_article_uid      = get_post_meta( $post->ID, 'plone_article_UID', true );
+			$original_article_index = array_search( $plone_article_uid, array_column( $articles_list, 'UID' ) );
+
+			if ( false === $original_article_index ) {
+				WP_CLI::warning( "Article UID $plone_article_uid not found in articles list: " . $post->ID );
+				continue;
+			}
+
+			$original_article = $articles_list[ $original_article_index ];
+
+			if ( array_key_exists( 'references', $original_article ) && array_key_exists( 'relatesTo', $original_article['references'] ) && ! empty( $original_article['references']['relatesTo'] ) ) {
+				$related_posts = [];
+
+				foreach ( $original_article['references']['relatesTo'] as $related_to_id ) {
+					// find WP post ID by the meta plone_article_UID
+					$related_wp_post_id = $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_article_UID' AND meta_value = %s",
+							$related_to_id
+						)
+					);
+
+					if ( ! $related_wp_post_id ) {
+						WP_CLI::warning( "Related Article UID $plone_article_uid not found in WP: " . $post->ID );
+						continue;
+					}
+
+					$related_posts[] = [
+						'title'     => get_the_title( $related_wp_post_id ),
+						'permalink' => get_permalink( $related_wp_post_id ),
+					];
+				}
+
+				if ( ! empty( $related_posts ) ) {
+					$updated_post_content = $post->post_content;
+
+					$updated_post_content .= serialize_block(
+						$this->gutenberg_block_generator->get_paragraph( 'Read More:' )
+					);
+
+					$updated_post_content .= serialize_block(
+						$this->gutenberg_block_generator->get_list(
+							array_map(
+								function( $related_post ) {
+										return '<a href="' . $related_post['permalink'] . '">' . $related_post['title'] . '</a>';
+								},
+								$related_posts
+							)
+						)
+					);
+
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => $updated_post_content,
+						]
+					);
+
+					$this->logger->log( 'migrate_headlines.log', sprintf( 'Updated post content for post %d', $post->ID ), Logger::SUCCESS );
+				}
+			}
+
+			update_post_meta( $post->ID, '_newspack_migrated_related_posts', true );
 		}
 
 		wp_cache_flush();
