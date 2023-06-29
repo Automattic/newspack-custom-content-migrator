@@ -278,7 +278,6 @@ class CCMMigrator implements InterfaceCommand {
 		$posts = $query->get_posts();
 
 		foreach ( $posts as $post ) {
-			// print_r( $post->ID . "\n" );
 			$raw_brands = get_post_meta( $post->ID, 'ccm_brands', true );
 			// If the post has no brands, we don't need to do anything.
 			$post_handled = true;
@@ -300,14 +299,15 @@ class CCMMigrator implements InterfaceCommand {
 						continue;
 					}
 
-					$brand = $grouped_brands[ $brand ];
+					$main_brand = $grouped_brands[ $brand ];
 
-					// Check if the brand exists.
-					if ( '' === $brand ) {
+					// Check if the main brand exists.
+					if ( '' === $main_brand ) {
 						// If it's the main brand "Colorado Community Media", we need to re-treat the post next time.
 						continue;
 					}
 
+					// Set the brand.
 					$term = get_term_by( 'name', $brand, 'brand' );
 					if ( $term ) {
 						$brand_ids[]    = $term->term_id;
@@ -320,6 +320,22 @@ class CCMMigrator implements InterfaceCommand {
 							$brand_titles[] = $brand;
 						} else {
 							$this->logger->log( $log_file, sprintf( 'Error adding the brand `%s` for the post %d: %s', $brand, $post->ID, $term->get_error_message() ) );
+						}
+					}
+
+					// Set the main brand.
+					$main_term = get_term_by( 'name', $main_brand, 'brand' );
+					if ( $main_term ) {
+						$brand_ids[]    = $main_term->term_id;
+						$brand_titles[] = $main_brand;
+					} else {
+						// Create the brand.
+						$main_term = wp_insert_term( $main_brand, 'brand' );
+						if ( ! is_wp_error( $main_term ) ) {
+							$brand_ids[]    = $main_term['term_id'];
+							$brand_titles[] = $main_brand;
+						} else {
+							$this->logger->log( $log_file, sprintf( 'Error adding the brand `%s` for the post %d: %s', $main_brand, $post->ID, $main_term->get_error_message() ) );
 						}
 					}
 				}
