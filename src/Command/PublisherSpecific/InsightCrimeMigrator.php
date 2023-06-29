@@ -121,6 +121,30 @@ class InsightCrimeMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator insight-crime-migrate-primary-tag',
+			[ $this, 'cmd_migrate_primary_tag' ],
+			[
+				'shortdesc' => 'Migrate primary tag.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -481,8 +505,6 @@ class InsightCrimeMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Command associative arguments.
 	 */
 	public function cmd_migrate_investigation_content( $args, $assoc_args ) {
-		global $wpdb;
-
 		$investigations_category_id = intval( $assoc_args['investigations-category-id'] );
 
 		$meta_query = [
@@ -545,6 +567,71 @@ class InsightCrimeMigrator implements InterfaceCommand {
 			}
 
 			update_post_meta( $post->ID, '_newspack_migrated_investigations_content', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator insight-crime-migrate-primary-tag`.
+	 *
+	 * @param array $args       Command arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 */
+	public function cmd_migrate_primary_tag( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_setting_primary_tag',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 201318,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 201318,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$custom_tag_id = get_post_meta( $post->ID, 'customtag', true );
+			if ( $custom_tag_id ) {
+				$tag = get_term_by( 'id', $custom_tag_id, 'post_tag' );
+
+				if ( ! $tag ) {
+					$this->logger->log( 'primary_tag_migration.log', sprintf( 'Post ID %d tag (%d) not found', $post->ID, $custom_tag_id ), Logger::WARNING );
+					continue;
+				}
+
+				update_post_meta( $post->ID, '_yoast_wpseo_primary_post_tag', $custom_tag_id );
+
+				$this->logger->log( 'primary_tag_migration.log', sprintf( 'Post ID %d has the primary tag %s (%d)', $post->ID, $tag->name, $custom_tag_id ), Logger::SUCCESS );
+			}
+
+			update_post_meta( $post->ID, '_newspack_setting_primary_tag', true );
 		}
 
 		wp_cache_flush();
