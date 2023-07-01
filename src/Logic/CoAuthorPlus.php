@@ -293,6 +293,30 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Links a Guest Author to an existing WP User.
+	 *
+	 * @param int     $ga_id Guest Author ID.
+	 * @param \WPUser $user  WP User.
+	 */
+	public function unlink_wp_user_from_guest_author( $ga_id, $user ) {
+		delete_post_meta( $ga_id, 'cap-linked_account', $user->user_login );
+	}
+
+	/**
+	 * Returns the Guest Author object which has a linked WP_User with given $user_login_of_linked_wpuser account.
+	 *
+	 * @param int $user_login_of_linked_account user_login of linked WP_User account.
+	 *
+	 * @return ?object Guest Author object or null.
+	 */
+	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser ) {
+		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser );
+		$ga = ( 'guest-author' == $ga->type ) ? $ga : null;
+
+		return $ga;
+	}
+
+	/**
 	 * Returns the Guest Author object by ID (as defined by the CAP plugin).
 	 *
 	 * @param int $ga_id Guest Author ID.
@@ -312,6 +336,25 @@ class CoAuthorPlus {
 	 */
 	public function get_guest_author_by_user_login( $ga_user_login ) {
 		return $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $ga_user_login );
+	}
+
+	/**
+	 * This returns a GA object if that GA's user_login matches the provided user_login, or if that GA's WP_User linked_account
+	 * matches the provided user_login.
+	 *
+	 * Also see self::get_guest_author_by_user_login().
+	 *
+	 * P.S. CAP can sometimes be a bit complicated.
+	 *
+	 * @param int $user_login user_login of existing GA object, or of existing WP_User object linked to a GA user.
+	 *
+	 * @return false|object Guest Author object which has that user_login, or has a linked WP_User with that user_login.
+	 */
+	public function get_guest_author_by_user_login_including_linked_account_login( $user_login ) {
+		$ga = $this->coauthors_plus->get_coauthor_by( 'user_login', $user_login, true );
+		$ga = ( 'guest-author' == $ga->type ) ? $ga : false;
+
+		return $ga;
 	}
 
 	/**
@@ -482,14 +525,14 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * This function will facilitate obtaining all posts for a given Guest Author.
+	 * This function will facilitate obtaining all posts by Guest Author.
 	 *
 	 * @param int  $ga_id Guest Author ID (Post ID).
 	 * @param bool $get_post_objects Flag which determines whether to return array of Post IDs, or Post Objects.
 	 *
 	 * @return int[]|WP_Post[] Array of Post IDs if $get_post_objects is false, or Post Objects if $get_post_objects is true.
 	 */
-	public function get_all_posts_for_guest_author( int $ga_id, bool $get_post_objects = false ) {
+	public function get_all_posts_by_guest_author( int $ga_id, bool $get_post_objects = false ) {
 		global $wpdb;
 
 		$records = $wpdb->get_results(
