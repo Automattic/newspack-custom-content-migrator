@@ -296,7 +296,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		global $wpdb;
 		try {
-			$this->validate_dbs( $live_table_prefix, [ 'options' ] );
+			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
 		} catch ( \RuntimeException $e ) {
 			WP_CLI::warning( $e->getMessage() );
 			WP_CLI::line( "Now running command `newspack-content-migrator correct-collations-for-live-wp-tables --live-table-prefix={$live_table_prefix} --mode=generous --skip-tables=options` ..." );
@@ -411,7 +411,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		// Validate DBs.
 		try {
-			$this->validate_dbs( $live_table_prefix, [ 'options' ] );
+			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
 		} catch ( \RuntimeException $e ) {
 			WP_CLI::warning( $e->getMessage() );
 			WP_CLI::line( "Now running command `newspack-content-migrator correct-collations-for-live-wp-tables --live-table-prefix={$live_table_prefix} --mode=generous --skip-tables=options` ..." );
@@ -738,11 +738,12 @@ class ContentDiffMigrator implements InterfaceCommand {
 			// Now import all related Post data.
 			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
-				$this->log( $this->log_error, sprintf( 'Following errors happened in import_posts() for post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new ) );
+				$msg = sprintf( 'Errors during import post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new );
 				foreach ( $import_errors as $import_error ) {
-					$this->log( $this->log_error, sprintf( '- %s', $import_error ) );
+					$msg .= PHP_EOL . '- ' . $import_error;
 				}
-				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (see log %s).', $post_type, $post_id_live, $post_id_new, $this->log_error ) );
+				$this->log( $this->log_error, $msg );
+				WP_CLI::warning( $msg );
 			}
 
 			// Log imported post.
@@ -1069,8 +1070,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 				break;
 		}
 
+		WP_CLI::log( "Now fixing $live_table_prefix tables collations..." );
 		foreach ( $tables_with_differing_collations as $result ) {
-			WP_CLI::log( 'Addressing ' . $result['table'] );
+			WP_CLI::log( 'Addressing ' . $result['table'] . ' table...' );
 			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
 		}
 	}
@@ -1214,7 +1216,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Validates DBs.
+	 * Validates DB tables.
 	 *
 	 * @param string $live_table_prefix Live table prefix.
 	 * @param array  $skip_tables       Core WP DB tables to skip (without prefix).
@@ -1223,9 +1225,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function validate_dbs( string $live_table_prefix, array $skip_tables ): void {
-		self::$logic->validate_core_wp_db_tables( $live_table_prefix, $skip_tables );
-		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix ) ) {
+	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
+		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
+		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix, $skip_tables ) ) {
 			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
 	}
