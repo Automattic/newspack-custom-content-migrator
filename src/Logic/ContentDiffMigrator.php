@@ -959,6 +959,13 @@ class ContentDiffMigrator {
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
 			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
 			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
+
+			// Validate live term row, it could be missing or invalid.
+			if ( is_null( $live_term_row ) ) {
+				$error_messages[] = sprintf( 'Faulty term relationship record in live DB, term skipped: posts.ID=%d > term_relationships has term_taxonomy_id=%d > term_taxonomy has term_id=%d >> term_id does not exist in live DB table.', $data['post']['ID'], $live_term_taxonomy_id, $live_term_taxonomy_row['term_id'] );
+				continue;
+			}
+
 			$live_term_name         = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
@@ -2897,7 +2904,7 @@ class ContentDiffMigrator {
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
-	public function validate_core_wp_db_tables( $table_prefix, $skip_tables = [] ) {
+	public function validate_core_wp_db_tables_exist_in_db( $table_prefix, $skip_tables = [] ) {
 		$all_tables = $this->get_all_db_tables();
 		foreach ( self::CORE_WP_TABLES as $table ) {
 			if ( in_array( $table, $skip_tables ) ) {
@@ -2974,8 +2981,9 @@ class ContentDiffMigrator {
 	 * @return array
 	 */
 	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
+		$collation_comparison = $this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables );
 		return array_filter(
-			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
+			$collation_comparison,
 			fn( $validated_table ) => false === $validated_table['match_bool']
 		);
 	}
@@ -3045,7 +3053,6 @@ class ContentDiffMigrator {
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
-			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );
