@@ -412,6 +412,37 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator hcn-set-featured-image-postition-for-featured-posts',
+			array( $this, 'hcn_set_featured_image_postition_for_featured_posts' ),
+			array(
+				'shortdesc' => 'Set featured image position for featured posts.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'feature-category-id',
+						'description' => 'Feature category ID.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator hcn-copy-subhead-to-excerpt',
 			array( $this, 'hcn_copy_subhead_to_excerpt' ),
 			array(
@@ -1543,6 +1574,62 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			}
 
 			update_post_meta( $post->ID, '_newspack_migrated_related_posts', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-set-featured-image-postition-for-featured-posts`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_set_featured_image_postition_for_featured_posts( $args, $assoc_args ) {
+		$posts_per_batch     = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch               = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$feature_category_id = intval( $assoc_args['feature-category-id'] );
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_set_featured_image_position',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				// 'p'              => 94456,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'cat'            => $feature_category_id,
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				// 'p'              => 94456,
+				'post_status'    => 'any',
+				'cat'            => $feature_category_id,
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			update_post_meta( $post->ID, 'newspack_featured_image_position', 'behind' );
+			$this->logger->log( 'set_featured_image_position.log', sprintf( 'Updated post %d', $post->ID ), Logger::SUCCESS );
+			update_post_meta( $post->ID, '_newspack_set_featured_image_position', true );
 		}
 
 		wp_cache_flush();
