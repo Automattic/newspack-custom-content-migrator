@@ -1065,11 +1065,21 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				if ( ! isset( $user['user_email'] ) || is_null( $user['user_email'] ) ) {
 					WP_CLI::warning( "User {$user['id']} does not have an email." );
 				}
-				// -- get GA
-				$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $user['user_email'] );
+				// -- get GA by email
+				$email = $user['user_email'];
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
 				if ( ! $ga ) {
-					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_GANOTFOUND.log', sprintf( "GA with email %s not found, skipping.", $user['user_email'] ), $this->logger::WARNING );
-					continue;
+					/**
+					 * This is an error when GAs were created in script above -- emails should have been trimmed, because
+					 * some emails in JSON may contain trailing spaces.
+					 * Now we have to work with both cases to make up for it.
+					 */
+					$email = trim( $email );
+					$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
+					if ( ! $ga ) {
+						$this->logger->log( 'cmd_update_all_author_avatars__ERROR_GANOTFOUND.log', sprintf( "GA with email %s not found, skipping.", $email ), $this->logger::WARNING );
+						continue;
+					}
 				}
 
 				// Update meta.
@@ -1091,13 +1101,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 						continue;
 					}
 
-					WP_CLI::warning( sprintf( "user_email: %s has faulty avatar, will reimport", $user['user_email'] ) );
+					WP_CLI::warning( sprintf( "user_email: %s has faulty avatar, will reimport", $email ) );
 				}
 
 				// Import avatar from file.
 				$image_file_path = $path . '/' . $avatar_filename;
 				if ( ! file_exists( $image_file_path ) ) {
-					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_FILENOTFOUND.log', sprintf( "user_email: %s > json_file: %s > image_file_path: %s does not exist.", $user['user_email'], $json_file['file'], $image_file_path ), $this->logger::WARNING );
+					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_FILENOTFOUND.log', sprintf( "user_email: %s > json_file: %s > image_file_path: %s does not exist.", $email, $json_file['file'], $image_file_path ), $this->logger::WARNING );
 					continue;
 				}
 				$att_id = $this->attachments->import_external_file( $image_file_path, $ga->ID );
