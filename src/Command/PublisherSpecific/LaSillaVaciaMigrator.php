@@ -1070,9 +1070,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
 				if ( ! $ga ) {
 					/**
-					 * This is an error when GAs were created in script above -- emails should have been trimmed, because
-					 * some emails in JSON may contain trailing spaces.
-					 * Now we have to work with both cases to make up for it.
+					 * Some emails in JSON contain trailing spaces, and when GAs were imported here emails weren't trimmed,
+					 * so now we have to work with both cases to make up for those.
 					 */
 					$email = trim( $email );
 					$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
