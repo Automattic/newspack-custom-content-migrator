@@ -1111,6 +1111,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					continue;
 				}
 				$att_id = $this->attachments->import_external_file( $image_file_path, $ga->ID );
+				if ( is_wp_error( $att_id ) ) {
+					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_ATTACHMENTIMPORT.log', sprintf( "file:%s err:%s", $image_file_path, $att_id->get_error_message() ), $this->logger::WARNING );
+					continue;
+				}
 				$this->coauthorsplus_logic->update_guest_author( $ga->ID, [ 'avatar' => $att_id ] );
 
 				// Yey!
