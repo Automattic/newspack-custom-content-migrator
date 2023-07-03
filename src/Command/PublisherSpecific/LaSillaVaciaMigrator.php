@@ -14,6 +14,8 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 class LaSillaVaciaMigrator implements InterfaceCommand
@@ -590,23 +592,41 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      */
     private $redirection;
 
+	/**
+	 * Logger.
+	 *
+	 * @var Logger $logger
+	 */
+	private $logger;
+
+	/**
+	 * Attachments.
+	 *
+	 * @var Attachments $attachments
+	 */
+	private $attachments;
+
     /**
-     * Constructor.
+     * Singleton constructor.
      */
-    public function __constructor()
-    {
+    private function __construct() {
+        $this->log_file_path = date('YmdHis', time()) . 'LSV_import.log';
+	    $this->coauthorsplus_logic = new CoAuthorPlus();
+	    $this->simple_local_avatars = new SimpleLocalAvatars();
+	    $this->redirection = new Redirection();
+	    $this->logger = new Logger();
+	    $this->attachments = new Attachments();
     }
 
-    public static function get_instance()
-    {
+	/**
+	 * Singleton get instance.
+	 *
+	 * @return mixed|LaSillaVaciaMigrator
+	 */
+    public static function get_instance() {
         $class = get_called_class();
-
         if (null === self::$instance) {
             self::$instance = new $class();
-            self::$instance->log_file_path = date('YmdHis', time()) . 'LSV_import.log';
-            self::$instance->coauthorsplus_logic = new CoAuthorPlus();
-            self::$instance->simple_local_avatars = new SimpleLocalAvatars();
-            self::$instance->redirection = new Redirection();
         }
 
         return self::$instance;
@@ -625,7 +645,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 'synopsis'  => [],
             ]
         );
-        
+
         WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-migrate-authors',
             [ $this, 'migrate_authors' ],
@@ -646,6 +666,50 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'optional' => true,
                         'repeating' => false,
                     ]
+                ],
+            ]
+        );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-update-all-author-avatars',
+            [ $this, 'cmd_update_all_author_avatars' ],
+            [
+                'shortdesc' => 'Goes through all users JSON files, and if their avatars are not set, imports them from file expected to be found in media folder path.',
+                'synopsis' => [
+                    [
+                        'description' => 'https://drive.google.com/file/d/1R5N1QYpcOsOT3gW6u6QCanJlR5cPrzhb/view?usp=drive_link',
+                        'type' => 'assoc',
+                        'name' => 'json-authors-silla-academica',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+	                    'description' => 'https://drive.google.com/file/d/1u59tq746o1Wg8p4Bbx5byqQDdwJOBV3u/view?usp=drive_link',
+                        'type' => 'assoc',
+                        'name' => 'json-authors-silla-llena',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+	                    'description' => 'https://drive.google.com/file/d/1ktu9ayl_sYAQbTCoXTgQHFLuJCqMLk7A/view?usp=drive_link',
+                        'type' => 'assoc',
+                        'name' => 'json-expertos',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+	                    'description' => 'https://drive.google.com/file/d/1UJLagdAVrFs02WdeCVJ8D8F32_o_2qi_/view?usp=drive_link',
+                        'type' => 'assoc',
+                        'name' => 'json-authors',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'assoc',
+                        'name' => 'path-folder-with-images',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
                 ],
             ]
         );
@@ -768,7 +832,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
         shell_exec( 'wp plugin activate newspack-custom-content-migrator' );
     }
-    
+
     /**
      * @void
      */
@@ -933,6 +997,153 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         }
     }
 
+	/**
+	 * Goes through all users JSON files, and if their avatars are not set, imports them from file expected to be found in media folder path.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_update_all_author_avatars( $args, $assoc_args ) {
+		// Path with images.
+		$path = $assoc_args['path-folder-with-images'];
+		if ( ! file_exists( $path ) ) {
+			WP_CLI::error( "Folder $path does not exist." );
+		}
+		/**
+		 * These JSONs use "image" key:
+		 *  - $json_academica
+		 *  - $json_llena
+		 *  - $json_authors
+		 * This JSON uses "picture" key:
+		 *  - $json_expertos
+		 */
+		$json_files = [
+			[
+				'file'                     => $assoc_args['json-authors-silla-academica'],
+				'json_key_used_for_avatar' => 'image',
+			],
+			[
+				'file'                     => $assoc_args['json-authors-silla-llena'],
+				'json_key_used_for_avatar' => 'image',
+			],
+			[
+				'file'                     => $assoc_args['json-authors'],
+				'json_key_used_for_avatar' => 'image',
+			],
+			[
+				'file'                     => $assoc_args['json-expertos'],
+				'json_key_used_for_avatar' => 'picture',
+			],
+		];
+		foreach ( $json_files as $json_file ) {
+			if ( ! file_exists( $json_file['file'] ) ) {
+				WP_CLI::error( sprintf( "File %s does not exist.", $json_file['file'] ) );
+			}
+		}
+
+
+		// Loop through all JSON files and import avatars if needed.
+		foreach ( $json_files as $key_json_file => $json_file ) {
+
+			$users = json_decode( file_get_contents( $json_file['file'] ), true );
+			foreach ( $users as $key_user => $user ) {
+
+				// Progress.
+				WP_CLI::line( sprintf( "file %d/%d user %d/%d", $key_json_file + 1, count( $json_files ), $key_user + 1, count( $users ) ) );
+
+				// Get avatar file name from user data.
+				$avatar_filename = $this->get_avatar_image_from_user_json( $user, $json_file['json_key_used_for_avatar'] );
+				if ( is_null( $avatar_filename ) ) {
+					// No avatar, skip.
+					continue;
+				}
+
+				// Get user.
+				// -- check if user email exists for all entries
+				if ( ! isset( $user['user_email'] ) || is_null( $user['user_email'] ) ) {
+					WP_CLI::warning( "User {$user['id']} does not have an email." );
+				}
+				// -- get GA
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $user['user_email'] );
+				if ( ! $ga ) {
+					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_GANOTFOUND.log', sprintf( "GA with email %s not found, skipping.", $user['user_email'] ), $this->logger::WARNING );
+					continue;
+				}
+
+				// Update meta.
+				update_post_meta( $ga->ID, 'avatar_filename', $avatar_filename );
+
+				// Check if GA already has a valid avatar image so that we don't import dupe attachments.
+				$existing_att_id = get_post_meta( $ga->ID, '_thumbnail_id', true );
+				if ( ! empty( $existing_att_id ) ) {
+					$existing_avatar_url = wp_get_attachment_url( $existing_att_id );
+
+					// DEV -- if using local dev env, use HTTP because HTTPS is not available.
+					if ( false !== strpos( $existing_avatar_url, '//lasilla.local/' ) ) {
+						$existing_avatar_url = str_replace( 'https://', 'http://', $existing_avatar_url );
+					}
+
+					$response = wp_remote_get( $existing_avatar_url );
+					if ( ! is_wp_error( $response ) && 200 === wp_remote_retrieve_response_code( $response ) ) {
+						// Avatar exists, skip.
+						continue;
+					}
+
+					WP_CLI::warning( sprintf( "user_email: %s has faulty avatar, will reimport", $user['user_email'] ) );
+				}
+
+				// Import avatar from file.
+				$image_file_path = $path . '/' . $avatar_filename;
+				if ( ! file_exists( $image_file_path ) ) {
+					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_FILENOTFOUND.log', sprintf( "user_email: %s > json_file: %s > image_file_path: %s does not exist.", $user['user_email'], $json_file['file'], $image_file_path ), $this->logger::WARNING );
+					continue;
+				}
+				$att_id = $this->attachments->import_external_file( $image_file_path, $ga->ID );
+				$this->coauthorsplus_logic->update_guest_author( $ga->ID, [ 'avatar' => $att_id ] );
+
+				// Yey!
+				$this->logger->log( 'cmd_update_all_author_avatars__UPDATED.log', sprintf( "ga_id: %d imported avatar att_ID: %s", $ga->ID, $att_id ), $this->logger::SUCCESS );
+			}
+		}
+
+		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Gets avatar image filename from user JSON file data, which can use either "image" or "picture" keys for avatars.
+	 *
+	 * @param array  $data               User data.
+	 * @param string $key_used_for_image String. Either "image" or "picture".
+	 *
+	 * @return ?string Image filename from user JSON.
+	 */
+	private function get_avatar_image_from_user_json( $data, $key_used_for_image ) {
+		$image_file = null;
+
+		if ( 'image' == $key_used_for_image ) {
+
+			// Some validation.
+			if ( ! isset( $data['image'][0] ) || is_null( $data['image'][0] ) ) {
+				return null;
+			}
+			if ( count( $data['image'] ) > 1 ) {
+				WP_CLI::warning( sprintf( "User %s has more than one image, using the first one.", $data['id'] ) );
+			}
+			$image_file = $data['image'][0];
+
+		} elseif ( 'picture' == $key_used_for_image ) {
+
+			$d = 1;
+
+		} else {
+			WP_CLI::error( sprintf( "Key $key_used_for_image not supported, user data: %s", json_encode( $data ) ) );
+		}
+
+		return $image_file;
+	}
+
     /**
      * Imports Guest Authors from JSON file.
      *
@@ -975,47 +1186,48 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 $description .= $user['description'];
             }
 
-            if ( ! empty( $user['lineasInvestigacion'] ) ) {
-                $description .= "\n<strong>Líneas de Investigación: </strong>" . $user['lineasInvestigacion'];
-            }
-
-            if ( ! empty ( $user['categories'] ) ) {
-                $description .= "\n\n<strong>Universidad: </strong>" . $user['categories'][0]['name'];
-            }
-
             $guest_author_data['description'] = $description;
 
-            if ( ! empty( $user['picture'] ) ) {
-                $file_path_parts = explode( '/', $user['picture'] );
-                $filename = array_pop( $file_path_parts );
-                $guest_author_data['avatar'] = $this->handle_profile_photo( $filename );
-            }
+            if ( ! $guest_author_exists ) {
+	            $guest_author_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
+                $this->file_logger( "Created GA ID {$guest_author_id}" );
 
-            if ( false === $guest_author_exists ) {
-                $guest_author_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
-
-                update_post_meta( $guest_author_id, 'original_user_id', $user['id'] );
-                update_post_meta( $guest_author_id, 'publicaciones', $user['publicaciones'] );
-                update_post_meta( $guest_author_id, 'lineasInvestigacion', $user['lineasInvestigacion'] );
-                update_post_meta( $guest_author_id, 'cap-newspack_job_title', $user['lineasInvestigacion'] );
-                update_post_meta( $guest_author_id, 'cap-newspack_phone_number', $user['phone'] );
-                update_post_meta( $guest_author_id, 'cap-website', $user['url'] );
+				// Import a new media item only if new GA is created -- shouldn't reimport if GA already exists.
+	            if ( ! empty( $user['picture'] ) ) {
+	                $file_path_parts = explode( '/', $user['picture'] );
+	                $filename = array_pop( $file_path_parts );
+	                $guest_author_data['avatar'] = $this->handle_profile_photo( $filename );
+	            }
             } else {
-                $this->file_logger( "Guest Author already exists. ID: {$guest_author_exists->ID}, will attempt to update information." );
-                update_post_meta( $guest_author_exists->ID, 'cap-display_name', $guest_author_data['display_name'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-first_name', $guest_author_data['first_name'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-last_name', $guest_author_data['last_name'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-user_email', $guest_author_data['user_email'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-description', $guest_author_data['description'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-description', $guest_author_data['description'] );
-                update_post_meta( $guest_author_exists->ID, '_thumbnail_id', $guest_author_data['avatar'] );
-                update_post_meta( $guest_author_exists->ID, 'original_user_id', $user['id'] );
-                update_post_meta( $guest_author_exists->ID, 'publicaciones', $user['publicaciones'] );
-                update_post_meta( $guest_author_exists->ID, 'lineasInvestigacion', $user['lineasInvestigacion'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-newspack_job_title', $user['lineasInvestigacion'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-newspack_phone_number', $user['phone'] );
-                update_post_meta( $guest_author_exists->ID, 'cap-website', $user['url'] );
+	            $guest_author_id = $guest_author_exists->ID;
+                $this->file_logger( "Exists GA ID {$guest_author_exists->ID}" );
             }
+
+			// GA fields.
+            update_post_meta( $guest_author_id, 'cap-display_name', $guest_author_data['display_name'] );
+            update_post_meta( $guest_author_id, 'cap-first_name', $guest_author_data['first_name'] );
+            update_post_meta( $guest_author_id, 'cap-last_name', $guest_author_data['last_name'] );
+            update_post_meta( $guest_author_id, 'cap-user_email', $guest_author_data['user_email'] );
+            update_post_meta( $guest_author_id, 'cap-description', $guest_author_data['description'] );
+            update_post_meta( $guest_author_id, 'cap-newspack_job_title', $user['lineasInvestigacion'] );
+            update_post_meta( $guest_author_id, 'cap-newspack_phone_number', $user['phone'] );
+            update_post_meta( $guest_author_id, 'cap-website', $user['url'] );
+            update_post_meta( $guest_author_id, 'cap-newspack_role', $user['lineasInvestigacion'] );
+            if ( ! empty ( $user['categories'] ) ) {
+	            update_post_meta( $guest_author_id, 'cap-newspack_employer', $user['categories'][0]['name'] );
+            }
+			if ( isset( $guest_author_data['avatar'] ) && ! empty( $guest_author_data['avatar'] ) ) {
+                update_post_meta( $guest_author_id, '_thumbnail_id', $guest_author_data['avatar'] );
+			}
+
+			// Extra postmeta.
+            update_post_meta( $guest_author_id, 'original_user_id', $user['id'] );
+            update_post_meta( $guest_author_id, 'publicaciones', $user['publicaciones'] );
+            update_post_meta( $guest_author_id, 'lineasInvestigacion', $user['lineasInvestigacion'] );
+	        if ( ! empty ( $user['categories'] ) ) {
+		        update_post_meta( $guest_author_id, 'universidad', $user['categories'][0]['name'] );
+	        }
+
         }
     }
 
