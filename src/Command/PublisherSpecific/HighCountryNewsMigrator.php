@@ -443,6 +443,30 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator hcn-turn-on-images-captions-and-credits',
+			array( $this, 'hcn_turn_on_images_captions_and_credits' ),
+			array(
+				'shortdesc' => 'Turn on images captions and credits.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator hcn-copy-subhead-to-excerpt',
 			array( $this, 'hcn_copy_subhead_to_excerpt' ),
 			array(
@@ -1636,6 +1660,97 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator hcn-turn-on-images-captions-and-credits`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function hcn_turn_on_images_captions_and_credits( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 1000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_with_media_captions_and_credits_on',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'p'              => 120731,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'p'              => 120731,
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$post_content = $post->post_content;
+
+			$updated_post_content = serialize_blocks(
+				array_map(
+					function( $block ) use ( $post ) {
+						if ( 'core/image' === $block['blockName'] ) {
+							// get media URL from innerHTML attribute in the format wp-content/uploads/2021/05/nouveau-web1.jpg.
+							preg_match( '/wp-content\/uploads\/(\d{4}\/\d{2}\/([^?"]+))[^"]*"/', $block['innerHTML'], $matches );
+
+							$media_url = $matches[1];
+
+							// get media ID from media URL.
+							$media_id = $this->get_attachment_id_from_url( $media_url );
+
+							if ( $media_id ) {
+								$this->logger->log( 'turn_on_images_captions_and_credits.log', sprintf( 'Updated image %d', $media_id ), Logger::SUCCESS );
+							} else {
+								$this->logger->log( 'turn_on_images_captions_and_credits.log', sprintf( 'Image of the post %d not found for URL %s', $post->ID, $media_url ), Logger::WARNING );
+							}
+
+							return $media_id ? $this->gutenberg_block_generator->get_image( get_post( $media_id ) ) : $block;
+						}
+
+						return $block;
+					},
+					parse_blocks( $post_content )
+				)
+			);
+
+			if ( $post_content !== $updated_post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $updated_post_content,
+					]
+				);
+
+				$this->logger->log( 'turn_on_images_captions_and_credits.log', sprintf( 'Updated post content for post %d', $post->ID ), Logger::SUCCESS );
+			}
+
+			update_post_meta( $post->ID, '_newspack_with_media_captions_and_credits_on', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
 	 * Callable for `newspack-content-migrator hcn-copy-subhead-to-excerpt`.
 	 *
 	 * @param $args
@@ -2063,5 +2178,24 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		}
 
 		return $inner_html;
+	}
+
+	/**
+	 * Get attachment ID from media URL.
+	 *
+	 * @param string $url Media URL.
+	 * @return int|false attachment ID.
+	 */
+	private function get_attachment_id_from_url( $url ) {
+		global $wpdb;
+
+		$attachment_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value LIKE %s",
+				'%' . $url . '%'
+			)
+		);
+
+		return $attachment_id;
 	}
 }
