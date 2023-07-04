@@ -51,6 +51,13 @@ class UsersMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
+						'name'        => 'role',
+						'description' => 'Role to delete.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'reassign',
 						'description' => 'Reassign posts to this user ID.',
 						'optional'    => false,
@@ -87,6 +94,7 @@ class UsersMigrator implements InterfaceCommand {
 		$users_per_batch = isset( $assoc_args['users-per-batch'] ) ? intval( $assoc_args['users-per-batch'] ) : 10000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 		$reassign        = intval( $assoc_args['reassign'] );
+		$role            = $assoc_args['role'];
 
 		$reassign_user = get_user_by( 'id', $reassign );
 
@@ -97,7 +105,7 @@ class UsersMigrator implements InterfaceCommand {
 
 		$users = get_users(
 			[
-				'role'   => 'subscriber',
+				'role'   => $role,
 				'number' => $users_per_batch,
 				'offset' => ( $batch - 1 ) * $users_per_batch,
 			]
