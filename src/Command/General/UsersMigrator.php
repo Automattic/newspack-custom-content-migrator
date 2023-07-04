@@ -44,8 +44,8 @@ class UsersMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator delete-all-users',
-			array( $this, 'cmd_delete_all_users' ),
+			'newspack-content-migrator delete-all-users-with-role',
+			array( $this, 'cmd_delete_all_users_with_role' ),
 			array(
 				'shortdesc' => 'Deletes all users.',
 				'synopsis'  => [
@@ -83,14 +83,14 @@ class UsersMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator delete-all-users`.
+	 * Callable for `newspack-content-migrator delete-all-users-with-role`.
 	 *
 	 * @param array $positional_args Positional arguments.
 	 * @param array $assoc_args      Associative arguments.
 	 * @return void
 	 */
-	public function cmd_delete_all_users( $positional_args, $assoc_args ) {
-		$log_file        = 'delete_users.log';
+	public function cmd_delete_all_users_with_role( $positional_args, $assoc_args ) {
+		$log_file        = 'delete_users_with_role.log';
 		$users_per_batch = isset( $assoc_args['users-per-batch'] ) ? intval( $assoc_args['users-per-batch'] ) : 10000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 		$reassign        = intval( $assoc_args['reassign'] );
