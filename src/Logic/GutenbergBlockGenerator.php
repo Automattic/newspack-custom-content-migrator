@@ -233,10 +233,11 @@ class GutenbergBlockGenerator {
 		$image_alt   = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
 
 		$attrs = [
+			'id'       => $attachment_post->ID,
 			'sizeSlug' => $size,
 		];
 
-		$content = '<figure class="wp-block-image size-' . $size . '"><img src="' . wp_get_attachment_url( $attachment_post->ID ) . '" alt="' . $image_alt . '"/>' . $caption_tag . '</figure>';
+		$content = '<figure class="wp-block-image size-' . $size . '"><img src="' . wp_get_attachment_url( $attachment_post->ID ) . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_post->ID . '"/>' . $caption_tag . '</figure>';
 
 		return [
 			'blockName'    => 'core/image',
