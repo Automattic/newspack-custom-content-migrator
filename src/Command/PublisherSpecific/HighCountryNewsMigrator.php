@@ -1680,7 +1680,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			[
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
-				'p'              => 120731,
+				// 'p'              => 120731,
 				'post_status'    => 'any',
 				'fields'         => 'ids',
 				'no_found_rows'  => true,
@@ -1693,7 +1693,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$query = new \WP_Query(
 			[
 				'post_type'      => 'post',
-				'p'              => 120731,
+				// 'p'              => 120731,
 				'post_status'    => 'any',
 				'paged'          => $batch,
 				'posts_per_page' => $posts_per_batch,
