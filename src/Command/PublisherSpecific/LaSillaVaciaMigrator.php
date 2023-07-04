@@ -989,7 +989,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                             $author['display_name'],
 							$post_id->get_error_message() )
 						);
-						continue;
+						continue 2;
 					}
 
                     update_post_meta( $post_id, 'original_user_id', $author['id'] );
