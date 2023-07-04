@@ -1713,6 +1713,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 							// get media URL from innerHTML attribute in the format wp-content/uploads/2021/05/nouveau-web1.jpg.
 							preg_match( '/wp-content\/uploads\/(\d{4}\/\d{2}\/([^?"]+))[^"]*"/', $block['innerHTML'], $matches );
 
+							if ( ! isset( $matches[1] ) ) {
+								return $block;
+							}
+
 							$media_url = $matches[1];
 
 							// get media ID from media URL.
