@@ -1130,6 +1130,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_GANOTFOUND.log', sprintf( "GA with email: '%s' display_name: '%s' not found, skipping.", $email, $display_name ), $this->logger::WARNING );
 					continue;
 				}
+				// If multiple GAs returned, use the first one.
+				$ga = is_array( $ga ) ? $ga[0] : $ga;
 
 				// Update meta.
 				update_post_meta( $ga->ID, 'avatar_filename', $avatar_filename );
