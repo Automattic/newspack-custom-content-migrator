@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.3.4
+ * Version:     1.4.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -61,6 +61,7 @@ PluginSetup::register_migrators(
 		Command\General\MetroMigrator::class,
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
+		Command\General\UsersMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
