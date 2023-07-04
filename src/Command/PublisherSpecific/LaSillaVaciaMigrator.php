@@ -1012,11 +1012,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			WP_CLI::error( "Folder $path does not exist." );
 		}
 		/**
-		 * These JSONs use "image" key:
+		 * These JSONs use "image" key for avatar image:
 		 *  - $json_academica
 		 *  - $json_llena
 		 *  - $json_authors
-		 * This JSON uses "picture" key:
+		 * This JSON uses "picture" key for avatar image:
 		 *  - $json_expertos
 		 */
 		$json_files = [
