@@ -1060,25 +1060,40 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					continue;
 				}
 
-				// Get user.
-				// -- check if user email exists for all entries
-				if ( ! isset( $user['user_email'] ) || is_null( $user['user_email'] ) ) {
-					WP_CLI::warning( "User {$user['id']} does not have an email." );
-				}
-				// -- get GA by email
-				$email = $user['user_email'];
-				$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
-				if ( ! $ga ) {
-					/**
-					 * Some emails in JSON contain trailing spaces, and when GAs were imported here emails weren't trimmed,
-					 * so now we have to work with both cases to make up for those.
-					 */
-					$email = trim( $email );
+				// Get GA.
+				$ga = null;
+				// 1. get GA by email (can be two fields)
+				$email = isset( $user['user_email'] ) ? $user['user_email'] : $user['email'];
+				if ( $email ) {
 					$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
 					if ( ! $ga ) {
-						$this->logger->log( 'cmd_update_all_author_avatars__ERROR_GANOTFOUND.log', sprintf( "GA with email %s not found, skipping.", $email ), $this->logger::WARNING );
-						continue;
+						/**
+						 * Some emails in JSON contain trailing spaces, and when GAs were imported emails weren't trimmed,
+						 * so now we have to work with both cases to make up for those.
+						 */
+						$email = trim( $email );
+						$ga = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
 					}
+				}
+				// 2. get GA by full name
+				if ( ! $ga ) {
+					if ( isset( $user['fullname'] ) ) {
+						$display_name = $user['fullname'];
+					} else {
+						// From LaSillaVaciaMigrator::migrate_users.
+						$display_name = $user['name'] . ' ' . $user['lastname'];
+					}
+					$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $display_name );
+					if ( ! $ga ) {
+						$display_name = trim( $display_name );
+						$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $display_name );
+					}
+				}
+
+				// GA not found. Log and skip.
+				if ( ! $ga ) {
+					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_GANOTFOUND.log', sprintf( "GA with email: '%s' display_name: '%s' not found, skipping.", $email, $display_name ), $this->logger::WARNING );
+					continue;
 				}
 
 				// Update meta.
@@ -1148,7 +1163,20 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 		} elseif ( 'picture' == $key_used_for_image ) {
 
-			$d = 1;
+			// Some validation.
+			if ( ! isset( $data['picture'] ) || is_null( $data['picture'] ) || empty( $data['picture'] ) ) {
+				return null;
+			}
+			if ( ! is_string( $data['picture'] ) ) {
+				WP_CLI::warning( sprintf( "Unexpected value for picture: ", json_encode( $data['picture'] ) ) );
+			}
+
+			$image_file = $data['picture'];
+
+			// Remove "/media/" from the beginning of filename.
+			if ( 0 === strpos( strtolower( $image_file ), '/media/' ) ) {
+				$image_file = substr( $image_file, 7 );
+			}
 
 		} else {
 			WP_CLI::error( sprintf( "Key $key_used_for_image not supported, user data: %s", json_encode( $data ) ) );
