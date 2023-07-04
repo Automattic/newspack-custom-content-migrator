@@ -659,6 +659,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'optional' => false,
                         'repeating' => false,
                     ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'emails-csv',
+		                'description' => 'Migrate just these emails, skip all other user records.',
+		                'optional' => true,
+		                'repeating' => false,
+	                ],
                     [
                         'type' => 'flag',
                         'name' => 'reset-db',
@@ -727,6 +734,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'optional' => false,
                         'repeating' => false,
                     ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'fullnames-csv',
+		                'description' => 'Migrate just these full names, skip all other user records.',
+		                'optional' => true,
+		                'repeating' => false,
+	                ],
                     [
                         'type' => 'flag',
                         'name' => 'reset-db',
@@ -896,7 +910,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $this->reset_db();
         }
 
+		$specific_emails = isset( $assoc_args['emails-csv'] ) ? explode( ',', $assoc_args['emails-csv'] ) : null;
+
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
+
+			// If given, will migrate only authors with these emails.
+			if ( ! is_null( $specific_emails ) && ! in_array( $author['user_email'], $specific_emails ) ) {
+				continue;
+			}
+
             $role = $author['xpr_rol'] ?? $author['role'] ?? 'antiguos usuarios';
 
             $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: $role" );
@@ -937,7 +959,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 case 'SillaAcademica':
                 case 'Silla Llena':
                 case 'SillaLlena':
-                    $this->file_logger( "Creating Guest Author." );
+                    $this->file_logger( "Creating Guest Author {$author['user_email']}." );
                     //CAP
                     $guest_author_data = [
                         'user_login' => $author['user_login'],
@@ -957,6 +979,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     $this->file_logger( json_encode( $guest_author_data ), false );
 
                     $post_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
+					if ( is_wp_error( $post_id ) ) {
+						$this->file_logger(
+							sprintf( "Error Creating GA (user_login: '%s', user_email: '%s', first_name: '%s', user_lastname: '%s', display_name: '%s'), err: %s",
+							$author['user_login'],
+                            $author['user_email'],
+                            $author['first_name'] ?? '',
+                            $author['user_lastname'] ?? '',
+                            $author['display_name'],
+							$post_id->get_error_message() )
+						);
+						continue;
+					}
 
                     update_post_meta( $post_id, 'original_user_id', $author['id'] );
                     update_post_meta( $post_id, 'original_role_id', $author['xpr_role_id'] );
@@ -970,6 +1004,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     update_post_meta( $post_id, 'linkedin_url', $author['LinkedInURL'] );
                     update_post_meta( $post_id, 'instagram_url', $author['InstagramURL'] );
                     update_post_meta( $post_id, 'whatsapp', $author['whatsApp'] );
+					WP_CLI::success( "GA ID $post_id created." );
                     continue 2;
             }
 
@@ -1197,10 +1232,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $this->reset_db();
         }
 
-        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
+	    $specific_fullnames = isset( $assoc_args['fullnames-csv'] ) ? explode( ',', $assoc_args['fullnames-csv'] ) : null;
+
+	    foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
+
+		    // If given, will migrate only authors with these display names.
+		    if ( ! is_null( $specific_fullnames ) && ! in_array( $user['fullname'], $specific_fullnames ) ) {
+			    continue;
+		    }
+
             $this->file_logger( "ID: {$user['id']} | FULLNAME: {$user['fullname']}" );
 
-            // There will always be a slug, but not always an email.
+		    // There will always be a slug, but not always an email.
             $guest_author_exists = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_login', $user['slug'] );
 
             // Email is preferred for finding guest authors.
@@ -1231,6 +1274,20 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
             if ( ! $guest_author_exists ) {
 	            $guest_author_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
+
+	            if ( is_wp_error( $guest_author_id ) ) {
+		            $this->file_logger(
+			            sprintf( "Error Creating GA (user_login/slug: '%s', user_email: '%s', first_name: '%s', user_lastname: '%s', display_name: '%s'), err: %s",
+				            $user['slug'],
+				            $user['email'],
+				            $first_name,
+				            $last_name,
+				            $user['fullname'],
+				            $guest_author_id->get_error_message() )
+		            );
+		            continue;
+	            }
+
                 $this->file_logger( "Created GA ID {$guest_author_id}" );
 
 				// Import a new media item only if new GA is created -- shouldn't reimport if GA already exists.

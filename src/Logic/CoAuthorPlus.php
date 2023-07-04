@@ -98,7 +98,7 @@ class CoAuthorPlus {
 	 *     @type int    $avatar       Attachment ID for the Avatar image.
 	 * }
 	 *
-	 * @return int|array Created Guest Author ID, or an array of created Guest Author IDs.
+	 * @return int|array|WP_Error Created Guest Author ID, or an array of created Guest Author IDs, or WP_Error.
 	 *
 	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
 	 */
