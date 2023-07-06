@@ -85,6 +85,252 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				'shortdesc' => "Runs through all the Posts, and in case it doesn't have a featured image, finds the first <img> element in Post content and sets it as featured image.",
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator hide-featured-image-if-used-in-post-content',
+			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
+			[
+				'shortdesc' => 'Hides featured image for post if that same image is used in post_content. By default it hides the featured image only if that same image is used at the very beginning of post_content. Optionally, if --anywhere-in-post-content flag is used, it hides the featured image if that same image is used anywhere in post_content.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'anywhere-in-post-content',
+						'description' => 'If this flag is set, featured image will be hidden if that same image is used anywhere in post_content.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids-csv',
+						'description' => 'Post IDs to process.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-from',
+						'description' => 'Process post IDs from this ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id-to',
+						'description' => 'Process post IDs to this ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for the `newspack-content-migrator hide-featured-image-if-used-in-post-content` command.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_hide_featured_image_if_used_in_post_content( $pos_args, $assoc_args ) {
+		global $wpdb;
+		$log = 'hide-featured-image-if-used-in-post-content.log';
+
+		$dry_run                  = isset( $assoc_args['dry-run'] ) ? true : false;
+		$anywhere_in_post_content = isset( $assoc_args['anywhere-in-post-content'] ) ? true : false;
+		$post_ids                 = isset( $assoc_args['post-ids-csv'] ) && ! empty( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+		$post_id_from             = isset( $assoc_args['post-id-from'] ) && ! empty( $assoc_args['post-id-from'] ) ? $assoc_args['post-id-from'] : null;
+		$post_id_to               = isset( $assoc_args['post-id-to'] ) && ! empty( $assoc_args['post-id-to'] ) ? $assoc_args['post-id-to'] : null;
+		// If --post-ids-csv, can't use --post-id-from and --post-id-to.
+		if ( $post_ids && ( $post_id_from || $post_id_to ) ) {
+			WP_CLI::error( "Can't use both --post-ids-csv and --post-id-from/--post-id-to." );
+		}
+		// If --post-id-from used, must use --post-id-to too.
+		if ( ( $post_id_from && ! $post_id_to ) || ( ! $post_id_from && $post_id_to ) ) {
+			WP_CLI::error( 'Muse provide both --post-id-from and --post-id-to.' );
+		}
+		// Will first use --post-ids-csv if provided.
+		if ( $post_ids ) {
+			WP_CLI::line( 'Checking provided --post-ids-csv...' );
+		}
+		// Get post ID range if specified.
+		if ( ! $post_ids && ( $post_id_from && $post_id_to ) ) {
+			WP_CLI::line( sprintf( 'Fetching post IDs in range between %d and %d...', $post_id_from, $post_id_to ) );
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"select ID
+					from {$wpdb->posts}
+					where post_type = 'post'
+					and post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ) 
+					and ID >= %d
+					and ID <= %d ;",
+					$post_id_from,
+					$post_id_to
+				)
+			);
+			if ( empty( $post_ids ) ) {
+				WP_CLI::error( 'No post IDs found in range.' );
+			}
+		}
+		// Use all posts if no post IDs specified.
+		if ( ! $post_ids ) {
+			WP_CLI::line( "Fetching all published post IDs..." );
+			$post_ids = $this->post_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+		}
+
+		// Timestamp log.
+		$this->logger->log( $log, sprintf( 'Starting %s', date('Y-m-d H:I:s') ) );
+
+		// Go through IDs.
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			// Validate post ID.
+			$post_id_exists = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+			if ( ! $post_id_exists ) {
+				WP_CLI::warning( sprintf( 'Post %d does not exist, skipping', $post_id ) );
+				continue;
+			}
+
+			// Get featured image ID.
+			$thumbnail_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key = '_thumbnail_id'", $post_id ) );
+			if ( ! $thumbnail_id ) {
+				WP_CLI::line( sprintf( 'Post %d has no featured image, skipping', $post_id ) );
+				continue;
+			}
+
+			// Get post_content.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+			if ( ! $post_content ) {
+				WP_CLI::warning( sprintf( 'Post %d has no post_content , skipping', $post_id ) );
+				continue;
+			}
+
+			// Get featured image URL.
+			$featured_image_url     = wp_get_attachment_url( $thumbnail_id );
+			$parsed_url             = parse_url( $featured_image_url );
+			$featured_image_no_host = $parsed_url['path'];
+
+			/**
+			 * Images can contain size modifiers in URL path, e.g. "img-300x200.jpg", which could be the same image as "img.jpg", but not necessarily.
+			 * That's tricky -- e.g. even \attachment_url_to_postid( "img-300x200.jpg" ) does not match this to be the attachment "img.jpg", if it indeed is the same image that's being used.
+			 * Here doing a couple of search strategies, starting with the safest ones. Extend if needed.
+			 */
+
+			// Hide featured image if used anywhere in post_content.
+			if ( $anywhere_in_post_content ) {
+
+				// Check if image url is used anywhere in post_content.
+				$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_no_host );
+				if ( ! $featured_image_used_in_post_content ) {
+					WP_CLI::line( sprintf( 'Featured image not used inline.', $post_id ) );
+					continue;
+				}
+
+				// Hide featured image.
+				if ( $featured_image_used_in_post_content ) {
+					if ( ! $dry_run ) {
+						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+					}
+					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $this->logger::SUCCESS );
+					continue;
+				}
+
+			} else {
+
+				// Hide featured image only if post_content starts with that same image.
+				$post_content_starts_with_featured_image = false;
+
+				$content    = trim( get_post_field( 'post_content', $post_id ) );
+				$image_src  = wp_get_attachment_image_src( $thumbnail_id, 'full' );
+				$image_path = wp_parse_url( $image_src[0] )['path'];
+
+				/**
+				 * Search 1: Search for image block with featured image at beginning of post_content by referencing attachment ID.
+				 */
+				$pattern_subject_begins_w_wpimage_w_attachment_id = '|
+					\A          # Start at beginning of string
+					\<\!--\swp:image    # image block opening
+					[^{]*       # anything but opening curly brace
+					{           # opening curly brace
+					[^}]*       # anything but closing curly brace
+					"id":' . absint( $thumbnail_id ) . '      # attachment id
+					.*?         # anything in the middle
+					--\>        # end of opening tag
+					.*?         # anything in the middle
+					\<\!--\s/wp:image\s--\>                   # block closing tag
+					|xims';
+				/**
+				 * Regex modifiers explained:
+				 *      x - ignore withespaces
+				 *      i - case insensitive
+				 *      U - ungreedy
+				 *      m - multiline:
+				 *          - wp:image block is a multiline string so multiline modifier is needed
+				 *          - when 'm' is used, '^' stops meaning beginning of subject
+				 *          - using '\A' instead of '^' to signify beginning of subject
+				 */
+				preg_match( $pattern_subject_begins_w_wpimage_w_attachment_id, $content, $matches );
+				$post_content_starts_with_featured_image = isset( $matches[0] ) ? true : false;
+
+				/**
+				 * If not found, do Search 2: Search for image block with image URL.
+				 */
+				if ( ! $post_content_starts_with_featured_image ) {
+					if ( $image_src ) {
+						$sprintf_regex_beginning_img_block = '|
+							\A                        # Start at beginning of string
+							<!--\swp:image
+							.*                        # Match any character zero or more times
+							\<\!--\s/wp:image\s--\>
+							|ximsU';
+						preg_match( $sprintf_regex_beginning_img_block, $content, $matches );
+						if ( isset( $matches[0] ) ) {
+							// Check if image URL used inside matched block.
+							$post_content_starts_with_featured_image = false !== strpos( $matches[0], addslashes( $image_path ) );
+						}
+					}
+				}
+
+				/**
+				 * If still not found do Search 3: HTML img element with relative source.
+				 */
+				if ( ! $post_content_starts_with_featured_image ) {
+					$img_element_regex = '|
+						\A          # Start at beginning of string
+						(?:<p>)?    # Optional <p> tag at the beginning -- Gutenberg may insert it.
+						<img
+						[^>]*       # anything but closing bracket
+						>           # end of image element
+						|ximsU';
+					preg_match( $img_element_regex, $content, $matches );
+					if ( isset( $matches[0] ) ) {
+						// Check if image URL used inside matched element.
+						$post_content_starts_with_featured_image = false !== strpos( $matches[0], addslashes( $image_path ) );
+					}
+				}
+
+				// Hide featured image if image found at beginning of post_content.
+				if ( $post_content_starts_with_featured_image ) {
+					if ( ! $dry_run ) {
+						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+					}
+					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $this->logger::SUCCESS );
+					continue;
+				}
+
+			}
+		}
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+		if ( $dry_run ) {
+			WP_CLI::warning( 'This was a dry run. No changes were made.' );
+		}
 	}
 
 	/**

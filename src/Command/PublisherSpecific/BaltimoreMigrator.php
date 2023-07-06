@@ -1,7 +1,7 @@
 <?php
 /**
  * Migrator for BaltimoreFishBowl
- * 
+ *
  * @package NewspackCustomContentMigrator
  */
 
@@ -19,14 +19,14 @@ class BaltimoreMigrator implements InterfaceCommand {
 
 	/**
 	 * Instance of BaltimoreMigrator
-	 * 
+	 *
 	 * @var null|InterfaceCommand
 	 */
 	private static $instance = null;
 
 	/**
 	 * Instance of \Logic\SimpleLocalAvatars.
-	 * 
+	 *
 	 * @var null|SimpleLocalAvatars
 	 */
 	private $sla_logic;
@@ -115,16 +115,16 @@ class BaltimoreMigrator implements InterfaceCommand {
 			}
 
 			$new_avatar_id = $attachments_logic->import_external_file(
-				$author_gravatar_path, 
+				$author_gravatar_path,
 				sprintf( 'User #%s Avatar', $author_id ),
 			);
-			
+
 			if ( is_wp_error( $new_avatar_id ) ) {
 				WP_CLI::warning( sprintf( 'There was an error importing the avatar attachment for user #%s', $author_id ) );
 				continue;
 			}
 
-			$sla_migrated = $this->sla_logic->import_avatar( $author_id, $new_avatar_id );
+			$sla_migrated = $this->sla_logic->assign_avatar( $author_id, $new_avatar_id );
 
 			if ( ! $sla_migrated ) {
 				WP_CLI::warning( sprintf( 'There was an error migrating the avatar image to SLA for user #%s', $author_id ) );

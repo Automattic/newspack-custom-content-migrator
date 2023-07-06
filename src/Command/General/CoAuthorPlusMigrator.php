@@ -198,8 +198,8 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				'shortdesc' => 'Create a Co-Authors Plus Guest Author and add it to a post.',
 				'synopsis'  => [
 					[
-						'type'        => 'positional',
-						'name'        => 'postID',
+						'type'        => 'assoc',
+						'name'        => 'post-id',
 						'description' => 'Post ID to add guest author to.',
 						'optional'    => false,
 						'repeating'   => false,
@@ -308,9 +308,69 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			[ $this, 'cmd_export_posts_gas' ],
 			[
 				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file. The command exports just the GAs names associated to post IDs, not WP Users -- if a post has a WP User author but no GAs, that ID will have a null value.',
-				'synopsis'  => [],
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'post-ids-csv',
+						'description' => 'Export Guest Author names for these Post IDs only.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category',
+			[ $this, 'cmd_set_ga_as_author_of_all_posts_in_category' ],
+			[
+				'shortdesc' => 'Sets a GA as author for all posts in category. Does not append GA, sets as only author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'category-id',
+						'description' => 'Category ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ga-id',
+						'description' => 'GA ID.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_set_ga_as_author_of_all_posts_in_category( array $pos_args, array $assoc_args ) {
+		$cat_id = $assoc_args['category-id'];
+		$ga_id  = $assoc_args['ga-id'];
+
+		$category = get_category( $cat_id );
+		if ( is_wp_error( $category ) || ! $category ) {
+			WP_CLI::error( sprintf( 'Category with ID %d not found.', $cat_id ) );
+		}
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+		if ( false === $ga || ! $ga ) {
+			WP_CLI::error( sprintf( 'Guest Author with ID %d not found.', $ga_id ) );
+		}
+
+		// Get all Post IDs in category and set GA.
+		$post_ids = $this->posts_logic->get_all_posts_ids_in_category( $cat_id, 'post', [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ] );
+		foreach ( $post_ids as $post_id ) {
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $ga_id ], $post_id, false );
+			WP_CLI::success( sprintf( 'Updated Post ID %d.', $post_id ) );
+		}
 	}
 
 	/**
@@ -320,9 +380,13 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_export_posts_gas( array $args, array $assoc_args ) {
+		$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+
 		$guest_author_names = [];
 
-		$post_ids = $this->posts_logic->get_all_posts_ids();
+		if ( ! $post_ids ) {
+			$post_ids = $this->posts_logic->get_all_posts_ids();
+		}
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$guest_authors = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );
@@ -359,40 +423,64 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	/**
 	 * Create a guest author and assign to a post.
 	 *
-	 * @param array $args       Positional arguments.
+	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_cap_create_guest_author_and_add_to_post( $args, $assoc_args ) {
+	public function cmd_cap_create_guest_author_and_add_to_post( $pos_args, $assoc_args ) {
 		$this->require_cap_plugin();
 
-		$post_id            = $args[0];
-		$email              = isset( $assoc_args['email'] ) ? $assoc_args['email'] : null;
-		$description        = isset( $assoc_args['description'] ) ? $assoc_args['description'] : null;
-		$full_name          = $assoc_args['full_name'];
-		$user_login         = sanitize_title( $full_name );
-		$data['user_login'] = $user_login;
-		$data               = [
-			'display_name' => sanitize_text_field( $full_name ),
-			'first_name'   => sanitize_text_field( $assoc_args['first_name'] ),
-			'last_name'    => sanitize_text_field( $assoc_args['last_name'] ),
+		$post_id     = $assoc_args['post-id'];
+		$full_name   = sanitize_text_field( $assoc_args['full_name'] );
+		$email       = isset( $assoc_args['email'] ) ? sanitize_email( $assoc_args['email'] ) : null;
+		$first_name  = isset( $assoc_args['first_name'] ) ? sanitize_text_field( $assoc_args['first_name'] ) : null;
+		$last_name   = isset( $assoc_args['last_name'] ) ? sanitize_text_field( $assoc_args['last_name'] ) : null;
+		$description = isset( $assoc_args['description'] ) ? wp_filter_post_kses( $assoc_args['description'] ) : null;
+		$user_login  = sanitize_title( $full_name );
+
+		// Get GA creation data array.
+		$data = [
+			'display_name' => $full_name,
+			'user_login'   => $user_login,
 		];
 		if ( $email ) {
-			$data['user_email'] = sanitize_email( $email );
+			// When creating a new GA, use lowercase email to avoid duplicates.
+			$data['user_email'] = strtolower( $email );
+		}
+		if ( $first_name ) {
+			$data['first_name'] = $first_name;
+		}
+		if ( $last_name ) {
+			$data['last_name'] = $last_name;
 		}
 		if ( $description ) {
-			$data['description'] = wp_filter_post_kses( $description );
+			$data['description'] = $description;
 		}
 
-		$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
+		// To get existing GA, use email first if available.
+		$guest_author = null;
+		if ( $email ) {
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_email( $email );
+
+			// Also try lowercase email.
+			if ( ! $guest_author ) {
+				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_email( strtolower( $email ) );
+			}
+		}
+		// If GA wasn't found by email, try user_login.
+		if ( ! $guest_author ) {
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
+		}
+		// Get GA ID.
 		if ( $guest_author ) {
 			$author_id = $guest_author->ID;
 		} else {
 			$author_id = $this->coauthorsplus_logic->create_guest_author( $data );
 		}
 
+		// Assign GA to post.
 		$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $author_id ], $post_id );
 
-		WP_CLI::success( 'Guest author successfully added.' );
+		WP_CLI::success( sprintf( 'Done postID %d', $post_id ) );
 	}
 
 	/**
