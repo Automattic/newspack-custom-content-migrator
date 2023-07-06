@@ -373,6 +373,52 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				],
 			],
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-get-all-post-ids-by-wp-user---ivan',
+			[ $this, 'cmd_get_all_posts_by_wp_user_ivan' ],
+			[
+				'shortdesc' => "Temp demo command.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'wpuser-id',
+						'description' => 'WP User ID.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-get-all-post-ids-by-wp-user---getposts',
+			[ $this, 'cmd_get_all_posts_by_wp_user_getposts' ],
+			[
+				'shortdesc' => "Temp demo command.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'wpuser-id',
+						'description' => 'WP User ID.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+
+	}
+
+	public function cmd_get_all_posts_by_wp_user_getposts( array $pos_args, array $assoc_args ) {
+		$wpuser_id = $assoc_args['wpuser-id'];
+		$ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user__get_posts( $wpuser_id, 'post', ['publish', 'pending', 'draft', 'future', 'private'] );
+		WP_CLI::success( print_r( $ids, true ) );
+	}
+
+	public function cmd_get_all_posts_by_wp_user_ivan( array $pos_args, array $assoc_args ) {
+		$wpuser_id = $assoc_args['wpuser-id'];
+		$ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user( $wpuser_id, 'post', ['publish', 'pending', 'draft', 'future', 'private'] );
+		WP_CLI::success( print_r( $ids, true ) );
 	}
 
 	/**
@@ -387,6 +433,9 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		$dry_run   = $assoc_args['dry-run'];
 		$wpuser_id = $assoc_args['wpuser-id'];
 		$ga_id     = isset( $assoc_args['ga-id'] ) ? $assoc_args['ga-id'] : null;
+
+		$ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user( $wpuser_id, 'post', ['publish', 'pending', 'draft', 'future', 'private'] );
+return;
 
 		// Get WP_User.
 		$wpuser = get_user_by( 'ID', $wpuser_id );
