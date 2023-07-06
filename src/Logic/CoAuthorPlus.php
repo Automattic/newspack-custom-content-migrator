@@ -525,25 +525,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Demo.
-	 */
-	public function get_all_posts_by_wp_user__get_posts( int $wpuser_id, string $post_type = 'post', array $post_status = [ 'publish', 'draft', 'pending', 'future', 'private', 'inherit', 'trash' ] ): array {
-
-		// Adapted from https://wordpress.org/support/topic/query-all-posts-of-author-even-if-he-she-is-co-author/
-		$args = [
-			'post_type' 	 => $post_type,
-			'post_status' 	 => $post_status,
-			'author__in'     => [ $wpuser_id ],
-            'fields'         => 'ids',
-            'posts_per_page' => -1,
-		];
-		$query = new \WP_Query( $args );
-		$ids = $query->posts;
-
-		return $ids;
-	}
-	/**
-	 * Gets all posts IDs by WP User. This returns all post IDs where th WP_User is:
+	 * Gets all post IDs authored by a WP User. Returns all post IDs where th WP_User is:
 	 *   - either the post's single author,
 	 *   - or one of post's co-authors,
 	 *   - and if the WP_user is linked to a Guest Author, this also returns all posts authored by that Guest Author.
