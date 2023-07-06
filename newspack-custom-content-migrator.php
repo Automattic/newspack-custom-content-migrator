@@ -64,6 +64,7 @@ PluginSetup::register_migrators(
 		Command\General\UsersMigrator::class,
 
 		// Publisher specific, remove when launched.
+		Command\PublisherSpecific\HipertextualMigrator::class,
 		Command\PublisherSpecific\GadisMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,

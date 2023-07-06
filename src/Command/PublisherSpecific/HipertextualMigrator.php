@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\Logger;
 
 /**
  * Custom migration scripts for Hipertextual.
@@ -16,14 +17,16 @@ class HipertextualMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
-	 * @var AttachmentsLogic
+	 * @var Logger.
 	 */
-	private $attachments_logic;
+	private $logger;
 
 	/**
 	 * Constructor.
 	 */
-	private function __construct() {}
+	private function __construct() {
+		$this->logger = new Logger();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -33,7 +36,7 @@ class HipertextualMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -141,6 +144,36 @@ class HipertextualMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator hipertextual-migrate-markdown',
+			[ $this, 'cmd_migrate_markdown' ],
+			[
+				'shortdesc' => 'Migrate markdown.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'backup-folder-path',
+						'description' => 'Path to the backup folder.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -167,7 +200,7 @@ class HipertextualMigrator implements InterfaceCommand {
 		foreach ( $matches[0] as $match ) {
 
 			// Loop through each markdown replacement needed.
-			foreach( $replacements as $search => $replace ) {
+			foreach ( $replacements as $search => $replace ) {
 				if ( false !== \strpos( $match, $search ) ) {
 
 					// Remove the markdown from the heading, leaving just the text.
@@ -180,7 +213,6 @@ class HipertextualMigrator implements InterfaceCommand {
 					$value = str_replace( $match, $title, $value );
 				}
 			}
-
 		}
 
 		return $value;
@@ -194,7 +226,7 @@ class HipertextualMigrator implements InterfaceCommand {
 	public function convert_markdown_bold( $value, $key, $post_id ) {
 
 		// Look for markdown bold, skip if there aren't any.
-		$find = \preg_match_all( '/\*\*[\w\sáéíóúñü,\-\s\(\)\.]+\*\*/', $value, $matches );
+		$find = \preg_match_all( '/\*\*[^\*<]+\*\*/', $value, $matches );
 		if ( ! $find || 0 === $find ) {
 			return $value;
 		}
@@ -210,6 +242,31 @@ class HipertextualMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Convert markdown bold
+	 *
+	 * @return string Converted content
+	 */
+	public function convert_markdown_urls_without_update( $post_content, $key, $post_id ) {
+
+		// Look for markdown URLs, skip if there aren't any.
+		$find = \preg_match_all( '/\[([^\]]+)\]\(([\S]+)\)/', $post_content, $matches );
+		if ( ! $find || 0 === $find ) {
+			return $post_content;
+		}
+
+		for ( $i = 0; $i < count( $matches[0] ); $i++ ) {
+			$replace      = sprintf(
+				'<a href="%s">%s</a>',
+				$matches[2][ $i ],
+				$matches[1][ $i ]
+			);
+			$post_content = \str_replace( $matches[0][ $i ], $replace, $post_content );
+		}
+
+		return $post_content;
+	}
+
+	/**
 	 * Convert markdown italics
 	 *
 	 * @return string Converted content
@@ -217,7 +274,7 @@ class HipertextualMigrator implements InterfaceCommand {
 	public function convert_markdown_italics( $value, $key, $post_id ) {
 
 		// Look for markdown bold, skip if there aren't any.
-		$find = \preg_match_all( '/\*[\w\sáéíóúñü,\-\s\(\)\.]+\*/', $value, $matches );
+		$find = \preg_match_all( '/\*[^\*<]+\*(?!;)/', $value, $matches );
 		if ( ! $find || 0 === $find ) {
 			return $value;
 		}
@@ -237,7 +294,7 @@ class HipertextualMigrator implements InterfaceCommand {
 	 */
 	public function convert_missed_markdown( $args, $assoc_args ) {
 
-		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
+		$post_id = isset( $assoc_args['post-id'] ) ? (int) $assoc_args['post-id'] : false;
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$limit   = min( $assoc_args['limit'], 100 );
 		$batches = min( $assoc_args['batches'], 10 );
@@ -258,17 +315,19 @@ class HipertextualMigrator implements InterfaceCommand {
 
 			WP_CLI::line( sprintf( 'Checking batch %d', $i ) );
 
-			$posts = get_posts( [
-				'posts_per_page' => $limit,
-				'post_type'      => 'post',
-				'post_status'    => 'publish',
-				'meta_query'     => [
-					[
-						'key'     => '_np_markdown_fix',
-						'compare' => 'NOT EXISTS',
-					]
+			$posts = get_posts(
+				[
+					'posts_per_page' => $limit,
+					'post_type'      => 'post',
+					'post_status'    => 'publish',
+					'meta_query'     => [
+						[
+							'key'     => '_np_markdown_fix',
+							'compare' => 'NOT EXISTS',
+						],
+					],
 				]
-			] );
+			);
 
 			// Don't try to convert nothing, 'cause that won't work.
 			if ( empty( $posts ) ) {
@@ -281,7 +340,6 @@ class HipertextualMigrator implements InterfaceCommand {
 			foreach ( $posts as $post ) {
 				$this->fix_markdown_in_post( $post, $dry_run );
 			}
-
 		}
 
 		// All work and no cache clearance make Homer something something...
@@ -292,13 +350,99 @@ class HipertextualMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator hipertextual-migrate-markdown`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_migrate_markdown( $args, $assoc_args ) {
+		global $wpdb;
+
+		$log_file           = 'hipertextual_migrate_markdown.log';
+		$posts_per_batch    = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch              = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$backup_folder_path = rtrim( $assoc_args['backup-folder-path'], '/' ) . '/';
+
+		// Create backup folder if it doesn't exist.
+		if ( ! file_exists( $backup_folder_path ) ) {
+			mkdir( $backup_folder_path, 0777, true );
+		}
+
+		$meta_query = [
+			[
+				'key'     => '_np_markdown_fix',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				// 'p'              => 1351512,
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				// 'p'              => 1234555,
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			$post_content = $post->post_content;
+
+			$post_content = $this->convert_markdown_bold( $post_content, '', $post->ID );
+			$post_content = $this->convert_markdown_urls_without_update( $post_content, '', $post->ID );
+			$post_content = $this->convert_markdown_italics( $post_content, '', $post->ID );
+			$post_content = $this->convert_markdown_headings( $post_content, '', $post->ID );
+
+			if ( $post_content !== $post->post_content ) {
+				// Backup the post content.
+				$backup_path = $backup_folder_path . $post->ID . '.txt';
+				file_put_contents( $backup_path, $post->post_content );
+
+				$update = $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content ], [ 'ID' => $post->ID ] );
+
+				if ( false === $update ) {
+					$this->logger->log(
+						$log_file,
+						sprintf(
+							'Failed to update post %d',
+							$post->ID,
+						),
+						Logger::WARNING
+					);
+				} else {
+					$this->logger->log( $log_file, sprintf( 'Updated post %d, the backup is here: %s', $post->ID, $backup_path ), Logger::SUCCESS );
+				}
+			}
+
+			add_post_meta( $post->ID, '_np_markdown_fix', gmdate( 'c' ) );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
 	 * Convert markdown URLs
 	 *
 	 * @return string Converted content
 	 */
 	public function convert_markdown_urls( $args, $assoc_args ) {
 
-		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : false;
+		$post_id = isset( $assoc_args['post-id'] ) ? (int) $assoc_args['post-id'] : false;
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$limit   = min( $assoc_args['limit'], 100 );
 		$batches = min( $assoc_args['batches'], 10 );
@@ -319,17 +463,19 @@ class HipertextualMigrator implements InterfaceCommand {
 
 			WP_CLI::line( sprintf( 'Checking batch %d', $i ) );
 
-			$posts = get_posts( [
-				'posts_per_page' => $limit,
-				'post_type'      => 'post',
-				'post_status'    => 'publish',
-				'meta_query'     => [
-					[
-						'key'     => '_np_markdown_urls',
-						'compare' => 'NOT EXISTS',
-					]
+			$posts = get_posts(
+				[
+					'posts_per_page' => $limit,
+					'post_type'      => 'post',
+					'post_status'    => 'publish',
+					'meta_query'     => [
+						[
+							'key'     => '_np_markdown_urls',
+							'compare' => 'NOT EXISTS',
+						],
+					],
 				]
-			] );
+			);
 
 			// Don't try to convert nothing, 'cause that won't work.
 			if ( empty( $posts ) ) {
@@ -342,7 +488,6 @@ class HipertextualMigrator implements InterfaceCommand {
 			foreach ( $posts as $post ) {
 				$this->fix_markdown_urls_in_post( $post, $dry_run );
 			}
-
 		}
 
 		// All work and no cache clearance make Homer something something...
@@ -363,21 +508,25 @@ class HipertextualMigrator implements InterfaceCommand {
 		$post_content = $this->convert_markdown_italics( $post_content, '', $post->ID );
 
 		if ( $post_content !== $post->post_content ) {
-			$update = ( $dry_run ) ? true : wp_update_post( [
-				'ID'           => $post->ID,
-				'post_content' => $post_content,
-			] );
+			$update = ( $dry_run ) ? true : wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $post_content,
+				]
+			);
 			if ( is_wp_error( $update ) ) {
-				WP_CLI::warning( sprintf(
-					'Failed to update post %d because %s',
-					$post->ID,
-					$update->get_error_message()
-				) );
+				WP_CLI::warning(
+					sprintf(
+						'Failed to update post %d because %s',
+						$post->ID,
+						$update->get_error_message()
+					)
+				);
 			}
 		}
 
 		if ( ! $dry_run ) {
-			add_post_meta( $post->ID, '_np_markdown_fix', date('c') );
+			add_post_meta( $post->ID, '_np_markdown_fix', date( 'c' ) );
 		}
 
 	}
@@ -393,7 +542,7 @@ class HipertextualMigrator implements InterfaceCommand {
 		$find = \preg_match_all( '/\[([\w\ssáéíóúñü]+)\]\(([\S]+)\)/', $post_content, $matches );
 		if ( ! $find || 0 === $find ) {
 			if ( ! $dry_run ) {
-				add_post_meta( $post->ID, '_np_markdown_urls', date('c') );
+				add_post_meta( $post->ID, '_np_markdown_urls', date( 'c' ) );
 			}
 			return;
 		}
@@ -401,32 +550,36 @@ class HipertextualMigrator implements InterfaceCommand {
 		WP_CLI::line( sprintf( 'Found %d matches in post %d', count( $matches[0] ), $post->ID ) );
 
 		for ( $i = 0; $i < count( $matches[0] ); $i++ ) {
-			$replace = sprintf(
+			$replace      = sprintf(
 				'<a href="%s">%s</a>',
-				$matches[2][$i],
-				$matches[1][$i]
+				$matches[2][ $i ],
+				$matches[1][ $i ]
 			);
-			$post_content = \str_replace( $matches[0][$i], $replace, $post_content );
+			$post_content = \str_replace( $matches[0][ $i ], $replace, $post_content );
 		}
 
 		if ( $post_content !== $post->post_content ) {
-			$update = ( $dry_run ) ? true : wp_update_post( [
-				'ID'           => $post->ID,
-				'post_content' => $post_content,
-			] );
+			$update = ( $dry_run ) ? true : wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $post_content,
+				]
+			);
 			if ( is_wp_error( $update ) ) {
-				WP_CLI::warning( sprintf(
-					'Failed to update post %d because %s',
-					$post->ID,
-					$update->get_error_message()
-				) );
+				WP_CLI::warning(
+					sprintf(
+						'Failed to update post %d because %s',
+						$post->ID,
+						$update->get_error_message()
+					)
+				);
 			} else {
 				WP_CLI::line( sprintf( 'Updated post %d', $post->ID ) );
 			}
 		}
 
 		if ( ! $dry_run ) {
-			add_post_meta( $post->ID, '_np_markdown_urls', date('c') );
+			add_post_meta( $post->ID, '_np_markdown_urls', date( 'c' ) );
 		}
 
 	}
@@ -470,9 +623,11 @@ class HipertextualMigrator implements InterfaceCommand {
 		}
 
 		$items = explode( '-', $value );
-		$list = '';
+		$list  = '';
 		foreach ( $items as $item ) {
-			if ( empty( $item ) ) continue;
+			if ( empty( $item ) ) {
+				continue;
+			}
 			$list .= sprintf( '<li>%s</li>', trim( $item ) );
 		}
 
@@ -546,9 +701,9 @@ class HipertextualMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$wp_object_cache->group_ops = array();
+		$wp_object_cache->group_ops      = array();
 		$wp_object_cache->memcache_debug = array();
-		$wp_object_cache->cache = array();
+		$wp_object_cache->cache          = array();
 
 		if ( is_callable( $wp_object_cache, '__remoteset' ) ) {
 			$wp_object_cache->__remoteset(); // important
