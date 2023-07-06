@@ -394,10 +394,6 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( 'WP User ID %d not found.', $wpuser_id ) );
 		}
 
-		$post_ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user( $wpuser_id, 'post', ['publish','draft','trash'] );
-return;
-
-
 		// Use existing GA.
 		if ( $ga_id ) {
 
@@ -466,21 +462,10 @@ return;
 			}
 		}
 
-		$post_ids = $this->coauthorsplus_logic->get_all_post_ids_by_wp_user( $wpuser );
-		// $this->coauthorsplus_logic->get_all_posts_by_guest_author( $wpuser_id );
+		$post_ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user( $wpuser_id, 'post', ['publish','draft','trash'] );
 
 return;
 
-		/**
-		 * Get all post IDs by $wpuser.
-		 *
-		 * Posts can be authored by WP_User by wp_posts.post_author. But WP_User could have been a CoAuthor, so we should check
-		 * CAP's meta. Therefore, we need to loop through all posts.
-		 */
-		$post_ids = $this->posts_logic->get_all_posts_ids();
-$post_ids = [12,13  ,18,21];
-		// $post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_author = %d", $wpuser_id ) );
-		// $this->coauthorsplus_logic->get_all_posts_by_guest_author( $wpuser_id);
 
 		// Reassign posts from $wpuser to $ga.
 		$reassigned_post_ids = [];
