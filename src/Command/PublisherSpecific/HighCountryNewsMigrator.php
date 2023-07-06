@@ -527,6 +527,30 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-delete-subscribers',
+			array( $this, 'hcn_delete_subscriber' ),
+			array(
+				'shortdesc' => 'Deletes all users.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-per-batch',
+						'description' => 'users to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			)
+		);
 	}
 
 	public function cmd_migrate_authors_from_scrape() {
@@ -1939,6 +1963,45 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 			// write to the processed issues log file.
 			file_put_contents( $already_processed_ids_file, $issue['@id'] . PHP_EOL, FILE_APPEND );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hcn-delete-subscribers`.
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args      Associative arguments.
+	 * @return void
+	 */
+	public function hcn_delete_subscriber( $positional_args, $assoc_args ) {
+		$log_file        = 'hcn_delete_subscribers.log';
+		$users_per_batch = isset( $assoc_args['users-per-batch'] ) ? intval( $assoc_args['users-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$users = get_users(
+			[
+				'role'   => 'subscriber',
+				'number' => $users_per_batch,
+				'offset' => ( $batch - 1 ) * $users_per_batch,
+			]
+		);
+
+		foreach ( $users as $user ) {
+			if ( 0 < intval( count_user_posts( $user->ID ) ) ) {
+				$this->logger->log( $log_file, 'Skipping user ' . $user->ID . ' ' . $user->user_email . ' with posts', Logger::WARNING );
+				continue;
+			}
+
+			$co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $user->display_name );
+			if ( $co_author ) {
+				$this->logger->log( $log_file, 'Skipping user ' . $user->ID . ' ' . $user->user_email . ' with co-author', Logger::WARNING );
+				continue;
+			}
+
+			$this->logger->log( $log_file, 'Deleting user ' . $user->ID . ' ' . $user->user_email, Logger::SUCCESS );
+			wp_delete_user( $user->ID );
 		}
 
 		wp_cache_flush();
