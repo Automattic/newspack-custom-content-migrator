@@ -409,18 +409,6 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 	}
 
-	public function cmd_get_all_posts_by_wp_user_getposts( array $pos_args, array $assoc_args ) {
-		$wpuser_id = $assoc_args['wpuser-id'];
-		$ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user__get_posts( $wpuser_id, 'post', ['publish', 'pending', 'draft', 'future', 'private'] );
-		WP_CLI::success( print_r( $ids, true ) );
-	}
-
-	public function cmd_get_all_posts_by_wp_user_ivan( array $pos_args, array $assoc_args ) {
-		$wpuser_id = $assoc_args['wpuser-id'];
-		$ids = $this->coauthorsplus_logic->get_all_posts_by_wp_user( $wpuser_id, 'post', ['publish', 'pending', 'draft', 'future', 'private'] );
-		WP_CLI::success( print_r( $ids, true ) );
-	}
-
 	/**
 	 * Callable for `newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category`.
 	 *

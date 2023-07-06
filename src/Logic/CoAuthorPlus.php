@@ -548,6 +548,13 @@ class CoAuthorPlus {
 	 *   - or one of post's co-authors,
 	 *   - and if the WP_user is linked to a Guest Author, this also returns all posts authored by that Guest Author.
 	 *
+	 * Ideally we would use get_posts() with 'author__in' param for this (see https://wordpress.org/support/topic/query-all-posts-of-author-even-if-he-she-is-co-author/),
+	 * but we have witnessed some bugs where it returns postIDs not authored by the WP_User, so we're using WP_Query instead.
+	 *
+	 * More detailed explanation of how this works follows.
+	 *
+	 * -------------------------------------------------
+	 *
 	 * Post authorship can be stored in two different places:
 	 *   1. If CAP plugin was not used (active) on site when a WP_User was created and assigned as post author,
 	 *      the classic `wp_posts`.`post_author` is what determines the post authorship.
@@ -594,7 +601,6 @@ class CoAuthorPlus {
 		if ( $term_id ) {
 			$term_taxonomy_id = $wpdb->get_var( $wpdb->prepare( "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = %d", $term_id ) );
 		}
-
 
 		// 1 -- get post IDs where this WP_User is a co-author as managed by CAP (via `wp_term_relationships`).
 		$post_status_placeholders = implode( ',', array_fill( 0, count( $post_status ), '%s' ) );
