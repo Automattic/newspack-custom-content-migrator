@@ -436,10 +436,6 @@ class CCMMigrator implements InterfaceCommand {
 				'key'     => '_newspack_migration_migrate_primary_category',
 				'compare' => 'NOT EXISTS',
 			],
-			[
-				'key'     => 'ccm_brands',
-				'compare' => 'EXISTS',
-			],
 		];
 
 		$total_query = new \WP_Query(
@@ -467,7 +463,7 @@ class CCMMigrator implements InterfaceCommand {
 		$total_posts = count( $posts );
 
 		foreach ( $posts as $index => $post ) {
-			WP_CLI::line( sprintf( 'Post %d/%d', $index + 1, $total_posts ) );
+			WP_CLI::line( sprintf( 'Post %d/%d (%d)', $index + 1, $total_posts, $post->ID ) );
 
 			$primary_category = get_post_meta( $post->ID, 'ccm_primary_category', true );
 
@@ -510,10 +506,6 @@ class CCMMigrator implements InterfaceCommand {
 			[
 				'key'     => '_newspack_migration_migrate_gallery_and_thumbnmail',
 				'compare' => 'NOT EXISTS',
-			],
-			[
-				'key'     => 'ccm_images',
-				'compare' => 'EXISTS',
 			],
 		];
 
@@ -607,10 +599,6 @@ class CCMMigrator implements InterfaceCommand {
 				'key'     => '_newspack_migration_migrate_co_authors',
 				'compare' => 'NOT EXISTS',
 			],
-			[
-				'key'     => 'ccm_coauthors',
-				'compare' => 'EXISTS',
-			],
 		];
 
 		$total_query = new \WP_Query(
@@ -696,14 +684,19 @@ class CCMMigrator implements InterfaceCommand {
 			} else {
 				$co_author_ids = [];
 				foreach ( $cleaned_co_authors as $cleaned_co_author ) {
-					$co_author_ids[] = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $cleaned_co_author ] );
+					$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $cleaned_co_author ] );
+					if ( is_wp_error( $co_author_id ) ) {
+						$this->logger->log( $log_file, sprintf( 'Error adding the co-author `%s` for the post %d: %s', $cleaned_co_author, $post->ID, $co_author_id->get_error_message() ) );
+					} else {
+						$co_author_ids[] = $co_author_id;
+					}
 				}
 
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_author_ids, $post->ID );
 				$this->logger->log( $log_file, sprintf( 'Setting post %d co-author(s): %s', $post->ID, join( ', ', $cleaned_co_authors ) ), Logger::SUCCESS );
 			}
 
-			update_post_meta( $post->ID, '_newspack_migration_migrate_gallery_and_thumbnmail', true );
+			update_post_meta( $post->ID, '_newspack_migration_migrate_co_authors', true );
 		}
 	}
 }
