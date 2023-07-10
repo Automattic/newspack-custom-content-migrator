@@ -209,6 +209,9 @@ class ContentDiffMigrator {
 					&& $live_post['post_status'] == $local_post['post_status']
 					&& $live_post['post_date'] == $local_post['post_date']
 				) {
+					// Remove the local post which was found (break; was done), to make the next search a bit faster.
+					unset( $results_local_posts[ $key_local_post ] );
+
 					$found = true;
 					break;
 				}
@@ -217,9 +220,6 @@ class ContentDiffMigrator {
 			// Unique on live, add to $ids.
 			if ( false === $found ) {
 				$ids[] = $live_post['ID'];
-
-				// Remove the local post which was found (break; was done), to make the next search a bit faster.
-				unset( $results_local_posts[ $key_local_post ] );
 			}
 		}
 
@@ -614,7 +614,7 @@ class ContentDiffMigrator {
 		if ( 0 == $category_tree['parent'] ) {
 
 			// Get or create this top parent category.
-			$category_top_parent_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], 0 );
+			$category_top_parent_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], 0 );
 			$category_top_parent_term_id = $category_top_parent_row['term_id'] ?? null;
 			if ( ! $category_top_parent_term_id ) {
 				// Insert it if it doesn't exist.
@@ -639,7 +639,7 @@ class ContentDiffMigrator {
 		}
 
 		// For a non-top-parent category, get or create its tree and return.
-		$category_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], $current_parent_tree['term_id'] );
+		$category_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], $current_parent_tree['term_id'] );
 		$category_term_id = $category_row['term_id'] ?? null;
 		if ( ! $category_term_id ) {
 			$category_term_id = $this->wp_insert_category(
@@ -736,7 +736,47 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets a category array with all the related data.
+	 * Gets category by its name and parent.
+	 *
+	 * @param string $table_prefix    DB table prefix.
+	 * @param string $cat_name        Category name.
+	 * @param string $cat_parent      Category parent's term_id.
+	 *
+	 * @return array {
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent's term_id.
+	 * }
+	 */
+	public function get_category_array_by_name_and_parent( $table_prefix, $cat_name, $cat_parent ) {
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$category = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+					FROM $table_terms t
+			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
+					WHERE tt.taxonomy = 'category'
+					AND tt.parent = %s
+					AND t.name = %s;",
+				$cat_parent,
+				$cat_name
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $category;
+	}
+
+	/**
+	 * Gets category by its name, description and parent
 	 *
 	 * @param string $table_prefix    DB table prefix.
 	 * @param string $cat_name        Category name.
@@ -919,6 +959,13 @@ class ContentDiffMigrator {
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
 			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
 			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
+
+			// Validate live term row, it could be missing or invalid.
+			if ( is_null( $live_term_row ) ) {
+				$error_messages[] = sprintf( 'Faulty term relationship record in live DB, term skipped: posts.ID=%d > term_relationships has term_taxonomy_id=%d > term_taxonomy has term_id=%d >> term_id does not exist in live DB table.', $data['post']['ID'], $live_term_taxonomy_id, $live_term_taxonomy_row['term_id'] );
+				continue;
+			}
+
 			$live_term_name         = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
@@ -1030,11 +1077,6 @@ class ContentDiffMigrator {
 		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
 
 		foreach ( $results as $key_result => $result ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_result % 2000 ) {
-				echo '.';
-			}
-
 			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
 			$post_id = $result['post_id'] ?? null;
 			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
@@ -1212,8 +1254,16 @@ class ContentDiffMigrator {
 			$block_innerhtml_updated    = $block['innerHTML'];
 			$block_innercontent_updated = $block['innerContent'][0];
 
+			// We've seen some wp:image blocks with no ID, skip them.
+			if ( ! isset( $block_updated['attrs']['id'] ) ) {
+				continue;
+			}
+
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1251,6 +1301,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1302,7 +1355,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <audio> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
@@ -1340,6 +1396,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole audio HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
@@ -1388,7 +1447,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <video> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerhtml_updated );
@@ -1426,6 +1488,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole video HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $video_html, $video_html_updated, $block_innerhtml_updated );
@@ -1474,7 +1539,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <a> elementa from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerhtml_updated );
@@ -1512,6 +1580,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole a HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $a_html, $a_html_updated, $block_innerhtml_updated );
@@ -1560,7 +1631,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1598,6 +1672,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1649,7 +1726,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get mediaID (attachment ID) from block header.
-			$att_id = $block_updated['attrs']['mediaId'];
+			$att_id = isset( $block_updated['attrs']['mediaId'] ) ? $block_updated['attrs']['mediaId'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1688,10 +1768,8 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			// If it's the same ID, don't update anything.
-			if ( $att_id === $new_att_id ) {
-				continue;
-			}
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1784,6 +1862,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1883,6 +1964,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1984,6 +2068,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -2817,7 +2904,7 @@ class ContentDiffMigrator {
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
-	public function validate_core_wp_db_tables( $table_prefix, $skip_tables = [] ) {
+	public function validate_core_wp_db_tables_exist_in_db( $table_prefix, $skip_tables = [] ) {
 		$all_tables = $this->get_all_db_tables();
 		foreach ( self::CORE_WP_TABLES as $table ) {
 			if ( in_array( $table, $skip_tables ) ) {
@@ -2894,8 +2981,9 @@ class ContentDiffMigrator {
 	 * @return array
 	 */
 	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
+		$collation_comparison = $this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables );
 		return array_filter(
-			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
+			$collation_comparison,
 			fn( $validated_table ) => false === $validated_table['match_bool']
 		);
 	}
@@ -2965,7 +3053,6 @@ class ContentDiffMigrator {
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
-			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );
@@ -2973,7 +3060,8 @@ class ContentDiffMigrator {
 			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
 				$limiter['start'] = $limiter['start'] + $limiter['limit'];
 			} else {
-				throw new \RuntimeException( sprintf( "Got up to (not including) %s. Failed running SQL '%s'.", $limiter['start'], $insert_sql ) );
+				$db_error = ( '' != $this->wpdb->last_error ) ? 'DB error message: ' . $this->wpdb->last_error : 'No DB error message available -- check error and debug logs.';
+				WP_CLI::error( sprintf( "Got up to (not including) %s. Failed running SQL '%s'. %s", $limiter['start'], $insert_sql, $db_error ) );
 			}
 
 			if ( $sleep_in_seconds ) {

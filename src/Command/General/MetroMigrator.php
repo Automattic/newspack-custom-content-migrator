@@ -6,11 +6,11 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use WP_CLI;
 
-class MetroMirgator implements InterfaceCommand {
+class MetroMigrator implements InterfaceCommand {
 
 	private $ids_mappings;
 	private $mappings_folder;
-	
+
 	/**
 	 * @var null|InterfaceCommand Instance.
 	 */
@@ -206,10 +206,10 @@ class MetroMirgator implements InterfaceCommand {
 
 		$uploads_path = wp_upload_dir()['basedir'];
 
-		foreach ( $attachments as $attachment ) {			
+		foreach ( $attachments as $attachment ) {
 			$filename = path_join( $uploads_path, $attachment->file );
 			$new_filename = path_join( $uploads_path, $filename . 'g' );
-			
+
 			WP_CLI::log( sprintf( 'Renaming attachement #%d filename from %s to %s', $attachment->ID , $filename, $filename . 'g' ) );
 
 			if ( ! file_exists( $filename ) ) {
@@ -264,7 +264,7 @@ class MetroMirgator implements InterfaceCommand {
 		$files_folder = $assoc_args['files-folder'];
 
 		$locations = $this->get_objects_from_folder( $files_folder );
-		
+
 		foreach ( $locations as $location ) {
 			if ( $this->location_exists( $location->uuid ) ) {
 				WP_CLI::log( sprintf( 'Location "%s" already exists. Skipping...', $location->title ) );
@@ -337,7 +337,7 @@ class MetroMirgator implements InterfaceCommand {
 			WP_CLI::log( sprintf( 'Importing attachment "%s"', $file_data->filename  ) );
 
 			$file_path = path_join( $files_folder, $file_data->uuid . '.data' );
-			
+
 			$result = $this->add_file( $file_data, $file_path );
 			if ( is_wp_error( $result ) ) {
 				WP_CLI::warning( sprintf( 'Could not add attachment "%s"', $file_data->filename ) );
@@ -381,7 +381,7 @@ class MetroMirgator implements InterfaceCommand {
 			if ( 'describes' != $this->get_object_id( $tag->uuid, 'tags_types') ) {
 				continue;
 			}
-			
+
 			if ( $this->tag_exists( $tag->uuid ) ) {
 				WP_CLI::log( sprintf( 'Tag "%s" already exists. Skipping...', $tag->title ) );
 				continue;
@@ -426,7 +426,7 @@ class MetroMirgator implements InterfaceCommand {
 
 	public function cmd_metro_import_sections( $args, $assoc_args ) {
 		$files_folder = $assoc_args['files-folder'];
-		
+
 		$sections = $this->get_objects_from_folder( $files_folder );
 
 		if ( $sections == false ) {
@@ -460,7 +460,7 @@ class MetroMirgator implements InterfaceCommand {
 
 			$this->add_category( $section, $parent_id );
 		}
-		
+
 		if ( count( $need_parents ) > 0 ) {
 			$this->add_categories( $need_parents );
 		}
@@ -511,7 +511,7 @@ class MetroMirgator implements InterfaceCommand {
 		}
 
 		$post->content = '';
-		
+
 		$post_meta = array(
 			'newspack_post_subtitle' => $post->sub_title,
 			'newspack_canonical_url' => $post->canonical_url,
@@ -545,7 +545,7 @@ class MetroMirgator implements InterfaceCommand {
 		}
 
 		$featured_image = $post->feature_image_url ? $post->feature_image_url : $post->teaser_image_url;
-		
+
 		if ( $featured_image ) {
 			$featured_image_uuid = end( explode( '/', $featured_image ) );
 			$featured_image_id = $this->get_attachment_id( $featured_image_uuid );
@@ -650,13 +650,13 @@ HTML;
 
 		$tmpfname = wp_tempnam( $file_path );
 		copy( $file_path, $tmpfname );
-		
+
 		$file_array = array(
 			'name'     => $data->filename,
 			'tmp_name' => $tmpfname,
 			'type' => $data->mimetype,
 		);
-		
+
 		$post_data = array(
 			'post_title' => $data->title ?? '',
 			'post_date' => $data->created,
