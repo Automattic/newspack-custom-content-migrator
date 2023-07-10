@@ -313,17 +313,17 @@ class TownNewsMigrator implements InterfaceCommand {
 			$xml_doc->xpath( '//tn:head/tn:pubdata' )
 		);
 		$tags            = array_map(
+			function( $tag ) {
+				return ucwords( (string) $tag );
+			},
+			explode( ',', $this->get_element_by_xpath_attribute( $xml_doc, '//tn:meta[@name="tncms-flags"]', 'content' ) )
+		);
+		$keywords        = array_map(
 			function( $keyword ) {
 				return ucwords( (string) $keyword[0]->attributes()['key'] );
 			},
 			$xml_doc->xpath( '//tn:head/tn:docdata/tn:key-list/tn:keyword' )
 		);
-
-		// Featured tag.
-		$featured = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:identified-content/tn:classifier[@type="tncms:flag"]', 'value' );
-		if ( 'featured' === $featured ) {
-			$tags[] = 'Featured';
-		}
 
 		// Add article.
 		$post_id = $this->create_post( $tn_id, $title, 'usable' === $status ? 'publish' : 'draft', $pubdate );
@@ -349,6 +349,9 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		// Set post tags and categories.
 		wp_set_post_tags( $post_id, $tags );
+
+		// Set YOAST keywords.
+		update_post_meta( $post_id, '_yoast_wpseo_focuskw', implode( ' ', $keywords ) );
 
 		$categories_to_add = [];
 		foreach ( $categories as $raw_category ) {
