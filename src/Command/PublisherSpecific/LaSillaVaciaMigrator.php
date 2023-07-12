@@ -1740,6 +1740,11 @@ return;
 	         * Get post data from JSON.
 	         */
 
+	        $original_article_id = $article['id'] ?? 0;
+
+			$additional_meta = [];
+	        $featured_image_attachment_id = null;
+
 	        $post_title = '';
 	        $post_date = '';
 	        $post_name = '';
@@ -1754,14 +1759,54 @@ return;
 				$post_date = $article['createdAt'];
 				$post_name = $article['slug'];
 				$article_authors = ! is_null( $article['author'] ) ? $article['author'] : [];
+			} elseif ( 'Quién es quién' == $assoc_args['category-name'] ) {
+				$post_title = trim( $article['title'] );
+				$post_date = $article['createdAt'];
+				$post_name = $article['slug'];
+				$article_authors = [];
+				if ( isset( $article['picture']['name'] ) ) {
+					$featured_img_url = 'https://www.lasillavacia.com/media/' . $article['picture']['name'];
+					$featured_image_attachment_id = $this->attachments->import_external_file( $featured_img_url );
+					if ( is_wp_error( $featured_image_attachment_id ) || ! $featured_image_attachment_id ) {
+						$msg = sprintf( "ERROR: Article ID %d, error importing featured image URL %s err: %s", $original_article_id, $featured_img_url, is_wp_error( $featured_image_attachment_id ) ? $featured_image_attachment_id->get_error_message() : '/' );
+						$this->file_logger( $msg );
+					} else {
+						$msg = sprintf( "Article ID %d, imported featured image attachment ID %d", $original_article_id, $featured_image_attachment_id );
+						$this->file_logger( $msg );
+					}
+				};
+				if ( isset( $article['picture'] ) ) {
+					$additional_meta['newspack_picture'] = $article['picture'];
+				}
 			}
 
+	        // Get content.
+	        $html = '';
+	        if ( ! empty( $article['html'] ) ) {
+				// handle_extracting_html_content() encapsulates post_content in <html> tag.
+		        // $html = $this->handle_extracting_html_content( $article['html'] );
+		        $html = $article['html'];
+	        } elseif ( ! empty( $article['post_html'] ) ) {
+		        $html = $article['post_html'];
+            } elseif ( ! empty( $article['post_content'] ) ) {
+                $html = $article['post_content'];
+            } elseif ( ! empty( $article['content'] ) ) {
+                $html = $article['content'];
+            }
+
+	        // Check if post 'html' or 'post_content' exists in JSON.
+	        if ( empty( $html ) ) {
+		        $msg = sprintf( "ERROR: Article ID %d '%s' has no post_content", $original_article_id, $post_title );
+		        WP_CLI::warning( $msg );
+		        $this->file_logger( $msg );
+		        continue;
+	        }
+
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
-	        $original_article_id = $article['id'] ?? 0;
 	        $original_article_slug = $post_name ?? '';
 	        $hashed_import_id = md5( $post_title . $original_article_slug );
-
 	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
+
 
 	        $datetime_format = 'Y-m-d H:i:s';
 	        $createdOnDT     = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
@@ -1774,27 +1819,16 @@ return;
 	        $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
 	        $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
 
-	        $html = '';
-
-	        // Get content.
-	        if ( ! empty( $article['html'] ) ) {
-				// handle_extracting_html_content() encapsulates post_content in <html> tag.
-		        // $html = $this->handle_extracting_html_content( $article['html'] );
-		        $html = $article['html'];
-	        } elseif ( ! empty( $article['post_html'] ) ) {
-		        $html = $article['post_html'];
-            } elseif ( ! empty( $article['post_content'] ) ) {
-                $html = $article['post_content'];
-            }
-
-	        // Check if post 'html' or 'post_content' exists in JSON.
-	        if ( empty( $html ) ) {
-		        $msg = sprintf( "ERROR: Article ID %d '%s' has no post_content", $original_article_id, $post_title );
-		        WP_CLI::warning( $msg );
-		        $this->file_logger( $msg );
-		        continue;
-	        }
-
+			$meta_input = [
+				'newspack_original_article_id' => $original_article_id,
+//                    'canonical_url' => $article['CanonicalUrl'],
+				'newspack_hashed_import_id' => $hashed_import_id,
+				'newspack_original_article_categories' => $article['categories'],
+				'newspack_original_post_author' => $article_authors,
+			];
+			if ( ! empty( $additional_meta ) ) {
+				$meta_input = array_merge( $meta_input, $additional_meta );
+			}
             $article_data = [
                 'post_author' => 0,
                 'post_date' => $createdOn,
@@ -1817,13 +1851,7 @@ return;
                 'post_type' => 'post',
                 'post_mime_type' => '',
                 'comment_count' => 0,
-                'meta_input' => [
-                    'newspack_original_article_id' => $original_article_id,
-//                    'canonical_url' => $article['CanonicalUrl'],
-                    'newspack_hashed_import_id' => $hashed_import_id,
-	                'newspack_original_article_categories' => $article['categories'],
-	                'newspack_original_post_author' => $article_authors,
-                ]
+                'meta_input' => $meta_input,
             ];
 
             if ( 1 === count( $article_authors ) ) {
@@ -1835,8 +1863,6 @@ return;
 	                $article_data['meta_input'][ $customfield['name'] ] = $customfield['value'];
 	            }
 			}
-
-            // $this->file_logger( json_encode( $article_data ), false );
 
             $new_post_id = $imported_hashed_ids[ $hashed_import_id ] ?? null;
 
@@ -1854,6 +1880,9 @@ return;
             }
 
             $post_id = wp_insert_post( $article_data );
+			if ( ! is_null( $featured_image_attachment_id ) ) {
+				set_post_thumbnail( $post_id, $featured_image_attachment_id );
+			}
 
             if ( count( $article_authors ) > 1 ) {
                 $guest_author_query = "SELECT 
@@ -1865,7 +1894,7 @@ return;
 
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id, false );
 				/**
-				 * This existing code doesn't work -- it's not finding the $term_taxonomy_ids.
+				 * This existing code below doesn't work -- it's not finding the $term_taxonomy_ids.
 				 * Plus we have a one-liner for this 👆.
 				 */
                 // if ( ! empty( $guest_author_ids ) ) {
