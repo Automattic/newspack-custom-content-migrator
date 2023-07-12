@@ -801,6 +801,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         );
 
         WP_CLI::add_command(
+            'newspack-content-migrator la-silla-ivans-helper',
+            [ $this, 'cmd_ivan_helper_cmd' ],
+            [
+                'shortdesc' => "Ivan U's helper command with various dev snippets.",
+            ]
+        );
+
+        WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-migrate-redirects',
             [ $this, 'migrate_redirects' ],
             [
@@ -1395,6 +1403,96 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $this->file_logger( "Writing unmigrated users to file." );
             file_put_contents( $unmigrated_users_file_path, json_encode( $unmigrated_users ) );
         }
+    }
+
+    public function cmd_ivan_helper_cmd( $args, $assoc_args ) {
+		global $wpdb;
+
+	    /**
+	     * Delete all posts in select categories, except those tagged as 'Memes de la semana'.
+	     */
+
+		// Get posts with 'Memes de la semana' tag.
+	    $memes_de_la_semana_tag_name = 'Memes de la semana';
+	    $memes_de_la_semana_tag_id = $wpdb->get_var( $wpdb->prepare( "SELECT term_id FROM $wpdb->terms WHERE name = %s", $memes_de_la_semana_tag_name ) );
+		if ( ! $memes_de_la_semana_tag_id ) {
+			WP_CLI::error( "Tag '$memes_de_la_semana_tag_name' not found." );
+		}
+	    $memes_de_la_semana_post_ids = get_posts( [
+		    'post_type' => 'post',
+		    'posts_per_page' => -1,
+		    'tag_id'=> $memes_de_la_semana_tag_id,
+		    'fields' => 'ids'
+	    ] );
+
+		// Will delete posts from these categories.
+	    $cats = [
+		    [ 'term_id' => 4984, 'name' => 'Detector de mentiras' ],
+		    [ 'term_id' => 4932, 'name' => 'En Vivo' ],
+		    [ 'term_id' => 4952, 'name' => 'Opinión' ],
+		    [ 'term_id' => 5001, 'name' => 'Podcasts' ],
+		    [ 'term_id' => 5027, 'name' => 'Quién es quién' ],
+		    [ 'term_id' => 5008, 'name' => 'Silla Académica' ],
+		    [ 'term_id' => 4924, 'name' => 'Silla Nacional' ],
+	    ];
+	    foreach ( $cats as $cat ) {
+		    $term = get_term_by( 'id', $cat['term_id'], 'category' );
+		    if ( ! $term || ( $cat['name'] != $term->name )  ) {
+			    WP_CLI::error( "Category {$cat['name']} not found." );
+		    }
+
+			// Get all children and subchildren category IDs. Two levels is enough for LSV structure.
+		    $terms_children_ids = [];
+		    $terms_childrens_children_ids = [];
+		    $terms_children = get_categories( [ 'child_of' => $term->term_id, 'hide_empty' => 0, ] );
+		    foreach ( $terms_children as $term_child ) {
+			    // Child term_id.
+				$terms_children_ids[] = $term_child->term_id;
+			    $terms_childrens_children = get_categories( [ 'child_of' => $term_child->term_id, 'hide_empty' => 0, ] );
+			    foreach ( $terms_childrens_children as $term_childs_child ) {
+			        // Child's child term_id.
+				    $terms_childrens_children_ids[] = $term_childs_child->term_id;
+			    }
+		    }
+
+			// Get all posts in this cat.
+		    $postslist = get_posts([ 'category' => $cat['term_id'], 'post_type' =>  'post', 'posts_per_page' => -1 ]);
+		    WP_CLI::line( sprintf( "\n" . "Total %d posts in category '%s'", count( $postslist ), $cat['name'] ) );
+		    foreach ($postslist as $post) {
+
+			    // Check if post belongs to other cats.
+			    $all_post_cats = wp_get_post_categories( $post->ID, [ 'hide_empty' => 0, ] );
+				// Subtract this ID, children IDs, and children's children IDs.
+			    $other_cats_ids = $all_post_cats;
+			    $other_cats_ids = array_diff( $other_cats_ids, [ $cat['term_id'] ] );
+			    $other_cats_ids = array_diff( $other_cats_ids, $terms_children_ids );
+			    $other_cats_ids = array_diff( $other_cats_ids, $terms_childrens_children_ids );
+			    $belongs_to_different_cats_too = false;
+				if ( count($other_cats_ids) > 0 ) {
+				    $belongs_to_different_cats_too = true;
+				}
+
+				// Skip deleting if $belongs_to_different_cats_too.
+			    if ( true == $belongs_to_different_cats_too ) {
+				    foreach ( $other_cats_ids as $other_cat_id ) {
+					    $other_term = get_term_by( 'id', $other_cat_id, 'category' );
+					    WP_CLI::warning( sprintf( "Post %d has other cat ID %d '%s'", $post->ID, $other_term->term_id, $other_term->name ) );
+				    }
+				    continue;
+			    }
+
+			    // Skip deleting if post has tag.
+			    if ( in_array( $post->ID, $memes_de_la_semana_post_ids ) ) {
+				    WP_CLI::warning( sprintf( "Post %d has 'Memes de la semana' tag", $post->ID ) );
+				    continue;
+			    }
+
+			    // wp_delete_post( $post->ID, true );
+			    WP_CLI::success( 'Deleted post ' . $post->ID );
+		    }
+	    }
+
+	    WP_CLI::line( 'Done.' );
     }
 
     /**
