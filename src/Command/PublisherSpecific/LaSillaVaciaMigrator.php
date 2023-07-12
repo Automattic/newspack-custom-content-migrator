@@ -15,6 +15,7 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
@@ -606,6 +607,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	 */
 	private $attachments;
 
+	/**
+	 * Taxonomy logic.
+	 *
+	 * @var Taxonomy $taxonomy.
+	 */
+	private $taxonomy;
+
     /**
      * Singleton constructor.
      */
@@ -616,6 +624,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	    $this->redirection = new Redirection();
 	    $this->logger = new Logger();
 	    $this->attachments = new Attachments();
+	    $this->taxonomy = new Taxonomy();
     }
 
 	/**
@@ -1703,14 +1712,8 @@ return;
 			WP_CLI::error( sprintf( "Category name '%s' not found.", $assoc_args['category-name'] ) );
 		}
 		// Get the main category term ID.
-	    $category_term_id = $wpdb->get_var( $wpdb->prepare(
-			"select wt.term_id
-			from wp_terms wt
-		    join wp_term_taxonomy wtt on wtt.term_id = wt.term_id 
-			where wt.name = %s and wtt.parent = 0;",
-			$assoc_args['category-name']
-	    ) );
-		if ( ! $category_term_id ) {
+	    $top_category_term_id = $this->taxonomy->get_term_id_by_taxonmy_name_and_parent( 'category', $assoc_args['category-name'], 0 );
+		if ( ! $top_category_term_id ) {
 			WP_CLI::error( sprintf( "Parent category not found by name '%s'.", $assoc_args['category-name'] ) );
 		}
 
@@ -1726,7 +1729,12 @@ return;
         $imported_hashed_ids = $wpdb->get_results( $imported_hashed_ids_sql, OBJECT_K );
         $imported_hashed_ids = array_map( fn( $value ) => (int) $value->post_id, $imported_hashed_ids );
 
+		$total_count = count( json_decode( file_get_contents( $assoc_args['import-json'] ), true ) );
+		$i = 0;
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
+	        $i++;
+
+			WP_CLI::log( sprintf( "Importing %d/%d", $i, $total_count ) );
 
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
 	        $original_article_id = $article['id'] ?? 0;
@@ -1792,9 +1800,11 @@ return;
                 'post_mime_type' => '',
                 'comment_count' => 0,
                 'meta_input' => [
-                    'original_article_id' => $original_article_id,
+                    'newspack_original_article_id' => $original_article_id,
 //                    'canonical_url' => $article['CanonicalUrl'],
-                    'hashed_import_id' => $hashed_import_id,
+                    'newspack_hashed_import_id' => $hashed_import_id,
+	                'newspack_original_article_categories' => $article['categories'],
+	                'newspack_original_post_author' => $article['post_author'],
                 ]
             ];
 
@@ -1802,9 +1812,11 @@ return;
                 $article_data['post_author'] = $authors[ $article['post_author'][0] ] ?? 0;
             }
 
-            foreach ( $article['customfields'] as $customfield ) {
-                $article_data['meta_input'][ $customfield['name'] ] = $customfield['value'];
-            }
+			if ( isset( $article['customfields'] ) ) {
+	            foreach ( $article['customfields'] as $customfield ) {
+	                $article_data['meta_input'][ $customfield['name'] ] = $customfield['value'];
+	            }
+			}
 
             $this->file_logger( json_encode( $article_data ), false );
 
@@ -1835,53 +1847,53 @@ return;
                 );
                 $guest_author_ids = $wpdb->get_col( $guest_author_query );
 
-                if ( ! empty( $guest_author_ids ) ) {
-                    $term_taxonomy_ids_query = $wpdb->prepare(
-                        "SELECT 
-                            tt.term_taxonomy_id
-                        FROM $wpdb->term_taxonomy tt 
-                            INNER JOIN $wpdb->term_relationships tr 
-                                ON tt.term_taxonomy_id = tr.term_taxonomy_id
-                        WHERE tt.taxonomy = 'author' 
-                          AND tr.object_id IN (" . implode( ',', $guest_author_ids ) . ')'
-                    );
-                    $term_taxonomy_ids = $wpdb->get_col( $term_taxonomy_ids_query );
-
-                    foreach ( $term_taxonomy_ids as $term_taxonomy_id ) {
-                        $wpdb->insert(
-                            $wpdb->term_relationships,
-                            [
-                                'object_id'        => $post_id,
-                                'term_taxonomy_id' => $term_taxonomy_id,
-                            ]
-                        );
-                    }
-                }
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id, false );
+				/**
+				 * This existing code doesn't work -- it's not finding the $term_taxonomy_ids.
+				 * Plus we have a one-liner for this 👆.
+				 */
+                // if ( ! empty( $guest_author_ids ) ) {
+                //     $term_taxonomy_ids_query = $wpdb->prepare(
+                //         "SELECT
+                //             tt.term_taxonomy_id
+                //         FROM $wpdb->term_taxonomy tt
+                //             INNER JOIN $wpdb->term_relationships tr
+                //                 ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                //         WHERE tt.taxonomy = 'author'
+                //           AND tr.object_id IN (" . implode( ',', $guest_author_ids ) . ')'
+                //     );
+                //     $term_taxonomy_ids = $wpdb->get_col( $term_taxonomy_ids_query );
+				//
+                //     foreach ( $term_taxonomy_ids as $term_taxonomy_id ) {
+                //         $wpdb->insert(
+                //             $wpdb->term_relationships,
+                //             [
+                //                 'object_id'        => $post_id,
+                //                 'term_taxonomy_id' => $term_taxonomy_id,
+                //             ]
+                //         );
+                //     }
+                // }
             }
 
 			// Set categories.
-	        $some_categories_assigned = false;
             foreach ( $article['categories'] as $category ) {
-                $term = get_term_by( 'name', $category['name'], 'category' );
-                if ( $term ) {
-                    wp_set_post_terms( $post_id, $term->term_id, 'category', true );
-	                $some_categories_assigned = true;
-                }
+	            $category_name = $category['title'];
+				$term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, $top_category_term_id );
+                wp_set_post_terms( $post_id, $term_id, 'category', true );
             }
-			// If no cats assigned, at least assign the top level category.
-			if ( false === $some_categories_assigned ) {
-                wp_set_post_terms( $post_id, $category_term_id, 'category', true );
+			// If no cats were assigned, at least assign the top level category.
+			if ( ! isset( $article['categories'] ) || ! $article['categories'] ) {
+                wp_set_post_terms( $post_id, $top_category_term_id, 'category', true );
 			}
-			// Save original categories as post_meta for easier revision and updates.
-	        update_post_meta( $post_id, 'newspack_original_article_categories', $article['categories'] );
 
-
-            wp_update_post(
-                [
-                    'ID' => $post_id,
-                    'guid' => "http://lasillavacia-staging.newspackstaging.com/?page_id={$post_id}"
-                ]
-            );
+			// It's not recommended to modify the guid
+            // wp_update_post(
+            //     [
+            //         'ID' => $post_id,
+            //         'guid' => "http://lasillavacia-staging.newspackstaging.com/?page_id={$post_id}"
+            //     ]
+            // );
 
             $this->file_logger( "Article Imported: $post_id" );
         }
