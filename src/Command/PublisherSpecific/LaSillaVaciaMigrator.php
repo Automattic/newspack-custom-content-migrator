@@ -790,6 +790,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'repeating' => false,
                     ],
                     [
+                        'type' => 'assoc',
+                        'name' => 'category-name',
+                        'description' => "Name of base category to where the JSON posts are being imported. See migrate_articles() for allowed values.",
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
                         'type' => 'flag',
                         'name' => 'reset-db',
                         'description' => 'Resets the database for a fresh import.',
@@ -1409,6 +1416,180 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		global $wpdb;
 
 	    /**
+	     * Refactor categories.
+	     */
+
+	    $categories_that_should_be_migrated_as_tags = [
+		    "Drogas" => 58,
+		    "Posconflicto" => 59,
+		    "Superpoderosos" => 60,
+		    "Plebiscito" => 61,
+		    "Renegociación" => 62,
+		    "Alejandro Ordoñez" => 63,
+		    "Álvaro Uribe" => 64,
+		    "Camelladores" => 67,
+		    "Ciudadanos de a pie" => 69,
+		    "Conflicto Armado" => 70,
+		    "Congreso" => 71,
+		    "Coronavirus" => 72,
+		    "Corrupción" => 73,
+		    "Desarrollo Rural" => 75,
+		    "Detector al chat de la familia" => 76,
+		    "Detector en Facebook" => 78,
+		    "Dónde está la Plata" => 79,
+		    "Economía" => 80,
+		    "Educación" => 81,
+		    "El factor Vargas Lleras" => 83,
+		    "Elecciones" => 84,
+		    "Elecciones 2019" => 85,
+		    "Encuestas" => 86,
+		    "Étnico" => 87,
+		    "Fuerza pública" => 88,
+		    "Gobierno de Claudia López" => 89,
+		    "Gobierno de Peñalosa" => 90,
+		    "Gobierno de Santos" => 91,
+		    "Gobierno de Uribe" => 92,
+		    "Gobierno Duque" => 93,
+		    "Gobiernos anteriores" => 94,
+		    "Grandes casos judiciales" => 95,
+		    "Gustavo Petro" => 96,
+		    "Justicia" => 97,
+		    "Justicia transicional" => 98,
+		    "La elección del fiscal" => 99,
+		    "La Silla Vacía" => 100,
+		    "Las ías" => 101,
+		    "Las vacas flacas" => 102,
+		    "Medio Ambiente" => 103,
+		    "Medios" => 104,
+		    "Minería" => 105,
+		    "Movimientos Sociales" => 106,
+		    "Mujeres" => 107,
+		    "Odebrecht" => 108,
+		    "Otras Regiones" => 109,
+		    "Otros países" => 110,
+		    "Otros personajes" => 111,
+		    "Otros temas" => 112,
+		    "Polarización" => 114,
+		    "Política menuda" => 115,
+		    "Presidenciales 2018" => 116,
+		    "Proceso con el ELN" => 117,
+		    "Proceso con las FARC" => 118,
+		    "Salud" => 120,
+		    "Seguridad" => 122,
+		    "Testigos falsos y Uribe" => 123,
+		    "Urbanismo" => 124,
+		    "Venezuela" => 125,
+		    "Víctimas" => 126,
+		    "Conversaciones" => 129,
+		    "Cubrimiento Especial" => 130,
+		    "Hágame el cruce" => 131,
+		    "Coronavirus + 177	Coronavirus" => 172,
+		    "Coronavirus + 177 Coronavirus" => 172,
+		    "Proceso de paz" => 173,
+		    "Jep" => 174,
+		    "Arte" => 386,
+		    "Posconflicto + 59 Posconflicto" => 389,
+		    "Elecciones 2023" => 429,
+		    "Sala de Redacción Ciudadana" => 378,
+		    "Gobierno" => 176,
+		    "Crisis" => 178,
+		    "Elecciones 2022" => 360,
+		    "La Dimensión Desconocida" => 388,
+		    "Econimia" => 48,
+		    "Entrevista" => 381,
+		    "Redes Silla llena" => 175,
+		    "Papers" => 326,
+		    "Libros" => 327,
+		    "Publicaciones seriadas" => 328,
+		    "Estudios patrocinados" => 329,
+		    "Política + 46	Politica" => 392,
+		    "Política + 46 Politica" => 392,
+		    "Medio Ambiente + 103 Medio ambiente" => 399,
+		    "Género" => 400,
+		    "Religión" => 401,
+		    "Corrupción + 73 Corrupcion" => 402,
+		    "Cultura + 47	Cultura" => 403,
+		    "Cultura + 47 Cultura" => 403,
+		    "Educación" => 404,
+		    "Economía" => 405,
+		    "Migraciones" => 406,
+		    "Relaciones Internacionales" => 407,
+		    "Ciencia" => 408,
+		    "Política social" => 409,
+		    "Elecciones" => 410,
+		    "Posconflicto" => 411,
+		    "Acuerdo de Paz" => 412,
+		    "Seguridad" => 413,
+		    "Desarrollo rural" => 414,
+		    "Salud" => 415,
+		    "Coronavirus" => 416,
+		    "Congreso" => 417,
+		    "Gobierno" => 418,
+		    "Justicia" => 419,
+		    "Movimientos sociales" => 420,
+		    "Sector privado" => 421,
+		    "Medios" => 422,
+		    "Tecnología e innovación" => 423,
+		    "Ciudades" => 424,
+		    "Comunidades étnicas" => 425,
+	    ];
+	    $categories_that_should_not_be_migrated = [
+		    "Store" => 17,
+		    "Module" => 18,
+		    "suscripciones pasadas" => 40,
+		    "Beneficios" => 41,
+		    "Items1" => 42,
+		    "Items2" => 43,
+		    "Destacado" => 49,
+		    "Destacados silla vacia" => 369,
+		    "Destacados silla llena" => 371,
+		    "Destacado home" => 374,
+		    "Destacado historia" => 375,
+		    "Destacado Episodio Landing" => 376,
+		    "Recomendados Episodio Landing" => 377,
+		    "Entrevistado" => 382,
+		    "Texto Citado" => 383,
+		    "Fin de semana" => 384,
+		    "Eventos Article" => 144,
+		    "Polemico" => 145,
+		    "Boletines" => 379,
+		    "Mailing" => 380,
+		    "Opinión" => 181,
+		    "Entidades" => 143,
+		    "Publicaciones" => 142,
+		    "Relacion Quien es Quien" => 50,
+		    "Rivalidad" => 51,
+		    "Laboral" => 52,
+		    "Quien es quien" => 44,
+		    "tematicas" => 45,
+		    "Temas" => 53,
+		    "Escala Detector" => 127,
+		    "Producto" => 128,
+		    "Sí o no" => 133,
+		    "Columnas de la silla" => 148,
+		    "Podcast" => 146,
+		    "Modulo Videos" => 147,
+		    "Temas silla llena" => 171,
+		    "Delitos" => 180,
+		    "Temas Experto" => 201,
+		    "Tipo de Publicación Patrocinada" => 325,
+		    "Lecciones" => 362,
+		    "Especiales" => 363,
+		    "categoryFileds" => 426,
+		    "SillaCursos" => 200,
+		    "cursos asincronicos" => 373,
+		    "Periodismo" => 364,
+		    "cursos productos" => 356,
+		    "Escritura" => 365,
+		    "Diseño" => 366,
+		    "Audiovisual" => 367,
+		    "Curso de Desinformación" => 430,
+	    ];
+
+return;
+
+
+	    /**
 	     * Delete all posts in select categories, except those tagged as 'Memes de la semana'.
 	     */
 
@@ -1500,11 +1681,39 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      */
     public function migrate_articles( $args, $assoc_args )
     {
+		global $wpdb;
+
         if ( $assoc_args['reset-db'] ) {
             $this->reset_db();
         }
 
-        global $wpdb;
+		// Top level category which posts in this JSON are for.
+		$category_names = [
+			'Opinión',
+			'Podcasts',
+			'Quién es quién',
+			'Silla Académica',
+			'Silla Nacional',
+			'Detector de mentiras',
+			'En Vivo',
+			'Silla Llena',
+			'Publicaciones',
+		];
+		if ( ! in_array( $assoc_args['category-name'], $category_names ) ) {
+			WP_CLI::error( sprintf( "Category name '%s' not found.", $assoc_args['category-name'] ) );
+		}
+		// Get the main category term ID.
+	    $category_term_id = $wpdb->get_var( $wpdb->prepare(
+			"select wt.term_id
+			from wp_terms wt
+		    join wp_term_taxonomy wtt on wtt.term_id = wt.term_id 
+			where wt.name = %s and wtt.parent = 0;",
+			$assoc_args['category-name']
+	    ) );
+		if ( ! $category_term_id ) {
+			WP_CLI::error( sprintf( "Parent category not found by name '%s'.", $assoc_args['category-name'] ) );
+		}
+
         $authors_sql = "SELECT um.meta_value, u.ID, um.meta_key
             FROM wp_users u LEFT JOIN wp_usermeta um ON um.user_id = u.ID
             WHERE um.meta_key = 'original_user_id'";
@@ -1519,32 +1728,46 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
 
-            // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
-            $original_article_id = $article['id'] ?? 0;
-            $original_article_title = $article['post_title'] ?? '';
-            $original_article_slug = $article['post_name'] ?? '';
-            $hashed_import_id = md5( $original_article_title . $original_article_slug );
+	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
+	        $original_article_id = $article['id'] ?? 0;
+	        $original_article_title = trim( $article['post_title'] ) ?? '';
+	        $original_article_slug = $article['post_name'] ?? '';
+	        $hashed_import_id = md5( $original_article_title . $original_article_slug );
 
-            $this->file_logger("Original Article ID: $original_article_id | Original Article Title: $original_article_title | Original Article Slug: $original_article_slug" );
+	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $original_article_title | Original Article Slug: $original_article_slug" );
 
-            $datetime_format = 'Y-m-d H:i:s';
-            $createdOnDT = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
-            $createdOn = $createdOnDT->format( $datetime_format );
-            $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
-            $createdOnGmt = $createdOnDT->format( $datetime_format );
+	        $datetime_format = 'Y-m-d H:i:s';
+	        $createdOnDT     = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
+	        $createdOn       = $createdOnDT->format( $datetime_format );
+	        $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+	        $createdOnGmt = $createdOnDT->format( $datetime_format );
 
-            $modifiedOnDT = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
-            $modifiedOn = $modifiedOnDT->format( $datetime_format );
-            $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
-            $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
+	        $modifiedOnDT = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
+	        $modifiedOn   = $modifiedOnDT->format( $datetime_format );
+	        $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+	        $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
 
-            $html = '';
+	        $html = '';
 
-            if ( ! empty( $article['html'] ) ) {
-                $html = $this->handle_extracting_html_content( $article['html'] );
-            } else {
+	        // Get content.
+	        if ( ! empty( $article['html'] ) ) {
+				// handle_extracting_html_content() encapsulates post_content in <html> tag.
+		        // $html = $this->handle_extracting_html_content( $article['html'] );
+
+		        $html = $article['html'];
+	        } elseif ( ! empty( $article['post_html'] ) ) {
+		        $html = $article['post_html'];
+            } elseif ( ! empty( $article['post_content'] ) ) {
                 $html = $article['post_content'];
             }
+
+	        // Check if post 'html' or 'post_content' exists in JSON.
+	        if ( empty( $html ) ) {
+		        $msg = sprintf( "ERROR: Article %d '%s' has no post_content", $original_article_id, $original_article_title );
+		        WP_CLI::warning( $msg );
+		        $this->file_logger( $msg );
+		        continue;
+	        }
 
             $article_data = [
                 'post_author' => 0,
@@ -1603,8 +1826,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             $post_id = wp_insert_post( $article_data );
 
             if ( count( $article['post_author'] ) > 1 ) {
-                global $wpdb;
-
                 $guest_author_query = $wpdb->prepare(
                     "SELECT 
                         post_id 
@@ -1638,12 +1859,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 }
             }
 
+			// Set categories.
+	        $some_categories_assigned = false;
             foreach ( $article['categories'] as $category ) {
                 $term = get_term_by( 'name', $category['name'], 'category' );
                 if ( $term ) {
                     wp_set_post_terms( $post_id, $term->term_id, 'category', true );
+	                $some_categories_assigned = true;
                 }
             }
+			// If no cats assigned, at least assign the top level category.
+			if ( false === $some_categories_assigned ) {
+                wp_set_post_terms( $post_id, $category_term_id, 'category', true );
+			}
+			// Save original categories as post_meta for easier revision and updates.
+	        update_post_meta( $post_id, 'newspack_original_article_categories', $article['categories'] );
+
 
             wp_update_post(
                 [
