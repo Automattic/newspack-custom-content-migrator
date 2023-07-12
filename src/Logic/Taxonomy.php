@@ -93,17 +93,32 @@ class Taxonomy {
 	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) : null|string {
 		global $wpdb;
 
+		$query_prepare = "select t.term_id 
+			from {$wpdb->terms} t
+			join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+			where tt.taxonomy = %s and t.name = %s and tt.parent = %d;";
+
+		// First try with converting name chars to HTML entities.
 		$existing_term_id = $wpdb->get_var(
 			$wpdb->prepare(
-				"select t.term_id 
-					from {$wpdb->terms} t
-					join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
-					where tt.taxonomy = %s and t.name = %s and tt.parent = %d;",
+				$query_prepare,
 				$taxonomy,
 				htmlentities( $name ),
 				$parent_term_id
 			)
 		);
+
+		// Try without converting name chars to HTML entities.
+		if ( ! $existing_term_id ) {
+			$existing_term_id = $wpdb->get_var(
+				$wpdb->prepare(
+					$query_prepare,
+					$taxonomy,
+					$name,
+					$parent_term_id
+				)
+			);
+		}
 
 		return $existing_term_id;
 	}
