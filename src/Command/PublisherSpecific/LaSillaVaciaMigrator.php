@@ -1692,7 +1692,7 @@ return;
     {
 		global $wpdb;
 
-        if ( $assoc_args['reset-db'] ) {
+        if ( isset( $assoc_args['reset-db'] ) ) {
             $this->reset_db();
         }
 
@@ -1736,21 +1736,40 @@ return;
 
 			WP_CLI::log( sprintf( "Importing %d/%d", $i, $total_count ) );
 
+	        /**
+	         * Get post data from JSON.
+	         */
+
+	        $post_title = '';
+	        $post_date = '';
+	        $post_name = '';
+			$article_authors = [];
+			if ( 'Opinión' == $assoc_args['category-name'] ) {
+				$post_title = trim( $article['post_title'] );
+				$post_date = $article['post_date'];
+				$post_name = $article['post_name'];
+				$article_authors = $article['post_author'];
+			} elseif ( 'Podcasts' == $assoc_args['category-name'] ) {
+				$post_title = trim( $article['title'] );
+				$post_date = $article['createdAt'];
+				$post_name = $article['slug'];
+				$article_authors = ! is_null( $article['author'] ) ? $article['author'] : [];
+			}
+
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
 	        $original_article_id = $article['id'] ?? 0;
-	        $original_article_title = trim( $article['post_title'] ) ?? '';
-	        $original_article_slug = $article['post_name'] ?? '';
-	        $hashed_import_id = md5( $original_article_title . $original_article_slug );
+	        $original_article_slug = $post_name ?? '';
+	        $hashed_import_id = md5( $post_title . $original_article_slug );
 
-	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $original_article_title | Original Article Slug: $original_article_slug" );
+	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
 
 	        $datetime_format = 'Y-m-d H:i:s';
-	        $createdOnDT     = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
+	        $createdOnDT     = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
 	        $createdOn       = $createdOnDT->format( $datetime_format );
 	        $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
 	        $createdOnGmt = $createdOnDT->format( $datetime_format );
 
-	        $modifiedOnDT = new DateTime( $article['post_date'], new DateTimeZone( 'America/Bogota' ) );
+	        $modifiedOnDT = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
 	        $modifiedOn   = $modifiedOnDT->format( $datetime_format );
 	        $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
 	        $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
@@ -1761,7 +1780,6 @@ return;
 	        if ( ! empty( $article['html'] ) ) {
 				// handle_extracting_html_content() encapsulates post_content in <html> tag.
 		        // $html = $this->handle_extracting_html_content( $article['html'] );
-
 		        $html = $article['html'];
 	        } elseif ( ! empty( $article['post_html'] ) ) {
 		        $html = $article['post_html'];
@@ -1771,7 +1789,7 @@ return;
 
 	        // Check if post 'html' or 'post_content' exists in JSON.
 	        if ( empty( $html ) ) {
-		        $msg = sprintf( "ERROR: Article %d '%s' has no post_content", $original_article_id, $original_article_title );
+		        $msg = sprintf( "ERROR: Article ID %d '%s' has no post_content", $original_article_id, $post_title );
 		        WP_CLI::warning( $msg );
 		        $this->file_logger( $msg );
 		        continue;
@@ -1782,13 +1800,13 @@ return;
                 'post_date' => $createdOn,
                 'post_date_gmt' => $createdOnGmt,
                 'post_content' => $html,
-                'post_title' => $article['post_title'],
+                'post_title' => $post_title,
                 'post_excerpt' => '',
                 'post_status' => 'publish',
                 'comment_status' => 'closed',
                 'ping_status' => 'closed',
                 'post_password' => '',
-                'post_name' => $article['post_name'],
+                'post_name' => $post_name,
                 'to_ping' => '',
                 'pinged' => '',
                 'post_modified' => $modifiedOn,
@@ -1804,12 +1822,12 @@ return;
 //                    'canonical_url' => $article['CanonicalUrl'],
                     'newspack_hashed_import_id' => $hashed_import_id,
 	                'newspack_original_article_categories' => $article['categories'],
-	                'newspack_original_post_author' => $article['post_author'],
+	                'newspack_original_post_author' => $article_authors,
                 ]
             ];
 
-            if ( 1 === count( $article['post_author'] ) ) {
-                $article_data['post_author'] = $authors[ $article['post_author'][0] ] ?? 0;
+            if ( 1 === count( $article_authors ) ) {
+                $article_data['post_author'] = $authors[ $article_authors[0] ] ?? 0;
             }
 
 			if ( isset( $article['customfields'] ) ) {
@@ -1818,7 +1836,7 @@ return;
 	            }
 			}
 
-            $this->file_logger( json_encode( $article_data ), false );
+            // $this->file_logger( json_encode( $article_data ), false );
 
             $new_post_id = $imported_hashed_ids[ $hashed_import_id ] ?? null;
 
@@ -1837,14 +1855,12 @@ return;
 
             $post_id = wp_insert_post( $article_data );
 
-            if ( count( $article['post_author'] ) > 1 ) {
-                $guest_author_query = $wpdb->prepare(
-                    "SELECT 
+            if ( count( $article_authors ) > 1 ) {
+                $guest_author_query = "SELECT 
                         post_id 
                     FROM $wpdb->postmeta 
                     WHERE meta_key = 'original_user_id' 
-                      AND meta_value IN (" . implode( ',', $article['post_author'] ) . ')'
-                );
+                      AND meta_value IN (" . implode( ',', $article_authors ) . ')';
                 $guest_author_ids = $wpdb->get_col( $guest_author_query );
 
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id, false );
@@ -1877,13 +1893,20 @@ return;
             }
 
 			// Set categories.
+	        $some_categories_were_set = false;
             foreach ( $article['categories'] as $category ) {
-	            $category_name = $category['title'];
-				$term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, $top_category_term_id );
-                wp_set_post_terms( $post_id, $term_id, 'category', true );
+	            $category_name = null;
+	            if ( isset( $category['title'] ) && ! is_null( $category['title'] ) ) {
+					$category_name = $category['title'];
+					$term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, $top_category_term_id );
+                    wp_set_post_terms( $post_id, $term_id, 'category', true );
+	                $some_categories_were_set = true;
+	            } else {
+		            $this->file_logger( sprintf( "ERROR: ID %d, Category does not have a title: %s", $original_article_id, json_encode( $category ) ) );
+	            }
             }
 			// If no cats were assigned, at least assign the top level category.
-			if ( ! isset( $article['categories'] ) || ! $article['categories'] ) {
+			if ( false === $some_categories_were_set ) {
                 wp_set_post_terms( $post_id, $top_category_term_id, 'category', true );
 			}
 
