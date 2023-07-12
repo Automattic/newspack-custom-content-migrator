@@ -1760,6 +1760,8 @@ return;
 				$post_name = $article['slug'];
 				$article_authors = ! is_null( $article['author'] ) ? $article['author'] : [];
 			} elseif ( 'Quién es quién' == $assoc_args['category-name'] ) {
+				WP_CLI::error( 'Re-importing Quien es quen posts will create duplicate featured image. Code not ready for that, make necessary adjustments to it first.' );
+
 				$post_title = trim( $article['title'] );
 				$post_date = $article['createdAt'];
 				$post_name = $article['slug'];
