@@ -1974,10 +1974,15 @@ return;
 			// Set categories.
 	        $some_categories_were_set = false;
             foreach ( $article['categories'] as $category ) {
-				// Get/create and assign child categories by $category['title'].
+				// Get category name.
 				$category_name = null;
 	            if ( isset( $category['title'] ) && ! is_null( $category['title'] ) ) {
-					$category_name = $category['title'];
+		            $category_name = $category['title'];
+	            } elseif ( isset( $category['name'] ) && ! is_null( $category['name'] ) ) {
+		            $category_name = $category['name'];
+	            }
+				// Assign cat.
+	            if ( ! is_null( $category_name ) ) {
 					$term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, $top_category_term_id );
                     wp_set_post_terms( $post_id, $term_id, 'category', true );
 	                $some_categories_were_set = true;
