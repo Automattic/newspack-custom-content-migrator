@@ -791,6 +791,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             [
                 'shortdesc' => 'Migrate articles',
                 'synopsis' => [
+	                [
+		                'type' => 'flag',
+		                'name' => 'incremental-import',
+		                'description' => "If this flag is set, it will only import new posts and won't re-import data for existing ones.",
+		                'optional' => true,
+		                'repeating' => false,
+	                ],
                     [
                         'type' => 'assoc',
                         'name' => 'import-json',
@@ -811,7 +818,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'description' => 'Resets the database for a fresh import.',
                         'optional' => true,
                         'repeating' => false,
-                    ]
+                    ],
                 ]
             ]
         );
@@ -1692,6 +1699,7 @@ return;
     {
 		global $wpdb;
 
+		$incremental_import = isset( $assoc_args['incremental-import'] ) ? true : false;
         if ( isset( $assoc_args['reset-db'] ) ) {
             $this->reset_db();
         }
@@ -1731,7 +1739,7 @@ return;
 
 		// Count total articles, but don't do it for very large files because of memory consumption -- a rough count is good enough for just approx. progress.
 	    if ( 'Silla Académica' == $assoc_args['category-name'] ) {
-		    $total_count = 21265;
+		    $total_count = '?';
 	    } else {
 			$total_count = count( json_decode( file_get_contents( $assoc_args['import-json'] ), true ) );
 	    }
@@ -1739,7 +1747,7 @@ return;
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
 	        $i++;
 
-			WP_CLI::log( sprintf( "Importing %d/%d", $i, $total_count ) );
+			WP_CLI::log( sprintf( "Importing %d/%s", $i, $total_count ) );
 
 	        /**
 	         * Get post data from JSON.
@@ -1830,6 +1838,22 @@ return;
 				}
 			}
 
+	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
+	        $original_article_slug = $post_name ?? '';
+	        $hashed_import_id = md5( $post_title . $original_article_slug );
+	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
+
+
+	        // Skip importing post if $incremental_import is true and post already exists.
+	        if ( true === $incremental_import ) {
+				$existing_postid_by_original_article_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_original_article_id' and meta_value = %s", $original_article_id ) );
+		        $existing_postid_by_hashed_import_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_hashed_import_id' and meta_value = %s", $hashed_import_id ) );
+				if ( $existing_postid_by_original_article_id && $existing_postid_by_hashed_import_id && $existing_postid_by_original_article_id == $existing_postid_by_hashed_import_id ) {
+					WP_CLI::line( sprintf( "Article was imported as Post ID %d, skipping.", $existing_postid_by_original_article_id ) );
+					continue;
+				}
+	        }
+
 	        // Get content.
 	        $html = '';
 	        if ( ! empty( $article['html'] ) ) {
@@ -1851,12 +1875,6 @@ return;
 		        $this->file_logger( $msg );
 		        continue;
 	        }
-
-	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
-	        $original_article_slug = $post_name ?? '';
-	        $hashed_import_id = md5( $post_title . $original_article_slug );
-	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
-
 
 	        $datetime_format = 'Y-m-d H:i:s';
 	        $createdOnDT     = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
