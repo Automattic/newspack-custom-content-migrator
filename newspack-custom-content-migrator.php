@@ -21,6 +21,7 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 
 require_once ABSPATH . 'wp-settings.php';
 
+PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
