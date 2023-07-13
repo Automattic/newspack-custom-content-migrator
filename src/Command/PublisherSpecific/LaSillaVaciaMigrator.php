@@ -1704,6 +1704,8 @@ return;
             $this->reset_db();
         }
 
+		$skip_base64_html_ids = [];
+
 		// Top level category which posts in this JSON are for.
 		$category_names = [
 			'Opinión',
@@ -1916,6 +1918,15 @@ return;
                 $html = $article['content'];
             }
 
+			if (
+				( false != strpos( $html, 'data:image/' ) )
+				&& ( false != strpos( $html, ';base64' ) )
+			) {
+				$skip_base64_html_ids[] = $original_article_id;
+				$html = '__';
+				continue;
+			}
+
 			// This is a one and single article out of all others for which wp_insert_post() fails to insert post_content because it contains BASE64 encoded images.
 	        // This post has been manually imported and should be skipped because data is not supported and already in the database.
 	        $failed_inserts_post_names = [ 'los-10-imperdibles-del-ano-para-procrastinar-en-vacaciones'];
@@ -2085,6 +2096,10 @@ return;
 
             $this->file_logger( "Article Imported: $post_id" );
         }
+
+		if ( ! empty( $skip_base64_html_ids ) ) {
+			WP_CLI::error( sprintf( "Done with errors -- skipped importing post_content (because HTML contained B64 which failed during post creation) for original IDs -- these post_contents should be inserted manually : %s", implode( ',', $skip_base64_html_ids ) ) );
+		}
     }
 
 	/**
