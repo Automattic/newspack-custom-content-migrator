@@ -1863,6 +1863,27 @@ return;
 				if ( isset( $article['tags'] ) ) {
 					$additional_meta['newspack_tags'] = $article['tags'];
 				}
+			} elseif ( 'En Vivo' == $assoc_args['category-name'] ) {
+				$post_title = trim( $article['title'] );
+				$post_name = $article['slug'];
+
+				// Date may be faulty.
+				$date_part = $this->is_date_valid( $article['StartDate'], 'Y-m-d' ) ? $article['StartDate'] : date("Y-m-d");;
+
+				// Very faulty time, contains many formats and some pure errors.
+				$time_part = ( $article['time'] != "None" ? $article['time'] : '00:00:00' );
+				$time_part = str_replace( ' pm', '', $time_part );
+				$time_part = str_replace( ' am', '', $time_part );
+				$time_part = str_replace( ' ', '', $time_part );
+				if ( 1 != preg_match("|^\d{1,2}:\d{1,2}$|", $time_part ) ) {
+					$time_part = '00:00:00';
+				}
+
+				$post_date = $date_part . ' ' . $time_part;
+
+				if ( isset( $article['canonical'] ) ) {
+					$additional_meta['newspack_canonical'] = $article['canonical'];
+				}
 			}
 
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
@@ -2065,6 +2086,21 @@ return;
             $this->file_logger( "Article Imported: $post_id" );
         }
     }
+
+	/**
+	 * Checks if date is valid.
+	 * Taken from https://stackoverflow.com/a/29093651 .
+	 *
+	 * @param string $date
+	 * @param string $format
+	 *
+	 * @return bool
+	 */
+	private function is_date_valid ($date, $format = 'Y-m-d' ) {
+		$d = DateTime::createFromFormat($format, $date);
+		// The Y ( 4 digits year ) returns TRUE for any integer with any number of digits so changing the comparison from == to === fixes the issue.
+		return $d && $d->format($format) === $date;
+	}
 
     /**
      * Migrator for LSV redirects.
