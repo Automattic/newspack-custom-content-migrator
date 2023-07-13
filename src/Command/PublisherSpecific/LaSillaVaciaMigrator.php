@@ -1753,7 +1753,11 @@ return;
 	         * Get post data from JSON.
 	         */
 
-	        $original_article_id = $article['id'] ?? 0;
+	        if ( 'Detector de mentiras' == $assoc_args['category-name'] ) {
+	            $original_article_id = $article['head_id'] ?? 0;
+	        } else {
+	            $original_article_id = $article['id'] ?? 0;
+	        }
 
 			$additional_meta = [];
 	        $featured_image_attachment_id = null;
@@ -1836,6 +1840,29 @@ return;
 				if ( isset( $article['tags'] ) ) {
 					$additional_meta['newspack_tags'] = $article['tags'];
 				}
+			} elseif ( 'Detector de mentiras' == $assoc_args['category-name'] ) {
+				$post_title = trim( $article['title'] );
+				$post_excerpt = $article['description'] ?? '';
+				$post_name = $article['slug'];
+				$post_date = $article['createdAt'];
+				$article_authors = ! is_null( $article['authors'] ) ? $article['authors'] : [];
+				if ( isset( $article['tags'] ) && ! is_null( $article['tags'] ) && ! empty( $article['tags'] ) ) {
+					foreach ( $article['tags'] as $article_tag ) {
+						if ( isset( $article_tag['name'] ) && ! empty( $article_tag['name'] ) ) {
+							$article_tags[] = $article_tag['name'];
+						}
+					}
+				}
+
+				if ( isset( $article['picture'] ) ) {
+					$additional_meta['newspack_picture'] = $article['picture'];
+				}
+				if ( isset( $article['url'] ) ) {
+					$additional_meta['newspack_url'] = $article['url'];
+				}
+				if ( isset( $article['tags'] ) ) {
+					$additional_meta['newspack_tags'] = $article['tags'];
+				}
 			}
 
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
@@ -1867,6 +1894,14 @@ return;
             } elseif ( ! empty( $article['content'] ) ) {
                 $html = $article['content'];
             }
+
+			// This is a one and single article out of all others for which wp_insert_post() fails to insert post_content because it contains BASE64 encoded images.
+	        // This post has been manually imported and should be skipped because data is not supported and already in the database.
+	        $failed_inserts_post_names = [ 'los-10-imperdibles-del-ano-para-procrastinar-en-vacaciones'];
+	        if ( in_array( $post_name, $failed_inserts_post_names ) ) {
+				WP_CLI::warning( sprintf( "Post name %s contains invalid data which makes wp_insert_post() crash and will be skipped.", $post_name ) );
+				continue;
+	        }
 
 	        // Check if post 'html' or 'post_content' exists in JSON.
 	        if ( empty( $html ) ) {
@@ -1948,6 +1983,7 @@ return;
             }
 
             $post_id = wp_insert_post( $article_data );
+
 			if ( ! is_null( $featured_image_attachment_id ) ) {
 				set_post_thumbnail( $post_id, $featured_image_attachment_id );
 			}
