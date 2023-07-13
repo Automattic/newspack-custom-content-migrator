@@ -1729,7 +1729,12 @@ return;
         $imported_hashed_ids = $wpdb->get_results( $imported_hashed_ids_sql, OBJECT_K );
         $imported_hashed_ids = array_map( fn( $value ) => (int) $value->post_id, $imported_hashed_ids );
 
-		$total_count = count( json_decode( file_get_contents( $assoc_args['import-json'] ), true ) );
+		// Count total articles, but don't do it for very large files because of memory consumption -- a rough count is good enough for just approx. progress.
+	    if ( 'Silla Académica' == $assoc_args['category-name'] ) {
+		    $total_count = 21265;
+	    } else {
+			$total_count = count( json_decode( file_get_contents( $assoc_args['import-json'] ), true ) );
+	    }
 		$i = 0;
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
 	        $i++;
@@ -1746,9 +1751,11 @@ return;
 	        $featured_image_attachment_id = null;
 
 	        $post_title = '';
+	        $post_excerpt = '';
 	        $post_date = '';
 	        $post_name = '';
 			$article_authors = [];
+			$article_tags = [];
 			if ( 'Opinión' == $assoc_args['category-name'] ) {
 				$post_title = trim( $article['post_title'] );
 				$post_date = $article['post_date'];
@@ -1783,7 +1790,6 @@ return;
 					$additional_meta['newspack_picture'] = $article['picture'];
 				}
 			} elseif ( 'Silla Académica' == $assoc_args['category-name'] ) {
-
 				$post_title = trim( $article['post_title'] );
 				$post_date = $article['publishedAt'];
 				$post_name = $article['post_name'];
@@ -1796,6 +1802,31 @@ return;
 				}
 				if ( isset( $article['url'] ) ) {
 					$additional_meta['newspack_url'] = $article['url'];
+				}
+			} elseif ( 'Silla Nacional' == $assoc_args['category-name'] ) {
+				$post_title = trim( $article['post_title'] );
+				$post_excerpt = $article['post_excerpt'] ?? '';
+				$post_date = $article['post_date'];
+				$post_name = $article['post_name'];
+				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : [];
+				if ( isset( $article['tags'] ) && ! is_null( $article['tags'] ) && ! empty( $article['tags'] ) ) {
+					foreach ( $article['tags'] as $article_tag ) {
+						if ( isset( $article_tag['name'] ) && ! empty( $article_tag['name'] ) ) {
+							$article_tags[] = $article_tag['name'];
+						}
+					}
+				}
+				if ( isset( $article['image'] ) ) {
+					$additional_meta['newspack_image'] = $article['image'];
+				}
+				if ( isset( $article['keywords'] ) ) {
+					$additional_meta['newspack_keywords'] = $article['keywords'];
+				}
+				if ( isset( $article['url'] ) ) {
+					$additional_meta['newspack_url'] = $article['url'];
+				}
+				if ( isset( $article['tags'] ) ) {
+					$additional_meta['newspack_tags'] = $article['tags'];
 				}
 			}
 
@@ -1854,7 +1885,7 @@ return;
                 'post_date_gmt' => $createdOnGmt,
                 'post_content' => $html,
                 'post_title' => $post_title,
-                'post_excerpt' => '',
+                'post_excerpt' => $post_excerpt,
                 'post_status' => 'publish',
                 'comment_status' => 'closed',
                 'ping_status' => 'closed',
@@ -1958,6 +1989,11 @@ return;
 			if ( false === $some_categories_were_set ) {
                 wp_set_post_terms( $post_id, $top_category_term_id, 'category', true );
 			}
+
+			// Set tags.
+	        if ( ! empty( $article_tags ) ) {
+		        wp_set_post_tags( $post_id, $article_tags, false );
+	        }
 
 			// It's not recommended to modify the guid
             // wp_update_post(
