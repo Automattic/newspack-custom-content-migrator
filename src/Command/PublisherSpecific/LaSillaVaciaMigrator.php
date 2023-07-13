@@ -1760,7 +1760,9 @@ return;
 				$post_name = $article['slug'];
 				$article_authors = ! is_null( $article['author'] ) ? $article['author'] : [];
 			} elseif ( 'Quién es quién' == $assoc_args['category-name'] ) {
-				WP_CLI::error( 'Re-importing Quien es quen posts will create duplicate featured image. Code not ready for that, make necessary adjustments to it first.' );
+
+				// Stop re-importing Quien es quen posts for now. We need an incremental check first otherwise we'll end up with dupe avatar images.
+				WP_CLI::error( "Re-importing Quien es quen posts will create duplicate featured images. This command is not ready for that yet, make necessary adjustments to it first." );
 
 				$post_title = trim( $article['title'] );
 				$post_date = $article['createdAt'];
@@ -1779,6 +1781,21 @@ return;
 				};
 				if ( isset( $article['picture'] ) ) {
 					$additional_meta['newspack_picture'] = $article['picture'];
+				}
+			} elseif ( 'Silla Académica' == $assoc_args['category-name'] ) {
+
+				$post_title = trim( $article['post_title'] );
+				$post_date = $article['publishedAt'];
+				$post_name = $article['post_name'];
+				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : [];
+				if ( isset( $article['image'] ) ) {
+					$additional_meta['newspack_image'] = $article['image'];
+				}
+				if ( isset( $article['keywords'] ) ) {
+					$additional_meta['newspack_keywords'] = $article['keywords'];
+				}
+				if ( isset( $article['url'] ) ) {
+					$additional_meta['newspack_url'] = $article['url'];
 				}
 			}
 
@@ -1926,7 +1943,8 @@ return;
 			// Set categories.
 	        $some_categories_were_set = false;
             foreach ( $article['categories'] as $category ) {
-	            $category_name = null;
+				// Get/create and assign child categories by $category['title'].
+				$category_name = null;
 	            if ( isset( $category['title'] ) && ! is_null( $category['title'] ) ) {
 					$category_name = $category['title'];
 					$term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, $top_category_term_id );
@@ -1936,7 +1954,7 @@ return;
 		            $this->file_logger( sprintf( "ERROR: ID %d, Category does not have a title: %s", $original_article_id, json_encode( $category ) ) );
 	            }
             }
-			// If no cats were assigned, at least assign the top level category.
+			// And if no cats were assigned, at least assign the top level category.
 			if ( false === $some_categories_were_set ) {
                 wp_set_post_terms( $post_id, $top_category_term_id, 'category', true );
 			}
