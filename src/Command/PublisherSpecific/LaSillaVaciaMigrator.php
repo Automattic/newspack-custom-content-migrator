@@ -15,6 +15,7 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
@@ -614,6 +615,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	 */
 	private $taxonomy;
 
+	/**
+	 * Images logic.
+	 *
+	 * @var Images $images Images logic.
+	 */
+	private $images;
+
     /**
      * Singleton constructor.
      */
@@ -625,6 +633,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	    $this->logger = new Logger();
 	    $this->attachments = new Attachments();
 	    $this->taxonomy = new Taxonomy();
+	    $this->images = new Images();
     }
 
 	/**
@@ -828,6 +837,51 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             [ $this, 'cmd_ivan_helper_cmd' ],
             [
                 'shortdesc' => "Ivan U's helper command with various dev snippets.",
+            ]
+        );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-update-img-paths-in-category-or-posts',
+            [ $this, 'cmd_update_img_paths_in_category_or_posts' ],
+            [
+                'shortdesc' => "Updates paths in <img> elements either in all posts in category, or in specific post IDs. Provide either category-term-id or post-ids-csv.",
+                'synopsis' => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'search',
+                        'description' => 'Search string in <img>.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'assoc',
+                        'name' => 'replace',
+                        'description' => 'Replace string in <img>.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'assoc',
+                        'name' => 'category-term-id',
+                        'description' => 'Category term_id in which all belonging posts will be updated.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'assoc',
+                        'name' => 'category-term-id',
+                        'description' => 'Category term_id in which all belonging posts will be updated.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ],
+                    [
+                        'type' => 'assoc',
+                        'name' => 'post-ids-csv',
+                        'description' => 'Post IDs in CSV format, which will be updated.',
+                        'optional' => true,
+                        'repeating' => false,
+                    ],
+                ]
             ]
         );
 
@@ -1428,8 +1482,70 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         }
     }
 
+    public function cmd_update_img_paths_in_category_or_posts( $args, $assoc_args ) {
+		$search           = $assoc_args['search'];
+		$replace          = $assoc_args['replace'];
+	    $category_term_id = isset( $assoc_args['category-term-id'] ) ? $assoc_args['category-term-id'] : null;
+		$post_ids         = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+		if ( is_null( $category_term_id ) && is_null( $post_ids ) ) {
+			WP_CLI::error( 'You must specify either a category term ID or a comma-separated list of post IDs.' );
+		}
+
+	    global $wpdb;
+
+		// Get all post IDs from category.
+		if ( ! is_null( $category_term_id ) ) {
+		    $post_ids = $wpdb->get_col( $wpdb->prepare(
+			    "select object_id from {$wpdb->term_relationships} tr
+				join {$wpdb->term_taxonomy} tt on tt.term_taxonomy_id = tr.term_taxonomy_id
+				join {$wpdb->terms} t on t.term_id = tt.term_id
+				join {$wpdb->posts} p on p.ID = tr.object_id
+				where t.term_id = %d
+				and p.post_type = 'post';",
+			    $category_term_id
+		    ) );
+		}
+
+		WP_CLI::log( sprintf( "Updating <imgs> in %d posts... Replacing:", count( $post_ids ) ) );
+		WP_CLI::log( sprintf( "- from %s", $search ) );
+		WP_CLI::log( sprintf( "- to %s", $replace ) );
+
+		$updated_post_ids = [];
+	    foreach ( $post_ids as $post_id ) {
+		    $updated = $this->images->str_replace_in_img_elements_in_post( $post_id, $search, $replace );
+			if ( 0 != $updated ) {
+				$updated_post_ids[] = $post_id;
+			}
+	    }
+
+		if ( empty( $updated_post_ids ) ) {
+			WP_CLI::warning( 'No posts updated.' );
+			return;
+		}
+
+        $log = date( 'Y-m-d_H-i-s' ) . '__catid_' . $category_term_id . '_updatedpostids.log';
+		file_put_contents( $log, implode( "\n", $updated_post_ids ) );
+
+		WP_CLI::success( sprintf( 'Done. List of updated posts saved to %s.', $log ) );
+		wp_cache_flush();
+    }
+
     public function cmd_ivan_helper_cmd( $args, $assoc_args ) {
-		global $wpdb;
+
+	    /**
+	     * Get all children cats of a cat.
+	     */
+	    $term_id = 4952;
+		$term = get_term( $term_id, 'category' );
+	    $terms_children = get_categories( [ 'child_of' => $term_id, 'hide_empty' => 0, ] );
+	    $terms_children_ids = [];
+		foreach ( $terms_children as $term_child ) {
+			$terms_children_ids[] = $term_child->term_id;
+	    }
+		WP_CLI::log( sprintf( "%d '%s' children:", $term_id, $term->name ) );
+		WP_CLI::log( implode( ',', $terms_children_ids ) );
+		WP_CLI::success( 'Done.' );
+		return;
 
 	    /**
 	     * Refactor categories.
