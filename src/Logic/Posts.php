@@ -12,7 +12,7 @@ class Posts {
 	/**
 	 * @param string|array $post_type   Post type(s).
 	 * @param array        $post_status Post statuses.
-	 * @param boolean      $nopaging    Deprecated usage, optional param kept for backward compatibility. Always defaults to true.
+	 * @param boolean      $nopaging    Deprecated usage, this param kept for backward compatibility with previous version of method. Always defaults to true.
 	 *
 	 * @return array
 	 */

@@ -4,6 +4,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\Posts;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**
@@ -15,11 +17,34 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	 */
 	private static $instance = null;
 
+	/**
+	 * CoAuthors Plus logic.
+	 *
+	 * @var CoAuthorPlus CoAuthors Plus logic instance.
+	 */
+	private $coauthorsplus_logic;
+
+	/**
+	 * Logger.
+	 *
+	 * @var Logger Logger instance.
+	 */
+	private $logger;
+
+	/**
+	 * Posts.
+	 *
+	 * @var Posts Posts instance.
+	 */
+	private $posts;
+
     /**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->logger = new Logger();
+		$this->posts = new Posts();
 	}
 
 	/**
@@ -56,7 +81,68 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-photographers',
+			[ $this, 'cmd_photographers' ],
+			[
+				'shortdesc' => "Gets postmeta 'autor_fotos_o_imagenes_del_post' and sets it as post's featured image's 'Credit' field. Fixes https://app.asana.com/0/1200360665923416/1205089960935202/f",
+				'synopsis'  => [],
+			]
+		);
 	}
+
+	/**
+	 * Callable for `newspack-content-migrator efecto-cocuyo-bylines-and-photographers`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+    public function cmd_photographers( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		// "Autor Fotos o Imágenes del Post" should be credit to the featured image.
+	    // e.g., live ID 534633 , staging ID 534633, staging featured image ID 534634.
+
+	    $post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+if ( $key_post_id + 1 < 28714 ) continue;
+
+			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$attachment_id = get_post_meta( $post_id, '_thumbnail_id', true );
+			$photographer = get_post_meta( $post_id, 'autor_fotos_o_imagenes_del_post', true );
+
+			if ( ! $attachment_id && $photographer ) {
+				$this->logger->log( "ec__warning_has_photographer_but_no_attachment_id.log", $post_id, $this->logger::WARNING );
+				continue;
+			}
+			if ( ! $attachment_id ) {
+				continue;
+			}
+			if ( ! $photographer ) {
+				continue;
+			}
+			$photographer = trim( $photographer );
+			if ( empty( $photographer ) ) {
+				continue;
+			}
+
+			// Get attachment photo credit.
+			$credit = get_post_meta( $attachment_id, '_media_credit', true );
+
+			// If credit exists and is different than photographer, log old and new values, overwrite with (new) photographer.
+			if ( $credit && ( $credit !== $photographer ) ) {
+				$this->logger->log( "ec__warning_credit_exists_was_overwritten.log", sprintf( "%d %d existing:'%s' new:'%s'", $post_id, $attachment_id, $credit, $photographer ), $this->logger::WARNING );
+			}
+
+			// Set credit to attachment.
+			update_post_meta( $attachment_id, '_media_credit', $photographer );
+			$this->logger->log( "ec__updated.log", "Updated credit for attachment {$attachment_id} to '{$photographer}'.", $this->logger::SUCCESS );
+		}
+    }
 
     /**
 	 * Outputs a list of potential avatars to be manually handled.
