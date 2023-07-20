@@ -4,6 +4,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\Posts;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**
@@ -15,11 +17,34 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	 */
 	private static $instance = null;
 
+	/**
+	 * CoAuthors Plus logic.
+	 *
+	 * @var CoAuthorPlus CoAuthors Plus logic instance.
+	 */
+	private $coauthorsplus_logic;
+
+	/**
+	 * Logger.
+	 *
+	 * @var Logger Logger instance.
+	 */
+	private $logger;
+
+	/**
+	 * Posts.
+	 *
+	 * @var Posts Posts instance.
+	 */
+	private $posts;
+
     /**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->logger = new Logger();
+		$this->posts = new Posts();
 	}
 
 	/**
@@ -56,7 +81,241 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-photographers',
+			[ $this, 'cmd_photographers' ],
+			[
+				'shortdesc' => "Gets postmeta 'autor_fotos_o_imagenes_del_post' and sets it as post's featured image's 'Credit' field. Fixes https://app.asana.com/0/1200360665923416/1205089960935202/f",
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas',
+			[ $this, 'cmd_split_merged_wpuser_authors_into_separate_gas' ],
+			[
+				'shortdesc' => "Some co-authors got merged into single WP_Users. This converts those accounts to separate GAs. Fixes https://app.asana.com/0/1200360665923416/1205089960935202/f",
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-update-imported-video-posts',
+			[ $this, 'cmd_update_imported_video_posts' ],
+			[
+				'shortdesc' => "Video galleries were imported as regular posts via WXR XML. This command assigns a proper category, and prepends video embed at beginning of post_content. Fixes https://app.asana.com/0/1200360665923416/1205089960935202/f",
+				'synopsis'  => [
+					'type'        => 'assoc',
+					'name'        => 'post-ids-csv',
+					'description' => "Post IDs.",
+					'optional'    => false,
+					'repeating'   => false,
+				],
+			],
+		);
 	}
+
+	/**
+	 * Callable for `newspack-content-migrator efecto-cocuyo-update-imported-video-posts`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+    public function cmd_update_imported_video_posts( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		// Get or create category "Videos".
+	    $category = wp_create_category( 'Videos', 0 );
+
+		$ids_no_video = [];
+
+	    $post_ids = explode( ',', $assoc_args[ 'post-ids-csv' ] );
+		foreach ( $post_ids as $post_id ) {
+
+			// Append "Video" category to post.
+			wp_set_post_categories( $post_id, [ $category ], true );
+
+			// Get video URL and caption.
+			$video_meta = get_post_meta( $post_id, '_fvp_video', true );
+			if ( ! $video_meta ) {
+				$ids_no_video[] = $post_id;
+				continue;
+			}
+			$caption = isset( $video_meta[ 'title' ] ) && ! empty( $video_meta[ 'title' ] ) ? $video_meta[ 'title' ] : null;
+
+			// Get YT block.
+			$yt_block = $this->get_yt_block( $video_meta[ 'full' ], $caption );
+
+			// Prepend to post_content.
+			$post_content = $wpdb->get_var( "SELECT post_content FROM {$wpdb->posts} WHERE ID = {$post_id}" );
+			$post_content_updated = $yt_block . "\n\n" . trim( $post_content );
+			$wpdb->update(
+				$wpdb->posts,
+				[ 'post_content' => $post_content_updated, ],
+				[ 'ID' => $post_id, ]
+			);
+
+			WP_CLI::line( "Updated {$post_id}" );
+		}
+
+		WP_CLI::warning( 'No videos found for post IDs: ' . implode( ', ', $ids_no_video ) );
+
+    }
+
+	/**
+	 * Gets a YT block.
+	 *
+	 * @param string  $url   YT URL.
+	 * @param ?string $title Optional. Caption.
+	 *
+	 * @return string Block HTML.
+	 */
+	private function get_yt_block( $url, $title = null ) {
+
+		$caption = '';
+		if ( ! is_null( $title ) ) {
+			$caption = '<figcaption class="wp-element-caption">' . $title . '</figcaption>';
+		}
+
+		$block = <<<EOT
+<!-- wp:embed {"url":"{$url}","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+{$url}
+</div>{$caption}</figure>
+<!-- /wp:embed -->
+EOT;
+
+		return $block;
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+    public function cmd_split_merged_wpuser_authors_into_separate_gas( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$wp_user_ids_to_gas = [
+			// "Dayimar Ayala e Irving Briceno"
+			87 => [
+				'Dayimar Ayala',
+				'Irving Briceno',
+			],
+			// "Jeanfreddy y Shari"
+			271 => [
+				'Jeanfreddy Gutiérrez',
+				'Shari Avendaño',
+			],
+			// "Marelia Armas y John Souto"
+			186 => [
+				'Marelia Armas',
+				'John Souto',
+			],
+			// "Mariel Lozada y Andrea Garcia"
+			92 => [
+				'Mariel Lozada',
+				'Andrea Garcia',
+			],
+		];
+
+		// Use this default WP_User as post_author placeholder for posts that will be owned by GAs.
+		$adminnewspack_wp_user_id = 407;
+
+		foreach ( $wp_user_ids_to_gas as $wp_user_id => $ga_names ) {
+
+			WP_CLI::line( "Updating posts belonging to WP_User ID $wp_user_id ..." );
+
+			// Get GAs for this WP_User.
+			$ga_ids = [];
+			foreach ( $ga_names as $ga_name ) {
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $ga_name );
+				if ( $ga ) {
+					$ga_ids[] = $ga->ID;
+				} else {
+					$ga_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $ga_name ] );
+					$ga_ids[] = $ga_id;
+				}
+			}
+
+			// Validate.
+			if ( count( $ga_ids ) != count( $ga_names ) ) {
+				$this->logger->log( 'efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas_err.log', "Not all GAs were found or created for WP_User ID $wp_user_id", $this->logger::WARNING );
+			}
+
+			// Update all 'post' types.
+			$post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_author = %d AND post_type = 'post'", $wp_user_id ) );
+			foreach ( $post_ids as $post_id ) {
+
+				// Remove the WP_User ID from the post_author field.
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_author' => $adminnewspack_wp_user_id ],
+					[ 'ID' => $post_id ],
+				);
+
+				// Add the GAs to the post.
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
+				$this->logger->log( 'efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas_updated.log', sprintf( "postID %d GA_IDs %s", $post_id, implode( ',', $ga_ids ) ), null );
+			}
+
+			WP_CLI::success( sprintf( "Updated %d posts", count( $post_ids ) ) );
+		}
+    }
+
+	/**
+	 * Callable for `newspack-content-migrator efecto-cocuyo-bylines-and-photographers`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+    public function cmd_photographers( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		// "Autor Fotos o Imágenes del Post" should be credit to the featured image.
+	    // e.g., live ID 534633 , staging ID 534633, staging featured image ID 534634.
+
+	    $post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$attachment_id = get_post_meta( $post_id, '_thumbnail_id', true );
+			$photographer = get_post_meta( $post_id, 'autor_fotos_o_imagenes_del_post', true );
+
+			if ( ! $attachment_id && $photographer ) {
+				$this->logger->log( "ec__warning_has_photographer_but_no_attachment_id.log", $post_id, $this->logger::WARNING );
+				continue;
+			}
+			if ( ! $attachment_id ) {
+				continue;
+			}
+			if ( ! $photographer ) {
+				continue;
+			}
+			$photographer = trim( $photographer );
+			if ( empty( $photographer ) ) {
+				continue;
+			}
+
+			// Get attachment photo credit.
+			$credit = get_post_meta( $attachment_id, '_media_credit', true );
+
+			// If credit exists and is different than photographer, log old and new values, overwrite with (new) photographer.
+			if ( $credit && ( $credit !== $photographer ) ) {
+				$this->logger->log( "ec__warning_credit_exists_was_overwritten.log", sprintf( "postID %d attachmentID%d existingCredit:'%s' newCredit:'%s'", $post_id, $attachment_id, $credit, $photographer ), $this->logger::WARNING );
+			}
+
+			// Set credit to attachment.
+			update_post_meta( $attachment_id, '_media_credit', $photographer );
+			$this->logger->log( "ec__updated.log", "Updated postID {$post_id} credit for attachmentID {$attachment_id} to '{$photographer}'.", $post_id, $this->logger::SUCCESS );
+		}
+    }
 
     /**
 	 * Outputs a list of potential avatars to be manually handled.
