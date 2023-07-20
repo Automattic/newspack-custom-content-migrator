@@ -108,8 +108,6 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	    $post_ids = $this->posts->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 
-if ( $key_post_id + 1 < 28714 ) continue;
-
 			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$attachment_id = get_post_meta( $post_id, '_thumbnail_id', true );
@@ -135,12 +133,12 @@ if ( $key_post_id + 1 < 28714 ) continue;
 
 			// If credit exists and is different than photographer, log old and new values, overwrite with (new) photographer.
 			if ( $credit && ( $credit !== $photographer ) ) {
-				$this->logger->log( "ec__warning_credit_exists_was_overwritten.log", sprintf( "%d %d existing:'%s' new:'%s'", $post_id, $attachment_id, $credit, $photographer ), $this->logger::WARNING );
+				$this->logger->log( "ec__warning_credit_exists_was_overwritten.log", sprintf( "postID %d attachmentID%d existingCredit:'%s' newCredit:'%s'", $post_id, $attachment_id, $credit, $photographer ), $this->logger::WARNING );
 			}
 
 			// Set credit to attachment.
 			update_post_meta( $attachment_id, '_media_credit', $photographer );
-			$this->logger->log( "ec__updated.log", "Updated credit for attachment {$attachment_id} to '{$photographer}'.", $this->logger::SUCCESS );
+			$this->logger->log( "ec__updated.log", "Updated postID %d credit for attachmentID {$attachment_id} to '{$photographer}'.", $post_id, $this->logger::SUCCESS );
 		}
     }
 
