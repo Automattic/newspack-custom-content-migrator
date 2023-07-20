@@ -138,7 +138,7 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 
 			// Set credit to attachment.
 			update_post_meta( $attachment_id, '_media_credit', $photographer );
-			$this->logger->log( "ec__updated.log", "Updated postID %d credit for attachmentID {$attachment_id} to '{$photographer}'.", $post_id, $this->logger::SUCCESS );
+			$this->logger->log( "ec__updated.log", "Updated postID {$post_id} credit for attachmentID {$attachment_id} to '{$photographer}'.", $post_id, $this->logger::SUCCESS );
 		}
     }
 
