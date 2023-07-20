@@ -97,6 +97,95 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-update-imported-video-posts',
+			[ $this, 'cmd_update_imported_video_posts' ],
+			[
+				'shortdesc' => "Video galleries were imported as regular posts via WXR XML. This command assigns a proper category, and prepends video embed at beginning of post_content. Fixes https://app.asana.com/0/1200360665923416/1205089960935202/f",
+				'synopsis'  => [
+					'type'        => 'assoc',
+					'name'        => 'post-ids-csv',
+					'description' => "Post IDs.",
+					'optional'    => false,
+					'repeating'   => false,
+				],
+			],
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator efecto-cocuyo-update-imported-video-posts`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+    public function cmd_update_imported_video_posts( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		// Get or create category "Videos".
+	    $category = wp_create_category( 'Videos', 0 );
+
+		$ids_no_video = [];
+
+	    $post_ids = explode( ',', $assoc_args[ 'post-ids-csv' ] );
+		foreach ( $post_ids as $post_id ) {
+
+			// Append "Video" category to post.
+			wp_set_post_categories( $post_id, [ $category ], true );
+
+			// Get video URL and caption.
+			$video_meta = get_post_meta( $post_id, '_fvp_video', true );
+			if ( ! $video_meta ) {
+				$ids_no_video[] = $post_id;
+				continue;
+			}
+			$caption = isset( $video_meta[ 'title' ] ) && ! empty( $video_meta[ 'title' ] ) ? $video_meta[ 'title' ] : null;
+
+			// Get YT block.
+			$yt_block = $this->get_yt_block( $video_meta[ 'full' ], $caption );
+
+			// Prepend to post_content.
+			$post_content = $wpdb->get_var( "SELECT post_content FROM {$wpdb->posts} WHERE ID = {$post_id}" );
+			$post_content_updated = $yt_block . "\n\n" . trim( $post_content );
+			$wpdb->update(
+				$wpdb->posts,
+				[ 'post_content' => $post_content_updated, ],
+				[ 'ID' => $post_id, ]
+			);
+
+			WP_CLI::line( "Updated {$post_id}" );
+		}
+
+		WP_CLI::warning( 'No videos found for post IDs: ' . implode( ', ', $ids_no_video ) );
+
+    }
+
+	/**
+	 * Gets a YT block.
+	 *
+	 * @param string  $url   YT URL.
+	 * @param ?string $title Optional. Caption.
+	 *
+	 * @return string Block HTML.
+	 */
+	private function get_yt_block( $url, $title = null ) {
+
+		$caption = '';
+		if ( ! is_null( $title ) ) {
+			$caption = '<figcaption class="wp-element-caption">' . $title . '</figcaption>';
+		}
+
+		$block = <<<EOT
+<!-- wp:embed {"url":"{$url}","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
+<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+{$url}
+</div>{$caption}</figure>
+<!-- /wp:embed -->
+EOT;
+
+		return $block;
 	}
 
 	/**
