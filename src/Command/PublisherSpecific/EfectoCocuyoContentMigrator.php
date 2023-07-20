@@ -89,7 +89,92 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas',
+			[ $this, 'cmd_split_merged_wpuser_authors_into_separate_gas' ],
+			[
+				'shortdesc' => "Some co-authors got merged into single WP_Users. This converts those accounts to separate GAs. Fixes https://app.asana.com/0/1200360665923416/1205089960935202/f",
+				'synopsis'  => [],
+			]
+		);
 	}
+
+	/**
+	 * Callable for `newspack-content-migrator efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+    public function cmd_split_merged_wpuser_authors_into_separate_gas( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$wp_user_ids_to_gas = [
+			// "Dayimar Ayala e Irving Briceno"
+			87 => [
+				'Dayimar Ayala',
+				'Irving Briceno',
+			],
+			// "Jeanfreddy y Shari"
+			271 => [
+				'Jeanfreddy Gutiérrez',
+				'Shari Avendaño',
+			],
+			// "Marelia Armas y John Souto"
+			186 => [
+				'Marelia Armas',
+				'John Souto',
+			],
+			// "Mariel Lozada y Andrea Garcia"
+			92 => [
+				'Mariel Lozada',
+				'Andrea Garcia',
+			],
+		];
+
+		$adminnewspack_wp_user_id = 407;
+
+		foreach ( $wp_user_ids_to_gas as $wp_user_id => $ga_names ) {
+
+			WP_CLI::line( "Updating posts belonging to WP_User ID $wp_user_id ..." );
+
+			// Get GAs for this WP_User.
+			$ga_ids = [];
+			foreach ( $ga_names as $ga_name ) {
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $ga_name );
+				if ( $ga ) {
+					$ga_ids[] = $ga->ID;
+				} else {
+					$ga_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $ga_name ] );
+					$ga_ids[] = $ga_id;
+				}
+			}
+
+			// Validate.
+			if ( count( $ga_ids ) != count( $ga_names ) ) {
+				$this->logger->log( 'efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas_err.log', "Not all GAs were found or created for WP_User ID $wp_user_id", $this->logger::WARNING );
+			}
+
+			// Update all 'post' types.
+			$post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_author = %d AND post_type = 'post'", $wp_user_id ) );
+			foreach ( $post_ids as $post_id ) {
+
+				// Remove the WP_User ID from the post_author field.
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_author' => $adminnewspack_wp_user_id ],
+					[ 'ID' => $post_id ],
+				);
+
+				// Add the GAs to the post.
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $ga_ids, $post_id );
+				$this->logger->log( 'efecto-cocuyo-split-merged-wpuser-authors-into-separate-gas_updated.log', sprintf( "postID %d GA_IDs %s", $post_id, implode( ',', $ga_ids ) ), null );
+			}
+
+			WP_CLI::success( sprintf( "Updated %d posts", count( $post_ids ) ) );
+		}
+    }
 
 	/**
 	 * Callable for `newspack-content-migrator efecto-cocuyo-bylines-and-photographers`.
