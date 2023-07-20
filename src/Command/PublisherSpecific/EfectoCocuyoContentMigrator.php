@@ -133,6 +133,7 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 			],
 		];
 
+		// Use this default WP_User as post_author placeholder for posts that will be owned by GAs.
 		$adminnewspack_wp_user_id = 407;
 
 		foreach ( $wp_user_ids_to_gas as $wp_user_id => $ga_names ) {
