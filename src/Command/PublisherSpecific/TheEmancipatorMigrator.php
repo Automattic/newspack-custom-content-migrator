@@ -114,7 +114,16 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 				if ( ! $dry_run ) {
 					foreach ( $credits as $co_author ) {
-						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
+						$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
+						if ( empty( $maybe_co_author ) ) {
+							$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
+						} elseif ( is_object( $maybe_co_author ) ) {
+							$co_author_id = $maybe_co_author->ID;
+						} else {
+							continue;
+							// TODO: Figure out what to do with an array here.
+						}
+
 						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
 
 						// Link the co-author created with the WP User with the same name if it exists.
@@ -144,7 +153,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( 'Local url: %s', get_permalink( $post->ID ) ) );
 			WP_CLI::line( '--------' );
 		}
-
 	}
 
 	/**
@@ -154,7 +162,10 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 *
 	 * @return (WP_User|false) WP_User object on success, false on failure.
 	 */
-	private function get_wp_user_by_name( $user_name ) {
+	private
+	function get_wp_user_by_name(
+		$user_name
+	) {
 		$user_query = new \WP_User_Query(
 			[
 				'search'        => $user_name,
@@ -177,7 +188,10 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 *
 	 * @return array
 	 */
-	private function maybe_spit_author_names( $name ): array {
+	private
+	function maybe_spit_author_names(
+		$name
+	): array {
 		if ( strpos( ' and ', $name ) ) {
 			return explode( ' and ', $name );
 		}
