@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \WP_CLI;
 
 /**
@@ -16,9 +17,18 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
+	 * CoAuthorPlus logic.
+	 *
+	 * @var CoAuthorPlus $coauthorsplus_logic
+	 */
+	private $coauthorsplus_logic;
+
+	/**
 	 * Constructor.
 	 */
-	private function __construct() {}
+	private function __construct() {
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -56,9 +66,15 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	public function cmd_authors( $args, $assoc_args ) {
 
-		$posts_count      = 0;
-		$posts_total      = array_sum( (array) wp_count_posts( 'post' ) );
-		$num_posts = $assoc_args['num_posts'] ?? - 1;
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit;
+		}
+
+		$posts_count = 0;
+		$posts_total = array_sum( (array) wp_count_posts( 'post' ) );
+		$num_posts   = $assoc_args['num_posts'] ?? - 1;
+		$dry_run     = ! empty( $assoc_args['dry_run'] );
 
 		$posts_query_args = [
 			'posts_per_page' => $num_posts,
@@ -67,11 +83,11 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			'paged'          => 1,
 			'fields'         => 'ids,post_author',
 		];
-		if ( $assoc_args['post_id'] ) {
+		if ( ! empty( $assoc_args['post_id'] ) ) {
 			$posts_query_args['p'] = $assoc_args['post_id'];
 		}
 
-		WP_CLI::line( sprintf( 'dry run mode: %s', ! empty( $assoc_args['dry_run'] ) ? 'on' : 'off' ) );
+		WP_CLI::line( sprintf( 'dry run mode: %s', $dry_run ? 'on' : 'off' ) );
 
 		$posts = get_posts( $posts_query_args );
 
@@ -86,16 +102,31 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 			if ( ! empty( $api_content['credits']['by'] ) ) {
 				foreach ( $api_content['credits']['by'] as $credit ) {
+					$names = [];
 					if ( ! empty( $credit['name'] ) ) {
-						if ( is_array( $credit ) ) {
-							$credits[] = $credit['name'];
-						}
-						else {
-							$credits[] = $credit;
+						$names = $this->maybe_spit_author_names( $credit['name'] );
+					} else {
+						$names = $this->maybe_spit_author_names( $credit );
+					}
+
+					$credits = array_merge( $credits, $names );
+				}
+
+				if ( ! $dry_run ) {
+					foreach ( $credits as $co_author ) {
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
+						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
+
+						// Link the co-author created with the WP User with the same name if it exists.
+						$co_author_wp_user = $this->get_wp_user_by_name( $co_author );
+						if ( $co_author_wp_user ) {
+							$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
+								$co_author_wp_user );
 						}
 					}
 				}
 			}
+
 
 			WP_CLI::line( sprintf( 'Start processing post with ID: %s (Post: %d of %d)', $post->ID, ++ $posts_count,
 				$posts_total ) );
@@ -114,6 +145,44 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			WP_CLI::line( '--------' );
 		}
 
+	}
+
+	/**
+	 * Retrieve WP user by name.
+	 *
+	 * @param string $user_name Name to look for.
+	 *
+	 * @return (WP_User|false) WP_User object on success, false on failure.
+	 */
+	private function get_wp_user_by_name( $user_name ) {
+		$user_query = new \WP_User_Query(
+			[
+				'search'        => $user_name,
+				'search_fields' => array( 'user_login', 'user_nicename', 'display_name' ),
+			]
+		);
+
+		// If we do have an existing WP User, we link the post to them.
+		if ( ! empty( $user_query->results ) ) {
+			return current( $user_query->results );
+		}
+
+		return false;
+	}
+
+	/**
+	 * Low-tech byline splitting.
+	 *
+	 * @param string $name
+	 *
+	 * @return array
+	 */
+	private function maybe_spit_author_names( $name ): array {
+		if ( strpos( ' and ', $name ) ) {
+			return explode( ' and ', $name );
+		}
+
+		return [ $name ];
 	}
 
 }
