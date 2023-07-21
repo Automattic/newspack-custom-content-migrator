@@ -176,7 +176,7 @@ class TheCityMigrator implements InterfaceCommand {
 
 				// ... and not refreshing, skip.
 				if ( ! $refresh_authors ) {
-					WP_CLI::log( sprintf( 'Author %d %s already exists. Skipping.', $author['uid'], $author['name'] ) );
+					WP_CLI::log( sprintf( "Author '%s' already exists. Skipping.", $author['name'] ) );
 					continue;
 				}
 
