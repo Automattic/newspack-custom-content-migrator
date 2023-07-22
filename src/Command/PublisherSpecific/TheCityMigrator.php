@@ -164,6 +164,7 @@ class TheCityMigrator implements InterfaceCommand {
 
 		return $paragraph_block;
 	}
+
 	/**
 	 * @param array $component Component data.
 	 *
@@ -228,10 +229,14 @@ class TheCityMigrator implements InterfaceCommand {
 			'EntryBodyRelatedList',
 			'EntryBodyHorizontalRule',
 			'EntryBodyTable',
-
-			'EntryBodyNewsletter',
 			'EntryBodyPymEmbed',
 			'EntryBodySidebar',
+
+			// These are not converted.
+			'EntryBodyNewsletter' => [
+				'method' => null,
+				'arguments' => null,
+			],
 		];
 		$components_debug = [];
 
@@ -267,47 +272,53 @@ class TheCityMigrator implements InterfaceCommand {
 					$d=1;
 				}
 
-				if ( 'EntryBodyHeading' != $component['__typename'] ) {
+				if ( 'EntryBodyNewsletter' != $component['__typename'] ) {
+				// if ( 'EntryBodyHeading' != $component['__typename'] ) {
 					continue;
 				}
 
-			// 'EntryBodyHeading',
-			// 'EntryBodyHTML',
-			// 'EntryBodyList',
-			// 'EntryBodyEmbed',
-			// 'EntryBodyPullquote',
-			// 'EntryBodyGallery',
-			// 'EntryBodyRelatedList',
-			// 'EntryBodyHorizontalRule',
-			// 'EntryBodyTable',
-			//
-			// 'EntryBodyNewsletter',
-			// 'EntryBodyPymEmbed',
-			// 'EntryBodySidebar',
+			// 'EntryBodyHeading' https://www.thecity.nyc/2019/3/7/21211180/chirlane-mccray-s-mental-health-program-struggles-to-retain-key-staff
+			// 'EntryBodyHTML' https://www.thecity.nyc/2023/6/5/23750108/acs-families-child-welfare-miranda-warning
+			// 'EntryBodyList' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
+			// 'EntryBodyEmbed' https://www.thecity.nyc/2020/7/5/21312671/shotspotter-nyc-shootings-fireworks-nypd-civil-rights
+			// 'EntryBodyPullquote' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
+			// 'EntryBodyGallery' https://www.thecity.nyc/2022/6/15/23170278/judges-district-leaders-county-committee-surrogate-judicial-delegate-downballot-races-2022
+			// 'EntryBodyRelatedList' https://www.thecity.nyc/2022/6/15/23170278/judges-district-leaders-county-committee-surrogate-judicial-delegate-downballot-races-2022
+			// 'EntryBodyHorizontalRule' https://www.thecity.nyc/2019/3/7/21211180/chirlane-mccray-s-mental-health-program-struggles-to-retain-key-staff
+			// 'EntryBodyTable' https://www.thecity.nyc/2022/2/27/22953438/42-gap-between-most-and-least-vaccinated-public-school-districts-nyc-covid
+			// --
+			// 'EntryBodyNewsletter' https://www.thecity.nyc/2022/5/24/23140480/nyc-state-senate-stavisky-rivera-real-estate
+			// 'EntryBodyPymEmbed' https://www.thecity.nyc/2019/3/7/21211180/chirlane-mccray-s-mental-health-program-struggles-to-retain-key-staff
+			// 'EntryBodySidebar' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
+
+
 
 // IMAGE Needs to have $post_id.
 // fake.
 $post_id = 123;
 
-				// Call method to convert Chorus component to Gutenberg block with dynamic arguments.
+				/**
+				 * Convert Chorus component to Gutenberg block.
+				 */
+				// Get method to convert this Chorus component to Gutenberg block.
 				$method = $component_converters[ $component['__typename'] ]['method'];
-				$arguments = [];
-				foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
-					// If method arguments are not available, throw an exception.
-					if ( ! isset( $$argument ) ) {
-						throw new \RuntimeException( sprintf(
-							"Argument $%s not set in context and can't be passed to method %s() as argument number %d.",
-							$argument,
-							$method,
-							$key_argument
-						) );
+				if ( $method ) {
+					// Get dynamic arguments to pass to the method.
+					$arguments = [];
+					foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
+						// If method arguments are not available, throw an exception.
+						if ( ! isset( $$argument ) ) {
+							throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
+						}
+						$arguments[] = $$argument;
 					}
-					$arguments[] = $$argument;
+
+					// Call the method with arguments and get Gutenberg block.
+					$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
 				}
-				// Call the method with arguments to convert Chorus Component to Gutenberg block.
-				$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
 
 
+				// Debug.
 				$components_debug[ $component['__typename'] ] = [
 					$entry['url'],
 					$component,
