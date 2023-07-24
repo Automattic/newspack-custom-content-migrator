@@ -4,8 +4,6 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \WP_CLI;
 
@@ -26,10 +24,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	private $coauthorsplus_logic;
 
-	/**
-	 * @var PostsLogic $posts_logic
-	 */
-	private PostsLogic $posts_logic;
+
 	/**
 	 * @var RedirectionLogic $redirection_logic
 	 */
@@ -40,7 +35,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
-		$this->posts_logic         = new PostsLogic();
 		$this->redirection_logic   = new RedirectionLogic();
 	}
 
@@ -79,6 +73,48 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-post-subtitles',
+			[ $this, 'cmd_post_subtitles' ],
+			[
+				'shortdesc' => 'Add post subtitles', // TODO
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	/**
+	 * Process post subtitles.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_post_subtitles( $args, $assoc_args ): void {
+
+		$data     = $this->get_data( $args, $assoc_args );
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing post subtitles', $data['posts_total'] );
+
+		foreach ( $data['posts'] as $post ) {
+			WP_CLI::log(
+				sprintf(
+					'Post ID: %s, %s',
+					$post->ID,
+					$post->guid
+				)
+			);
+
+			$meta        = get_post_meta( $post->ID );
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+			$subtitle    = $api_content['subheadlines']['basic'] ?? false;
+			if ( ! $data['dry_run'] && $subtitle ) {
+				update_post_meta( $post->ID, 'newspack_post_subtitle', $subtitle );
+			}
+			$progress->tick();
+		}
+
+		$progress->finish();
 	}
 
 	public function cmd_redirects( $args, $assoc_args ) {
@@ -87,87 +123,76 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Redirection plugin not found. Install, activate, and configure it before using this command.' );
 		}
 
-		$num_posts = $assoc_args['num_posts'] ?? - 1;
-		$dry_run   = $assoc_args['dry_run'] ?? false;
+		$data = $this->get_data( $args, $assoc_args );
 
-		$posts_query_args = [
-			'posts_per_page' => $num_posts,
-			'post_type'      => 'post',
-			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we migrate all.
-			'paged'          => 1,
-			'fields'         => 'ids,post_author',
-		];
-		if ( ! empty( $assoc_args['post_id'] ) ) {
-			$posts_query_args['p'] = $assoc_args['post_id'];
-		}
-		$posts = get_posts( $posts_query_args );
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing redirects', $data['posts_total'] );
 
-		foreach ( $posts as $post ) {
+		foreach ( $data['posts'] as $post ) {
+			WP_CLI::log(
+				sprintf(
+					'Post ID: %s, %s',
+					$post->ID,
+					$post->guid
+				)
+			);
+
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
 			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
-			if ( ! $redirect_to ) {
-				continue;
+			if ( $redirect_to ) {
+				$redirect_from = get_permalink( $post->ID );
+				if ( ! $data['dry_run'] && empty( \Red_Item::get_for_url( $redirect_from ) ) ) {
+					$this->redirection_logic->create_redirection_rule(
+						$post->ID . '-redirect',// TODO? WHat should that be?
+						$redirect_from,
+						$redirect_to
+					);
+					WP_CLI::log( sprintf( 'Added a redirect for post with ID %d to %s', $post->ID, $redirect_to ) );
+				}
 			}
-
-			$redirect_from = get_permalink( $post->ID );
-			if ( ! $dry_run && empty( \Red_Item::get_for_url( $redirect_from ) ) ) {
-				$this->redirection_logic->create_redirection_rule(
-					$post->ID . '-redirect',// TODO? WHat should that be?
-					$redirect_from,
-					$redirect_to
-				);
-				WP_CLI::line( sprintf( 'Added a redirect for post with ID %d to %s', $post->ID, $redirect_to ) );
-			}
+			$progress->tick();
 		}
 
+		$progress->finish();
 	}
 
 	/**
 	 * Process byline data.
 	 */
-	public function cmd_authors( $args, $assoc_args ) {
+	public function cmd_authors( $args, $assoc_args ): void {
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-		$posts_count = 0;
-		$posts_total = array_sum( (array) wp_count_posts( 'post' ) );
-		$num_posts   = $assoc_args['num_posts'] ?? - 1;
-		$dry_run     = ! empty( $assoc_args['dry_run'] );
+		$data        = $this->get_data( $args, $assoc_args );
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing bylines', $data['posts_total'] );
 
-		$posts_query_args = [
-			'posts_per_page' => $num_posts,
-			'post_type'      => 'post',
-			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we migrate all.
-			'paged'          => 1,
-			'fields'         => 'ids,post_author',
-		];
-		if ( ! empty( $assoc_args['post_id'] ) ) {
-			$posts_query_args['p'] = $assoc_args['post_id'];
-		}
+		foreach ( $data['posts'] as $post ) {
+			WP_CLI::log(
+				sprintf(
+					'Post ID: %s, %s',
+					$post->ID,
+					$post->guid
+				)
+			);
 
-		WP_CLI::line( sprintf( 'dry run mode: %s', $dry_run ? 'on' : 'off' ) );
-
-		$posts = get_posts( $posts_query_args );
-
-		foreach ( $posts as $post ) {
-
-			$author_id   = get_post_field( 'post_author', $post->ID );
-			$author_name = get_the_author_meta( 'display_name', $author_id );
-			$credits     = [];
+			$credits = [];
 
 			$meta        = get_post_meta( $post->ID );
-			$api_content = maybe_unserialize( $meta['api_content_element'][0] ); // TODO: Are there ever more than one entries in that array??
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+
+			// TODO. THe real author/owner? Should we use that instead?
+			$real_author = $api_content['revision']['user_id'] ?? false;
+			WP_CLI::log( sprintf( 'Real author? %s', $real_author ) );
 
 			if ( ! empty( $api_content['credits']['by'] ) ) {
 				foreach ( $api_content['credits']['by'] as $credit ) {
 					$credits[] = empty( $credit['name'] ) ? $credit : $credit['name'];
 				}
 
-				if ( ! $dry_run ) {
+				if ( ! $data['dry_run'] ) {
 					foreach ( $credits as $co_author ) {
 						$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
 						if ( empty( $maybe_co_author ) ) {
@@ -188,30 +213,23 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 								$co_author_wp_user );
 						}
 					}
+					WP_CLI::log( '----' );
 				}
 			}
-
-			WP_CLI::line( sprintf( 'Start processing post with ID: %s (Post: %d of %d)', $post->ID, ++ $posts_count,
-				$posts_total ) );
-			WP_CLI::line( sprintf( 'WP author: %s', $author_name ) );
-			WP_CLI::line( sprintf( 'API content credit(s): %s', implode( ', ', $credits ) ) );
-			WP_CLI::line( sprintf( 'Existing url: %s', 'https://bostonglobe.com' . $api_content['canonical_url'] ) );
-			WP_CLI::line( sprintf( 'Local url: %s', get_permalink( $post->ID ) ) );
-			WP_CLI::line( '--------' );
+			$progress->tick();
 		}
+
+		$progress->finish();
 	}
 
 	/**
-	 * Retrieve WP user by name.
+	 * Retrieve WP user by looking in login, nicename, and display name.
 	 *
 	 * @param string $user_name Name to look for.
 	 *
-	 * @return (WP_User|false) WP_User object on success, false on failure.
+	 * @return (\WP_User|false) WP_User object on success, false on failure.
 	 */
-	private
-	function get_wp_user_by_name(
-		$user_name
-	) {
+	private function get_wp_user_by_name( $user_name ) {
 		$user_query = new \WP_User_Query(
 			[
 				'search'        => $user_name,
@@ -225,6 +243,39 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Helper to get data and args.
+	 *
+	 * Returned array will have the following keys:
+	 * - num_posts: how many posts the user wants to process.
+	 * - dry_run: well, just that.
+	 * - posts: the WP_Post objects.
+	 * - posts_total: how many posts were found.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 *
+	 * @return array
+	 */
+	private function get_data( $args, $assoc_args ): array {
+		$data              = [];
+		$data['num_posts'] = $assoc_args['num_posts'] ?? - 1;
+		$data['dry_run']   = $assoc_args['dry_run'] ?? false;
+		$posts_query_args  = [
+			'posts_per_page' => $data['num_posts'],
+			'post_type'      => 'post',
+			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we migrate all.
+			'paged'          => 1,
+		];
+		if ( ! empty( $assoc_args['post_id'] ) ) {
+			$posts_query_args['p'] = $assoc_args['post_id'];
+		}
+		$data['posts']       = get_posts( $posts_query_args );
+		$data['posts_total'] = count( $data['posts'] );
+
+		return $data;
 	}
 
 }
