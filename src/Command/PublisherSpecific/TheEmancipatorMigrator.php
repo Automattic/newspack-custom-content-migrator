@@ -4,6 +4,9 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \WP_CLI;
 
 /**
@@ -24,10 +27,21 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var PostsLogic $posts_logic
+	 */
+	private PostsLogic $posts_logic;
+	/**
+	 * @var RedirectionLogic $redirection_logic
+	 */
+	private RedirectionLogic $redirection_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->posts_logic         = new PostsLogic();
+		$this->redirection_logic   = new RedirectionLogic();
 	}
 
 	/**
@@ -53,11 +67,60 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			'newspack-content-migrator emancipator-authors',
 			[ $this, 'cmd_authors' ],
 			[
-				'shortdesc' => 'This is an initial version of the command, it will probably migrate authors from end of post_content into actual authors.',
+				'shortdesc' => 'Migrates authors from the API content as Co-Authors.',
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-redirects',
+			[ $this, 'cmd_redirects' ],
+			[
+				'shortdesc' => 'Looks at redirects.', // TODO
+				'synopsis'  => [],
+			]
+		);
+	}
 
+	public function cmd_redirects( $args, $assoc_args ) {
+
+		if ( ! class_exists( \Red_Item::class ) ) {
+			WP_CLI::error( 'Redirection plugin not found. Install, activate, and configure it before using this command.' );
+		}
+
+		$num_posts = $assoc_args['num_posts'] ?? - 1;
+		$dry_run   = $assoc_args['dry_run'] ?? false;
+
+		$posts_query_args = [
+			'posts_per_page' => $num_posts,
+			'post_type'      => 'post',
+			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we migrate all.
+			'paged'          => 1,
+			'fields'         => 'ids,post_author',
+		];
+		if ( ! empty( $assoc_args['post_id'] ) ) {
+			$posts_query_args['p'] = $assoc_args['post_id'];
+		}
+		$posts = get_posts( $posts_query_args );
+
+		foreach ( $posts as $post ) {
+			$meta        = get_post_meta( $post->ID );
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+
+			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
+			if ( ! $redirect_to ) {
+				continue;
+			}
+
+			$redirect_from = get_permalink( $post->ID );
+			if ( ! $dry_run && empty( \Red_Item::get_for_url( $redirect_from ) ) ) {
+				$this->redirection_logic->create_redirection_rule(
+					$post->ID . '-redirect',// TODO? WHat should that be?
+					$redirect_from,
+					$redirect_to
+				);
+				WP_CLI::line( sprintf( 'Added a redirect for post with ID %d to %s', $post->ID, $redirect_to ) );
+			}
+		}
 
 	}
 
@@ -68,7 +131,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit;
 		}
 
 		$posts_count = 0;
@@ -102,14 +164,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 			if ( ! empty( $api_content['credits']['by'] ) ) {
 				foreach ( $api_content['credits']['by'] as $credit ) {
-					$names = [];
-					if ( ! empty( $credit['name'] ) ) {
-						$names = $this->maybe_spit_author_names( $credit['name'] );
-					} else {
-						$names = $this->maybe_spit_author_names( $credit );
-					}
-
-					$credits = array_merge( $credits, $names );
+					$credits[] = empty( $credit['name'] ) ? $credit : $credit['name'];
 				}
 
 				if ( ! $dry_run ) {
@@ -136,17 +191,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				}
 			}
 
-
 			WP_CLI::line( sprintf( 'Start processing post with ID: %s (Post: %d of %d)', $post->ID, ++ $posts_count,
 				$posts_total ) );
-
-			// TODO. Probably shouldn't go in this function, but I found that some posts
-			// are straight up redirects to other sites. We should maybe handle them not as posts?
-			if ( ! empty( $api_content['related_content']['redirect'] ) ) {
-				WP_CLI::line( sprintf( 'Has a redirect -> %s',
-					$api_content['related_content']['redirect'][0]['redirect_url'] ) );
-			}
-
 			WP_CLI::line( sprintf( 'WP author: %s', $author_name ) );
 			WP_CLI::line( sprintf( 'API content credit(s): %s', implode( ', ', $credits ) ) );
 			WP_CLI::line( sprintf( 'Existing url: %s', 'https://bostonglobe.com' . $api_content['canonical_url'] ) );
@@ -179,24 +225,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		}
 
 		return false;
-	}
-
-	/**
-	 * Low-tech byline splitting.
-	 *
-	 * @param string $name
-	 *
-	 * @return array
-	 */
-	private
-	function maybe_spit_author_names(
-		$name
-	): array {
-		if ( strpos( ' and ', $name ) ) {
-			return explode( ' and ', $name );
-		}
-
-		return [ $name ];
 	}
 
 }
