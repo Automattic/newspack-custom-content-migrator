@@ -180,7 +180,7 @@ class TheCityMigrator implements InterfaceCommand {
 	 * @return array Block data, to be rendered with serialize_blocks().
 	 */
 	public function component_heading_to_block( $component ) {
-		$paragraph_block = $this->gutenberg_blocks->get_paragraph( $component['contents']['html'] );
+		$paragraph_block = $this->gutenberg_blocks->get_heading( $component['contents']['html'] );
 
 		return $paragraph_block;
 	}
@@ -359,6 +359,43 @@ class TheCityMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * @param array $component           Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_pymembed_to_block( $component ) {
+
+		$block = [];
+		$src = $component['url'];
+
+		$block = $this->gutenberg_blocks->get_iframe( $src );
+
+		return $block;
+	}
+
+	/**
+	 * @param array $component Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_pullquote_to_block( $component ) {
+		$paragraph_block = $this->gutenberg_blocks->get_quote( $component['quote']['html'] );
+
+		return $paragraph_block;
+	}
+
+	/**
+	 * @param array $component Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_horizontal_rule_to_block( $component ) {
+		$paragraph_block = $this->gutenberg_blocks->get_separator( 'is-style-wide' );
+
+		return $paragraph_block;
+	}
+
+	/**
 	 * @param array $component Component data.
 	 *
 	 * @return array Block data, to be rendered with serialize_blocks().
@@ -372,8 +409,75 @@ class TheCityMigrator implements InterfaceCommand {
 		// Import image.
 		WP_CLI::line( sprintf( 'Downloading image URL %s ...', $url ) );
 		$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
+		update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
 		// Logg errors.
  		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+			$this->logger->log(
+				'thecity-chorus-cms-import-authors-and-posts__err__component_image_to_block.log',
+				sprintf( "Err importing image URL %s error: %s", $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
+				$this->logger::WARNING
+			);
+		}
+		$attachment_post = get_post( $attachment_id );
+
+		$paragraph_block = $this->gutenberg_blocks->get_image( $attachment_post );
+
+		return $paragraph_block;
+	}
+
+	/**
+	 * @param array $component Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_gallery_to_block( $component ) {
+
+		$attachment_ids = [];
+		foreach ( $component['gallery']['images'] as $key_image => $image ) {
+			$title = $image['asset']['title'];
+			$caption = $image['caption']['html'];
+			$url = $image['url'];
+
+			// Import image.
+			WP_CLI::line( sprintf( 'Downloading gallery image %d/%d URL %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
+			$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
+			update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
+			// Log errors.
+	        if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+				$this->logger->log(
+					'thecity-chorus-cms-import-authors-and-posts__err__component_image_to_block.log',
+					sprintf( "Err importing image URL %s error: %s", $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
+					$this->logger::WARNING
+				);
+
+				continue;
+			}
+
+			$attachment_ids[] = $attachment_id;
+		}
+
+		$slideshow_block = $this->gutenberg_blocks->get_jetpack_slideshow( $attachment_ids );
+
+		return $slideshow_block;
+	}
+
+	/**
+	 * @param array $component Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_sidebar_to_block( $component ) {
+
+		$url = $component['image']['url'];
+		$title = isset( $component['image']['asset']['title'] ) && ! empty( $component['image']['asset']['title'] ) ? $component['image']['asset']['title'] : null;
+		$caption = isset( $component['image']['caption']['plaintext'] ) && ! empty( $component['image']['caption']['plaintext'] ) ? $component['image']['caption']['plaintext'] : null;
+
+		// Import image.
+		WP_CLI::line( sprintf( 'Downloading image URL %s ...', $url ) );
+		$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
+		update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
+		// Logg errors.
+		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 			$this->logger->log(
 				'thecity-chorus-cms-import-authors-and-posts__err__component_image_to_block.log',
 				sprintf( "Err importing image URL %s error: %s", $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
@@ -410,7 +514,7 @@ class TheCityMigrator implements InterfaceCommand {
 				'method' => 'component_image_to_block',
 				'arguments' => [
 					'component',
-					'post_id'
+					'post_id',
 				],
 			],
 			'EntryBodyHeading' => [
@@ -437,13 +541,40 @@ class TheCityMigrator implements InterfaceCommand {
 					'component',
 				],
 			],
-			'EntryBodyPullquote',
-			'EntryBodyGallery',
-			'EntryBodyRelatedList',
-			'EntryBodyHorizontalRule',
-			'EntryBodyTable',
-			'EntryBodyPymEmbed',
-			'EntryBodySidebar',
+			'EntryBodyPullquote' => [
+				'method' => 'component_pullquote_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+			'EntryBodyHorizontalRule' => [
+				'method' => 'component_horizontal_rule_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+			'EntryBodyGallery' => [
+				'method' => 'component_gallery_to_block',
+				'arguments' => [
+					'component',
+					'post_id',
+				],
+			],
+			'EntryBodyPymEmbed' => [
+				'method' => 'component_pymembed_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+			'EntryBodySidebar' => [
+				'method' => 'component_sidebar_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+
+			// 'EntryBodyTable',
+			// 'EntryBodyRelatedList',
 
 			// These are not converted.
 			'EntryBodyNewsletter' => [
@@ -462,6 +593,12 @@ $components_debug_samples = [];
 			WP_CLI::line( sprintf( "%d/%d", $key_entry_json + 1, count( $entries_jsons ) ) );
 
 			$entry = json_decode( file_get_contents( $entry_json ), true );
+
+// DEV debug.
+// if ( 'https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field' != $entry['url'] ) {
+// 	continue;
+// }
+
 
 			/**
 			 * Various data consistency checks -- use step debugging to catch unexpected data.
@@ -486,68 +623,75 @@ $components_debug_samples = [];
 					$d=1;
 				}
 
-				if ( 'EntryBodyEmbed' != $component['__typename'] ) {
-// $paragraph_block = $this->gutenberg_blocks->get_list( $component['contents']['html'] );
-					continue;
-				}
+// DEV debug -- REMOVE.
+if ( 'EntryBodySidebar' != $component['__typename'] ) {
+	continue;
+}
 
-// ururur
+// DEV debug -- REMOVE.
 // $components_debug_samples[ $component['embed']['provider']['name'] ][] = $component['embed']['embedHtml'];
 // continue;
 
-				// Call the converter.
-				$method = $component_converters[ $component['__typename'] ]['method'];
-				$arguments = $component_converters[ $component['__typename'] ]['arguments'];
+// DEV debug -- REMOVE and move conversion below after post was created.
+// $post_id needed for component conversion -- for DEV purposes use this fake one
+$post_id = 123;
+
+
+				/**
+				 * Call the converter on component.
+				 */
+				if ( 'EntryBodySidebar' == $component['__typename'] ) {
+
+					/**
+					 * Converting the EntryBodySidebar component to blocks is a special recursive case.
+					 * This component is an array of nested components; need to loop over all of them and render them into blocks one by one.
+					 */
+// DEV debug -- REMOVE.
 $blocks = [];
-				$blocks[] = $this->$method( $component, $entry['id'] );
+					$sidebar_component = $component['sidebar']['body'];
+					foreach ( $sidebar_component as $component ) {
+						$method = $component_converters[ $component['__typename'] ]['method'];
+						$arguments = [];
+						foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
+							if ( ! isset( $$argument ) ) {
+								throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
+							}
+							$arguments[] = $$argument;
+						}
+						$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
+					}
+
+				} else {
+
+					/**
+					 * Convert a Chorus component component to Gutenberg block.
+					 * Get its method name, arguments, and run it to get the equivalent Gutenberg block.
+					 */
+					$method = $component_converters[ $component['__typename'] ]['method'];
+					$arguments = [];
+					foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
+						if ( ! isset( $$argument ) ) {
+							throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
+						}
+						$arguments[] = $$argument;
+					}
+// DEV debug -- REMOVE.
+$blocks = [];
+					$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
+
+				}
 
 
+// DEV debug -- REMOVE.
 // temp store blocks for QA
 $post_content = serialize_blocks( $blocks );
 $d=1;
 			}
 
-			// 'EntryBodyEmbed' https://www.thecity.nyc/2020/7/5/21312671/shotspotter-nyc-shootings-fireworks-nypd-civil-rights
-			// 'EntryBodyPullquote' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
-			// 'EntryBodyGallery' https://www.thecity.nyc/2022/6/15/23170278/judges-district-leaders-county-committee-surrogate-judicial-delegate-downballot-races-2022
-			// 'EntryBodyRelatedList' https://www.thecity.nyc/2022/6/15/23170278/judges-district-leaders-county-committee-surrogate-judicial-delegate-downballot-races-2022
-			// 'EntryBodyHorizontalRule' https://www.thecity.nyc/2019/3/7/21211180/chirlane-mccray-s-mental-health-program-struggles-to-retain-key-staff
-			// 'EntryBodyTable' https://www.thecity.nyc/2022/2/27/22953438/42-gap-between-most-and-least-vaccinated-public-school-districts-nyc-covid
-			// --
-			// 'EntryBodyNewsletter' https://www.thecity.nyc/2022/5/24/23140480/nyc-state-senate-stavisky-rivera-real-estate
-			// 'EntryBodyPymEmbed' https://www.thecity.nyc/2019/3/7/21211180/chirlane-mccray-s-mental-health-program-struggles-to-retain-key-staff
-			// 'EntryBodySidebar' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
-
-
-
-// IMAGE Needs to have $post_id.
-// fake.
-$post_id = 123;
-
-			/**
-			 * Convert Chorus component to Gutenberg block.
-			 */
-			// Get method to convert this $component['__typename'] Chorus component to Gutenberg block.
-			$method = $component_converters[ $component['__typename'] ]['method'];
-			if ( $method ) {
-				// Get an array of arguments for method.
-				$arguments = [];
-				foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
-					// If method arguments are not available, throw an exception.
-					if ( ! isset( $$argument ) ) {
-						throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
-					}
-					$arguments[] = $$argument;
-				}
-
-				// Call the method with arguments and get Gutenberg block.
-				$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
-			}
-
 
 			// Check if $component_converters contains this __typename, throw exception if not.
 			if ( ! isset( $component_converters[ $component['__typename' ] ] ) ) {
-//					throw new \RuntimeException( sprintf( "%d component not registered with $component_converters.", $component['__typename' ] ) );
+				throw new \RuntimeException( sprintf( "%d component not registered with $component_converters.", $component['__typename' ] ) );
 			}
 
 			// Debug.
