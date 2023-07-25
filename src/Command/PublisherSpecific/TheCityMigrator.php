@@ -7,6 +7,7 @@ use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 
 /**
@@ -48,6 +49,13 @@ class TheCityMigrator implements InterfaceCommand {
 	private $gutenberg_blocks;
 
 	/**
+	 * Crawler instance.
+	 *
+	 * @var Crawler Crawler instance.
+	 */
+	private $crawler;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -55,6 +63,7 @@ class TheCityMigrator implements InterfaceCommand {
 		$this->logger = new Logger();
 		$this->attachments = new Attachments();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
+		$this->crawler = new Crawler();
 	}
 
 	/**
@@ -170,6 +179,190 @@ class TheCityMigrator implements InterfaceCommand {
 	 *
 	 * @return array Block data, to be rendered with serialize_blocks().
 	 */
+	public function component_heading_to_block( $component ) {
+		$paragraph_block = $this->gutenberg_blocks->get_paragraph( $component['contents']['html'] );
+
+		return $paragraph_block;
+	}
+
+	/**
+	 * @param array $component           Component data.
+	 * @param bool  $strip_ending_breaks Should strip line breaks or spaces from ending of HTML.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_html_to_block( $component, $strip_ending_breaks = true ) {
+		$html = $component['rawHtml'];
+		if ( $strip_ending_breaks ) {
+			$html = rtrim( $html );
+		}
+		$paragraph_block = $this->gutenberg_blocks->get_html( $html );
+
+		return $paragraph_block;
+	}
+
+	/**
+	 * @param array $component           Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_list_to_block( $component ) {
+		$paragraph_block = $this->gutenberg_blocks->get_list( $component['contents']['html'] );
+
+		return $paragraph_block;
+	}
+
+	/**
+	 * @param array $component           Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
+	public function component_embed_to_block( $component ) {
+
+		$block = [];
+
+		$html = $component['embed']['embedHtml'];
+		switch ( $component['embed']['provider']['name'] ) {
+			case 'YouTube':
+
+				// We expect an iframe with src attribute.
+				$this->crawler->clear();
+				$this->crawler->add( $html );
+				$src_crawler = $this->crawler->filterXPath( '//iframe/@src' );
+
+				// Validate that we have exactly one iframe with src attribute.
+				if ( 1 !== $src_crawler->count() ) {
+					$this->logger->log(
+						'thecity-chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
+						sprintf( "Err importing embed YT component, HTML =  ", $html ),
+						$this->logger::WARNING
+					);
+					return [];
+				}
+
+				// We're not going to validate much more, Chorus should have this right.
+				$src = trim( $src_crawler->getNode( 0 )->textContent );
+
+				$block = $this->gutenberg_blocks->get_youtube( $src );
+
+				break;
+
+			case 'Vimeo':
+
+				// We expect an iframe with src attribute.
+				$this->crawler->clear();
+				$this->crawler->add( $html );
+				$src_crawler = $this->crawler->filterXPath( '//iframe/@src' );
+
+				// Validate that we have exactly one iframe with src attribute.
+				if ( 1 !== $src_crawler->count() ) {
+					$this->logger->log(
+						'thecity-chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
+						sprintf( "Err importing embed Vimeo component, HTML =  ", $html ),
+						$this->logger::WARNING
+					);
+					return [];
+				}
+
+				// We're not going to validate much more, Chorus should have this right.
+				$src = trim( $src_crawler->getNode( 0 )->textContent );
+
+				$block = $this->gutenberg_blocks->get_vimeo( $src );
+
+				break;
+
+			case 'Twitter':
+
+				// Get all <a>s' srcs.
+				$this->crawler->clear();
+				$this->crawler->add( $html );
+				$src_crawler = $this->crawler->filterXPath( '//a/@href' );
+
+				$src = null;
+				// Find src which has "twitter.com" and "/status/".
+				foreach ( $src_crawler as $src_crawler_node ) {
+					$src_this_node = trim( $src_crawler_node->textContent );
+					if ( false !== strpos( $src_this_node, 'twitter.com' ) && false !== strpos( $src_this_node, '/status/' ) ) {
+						$src = $src_this_node;
+					}
+				}
+
+				// Validate.
+				if ( is_null( $src ) ) {
+					$this->logger->log(
+						'thecity-chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
+						sprintf( "Err importing embed Twitter component, HTML =  ", $html ),
+						$this->logger::WARNING
+					);
+					return [];
+				}
+
+				$block = $this->gutenberg_blocks->get_twitter( $src );
+
+				break;
+
+			case 'Facebook':
+
+				// Get all <a>s' srcs.
+				$this->crawler->clear();
+				$this->crawler->add( $html );
+				$src_crawler = $this->crawler->filterXPath( '//a/@href' );
+
+				$src = null;
+				// Find src which has "facebook.com".
+				foreach ( $src_crawler as $src_crawler_node ) {
+					$src_this_node = trim( $src_crawler_node->textContent );
+					if ( false !== strpos( $src_this_node, 'facebook.com' ) ) {
+						$src = $src_this_node;
+					}
+				}
+
+				// Validate.
+				if ( is_null( $src ) ) {
+					$this->logger->log(
+						'thecity-chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
+						sprintf( "Err importing embed Facebook component, HTML =  ", $html ),
+						$this->logger::WARNING
+					);
+					return [];
+				}
+
+				$block = $this->gutenberg_blocks->get_facebook( $src );
+
+				break;
+
+			default:
+
+				// For all other types, try and get an iframe's src attribute.
+				$this->crawler->clear();
+				$this->crawler->add( $html );
+				$src_crawler = $this->crawler->filterXPath( '//iframe/@src' );
+
+				if ( $src_crawler->count() >= 0 ) {
+					$src = trim( $src_crawler->getNode( 0 )->textContent );
+					$block = $this->gutenberg_blocks->get_iframe( $src );
+				}
+
+				break;
+		}
+
+		// Log that nothing happened.
+		if ( empty( $block ) ) {
+			$this->logger->log(
+				'thecity-chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
+				sprintf( "Err importing embed component, no known component type found, HTML =  ", $html ),
+				$this->logger::WARNING
+			);
+		}
+
+		return $block;
+	}
+
+	/**
+	 * @param array $component Component data.
+	 *
+	 * @return array Block data, to be rendered with serialize_blocks().
+	 */
 	public function component_image_to_block( $component ) {
 
 		$url = $component['image']['url'];
@@ -220,10 +413,30 @@ class TheCityMigrator implements InterfaceCommand {
 					'post_id'
 				],
 			],
-			'EntryBodyHeading',
-			'EntryBodyHTML',
-			'EntryBodyList',
-			'EntryBodyEmbed',
+			'EntryBodyHeading' => [
+				'method' => 'component_heading_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+			'EntryBodyHTML' => [
+				'method' => 'component_html_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+			'EntryBodyList' => [
+				'method' => 'component_list_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
+			'EntryBodyEmbed' => [
+				'method' => 'component_embed_to_block',
+				'arguments' => [
+					'component',
+				],
+			],
 			'EntryBodyPullquote',
 			'EntryBodyGallery',
 			'EntryBodyRelatedList',
@@ -238,9 +451,10 @@ class TheCityMigrator implements InterfaceCommand {
 				'arguments' => null,
 			],
 		];
-		$components_debug = [];
 
+$components_debug_types = [];
 
+$components_debug_samples = [];
 
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
@@ -272,14 +486,27 @@ class TheCityMigrator implements InterfaceCommand {
 					$d=1;
 				}
 
-				if ( 'EntryBodyNewsletter' != $component['__typename'] ) {
-				// if ( 'EntryBodyHeading' != $component['__typename'] ) {
+				if ( 'EntryBodyEmbed' != $component['__typename'] ) {
+// $paragraph_block = $this->gutenberg_blocks->get_list( $component['contents']['html'] );
 					continue;
 				}
 
-			// 'EntryBodyHeading' https://www.thecity.nyc/2019/3/7/21211180/chirlane-mccray-s-mental-health-program-struggles-to-retain-key-staff
-			// 'EntryBodyHTML' https://www.thecity.nyc/2023/6/5/23750108/acs-families-child-welfare-miranda-warning
-			// 'EntryBodyList' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
+// ururur
+// $components_debug_samples[ $component['embed']['provider']['name'] ][] = $component['embed']['embedHtml'];
+// continue;
+
+				// Call the converter.
+				$method = $component_converters[ $component['__typename'] ]['method'];
+				$arguments = $component_converters[ $component['__typename'] ]['arguments'];
+$blocks = [];
+				$blocks[] = $this->$method( $component, $entry['id'] );
+
+
+// temp store blocks for QA
+$post_content = serialize_blocks( $blocks );
+$d=1;
+			}
+
 			// 'EntryBodyEmbed' https://www.thecity.nyc/2020/7/5/21312671/shotspotter-nyc-shootings-fireworks-nypd-civil-rights
 			// 'EntryBodyPullquote' https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field
 			// 'EntryBodyGallery' https://www.thecity.nyc/2022/6/15/23170278/judges-district-leaders-county-committee-surrogate-judicial-delegate-downballot-races-2022
@@ -297,42 +524,47 @@ class TheCityMigrator implements InterfaceCommand {
 // fake.
 $post_id = 123;
 
-				/**
-				 * Convert Chorus component to Gutenberg block.
-				 */
-				// Get method to convert this Chorus component to Gutenberg block.
-				$method = $component_converters[ $component['__typename'] ]['method'];
-				if ( $method ) {
-					// Get dynamic arguments to pass to the method.
-					$arguments = [];
-					foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
-						// If method arguments are not available, throw an exception.
-						if ( ! isset( $$argument ) ) {
-							throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
-						}
-						$arguments[] = $$argument;
+			/**
+			 * Convert Chorus component to Gutenberg block.
+			 */
+			// Get method to convert this $component['__typename'] Chorus component to Gutenberg block.
+			$method = $component_converters[ $component['__typename'] ]['method'];
+			if ( $method ) {
+				// Get an array of arguments for method.
+				$arguments = [];
+				foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
+					// If method arguments are not available, throw an exception.
+					if ( ! isset( $$argument ) ) {
+						throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
 					}
-
-					// Call the method with arguments and get Gutenberg block.
-					$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
+					$arguments[] = $$argument;
 				}
 
-
-				// Debug.
-				$components_debug[ $component['__typename'] ] = [
-					$entry['url'],
-					$component,
-				];
-
+				// Call the method with arguments and get Gutenberg block.
+				$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
 			}
+
+
+			// Check if $component_converters contains this __typename, throw exception if not.
+			if ( ! isset( $component_converters[ $component['__typename' ] ] ) ) {
+//					throw new \RuntimeException( sprintf( "%d component not registered with $component_converters.", $component['__typename' ] ) );
+			}
+
+			// Debug.
+			$components_debug_types[ $component['__typename'] ] = [
+				$entry['url'],
+				$component,
+			];
+
 			$post_content = serialize_blocks( $blocks );
 
+continue;
 
-
-			continue;
 $post_content = $this->compile_post_content( $entry );
 
-
+			/**
+			 * Get post arguments.
+			 */
 			$post_arr = [
 				'post_type'             => 'post',
 				'post_status'           => 'publish',
@@ -353,7 +585,9 @@ $post_content = $this->compile_post_content( $entry );
 			}
 			$post_arr['post_date'] = $publish_date;
 
-			// Insert post.
+			/**
+			 * Insert post.
+			 */
 			$post_id = wp_insert_post( $post_arr, true );
 			if ( is_wp_error( $post_id ) ) {
 				$err = $post_id->get_error_message();
@@ -362,7 +596,9 @@ $post_content = $this->compile_post_content( $entry );
 			}
 
 
-			// Import featured image.
+			/**
+			 * Import featured image.
+			 */
 			if ( isset( $entry['leadImage']['asset'] ) && ! empty( $entry['leadImage']['asset'] ) ) {
 				if ( 'IMAGE' != $entry['leadImage']['asset']['type'] ) {
 					$d=1;
@@ -394,7 +630,6 @@ $post_content = $this->compile_post_content( $entry );
 					$wpdb->update( $wpdb->posts, [ 'post_date' => $created_at, 'post_date_gmt' => $created_at ], [ 'ID' => $attachment_id ] );
 				}
 			}
-
 			// Set Newspack featured image position.
 			if ( $entry['layoutTemplate'] ) {
 				if ( ! isset( $newspack_featured_image_position[ $entry['layoutTemplate'] ] ) ) {
@@ -404,7 +639,9 @@ $post_content = $this->compile_post_content( $entry );
 			}
 
 
-			// Get and assign authors.
+			/**
+			 * Get and assign authors.
+			 */
 			$ga_ids = [];
 			foreach ( $entry['author'] as $author ) {
 				// Get GA ID with that uid.
@@ -430,12 +667,12 @@ $post_content = $this->compile_post_content( $entry );
 					$ga_ids[] = $ga_id;
 				}
 			}
-
 			// Assign authors.
 			$this->coauthors_plus->assign_guest_authors_to_post( $ga_ids, $post_id );
 
-
-			// Categories.
+			/**
+			 * Categories.
+			 */
 			$category_name_primary = $entry['primaryCommunityGroup']['name'];
 				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_id );
 
@@ -451,14 +688,14 @@ $post_content = $this->compile_post_content( $entry );
 			}
 
 
-			// Update more data on post.
+			/**
+			 * Update additional post data.
+			 */
 			$updates = [];
-
 
 			// Content
 			$post_content = $this->compile_post_content( $entry );
 			$updates['post_content'] = $post_content;
-
 
 			// Get slug.
 			$url_parsed = parse_url( $entry['url'] );
@@ -494,7 +731,9 @@ $post_content = $this->compile_post_content( $entry );
 
 		}
 
-		$components_debug;
+		// ururur
+		$components_debug_samples;
+		$components_debug_types;
 		$d=1;
 
 	}
