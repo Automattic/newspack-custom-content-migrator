@@ -331,6 +331,13 @@ class TheCityMigrator implements InterfaceCommand {
 
 				break;
 
+			case 'Tableau Software':
+
+				// This works as Classic Editor shortcode.
+				$block = $this->gutenberg_blocks->get_html( $component['embed']['embedHtml'] );
+
+				break;
+
 			default:
 
 				// For all other types, try and get an iframe's src attribute.
@@ -595,7 +602,7 @@ $components_debug_samples = [];
 			$entry = json_decode( file_get_contents( $entry_json ), true );
 
 // DEV debug.
-// if ( 'https://www.thecity.nyc/missing-them/2021/3/24/22349311/nyc-covid-victims-destined-for-hart-island-potters-field' != $entry['url'] ) {
+// if ( 'https://www.thecity.nyc/2020/6/24/21302298/de-blasio-layoffs-new-york-city-taxes-budget' != $entry['url'] ) {
 // 	continue;
 // }
 
@@ -624,9 +631,9 @@ $components_debug_samples = [];
 				}
 
 // DEV debug -- REMOVE.
-if ( 'EntryBodySidebar' != $component['__typename'] ) {
-	continue;
-}
+// if ( 'EntryBodyEmbed' != $component['__typename'] ) {
+// 	continue;
+// }
 
 // DEV debug -- REMOVE.
 // $components_debug_samples[ $component['embed']['provider']['name'] ][] = $component['embed']['embedHtml'];
@@ -647,7 +654,7 @@ $post_id = 123;
 					 * This component is an array of nested components; need to loop over all of them and render them into blocks one by one.
 					 */
 // DEV debug -- REMOVE.
-$blocks = [];
+// $blocks = [];
 					$sidebar_component = $component['sidebar']['body'];
 					foreach ( $sidebar_component as $component ) {
 						$method = $component_converters[ $component['__typename'] ]['method'];
@@ -668,6 +675,10 @@ $blocks = [];
 					 * Get its method name, arguments, and run it to get the equivalent Gutenberg block.
 					 */
 					$method = $component_converters[ $component['__typename'] ]['method'];
+					// This is one of the components that are being skipped.
+					if ( is_null( $method ) ) {
+						continue;
+					}
 					$arguments = [];
 					foreach ( $component_converters[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
 						if ( ! isset( $$argument ) ) {
@@ -676,7 +687,7 @@ $blocks = [];
 						$arguments[] = $$argument;
 					}
 // DEV debug -- REMOVE.
-$blocks = [];
+// $blocks = [];
 					$blocks[] = call_user_func_array( 'self::' . $method, $arguments );
 
 				}
@@ -684,10 +695,11 @@ $blocks = [];
 
 // DEV debug -- REMOVE.
 // temp store blocks for QA
-$post_content = serialize_blocks( $blocks );
-$d=1;
+// $post_content = serialize_blocks( $blocks );
 			}
 
+$post_content = serialize_blocks( $blocks );
+continue;
 
 			// Check if $component_converters contains this __typename, throw exception if not.
 			if ( ! isset( $component_converters[ $component['__typename' ] ] ) ) {
@@ -702,7 +714,6 @@ $d=1;
 
 			$post_content = serialize_blocks( $blocks );
 
-continue;
 
 $post_content = $this->compile_post_content( $entry );
 
