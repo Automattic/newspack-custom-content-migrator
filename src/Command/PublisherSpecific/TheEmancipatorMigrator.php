@@ -12,6 +12,9 @@ use \WP_CLI;
  */
 class TheEmancipatorMigrator implements InterfaceCommand {
 
+	const CATEGORY_ID_OPINION = 8;
+	const CATEGORY_ID_THE_EMANCIPATOR = 9;
+
 	/**
 	 * @var null|InterfaceCommand Instance.
 	 */
@@ -81,6 +84,23 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-taxonomy',
+			[ $this, 'cmd_taxonomy' ],
+			[
+				'shortdesc' => 'Remove unneeded categories.', // TODO
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	public function cmd_taxonomy( $args, $assoc_args ): void {
+		$data = $this->get_data( $args, $assoc_args );
+		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator" categories from posts.' );
+		foreach ( $data['posts'] as $post ) {
+			wp_remove_object_terms( $post->ID, self::CATEGORY_ID_OPINION, 'category' );
+			wp_remove_object_terms( $post->ID, self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
+		}
 	}
 
 	/**
@@ -166,7 +186,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-		$data        = $this->get_data( $args, $assoc_args );
+		$data     = $this->get_data( $args, $assoc_args );
 		$progress = WP_CLI\Utils\make_progress_bar( 'Processing bylines', $data['posts_total'] );
 
 		foreach ( $data['posts'] as $post ) {
@@ -266,7 +286,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		$posts_query_args  = [
 			'posts_per_page' => $data['num_posts'],
 			'post_type'      => 'post',
-			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we migrate all.
+			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we process all those?
 			'paged'          => 1,
 		];
 		if ( ! empty( $assoc_args['post_id'] ) ) {
