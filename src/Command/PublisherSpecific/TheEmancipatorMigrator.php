@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \WP_CLI;
 
@@ -32,6 +33,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 * @var RedirectionLogic $redirection_logic
 	 */
 	private RedirectionLogic $redirection_logic;
+	private Posts $posts_logic;
 
 	/**
 	 * Constructor.
@@ -39,6 +41,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
 		$this->redirection_logic   = new RedirectionLogic();
+		$this->posts_logic         = new Posts();
 	}
 
 	/**
@@ -95,9 +98,10 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
-		$data = $this->get_data( $args, $assoc_args );
+
 		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator" categories from posts.' );
-		foreach ( $data['posts'] as $post ) {
+
+		foreach ( $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args ) as $post ) {
 			wp_remove_object_terms( $post->ID, self::CATEGORY_ID_OPINION, 'category' );
 			wp_remove_object_terms( $post->ID, self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
 		}
@@ -113,10 +117,12 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	public function cmd_post_subtitles( $args, $assoc_args ): void {
 
-		$data     = $this->get_data( $args, $assoc_args );
-		$progress = WP_CLI\Utils\make_progress_bar( 'Processing post subtitles', $data['posts_total'] );
+		WP_CLI::log( 'Processing post subtitles' );
+		$counter = 0;
+		$dry_run = $assoc_args['dry-run'] ?? false;
+		$posts = $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args );
 
-		foreach ( $data['posts'] as $post ) {
+		foreach ( $posts as $post ) {
 			WP_CLI::log(
 				sprintf(
 					'Post ID: %s, %s',
@@ -124,17 +130,17 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$post->guid
 				)
 			);
+			$counter++;
 
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 			$subtitle    = $api_content['subheadlines']['basic'] ?? false;
-			if ( ! $data['dry_run'] && $subtitle ) {
+			if ( ! $dry_run && $subtitle ) {
 				update_post_meta( $post->ID, 'newspack_post_subtitle', $subtitle );
 			}
-			$progress->tick();
 		}
 
-		$progress->finish();
+		WP_CLI::success( sprintf( 'Finished processing %s post subtitles', $counter ) );
 	}
 
 	public function cmd_redirects( $args, $assoc_args ) {
@@ -143,11 +149,12 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Redirection plugin not found. Install, activate, and configure it before using this command.' );
 		}
 
-		$data = $this->get_data( $args, $assoc_args );
+		WP_CLI::log( 'Processing redirects' );
+		$counter = 0;
+		$dry_run = $assoc_args['dry-run'] ?? false;
+		$posts = $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args );
 
-		$progress = WP_CLI\Utils\make_progress_bar( 'Processing redirects', $data['posts_total'] );
-
-		foreach ( $data['posts'] as $post ) {
+		foreach ( $posts as $post ) {
 			WP_CLI::log(
 				sprintf(
 					'Post ID: %s, %s',
@@ -155,6 +162,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$post->guid
 				)
 			);
+			$counter++;
 
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
@@ -162,7 +170,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
 			if ( $redirect_to ) {
 				$redirect_from = get_permalink( $post->ID );
-				if ( ! $data['dry_run'] && empty( \Red_Item::get_for_url( $redirect_from ) ) ) {
+				if ( ! $dry_run && empty( \Red_Item::get_for_url( $redirect_from ) ) ) {
 					$this->redirection_logic->create_redirection_rule(
 						$post->ID . '-redirect',// TODO? WHat should that be?
 						$redirect_from,
@@ -171,10 +179,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					WP_CLI::log( sprintf( 'Added a redirect for post with ID %d to %s', $post->ID, $redirect_to ) );
 				}
 			}
-			$progress->tick();
 		}
-
-		$progress->finish();
+		WP_CLI::success( sprintf( 'Finished processing %s posts for redirects', $counter ) );
 	}
 
 	/**
@@ -186,10 +192,12 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-		$data     = $this->get_data( $args, $assoc_args );
-		$progress = WP_CLI\Utils\make_progress_bar( 'Processing bylines', $data['posts_total'] );
+		WP_CLI::log( 'Processing bylines' );
+		$counter = 0;
+		$dry_run = $assoc_args['dry-run'] ?? false;
+		$posts = $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args );
 
-		foreach ( $data['posts'] as $post ) {
+		foreach ( $posts as $post ) {
 			WP_CLI::log(
 				sprintf(
 					'Post ID: %s, %s',
@@ -197,9 +205,9 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$post->guid
 				)
 			);
+			$counter++;
 
 			$credits = [];
-
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
@@ -212,34 +220,34 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$credits[] = empty( $credit['name'] ) ? $credit : $credit['name'];
 				}
 
-				if ( ! $data['dry_run'] ) {
-					foreach ( $credits as $co_author ) {
-						$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
-						if ( empty( $maybe_co_author ) ) {
-							$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
-						} elseif ( is_object( $maybe_co_author ) ) {
-							$co_author_id = $maybe_co_author->ID;
-						} else {
-							continue;
-							// TODO: Figure out what to do with an array here.
-						}
+				if ( $dry_run ) {
+					continue;
+				}
 
-						$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
-
-						// Link the co-author created with the WP User with the same name if it exists.
-						$co_author_wp_user = $this->get_wp_user_by_name( $co_author );
-						if ( $co_author_wp_user ) {
-							$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
-								$co_author_wp_user );
-						}
+				foreach ( $credits as $co_author ) {
+					$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
+					if ( empty( $maybe_co_author ) ) {
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
+					} elseif ( is_object( $maybe_co_author ) ) {
+						$co_author_id = $maybe_co_author->ID;
+					} else {
+						continue;
+						// TODO: Figure out what to do with an array here.
 					}
-					WP_CLI::log( '----' );
+
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
+
+					// Link the co-author created with the WP User with the same name if it exists.
+					$co_author_wp_user = $this->get_wp_user_by_name( $co_author );
+					if ( $co_author_wp_user ) {
+						$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
+							$co_author_wp_user );
+					}
 				}
 			}
-			$progress->tick();
 		}
 
-		$progress->finish();
+		WP_CLI::success( sprintf( 'Finished processing %s posts for bylines', $counter ) );
 	}
 
 	/**
@@ -263,39 +271,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		}
 
 		return false;
-	}
-
-	/**
-	 * Helper to get data and args.
-	 *
-	 * Returned array will have the following keys:
-	 * - num_posts: how many posts the user wants to process.
-	 * - dry_run: well, just that.
-	 * - posts: the WP_Post objects.
-	 * - posts_total: how many posts were found.
-	 *
-	 * @param array $args
-	 * @param array $assoc_args
-	 *
-	 * @return array
-	 */
-	private function get_data( $args, $assoc_args ): array {
-		$data              = [];
-		$data['num_posts'] = $assoc_args['num_posts'] ?? - 1;
-		$data['dry_run']   = $assoc_args['dry_run'] ?? false;
-		$posts_query_args  = [
-			'posts_per_page' => $data['num_posts'],
-			'post_type'      => 'post',
-			'post_status'    => 'publish', // TODO. There are a lot of other states. Not sure if we process all those?
-			'paged'          => 1,
-		];
-		if ( ! empty( $assoc_args['post_id'] ) ) {
-			$posts_query_args['p'] = $assoc_args['post_id'];
-		}
-		$data['posts']       = get_posts( $posts_query_args );
-		$data['posts_total'] = count( $data['posts'] );
-
-		return $data;
 	}
 
 }
