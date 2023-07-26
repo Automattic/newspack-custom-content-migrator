@@ -2,11 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for The Emancipator.
@@ -17,13 +17,11 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	const CATEGORY_ID_THE_EMANCIPATOR = 9;
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * @var null | TheEmancipatorMigrator
 	 */
 	private static $instance = null;
 
 	/**
-	 * CoAuthorPlus logic.
-	 *
 	 * @var CoAuthorPlus $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
@@ -32,11 +30,15 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	/**
 	 * @var RedirectionLogic $redirection_logic
 	 */
-	private RedirectionLogic $redirection_logic;
+	private $redirection_logic;
+
+	/**
+	 * @var Posts $posts_logic
+	 */
 	private Posts $posts_logic;
 
 	/**
-	 * Constructor.
+	 * Private constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
@@ -45,14 +47,13 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
+	 * Singleton.
 	 *
-	 * @return InterfaceCommand|null
+	 * @return TheEmancipatorMigrator
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
+	public static function get_instance(): TheEmancipatorMigrator {
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new self();
 		}
 
 		return self::$instance;
@@ -60,8 +61,10 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	/**
 	 * See InterfaceCommand::register_commands.
+	 *
+	 * @throws \Exception
 	 */
-	public function register_commands() {
+	public function register_commands(): void {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator emancipator-authors',
@@ -75,7 +78,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			'newspack-content-migrator emancipator-redirects',
 			[ $this, 'cmd_redirects' ],
 			[
-				'shortdesc' => 'Looks at redirects.', // TODO
+				'shortdesc' => 'Create redirects for articles that are just redirects.',
 				'synopsis'  => [],
 			]
 		);
@@ -83,7 +86,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			'newspack-content-migrator emancipator-post-subtitles',
 			[ $this, 'cmd_post_subtitles' ],
 			[
-				'shortdesc' => 'Add post subtitles', // TODO
+				'shortdesc' => 'Add post subtitles',
 				'synopsis'  => [],
 			]
 		);
@@ -91,7 +94,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			'newspack-content-migrator emancipator-taxonomy',
 			[ $this, 'cmd_taxonomy' ],
 			[
-				'shortdesc' => 'Remove unneeded categories.', // TODO
+				'shortdesc' => 'Remove unneeded categories.',
 				'synopsis'  => [],
 			]
 		);
@@ -145,7 +148,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	public function cmd_redirects( $args, $assoc_args ) {
 
-		if ( ! class_exists( \Red_Item::class ) ) {
+		if ( ! $this->redirection_logic->plugin_is_activated() ) {
 			WP_CLI::error( 'Redirection plugin not found. Install, activate, and configure it before using this command.' );
 		}
 
@@ -170,9 +173,9 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
 			if ( $redirect_to ) {
 				$redirect_from = get_permalink( $post->ID );
-				if ( ! $dry_run && empty( \Red_Item::get_for_url( $redirect_from ) ) ) {
+				if ( ! $dry_run && ! $this->redirection_logic->has_redirect_from( $redirect_from ) ) {
 					$this->redirection_logic->create_redirection_rule(
-						$post->ID . '-redirect',// TODO? WHat should that be?
+						$post->ID . '-redirect',
 						$redirect_from,
 						$redirect_to
 					);

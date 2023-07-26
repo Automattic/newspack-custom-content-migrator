@@ -44,4 +44,24 @@ class Redirection {
 		] );
 	}
 
+	/**
+	 * Checks if a redirect alreday exists for a given URL.
+	 *
+	 * @param string $from URL to check.
+	 *
+	 * @return bool True if a redirect exists, false otherwise.
+	 */
+	public function has_redirect_from( string $from ): bool {
+		return ! empty( \Red_Item::get_for_url( $from ) );
+	}
+
+	/**
+	 * Is the redirection plugin active?
+	 *
+	 * @return bool
+	 */
+	public function plugin_is_activated(): bool {
+		return class_exists( \Red_Item::class );
+	}
+
 }
