@@ -279,11 +279,11 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Content not found in path.' );
 		}
 
-		// WP_CLI::line( "Checking whether this script knows how to convert all Chorus' content components..." );
-		// $this->validate_known_component_types( $entries_path );
-		//
-		// WP_CLI::line( "Importing authors..." );
-		// $this->import_authors( $authors_path, $refresh_authors );
+		WP_CLI::line( "Checking whether this script knows how to convert all Chorus' content components..." );
+		$this->validate_known_component_types( $entries_path );
+
+		WP_CLI::line( "Importing authors..." );
+		$this->import_authors( $authors_path, $refresh_authors );
 
 		WP_CLI::line( "Importing posts..." );
 		$this->import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ );
