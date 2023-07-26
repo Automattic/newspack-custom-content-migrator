@@ -67,6 +67,16 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	public function register_commands(): void {
 
 		$synopsis = '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>]';
+
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-taxonomy',
+			[ $this, 'cmd_taxonomy' ],
+			[
+				'shortdesc' => 'Remove unneeded categories.',
+				'synopsis'  => $synopsis,
+			]
+		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator emancipator-authors',
 			[ $this, 'cmd_post_authors' ],
@@ -84,14 +94,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				'synopsis'  => $synopsis,
 			]
 		);
-		WP_CLI::add_command(
-			'newspack-content-migrator emancipator-redirects',
-			[ $this, 'cmd_redirects' ],
-			[
-				'shortdesc' => 'Create redirects for articles that are just redirects.',
-				'synopsis'  => $synopsis,
-			]
-		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator emancipator-post-subtitles',
@@ -101,14 +103,16 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				'synopsis'  => $synopsis,
 			]
 		);
-		WP_CLI::add_command(
-			'newspack-content-migrator emancipator-taxonomy',
-			[ $this, 'cmd_taxonomy' ],
-			[
-				'shortdesc' => 'Remove unneeded categories.',
-				'synopsis'  => $synopsis,
-			]
-		);
+
+		// TODO. Not sure this is needed.
+//		WP_CLI::add_command(
+//			'newspack-content-migrator emancipator-redirects',
+//			[ $this, 'cmd_redirects' ],
+//			[
+//				'shortdesc' => 'Create redirects for articles that are just redirects.',
+//				'synopsis'  => $synopsis,
+//			]
+//		);
 	}
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
@@ -225,6 +229,16 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Finished processing %s posts for redirects', $counter ) );
 	}
 
+	/**
+	 * Find the user that owns the post in the serialized API content and assign it as the post author.
+	 * If the user doesn't exist, create it and assign the author role.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException
+	 */
 	public function cmd_post_authors( $args, $assoc_args ): void {
 		WP_CLI::log( 'Processing post authors' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
@@ -265,7 +279,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Process byline data for posts.
+	 * Add bylines (co-authors) for posts.
 	 */
 	public function cmd_post_bylines( $args, $assoc_args ): void {
 
