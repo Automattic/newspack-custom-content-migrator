@@ -19,21 +19,28 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Chorus components to Gutenberg blocks converters.
 	 *
-	 * Keys are the Chorus component name, values define a method used to convert it to blocks.
+	 * Keys are the Chorus component name, values define a method used to convert it to blocks and its arguments.
 	 *
 	 * @array COMPONENT_CONVERTERS {
-	 *      @type string $method    Method to call to convert the component.
-	 *      @type string $arguments Arguments to pass to the method.
+	 *  string $method    A method in this class which gets to convert component to Gutenberg blocks.
+	 *  string $arguments Names of variables passed to the conversion method.
 	 * }
 	 */
 	const COMPONENT_CONVERTERS = [
 		/**
-		 * Key is Chorus component name.
-		 *
-		 * @array {
-		 *  string $method    A method in this class which gets to convert component to Gutenberg blocks.
-		 *  string $arguments Names of variables passed to the conversion method.
-		 * }
+		 * These few components with nulls will not be converted.
+		 */
+		'EntryBodyNewsletter'     => [
+			'method'    => null,
+			'arguments' => null,
+		],
+		'EntryBodyTable'          => [
+			'method'    => null,
+			'arguments' => null,
+		],
+
+		/**
+		 * Components conversion definitions.
 		 */
 		'EntryBodyParagraph'      => [
 			'method'    => 'component_paragraph_to_block',
@@ -109,18 +116,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			'arguments' => [
 				'component',
 			],
-		],
-
-		/**
-		 * These components with nulls for methods and arrays will not be converted.
-		 */
-		'EntryBodyNewsletter'     => [
-			'method'    => null,
-			'arguments' => null,
-		],
-		'EntryBodyTable'          => [
-			'method'    => null,
-			'arguments' => null,
 		],
 	];
 
