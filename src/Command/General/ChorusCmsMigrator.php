@@ -35,77 +35,77 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		 *  string $arguments Names of variables passed to the conversion method.
 		 * }
 		 */
-		'EntryBodyParagraph' => [
-			'method' => 'component_paragraph_to_block',
+		'EntryBodyParagraph'      => [
+			'method'    => 'component_paragraph_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyImage' => [
-			'method' => 'component_image_to_block',
+		'EntryBodyImage'          => [
+			'method'    => 'component_image_to_block',
 			'arguments' => [
 				'component',
 				'post_id',
 			],
 		],
-		'EntryBodyHeading' => [
-			'method' => 'component_heading_to_block',
+		'EntryBodyHeading'        => [
+			'method'    => 'component_heading_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyHTML' => [
-			'method' => 'component_html_to_block',
+		'EntryBodyHTML'           => [
+			'method'    => 'component_html_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyList' => [
-			'method' => 'component_list_to_block',
+		'EntryBodyList'           => [
+			'method'    => 'component_list_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyEmbed' => [
-			'method' => 'component_embed_to_block',
+		'EntryBodyEmbed'          => [
+			'method'    => 'component_embed_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyPullquote' => [
-			'method' => 'component_pullquote_to_block',
+		'EntryBodyPullquote'      => [
+			'method'    => 'component_pullquote_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
 		'EntryBodyHorizontalRule' => [
-			'method' => 'component_horizontal_rule_to_block',
+			'method'    => 'component_horizontal_rule_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyGallery' => [
-			'method' => 'component_gallery_to_block',
-			'arguments' => [
-				'component',
-				'post_id',
-			],
-		],
-		'EntryBodyPymEmbed' => [
-			'method' => 'component_pymembed_to_block',
-			'arguments' => [
-				'component',
-			],
-		],
-		'EntryBodySidebar' => [
-			'method' => 'component_sidebar_to_block',
+		'EntryBodyGallery'        => [
+			'method'    => 'component_gallery_to_block',
 			'arguments' => [
 				'component',
 				'post_id',
 			],
 		],
-		'EntryBodyRelatedList' => [
-			'method' => 'component_related_list_to_block',
+		'EntryBodyPymEmbed'       => [
+			'method'    => 'component_pymembed_to_block',
+			'arguments' => [
+				'component',
+			],
+		],
+		'EntryBodySidebar'        => [
+			'method'    => 'component_sidebar_to_block',
+			'arguments' => [
+				'component',
+				'post_id',
+			],
+		],
+		'EntryBodyRelatedList'    => [
+			'method'    => 'component_related_list_to_block',
 			'arguments' => [
 				'component',
 			],
@@ -114,12 +114,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		/**
 		 * These components with nulls for methods and arrays will not be converted.
 		 */
-		'EntryBodyNewsletter' => [
-			'method' => null,
+		'EntryBodyNewsletter'     => [
+			'method'    => null,
 			'arguments' => null,
 		],
-		'EntryBodyTable' => [
-			'method' => null,
+		'EntryBodyTable'          => [
+			'method'    => null,
 			'arguments' => null,
 		],
 	];
@@ -192,12 +192,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthors_plus = new CoAuthorPlus();
-		$this->logger = new Logger();
-		$this->attachments = new Attachments();
+		$this->coauthors_plus   = new CoAuthorPlus();
+		$this->logger           = new Logger();
+		$this->attachments      = new Attachments();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
-		$this->crawler = new Crawler();
-		$this->taxonomy = new Taxonomy();
+		$this->crawler          = new Crawler();
+		$this->taxonomy         = new Taxonomy();
 	}
 
 	/**
@@ -208,7 +208,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -232,16 +232,16 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 					// [
-					// 	'type'        => 'flag',
-					// 	'name'        => 'default-author-user-id',
-					// 	'description' => "GAs will be assigned to post, but still a u.",
-					// 	'optional'    => false,
-					// 	'repeating'   => false,
+					// 'type'        => 'flag',
+					// 'name'        => 'default-author-user-id',
+					// 'description' => "GAs will be assigned to post, but still a u.",
+					// 'optional'    => false,
+					// 'repeating'   => false,
 					// ],
 					[
 						'type'        => 'flag',
 						'name'        => 'refresh-authors',
-						'description' => "If used, will refresh all author data from JSONs, even if author exists.",
+						'description' => 'If used, will refresh all author data from JSONs, even if author exists.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -271,10 +271,10 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		 */
 		// $default_author_user_id = $assoc_args['default-author-user-id'];
 		$refresh_authors = $assoc_args['refresh-authors'] ?? null;
-		$refresh_posts = $assoc_args['refresh-posts'] ?? null;
-		$path = rtrim( $assoc_args['path-to-export'], '/' );
-		$authors_path = $path . '/author';
-		$entries_path = $path . '/entry';
+		$refresh_posts   = $assoc_args['refresh-posts'] ?? null;
+		$path            = rtrim( $assoc_args['path-to-export'], '/' );
+		$authors_path    = $path . '/author';
+		$entries_path    = $path . '/entry';
 		if ( ! file_exists( $authors_path ) || ! file_exists( $entries_path ) ) {
 			WP_CLI::error( 'Content not found in path.' );
 		}
@@ -282,13 +282,20 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		WP_CLI::line( "Checking whether this script knows how to convert all Chorus' content components..." );
 		$this->validate_known_component_types( $entries_path );
 
-		WP_CLI::line( "Importing authors..." );
+		WP_CLI::line( 'Importing authors...' );
 		$this->import_authors( $authors_path, $refresh_authors );
 
-		WP_CLI::line( "Importing posts..." );
+		WP_CLI::line( 'Importing posts...' );
 		$this->import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ );
 	}
 
+	/**
+	 * Loops through entries JSONs and just checks if there are some unknown components that this script doesn't know how to convert.
+	 *
+	 * @param $entries_path Path to entries/.
+	 *
+	 * @return void
+	 */
 	public function validate_known_component_types( $entries_path ) {
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
@@ -305,6 +312,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one paragraph block.
@@ -318,6 +327,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one heading block.
@@ -331,6 +342,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component           Component data.
 	 * @param bool  $strip_ending_breaks Should strip line breaks or spaces from ending of HTML.
 	 *
@@ -349,6 +362,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component           Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one list block.
@@ -367,6 +382,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component           Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one block.
@@ -378,7 +395,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$html = $component['embed']['embedHtml'];
 		switch ( $component['embed']['provider']['name'] ) {
 			case 'YouTube':
-
 				// We expect an iframe with src attribute.
 				$this->crawler->clear();
 				$this->crawler->add( $html );
@@ -388,7 +404,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				if ( 1 !== $src_crawler->count() ) {
 					$this->logger->log(
 						'chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
-						sprintf( "Err importing embed YT component, HTML =  ", $html ),
+						sprintf( 'Err importing embed YT component, HTML =  ', $html ),
 						$this->logger::WARNING
 					);
 					return [];
@@ -402,7 +418,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				break;
 
 			case 'Vimeo':
-
 				// We expect an iframe with src attribute.
 				$this->crawler->clear();
 				$this->crawler->add( $html );
@@ -412,7 +427,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				if ( 1 !== $src_crawler->count() ) {
 					$this->logger->log(
 						'chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
-						sprintf( "Err importing embed Vimeo component, HTML =  ", $html ),
+						sprintf( 'Err importing embed Vimeo component, HTML =  ', $html ),
 						$this->logger::WARNING
 					);
 					return [];
@@ -426,7 +441,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				break;
 
 			case 'Twitter':
-
 				// Get all <a>s' srcs.
 				$this->crawler->clear();
 				$this->crawler->add( $html );
@@ -445,7 +459,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				if ( is_null( $src ) ) {
 					$this->logger->log(
 						'chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
-						sprintf( "Err importing embed Twitter component, HTML =  ", $html ),
+						sprintf( 'Err importing embed Twitter component, HTML =  ', $html ),
 						$this->logger::WARNING
 					);
 					return [];
@@ -456,7 +470,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				break;
 
 			case 'Facebook':
-
 				// Get all <a>s' srcs.
 				$this->crawler->clear();
 				$this->crawler->add( $html );
@@ -475,7 +488,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				if ( is_null( $src ) ) {
 					$this->logger->log(
 						'chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
-						sprintf( "Err importing embed Facebook component, HTML =  ", $html ),
+						sprintf( 'Err importing embed Facebook component, HTML =  ', $html ),
 						$this->logger::WARNING
 					);
 					return [];
@@ -486,21 +499,19 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				break;
 
 			case 'Tableau Software':
-
 				// This works as Classic Editor shortcode.
 				$blocks[] = $this->gutenberg_blocks->get_html( $component['embed']['embedHtml'] );
 
 				break;
 
 			default:
-
 				// For all other types, try and get an iframe's src attribute.
 				$this->crawler->clear();
 				$this->crawler->add( $html );
 				$src_crawler = $this->crawler->filterXPath( '//iframe/@src' );
 
 				if ( $src_crawler->count() >= 0 ) {
-					$src = trim( $src_crawler->getNode( 0 )->textContent );
+					$src      = trim( $src_crawler->getNode( 0 )->textContent );
 					$blocks[] = $this->gutenberg_blocks->get_iframe( $src );
 				}
 
@@ -511,7 +522,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		if ( empty( $blocks ) ) {
 			$this->logger->log(
 				'chorus-cms-import-authors-and-posts__err__component_embed_to_block.log',
-				sprintf( "Err importing embed component, no known component type found, HTML =  ", $html ),
+				sprintf( 'Err importing embed component, no known component type found, HTML =  ', $html ),
 				$this->logger::WARNING
 			);
 		}
@@ -520,6 +531,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component           Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one iframe block.
@@ -527,13 +540,15 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function component_pymembed_to_block( $component ) {
 		$blocks = [];
 
-		$src = $component['url'];
+		$src      = $component['url'];
 		$blocks[] = $this->gutenberg_blocks->get_iframe( $src );
 
 		return $blocks;
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one quote block.
@@ -547,6 +562,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one separator block.
@@ -560,6 +577,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one image block.
@@ -567,8 +586,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function component_image_to_block( $component ) {
 		$blocks = [];
 
-		$url = $component['image']['url'];
-		$title = isset( $component['image']['asset']['title'] ) && ! empty( $component['image']['asset']['title'] ) ? $component['image']['asset']['title'] : null;
+		$url     = $component['image']['url'];
+		$title   = isset( $component['image']['asset']['title'] ) && ! empty( $component['image']['asset']['title'] ) ? $component['image']['asset']['title'] : null;
 		$caption = isset( $component['image']['caption']['plaintext'] ) && ! empty( $component['image']['caption']['plaintext'] ) ? $component['image']['caption']['plaintext'] : null;
 
 		// Import image.
@@ -576,10 +595,10 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
 		update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
 		// Logg errors.
- 		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 			$this->logger->log(
 				'chorus-cms-import-authors-and-posts__err__component_image_to_block.log',
-				sprintf( "Err importing image URL %s error: %s", $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
+				sprintf( 'Err importing image URL %s error: %s', $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
 				$this->logger::WARNING
 			);
 		}
@@ -591,6 +610,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one Jetpack slideshow gallery block.
@@ -600,19 +621,19 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 		$attachment_ids = [];
 		foreach ( $component['gallery']['images'] as $key_image => $image ) {
-			$title = $image['asset']['title'];
+			$title   = $image['asset']['title'];
 			$caption = $image['caption']['html'];
-			$url = $image['url'];
+			$url     = $image['url'];
 
 			// Import image.
 			WP_CLI::line( sprintf( 'Downloading gallery image %d/%d URL %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
 			$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
 			update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
 			// Log errors.
-	        if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 				$this->logger->log(
 					'chorus-cms-import-authors-and-posts__err__component_image_to_block.log',
-					sprintf( "Err importing image URL %s error: %s", $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
+					sprintf( 'Err importing image URL %s error: %s', $url, is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ),
 					$this->logger::WARNING
 				);
 
@@ -628,6 +649,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $sidebar_component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns _________________.
@@ -638,7 +661,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$inner_blocks = [];
 		foreach ( $sidebar_component['sidebar']['body'] as $component ) {
 			// Get method name and arguments.
-			$method = self::COMPONENT_CONVERTERS[ $component['__typename'] ]['method'];
+			$method    = self::COMPONENT_CONVERTERS[ $component['__typename'] ]['method'];
 			$arguments = [];
 			foreach ( self::COMPONENT_CONVERTERS[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
 				if ( ! isset( $$argument ) ) {
@@ -655,29 +678,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		}
 
 		$group_block = $this->gutenberg_blocks->get_group_constrained( $inner_blocks, [ 'group-sidebar' ] );
-		$blocks[] = $group_block;
+		$blocks[]    = $group_block;
 
 		return $blocks;
 	}
 
-	public function get_author_names_from_additional_contributors_field( $contributor_field ) {
-
-		$contributor_field = trim( $contributor_field );
-		$contributor_field = str_replace( 'Additional Reporting By ', '', $contributor_field );
-		$contributor_field = str_replace( 'Additional Reporting by ', '', $contributor_field );
-		$contributor_field = str_replace( 'ADDITIONAL REPORTING BY ', '', $contributor_field );
-		$contributor_field = str_replace( 'With Additional Reporting by ', '', $contributor_field );
-		$contributor_field = str_replace( 'Additional reporting by ', '', $contributor_field );
-		$contributor_field = str_replace( ' and ', ', ', $contributor_field );
-		$contributor_field = str_replace( ' AND ', ', ', $contributor_field );
-		$contributor_field = str_replace( ', ', ',', $contributor_field );
-
-		$author_names = explode( ',', $contributor_field );
-
-		return $author_names;
-	}
-
 	/**
+	 * Converts Chorus content component to Gutenberg block(s).
+	 *
 	 * @param array $component Component data.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks().
@@ -700,6 +708,38 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		return $blocks;
 	}
 
+	/**
+	 * Parses string with additional reporters and returns array of author names.
+	 *
+	 * @param string $contributor_field
+	 *
+	 * @return string[]
+	 */
+	public function get_author_names_from_additional_contributors_field( $contributor_field ) {
+
+		$contributor_field = trim( $contributor_field );
+		$contributor_field = str_replace( 'Additional Reporting By ', '', $contributor_field );
+		$contributor_field = str_replace( 'Additional Reporting by ', '', $contributor_field );
+		$contributor_field = str_replace( 'ADDITIONAL REPORTING BY ', '', $contributor_field );
+		$contributor_field = str_replace( 'With Additional Reporting by ', '', $contributor_field );
+		$contributor_field = str_replace( 'Additional reporting by ', '', $contributor_field );
+		$contributor_field = str_replace( ' and ', ', ', $contributor_field );
+		$contributor_field = str_replace( ' AND ', ', ', $contributor_field );
+		$contributor_field = str_replace( ', ', ',', $contributor_field );
+
+		$author_names = explode( ',', $contributor_field );
+
+		return $author_names;
+	}
+
+	/**
+	 * Imports posts.
+	 *
+	 * @param string $entries_path
+	 * @param bool   $refresh_posts
+	 *
+	 * @return void
+	 */
 	public function import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ ) {
 		global $wpdb;
 
@@ -709,7 +749,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
 		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
-			WP_CLI::line( sprintf( "%d/%d", $key_entry_json + 1, count( $entries_jsons ) ) );
+			WP_CLI::line( sprintf( '%d/%d', $key_entry_json + 1, count( $entries_jsons ) ) );
 
 			$entry = json_decode( file_get_contents( $entry_json ), true );
 
@@ -747,16 +787,16 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 */
 			$publish_date = $this->format_date( $entry['publishDate'] );
 			if ( ! $publish_date ) {
-				$publish_date = date('Y-m-d H:i:s' );
+				$publish_date = date( 'Y-m-d H:i:s' );
 			}
 			$post_create_args['post_date'] = $publish_date;
 
 			/**
 			 * Slug.
 			 */
-			$url_parsed = parse_url( $entry['url'] );
-			$path_exploded = explode( '/', $url_parsed['path'] );
-			$slug = $path_exploded[ count( $path_exploded ) - 1 ];
+			$url_parsed                    = parse_url( $entry['url'] );
+			$path_exploded                 = explode( '/', $url_parsed['path'] );
+			$slug                          = $path_exploded[ count( $path_exploded ) - 1 ];
 			$post_create_args['post_name'] = $slug;
 
 			/**
@@ -765,7 +805,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$post_id = wp_insert_post( $post_create_args, true );
 			if ( is_wp_error( $post_id ) ) {
 				$err = $post_id->get_error_message();
-				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorInserting: ". $err );
+				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorInserting: " . $err );
 				continue;
 			}
 			WP_CLI::success( "Created post ID $post_id for {$entry['url']}" );
@@ -802,7 +842,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			/**
 			 * Get post_content.
 			 */
-			$post_content = serialize_blocks( $blocks );
+			$post_content                     = serialize_blocks( $blocks );
 			$post_update_data['post_content'] = $post_content;
 
 			/**
@@ -812,16 +852,16 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				if ( 'IMAGE' != $entry['leadImage']['asset']['type'] ) {
 					continue;
 				}
-				$url = $entry['leadImage']['asset']['url'];
-				$credit = $entry['leadImage']['asset']['credit']['html'];
-				$title = $entry['leadImage']['asset']['title'];
+				$url     = $entry['leadImage']['asset']['url'];
+				$credit  = $entry['leadImage']['asset']['credit']['html'];
+				$title   = $entry['leadImage']['asset']['title'];
 				$caption = $entry['leadImage']['asset']['sourceCaption'];
 
 				// Download featured image.
 				WP_CLI::line( "Downloading featured image {$url} ..." );
 				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
 				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
-					$this->logger->log( 'chorus__error__import_featured_image.log', "url: {$url} errorInserting: ". ( is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ) );
+					$this->logger->log( 'chorus__error__import_featured_image.log', "url: {$url} errorInserting: " . ( is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ) );
 					break;
 				}
 
@@ -844,15 +884,15 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 * Authors.
 			 * There's only one author per entry in Chorus. Remaining co-authors are "contributors" and "additional contributors".
 			 */
-			$ga_ids = [];
-			$ga_id = $this->get_or_create_ga_from_author_data(
+			$ga_ids                           = [];
+			$ga_id                            = $this->get_or_create_ga_from_author_data(
 				$refresh_authors,
 				$entry['author']['firstName'],
 				$entry['author']['lastName'],
-				$display_name = null,
+				$display_name                 = null,
 				$entry['author']['uid'],
 				$entry['author']['username'],
-				$short_bio = null,
+				$short_bio                    = null,
 				$author_profile__social_links = null
 			);
 
@@ -861,7 +901,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			} else {
 				$this->logger->log(
 					'chorus-cms-import-authors-and-posts__err__assign_author.log',
-					sprintf( "Could not assign Author to post ID %d, url %s, firstName: %s, lastName: %s, uid: %s, username: %s", $post_id, $entry['url'], $entry['author']['firstName'], $entry['author']['lastName'], $entry['author']['uid'], $entry['author']['username'] ),
+					sprintf( 'Could not assign Author to post ID %d, url %s, firstName: %s, lastName: %s, uid: %s, username: %s', $post_id, $entry['url'], $entry['author']['firstName'], $entry['author']['lastName'], $entry['author']['uid'], $entry['author']['username'] ),
 					$this->logger::WARNING
 				);
 			}
@@ -887,7 +927,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 					} else {
 						$this->logger->log(
 							'chorus-cms-import-authors-and-posts__err__assign_author.log',
-							sprintf( "Could not assign Contributor to post ID %d, url %s, firstName: %s lastName: %s display_name: %s uid: %s username: %s short_bio: %s social_links: %s", $post_id, $entry['url'], $contributor['authorProfile']['user']['firstName'], $contributor['authorProfile']['user']['lastName'], $contributor['authorProfile']['name'], $contributor['authorProfile']['user']['uid'], $contributor['authorProfile']['user']['username'], $contributor['authorProfile']['shortBio'], printf( $contributor['authorProfile']['socialLinks'], true ) ),
+							sprintf( 'Could not assign Contributor to post ID %d, url %s, firstName: %s lastName: %s display_name: %s uid: %s username: %s short_bio: %s social_links: %s', $post_id, $entry['url'], $contributor['authorProfile']['user']['firstName'], $contributor['authorProfile']['user']['lastName'], $contributor['authorProfile']['name'], $contributor['authorProfile']['user']['uid'], $contributor['authorProfile']['user']['username'], $contributor['authorProfile']['shortBio'], printf( $contributor['authorProfile']['socialLinks'], true ) ),
 							$this->logger::WARNING
 						);
 					}
@@ -903,13 +943,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$author_names = $this->get_author_names_from_additional_contributors_field( $entry['additionalContributors']['plaintext'] );
 				foreach ( $author_names as $author_name ) {
 					// Additional contributors go only by name, so no need for $author_args.
-					$ga = $this->coauthors_plus->get_guest_author_by_display_name( $author_name );
+					$ga    = $this->coauthors_plus->get_guest_author_by_display_name( $author_name );
 					$ga_id = $ga ? $ga->ID : null;
 					if ( ! $ga_id ) {
 						$ga_id = $this->coauthors_plus->create_guest_author( [ 'display_name' => $author_name ] );
 					}
 					if ( $ga_id ) {
-						$ga_ids[] = $ga_id;
+						$ga_ids[]                         = $ga_id;
 						$ga_ids_additional_contributors[] = $ga_id;
 					} else {
 						$this->logger->log(
@@ -934,16 +974,16 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$category_ids = [];
 
 			// Set primary.
-			$category_name_primary = $entry['primaryCommunityGroup']['name'];
+			$category_name_primary    = $entry['primaryCommunityGroup']['name'];
 			$category_primary_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name_primary, 0 );
 			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_primary_term_id );
 			$category_ids[] = $category_primary_term_id;
 
 			// Set other categories.
 			foreach ( $entry['communityGroups'] as $community_group ) {
-				$category_name = $community_group['name'];
+				$category_name    = $community_group['name'];
 				$category_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
-				$category_ids[] = $category_term_id;
+				$category_ids[]   = $category_term_id;
 			}
 
 			// Set post categories.
@@ -954,7 +994,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 */
 			$updated_date = $this->format_date( $entry['updatedAt'] );
 			if ( $updated_date ) {
-				$post_update_data['post_modified'] = $updated_date;
+				$post_update_data['post_modified']     = $updated_date;
 				$post_update_data['post_modified_gmt'] = $updated_date;
 			}
 
@@ -978,10 +1018,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			}
 		}
 
-		$d=1;
+		$d = 1;
 	}
 
 	/**
+	 * Format date from Chorus CMS to WordPress.
+	 *
 	 * @param $chorus_date
 	 *
 	 * @return array|string|string[]|null
@@ -994,6 +1036,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		return $wp_date;
 	}
 
+	/**
+	 * Imports authors/ JSONs to GAs.
+	 *
+	 * @param string $authors_path Path to authors/ JSONs.
+	 * @param bool   $refresh_authors
+	 *
+	 * @return void
+	 */
 	public function import_authors( $authors_path, $refresh_authors ) {
 		$authors_jsons = glob( $authors_path . '/*.json' );
 		foreach ( $authors_jsons as $author_json ) {
@@ -1009,7 +1059,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$author['shortBio'],
 				$author['socialLinks']
 			);
-			$d = 'check: ' . $author['name'];
+			$d     = 'check: ' . $author['name'];
 			WP_CLI::success( sprintf( "Created GA %d for author '%s'.", $ga_id, $author['name'] ) );
 
 			// Save $author['uid'] as postmeta.
@@ -1020,7 +1070,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Gets GA by $uid, or creates it if it doesn't exist.
+	 * Gets GA by $uid, or $display_name, or full name, or creates it if it doesn't exist.
 	 *
 	 * @param bool   $refresh_author If set, will update existing GA with user data provided here by these arguments (names, bio, social links, ...), won't just return the existing GA.
 	 * @param string $uid
@@ -1052,8 +1102,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Get GA creation/update params.
 		$ga_args = [
 			'display_name' => $display_name,
-			'first_name' => $first_name,
-			'last_name' => $last_name,
+			'first_name'   => $first_name,
+			'last_name'    => $last_name,
 		];
 
 		if ( $username ) {
@@ -1129,12 +1179,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		}
 		// Get by display_name.
 		if ( is_null( $ga_id ) && ! empty( $display_name ) ) {
-			$ga = $this->coauthors_plus->get_guest_author_by_display_name( $display_name );
+			$ga    = $this->coauthors_plus->get_guest_author_by_display_name( $display_name );
 			$ga_id = $ga ? $ga->ID : null;
 		}
 		// Get by full name.
 		if ( is_null( $ga_id ) && ! empty( $first_name ) && ! empty( $last_name ) ) {
-			$ga = $this->coauthors_plus->get_guest_author_by_display_name( $first_name . ' ' . $last_name );
+			$ga    = $this->coauthors_plus->get_guest_author_by_display_name( $first_name . ' ' . $last_name );
 			$ga_id = $ga ? $ga->ID : null;
 		}
 
@@ -1161,7 +1211,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		} catch ( \Exception $e ) {
 			$this->logger->log(
 				'chorus-cms-import-authors-and-posts__err__create_ga.log',
-				sprintf( "Err creating GA error message '%s', GA data = %s ", $e->getMessage(), print_r( $ga_args, true) ),
+				sprintf( "Err creating GA error message '%s', GA data = %s ", $e->getMessage(), print_r( $ga_args, true ) ),
 				$this->logger::WARNING
 			);
 		}
