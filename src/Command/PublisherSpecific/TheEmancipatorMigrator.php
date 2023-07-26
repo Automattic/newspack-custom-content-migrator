@@ -82,6 +82,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator emancipator-post-subtitles',
 			[ $this, 'cmd_post_subtitles' ],
@@ -102,11 +103,39 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
 
-		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator" categories from posts.' );
+		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator".' );
 
-		foreach ( $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args ) as $post ) {
-			wp_remove_object_terms( $post->ID, self::CATEGORY_ID_OPINION, 'category' );
-			wp_remove_object_terms( $post->ID, self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
+		$dry_run = $assoc_args['dry-run'] ?? false;
+
+		// Remove the categories "opinion" and "the emancipator" from all posts.
+		foreach ( $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			if ( ! $dry_run ) {
+				wp_remove_object_terms( $post->ID, self::CATEGORY_ID_OPINION, 'category' );
+				wp_remove_object_terms( $post->ID, self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
+			}
+		}
+
+		// Now unnest the categories under opinion -> the emancipator.
+		$children = get_categories(
+			[
+				'parent' => self::CATEGORY_ID_THE_EMANCIPATOR,
+			]
+		);
+		foreach ( $children as $child ) {
+			if ( ! $dry_run ) {
+				wp_update_term(
+					$child->term_id,
+					'category',
+					[
+						'parent' => 0,
+					]
+				);
+			}
+		}
+		// And finally delete the two categories.
+		if ( ! $dry_run ) {
+			wp_delete_term( self::CATEGORY_ID_OPINION, 'category' );
+			wp_delete_term( self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
 		}
 	}
 
@@ -123,7 +152,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::log( 'Processing post subtitles' );
 		$counter = 0;
 		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts = $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args );
+		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
 			WP_CLI::log(
@@ -133,7 +162,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$post->guid
 				)
 			);
-			$counter++;
+			$counter ++;
 
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
@@ -146,7 +175,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Finished processing %s post subtitles', $counter ) );
 	}
 
-	public function cmd_redirects( $args, $assoc_args ) {
+	public function cmd_redirects( $args, $assoc_args ): void {
 
 		if ( ! $this->redirection_logic->plugin_is_activated() ) {
 			WP_CLI::error( 'Redirection plugin not found. Install, activate, and configure it before using this command.' );
@@ -155,7 +184,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::log( 'Processing redirects' );
 		$counter = 0;
 		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts = $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args );
+		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
 			WP_CLI::log(
@@ -165,7 +194,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$post->guid
 				)
 			);
-			$counter++;
+			$counter ++;
 
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
@@ -198,7 +227,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::log( 'Processing bylines' );
 		$counter = 0;
 		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts = $this->posts_logic->get_all_wp_posts( 'post', ['publish'], $assoc_args );
+		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
 			WP_CLI::log(
@@ -208,9 +237,9 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$post->guid
 				)
 			);
-			$counter++;
+			$counter ++;
 
-			$credits = [];
+			$credits     = [];
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
