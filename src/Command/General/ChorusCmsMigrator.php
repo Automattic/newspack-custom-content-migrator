@@ -1,6 +1,6 @@
 <?php
 
-namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
+namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;

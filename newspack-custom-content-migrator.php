@@ -63,7 +63,7 @@ PluginSetup::register_migrators(
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
-		Command\PublisherSpecific\ChorusCmsMigrator::class,
+		Command\General\ChorusCmsMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
