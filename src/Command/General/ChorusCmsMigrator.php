@@ -12,7 +12,7 @@ use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 
 /**
- * Custom migration scripts for The City.
+ * Custom migration scripts for Chorus CMS.
  */
 class ChorusCmsMigrator implements InterfaceCommand {
 
