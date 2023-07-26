@@ -356,7 +356,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function component_list_to_block( $component ) {
 		$blocks = [];
 
-		$blocks[] = $this->gutenberg_blocks->get_list( $component['contents']['html'] );
+		$elements = [];
+		foreach ( $component['items'] as $item ) {
+			$elements[] = $item['line']['html'];
+		}
+
+		$blocks[] = $this->gutenberg_blocks->get_list( $elements );
 
 		return $blocks;
 	}
@@ -536,7 +541,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function component_pullquote_to_block( $component ) {
 		$blocks = [];
 
-		$blocks = $this->gutenberg_blocks->get_quote( $component['quote']['html'] );
+		$blocks[] = $this->gutenberg_blocks->get_quote( $component['quote']['html'] );
 
 		return $blocks;
 	}
@@ -549,7 +554,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function component_horizontal_rule_to_block( $component ) {
 		$blocks = [];
 
-		$blocks = $this->gutenberg_blocks->get_separator( 'is-style-wide' );
+		$blocks[] = $this->gutenberg_blocks->get_separator( 'is-style-wide' );
 
 		return $blocks;
 	}
@@ -698,26 +703,15 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ ) {
 		global $wpdb;
 
+		// This can be dynamically set by command parameters, hardcoded for now.
+		$refresh_authors = false;
+
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
 		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
 			WP_CLI::line( sprintf( "%d/%d", $key_entry_json + 1, count( $entries_jsons ) ) );
 
 			$entry = json_decode( file_get_contents( $entry_json ), true );
-
-
-			foreach ( $entry['author'] as $author ) {
-				$au=$entry['url'];
-				$af=$entry_json;
-				$d=1;
-			}
-
-			if ( $entry['contributors'] && ! empty( $entry['contributors'] ) ) {
-				$au=$entry['url'];
-				$af=$entry_json;
-$entry['contributors'][0]['authorProfile']['user']['uid'];
-				$d=1;
-			}
 
 			/**
 			 * Import only published entries of type STORY.
@@ -774,6 +768,7 @@ $entry['contributors'][0]['authorProfile']['user']['uid'];
 				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorInserting: ". $err );
 				continue;
 			}
+			WP_CLI::success( "Created post ID $post_id for {$entry['url']}" );
 
 			/**
 			 * Convert all Chorus entry's "components" to Gutenberg blocks.
@@ -823,6 +818,7 @@ $entry['contributors'][0]['authorProfile']['user']['uid'];
 				$caption = $entry['leadImage']['asset']['sourceCaption'];
 
 				// Download featured image.
+				WP_CLI::line( "Downloading featured image {$url} ..." );
 				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
 				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 					$this->logger->log( 'chorus__error__import_featured_image.log', "url: {$url} errorInserting: ". ( is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ) );
@@ -837,45 +833,91 @@ $entry['contributors'][0]['authorProfile']['user']['uid'];
 
 				// Set Newspack featured image position.
 				if ( $entry['layoutTemplate'] ) {
+					if ( ! isset( self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] ) ) {
+						throw new \RuntimeException( sprintf( "Undefined featured image mapping in self::FEATURED_IMAGE_POSITION_MAPPING for layout template '%s'.", $entry['layoutTemplate'] ) );
+					}
 					update_post_meta( $post_id, 'newspack_featured_image_position', self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] );
 				}
 			}
 
 			/**
-			 * Get and assign authors.
+			 * Authors.
+			 * There's only one author per entry in Chorus. Remaining co-authors are "contributors" and "additional contributors".
 			 */
 			$ga_ids = [];
-			foreach ( $entry['author'] as $author ) {
-				// Get GA ID with that uid.
-				$ga_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s and meta_value = %s", 'newspack_chorus_author_uid', $entry['author'][0]['uid'] ) );
-				if ( ! $ga_id ) {
-					$d=1;
-				}
+			$ga_id = $this->get_or_create_ga_from_author_data(
+				$refresh_authors,
+				$entry['author']['firstName'],
+				$entry['author']['lastName'],
+				$display_name = null,
+				$entry['author']['uid'],
+				$entry['author']['username'],
+				$short_bio = null,
+				$author_profile__social_links = null
+			);
+
+			if ( $ga_id ) {
 				$ga_ids[] = $ga_id;
+			} else {
+				$this->logger->log(
+					'chorus-cms-import-authors-and-posts__err__assign_author.log',
+					sprintf( "Could not assign Author to post ID %d, url %s, firstName: %s, lastName: %s, uid: %s, username: %s", $post_id, $entry['url'], $entry['author']['firstName'], $entry['author']['lastName'], $entry['author']['uid'], $entry['author']['username'] ),
+					$this->logger::WARNING
+				);
 			}
 
-			// "Contributors" are regular GAs.
+			/**
+			 * "Contributors".
+			 * These are regular GAs. They go AFTER the author.
+			 */
 			if ( $entry['contributors'] && ! empty( $entry['contributors'] ) ) {
 				foreach ( $entry['contributors'] as $contributor ) {
-					$ga_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s and meta_value = %s", 'newspack_chorus_author_uid', $contributor['authorProfile']['uid'] ) );
-					if ( ! $ga_id ) {
-						$d=1;
+					$ga_id = $this->get_or_create_ga_from_author_data(
+						$refresh_authors,
+						$contributor['authorProfile']['user']['firstName'],
+						$contributor['authorProfile']['user']['lastName'],
+						$contributor['authorProfile']['name'],
+						$contributor['authorProfile']['user']['uid'],
+						$contributor['authorProfile']['user']['username'],
+						$contributor['authorProfile']['shortBio'],
+						$contributor['authorProfile']['socialLinks']
+					);
+					if ( $ga_id ) {
+						$ga_ids[] = $ga_id;
+					} else {
+						$this->logger->log(
+							'chorus-cms-import-authors-and-posts__err__assign_author.log',
+							sprintf( "Could not assign Contributor to post ID %d, url %s, firstName: %s lastName: %s display_name: %s uid: %s username: %s short_bio: %s social_links: %s", $post_id, $entry['url'], $contributor['authorProfile']['user']['firstName'], $contributor['authorProfile']['user']['lastName'], $contributor['authorProfile']['name'], $contributor['authorProfile']['user']['uid'], $contributor['authorProfile']['user']['username'], $contributor['authorProfile']['shortBio'], printf( $contributor['authorProfile']['socialLinks'], true ) ),
+							$this->logger::WARNING
+						);
 					}
-					$ga_ids[] = $ga_id;
 				}
 			}
 
-			// "Additional contributors" are also GAs, but they should get "additional reporting by" in front of their name. For now let's just save postmeta.
+			/**
+			 * "Additional contributors".
+			 * These are also GAs, but they should be getting "additional reporting by" in front of their name. For now just saving postmeta until we figure out how we're going to be displaying this label.
+			 */
 			$ga_ids_additional_contributors = [];
 			if ( $entry['additionalContributors'] && ! empty( trim( $entry['additionalContributors']['plaintext'] ) ) ) {
 				$author_names = $this->get_author_names_from_additional_contributors_field( $entry['additionalContributors']['plaintext'] );
 				foreach ( $author_names as $author_name ) {
-					$ga_id = $this->coauthors_plus->get_guest_author_by_display_name( $author_name );
+					// Additional contributors go only by name, so no need for $author_args.
+					$ga = $this->coauthors_plus->get_guest_author_by_display_name( $author_name );
+					$ga_id = $ga ? $ga->ID : null;
 					if ( ! $ga_id ) {
-						$d=1;
+						$ga_id = $this->coauthors_plus->create_guest_author( [ 'display_name' => $author_name ] );
 					}
-					$ga_ids[] = $ga_id;
-					$ga_ids_additional_contributors[] = $ga_id;
+					if ( $ga_id ) {
+						$ga_ids[] = $ga_id;
+						$ga_ids_additional_contributors[] = $ga_id;
+					} else {
+						$this->logger->log(
+							'chorus-cms-import-authors-and-posts__err__assign_author.log',
+							sprintf( "Could not assign Additional Contributor to post ID %d, url %s, entry['additionalContributors']: %s, this extracted author name: %s", $post_id, $entry['url'], $entry['additionalContributors']['plaintext'], $author_name ),
+							$this->logger::WARNING
+						);
+					}
 				}
 			}
 			// Save meta for additional contributors.
@@ -928,6 +970,9 @@ $entry['contributors'][0]['authorProfile']['user']['uid'];
 				'newspack_chorus_entry_uid' => $entry['uid'],
 				'newspack_chorus_entry_url' => $entry['url'],
 			];
+			if ( $entry['layoutTemplate'] ) {
+				$meta['newspack_chorus_entry_layout_template'] = $entry['layoutTemplate'];
+			}
 			foreach ( $meta as $meta_key => $meta_value ) {
 				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
@@ -950,115 +995,177 @@ $entry['contributors'][0]['authorProfile']['user']['uid'];
 	}
 
 	public function import_authors( $authors_path, $refresh_authors ) {
-		global $wpdb;
-
 		$authors_jsons = glob( $authors_path . '/*.json' );
 		foreach ( $authors_jsons as $author_json ) {
 			$author = json_decode( file_get_contents( $author_json ), true );
 
-			// Get GA creation/update params.
-			$ga_args = [
-				'display_name' => $author['name'],
-				'user_login' => $author['user']['username'],
-				'first_name' => $author['user']['firstName'],
-				'last_name' => $author['user']['lastName'],
-			];
-
-			// Apparently shortBio is always empty :(.
-			if ( $author['shortBio'] ) {
-				$ga_args['description'] = $author['shortBio'];
-			}
-
-			if ( isset( $author['socialLinks'] ) && ! empty( $author['socialLinks'] ) ) {
-
-				// Extract links HTML for bio from socialLinks.
-				$links_bio = '';
-				foreach ( $author['socialLinks'] as $social_link ) {
-					/**
-					 * Available types: PROFILE, TWITTER, RSS, EMAIL, INSTAGRAM.
-					 */
-					if ( $social_link['type'] ) {
-						if ( 'PROFILE' === $social_link['type'] ) {
-							// Local site author page URL.
-						} elseif ( 'TWITTER' === $social_link['type'] ) {
-							// If doesn't end with dot, add dot.
-							$links_bio .= ( ! empty( $links_bio ) && '.' != substr( $links_bio, -1 ) ) ? '.' : '';
-							// If doesn't end with space, add space.
-							$links_bio .= ( ! empty( $links_bio ) && ' ' != substr( $links_bio, -1 ) ) ? ' ' : '';
-							// Get handle from URL.
-							$handle = rtrim( $social_link['url'], '/' );
-							$handle = substr( $handle, strrpos( $handle, '/' ) + 1 );
-							// Add Twitter link.
-							$links_bio .= sprintf( '<a href="%s" target="_blank">Follow @%s on Twitter</a>.', $social_link['url'], $handle );
-						} elseif ( 'RSS' === $social_link['type'] ) {
-							// RSS feed URL.
-						} elseif ( 'EMAIL' === $social_link['type'] ) {
-							$ga_args['user_email'] = $social_link['url'];
-						} elseif ( 'INSTAGRAM' === $social_link['type'] ) {
-							// If doesn't end with dot, add dot.
-							$links_bio .= ( ! empty( $links_bio ) && '.' != substr( $links_bio, -1 ) ) ? '.' : '';
-							// If doesn't end with space, add space.
-							$links_bio .= ( ! empty( $links_bio ) && ' ' != substr( $links_bio, -1 ) ) ? ' ' : '';
-							// Get handle from URL.
-							$handle = rtrim( $social_link['url'], '/' );
-							$handle = substr( $handle, strrpos( $handle, '/' ) + 1 );
-							// Add Twitter link.
-							$links_bio .= sprintf( '<a href="%s" target="_blank">Follow @%s on Instagram</a>.', $social_link['url'], $handle );
-						}
-					}
-
-					// Not used key in JSONs: $social_link['label']
-				}
-
-				// Append social links to GA bio.
-				if ( ! empty( $links_bio ) ) {
-					// Start with bio.
-					$bio_updated = isset( $ga_args['description'] ) && ! empty( $ga_args['description'] ) ? $ga_args['description'] : '';
-					// If doesn't end with dot, add dot.
-					$bio_updated .= ( ! empty( $bio_updated ) && '.' != substr( $bio_updated, -1 ) ) ? '.' : '';
-					// If doesn't end with space, add space.
-					$bio_updated .= ( ! empty( $bio_updated ) && ' ' != substr( $bio_updated, -1 ) ) ? ' ' : '';
-					// Add links bio.
-					$bio_updated .= $links_bio;
-
-					// Update bio.
-					$ga_args['description'] = $bio_updated;
-				}
-			}
-
-			// Get existing GA.
-			$ga_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_chorus_author_uid' and meta_value = %s", $author['uid'] ) );
-
-			// If GA exists...
-			if ( $ga_id ) {
-
-				// ... and not refreshing, skip.
-				if ( ! $refresh_authors ) {
-					WP_CLI::log( sprintf( "Author '%s' already exists. Skipping.", $author['name'] ) );
-					continue;
-				}
-
-				// ... and refreshing, update the GA.
-				// Don't attempt to update user_login -- presently not supported.
-				unset( $ga_args['user_login'] );
-				$this->coauthors_plus->update_guest_author( $ga_id, $ga_args );
-				WP_CLI::success( sprintf( 'Updated existing user data GA %d for author %s.', $ga_id, $author['name'] ) );
-				continue;
-			}
-
-			// Create GA.
-			$ga_id = $this->coauthors_plus->create_guest_author( $ga_args );
+			$ga_id = $this->get_or_create_ga_from_author_data(
+				false,
+				$author['user']['firstName'],
+				$author['user']['lastName'],
+				$author['name'],
+				$author['uid'],
+				$author['user']['username'],
+				$author['shortBio'],
+				$author['socialLinks']
+			);
+			$d = 'check: ' . $author['name'];
 			WP_CLI::success( sprintf( "Created GA %d for author '%s'.", $ga_id, $author['name'] ) );
+
 			// Save $author['uid'] as postmeta.
 			if ( $author['uid'] ) {
 				update_post_meta( $ga_id, 'newspack_chorus_author_uid', $author['uid'] );
 			}
-
-			/**
-			 * These $authors keys also exist in author JSONs:
-			 *  $author['url'] -- local site author page URL
-			 *  $author['title'] -- not used, always empty
-			 */
 		}
+	}
+
+	/**
+	 * Gets GA by $uid, or creates it if it doesn't exist.
+	 *
+	 * @param bool   $refresh_author If set, will update existing GA with user data provided here by these arguments (names, bio, social links, ...), won't just return the existing GA.
+	 * @param string $uid
+	 * @param string $display_name
+	 * @param string $username
+	 * @param string $first_name
+	 * @param string $last_name
+	 * @param string $short_bio
+	 * @param array  $author_profile__social_links
+	 *
+	 * @return int GA ID.
+	 */
+	public function get_or_create_ga_from_author_data(
+		$refresh_author = false,
+		$first_name,
+		$last_name,
+		$display_name = null,
+		$uid = null,
+		$username = null,
+		$short_bio = null,
+		$author_profile__social_links = []
+	) {
+		global $wpdb;
+
+		if ( ! $display_name ) {
+			$display_name = $first_name . ' ' . $last_name;
+		}
+
+		// Get GA creation/update params.
+		$ga_args = [
+			'display_name' => $display_name,
+			'first_name' => $first_name,
+			'last_name' => $last_name,
+		];
+
+		if ( $username ) {
+			$ga_args['user_login'] = $username;
+		}
+
+		// Apparently shortBio is always empty :(.
+		if ( $short_bio ) {
+			$ga_args['description'] = $short_bio;
+		}
+
+		if ( ! empty( $author_profile__social_links ) ) {
+
+			// Extract links HTML for bio from socialLinks.
+			$links_bio = '';
+			foreach ( $author_profile__social_links as $social_link ) {
+				/**
+				 * Available types: PROFILE, TWITTER, RSS, EMAIL, INSTAGRAM.
+				 */
+				if ( $social_link['type'] ) {
+					if ( 'PROFILE' === $social_link['type'] ) {
+						// Local site author page URL.
+					} elseif ( 'TWITTER' === $social_link['type'] ) {
+						// If doesn't end with dot, add dot.
+						$links_bio .= ( ! empty( $links_bio ) && '.' != substr( $links_bio, -1 ) ) ? '.' : '';
+						// If doesn't end with space, add space.
+						$links_bio .= ( ! empty( $links_bio ) && ' ' != substr( $links_bio, -1 ) ) ? ' ' : '';
+						// Get handle from URL.
+						$handle = rtrim( $social_link['url'], '/' );
+						$handle = substr( $handle, strrpos( $handle, '/' ) + 1 );
+						// Add Twitter link.
+						$links_bio .= sprintf( '<a href="%s" target="_blank">Follow @%s on Twitter</a>.', $social_link['url'], $handle );
+					} elseif ( 'RSS' === $social_link['type'] ) {
+						// RSS feed URL.
+					} elseif ( 'EMAIL' === $social_link['type'] ) {
+						$ga_args['user_email'] = $social_link['url'];
+					} elseif ( 'INSTAGRAM' === $social_link['type'] ) {
+						// If doesn't end with dot, add dot.
+						$links_bio .= ( ! empty( $links_bio ) && '.' != substr( $links_bio, -1 ) ) ? '.' : '';
+						// If doesn't end with space, add space.
+						$links_bio .= ( ! empty( $links_bio ) && ' ' != substr( $links_bio, -1 ) ) ? ' ' : '';
+						// Get handle from URL.
+						$handle = rtrim( $social_link['url'], '/' );
+						$handle = substr( $handle, strrpos( $handle, '/' ) + 1 );
+						// Add Twitter link.
+						$links_bio .= sprintf( '<a href="%s" target="_blank">Follow @%s on Instagram</a>.', $social_link['url'], $handle );
+					}
+				}
+
+				// Not used key in JSONs: $social_link['label']
+			}
+
+			// Append social links to GA bio.
+			if ( ! empty( $links_bio ) ) {
+				// Start with bio.
+				$bio_updated = isset( $ga_args['description'] ) && ! empty( $ga_args['description'] ) ? $ga_args['description'] : '';
+				// If doesn't end with dot, add dot.
+				$bio_updated .= ( ! empty( $bio_updated ) && '.' != substr( $bio_updated, -1 ) ) ? '.' : '';
+				// If doesn't end with space, add space.
+				$bio_updated .= ( ! empty( $bio_updated ) && ' ' != substr( $bio_updated, -1 ) ) ? ' ' : '';
+				// Add links bio.
+				$bio_updated .= $links_bio;
+
+				// Update bio.
+				$ga_args['description'] = $bio_updated;
+			}
+		}
+
+		// Get existing GA.
+		$ga_id = null;
+		if ( $uid ) {
+			$ga_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_chorus_author_uid' and meta_value = %s", $uid ) );
+		}
+		// Get by display_name.
+		if ( is_null( $ga_id ) && ! empty( $display_name ) ) {
+			$ga = $this->coauthors_plus->get_guest_author_by_display_name( $display_name );
+			$ga_id = $ga ? $ga->ID : null;
+		}
+		// Get by full name.
+		if ( is_null( $ga_id ) && ! empty( $first_name ) && ! empty( $last_name ) ) {
+			$ga = $this->coauthors_plus->get_guest_author_by_display_name( $first_name . ' ' . $last_name );
+			$ga_id = $ga ? $ga->ID : null;
+		}
+
+		// If GA exists...
+		if ( $ga_id ) {
+
+			// ... and not refreshing, skip.
+			if ( ! $refresh_author ) {
+				WP_CLI::log( sprintf( "Author '%s' already exists.", $display_name ) );
+				return $ga_id;
+			}
+
+			// ... and refreshing, update the GA.
+			// Don't attempt to update user_login -- presently not supported.
+			unset( $ga_args['user_login'] );
+			$this->coauthors_plus->update_guest_author( $ga_id, $ga_args );
+			WP_CLI::success( sprintf( 'Updated existing user GA %d for author %s.', $ga_id, $display_name ) );
+			return $ga_id;
+		}
+
+		// Create GA.
+		try {
+			$ga_id = $this->coauthors_plus->create_guest_author( $ga_args );
+		} catch ( \Exception $e ) {
+			$this->logger->log(
+				'chorus-cms-import-authors-and-posts__err__create_ga.log',
+				sprintf( "Err creating GA error message '%s', GA data = %s ", $e->getMessage(), print_r( $ga_args, true) ),
+				$this->logger::WARNING
+			);
+		}
+
+		return $ga_id;
 	}
 }
