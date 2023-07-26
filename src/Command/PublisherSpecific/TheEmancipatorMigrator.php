@@ -307,6 +307,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					continue;
 				}
 
+				$co_authors = [];
+
 				foreach ( $credits as $co_author ) {
 					$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
 					if ( empty( $maybe_co_author ) ) {
@@ -318,7 +320,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 						// TODO: Figure out what to do with an array here.
 					}
 
-					$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $co_author_id ], $post->ID );
 
 					// Link the co-author created with the WP User with the same name if it exists.
 					$co_author_wp_user = $this->get_wp_user_by_name( $co_author );
@@ -326,6 +327,10 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 						$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
 							$co_author_wp_user );
 					}
+					$co_authors[] = $co_author_id;
+				}
+				if ( ! empty ( $co_authors ) ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors, $post->ID );
 				}
 			}
 		}
