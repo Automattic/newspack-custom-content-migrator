@@ -66,12 +66,22 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	public function register_commands(): void {
 
+		$synopsis = '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>]';
 		WP_CLI::add_command(
 			'newspack-content-migrator emancipator-authors',
-			[ $this, 'cmd_authors' ],
+			[ $this, 'cmd_post_authors' ],
 			[
-				'shortdesc' => 'Migrates authors from the API content as Co-Authors.',
-				'synopsis'  => [],
+				'shortdesc' => 'Migrates post authors/owners from the API content.',
+				'synopsis'  => $synopsis,
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-bylines',
+			[ $this, 'cmd_post_bylines' ],
+			[
+				'shortdesc' => 'Migrates bylines from the API content as Co-Authors.',
+				'synopsis'  => $synopsis,
 			]
 		);
 		WP_CLI::add_command(
@@ -79,7 +89,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			[ $this, 'cmd_redirects' ],
 			[
 				'shortdesc' => 'Create redirects for articles that are just redirects.',
-				'synopsis'  => [],
+				'synopsis'  => $synopsis,
 			]
 		);
 
@@ -88,7 +98,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			[ $this, 'cmd_post_subtitles' ],
 			[
 				'shortdesc' => 'Add post subtitles',
-				'synopsis'  => [],
+				'synopsis'  => $synopsis,
 			]
 		);
 		WP_CLI::add_command(
@@ -96,7 +106,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			[ $this, 'cmd_taxonomy' ],
 			[
 				'shortdesc' => 'Remove unneeded categories.',
-				'synopsis'  => [],
+				'synopsis'  => $synopsis,
 			]
 		);
 	}
@@ -215,10 +225,49 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Finished processing %s posts for redirects', $counter ) );
 	}
 
+	public function cmd_post_authors( $args, $assoc_args ): void {
+		WP_CLI::log( 'Processing post authors' );
+		$dry_run = $assoc_args['dry-run'] ?? false;
+
+		foreach ( $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+
+			$meta        = get_post_meta( $post->ID );
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+
+			$real_author_email = $api_content['revision']['user_id'] ?? false;
+			if ( ! $real_author_email ) {
+				continue;
+			}
+			if ( ! $dry_run ) {
+				$maybe_existing_user = $this->get_wp_user_by_name( $real_author_email );
+				$author_id           = $maybe_existing_user->ID ?? false;
+				if ( ! $author_id ) {
+					$username  = stristr( $real_author_email, '@', true );
+					$password  = wp_generate_password( 16, false );
+					$author_id = wp_create_user( $username, $password, $real_author_email );
+					if ( ! is_wp_error( $author_id ) ) {
+						$wp_user = get_userdata( $author_id );
+						$wp_user->set_role( 'author' );
+					}
+				}
+				if ( $author_id !== $post->post_author ) {
+					$post_data = array(
+						'ID'          => $post->ID,
+						'post_author' => $author_id,
+					);
+					$updated   = wp_update_post( $post_data );
+					if ( is_wp_error( $updated ) ) {
+						WP_CLI::error( sprintf( 'Failed to assign author to post with ID %d', $post->ID ) );
+					}
+				}
+			}
+		}
+	}
+
 	/**
-	 * Process byline data.
+	 * Process byline data for posts.
 	 */
-	public function cmd_authors( $args, $assoc_args ): void {
+	public function cmd_post_bylines( $args, $assoc_args ): void {
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
@@ -230,22 +279,10 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
-			WP_CLI::log(
-				sprintf(
-					'Post ID: %s, %s',
-					$post->ID,
-					$post->guid
-				)
-			);
 			$counter ++;
-
 			$credits     = [];
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
-
-			// TODO. THe real author/owner? Should we use that instead?
-			$real_author = $api_content['revision']['user_id'] ?? false;
-			WP_CLI::log( sprintf( 'Real author? %s', $real_author ) );
 
 			if ( ! empty( $api_content['credits']['by'] ) ) {
 				foreach ( $api_content['credits']['by'] as $credit ) {
@@ -297,7 +334,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			]
 		);
 
-		// If we do have an existing WP User, we link the post to them.
 		if ( ! empty( $user_query->results ) ) {
 			return current( $user_query->results );
 		}
