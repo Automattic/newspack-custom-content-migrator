@@ -169,13 +169,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
-			WP_CLI::log(
-				sprintf(
-					'Post ID: %s, %s',
-					$post->ID,
-					$post->guid
-				)
-			);
 			$counter ++;
 
 			$meta        = get_post_meta( $post->ID );
@@ -253,7 +246,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				continue;
 			}
 			if ( ! $dry_run ) {
-				$maybe_existing_user = $this->get_wp_user_by_name( $real_author_email );
+				$maybe_existing_user = get_user_by( 'email', $real_author_email );
 				$author_id           = $maybe_existing_user->ID ?? false;
 				if ( ! $author_id ) {
 					$username  = stristr( $real_author_email, '@', true );
@@ -280,6 +273,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	/**
 	 * Add bylines (co-authors) for posts.
+	 * Also delete the "credit paragraphs" at the bottom of the post content if possible.
 	 */
 	public function cmd_post_bylines( $args, $assoc_args ): void {
 
@@ -307,30 +301,52 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					continue;
 				}
 
-				$co_authors = [];
+				$co_author_ids = [];
+
+				$replace_in_content = false;
 
 				foreach ( $credits as $co_author ) {
 					$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
+					$co_author_id    = 0;
 					if ( empty( $maybe_co_author ) ) {
-						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $co_author ] );
+						$author_description = $this->find_byine_credit( $co_author, $post->post_content );
+
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [
+							'display_name' => $co_author,
+							'description'  => wp_strip_all_tags( $author_description ),
+						] );
+						if ( ! empty( $author_description ) ) {
+							$to_replace         = sprintf( '<!-- wp:paragraph -->%s<!-- /wp:paragraph -->',
+								$author_description );
+							$post->post_content = str_replace( $to_replace, '', $post->post_content );
+							$replace_in_content = true;
+						}
+
 					} elseif ( is_object( $maybe_co_author ) ) {
 						$co_author_id = $maybe_co_author->ID;
-					} else {
-						continue;
-						// TODO: Figure out what to do with an array here.
 					}
 
-
-					// Link the co-author created with the WP User with the same name if it exists.
-					$co_author_wp_user = $this->get_wp_user_by_name( $co_author );
-					if ( $co_author_wp_user ) {
-						$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
-							$co_author_wp_user );
+					if ( ! empty( $co_author_id ) ) {
+						// Link the co-author created with the WP User with the same name if it exists.
+						$co_author_wp_user = get_user_by( 'login', $co_author );
+						if ( $co_author_wp_user ) {
+							$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
+								$co_author_wp_user );
+						}
+						$co_author_ids[] = $co_author_id;
 					}
-					$co_authors[] = $co_author_id;
+
 				}
-				if ( ! empty ( $co_authors ) ) {
-					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_authors, $post->ID );
+				if ( ! empty ( $co_author_ids ) ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_author_ids, $post->ID );
+				}
+
+				if ( $replace_in_content ) {
+					$post_data = [
+						'ID'           => $post->ID,
+						'post_content' => $post->post_content,
+					];
+					wp_update_post( $post_data );
 				}
 			}
 		}
@@ -339,25 +355,30 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Retrieve WP user by looking in login, nicename, and display name.
+	 * Posts have "credit paragraphs" at the bottom of the content. They typically
+	 * start with "$name is ..." and are italicized. This tries to find the string.
 	 *
-	 * @param string $user_name Name to look for.
+	 * @param string $name
+	 * @param string $content
 	 *
-	 * @return (\WP_User|false) WP_User object on success, false on failure.
+	 * @return string
 	 */
-	private function get_wp_user_by_name( $user_name ) {
-		$user_query = new \WP_User_Query(
-			[
-				'search'        => $user_name,
-				'search_fields' => array( 'user_login', 'user_nicename', 'display_name' ),
-			]
-		);
+	private function find_byine_credit( $name, $content ): string {
+		// We're looking for a paragraph that starts with "$name is ...".
+		$looking_for = sprintf( '<p><i>%s is', $name );
+		// Loop backwards through the blocks array because the "credits paragraphs" are at the bottom.
+		foreach ( array_reverse( parse_blocks( $content ) ) as $idx => $block ) {
+			// Only deal with paragraphs. And only look in the bottom 10 blocks.
+			if ( $idx > 10 || 'core/paragraph' !== $block['blockName'] ) {
+				continue;
+			}
 
-		if ( ! empty( $user_query->results ) ) {
-			return current( $user_query->results );
+			if ( str_starts_with( $block['innerHTML'], $looking_for ) ) {
+				return $block['innerHTML'];
+			}
 		}
 
-		return false;
+		return '';
 	}
 
 }
