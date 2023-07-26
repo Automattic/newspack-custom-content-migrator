@@ -63,6 +63,7 @@ PluginSetup::register_migrators(
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
+		Command\PublisherSpecific\ChorusCmsMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -80,6 +81,5 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
-		Command\PublisherSpecific\TheCityMigrator::class,
 	)
 );

@@ -6,6 +6,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use \NewspackCustomContentMigrator\Logic\Taxonomy;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
@@ -16,10 +17,11 @@ use \WP_CLI;
 class ChorusCmsMigrator implements InterfaceCommand {
 
 	/**
-	 * Chorus component converters.
+	 * Chorus components to Gutenberg blocks converters.
+	 *
+	 * Keys are the Chorus component name, values define a method used to convert it to blocks.
 	 *
 	 * @array COMPONENT_CONVERTERS {
-	 *      Key is the Chorus component name, value is an array with:
 	 *      @type string $method    Method to call to convert the component.
 	 *      @type string $arguments Arguments to pass to the method.
 	 * }
@@ -110,7 +112,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		],
 
 		/**
-		 * These components will not be converted.
+		 * These components with nulls for methods and arrays will not be converted.
 		 */
 		'EntryBodyNewsletter' => [
 			'method' => null,
@@ -120,6 +122,23 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			'method' => null,
 			'arguments' => null,
 		],
+	];
+
+	/**
+	 * Mapping from Chorus' featured image position to Newspack's.
+	 */
+	const FEATURED_IMAGE_POSITION_MAPPING = [
+		'HEADLINE_OVERLAY'     => 'behind',
+		// HEADLINE_BELOW => Above Title,
+		'HEADLINE_BELOW'       => 'above',
+		// SPLIT_LEFT => Beside Title
+		'SPLIT_LEFT'           => 'beside',
+		// SPLIT_RIGHT => Beside Title
+		'SPLIT_RIGHT'          => 'beside',
+		// STANDARD => Large
+		'STANDARD'             => 'large',
+		// HEADLINE_BELOW_SHORT => Above Title
+		'HEADLINE_BELOW_SHORT' => 'above',
 	];
 
 	/**
@@ -163,6 +182,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	private $crawler;
 
 	/**
+	 * Taxonomy instance.
+	 *
+	 * @var Taxonomy Taxonomy instance.
+	 */
+	private $taxonomy;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -171,6 +197,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$this->attachments = new Attachments();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
 		$this->crawler = new Crawler();
+		$this->taxonomy = new Taxonomy();
 	}
 
 	/**
@@ -193,9 +220,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator chorus-cms-import-authors-and-posts',
-			[ $this, 'cmd_choruscms_import_authors_and_posts' ],
+			[ $this, 'cmd_import_authors_and_posts' ],
 			[
-				'shortdesc' => 'Migrates Chorus CMS authors and posts (entries) to WordPress.',
+				'shortdesc' => 'Migrates authors and entries (posts) to WordPress.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -236,10 +263,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_choruscms_import_authors_and_posts( $pos_args, $assoc_args ) {
+	public function cmd_import_authors_and_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
-		// Params.
+		/**
+		 * CLI Params.
+		 */
 		// $default_author_user_id = $assoc_args['default-author-user-id'];
 		$refresh_authors = $assoc_args['refresh-authors'] ?? null;
 		$refresh_posts = $assoc_args['refresh-posts'] ?? null;
@@ -250,24 +279,29 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Content not found in path.' );
 		}
 
-		// Mapping from Chorus' featured image position to Newspack's.
-		$newspack_featured_image_position = [
-			// HEADLINE_OVERLAY => Behind Post Title
-			'HEADLINE_OVERLAY' => 'behind',
-			// HEADLINE_BELOW => Above Title,
-			'HEADLINE_BELOW' => 'above',
-			// SPLIT_LEFT => Beside Title
-			'SPLIT_LEFT' => 'beside',
-			// SPLIT_RIGHT => Beside Title
-			'SPLIT_RIGHT' => 'beside',
-			// STANDARD => Large
-			'STANDARD' => 'large',
-			// HEADLINE_BELOW_SHORT => Above Title
-			'HEADLINE_BELOW_SHORT' => 'above',
-		];
-
+		// WP_CLI::line( "Checking whether this script knows how to convert all Chorus' content components..." );
+		// $this->validate_known_component_types( $entries_path );
+		//
+		// WP_CLI::line( "Importing authors..." );
 		// $this->import_authors( $authors_path, $refresh_authors );
-		$this->import_entries( $entries_path, $refresh_posts, $newspack_featured_image_position /*, $default_author_user_id */ );
+
+		WP_CLI::line( "Importing posts..." );
+		$this->import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ );
+	}
+
+	public function validate_known_component_types( $entries_path ) {
+		// Loop through entries and import them.
+		$entries_jsons = glob( $entries_path . '/*.json' );
+		foreach ( $entries_jsons as $entry_json ) {
+			$entry = json_decode( file_get_contents( $entry_json ), true );
+
+			// Loop through components.
+			foreach ( $entry['body']['components'] as $component ) {
+				if ( ! isset( self::COMPONENT_CONVERTERS[ $component['__typename'] ] ) ) {
+					WP_CLI::error( sprintf( "Unknown component type '%s', need to create a converter first.", $component['__typename'] ) );
+				}
+			}
+		}
 	}
 
 	/**
@@ -621,6 +655,23 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		return $blocks;
 	}
 
+	public function get_author_names_from_additional_contributors_field( $contributor_field ) {
+
+		$contributor_field = trim( $contributor_field );
+		$contributor_field = str_replace( 'Additional Reporting By ', '', $contributor_field );
+		$contributor_field = str_replace( 'Additional Reporting by ', '', $contributor_field );
+		$contributor_field = str_replace( 'ADDITIONAL REPORTING BY ', '', $contributor_field );
+		$contributor_field = str_replace( 'With Additional Reporting by ', '', $contributor_field );
+		$contributor_field = str_replace( 'Additional reporting by ', '', $contributor_field );
+		$contributor_field = str_replace( ' and ', ', ', $contributor_field );
+		$contributor_field = str_replace( ' AND ', ', ', $contributor_field );
+		$contributor_field = str_replace( ', ', ',', $contributor_field );
+
+		$author_names = explode( ',', $contributor_field );
+
+		return $author_names;
+	}
+
 	/**
 	 * @param array $component Component data.
 	 *
@@ -644,11 +695,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		return $blocks;
 	}
 
-	public function import_entries( $entries_path, $refresh_posts, $newspack_featured_image_position /*, $default_author_user_id */ ) {
+	public function import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ ) {
 		global $wpdb;
-
-$components_debug_types = [];
-$components_debug_samples = [];
 
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
@@ -657,207 +705,141 @@ $components_debug_samples = [];
 
 			$entry = json_decode( file_get_contents( $entry_json ), true );
 
-// DEV debug.
-if ( 'https://www.thecity.nyc/2023/2/16/23601959/voter-information-2023-nyc-elections' != $entry['url'] ) {
-	continue;
-}
 
-			/**
-			 * Various data consistency checks -- use step debugging to catch unexpected data.
-			 */
-			if ( 'Entry' != $entry['__typename'] ) {
+			foreach ( $entry['author'] as $author ) {
+				$au=$entry['url'];
+				$af=$entry_json;
 				$d=1;
 			}
-			if ( 'PUBLISHED' != $entry['publishStatus'] ) {
+
+			if ( $entry['contributors'] && ! empty( $entry['contributors'] ) ) {
+				$au=$entry['url'];
+				$af=$entry_json;
+$entry['contributors'][0]['authorProfile']['user']['uid'];
 				$d=1;
+			}
+
+			/**
+			 * Import only published entries of type STORY.
+			 */
+			if ( 'PUBLISHED' != $entry['publishStatus'] ) {
+				continue;
+			}
+			if ( 'Entry' != $entry['__typename'] ) {
+				continue;
 			}
 			if ( 'STORY' != $entry['type'] ) {
-				$d=1;
+				continue;
 			}
-
-			// Loop through components.
-			$blocks = [];
-			foreach ( $entry['body']['components'] as $component ) {
-
-				if ( ! isset( self::COMPONENT_CONVERTERS[ $component['__typename'] ] ) ) {
-					// Unknown component type, need to create a converter.
-					$d=1;
-				}
-
-// DEV debug -- REMOVE.
-if ( 'EntryBodySidebar' != $component['__typename'] ) {
-	continue;
-}
-
-// DEV debug -- REMOVE.
-// $components_debug_samples[ $component['embed']['provider']['name'] ][] = $component['embed']['embedHtml'];
-// continue;
-
-// DEV debug -- REMOVE and move conversion below after post was created.
-// $post_id needed for component conversion -- for DEV purposes use this fake one
-$post_id = 123;
-
-
-// 				/**
-// 				 * Call the converter on component.
-// 				 */
-// 				if ( 'EntryBodySidebar' == $component['__typename'] ) {
-//
-// 					/**
-// 					 * Converting the EntryBodySidebar component to blocks is a special recursive case.
-// 					 * This component is an array of nested components; need to loop over all of them and render them into blocks one by one.
-// 					 */
-// // DEV debug -- REMOVE.
-// $blocks = [];
-// 					$sidebar_component = $component['sidebar']['body'];
-// 					foreach ( $sidebar_component as $component ) {
-// 						// Get method name and arguments.
-// 						$method = self::COMPONENT_CONVERTERS[ $component['__typename'] ]['method'];
-// 						$arguments = [];
-// 						foreach ( self::COMPONENT_CONVERTERS[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
-// 							if ( ! isset( $$argument ) ) {
-// 								throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
-// 							}
-// 							$arguments[] = $$argument;
-// 						}
-//
-// 						// Call the method and merge resulting converted block.
-// 						$blocks = array_merge(
-// 							$blocks,
-// 							call_user_func_array( 'self::' . $method, $arguments )
-// 						);
-// 					}
-//
-// 				} else {
-
-					/**
-					 * Convert a Chorus component component to Gutenberg block.
-					 * Get its method name, arguments, and run it to get the equivalent Gutenberg block.
-					 */
-					// Get method name and arguments.
-					$method = self::COMPONENT_CONVERTERS[ $component['__typename'] ]['method'];
-					// This is one of the components that are being skipped.
-					if ( is_null( $method ) ) {
-						continue;
-					}
-					$arguments = [];
-					foreach ( self::COMPONENT_CONVERTERS[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
-						if ( ! isset( $$argument ) ) {
-							throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
-						}
-						$arguments[] = $$argument;
-					}
-// DEV debug -- REMOVE.
-$blocks = [];
-					// Call the method and merge resulting converted block.
-					$blocks = array_merge(
-						$blocks,
-						call_user_func_array( 'self::' . $method, $arguments )
-					);
-				// }
-
-
-// DEV debug -- REMOVE.
-// temp store blocks for QA
-$post_content = serialize_blocks( $blocks );
-continue;
-			}
-
-$post_content = serialize_blocks( $blocks );
-continue;
-
-			// Check if self::COMPONENT_CONVERTERS contains this __typename, throw exception if not.
-			if ( ! isset( self::COMPONENT_CONVERTERS[ $component['__typename' ] ] ) ) {
-				throw new \RuntimeException( sprintf( "%d component not registered with self::COMPONENT_CONVERTERS.", $component['__typename' ] ) );
-			}
-
-			// Debug.
-			$components_debug_types[ $component['__typename'] ] = [
-				$entry['url'],
-				$component,
-			];
-
-			$post_content = serialize_blocks( $blocks );
-
-
-$post_content = $this->compile_post_content( $entry );
 
 			/**
-			 * Get post arguments.
+			 * Post creation arguments.
 			 */
-			$post_arr = [
-				'post_type'             => 'post',
-				'post_status'           => 'publish',
-				'post_title'            => $entry['title'],
-				'post_content'          => '',
-
-				// 'post_author'           => $user_id,
+			$post_create_args = [
+				'post_type'   => 'post',
+				'post_status' => 'publish',
+				'post_title'  => $entry['title'],
 			];
-			// Excerpt.
+
+			/**
+			 * Excerpt.
+			 */
 			if ( isset( $entry['dek']['html'] ) && ! empty( $entry['dek']['html'] ) ) {
-				$post_arr['post_excerpt'] = $entry['dek']['html'];
+				$post_create_args['post_excerpt'] = $entry['dek']['html'];
 			}
 
-			// Post date.
+			/**
+			 * Post date.
+			 */
 			$publish_date = $this->format_date( $entry['publishDate'] );
 			if ( ! $publish_date ) {
-				$d=1;
+				$publish_date = date('Y-m-d H:i:s' );
 			}
-			$post_arr['post_date'] = $publish_date;
+			$post_create_args['post_date'] = $publish_date;
+
+			/**
+			 * Slug.
+			 */
+			$url_parsed = parse_url( $entry['url'] );
+			$path_exploded = explode( '/', $url_parsed['path'] );
+			$slug = $path_exploded[ count( $path_exploded ) - 1 ];
+			$post_create_args['post_name'] = $slug;
 
 			/**
 			 * Insert post.
 			 */
-			$post_id = wp_insert_post( $post_arr, true );
+			$post_id = wp_insert_post( $post_create_args, true );
 			if ( is_wp_error( $post_id ) ) {
 				$err = $post_id->get_error_message();
 				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorInserting: ". $err );
 				continue;
 			}
 
+			/**
+			 * Convert all Chorus entry's "components" to Gutenberg blocks.
+			 * (Needs to happen after post creation because some blocks need the post ID.)
+			 */
+			$blocks = [];
+			foreach ( $entry['body']['components'] as $component ) {
+
+				// Get conversion method name.
+				$method = self::COMPONENT_CONVERTERS[ $component['__typename'] ]['method'];
+				if ( is_null( $method ) ) {
+					continue;
+				}
+
+				// Get arguments.
+				$arguments = [];
+				foreach ( self::COMPONENT_CONVERTERS[ $component['__typename'] ]['arguments'] as $key_argument => $argument ) {
+					if ( ! isset( $$argument ) ) {
+						throw new \RuntimeException( sprintf( "Argument $%s not set in context and can't be passed to method %s() as argument number %d.", $argument, $method, $key_argument ) );
+					}
+					$arguments[] = $$argument;
+				}
+
+				// Call the method and get resulting blocks.
+				$blocks = array_merge( $blocks, call_user_func_array( 'self::' . $method, $arguments ) );
+			}
+
+			// Update post data all at once.
+			$post_update_data = [];
+
+			/**
+			 * Get post_content.
+			 */
+			$post_content = serialize_blocks( $blocks );
+			$post_update_data['post_content'] = $post_content;
 
 			/**
 			 * Import featured image.
 			 */
 			if ( isset( $entry['leadImage']['asset'] ) && ! empty( $entry['leadImage']['asset'] ) ) {
 				if ( 'IMAGE' != $entry['leadImage']['asset']['type'] ) {
-					$d=1;
-				}
-				if ( $entry['leadImage']['additionalContributors'] ) {
-					$d=1;
+					continue;
 				}
 				$url = $entry['leadImage']['asset']['url'];
 				$credit = $entry['leadImage']['asset']['credit']['html'];
 				$title = $entry['leadImage']['asset']['title'];
 				$caption = $entry['leadImage']['asset']['sourceCaption'];
-				$search_text = $entry['leadImage']['asset']['searchText'];
 
 				// Download featured image.
-				$attachment_id = $this->attachments->import_external_file(
-					$url, $title, $caption, $description = null, $alt = null, $post_id, $args = []
-				);
+				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
 				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 					$this->logger->log( 'chorus__error__import_featured_image.log', "url: {$url} errorInserting: ". ( is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ) );
 					break;
 				}
 
-				// Save credit as newspack credit.
+				// Set is as featured image.
+				set_post_thumbnail( $post_id, $attachment_id );
+
+				// Save credit as Newspack credit.
 				update_post_meta( $attachment_id, '_media_credit', $credit );
 
-				// 'createdAt' => '2022-12-02T19:23:52.000Z',
-				$created_at = $this->format_date( $entry['leadImage']['asset']['createdAt'] );
-				if ( $created_at ) {
-					$wpdb->update( $wpdb->posts, [ 'post_date' => $created_at, 'post_date_gmt' => $created_at ], [ 'ID' => $attachment_id ] );
+				// Set Newspack featured image position.
+				if ( $entry['layoutTemplate'] ) {
+					update_post_meta( $post_id, 'newspack_featured_image_position', self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] );
 				}
 			}
-			// Set Newspack featured image position.
-			if ( $entry['layoutTemplate'] ) {
-				if ( ! isset( $newspack_featured_image_position[ $entry['layoutTemplate'] ] ) ) {
-					$d=1;
-				}
-				update_post_meta( $post_id, 'newspack_featured_image_position', $newspack_featured_image_position[ $entry['layoutTemplate'] ] );
-			}
-
 
 			/**
 			 * Get and assign authors.
@@ -871,15 +853,10 @@ $post_content = $this->compile_post_content( $entry );
 				}
 				$ga_ids[] = $ga_id;
 			}
-			if ( ! empty( $entry['contributors'] ) ) {
-				$d=1;
-			}
-			// "Contributors" are additional GAs.
+
+			// "Contributors" are regular GAs.
 			if ( $entry['contributors'] && ! empty( $entry['contributors'] ) ) {
 				foreach ( $entry['contributors'] as $contributor ) {
-					if ( ! isset( $contributor['authorProfile']['uid'] ) || empty( $contributor['authorProfile']['uid'] ) ) {
-						$d = 1;
-					}
 					$ga_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s and meta_value = %s", 'newspack_chorus_author_uid', $contributor['authorProfile']['uid'] ) );
 					if ( ! $ga_id ) {
 						$d=1;
@@ -887,84 +864,76 @@ $post_content = $this->compile_post_content( $entry );
 					$ga_ids[] = $ga_id;
 				}
 			}
-			// Assign authors.
+
+			// "Additional contributors" are also GAs, but they should get "additional reporting by" in front of their name. For now let's just save postmeta.
+			$ga_ids_additional_contributors = [];
+			if ( $entry['additionalContributors'] && ! empty( trim( $entry['additionalContributors']['plaintext'] ) ) ) {
+				$author_names = $this->get_author_names_from_additional_contributors_field( $entry['additionalContributors']['plaintext'] );
+				foreach ( $author_names as $author_name ) {
+					$ga_id = $this->coauthors_plus->get_guest_author_by_display_name( $author_name );
+					if ( ! $ga_id ) {
+						$d=1;
+					}
+					$ga_ids[] = $ga_id;
+					$ga_ids_additional_contributors[] = $ga_id;
+				}
+			}
+			// Save meta for additional contributors.
+			foreach ( $ga_ids_additional_contributors as $ga_id ) {
+				add_post_meta( $post_id, 'newspack_chorus_additional_contributor_ga_id', $ga_id );
+			}
+
+			// Assign all co-authors.
 			$this->coauthors_plus->assign_guest_authors_to_post( $ga_ids, $post_id );
 
 			/**
 			 * Categories.
 			 */
-			$category_name_primary = $entry['primaryCommunityGroup']['name'];
-				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_id );
+			$category_ids = [];
 
+			// Set primary.
+			$category_name_primary = $entry['primaryCommunityGroup']['name'];
+			$category_primary_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name_primary, 0 );
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_primary_term_id );
+			$category_ids[] = $category_primary_term_id;
+
+			// Set other categories.
 			foreach ( $entry['communityGroups'] as $community_group ) {
 				$category_name = $community_group['name'];
+				$category_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+				$category_ids[] = $category_term_id;
 			}
 
-			foreach ( $entry['body']['components'] as $component ) {
-
-				// get all unique component types, their content, and example URLs.
-
-				$component['__typename'];
-			}
-
+			// Set post categories.
+			wp_set_post_categories( $post_id, $category_ids );
 
 			/**
-			 * Update additional post data.
+			 * Updated date.
 			 */
-			$updates = [];
-
-			// Content
-			$post_content = $this->compile_post_content( $entry );
-			$updates['post_content'] = $post_content;
-
-			// Get slug.
-			$url_parsed = parse_url( $entry['url'] );
-			$path_exploded = explode( '/', $url_parsed['path'] );
-			$slug = $path_exploded[ count( $path_exploded ) - 1 ];
-			if ( ! $slug ) {
-				$d = 1;
-			}
-			$updates['post_name'] = $slug;
-
-			// Modify updated date.
 			$updated_date = $this->format_date( $entry['updatedAt'] );
-			if ( ! $updated_date ) {
-				$d=1;
+			if ( $updated_date ) {
+				$post_update_data['post_modified'] = $updated_date;
+				$post_update_data['post_modified_gmt'] = $updated_date;
 			}
-			$updates['post_modified'] = $updated_date;
-			$updates['post_modified_gmt'] = $updated_date;
 
-			// Apply $updates.
-			$wpdb->update( $wpdb->posts, $updates, [ 'ID' => $post_id ] );
+			/**
+			 * Update all remaining post data.
+			 */
+			$wpdb->update( $wpdb->posts, $post_update_data, [ 'ID' => $post_id ] );
 
-			// Set other post meta.
+			/**
+			 * Set post meta.
+			 */
 			$meta = [
 				'newspack_chorus_entry_uid' => $entry['uid'],
 				'newspack_chorus_entry_url' => $entry['url'],
 			];
-			if ( $entry['additionalContributors'] && ! empty( trim( $entry['additionalContributors']['plaintext'] ) ) ) {
-				$meta['newspack_chorus_additional_contributors'] = $entry['additionalContributors']['plaintext'];
-			}
 			foreach ( $meta as $meta_key => $meta_value ) {
 				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
-
 		}
 
-		// ururur
-		$components_debug_samples;
-		$components_debug_types;
 		$d=1;
-
-	}
-
-	public function compile_post_content( $entry ) {
-
-		$post_content = '';
-
-
-		return $post_content;
-
 	}
 
 	/**
