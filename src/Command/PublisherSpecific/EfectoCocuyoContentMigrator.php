@@ -438,6 +438,11 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
             'Josep Borrell' => '',
             'Albany Andara, Reynaldo Mozo y Ronny Rodríguez' => 'Albany Andara, Reynaldo Mozo Zambrano y Ronny Rodríguez',
             'Ana Virgina Garroni' => '',
+            'Iván E. Reyes | Ronny S. Rodríguez Rosas' => 'Iván E. Reyes y Ronny Rodríguez',
+            'Iván E. Reyes | Ronny S. Rodríguez R.' => 'Iván E. Reyes y Ronny Rodríguez',
+            'Iván Reyes/ Deisy Martínez' => 'Iván E. Reyes y Deisy Martínez',
+            'Albany Andara Meza | Ronny S. Rodríguez Rosas' => 'Albany Andara y Ronny Rodríguez',
+            'Coalición C-Informa' => 'C-Informa',
         ];
 
         return ! empty( $names[ $name ] ) ? $names[ $name ] : $name;
