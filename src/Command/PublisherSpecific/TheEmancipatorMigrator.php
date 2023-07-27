@@ -2,11 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use CWS_PageLinksTo;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use WP_CLI;
+use WP_CLI\ExitException;
 
 /**
  * Custom migration scripts for The Emancipator.
@@ -26,12 +27,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	private $coauthorsplus_logic;
 
-
-	/**
-	 * @var RedirectionLogic $redirection_logic
-	 */
-	private $redirection_logic;
-
 	/**
 	 * @var Posts $posts_logic
 	 */
@@ -42,7 +37,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
-		$this->redirection_logic   = new RedirectionLogic();
 		$this->posts_logic         = new Posts();
 	}
 
@@ -104,15 +98,14 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			]
 		);
 
-		// TODO. Not sure this is needed.
-//		WP_CLI::add_command(
-//			'newspack-content-migrator emancipator-redirects',
-//			[ $this, 'cmd_redirects' ],
-//			[
-//				'shortdesc' => 'Create redirects for articles that are just redirects.',
-//				'synopsis'  => $synopsis,
-//			]
-//		);
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-redirects',
+			[ $this, 'cmd_redirects' ],
+			[
+				'shortdesc' => 'Create redirects for articles that are just redirects.',
+				'synopsis'  => $synopsis,
+			]
+		);
 	}
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
@@ -182,44 +175,28 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Finished processing %s post subtitles', $counter ) );
 	}
 
+	/**
+	 * Create redirects for articles that are just redirects. Uses the Page Links To plugin.
+	 * @throws WP_CLI\ExitException
+	 */
 	public function cmd_redirects( $args, $assoc_args ): void {
-
-		if ( ! $this->redirection_logic->plugin_is_activated() ) {
-			WP_CLI::error( 'Redirection plugin not found. Install, activate, and configure it before using this command.' );
+		if ( ! class_exists( 'CWS_PageLinksTo' ) ) {
+			WP_CLI::error( 'Page Links To plugin not found. Install and activate it before using this command.' );
 		}
 
-		WP_CLI::log( 'Processing redirects' );
-		$counter = 0;
+		WP_CLI::log( 'Processing redirects into page links to.' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
-		foreach ( $posts as $post ) {
-			WP_CLI::log(
-				sprintf(
-					'Post ID: %s, %s',
-					$post->ID,
-					$post->guid
-				)
-			);
-			$counter ++;
-
+		foreach ( $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
 			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
-			if ( $redirect_to ) {
-				$redirect_from = get_permalink( $post->ID );
-				if ( ! $dry_run && ! $this->redirection_logic->has_redirect_from( $redirect_from ) ) {
-					$this->redirection_logic->create_redirection_rule(
-						$post->ID . '-redirect',
-						$redirect_from,
-						$redirect_to
-					);
-					WP_CLI::log( sprintf( 'Added a redirect for post with ID %d to %s', $post->ID, $redirect_to ) );
-				}
+			if ( ! $dry_run && $redirect_to && ! CWS_PageLinksTo::get_link( $post )) {
+				CWS_PageLinksTo::set_link( $post->ID, $redirect_to );
 			}
 		}
-		WP_CLI::success( sprintf( 'Finished processing %s posts for redirects', $counter ) );
+		WP_CLI::success( 'Finished processing redirects' );
 	}
 
 	/**
@@ -274,6 +251,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	/**
 	 * Add bylines (co-authors) for posts.
 	 * Also delete the "credit paragraphs" at the bottom of the post content if possible.
+	 *
+	 * @throws ExitException
 	 */
 	public function cmd_post_bylines( $args, $assoc_args ): void {
 
@@ -309,7 +288,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
 					$co_author_id    = 0;
 					if ( empty( $maybe_co_author ) ) {
-						$author_description = $this->find_byine_credit( $co_author, $post->post_content );
+						$author_description = $this->find_byline_credit( $co_author, $post->post_content );
 
 						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [
 							'display_name' => $co_author,
@@ -363,7 +342,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 *
 	 * @return string
 	 */
-	private function find_byine_credit( $name, $content ): string {
+	private function find_byline_credit( $name, $content ): string {
 		// We're looking for a paragraph that starts with "$name is ...".
 		$looking_for = sprintf( '<p><i>%s is', $name );
 		// Loop backwards through the blocks array because the "credits paragraphs" are at the bottom.
