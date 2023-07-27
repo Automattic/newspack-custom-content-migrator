@@ -134,6 +134,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		'STANDARD'             => 'large',
 		// HEADLINE_BELOW_SHORT => Above Title
 		'HEADLINE_BELOW_SHORT' => 'above',
+		// HEADLINE_ABOVE => Large
+		'HEADLINE_ABOVE'       => 'large',
 	];
 
 	/**
@@ -868,10 +870,15 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 				// Set Newspack featured image position.
 				if ( $entry['layoutTemplate'] ) {
-					if ( ! isset( self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] ) ) {
-						throw new \RuntimeException( sprintf( "Undefined featured image mapping in self::FEATURED_IMAGE_POSITION_MAPPING for layout template '%s'.", $entry['layoutTemplate'] ) );
+					if ( isset( self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] ) ) {
+						update_post_meta( $post_id, 'newspack_featured_image_position', self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] );
+					} else {
+						$this->logger->log(
+							'chorus-cms-import-authors-and-posts__warning__layout_template.log',
+							sprintf( "Undefined featured image mapping in self::FEATURED_IMAGE_POSITION_MAPPING for layout template '%s'.", $entry['layoutTemplate'] ),
+							$this->logger::WARNING
+						);
 					}
-					update_post_meta( $post_id, 'newspack_featured_image_position', self::FEATURED_IMAGE_POSITION_MAPPING[ $entry['layoutTemplate'] ] );
 				}
 			}
 
