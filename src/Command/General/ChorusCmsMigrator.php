@@ -588,7 +588,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$caption = isset( $component['image']['caption']['plaintext'] ) && ! empty( $component['image']['caption']['plaintext'] ) ? $component['image']['caption']['plaintext'] : null;
 
 		// Import image.
-		WP_CLI::line( sprintf( 'Downloading image URL %s ...', $url ) );
+		WP_CLI::line( sprintf( 'Downloading image %s ...', $url ) );
 		$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
 		update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
 		// Logg errors.
@@ -623,7 +623,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$url     = $image['url'];
 
 			// Import image.
-			WP_CLI::line( sprintf( 'Downloading gallery image %d/%d URL %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
+			WP_CLI::line( sprintf( 'Downloading gallery image %d/%d %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
 			$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
 			update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
 			// Log errors.
@@ -850,9 +850,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 					continue;
 				}
 				$url     = $entry['leadImage']['asset']['url'];
-				$credit  = $entry['leadImage']['asset']['credit']['html'];
-				$title   = $entry['leadImage']['asset']['title'];
-				$caption = $entry['leadImage']['asset']['sourceCaption'];
+				$credit  = $entry['leadImage']['asset']['credit']['html'] ?? null;
+				$title   = $entry['leadImage']['asset']['title'] ?? null;
+				$caption = $entry['leadImage']['asset']['sourceCaption'] ?? null;
 
 				// Download featured image.
 				WP_CLI::line( "Downloading featured image {$url} ..." );
@@ -888,14 +888,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 */
 			$ga_ids                           = [];
 			$ga_id                            = $this->get_or_create_ga_from_author_data(
-				$refresh_authors,
 				$entry['author']['firstName'],
 				$entry['author']['lastName'],
 				$display_name                 = null,
 				$entry['author']['uid'],
 				$entry['author']['username'],
 				$short_bio                    = null,
-				$author_profile__social_links = null
+				$author_profile__social_links = null,
+				$refresh_authors
 			);
 
 			if ( $ga_id ) {
@@ -915,14 +915,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			if ( $entry['contributors'] && ! empty( $entry['contributors'] ) ) {
 				foreach ( $entry['contributors'] as $contributor ) {
 					$ga_id = $this->get_or_create_ga_from_author_data(
-						$refresh_authors,
 						$contributor['authorProfile']['user']['firstName'],
 						$contributor['authorProfile']['user']['lastName'],
 						$contributor['authorProfile']['name'],
 						$contributor['authorProfile']['user']['uid'],
 						$contributor['authorProfile']['user']['username'],
 						$contributor['authorProfile']['shortBio'],
-						$contributor['authorProfile']['socialLinks']
+						$contributor['authorProfile']['socialLinks'],
+						$refresh_authors
 					);
 					if ( $ga_id ) {
 						$ga_ids[] = $ga_id;
@@ -1052,14 +1052,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$author = json_decode( file_get_contents( $author_json ), true );
 
 			$ga_id = $this->get_or_create_ga_from_author_data(
-				false,
 				$author['user']['firstName'],
 				$author['user']['lastName'],
 				$author['name'],
 				$author['uid'],
 				$author['user']['username'],
 				$author['shortBio'],
-				$author['socialLinks']
+				$author['socialLinks'],
+				false
 			);
 			$d     = 'check: ' . $author['name'];
 			WP_CLI::success( sprintf( "Created GA %d for author '%s'.", $ga_id, $author['name'] ) );
@@ -1072,7 +1072,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Gets GA by $uid, or $display_name, or full name, or creates it if it doesn't exist.
+	 * Chorus JSONs have author data in multiple places, and not all of the data is always present.
+	 * This gets a GA by its $uid, or $display_name, or its full name (first + last), or creates the GA if it doesn't exist.
 	 *
 	 * @param bool   $refresh_author If set, will update existing GA with user data provided here by these arguments (names, bio, social links, ...), won't just return the existing GA.
 	 * @param string $uid
@@ -1086,14 +1087,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * @return int GA ID.
 	 */
 	public function get_or_create_ga_from_author_data(
-		$refresh_author = false,
 		$first_name,
 		$last_name,
 		$display_name = null,
 		$uid = null,
 		$username = null,
 		$short_bio = null,
-		$author_profile__social_links = []
+		$author_profile__social_links = [],
+		$refresh_author = false
 	) {
 		global $wpdb;
 
