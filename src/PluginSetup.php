@@ -26,6 +26,34 @@ class PluginSetup {
 	}
 
 	/**
+	 * Configures all errors and warnings will be output to CLI.
+	 * 
+	 * @param string $level Error reporting level. Presently defaults to 'dev' but can be extended.
+	 */
+	public static function configure_error_reporting( $level = 'dev' ) {
+		if ( 'dev' === $level ) {
+			// phpcs:disable -- Adds extra debugging config options for dev purposes.
+			@ini_set( 'display_errors', 1 );
+			@ini_set( 'display_startup_errors', 1 );
+			error_reporting( E_ALL );
+			// phpcs:enable
+
+			// Enable WP_DEBUG mode.
+			if ( ! defined( 'WP_DEBUG' ) ) {
+				define( 'WP_DEBUG', true );
+			}
+			// Enable Debug logging to the /wp-content/debug.log file.
+			if ( ! defined( 'WP_DEBUG_LOG' ) ) {
+				define( 'WP_DEBUG_LOG', true );
+			}
+			// Enable display of errors and warnings.
+			if ( ! defined( 'WP_DEBUG_DISPLAY' ) ) {
+				define( 'WP_DEBUG_DISPLAY', true );
+			}
+		}
+	}
+
+	/**
 	 * Registers migrators' commands.
 	 *
 	 * @param array $migrator_classes Array of Command\InterfaceCommand classes.
