@@ -227,13 +227,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
-					// [
-					// 'type'        => 'flag',
-					// 'name'        => 'default-author-user-id',
-					// 'description' => "GAs will be assigned to post, but still a u.",
-					// 'optional'    => false,
-					// 'repeating'   => false,
-					// ],
 					[
 						'type'        => 'flag',
 						'name'        => 'refresh-authors',
@@ -264,7 +257,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		/**
 		 * CLI Params.
 		 */
-		// $default_author_user_id = $assoc_args['default-author-user-id'];
 		// Not yet implemented $refresh_authors.
 		$refresh_authors = $assoc_args['refresh-authors'] ?? null;
 		// Not yet implemented $refresh_posts.
@@ -283,7 +275,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$this->import_authors( $authors_path, $refresh_authors );
 
 		WP_CLI::line( 'Importing posts...' );
-		$this->import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ );
+		$this->import_entries( $entries_path, $refresh_posts );
 
 		WP_CLI::success( 'Done. Check *.log files.' );
 	}
@@ -338,14 +330,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * Imports posts.
 	 *
 	 * @param string $entries_path
-	 * @param bool   $refresh_posts
+	 * @param bool   $refresh_posts Not yet implemented.
 	 *
 	 * @return void
 	 */
-	public function import_entries( $entries_path, $refresh_posts /*, $default_author_user_id */ ) {
+	public function import_entries( $entries_path, $refresh_posts ) {
 		global $wpdb;
 
-		// This can be dynamically set by command parameters, hardcoded for now.
+		// Not yet implemented.
 		$refresh_authors = false;
 
 		// Loop through entries and import them.
@@ -644,8 +636,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Imports authors/ JSONs to GAs.
 	 *
-	 * @param string $authors_path Path to authors/ JSONs.
-	 * @param bool   $refresh_authors
+	 * @param string $authors_path    Path to authors/ JSONs.
+	 * @param bool   $refresh_authors Not yet implemented.
 	 *
 	 * @return void
 	 */
