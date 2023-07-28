@@ -91,60 +91,60 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( 'Table %s not found.', $record_table ) );
 		}
 
-		// $continue = PHP_Utils::readline( sprintf( "Continuing will truncate the existing %s table. Continue? [y/n] ", $record_table ) );
-		// if ( 'y' !== $continue ) {
-		// 	WP_CLI::error( 'Aborting.' );
-		// }
-		//
-		// // Create/truncate custom table.
-		// $this->create_custom_table( $custom_table, $truncate = true );
-		//
-		// // Read from $record_table and write just posts entries to $custom_table.
-		// $offset = 0;
-		// $batchSize = 1000;
-		// $total_rows = $wpdb->get_var( "SELECT count(*) FROM {$record_table}" );
-		// $total_batches = ceil( $total_rows / $batchSize );
-		// while ( true ) {
-		//
-		// 	WP_CLI::line( sprintf( "%d/%d getting posts from %s into %s ...", $offset, $total_rows, $record_table, $custom_table ) );
-		//
-		// 	// Query in batches.
-		// 	$sql = "SELECT * FROM {$record_table} ORDER BY id, typeId ASC LIMIT $batchSize OFFSET $offset";
-		// 	$rows = $wpdb->get_results( $sql, ARRAY_A );
-		//
-		// 	if ( count( $rows ) > 0 ) {
-		// 		foreach ( $rows as $row ) {
-		//
-		// 			// Get row JSON data. It might be readily decodable, or double backslashes may have to be removed up to two times.
-		// 			$data_result = $row[ 'data' ];
-		// 			$data = json_decode( $data_result, true );
-		// 			if ( ! $data ) {
-		// 				$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
-		// 				$data = json_decode( $data_result, true );
-		// 				if ( ! $data ) {
-		// 					$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
-		// 					$data = json_decode( $data_result, true );
-		// 				}
-		// 			}
-		//
-		// 			// Check if this is a post.
-		// 			$slug = $data['sluggable.slug'] ?? null;
-		// 			$title = $data['headline'] ?? null;
-		// 			$post_content = $data['body'] ?? null;
-		// 			$is_a_post = $slug && $title && $post_content;
-		// 			if ( ! $is_a_post ) {
-		// 				continue;
-		// 			}
-		//
-		// 			// Insert to custom table
-		// 			$wpdb->insert( $custom_table, [ 'slug' => $slug, 'data' => json_encode( $data ) ] );
-		// 		}
-		//
-		// 		$offset += $batchSize;
-		// 	} else {
-		// 		break;
-		// 	}
-		// }
+		$continue = PHP_Utils::readline( sprintf( "Continuing will truncate the existing %s table. Continue? [y/n] ", $record_table ) );
+		if ( 'y' !== $continue ) {
+			WP_CLI::error( 'Aborting.' );
+		}
+
+		// Create/truncate custom table.
+		$this->create_custom_table( $custom_table, $truncate = true );
+
+		// Read from $record_table and write just posts entries to $custom_table.
+		$offset = 0;
+		$batchSize = 1000;
+		$total_rows = $wpdb->get_var( "SELECT count(*) FROM {$record_table}" );
+		$total_batches = ceil( $total_rows / $batchSize );
+		while ( true ) {
+
+			WP_CLI::line( sprintf( "%d/%d getting posts from %s into %s ...", $offset, $total_rows, $record_table, $custom_table ) );
+
+			// Query in batches.
+			$sql = "SELECT * FROM {$record_table} ORDER BY id, typeId ASC LIMIT $batchSize OFFSET $offset";
+			$rows = $wpdb->get_results( $sql, ARRAY_A );
+
+			if ( count( $rows ) > 0 ) {
+				foreach ( $rows as $row ) {
+
+					// Get row JSON data. It might be readily decodable, or double backslashes may have to be removed up to two times.
+					$data_result = $row[ 'data' ];
+					$data = json_decode( $data_result, true );
+					if ( ! $data ) {
+						$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
+						$data = json_decode( $data_result, true );
+						if ( ! $data ) {
+							$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
+							$data = json_decode( $data_result, true );
+						}
+					}
+
+					// Check if this is a post.
+					$slug = $data['sluggable.slug'] ?? null;
+					$title = $data['headline'] ?? null;
+					$post_content = $data['body'] ?? null;
+					$is_a_post = $slug && $title && $post_content;
+					if ( ! $is_a_post ) {
+						continue;
+					}
+
+					// Insert to custom table
+					$wpdb->insert( $custom_table, [ 'slug' => $slug, 'data' => json_encode( $data ) ] );
+				}
+
+				$offset += $batchSize;
+			} else {
+				break;
+			}
+		}
 
 		// Group by slugs and leave just the most recent entry.
 
