@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments;
+use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
 use \WP_CLI;
 
 /**
@@ -11,6 +12,7 @@ use \WP_CLI;
  */
 class LookoutLocalMigrator implements InterfaceCommand {
 
+	const DATA_EXPORT_TABLE = 'Record';
 	const CUSTOM_ENTRIES_TABLE = 'newspack_entries';
 
 	/**
@@ -79,65 +81,72 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public function cmd_get_posts_from_data_export_table( $pos_args, $assoc_args ) {
 		global $wpdb;
 
-		// Table we got from the client.
-		$record_table   = 'Record';
+		// Table names.
+		$record_table = self::DATA_EXPORT_TABLE;
+		$custom_table = self::CUSTOM_ENTRIES_TABLE;
 
-		// Two helper tables.
-		// First table filters out just the posts and has a `slug` colum (removes requests, logs, dumps and all garbage).
-		$filtered_data_table = 'newspack_filter';
-		// Second table picks only the newst post and should be converted to posts.
-		$entries_table    = 'newspack_entries';
-
-		// Remove second table.
-		// Rename filter to self::CUSTOM_ENTRIES_TABLE.
-		// Do a second pass grouping by slugs and leaving just the most recent entry.
-
-		$this->create_custom_table( $filtered_data_table, $truncate = true );
-		$this->create_custom_table( $entries_table, $truncate = true );
-
-		$offset = 0;
-		$batchSize = 1000;
-		$total_rows = $wpdb->get_var( "SELECT count(*) FROM {$record_table}" );
-		$total_batches = ceil( $total_rows / $batchSize );
-		while ( true ) {
-
-			WP_CLI::line( sprintf( "%d/%d getting posts from %s into %s ...", $offset, $total_rows, $record_table, $filtered_data_table ) );
-
-			// Query in batches.
-			$sql = "SELECT * FROM {$record_table} ORDER BY id, typeId ASC LIMIT $batchSize OFFSET $offset";
-			$rows = $wpdb->get_results( $sql, ARRAY_A );
-
-			if ( count( $rows ) > 0 ) {
-				foreach ( $rows as $row ) {
-
-					// Get JSON data. It might be readily decodable, or double backslashes may have to be removed up to two times.
-					$data_result = $row[ 'data' ];
-					$data = json_decode( $data_result, true );
-					if ( ! $data ) {
-						$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
-						$data = json_decode( $data_result, true );
-						if ( ! $data ) {
-							$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
-							$data = json_decode( $data_result, true );
-						}
-					}
-
-					// Check if this is a post.
-					$slug = $data['sluggable.slug'] ?? null;
-					$title = $data['headline'] ?? null;
-					$post_content = $data['body'] ?? null;
-					$is_a_post = $slug && $title && $post_content;
-
-					if ( $is_a_post ) {
-						$wpdb->insert( $filtered_data_table, [ 'slug' => $slug, 'data' => json_encode( $data ) ] );
-					}
-				}
-
-				$offset += $batchSize;
-			} else {
-				break;
-			}
+		// Check if Record table is here.
+		$count_record_table = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(TABLE_NAME) FROM information_schema.TABLES WHERE TABLE_NAME = %s;", $record_table ) );
+		if ( 1 != $count_record_table ) {
+			WP_CLI::error( sprintf( 'Table %s not found.', $record_table ) );
 		}
+
+		// $continue = PHP_Utils::readline( sprintf( "Continuing will truncate the existing %s table. Continue? [y/n] ", $record_table ) );
+		// if ( 'y' !== $continue ) {
+		// 	WP_CLI::error( 'Aborting.' );
+		// }
+		//
+		// // Create/truncate custom table.
+		// $this->create_custom_table( $custom_table, $truncate = true );
+		//
+		// // Read from $record_table and write just posts entries to $custom_table.
+		// $offset = 0;
+		// $batchSize = 1000;
+		// $total_rows = $wpdb->get_var( "SELECT count(*) FROM {$record_table}" );
+		// $total_batches = ceil( $total_rows / $batchSize );
+		// while ( true ) {
+		//
+		// 	WP_CLI::line( sprintf( "%d/%d getting posts from %s into %s ...", $offset, $total_rows, $record_table, $custom_table ) );
+		//
+		// 	// Query in batches.
+		// 	$sql = "SELECT * FROM {$record_table} ORDER BY id, typeId ASC LIMIT $batchSize OFFSET $offset";
+		// 	$rows = $wpdb->get_results( $sql, ARRAY_A );
+		//
+		// 	if ( count( $rows ) > 0 ) {
+		// 		foreach ( $rows as $row ) {
+		//
+		// 			// Get row JSON data. It might be readily decodable, or double backslashes may have to be removed up to two times.
+		// 			$data_result = $row[ 'data' ];
+		// 			$data = json_decode( $data_result, true );
+		// 			if ( ! $data ) {
+		// 				$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
+		// 				$data = json_decode( $data_result, true );
+		// 				if ( ! $data ) {
+		// 					$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
+		// 					$data = json_decode( $data_result, true );
+		// 				}
+		// 			}
+		//
+		// 			// Check if this is a post.
+		// 			$slug = $data['sluggable.slug'] ?? null;
+		// 			$title = $data['headline'] ?? null;
+		// 			$post_content = $data['body'] ?? null;
+		// 			$is_a_post = $slug && $title && $post_content;
+		// 			if ( ! $is_a_post ) {
+		// 				continue;
+		// 			}
+		//
+		// 			// Insert to custom table
+		// 			$wpdb->insert( $custom_table, [ 'slug' => $slug, 'data' => json_encode( $data ) ] );
+		// 		}
+		//
+		// 		$offset += $batchSize;
+		// 	} else {
+		// 		break;
+		// 	}
+		// }
+
+		// Group by slugs and leave just the most recent entry.
 
 		WP_CLI::line( 'Done' );
 	}
@@ -167,7 +176,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			];
 			$post_id = wp_insert_post( $post_args );
 
-			// Postmeta.
+
+			// Get more postmeta.
 			$postmeta = [
 				"newspack_commentable.enableCommenting" => $data["commentable.enableCommenting"],
 			];
@@ -175,28 +185,40 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$postmeta['newspack_post_subtitle'] = $subheadline;
 			}
 
-			// Additional post update data.
+
+			// Get more post data to update all at once.
 			$post_modified = $this->convert_epoch_timestamp_to_wp_format( $data['publicUpdateDate'] );
 			$post_update_data = [
 				'post_modified'	=> $post_modified,
 			];
 
-			// Post URL.
 
-			// Categories.
-			// TODO -- is this a taxonomy?
-			$data["sectionable.section"];
+			// Post URL.
+			// TODO -- find post URL for redirect purposes and store as meta. Looks like it's stored as "canonicalURL" in some related entries.
+
+
+			// Post excerpt.
+			// TODO -- find excerpt.
+
+
+			// Featured image.
+			$data['lead'];
+			// These two fields:
+			//     "_id": "00000184-6982-da20-afed-7da6f7680000",
+			//     "_type": "52f00ba5-1f41-3845-91f1-1ad72e863ccb"
+			$data['lead'][ 'leadImage' ];
 			// Can be single entry:
-			//      "_ref": "00000180-62d1-d0a2-adbe-76d9f9e7002e",
-			//      "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
-			$data["sectionable.secondarySections"];
-			// Can be multiple entries:
-			// [
-			//      {
-			//          "_ref": "00000175-7fd0-dffc-a7fd-7ffd9e6a0000",
-			//          "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
-			//      }
-			// ]
+			//      "_ref": "0000017b-75b6-dd26-af7b-7df6582f0000",
+			//      "_type": "4da1a812-2b2b-36a7-a321-fea9c9594cb9"
+			$caption = $data['lead'][ 'caption' ];
+			$hide_caption = $data['lead'][ 'hideCaption' ];
+			$credit = $data['lead'][ 'credit' ];
+			$alt = $data['lead'][ 'altText' ];
+			// TODO -- find url and download image.
+			$url;
+			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
+			set_post_thumbnail( $post_id, $attachment_id );
+
 
 			// Authors.
 			$data["authorable.authors"];
@@ -217,27 +239,25 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			//      "_type": "289d6a55-9c3a-324b-9772-9c6f94cf4f88"
 
 
-			// Featured image.
-			$data['lead'];
-			// These two fields:
-			//     "_id": "00000184-6982-da20-afed-7da6f7680000",
-			//     "_type": "52f00ba5-1f41-3845-91f1-1ad72e863ccb"
-			$data['lead'][ 'leadImage' ];
+			// Categories.
+			// TODO -- is this a taxonomy?
+			$data["sectionable.section"];
 			// Can be single entry:
-			//      "_ref": "0000017b-75b6-dd26-af7b-7df6582f0000",
-            //      "_type": "4da1a812-2b2b-36a7-a321-fea9c9594cb9"
-			$caption = $data['lead'][ 'caption' ];
-			$hide_caption = $data['lead'][ 'hideCaption' ];
-			$credit = $data['lead'][ 'credit' ];
-			$alt = $data['lead'][ 'altText' ];
-			// TODO -- find url and download image.
-			$url;
-			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
-			set_post_thumbnail( $post_id, $attachment_id );
+			//      "_ref": "00000180-62d1-d0a2-adbe-76d9f9e7002e",
+			//      "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
+			$data["sectionable.secondarySections"];
+			// Can be multiple entries:
+			// [
+			//      {
+			//          "_ref": "00000175-7fd0-dffc-a7fd-7ffd9e6a0000",
+			//          "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
+			//      }
+			// ]
+
 
 			// Tags.
 			$data["taggable.tags"];
-			// TODO -- find associated tags?
+			// TODO -- find tags
 			// Can be multiple entries:
 			// [
 			//      {
@@ -245,6 +265,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			//          "_type": "90602a54-e7fb-3b69-8e25-236e50f8f7f5"
 			//      }
 			// ]
+
+
+			// Save postmeta.
+			foreach ( $postmeta as $meta_key => $meta_value ) {
+				update_post_meta( $post_id, $meta_key, $meta_value );
+			}
+
+
+			// Update post data.
+			if ( ! empty( $post_update_data ) ) {
+				$wpdb->update( $wpdb->posts, $post_update_data, [ 'ID' => $post_id ] );
+			}
 		}
 
 	}
