@@ -19,8 +19,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Chorus components to Gutenberg blocks converters.
 	 *
-	 * Keys are the Chorus component name, values define a method used to convert it to blocks and its arguments.
+	 * The way this works is once a Chorus component is found in a post, the 'method' is called with the 'arguments' and it returns Gutenberg blocks.
 	 *
+	 * Keys are the Chorus component name, values define a method used to convert it to blocks and its arguments.
 	 * @array COMPONENT_CONVERTERS {
 	 *  string $method    A method in this class which gets to convert component to Gutenberg blocks.
 	 *  string $arguments Names of variables passed to the conversion method.
@@ -1196,7 +1197,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 			// ... and not refreshing, skip.
 			if ( ! $refresh_author ) {
-				WP_CLI::log( sprintf( "Author '%s' already exists.", $display_name ) );
 				return $ga_id;
 			}
 
