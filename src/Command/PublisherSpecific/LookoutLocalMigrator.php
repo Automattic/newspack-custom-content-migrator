@@ -68,6 +68,41 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-dev',
+			[ $this, 'cmd_dev' ],
+			[
+				'shortdesc' => 'Temp dev command for various research snippets.',
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	public function cmd_dev( $pos_args, $assoc_args ) {
+		global $wpdb;
+// Decode JSONs from file
+		$lines = explode( "\n", file_get_contents( '/Users/ivanuravic/www/lookoutlocal/app/public/0_examine_DB_export/search/authorable_oneoff.log' ) );
+		$jsons = [];
+		foreach ( $lines as $line ) {
+			$data = json_decode( $line, true );
+			if ( ! $data ) {
+				$line = str_replace( "\\\\", "\\", $line ); // Replace double escapes with just one escape.
+				$data = json_decode( $line, true );
+				if ( ! $data ) {
+					$line = str_replace( "\\\\", "\\", $line ); // Replace double escapes with just one escape.
+					$data = json_decode( $line, true );
+					if ( $data ) { $jsons[] = $data; }
+				} else { $jsons[] = $data; }
+			} else { $jsons[] = $data; }
+		}
+		$d=1;
+		$jsons_long = json_encode( $jsons );
+
+
+// Get post data from newspack_entries
+		$json = $wpdb->get_var( "SELECT data FROM newspack_entries where slug = 'first-image-from-nasas-james-webb-space-telescope-reveals-thousands-of-galaxies-in-stunning-detail';" );
+		$data = json_decode( $json, true );
+		return;
 	}
 
 	/**
@@ -155,6 +190,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		$data_jsons = $wpdb->get_col( "SELECT data from %s", self::CUSTOM_ENTRIES_TABLE );
+
+		$data_jsons = $wpdb->get_col( "SELECT data from %s", self::CUSTOM_ENTRIES_TABLE );
 		foreach ( $data_jsons as $data_json ) {
 			$data = json_encode( $data_json, true );
 
@@ -221,6 +258,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 
 			// Authors.
+			// TODO - search these two fields. Find bios, avatars, etc by checking staff pages at https://lookout.co/santacruz/about .
 			$data["authorable.authors"];
 			// Can be multiple entries:
 			// [
@@ -230,7 +268,20 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			//      }
 			// ]
 			$data["authorable.oneOffAuthors"];
-			// TODO - search where not empty and see how it's used.
+			// Can be multiple entries:
+			// [
+			// 	{
+			// 		"name":"Corinne Purtill",
+			// 		"_id":"d6ce0bcd-d952-3539-87b9-71bdb93e98c7",
+			// 		"_type":"6d79db11-1e28-338b-986c-1ff580f1986a"
+			// 	},
+			// 	{
+			// 		"name":"Sumeet Kulkarni",
+			// 		"_id":"434ebcb2-e65c-32a6-8159-fb606c93ee0b",
+			// 		"_type":"6d79db11-1e28-338b-986c-1ff580f1986a"
+			// 	}
+			// ]
+
 			$data["authorable.primaryAuthorBioOverride"];
 			// ? TODO - search where not empty and see how it's used.
 			$data["hasSource.source"];
