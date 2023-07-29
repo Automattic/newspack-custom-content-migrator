@@ -190,8 +190,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		$data_jsons = $wpdb->get_col( "SELECT data from %s", self::CUSTOM_ENTRIES_TABLE );
-
-		$data_jsons = $wpdb->get_col( "SELECT data from %s", self::CUSTOM_ENTRIES_TABLE );
 		foreach ( $data_jsons as $data_json ) {
 			$data = json_encode( $data_json, true );
 
