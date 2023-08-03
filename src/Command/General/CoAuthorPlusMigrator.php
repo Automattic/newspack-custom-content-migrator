@@ -351,13 +351,6 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'dry-run',
-						'description' => 'Dry run.',
-						'optional'    => true,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
 						'name'        => 'wpuser-id',
 						'description' => 'WP User ID.',
 						'optional'    => false,
@@ -373,7 +366,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'default-post-author-wpuser-id',
-						'description' => "The inner workings of CAP require an actual existing WP_User to be used as post's wp_post.post_author (even though that doesn't matter any longer once a GA is assigned because CAP's taxonomy takes over and wp_post.post_author is no longer used to represent post's author). This command will try and use adminnewspack, but if adminnewspack is not found, it will be required to give any default WP_User ID to become the new 'placeholder' wp_posts.post_author once GA is assigned.",
+						'description' => "This command will try and use adminnewspack, but if adminnewspack is not found, it will be required to give any default WP_User ID to become the new 'placeholder' wp_posts.post_author once GA is assigned. The inner workings of CAP require an actual existing WP_User to be used as post's wp_post.post_author (even though that doesn't matter any longer once a GA is assigned because CAP's taxonomy takes over and wp_post.post_author is no longer used to represent post's author).",
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -393,17 +386,16 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	public function cmd_convert_wpuser_to_ga( array $pos_args, array $assoc_args ) {
 		global $wpdb;
 
-		$dry_run   = $assoc_args['dry-run'];
 		$wpuser_id = $assoc_args['wpuser-id'];
 		$ga_id     = isset( $assoc_args['ga-id'] ) ? $assoc_args['ga-id'] : null;
 
-		// Get WP_User.
+		// Get the WP_User.
 		$wpuser = get_user_by( 'ID', $wpuser_id );
 		if ( ! $wpuser ) {
 			WP_CLI::error( sprintf( 'WP User ID %d not found.', $wpuser_id ) );
 		}
 
-		// Get default WP_User ID to use as placeholder for wp_posts.post_author. Try and use adminnewspack as it won't matter who wp_posts.post_author is once GA is assigned, because at that point CAP's term relationships take over as determinants of post autorship and post_author stops representing the author.
+		// Get a default WP_User ID to replace this WP_User as current wp_posts.post_author. Try and use adminnewspack as it won't matter who wp_posts.post_author is once GA is assigned, because at that point CAP's term relationships take over as determinants of post autorship and post_author stops representing the author. If adminnewspack is not found, exit and require to provide an ID.
 		$default_wpuser_id = get_user_by( 'login', 'adminnewspack' )->ID;
 		if ( ! $default_wpuser_id ) {
 			WP_CLI::error( sprint( 'adminnewspack WP_User not found. Please provide a default WP_User ID to use as placeholder for wp_posts.post_author by using the --default-post-author-wpuser-id argument.' ) );
@@ -422,7 +414,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
 			if ( ! $ga ) {
 				WP_CLI::error( sprintf( 'Guest Author ID %d not found.', $ga_id ) );
-			}       
+			}
 		} else {
 			// Create new GA.
 			// But first validate whether a new GA can be created -- check if one already exists with same email or user_login.
@@ -479,7 +471,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			[
 				'ID'         => $wpuser_id,
 				'user_login' => $new_userlogin,
-			] 
+			]
 		);
 		WP_CLI::success( sprintf( "WP_User's user_login updated to '%s'.", $new_userlogin ) );
 
