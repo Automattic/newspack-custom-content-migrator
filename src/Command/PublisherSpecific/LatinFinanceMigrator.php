@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use \Newspack_WXR_Exporter;
 use \PDO, \PDOException;
 use \stdClass;
@@ -24,7 +25,10 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	private $authors = array();
 	private $tags = array();
 	private $post_slugs = array();
+	private $prev_checksums = array();
+	private $out_files = [];
 
+	private $logger;
 	private $coauthorsplus_logic = null;
 
 	/**
@@ -35,7 +39,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	/**
 	 * Constructor.
 	 */
-	private function __construct() {}
+	private function __construct() {
+		$this->logger = new Logger();
+	}
 
 	/**
 	 * Singleton get_instance().
@@ -749,6 +755,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->set_authors();
 		$this->set_tags();
 		$this->set_tags_parent_slugs();
+
+		// Set previous checksums lookup array (if file exists)
+		$this->set_previous_checksums();
 				
 		// Setup query vars for MSSQL DB for content types
 		$limit = 500; // row limit per batch
@@ -779,6 +788,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// export categories
 		$this->export_categories();
 
+		// log out checksum match report
+		foreach( $this->prev_checksums as $k => $v ) {
+			if( 0 == $v[2] ) {
+				$this->mylog( 'checksum-deleted', array( $k, $v ) );
+			}
+			else if( $v[2] > 1 ) {
+				$this->mylog( 'checksum-multiple', array( $k, $v ) );
+			}
+		}
 	}
 
 	/**
@@ -1041,6 +1059,30 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// load xml column
 			$xml = simplexml_load_string( $row['xml'] );
 			
+			// handle existing checksums
+			$checksum = md5( serialize( $row ) );
+
+			if( isset( $this->prev_checksums[(string) $row['nodeId']] ) ) {
+
+				// WP_CLI::line( 'Checksum found: ' .  (string) $row['nodeId'] );
+				$this->prev_checksums[(string) $row['nodeId']][2]++;
+				
+				if( (string) $row['versionId'] != $this->prev_checksums[(string) $row['nodeId']][0] ) {
+					$this->mylog( 'checksum-version-mismatch', array( (string) $row['nodeId'], (string) $row['xml'] ) );
+				}
+
+				if( $checksum != $this->prev_checksums[(string) $row['nodeId']][1] ) {
+					$this->mylog( 'checksum-value-mismatch', array( (string) $row['nodeId'], (string) $row['xml'] ) );
+				}
+
+				// increment last id processed
+				$last_id = (int) $row['nodeId'];
+				continue;
+
+			}
+			
+			// WP_CLI::line( 'New post: ' .  (string) $row['nodeId'] );
+
 			// get info for this post
 			$authors = $this->get_authors_and_increment( (string) $xml->authors );
 			$categories = $this->get_cats_and_increment( (string) $xml->tags );
@@ -1096,7 +1138,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 					// helpful to catch changes in future imports
 					'newspack_lf_node_id' => (string) $row['nodeId'],
 					'newspack_lf_version_id' => (string) $row['versionId'],
-					'newspack_lf_checksum' => md5( serialize( $row ) ),
+					'newspack_lf_checksum' => $checksum,
 
 					// helpful for redirects if needed
 					'newspack_lf_slug' => $slug,
@@ -1149,6 +1191,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// return from function at this point if no rows were processed
 		// todo: set a return line above the while loop if PDO->rowCount() could return a consistant "0 results" row count...
 		if( $last_id === null ) return null;
+
+		// also return of the post data array is empty...this could happen with checksum matches
+		if( 0 == count( $data['posts'] ) ) {
+			return $last_id;	
+		}
 
 		$fileslug = $this->export_path  . '/latinfinance-posts-' . $start_id . '-' . $last_id;
 		$data['export_file'] = $fileslug . '.xml';
@@ -1506,6 +1553,22 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		file_put_contents( $path, ob_get_clean() );
 	}
 
+	private function mylog( $slug, $message, $level = null ) {
+
+		$out_file = $this->export_path . '/' . $slug . '.log';
+
+		// clear on each run
+		if( empty( $this->out_files[$out_file] ) ) {
+			file_put_contents( $out_file, '' );
+			$this->out_files[$out_file] = true;
+		}
+		
+		$message = ( is_object( $message ) || is_array( $message ) ) ? print_r( $message, true ) : $message;
+
+		$this->logger->log( $out_file, $message, $level );		
+
+	}
+
 
 	/**
 	 * Setters
@@ -1767,6 +1830,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		catch( PDOException $e ) {  
 			WP_CLI::error( 'SQL Server error ' . $e->getCode() . ': ' . $e->getMessage() );
 		}  
+
+	}
+
+	private function set_previous_checksums(){
+		
+		$path = $this->export_path . '/../../lookup-original-checksums.txt';
+
+		$file_handle = fopen( $path, "r");
+
+		if ( ! $file_handle ) {
+			// WP_CLI::error( 'File not exists: ' . $path );
+			return; // no file is fine for initial insert
+		}
+
+		while( !feof( $file_handle ) ) {
+			$arr = array_map( 'trim', explode( ',', trim( fgets( $file_handle ) ) ) );
+			$this->prev_checksums[$arr[0]] = array( $arr[1], $arr[2], 0 ); // version, checksum, counter
+		}
 
 	}
 
