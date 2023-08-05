@@ -26,6 +26,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	private $tags = array();
 	private $post_slugs = array();
 	private $prev_checksums = array();
+	private $prev_categories = array();
 	private $out_files = [];
 
 	private $logger;
@@ -758,6 +759,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// Set previous checksums lookup array (if file exists)
 		$this->set_previous_checksums();
+		$this->prev_categories = $this->hack_prev_category_urls();
 				
 		// Setup query vars for MSSQL DB for content types
 		$limit = 500; // row limit per batch
@@ -785,10 +787,10 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// tag descriptions can be recreated by hand if desired
 		$this->log_to_csv( $this->tags, $this->export_path  . '/latinfinance-tags.csv');
 
-		// export categories
-		$this->export_categories();
+		// export categories for first time only. For Launch import, do by hand using log file
+		if( 0 == count( $this->prev_checksums ) ) $this->export_categories();
 
-		// log out checksum match report
+		// log checksum match report
 		foreach( $this->prev_checksums as $k => $v ) {
 			if( 0 == $v[2] ) {
 				$this->mylog( 'checksum-deleted', array( $k, $v ) );
@@ -1061,28 +1063,14 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			
 			// handle existing checksums
 			$checksum = md5( serialize( $row ) );
-
-			if( isset( $this->prev_checksums[(string) $row['nodeId']] ) ) {
-
-				// WP_CLI::line( 'Checksum found: ' .  (string) $row['nodeId'] );
-				$this->prev_checksums[(string) $row['nodeId']][2]++;
-				
-				if( (string) $row['versionId'] != $this->prev_checksums[(string) $row['nodeId']][0] ) {
-					$this->mylog( 'checksum-version-mismatch', array( (string) $row['nodeId'], (string) $row['xml'] ) );
-				}
-
-				if( $checksum != $this->prev_checksums[(string) $row['nodeId']][1] ) {
-					$this->mylog( 'checksum-value-mismatch', array( (string) $row['nodeId'], (string) $row['xml'] ) );
-				}
-
-				// increment last id processed
+			if( $this->has_existing_checksum( (string) $row['nodeId'], (string) $row['versionId'], $checksum, $row ) ) {
+				WP_CLI::line( 'Exists: ' . $row['nodeId'] );
 				$last_id = (int) $row['nodeId'];
 				continue;
-
 			}
-			
-			// WP_CLI::line( 'New post: ' .  (string) $row['nodeId'] );
 
+			WP_CLI::line( 'New: ' . $row['nodeId'] );
+						
 			// get info for this post
 			$authors = $this->get_authors_and_increment( (string) $xml->authors );
 			$categories = $this->get_cats_and_increment( (string) $xml->tags );
@@ -1104,6 +1092,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				WP_CLI::warning( 'Post expireDate exists "' . $row['expireDate'] .'" for node ' . $row['nodeId']);
 			}
 
+			// Logs for Launch that could help debugging WXR uploads
+			if( count( $this->prev_checksums ) > 0 ) {
+				$this->log_launch_helpers( $categories, (string) $xml['nodeName'], (string) $xml->displayDate, $slug, $row );				
+			}
+			
 			// Add values to a single post array
 			$post = [
 
@@ -1139,6 +1132,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 					'newspack_lf_node_id' => (string) $row['nodeId'],
 					'newspack_lf_version_id' => (string) $row['versionId'],
 					'newspack_lf_checksum' => $checksum,
+					'newspack_lf_import_batch' => ( count( $this->prev_checksums ) > 0 ) ? 'launch' : 'initial',
 
 					// helpful for redirects if needed
 					'newspack_lf_slug' => $slug,
@@ -1192,7 +1186,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// todo: set a return line above the while loop if PDO->rowCount() could return a consistant "0 results" row count...
 		if( $last_id === null ) return null;
 
-		// also return of the post data array is empty...this could happen with checksum matches
+		// return if the entire post data array is empty...this could happen with checksum matches
 		if( 0 == count( $data['posts'] ) ) {
 			return $last_id;	
 		}
@@ -1263,6 +1257,28 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 		
 		}
+	}
+
+	private function has_existing_checksum( $id, $version, $checksum, $log_data ) {
+
+		if( isset( $this->prev_checksums[$id] ) ) {
+
+			// count matches
+			$this->prev_checksums[$id][2]++;
+			
+			// log any mismatches
+			if( $version != $this->prev_checksums[$id][0] ) {
+				$this->mylog( 'checksum-version-mismatch', $log_data );
+			}
+
+			if( $checksum != $this->prev_checksums[$id][1] ) {
+				$this->mylog( 'checksum-value-mismatch', $log_data );
+			}
+
+			return true;
+		}
+
+		return false;
 	}
 
 
@@ -1551,6 +1567,28 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		ob_start();
 		var_dump( $data );
 		file_put_contents( $path, ob_get_clean() );
+	}
+
+	private function log_launch_helpers( $categories, $title, $date, $slug, $log_data ) {
+
+		// new categories
+		foreach( $categories['full'] as $v ) {
+			if( ! in_array( $v['url'], $this->prev_categories ) ) {
+				$this->mylog( 'launch-new-categories', $v );
+			} 
+		}
+
+		// duplicate slug
+		$query = new WP_Query( array( 'name' => $slug ) );
+		if( 0 != $query->post_count) {
+			$this->mylog( 'launch-slug-exists', $log_data );
+		}
+
+		// importer fail on "post exists"
+		if( post_exists( $title, '', $date ) ) {
+			$this->mylog( 'launch-post-exists', $log_data );
+		}
+
 	}
 
 	private function mylog( $slug, $message, $level = null ) {
@@ -1991,6 +2029,164 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	/**
 	 * Hacks...
 	 */
+
+	private function hack_prev_category_urls() {
+
+		// initial import list
+		// see: migrated-google-drive-content-2023-05-10/csv-reports/latinfinance-tags.csv
+		return array(
+			'/topics',
+			'/topics/interviews',
+			'/topics/event-exclusives',
+			'/topics/corporate-sovereign-strategy',
+			'/topics/esg',
+			'/topics/economy-policy',
+			'/topics/technology',
+			'/topics/funds',
+			'/topics/sponsored-content',
+			'/topics/debt',
+			'/topics/people',
+			'/topics/capital-markets',
+			'/topics/international-financial-institutions',
+			'/topics/ma',
+			'/topics/project-infrastructure-finance',
+			'/topics/debenture',
+			'/topics/video',
+			'/topics/telecoms',
+			'/topics/coronavirus',
+			'/topics/structured-finance',
+			'/topics/loans',
+			'/topics/latinfinance-connect',
+			'/topics/regulation',
+			'/topics/credit-ratings',
+			'/topics/regions',
+			'/topics/bonds',
+			'/topics/fixed-income',
+			'/topics/commerce',
+			'/topics/ipo',
+			'/topics/latinfinance-30',
+			'/topics/tourism',
+			'/topics/in-depth',
+			'/topics/energy',
+			'/topics/healthcare',
+			'/topics/game-changers',
+			'/topics/equity',
+			'/topics/asset-management',
+			'/topics/regions/latin-america',
+			'/topics/regions/cuba',
+			'/topics/esg/renewable',
+			'/topics/in-depth/features',
+			'/topics/regions/venezuela',
+			'/topics/regions/europe',
+			'/topics/international-financial-institutions/caf',
+			'/topics/energy/hydro',
+			'/topics/regions/barbados',
+			'/topics/energy/gas',
+			'/topics/telecoms/mobile',
+			'/topics/regions/panama',
+			'/topics/telecoms/fixed-line',
+			'/topics/esg/sustainability-bonds',
+			'/topics/regions/china',
+			'/topics/regions/trinidad-tobago',
+			'/topics/regions/guatemala',
+			'/topics/international-financial-institutions/world-bank',
+			'/topics/project-infrastructure-finance/water-sewage',
+			'/topics/project-infrastructure-finance/railroads',
+			'/topics/regions/guyana',
+			'/topics/regions/south-america',
+			'/topics/project-infrastructure-finance/highways',
+			'/topics/regions/bahamas',
+			'/topics/credit-ratings/moodys-investors-service',
+			'/topics/regions/united-kingdom',
+			'/topics/energy/electricity',
+			'/topics/regions/germany',
+			'/topics/regions/grenada',
+			'/topics/regions/jamaica',
+			'/topics/regions/africa',
+			'/topics/project-infrastructure-finance/toll-road',
+			'/topics/regions/usmca',
+			'/topics/regions/australia',
+			'/topics/regions/nicaragua',
+			'/topics/project-infrastructure-finance/dams',
+			'/topics/in-depth/comment-opinion',
+			'/topics/energy/pipelines',
+			'/topics/regions/costa-rica',
+			'/topics/credit-ratings/sp-global',
+			'/topics/regions/mercosur-ar-br-pa-ur-ve',
+			'/topics/regions/uruguay',
+			'/topics/regions/switzerland',
+			'/topics/healthcare/health-policy',
+			'/topics/regions/bermuda',
+			'/topics/esg/wind',
+			'/topics/project-infrastructure-finance/ports',
+			'/topics/regions/bvi',
+			'/topics/regions/honduras',
+			'/topics/regions/italy',
+			'/topics/esg/green-finance',
+			'/topics/regulation/politics',
+			'/topics/regulation/rule-144a-regs',
+			'/topics/credit-ratings/fitch-ratings',
+			'/topics/regions/russia',
+			'/topics/regions/andean',
+			'/topics/esg/solar',
+			'/topics/international-financial-institutions/jica-japan-international-cooperation-agency',
+			'/topics/regions/mexico',
+			'/topics/regions/chile',
+			'/topics/regions/ecuador',
+			'/topics/regions/bolivia',
+			'/topics/regions/netherlands',
+			'/topics/technology/digital-payments',
+			'/topics/regions/brazil',
+			'/topics/energy/solar',
+			'/topics/regions/suriname',
+			'/topics/regions/peru',
+			'/topics/energy/wind',
+			'/topics/regions/pacific-alliance-ch-co-mx-pe',
+			'/topics/healthcare/hospitals',
+			'/topics/in-depth/special-reports',
+			'/topics/regions/singapore',
+			'/topics/esg/green-washing',
+			'/topics/loans/clo',
+			'/topics/regions/france',
+			'/topics/energy/lng',
+			'/topics/esg/sustainable-development-bonds',
+			'/topics/project-infrastructure-finance/tunnels',
+			'/topics/international-financial-institutions/international-monetary-fund-imf',
+			'/topics/credit-ratings/upgrade',
+			'/topics/esg/hydro',
+			'/topics/regions/dominican-republic',
+			'/topics/healthcare/pharmaceuticals',
+			'/topics/esg/green-bonds',
+			'/topics/energy/oil',
+			'/topics/regions/paraguay',
+			'/topics/regions/asia',
+			'/topics/regions/japan',
+			'/topics/regions/canada',
+			'/topics/regions/el-salvador',
+			'/topics/regions/colombia',
+			'/topics/regions/argentina',
+			'/topics/credit-ratings/downgrade',
+			'/topics/regions/portugal',
+			'/topics/regions/united-states',
+			'/topics/regions/central-america',
+			'/topics/esg/sustainability-linked',
+			'/topics/esg/social-bonds',
+			'/topics/credit-ratings/revision',
+			'/topics/regions/haiti',
+			'/topics/regions/india',
+			'/topics/regulation/rule-400',
+			'/topics/commerce/retail-shopping',
+			'/topics/regulation/rule-476',
+			'/topics/regions/middle-east',
+			'/topics/international-financial-institutions/inter-american-development-bank-idb',
+			'/topics/international-financial-institutions/idb-invest',
+			'/topics/regions/belize',
+			'/topics/regions/caribbean',
+			'/topics/regions/spain',
+			'/topics/esg/biofuels',
+		);
+
+	}
 
 	private function hack_get_old_redirects() {
 
