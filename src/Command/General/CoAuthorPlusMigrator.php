@@ -396,7 +396,8 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 
 		// Get a default WP_User ID to replace this WP_User as current wp_posts.post_author. Try and use adminnewspack as it won't matter who wp_posts.post_author is once GA is assigned, because at that point CAP's term relationships take over as determinants of post autorship and post_author stops representing the author. If adminnewspack is not found, exit and require to provide an ID.
-		$default_wpuser_id = get_user_by( 'login', 'adminnewspack' )->ID;
+		$adminnewspack_user = get_user_by( 'login', 'adminnewspack' );
+		$default_wpuser_id  = $adminnewspack_user ? $adminnewspack_user->ID : null;
 		if ( ! $default_wpuser_id ) {
 			WP_CLI::error( sprint( 'adminnewspack WP_User not found. Please provide a default WP_User ID to use as placeholder for wp_posts.post_author by using the --default-post-author-wpuser-id argument.' ) );
 		}
