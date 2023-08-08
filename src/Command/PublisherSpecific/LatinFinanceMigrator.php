@@ -171,6 +171,32 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-set-coauthors-plus-launch',
+			[ $this, 'cmd_set_coauthors_plus_launch' ],
+			[
+				'shortdesc' => 'LAUNCH VERSION OF PREVIOUS COMMAND',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to process per batch. (Integer) (-1 => all)',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => 100,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batches',
+						'description' => 'Batches to process per run. (Integer) (-1 => all)',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => -1,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-set-primary-categories',
 			[ $this, 'cmd_set_primary_categories' ],
 			[
@@ -762,7 +788,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->prev_categories = $this->hack_prev_category_urls();
 				
 		// Setup query vars for MSSQL DB for content types
-		$limit = 500; // row limit per batch
+		$limit = 100; // row limit per batch
 		$start_id = 1; // 1; rows greater than or equal to this ID value
 		$max_id = 2147483647; // useful if upper range is needed. max Int for SQL Server = 2147483647
 
@@ -956,6 +982,54 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-set-coauthors-plus-launch'.
+	 *
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_set_coauthors_plus_launch( $pos_args, $assoc_args ) {
+
+		$posts_per_batch = isset( $assoc_args[ 'posts-per-batch' ] ) ? (int) $assoc_args['posts-per-batch'] : 100;
+		$batches = isset( $assoc_args[ 'batches' ] ) ? (int) $assoc_args['batches'] : -1;
+
+		if( -1 > $posts_per_batch ) {
+			WP_CLI::error( "Posts per batch argument must be -1 or greater." );
+		}
+
+		if( -1 > $batches ) {
+			WP_CLI::error( "Batches argument must be -1 or greater." );
+		}
+
+		WP_CLI::line( "Doing latinfinance-set-coauthors-plus-launch..." );
+
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+
+		// Install and activate the CAP plugin if missing.
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( 'Co-Authors Plus plugin must be activated. Run: wp plugin install co-authors-plus --activate' );
+		}
+
+		// clear blank authors meta (json [] empty array) that may have been inserted during import
+		delete_metadata( 'post', null, 'newspack_lf_authors', '[]', true );
+
+		// do each batch
+		for( $i = $batches; $i > 0 || $batches == -1;  $i-- ) {
+
+			$count = $this->set_coauthors_plus_launch( $posts_per_batch );
+
+			if( 0 === $count ) {
+				WP_CLI::line('No more rows to process.');
+				break; // stop if no more rows
+			}
+
+			WP_CLI::line('Processed ' . $count . ' rows...');
+
+		}
+
+		WP_CLI::success( 'Done' );
+
+	}
 
 	/**
 	 * Callable for 'newspack-content-migrator latinfinance-set-primary-categories'.
@@ -1666,6 +1740,67 @@ class LatinFinanceMigrator implements InterfaceCommand {
 					'taxonomy' => 'author',
 					'field' => 'slug',
 					'operator' => 'NOT EXISTS',
+				],
+			],
+		];
+
+		$query = new WP_Query ( $args );
+
+		foreach ($query->posts as $post_id ) {
+
+			// get meta as json object
+			$authors = json_decode( get_post_meta( $post_id, 'newspack_lf_authors', true ) );
+
+			// create (or get) author ids
+			$cap_ids = array_map( function ( $author ) {
+
+				// creates author or gets existing author ID
+				return $this->coauthorsplus_logic->create_guest_author( [
+					'display_name' => sanitize_text_field( $author->name ),
+					'user_login'   => sanitize_title( $author->name ),
+					'user_email'   => sanitize_email( $author->email ),
+				]);
+
+			}, $authors );
+
+			// save to post
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( $cap_ids, $post_id );
+
+		} // posts
+
+		return $query->post_count;
+
+	}
+
+	/**
+	 * Set CoAuthorsPlus from postmeta for Launch
+	 *
+	 * @param int $posts_per_page
+	 * @return int $count posts processed
+	 */
+	private function set_coauthors_plus_launch( $posts_per_page ) {
+
+		// select posts with authors postmeta where CoAuthors taxonomy isn't set
+		$args = [
+			'posts_per_page' => $posts_per_page,
+			'post_type'     => 'post',
+			'fields'		=> 'ids',
+			'meta_query'    => [
+				[
+					'key'     => 'newspack_lf_authors',
+					'compare' => 'EXISTS',
+				],
+				'relation' => 'AND',
+				[
+					'key'     => 'newspack_lf_import_batch',
+					'compare' => 'launch',
+				],
+			],
+			'tax_query' 	=> [
+				[
+					'taxonomy' => 'author',
+					'field' => 'name',
+					'terms' => 'lf-import-user',
 				],
 			],
 		];
