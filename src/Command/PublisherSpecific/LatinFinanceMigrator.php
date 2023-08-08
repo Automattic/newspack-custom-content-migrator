@@ -912,6 +912,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			'img-old-assets-removed' 	=> 0,
 			// 'img-old-assets-skipped' 	=> 0,
 			'img-off-site-skipped'	 	=> 0,
+			'img-off-site-urls'	 		=> [],
 			'img-staging-skipped'	 	=> 0,
 			'fixed'						=> 0,
 			'fix-by-hand'				=> [],
@@ -1903,7 +1904,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// images per post content
 		foreach( $imgs as $img ) {
-				
+			
 			// DOMAIN: skip aleady set images
 			if( preg_match( '#src=.{0,1}http(s)?://latinfinance-newspack#i', $img ) ) {
 				$report['img-staging-skipped']++;
@@ -1911,7 +1912,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			}
 
 			// DOMAIN: images on domain
-			if( preg_match( '#src=.{0,1}http(s)?://([a-z]\.)?latinfinance.com#i', $img ) ) {
+			if( preg_match( '#src=.{0,1}http(s)?://([a-z]+\.)?latinfinance.com#i', $img ) ) {
 				$report['fix-by-hand'][] = 'Fix by hand: post id ' . $post_id . ' => ' . $img;
 				continue;
 			}
@@ -1919,6 +1920,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// DOMAIN: all other domains (offsite)
 			if( preg_match( '#src=.{0,1}http(s)?://#i', $img ) ) {
 				$report['img-off-site-skipped']++;
+				$report['img-off-site-urls'][] = $img;
 				continue;
 			}
 
