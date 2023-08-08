@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
+use \Newspack_Scraper_Migrator_Util;
 use \WP_CLI;
 
 /**
@@ -29,10 +30,34 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
+	 * Current working directory.
+	 *
+	 * @var false|string Current working directory.
+	 */
+	private $cwd;
+
+	/**
+	 * Scraper instance.
+	 *
+	 * @var Newspack_Scraper_Migrator_Util Instance.
+	 */
+	private $scraper;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		// Set it in advance because works differently in different environments.
+		$this->cwd = __DIR__;
+		if ( ! file_exists( $this->cwd ) ) {
+			$this->cwd = getcwd();
+		}
+
+		// Newspack_Scraper_Migrator_Util is not autoloaded, so we have to require it manually.
+		require realpath( $this->cwd . '/../../../vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-util.php' );
+
 		$this->attachments = new Attachments();
+		$this->scraper = new Newspack_Scraper_Migrator_Util();
 	}
 
 	/**
@@ -62,10 +87,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-import-posts',
+			'newspack-content-migrator lookoutlocal-import-posts-programmatically',
 			[ $this, 'cmd_import_posts' ],
 			[
-				'shortdesc' => 'Imports posts from JSONs in  self::CUSTOM_ENTRIES_TABLE.',
+				'shortdesc' => 'Abandoned. This is not feasible. Will combine with scraping. (old description: Imports posts from JSONs in  self::CUSTOM_ENTRIES_TABLE.)',
 				'synopsis'  => [],
 			]
 		);
@@ -77,6 +102,156 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-scrape-posts',
+			[ $this, 'cmd_scrape_posts' ],
+			[
+				'shortdesc' => 'Make sure to run lookoutlocal-get-posts-from-data-export-table first, which gets all posts data in separate table. This scrapes posts from live.',
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		$temp_section_data_cache_path = $this->cwd . '/temp_section_data_cache_path/section_data';
+		if ( ! file_exists( $temp_section_data_cache_path ) ) {
+			mkdir( $temp_section_data_cache_path, 0777, true );
+		}
+
+		// Get post entries.
+		$entries_table = self::CUSTOM_ENTRIES_TABLE;
+		$results = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
+
+
+// // START get URL.
+//
+// 		// Get post slugs and URLs.
+// 		/**
+// 		 * @var array $urls_data {
+// 		 *      @type string slug Post slug.
+// 		 *      @type string url  Post url.
+// 		 * }
+// 		 */
+// 		$urls_data = [];
+// 		$record_table = self::DATA_EXPORT_TABLE;
+// 		foreach ( $results as $key_result => $result ) {
+// 			WP_CLI::line( sprintf( "%d/%d", $key_result + 1, count( $results ) ) );
+//
+// // TODO remove dev helper:
+// // if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
+//
+//
+// 			$slug = $result['slug'];
+// 			$data = json_decode( $result['data'], true);
+//
+// 			// Example post URL:
+// 			// https://lookout.co/santacruz/environment/story/2020-11-18/debris-flow-evacuations-this-winter
+//
+// 			/**
+// 			 * Tried getting URL/ permalink from `Record` by "cms.directory.pathTypes", but it's not there in that format:
+// 			 *      select data from Record where data like '%00000175-41f4-d1f7-a775-edfd1bd00000:00000175-dd52-dd02-abf7-dd72cf3b0000%' and data like '%environment%';
+// 			 * It's probably split by two objects separated by ":", but that's difficult to locate in `Record`.
+// 			 *
+// 			 * Next trying to just get name of category "environment", and date "2020-11-18" from `Record`, then composing the URL manually.
+// 			 * Will debug when doing curls if path is not correct, and extend this.
+// 			 *      select data from Record where data like '{"cms.site.owner"%' and data like '%"_type":"ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"%' and data like '%"_id":"00000175-8030-d826-abfd-ec7086fa0000"%' order by id desc limit 1;
+// 			 */
+//
+// 			// Get (what I believe to be) category data entry from Record table.
+// 			if ( ! isset( $data['sectionable.section']['_ref'] ) || ! isset( $data['sectionable.section']['_type'] ) ) {
+// 				$d=1;
+// 				continue;
+// 			}
+// 			$id_like = sprintf( '"_id":"%s"', $data['sectionable.section']['_ref'] );
+// 			$type_like = sprintf( '"_type":"%s"', $data['sectionable.section']['_type'] );
+// 			$section_data_temp_cache_file_name = $data['sectionable.section']['_type'] . '__' . $data['sectionable.section']['_ref'];
+// 			$section_data_temp_cache_file_path = $temp_section_data_cache_path . '/' . $section_data_temp_cache_file_name;
+// 			if ( ! file_exists( $section_data_temp_cache_file_path ) ) {
+// 				$sql = "select data from {$record_table} where data like '{\"cms.site.owner\"%' and data like '%{$id_like}%' and data like '%{$type_like}%' order by id desc limit 1;";
+// 				WP_CLI::line( sprintf( "Getting section info" ) );
+// 				$section_result = $wpdb->get_var( $sql );
+// 				file_put_contents( $section_data_temp_cache_file_path, $section_result );
+// 			} else {
+// 				$section_result = file_get_contents( $section_data_temp_cache_file_path );
+// 			}
+// 			$section = json_decode( $section_result, true );
+//
+// 			// Check if section data is valid.
+// 			if ( ! $section || ! isset( $section['cms.directory.paths'] ) || ! $section['cms.directory.paths'] ) {
+// 				$d=1;
+// 			}
+//
+// 			// Get last exploded url segment from, e.g. "cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-32a8-d1f7-a775-feedba580000/environment"
+// 			if ( ! isset( $section['cms.directory.paths'][0] ) ) {
+// 				$d=1;
+// 			}
+// 			$section_paths_exploded = explode( '/', $section['cms.directory.paths'][0] );
+// 			$section_slug = end( $section_paths_exploded );
+// 			if ( ! $section_slug ) {
+// 				$d=1;
+// 			}
+//
+// 			// Get date slug, e.g. '2020-11-18'.
+// 			$date_slug = date( 'Y-m-d', $data['cms.content.publishDate'] / 1000 );
+//
+// 			// Compose URL.
+// 			$url = sprintf(
+// 				'https://lookout.co/santacruz/%s/story/%s/%s',
+// 				$section_slug,
+// 				$date_slug,
+// 				$slug
+// 			);
+//
+// // END get URL.
+//
+// 			$urls_data[] = [
+// 				'_id' => $data["_id"],
+// 				'_type' => $data["_type"],
+// 				'slug' => $slug,
+// 				'url'  => $url,
+// 			];
+// // TODO remove dev helper:
+// if ( $key_result >= 10 ) { break; }
+//
+// 		}
+
+$urls_data = array ( 0 =>  array ( '_id' => '00000175-80c1-dffc-a7fd-ecfd2f060000', '_type' => '0a0520eb-35b6-3762-a20e-86739324b125', 'slug' => 'santa-cruz-food-banks-covid-19-hungry-help', 'url' => 'https://lookout.co/santacruz/guides/story/2020-10-31/santa-cruz-food-banks-covid-19-hungry-help', ), 1 =>  array ( '_id' => '00000175-9f9c-ddb0-a57f-dfddbe550000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'ucsc-archive-10-000-photos-santa-cruz-history', 'url' => 'https://lookout.co/santacruz/ucsc-cabrillo/story/2020-11-06/ucsc-archive-10-000-photos-santa-cruz-history', ), 2 =>  array ( '_id' => '00000175-aefd-dfc0-afff-fefd2f6f0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'santa-cruz-wildfires-covid-flu-season-health', 'url' => 'https://lookout.co/santacruz/environment/story/2020-11-09/santa-cruz-wildfires-covid-flu-season-health', ), 3 =>  array ( '_id' => '00000175-af10-dfc0-afff-fffc47b60000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'cannabis-climate-change-santa-cruz', 'url' => 'https://lookout.co/santacruz/environment/story/2020-11-09/cannabis-climate-change-santa-cruz', ), 4 =>  array ( '_id' => '00000175-af24-ddb0-a57f-ef65639e0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'robots-farms-harvest-watsonville-santa-cruz-rural', 'url' => 'https://lookout.co/santacruz/business-technology/story/2020-11-09/robots-farms-harvest-watsonville-santa-cruz-rural', ), 5 =>  array ( '_id' => '00000175-b31d-de97-ab7d-f35f56790000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'biden-win-santa-cruz-lookout-local-recovery-2021', 'url' => 'https://lookout.co/santacruz/the-here-now/story/2020-11-17/biden-win-santa-cruz-lookout-local-recovery-2021', ), 6 =>  array ( '_id' => '00000175-b8f1-ddd1-abf5-fff7e72a0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'illuminee-small-business-profile', 'url' => 'https://lookout.co/santacruz/business-technology/story/2020-11-11/illuminee-small-business-profile', ), 7 =>  array ( '_id' => '00000175-be94-d297-a1f5-bed656d10000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'cabrillo-college-culinary-arts-hospitality-management-classes-continue-amidst-the-covid-19-pandemic', 'url' => 'https://lookout.co/santacruz/coast-life/story/2020-11-13/cabrillo-college-culinary-arts-hospitality-management-classes-continue-amidst-the-covid-19-pandemic', ), 8 =>  array ( '_id' => '00000175-c2c0-ddb2-ab7f-e6e73f0d0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'debris-flow-evacuations-this-winter', 'url' => 'https://lookout.co/santacruz/environment/story/2020-11-18/debris-flow-evacuations-this-winter', ), 9 =>  array ( '_id' => '00000175-c33c-d297-a1f5-d77ea9d40000', '_type' => 'a7753743-f4e0-30aa-b2fc-221aed805f42', 'slug' => 'debris-flow-safety-rain-winter-santa-cruz-mountains-mudslides', 'url' => 'https://lookout.co/santacruz/guides/story/2020-12-12/debris-flow-safety-rain-winter-santa-cruz-mountains-mudslides', ), );
+$wrong_urls = [
+	'https://lookout.co/santacruz/coast-life/story/2020-11-13/cabrillo-college-culinary-arts-hospitality-management-classes-continue-amidst-the-covid-19-pandemic',
+	'https://lookout.co/santacruz/the-here-now/story/2020-11-17/biden-win-santa-cruz-lookout-local-recovery-2021',
+	'https://lookout.co/santacruz/business-technology/story/2020-11-09/robots-farms-harvest-watsonville-santa-cruz-rural',
+	'https://lookout.co/santacruz/environment/story/2020-11-09/cannabis-climate-change-santa-cruz',
+	'https://lookout.co/santacruz/guides/story/2020-10-31/santa-cruz-food-banks-covid-19-hungry-help',
+];
+
+// Loop through URLs and scrape.
+		foreach ( $urls_data as $url_data ) {
+
+// TODO debug
+if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
+
+			$url = $url_data['url'];
+			$body = $this->wp_remote_get_body_with_retry( $url, 3, 5 );
+
+
+			
+		}
+
+		// Get response.
+	}
+
+	private function wp_remote_get_body_with_retry( $url, $retries, $sleep ) {
+		$body = $this->scraper->newspack_scraper_migrator_get_raw_html( $url );
+		$retried = 1;
+		if ( ! $body && ( $retried < $retries ) ) {
+			sleep( $sleep );
+			$retried++;
+			$body = scrape_with_retry( $url, $retries, $sleep );
+		}
+
+		return $body;
 	}
 
 	public function cmd_dev( $pos_args, $assoc_args ) {
