@@ -157,18 +157,26 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-get-posts-from-data-export-table',
-			[ $this, 'cmd_get_posts_from_data_export_table' ],
+			'newspack-content-migrator lookoutlocal-create-custom-table',
+			[ $this, 'cmd_create_custom_table' ],
 			[
 				'shortdesc' => 'Extracts all posts JSONs from the huge `Record` table into a new custom table called self::CUSTOM_ENTRIES_TABLE.',
 				'synopsis'  => [],
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-import-posts-programmatically',
-			[ $this, 'cmd_import_posts' ],
+			'newspack-content-migrator lookoutlocal-scrape-posts',
+			[ $this, 'cmd_scrape_posts' ],
 			[
-				'shortdesc' => 'Abandoned. This is not feasible. Will combine with scraping. (old description: Imports posts from JSONs in  self::CUSTOM_ENTRIES_TABLE.)',
+				'shortdesc' => 'Main command. Scrape posts from live and imports them. Make sure to run lookoutlocal-create-custom-table first.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-deprecated-import-posts-programmatically',
+			[ $this, 'cmd_deprecated_import_posts' ],
+			[
+				'shortdesc' => 'Tried to see if we can programmatically get all relational data from `Record` table. But the answer is no -- it is simply too dificult, better to scrape. (old description: Imports posts from JSONs in  self::CUSTOM_ENTRIES_TABLE.)',
 				'synopsis'  => [],
 			]
 		);
@@ -180,14 +188,225 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
-		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-scrape-posts',
-			[ $this, 'cmd_scrape_posts' ],
-			[
-				'shortdesc' => 'Make sure to run lookoutlocal-get-posts-from-data-export-table first, which gets all posts data in separate table. This scrapes posts from live.',
-				'synopsis'  => [],
-			]
-		);
+	}
+
+	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+
+		/**
+		 * Prepare logs and caching.
+		 */
+
+		// Log files.
+		$log_path             = $this->cwd . '/logs_and_cache';
+		$log_wrong_urls       = 'll_debug__wrong_urls.log';
+		$log_all_author_names = 'll_debug__all_author_names.log';
+		$log_all_tags         = 'll_debug__all_tags.log';
+
+		// Hit timestamp on all logs.
+		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+		$this->logger->log( $log_wrong_urls, $ts, false );
+		$this->logger->log( $log_all_author_names, $ts, false );
+		$this->logger->log( $log_all_tags, $ts, false );
+
+		// Create folders for caching stuff.
+		// Cache section (category) data to files (because SQLs on `Result` table are super slow).
+		$section_data_cache_path = $log_path . '/cache_section_data';
+		if ( ! file_exists( $section_data_cache_path ) ) {
+			mkdir( $section_data_cache_path, 0777, true );
+		}
+		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+		$scraped_htmls_cache_path = $log_path . '/cache_scraped_htmls';
+		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+			mkdir( $scraped_htmls_cache_path, 0777, true );
+		}
+
+
+
+		/**
+		 * We will first loop through all the posts to get their URLs.
+		 * URLs are hard to find, since we must crawl their DB export and search through relational data, and all queries are super slow since it's one 6 GB table.
+		 */
+
+		// Get rows from our custom posts table (table was created by command lookoutlocal-create-custom-table).
+		$entries_table       = self::CUSTOM_ENTRIES_TABLE;
+		$newspack_table_rows = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
+
+		/**
+		 * @var array $posts_urls All pposts URL data is stored in this array. {
+		 *      @type string slug Post slug.
+		 *      @type string url  Post url.
+		 * }
+		 */
+		$posts_urls = [];
+		foreach ( $newspack_table_rows as $key_row => $newspack_table_row ) {
+
+			WP_CLI::line( sprintf( '%d/%d', $key_row + 1, count( $newspack_table_rows ) ) );
+
+			// TODO remove dev helper:
+			// if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
+
+			// Get post URL.
+			$url          = $this->get_post_url( $newspack_table_row, $section_data_cache_path );
+			$posts_urls[] = [
+				'_id'   => $newspack_table_row['_id'],
+				'_type' => $newspack_table_row['_type'],
+				'slug'  => $newspack_table_row['slug'],
+				'url'   => $url,
+			];
+		}
+
+
+
+		/**
+		 * Now that we have the URLs, we will scrape them and import posts.
+		 */
+		$post_authors           = [];
+		$debug_all_author_names = [];
+		$debug_wrong_posts_urls = [];
+		$debug_all_tags         = [];
+		foreach ( $posts_urls as $url_data ) {
+
+			$url  = $url_data['url'];
+			$slug = $url_data['slug'];
+
+			// If post with same URL was imported, skip it.
+			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s", 'newspackmigration_url', $url ) );
+			if ( $post_id ) {
+				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping', $post_id, $url ) );
+				continue;
+			}
+
+			// HTML cache filename and path.
+			$html_cached_filename  = $slug . '.html';
+			$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
+
+			// Get HTML from cache or fetch from HTTP.
+			$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
+			if ( is_null( $html ) ) {
+				$get_result = $this->wp_remote_get_with_retry( $url );
+				if ( is_array( $get_result ) ) {
+					// Not OK.
+					$debug_wrong_posts_urls[] = $url;
+					$this->logger->log( $log_wrong_urls, sprintf( '%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
+					continue;
+				}
+
+				$html = $get_result;
+
+				// Save HTML to file.
+				file_put_contents( $html_cached_file_path, $html );
+			}
+
+			// Crawl and extract all useful data from HTML
+			$crawled_data = $this->get_post_data_from_html( $html );
+
+			// Create post.
+			$post_args = [
+				'post_title'   => $crawled_data['post_title'],
+				'post_content' => $crawled_data['post_content'],
+				'post_status'  => 'publish',
+				'post_type'    => 'post',
+				'post_name'    => $slug,
+				'post_date'    => $crawled_data['post_date'],
+			];
+			$post_id   = wp_insert_post( $post_args );
+
+			// Collect postmeta in this array.
+			$postmeta = [
+				'newspackmigration_url'                => $url,
+				'newspackmigration_slug'               => $slug,
+				// E.g. "lo-sc".
+				'newspackmigration_script_source'      => $crawled_data['script_data']['source'] ?? '',
+				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
+				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
+				// E.g. "Promoted Content".
+				'newspackmigration_script_tags'        => $crawled_data['script_data']['tags'],
+				'newspackmigration_presentedBy'        => $crawled_data['presented_by'] ?? '',
+			];
+
+			// Import featured image.
+			if ( isset( $data['featured_image_src'] ) ) {
+				$attachment_id   = $this->attachments->import_external_file(
+					$data['featured_image_src'],
+					$title       = null,
+					$data['featured_image_caption'],
+					$description = null,
+					$data['featured_image_alt'],
+					$post_id,
+					$args        = []
+				);
+				set_post_thumbnail( $post_id, $attachment_id );
+				// Credit goes as Newspack credit meta.
+				if ( $data['featured_image_credit'] ) {
+					$postmeta[ self::MEDIA_CREDIT_META ] = $data['featured_image_credit'];
+				}
+			}
+
+			// Authors.
+			$ga_ids = [];
+			// Get/create GAs.
+			foreach ( $data['post_authors'] as $author_name ) {
+				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
+				if ( $ga ) {
+					$ga_id = $ga->ID;
+				} else {
+					$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
+				}
+				$ga_ids[] = $ga_id;
+			}
+			if ( empty( $ga_ids ) ) {
+				throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
+			}
+			// Assign GAs to post.
+			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+			// Also collect all author names for easier debugging/QA-ing.
+			$debug_all_author_names = array_merge( $debug_all_author_names, $post_authors );
+
+			// Categories.
+			$category_parent_id = 0;
+			if ( $data['category_parent_name'] ) {
+				// Get or create parent category.
+				$category_parent_id = wp_create_category( $data['category_parent_name'], 0 );
+				if ( is_wp_error( $category_parent_id ) ) {
+					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $category_parent_name, $url ) );
+				}
+			}
+			// Get or create primary category.
+			$category_id = wp_create_category( $data['category_name'], $category_parent_id );
+			// Set category.
+			wp_set_post_categories( $post_id, [ $category_id ] );
+
+			// Assign tags.
+			$tags = $data['script_data']['tags'];
+			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
+			wp_set_post_tags( $post_id, $tags );
+			// Collect all tags for QA.
+			$debug_all_tags[] = array_merge( $debug_all_tags, $tags );
+
+			// Save the postmeta.
+			foreach ( $postmeta as $meta_key => $meta_value ) {
+				if ( ! empty( $meta_value ) ) {
+					update_post_meta( $post_id, $meta_key, $meta_value );
+				}
+			}
+
+			$d = 1;
+		}
+
+		// Debug and QA info.
+		if ( ! empty( $debug_wrong_posts_urls ) ) {
+			WP_CLI::warning( "Check $log_wrong_urls for errors." );
+		}
+		if ( ! empty( $debug_all_author_names ) ) {
+			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
+			WP_CLI::warning( "QA all matched $log_all_author_names ." );
+		}
+		if ( ! empty( $debug_all_tags ) ) {
+			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags ), false );
+			WP_CLI::warning( "QA all matched $log_all_tags ." );
+		}
 	}
 
 	public function get_post_url( $newspack_entries_table_row, $section_data_cache_path ) {
@@ -382,225 +601,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		return $data;
 	}
 
-	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
-		global $wpdb;
-
-
-		/**
-		 * Prepare logs and caching.
-		 */
-
-		// Log files.
-		$log_path             = $this->cwd . '/logs_and_cache';
-		$log_wrong_urls       = 'll_debug__wrong_urls.log';
-		$log_all_author_names = 'll_debug__all_author_names.log';
-		$log_all_tags         = 'll_debug__all_tags.log';
-
-		// Hit timestamp on all logs.
-		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
-		$this->logger->log( $log_wrong_urls, $ts, false );
-		$this->logger->log( $log_all_author_names, $ts, false );
-		$this->logger->log( $log_all_tags, $ts, false );
-
-		// Create folders for caching stuff.
-		// Cache section (category) data to files (because SQLs on `Result` table are super slow).
-		$section_data_cache_path = $log_path . '/cache_section_data';
-		if ( ! file_exists( $section_data_cache_path ) ) {
-			mkdir( $section_data_cache_path, 0777, true );
-		}
-		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-		$scraped_htmls_cache_path = $log_path . '/cache_scraped_htmls';
-		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
-			mkdir( $scraped_htmls_cache_path, 0777, true );
-		}
-
-
-
-		/**
-		 * We will first loop through all the posts to get their URLs.
-		 * URLs are hard to find, since we must crawl their DB export and search through relational data, and all queries are super slow since it's one 6 GB table.
-		 */
-
-		// Get rows from our custom posts table (table was created by command lookoutlocal-get-posts-from-data-export-table).
-		$entries_table       = self::CUSTOM_ENTRIES_TABLE;
-		$newspack_table_rows = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
-
-		/**
-		 * @var array $posts_urls All pposts URL data is stored in this array. {
-		 *      @type string slug Post slug.
-		 *      @type string url  Post url.
-		 * }
-		 */
-		$posts_urls = [];
-		foreach ( $newspack_table_rows as $key_row => $newspack_table_row ) {
-
-			WP_CLI::line( sprintf( '%d/%d', $key_row + 1, count( $newspack_table_rows ) ) );
-
-			// TODO remove dev helper:
-			// if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
-
-			// Get post URL.
-			$url          = $this->get_post_url( $newspack_table_row, $section_data_cache_path );
-			$posts_urls[] = [
-				'_id'   => $newspack_table_row['_id'],
-				'_type' => $newspack_table_row['_type'],
-				'slug'  => $newspack_table_row['slug'],
-				'url'   => $url,
-			];
-		}
-
-
-
-		/**
-		 * Now that we have the URLs, we will scrape them and import posts.
-		 */
-		$post_authors           = [];
-		$debug_all_author_names = [];
-		$debug_wrong_posts_urls = [];
-		$debug_all_tags         = [];
-		foreach ( $posts_urls as $url_data ) {
-
-			$url  = $url_data['url'];
-			$slug = $url_data['slug'];
-
-			// If post with same URL was imported, skip it.
-			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s", 'newspackmigration_url', $url ) );
-			if ( $post_id ) {
-				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping', $post_id, $url ) );
-				continue;
-			}
-
-			// HTML cache filename and path.
-			$html_cached_filename  = $slug . '.html';
-			$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
-
-			// Get HTML from cache or fetch from HTTP.
-			$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
-			if ( is_null( $html ) ) {
-				$get_result = $this->wp_remote_get_with_retry( $url );
-				if ( is_array( $get_result ) ) {
-					// Not OK.
-					$debug_wrong_posts_urls[] = $url;
-					$this->logger->log( $log_wrong_urls, sprintf( '%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
-					continue;
-				}
-
-				$html = $get_result;
-
-				// Save HTML to file.
-				file_put_contents( $html_cached_file_path, $html );
-			}
-
-			// Crawl and extract all useful data from HTML
-			$crawled_data = $this->get_post_data_from_html( $html );
-
-			// Create post.
-			$post_args = [
-				'post_title'   => $crawled_data['post_title'],
-				'post_content' => $crawled_data['post_content'],
-				'post_status'  => 'publish',
-				'post_type'    => 'post',
-				'post_name'    => $slug,
-				'post_date'    => $crawled_data['post_date'],
-			];
-			$post_id   = wp_insert_post( $post_args );
-
-			// Collect postmeta in this array.
-			$postmeta = [
-				'newspackmigration_url'                => $url,
-				'newspackmigration_slug'               => $slug,
-				// E.g. "lo-sc".
-				'newspackmigration_script_source'      => $crawled_data['script_data']['source'] ?? '',
-				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
-				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
-				// E.g. "Promoted Content".
-				'newspackmigration_script_tags'        => $crawled_data['script_data']['tags'],
-				'newspackmigration_presentedBy'        => $crawled_data['presented_by'] ?? '',
-			];
-
-			// Import featured image.
-			if ( isset( $data['featured_image_src'] ) ) {
-				$attachment_id   = $this->attachments->import_external_file(
-					$data['featured_image_src'],
-					$title       = null,
-					$data['featured_image_caption'],
-					$description = null,
-					$data['featured_image_alt'],
-					$post_id,
-					$args        = []
-				);
-				set_post_thumbnail( $post_id, $attachment_id );
-				// Credit goes as Newspack credit meta.
-				if ( $data['featured_image_credit'] ) {
-					$postmeta[ self::MEDIA_CREDIT_META ] = $data['featured_image_credit'];
-				}
-			}
-
-			// Authors.
-			$ga_ids = [];
-			// Get/create GAs.
-			foreach ( $data['post_authors'] as $author_name ) {
-				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
-				if ( $ga ) {
-					$ga_id = $ga->ID;
-				} else {
-					$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
-				}
-				$ga_ids[] = $ga_id;
-			}
-			if ( empty( $ga_ids ) ) {
-				throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
-			}
-			// Assign GAs to post.
-			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
-			// Also collect all author names for easier debugging/QA-ing.
-			$debug_all_author_names = array_merge( $debug_all_author_names, $post_authors );
-
-			// Categories.
-			$category_parent_id = 0;
-			if ( $data['category_parent_name'] ) {
-				// Get or create parent category.
-				$category_parent_id = wp_create_category( $data['category_parent_name'], 0 );
-				if ( is_wp_error( $category_parent_id ) ) {
-					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $category_parent_name, $url ) );
-				}
-			}
-			// Get or create primary category.
-			$category_id = wp_create_category( $data['category_name'], $category_parent_id );
-			// Set category.
-			wp_set_post_categories( $post_id, [ $category_id ] );
-
-			// Assign tags.
-			$tags = $data['script_data']['tags'];
-			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
-			wp_set_post_tags( $post_id, $tags );
-			// Collect all tags for QA.
-			$debug_all_tags[] = array_merge( $debug_all_tags, $tags );
-
-			// Save the postmeta.
-			foreach ( $postmeta as $meta_key => $meta_value ) {
-				if ( ! empty( $meta_value ) ) {
-					update_post_meta( $post_id, $meta_key, $meta_value );
-				}
-			}
-
-			$d = 1;
-		}
-
-		// Debug and QA info.
-		if ( ! empty( $debug_wrong_posts_urls ) ) {
-			WP_CLI::warning( "Check $log_wrong_urls for errors." );
-		}
-		if ( ! empty( $debug_all_author_names ) ) {
-			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-			WP_CLI::warning( "QA all matched $log_all_author_names ." );
-		}
-		if ( ! empty( $debug_all_tags ) ) {
-			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags ), false );
-			WP_CLI::warning( "QA all matched $log_all_tags ." );
-		}
-	}
-
 	public function format_featured_image_credit( $featured_image_credit ) {
 		$featured_image_credit = trim( $featured_image_credit, ' ()' );
 
@@ -616,6 +616,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		return $authors;
 	}
 
+	/**
+	 * Crawls content by CSS selector.
+	 * Can get text only, or full HTML content.
+	 * Can sanitize text optionally
+	 *
+	 * @param $selector
+	 * @param $dom_crawler
+	 * @param $get_text
+	 * @param $sanitize_text
+	 *
+	 * @return string|null
+	 */
 	public function filter_selector( $selector, $dom_crawler, $get_text = true, $sanitize_text = true ) {
 		$text = null;
 
@@ -634,6 +646,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		return $text;
 	}
 
+	/**
+	 * Gets Crawler node by CSS selector.
+	 *
+	 * @param $selector
+	 * @param $dom_crawler
+	 *
+	 * @return false|Crawler
+	 */
 	public function filter_selector_element( $selector, $dom_crawler ) {
 		$found_element = $this->data_parser->get_element_by_selector( $selector, $dom_crawler, $single = true );
 
@@ -648,14 +668,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|array Body HTML string or Response array from \wp_remote_get() in case of error.
 	 */
-	private function wp_remote_get_with_retry( $url, $retried = 0, $retries = 3, $sleep = 2 ) {
+	public function wp_remote_get_with_retry( $url, $retried = 0, $retries = 3, $sleep = 2 ) {
 
 		$response = wp_remote_get(
 			$url,
 			[
 				'timeout'    => 60,
 				'user-agent' => 'Newspack Scraper Migrator',
-			] 
+			]
 		);
 
 		// Retry if error, or if response code is not 200 and retries are not exhausted.
@@ -679,6 +699,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		return $response;
 	}
 
+	/**
+	 * Temp dev command for stuff and things.
+	 *
+	 * @param $pos_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
 	public function cmd_dev( $pos_args, $assoc_args ) {
 		global $wpdb;
 
@@ -780,14 +808,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator lookoutlocal-get-posts-from-data-export-table`.
+	 * Callable for `newspack-content-migrator lookoutlocal-create-custom-table`.
+	 *
+	 * Tried to see if we can get all relational data ourselves from `Record` table.
+	 * The answer is no -- it is simply too difficult, better to scrape.
 	 *
 	 * @param array $pos_args   Array of positional arguments.
 	 * @param array $assoc_args Array of associative arguments.
 	 *
 	 * @return void
 	 */
-	public function cmd_get_posts_from_data_export_table( $pos_args, $assoc_args ) {
+	public function cmd_create_custom_table( $pos_args, $assoc_args ) {
 		global $wpdb;
 
 		// Table names.
@@ -851,7 +882,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						[
 							'slug' => $slug,
 							'data' => json_encode( $data ),
-						] 
+						]
 					);
 				}
 
@@ -866,7 +897,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		WP_CLI::line( 'Done' );
 	}
 
-	public function cmd_import_posts( $pos_args, $assoc_args ) {
+	public function cmd_deprecated_import_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
 		$data_jsons = $wpdb->get_col( 'SELECT data from %s', self::CUSTOM_ENTRIES_TABLE );
@@ -1017,6 +1048,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		return $readable;
 	}
 
+	/**
+	 * @param $table_name
+	 * @param $truncate
+	 *
+	 * @return void
+	 */
 	public function create_custom_table( $table_name, $truncate = false ) {
 		global $wpdb;
 
