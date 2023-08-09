@@ -5,8 +5,11 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use \Newspack_Scraper_Migrator_Util;
+use \Newspack_Scraper_Migrator_HTML_Parser;
 use \WP_CLI;
+use Symfony\Component\DomCrawler\Crawler as Crawler;
 
 /**
  * Custom migration scripts for Lookout Local.
@@ -30,6 +33,20 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
+	 * Logger instance.
+	 *
+	 * @var Logger Logger instance.
+	 */
+	private $logger;
+
+	/**
+	 * DomCrawler instance.
+	 *
+	 * @var Crawler Crawler instance.
+	 */
+	private $crawler;
+
+	/**
 	 * Current working directory.
 	 *
 	 * @var false|string Current working directory.
@@ -44,6 +61,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $scraper;
 
 	/**
+	 * Parser instance.
+	 *
+	 * @var Newspack_Scraper_Migrator_HTML_Parser Instance.
+	 */
+	private $data_parser;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -53,11 +77,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$this->cwd = getcwd();
 		}
 
-		// Newspack_Scraper_Migrator_Util is not autoloaded, so we have to require it manually.
+		// Newspack_Scraper_Migrator is not autoloaded.
 		require realpath( $this->cwd . '/../../../vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-util.php' );
+		require realpath( $this->cwd . '/../../../vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-html-parser.php' );
 
 		$this->attachments = new Attachments();
+		$this->logger = new Logger();
 		$this->scraper = new Newspack_Scraper_Migrator_Util();
+		$this->crawler = new Crawler();
+		$this->data_parser = new Newspack_Scraper_Migrator_HTML_Parser();
 	}
 
 	/**
@@ -115,6 +143,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
+		// Logs.
+		$log_wrong_urls = 'll_wrong_urls.log';
+
+		// Timestamp logs.
+		$this->logger->log( $log_wrong_urls, sprintf( "Started: %s", date( 'Y-m-d H:i:s' ) ), false );
+
+		// Cache section data to files, because SQLs on Result table are super slow.
 		$temp_section_data_cache_path = $this->cwd . '/temp_section_data_cache_path/section_data';
 		if ( ! file_exists( $temp_section_data_cache_path ) ) {
 			mkdir( $temp_section_data_cache_path, 0777, true );
@@ -233,25 +268,182 @@ $wrong_urls = [
 if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
 
 			$url = $url_data['url'];
-			$body = $this->wp_remote_get_body_with_retry( $url, 3, 5 );
+
+			// TODO load HTML from file.
+
+			$get_result = $this->wp_remote_get_with_retry( $url );
+			if ( is_array( $get_result ) ) {
+				// Not OK.
+
+				// Log.
+				$this->logger->log( $log_wrong_urls, sprintf( "%s CODE:%s MESSAGE:%s", $url, $get_result['response']['code'], $get_result['response']['message'] ) );
+
+				continue;
+			}
+
+			$html = $get_result;
+
+			// TODO save HTML to file.
+
+			$this->crawler->clear();
+			$this->crawler->add( $html );
+
+			// $img_data = $this->crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
+
+			// $image = $images->getIterator()[0];
+			// $img_raw_html = $image->ownerDocument->saveHTML( $image );
+			// $img_src = $image->getAttribute( 'src' );
+
+			$selectors = [
+				'title'          => 'h1.pSt-tTl',
+				'content'        => 'div.body',
+			];
+			$title = $this->parse_title( $selectors[ 'title' ], $url );
+			$featured_image = $this->parse_featured_image( $selectors[ 'featured_image' ], $url );
+			$author = $this->parse_author( $selectors[ 'author' ], $url );
+			$excerpt = $this->parse_excerpt( $selectors[ 'excerpt' ], $url );
+			$date = $this->parse_date( $selectors[ 'date' ], $url );
+			$content = $this->parse_content( $selectors[ 'content' ], $url );
+			$categories = $this->parse_categories( $selectors[ 'categories' ], $url );
+			$tags = $this->parse_tags( $selectors[ 'tags' ], $url );
+
+			$post = $this->data_parser->parse( $html, $url, $selectors );
+
+			$title = $this->crawler->filterXpath( 'div[@class="headline"]' );
+			$title = $title->getIterator();
+			count( $title )
+			[0]->textContent;
+			$subtitle = $this->crawler->filterXpath( 'div[@class="subheadline"]' );
+			//
+			// h1 headline
+			// div subheadline
+			$post_content;
+			$post_date;
 
 
-			
+			// Create post.
+			$post_args = [
+				'post_title' => $title,
+				'post_content' => $post_content,
+				'post_status' => 'publish',
+				'post_type' => 'post',
+				'post_name' => $slug,
+				'post_date' => $post_date,
+			];
+			$post_id = wp_insert_post( $post_args );
+
+
+
+			// Get more postmeta.
+			$postmeta = [
+				"newspack_commentable.enableCommenting" => $data["commentable.enableCommenting"],
+			];
+			if ( $subheadline ) {
+				$postmeta['newspack_post_subtitle'] = $subheadline;
+			}
+
+
+			// Get more post data to update all at once.
+			$post_modified = $this->convert_epoch_timestamp_to_wp_format( $data['publicUpdateDate'] );
+			$post_update_data = [
+				'post_modified'	=> $post_modified,
+			];
+
+
+			// Post URL.
+			// TODO -- find post URL for redirect purposes and store as meta. Looks like it's stored as "canonicalURL" in some related entries.
+			// ? "paths" data ?
+
+
+			// Post excerpt.
+			// TODO -- find excerpt.
+
+
+			// Featured image.
+			$caption = $data['lead'][ 'caption' ];
+			$hide_caption = $data['lead'][ 'hideCaption' ];
+			$credit = $data['lead'][ 'credit' ];
+			$alt = $data['lead'][ 'altText' ];
+			// TODO -- find url and download image.
+			$url;
+			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
+			set_post_thumbnail( $post_id, $attachment_id );
+
+
+			// Authors.
+
+			// div author-name
+
+			// Categories.
+			$data["sectionable.section"];
+
+			$data["sectionable.secondarySections"];
+
+
+			// "Presented by"
+			// div brand-content-name
+
+
+			// Tags.
+			$data["taggable.tags"];
+
+
+			// Save postmeta.
+			foreach ( $postmeta as $meta_key => $meta_value ) {
+				update_post_meta( $post_id, $meta_key, $meta_value );
+			}
+
+
+			// Update post data.
+			if ( ! empty( $post_update_data ) ) {
+				$wpdb->update( $wpdb->posts, $post_update_data, [ 'ID' => $post_id ] );
+			}
+
+
+
+
+
+
+			$d = 1;
 		}
 
 		// Get response.
 	}
 
-	private function wp_remote_get_body_with_retry( $url, $retries, $sleep ) {
-		$body = $this->scraper->newspack_scraper_migrator_get_raw_html( $url );
-		$retried = 1;
-		if ( ! $body && ( $retried < $retries ) ) {
+	/**
+	 * @param $url     URL to scrape.
+	 * @param $retried Number of times this function was retried.
+	 * @param $retries Number of times to retry.
+	 * @param $sleep   Number of seconds to sleep between retries.
+	 *
+	 * @return string|array Body HTML string or Response array from \wp_remote_get() in case of error.
+	 */
+	private function wp_remote_get_with_retry( $url, $retried = 0, $retries = 3, $sleep = 2 ) {
+
+		$response = wp_remote_get( $url, [
+			'timeout' => 60,
+			'user-agent' => 'Newspack Scraper Migrator',
+		] );
+
+		// Retry if error, or if response code is not 200 and retries are not exhausted.
+		if (
+			( is_wp_error( $response ) || ( 200 != $response["response"]["code"] ) )
+			&& ( $retried < $retries )
+		) {
 			sleep( $sleep );
 			$retried++;
-			$body = scrape_with_retry( $url, $retries, $sleep );
+			$response = $this->wp_remote_get_with_retry( $url, $retried, $retries, $sleep );
 		}
 
-		return $body;
+		// If everything is fine, return body.
+		if ( ! is_wp_error( $response ) && ( 200 == $response["response"]["code"] ) ) {
+			$body = wp_remote_retrieve_body( $response );
+
+			return $body;
+		}
+
+		// If not OK, return response array.
+		return $response;
 	}
 
 	public function cmd_dev( $pos_args, $assoc_args ) {
