@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments;
+use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \Newspack_Scraper_Migrator_Util;
@@ -16,6 +17,7 @@ use Symfony\Component\DomCrawler\Crawler as Crawler;
  */
 class LookoutLocalMigrator implements InterfaceCommand {
 
+	const MEDIA_CREDIT_META = '_media_credit';
 	const DATA_EXPORT_TABLE = 'Record';
 	const CUSTOM_ENTRIES_TABLE = 'newspack_entries';
 	const LOOKOUT_S3_SCHEMA_AND_HOSTNAME = 'https://lookout-local-brightspot.s3.amazonaws.com';
@@ -108,6 +110,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $data_parser;
 
 	/**
+	 * CoAuthorPlus instance.
+	 *
+	 * @var CoAuthorPlus Instance.
+	 */
+	private $cap;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -126,6 +135,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->scraper = new Newspack_Scraper_Migrator_Util();
 		$this->crawler = new Crawler();
 		$this->data_parser = new Newspack_Scraper_Migrator_HTML_Parser();
+		$this->cap = new CoAuthorPlus();
 	}
 
 	/**
@@ -180,244 +190,368 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		);
 	}
 
+	public function get_post_url( $newspack_entries_table_row, $section_data_cache_path ) {
+		global $wpdb;
+
+		$slug = $newspack_entries_table_row['slug'];
+		$data = json_decode( $newspack_entries_table_row['data'], true);
+
+		/**
+		 * Example post URL looks like this:
+		 *      https://lookout.co/santacruz/environment/story/2020-11-18/debris-flow-evacuations-this-winter
+		 *
+		 * Tried getting URL/ permalink from `Record` by "cms.directory.pathTypes", but it's not there in that format:
+		 *      select data from Record where data like '%00000175-41f4-d1f7-a775-edfd1bd00000:00000175-dd52-dd02-abf7-dd72cf3b0000%' and data like '%environment%';
+		 * It's probably split by two objects separated by ":", but that's difficult to locate in `Record`.
+		 *
+		 * Next, trying to just get the name of category, e.g. "environment", and date, e.g. "2020-11-18", from `Record`, then compose the URL manually.
+		 * Searching by relational sections "sectionable.section", "_id" and "_type".
+		 *      select data from Record where data like '{"cms.site.owner"%' and data like '%"_type":"ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"%' and data like '%"_id":"00000175-8030-d826-abfd-ec7086fa0000"%' order by id desc limit 1;
+		 */
+
+		// Get (what I believe to be) category data entry from Record table.
+		if ( ! isset( $data['sectionable.section']['_ref'] ) || ! isset( $data['sectionable.section']['_type'] ) ) {
+			return null;
+		}
+		$id_like = sprintf( '"_id":"%s"', $data['sectionable.section']['_ref'] );
+		$type_like = sprintf( '"_type":"%s"', $data['sectionable.section']['_type'] );
+		$section_data_temp_cache_file_name = $data['sectionable.section']['_type'] . '__' . $data['sectionable.section']['_ref'];
+		$section_data_temp_cache_file_path = $section_data_cache_path . '/' . $section_data_temp_cache_file_name;
+
+		$record_table = self::DATA_EXPORT_TABLE;
+		if ( ! file_exists( $section_data_temp_cache_file_path ) ) {
+			$sql = "select data from {$record_table} where data like '{\"cms.site.owner\"%' and data like '%{$id_like}%' and data like '%{$type_like}%' order by id desc limit 1;";
+			WP_CLI::line( sprintf( "Getting section info" ) );
+			$section_result = $wpdb->get_var( $sql );
+			file_put_contents( $section_data_temp_cache_file_path, $section_result );
+		} else {
+			$section_result = file_get_contents( $section_data_temp_cache_file_path );
+		}
+		$section = json_decode( $section_result, true );
+
+		// Check if section data is valid.
+		if ( ! $section || ! isset( $section['cms.directory.paths'] ) || ! $section['cms.directory.paths'] ) {
+			$d=1;
+		}
+
+		// Get last exploded url segment from, e.g. "cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-32a8-d1f7-a775-feedba580000/environment"
+		if ( ! isset( $section['cms.directory.paths'][0] ) ) {
+			$d=1;
+		}
+		$section_paths_exploded = explode( '/', $section['cms.directory.paths'][0] );
+		$section_slug = end( $section_paths_exploded );
+		if ( ! $section_slug ) {
+			$d=1;
+		}
+
+		// Get date slug, e.g. '2020-11-18'.
+		$date_slug = date( 'Y-m-d', $data['cms.content.publishDate'] / 1000 );
+
+		// Compose URL.
+		$url = sprintf(
+			'https://lookout.co/santacruz/%s/story/%s/%s',
+			$section_slug,
+			$date_slug,
+			$slug
+		);
+
+		return $url;
+	}
+
+	/**
+	 * Crawls all useful post data from HTML.
+	 *
+	 * @param string $html                    HTML.
+	 * @param array  &$debug_all_author_names Stores all author names for easier QA/debugging.
+	 * @param array  &$debug_all_tags         Stores all tags for easier QA/debugging.
+	 *
+	 * @return array $data All posts data crawled from HTML. {
+	 *      @type array   script_data            Decoded data from that one <script> element with useful post info.
+	 *      @type string  post_title
+	 *      @type string  subtitle
+	 *      @type string  post_content
+	 *      @type string  post_date
+	 *      @type array   post_authors           Array of author names.
+	 *      @type ?string featured_image_src
+	 *      @type ?string featured_image_alt
+	 *      @type ?string featured_image_caption
+	 *      @type ?string featured_image_credit
+	 *      @type string  category_name
+	 *      @type ?string category_parent_name
+	 *      @type ?string tags
+	 *      @type ?string presented_by
+	 * }
+	 */
+	public function get_post_data_from_html( $html, &$debug_all_author_names, &$debug_all_tags ) {
+
+		$data = [];
+
+		/**
+		 * Get all post data.
+		 */
+		$this->crawler->clear();
+		$this->crawler->add( $html );
+
+		// Extract some data from this <script> element which contains useful data.
+		$script_json = $this->filter_selector( 'script#head-dl', $this->crawler );
+		$script_json = ltrim( $script_json, 'var dataLayer = ' );
+		$script_json = rtrim( $script_json, ';' );
+		$script_data = json_decode( $script_json, true );
+		$script_data = $script_data[0] ?? null;
+		if ( is_null( $script_data ) ) {
+			throw new \UnexpectedValueException( sprintf( 'Could not get <script> element data for post %s', $url ) );
+		}
+
+		$data[ 'script_data' ] = $script_data;
+
+		// Title, subtitle, content.
+		$title = $this->filter_selector( 'h1.headline', $this->crawler );
+		if ( empty( $title ) ) {
+			throw new \UnexpectedValueException( sprintf( 'Could not get title for post %s', $url ) );
+		}
+		$data[ 'post_title' ] = $title;
+
+		$subtitle = $this->filter_selector( 'div.subheadline', $this->crawler ) ?? null;
+		$data[ 'post_title' ] = $subtitle;
+
+		$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+		if ( empty( $post_content ) ) {
+			throw new \UnexpectedValueException( sprintf( 'Could not get post content for post %s', $url ) );
+		}
+		$data[ 'post_content' ] = $post_content;
+
+		// Date. <script> element has both date and time of publishing.
+		$matched = preg_match( '/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/', $script_data['publishDate'], $matches_date ) ;
+		if ( false === $matched ) {
+			throw new \UnexpectedValueException( sprintf( 'Could not get date for post %s', $url ) );
+		}
+		$post_date = sprintf( '%s-%s-%s$all %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
+		$data[ 'post_date' ] = $post_date;
+
+		// Authors.
+		$authors_text = $this->filter_selector( 'div.author-name', $this->crawler );
+		$post_authors = $this->format_authors( $authors_text );
+		$data[ 'post_authors' ] = $post_authors;
+
+		// Also collect all author names for easier debugging/QA-ing.
+		$debug_all_author_names = array_merge( $debug_all_author_names, $post_authors );
+
+		// Featured image.
+		$featured_image = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
+		$featured_image_exists = count( $featured_image->getIterator() ) > 0 ? true : false;
+		if ( $featured_image_exists ) {
+			$featured_image_src = $featured_image->getAttribute( 'src' );
+			$data[ 'featured_image_src' ] = $featured_image_src;
+
+			$featured_image_alt = $featured_image->getAttribute( 'alt' ) ?? null;
+			$data[ 'featured_image_alt' ] = $featured_image_alt;
+
+			$featured_image_caption = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-caption', $this->crawler ) ?? null;
+			$data[ 'featured_image_caption' ] = $featured_image_caption;
+
+			$featured_image_credit = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-credit', $this->crawler );
+			$featured_image_credit = $this->format_featured_image_credit( $featured_image_credit ) ?? null;
+			$data[ 'featured_image_credit' ] = $featured_image_credit;
+		}
+
+		// Category.
+		// Section name is located both in <meta> element:
+		//      <meta property="article:section" content="UC Santa Cruz">
+		// and in <script> element data:
+		//      $script_data['sectionName]
+		// but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
+		$section_meta = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
+		$category_name = $section_meta->getAttribute( 'content' );
+		$data[ 'category_name' ] = $category_name;
+
+		// Parent category.
+		// E.g. "higher-ed"
+		$section_parent_slug = $script_data['sectionParentPath'];
+		$category_parent_name = self::SECTIONS[ $section_parent_slug ] ?? null;
+		$data[ 'category_parent_name' ] = $category_parent_name;
+
+		// Tags.
+		$tags = $script_data['tags'] ?? null;
+		$data[ 'tags' ] = $tags;
+
+		// Collect tags for easier QA.
+		$debug_all_tags[] = array_merge( $debug_all_tags, $tags );
+
+		// Presented by.
+		/**
+		 * E.g. "Promoted Content"
+		 * This data is also found in <meta property="article:tag" content="Promoted Content">.
+		 */
+		$presented_by = $this->filter_selector_element( 'div.brand-content-name', $this->crawler ) ?? null;
+		$data[ 'presented_by' ] = $presented_by;
+
+		return $data;
+	}
+
 	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
-		// Logs.
-		$log_wrong_urls = 'll_wrong_urls.log';
+		// Log files.
+		$log_path = $this->cwd . '/logs_and_cache';
+		$log_wrong_urls = 'll_debug__wrong_urls.log';
+		$log_all_author_names = 'll_debug__all_author_names.log';
+		$log_all_tags = 'll_debug__all_tags.log';
 
-		// Timestamp logs.
-		$this->logger->log( $log_wrong_urls, sprintf( "Started: %s", date( 'Y-m-d H:i:s' ) ), false );
+		// Hit timestamp on all logs.
+		$ts = sprintf( "Started: %s", date( 'Y-m-d H:i:s' ) );
+		$this->logger->log( $log_wrong_urls, $ts, false );
+		$this->logger->log( $log_all_author_names, $ts, false );
+		$this->logger->log( $log_all_tags, $ts, false );
 
-		// Cache section data to files, because SQLs on Result table are super slow.
-		$temp_section_data_cache_path = $this->cwd . '/temp_section_data_cache_path/section_data';
-		if ( ! file_exists( $temp_section_data_cache_path ) ) {
-			mkdir( $temp_section_data_cache_path, 0777, true );
+		// Create folders for caching stuff.
+		// Cache section (category) data to files (because SQLs on `Result` table are super slow).
+		$section_data_cache_path = $log_path . '/cache_section_data';
+		if ( ! file_exists( $section_data_cache_path ) ) {
+			mkdir( $section_data_cache_path, 0777, true );
+		}
+		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+		$scraped_htmls_cache_path = $log_path . '/cache_scraped_htmls';
+		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+			mkdir( $scraped_htmls_cache_path, 0777, true );
 		}
 
-		// Get post entries.
+		// Get rows from our custom posts table (created by command lookoutlocal-get-posts-from-data-export-table).
 		$entries_table = self::CUSTOM_ENTRIES_TABLE;
-		$results = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
+		$newspack_entries_table_rows = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
 
 
-// // START get URL.
-//
-// 		// Get post slugs and URLs.
-// 		/**
-// 		 * @var array $urls_data {
-// 		 *      @type string slug Post slug.
-// 		 *      @type string url  Post url.
-// 		 * }
-// 		 */
-// 		$urls_data = [];
-// 		$record_table = self::DATA_EXPORT_TABLE;
-// 		foreach ( $results as $key_result => $result ) {
-// 			WP_CLI::line( sprintf( "%d/%d", $key_result + 1, count( $results ) ) );
-//
-// // TODO remove dev helper:
-// // if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
-//
-//
-// 			$slug = $result['slug'];
-// 			$data = json_decode( $result['data'], true);
-//
-// 			// Example post URL:
-// 			// https://lookout.co/santacruz/environment/story/2020-11-18/debris-flow-evacuations-this-winter
-//
-// 			/**
-// 			 * Tried getting URL/ permalink from `Record` by "cms.directory.pathTypes", but it's not there in that format:
-// 			 *      select data from Record where data like '%00000175-41f4-d1f7-a775-edfd1bd00000:00000175-dd52-dd02-abf7-dd72cf3b0000%' and data like '%environment%';
-// 			 * It's probably split by two objects separated by ":", but that's difficult to locate in `Record`.
-// 			 *
-// 			 * Next trying to just get name of category "environment", and date "2020-11-18" from `Record`, then composing the URL manually.
-// 			 * Will debug when doing curls if path is not correct, and extend this.
-// 			 *      select data from Record where data like '{"cms.site.owner"%' and data like '%"_type":"ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"%' and data like '%"_id":"00000175-8030-d826-abfd-ec7086fa0000"%' order by id desc limit 1;
-// 			 */
-//
-// 			// Get (what I believe to be) category data entry from Record table.
-// 			if ( ! isset( $data['sectionable.section']['_ref'] ) || ! isset( $data['sectionable.section']['_type'] ) ) {
-// 				$d=1;
-// 				continue;
-// 			}
-// 			$id_like = sprintf( '"_id":"%s"', $data['sectionable.section']['_ref'] );
-// 			$type_like = sprintf( '"_type":"%s"', $data['sectionable.section']['_type'] );
-// 			$section_data_temp_cache_file_name = $data['sectionable.section']['_type'] . '__' . $data['sectionable.section']['_ref'];
-// 			$section_data_temp_cache_file_path = $temp_section_data_cache_path . '/' . $section_data_temp_cache_file_name;
-// 			if ( ! file_exists( $section_data_temp_cache_file_path ) ) {
-// 				$sql = "select data from {$record_table} where data like '{\"cms.site.owner\"%' and data like '%{$id_like}%' and data like '%{$type_like}%' order by id desc limit 1;";
-// 				WP_CLI::line( sprintf( "Getting section info" ) );
-// 				$section_result = $wpdb->get_var( $sql );
-// 				file_put_contents( $section_data_temp_cache_file_path, $section_result );
-// 			} else {
-// 				$section_result = file_get_contents( $section_data_temp_cache_file_path );
-// 			}
-// 			$section = json_decode( $section_result, true );
-//
-// 			// Check if section data is valid.
-// 			if ( ! $section || ! isset( $section['cms.directory.paths'] ) || ! $section['cms.directory.paths'] ) {
-// 				$d=1;
-// 			}
-//
-// 			// Get last exploded url segment from, e.g. "cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-32a8-d1f7-a775-feedba580000/environment"
-// 			if ( ! isset( $section['cms.directory.paths'][0] ) ) {
-// 				$d=1;
-// 			}
-// 			$section_paths_exploded = explode( '/', $section['cms.directory.paths'][0] );
-// 			$section_slug = end( $section_paths_exploded );
-// 			if ( ! $section_slug ) {
-// 				$d=1;
-// 			}
-//
-// 			// Get date slug, e.g. '2020-11-18'.
-// 			$date_slug = date( 'Y-m-d', $data['cms.content.publishDate'] / 1000 );
-//
-// 			// Compose URL.
-// 			$url = sprintf(
-// 				'https://lookout.co/santacruz/%s/story/%s/%s',
-// 				$section_slug,
-// 				$date_slug,
-// 				$slug
-// 			);
-//
-// // END get URL.
-//
-// 			$urls_data[] = [
-// 				'_id' => $data["_id"],
-// 				'_type' => $data["_type"],
-// 				'slug' => $slug,
-// 				'url'  => $url,
-// 			];
-// // TODO remove dev helper:
-// if ( $key_result >= 10 ) { break; }
-//
-// 		}
+		/**
+		 * We will first loop through all posts and get their URLs.
+		 * URL is hard to find, we must crawl their DB export and search through relational data.
+		 */
 
-$urls_data = array ( 0 =>  array ( '_id' => '00000175-80c1-dffc-a7fd-ecfd2f060000', '_type' => '0a0520eb-35b6-3762-a20e-86739324b125', 'slug' => 'santa-cruz-food-banks-covid-19-hungry-help', 'url' => 'https://lookout.co/santacruz/guides/story/2020-10-31/santa-cruz-food-banks-covid-19-hungry-help', ), 1 =>  array ( '_id' => '00000175-9f9c-ddb0-a57f-dfddbe550000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'ucsc-archive-10-000-photos-santa-cruz-history', 'url' => 'https://lookout.co/santacruz/ucsc-cabrillo/story/2020-11-06/ucsc-archive-10-000-photos-santa-cruz-history', ), 2 =>  array ( '_id' => '00000175-aefd-dfc0-afff-fefd2f6f0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'santa-cruz-wildfires-covid-flu-season-health', 'url' => 'https://lookout.co/santacruz/environment/story/2020-11-09/santa-cruz-wildfires-covid-flu-season-health', ), 3 =>  array ( '_id' => '00000175-af10-dfc0-afff-fffc47b60000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'cannabis-climate-change-santa-cruz', 'url' => 'https://lookout.co/santacruz/environment/story/2020-11-09/cannabis-climate-change-santa-cruz', ), 4 =>  array ( '_id' => '00000175-af24-ddb0-a57f-ef65639e0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'robots-farms-harvest-watsonville-santa-cruz-rural', 'url' => 'https://lookout.co/santacruz/business-technology/story/2020-11-09/robots-farms-harvest-watsonville-santa-cruz-rural', ), 5 =>  array ( '_id' => '00000175-b31d-de97-ab7d-f35f56790000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'biden-win-santa-cruz-lookout-local-recovery-2021', 'url' => 'https://lookout.co/santacruz/the-here-now/story/2020-11-17/biden-win-santa-cruz-lookout-local-recovery-2021', ), 6 =>  array ( '_id' => '00000175-b8f1-ddd1-abf5-fff7e72a0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'illuminee-small-business-profile', 'url' => 'https://lookout.co/santacruz/business-technology/story/2020-11-11/illuminee-small-business-profile', ), 7 =>  array ( '_id' => '00000175-be94-d297-a1f5-bed656d10000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'cabrillo-college-culinary-arts-hospitality-management-classes-continue-amidst-the-covid-19-pandemic', 'url' => 'https://lookout.co/santacruz/coast-life/story/2020-11-13/cabrillo-college-culinary-arts-hospitality-management-classes-continue-amidst-the-covid-19-pandemic', ), 8 =>  array ( '_id' => '00000175-c2c0-ddb2-ab7f-e6e73f0d0000', '_type' => '4f8e492c-6f2f-390e-bc61-f176d3a37ab9', 'slug' => 'debris-flow-evacuations-this-winter', 'url' => 'https://lookout.co/santacruz/environment/story/2020-11-18/debris-flow-evacuations-this-winter', ), 9 =>  array ( '_id' => '00000175-c33c-d297-a1f5-d77ea9d40000', '_type' => 'a7753743-f4e0-30aa-b2fc-221aed805f42', 'slug' => 'debris-flow-safety-rain-winter-santa-cruz-mountains-mudslides', 'url' => 'https://lookout.co/santacruz/guides/story/2020-12-12/debris-flow-safety-rain-winter-santa-cruz-mountains-mudslides', ), );
-$wrong_urls = [
-	'https://lookout.co/santacruz/coast-life/story/2020-11-13/cabrillo-college-culinary-arts-hospitality-management-classes-continue-amidst-the-covid-19-pandemic',
-	'https://lookout.co/santacruz/the-here-now/story/2020-11-17/biden-win-santa-cruz-lookout-local-recovery-2021',
-	'https://lookout.co/santacruz/business-technology/story/2020-11-09/robots-farms-harvest-watsonville-santa-cruz-rural',
-	'https://lookout.co/santacruz/environment/story/2020-11-09/cannabis-climate-change-santa-cruz',
-	'https://lookout.co/santacruz/guides/story/2020-10-31/santa-cruz-food-banks-covid-19-hungry-help',
-];
+		/**
+		 * @var array $posts_urls All pposts URL data is stored in this array. {
+		 *      @type string slug Post slug.
+		 *      @type string url  Post url.
+		 * }
+		 */
+		$posts_urls = [];
+		foreach ( $newspack_entries_table_rows as $key_row => $newspack_entries_table_row ) {
+			WP_CLI::line( sprintf( "%d/%d", $key_row + 1, count( $newspack_entries_table_rows ) ) );
 
-$authors = [];
+// TODO remove dev helper:
+// if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
 
-// Loop through URLs and scrape.
-		foreach ( $urls_data as $url_data ) {
+			// Get post URL.
+			$url          = $this->get_post_url( $newspack_entries_table_row, $section_data_cache_path );
+			$posts_urls[] = [
+				'_id'   => $newspack_entries_table_row["_id"],
+				'_type' => $newspack_entries_table_row["_type"],
+				'slug'  => $newspack_entries_table_row['slug'],
+				'url'   => $url,
+			];
 
-// TODO debug
-if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
+		}
 
-			$url = $url_data['url'];
+		/**
+		 * Now that we have the URLs, we will loop through them and scrape and import posts.
+		 */
+		$post_authors = [];
+		$debug_all_author_names = [];
+		$debug_wrong_posts_urls = [];
+		$debug_all_tags = [];
+		foreach ( $posts_urls as $url_data ) {
 
-			// TODO load HTML from file.
+			$url  = $url_data['url'];
+			$slug = $url_data['slug'];
 
-			$get_result = $this->wp_remote_get_with_retry( $url );
-			if ( is_array( $get_result ) ) {
-				// Not OK.
+			// HTML cache filename and path.
+			$html_cached_filename = $slug . '.html';
+			$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
 
-				// Log.
-				$this->logger->log( $log_wrong_urls, sprintf( "%s CODE:%s MESSAGE:%s", $url, $get_result['response']['code'], $get_result['response']['message'] ) );
+			// Get HTML from cache or fetch from HTTP.
+			$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
+			if ( is_null( $html ) ) {
+				$get_result = $this->wp_remote_get_with_retry( $url );
+				if ( is_array( $get_result ) ) {
+					// Not OK.
+					$debug_wrong_posts_urls[] = $url;
+					$this->logger->log( $log_wrong_urls, sprintf( "%s CODE:%s MESSAGE:%s", $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
+					continue;
+				}
 
-				continue;
+				$html = $get_result;
+
+				// Save HTML to file.
+				file_put_contents( $html_cached_file_path, $html );
 			}
 
-			$html = $get_result;
+			// Crawls and extracts all useful post data from HTML
+			$crawled_data = $this->get_post_data_from_html( $html, $debug_all_author_names, $debug_all_tags );
 
-			// TODO save HTML to file.
-
-
-			/**
-			 * Get all post data.
-			 */
-			$this->crawler->clear();
-			$this->crawler->add( $html );
-
-			// Extract some data from this <script> element which contains JSON data we can use.
-			$script_json = $featured_image_caption = $this->filter_selector( 'script#head-dl', $this->crawler );
-			$script_json = ltrim( $script_json, 'var dataLayer = ' );
-			$script_json = rtrim( $script_json, ';' );
-			$script_data = json_decode( $script_json, true );
-			$script_data = $script_data[0];
-
-			// Title, subtitle, content.
-			$title = $this->filter_selector( 'h1.headline', $this->crawler );
-			$subtitle = $this->filter_selector( 'div.subheadline', $this->crawler );
-			$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
-
-			// Date.
-			$matched = preg_match( '/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/', $script_data['publishDate'], $matches_date ) ;
-			if ( false === $matched ) {
-				// TODO
-				$d=1;
-			}
-			$post_date = sprintf( '%s-%s-%s %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
-
-			// Authors.
-			$authors_text = $this->filter_selector( 'div.author-name', $this->crawler );
-			$authors = array_merge( $authors, $this->format_authors( $authors_text ) );
-
-			// Featured image.
-			$featured_image_caption = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-caption', $this->crawler );
-			$featured_image_credit = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-credit', $this->crawler );
-			$featured_image_credit = $this->format_featured_image_credit( $featured_image_credit );
-			$featured_image = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
-			$featured_image_src = $featured_image->getAttribute( 'src' );
-			$featured_image_alt = $featured_image->getAttribute( 'alt' );
-
-			// Category.
-			// Section name is located both in <meta> element:
-			//      <meta property="article:section" content="UC Santa Cruz">
-			// and in <script> element data:
-			//      $script_data['sectionName]
-			// but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
-			$section_meta = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
-			$category_name = $section_meta->getAttribute( 'content' );
-
-			// Parent category.
-			// E.g. "higher-ed"
-			$section_parent_slug = $script_data['sectionParentPath'];
-			$category_parent_name = self::SECTIONS[ $section_parent_slug ] ?? null;
-
-			// Tags.
-
-			// Presented by.
-			$presented_by = $this->filter_selector_element( 'div.brand-content-name', $this->crawler );
-
-			// More postmeta.
+			// Postmeta.
 			$postmeta = [
-				// E.g. "lo-sc"
-				'newspack_script_source' => $script_data['source'] ?? '',
-				// E.g. "uc-santa-cruz"
-				'newspack_script_sectionName' => $script_data['sectionName'],
-				// E.g. "Promoted Content"
-	            // Also found in <meta property="article:tag" content="Promoted Content">.
-				'newspack_script_tags' => $script_data['tags'],
-				'newspack_presentedBy' => $presented_by ?? '',
+				// E.g. "lo-sc".
+				'newspackmigration_script_source' => $crawled_data['script_data']['source'] ?? '',
+				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
+				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
+				// E.g. "Promoted Content".
+				'newspackmigration_script_tags' => $crawled_data['script_data']['tags'],
+				'newspackmigration_presentedBy' => $crawled_data['presented_by'] ?? '',
 			];
 
 			// Create post.
 			$post_args = [
-				'post_title' => $title,
-				'post_content' => $post_content,
+				'post_title' => $crawled_data['post_title'],
+				'post_content' => $crawled_data['post_content'],
 				'post_status' => 'publish',
 				'post_type' => 'post',
 				'post_name' => $slug,
-				'post_date' => $post_date,
+				'post_date' => $crawled_data['post_date'],
 			];
 			$post_id = wp_insert_post( $post_args );
 
 			// Import featured image.
-			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
-			set_post_thumbnail( $post_id, $attachment_id );
+			if ( isset( $data[ 'featured_image_src' ] ) ) {
+				$attachment_id = $this->attachments->import_external_file( $data[ 'featured_image_src' ], $title = null, $data[ 'featured_image_caption' ], $description = null, $data[ 'featured_image_alt' ], $post_id, $args = [] );
+				set_post_thumbnail( $post_id, $attachment_id );
+				if ( $data[ 'featured_image_credit' ] ) {
+					$postmeta[ self::MEDIA_CREDIT_META] = $data[ 'featured_image_credit' ];
+				}
+			}
 
-			// Create and assign authors.
+			// Authors.
+			$ga_ids = [];
+			// Get or create all GAs.
+			foreach ( $data[ 'post_authors' ] as $author_name ) {
+				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
+				if ( $ga ) {
+					$ga_id = $ga->ID;
+				} else {
+					$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
+				}
+				$ga_ids[] = $ga_id;
+			}
+			if ( empty( $ga_ids ) ) {
+				throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
+			}
+			// Assign GAs to post.
+			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
 
-			// Create and assign categories.
+			// Categories.
+			$category_parent_id = 0;
+			if ( $data[ 'category_parent_name' ] ) {
+				// Get or create parent category.
+				$category_parent_id = wp_create_category( $data[ 'category_parent_name' ], 0 );
+				if ( is_wp_error( $category_parent_id ) ) {
+					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $category_parent_name, $url ) );
+				}
+			}
+			// Get or create primary category.
+			$category_id = wp_create_category( $data[ 'category_name' ], $category_parent_id );
+			// Set category.
+			wp_set_post_categories( $post_id, [ $category_id ] );
 
 			// Assign tags.
-			$script_data['tags'];
+			$tags = $data[ 'script_data' ]['tags'];
+			// wp_set_post_tags() also takes a CSV of tags, so maybe this will work out of the box.
+			wp_set_post_tags( $post_id, $tags );
 
 			// Save postmeta.
 			foreach ( $postmeta as $meta_key => $meta_value ) {
@@ -429,9 +563,18 @@ if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
 			$d = 1;
 		}
 
-		// TODO -- debug all authors
-
-		// Get response.
+		// Debug and QA info.
+		if ( ! empty( $debug_wrong_posts_urls ) ) {
+			WP_CLI::warning( "Check $log_wrong_urls for errors." );
+		}
+		if ( ! empty( $debug_all_author_names ) ) {
+			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
+			WP_CLI::warning( "QA all matched $log_all_author_names ." );
+		}
+		if ( ! empty( $debug_all_tags ) ) {
+			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags ), false );
+			WP_CLI::warning( "QA all matched $log_all_tags ." );
+		}
 	}
 
 	public function format_featured_image_credit( $featured_image_credit ) {
@@ -715,10 +858,10 @@ if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
 
 			// Get more postmeta.
 			$postmeta = [
-				"newspack_commentable.enableCommenting" => $data["commentable.enableCommenting"],
+				"newspackmigration_commentable.enableCommenting" => $data["commentable.enableCommenting"],
 			];
 			if ( $subheadline ) {
-				$postmeta['newspack_post_subtitle'] = $subheadline;
+				$postmeta['newspackmigration_post_subtitle'] = $subheadline;
 			}
 
 
