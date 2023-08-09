@@ -223,7 +223,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 
-
 		/**
 		 * We will first loop through all the posts to get their URLs.
 		 * URLs are hard to find, since we must crawl their DB export and search through relational data, and all queries are super slow since it's one 6 GB table.
@@ -258,9 +257,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 
-
 		/**
-		 * Now that we have the URLs, we will scrape them and import posts.
+		 * Now that we have the URLs, we will scrape them and import the posts.
 		 */
 		$post_authors           = [];
 		$debug_all_author_names = [];
@@ -300,7 +298,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			}
 
 			// Crawl and extract all useful data from HTML
-			$crawled_data = $this->get_post_data_from_html( $html );
+			$crawled_data = $this->crawl_post_data_from_html( $html );
 
 			// Create post.
 			$post_args = [
@@ -370,7 +368,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				// Get or create parent category.
 				$category_parent_id = wp_create_category( $data['category_parent_name'], 0 );
 				if ( is_wp_error( $category_parent_id ) ) {
-					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $category_parent_name, $url ) );
+					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $data['category_parent_name'], $url ) );
 				}
 			}
 			// Get or create primary category.
@@ -501,7 +499,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *      @type ?string presented_by
 	 * }
 	 */
-	public function get_post_data_from_html( $html ) {
+	public function crawl_post_data_from_html( $html ) {
 
 		$data = [];
 
