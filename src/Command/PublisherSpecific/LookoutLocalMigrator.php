@@ -184,7 +184,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			'newspack-content-migrator lookoutlocal-dev',
 			[ $this, 'cmd_dev' ],
 			[
-				'shortdesc' => 'Temp dev command for various research snippets.',
+				'shortdesc' => 'Temp dev command for various snippets.',
 				'synopsis'  => [],
 			]
 		);
@@ -212,12 +212,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Create folders for caching stuff.
 		// Cache section (category) data to files (because SQLs on `Result` table are super slow).
-		$section_data_cache_path = $log_path . '/cache_section_data';
+		$section_data_cache_path = $log_path . '/cache/section_data';
 		if ( ! file_exists( $section_data_cache_path ) ) {
 			mkdir( $section_data_cache_path, 0777, true );
 		}
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-		$scraped_htmls_cache_path = $log_path . '/cache_scraped_htmls';
+		$scraped_htmls_cache_path = $log_path . '/cache/scraped_htmls';
 		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
 			mkdir( $scraped_htmls_cache_path, 0777, true );
 		}
@@ -241,19 +241,26 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$posts_urls = [];
 		foreach ( $newspack_table_rows as $key_row => $newspack_table_row ) {
 
-			WP_CLI::line( sprintf( '%d/%d', $key_row + 1, count( $newspack_table_rows ) ) );
+			$row_data = json_decode( $newspack_table_row['data'], true );
+			$slug     = $newspack_table_row['slug'];
 
-			// TODO remove dev helper:
-			// if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
+// TODO remove dev helper:
+// if ( 'debris-flow-evacuations-this-winter' != $slug ) { continue ; }
+
+			WP_CLI::line( sprintf( '%d/%d Getting URL for slug %s ...', $key_row + 1, count( $newspack_table_rows ), $slug ) );
 
 			// Get post URL.
 			$url          = $this->get_post_url( $newspack_table_row, $section_data_cache_path );
 			$posts_urls[] = [
-				'_id'   => $newspack_table_row['_id'],
-				'_type' => $newspack_table_row['_type'],
-				'slug'  => $newspack_table_row['slug'],
+				'_id'   => $row_data['_id'],
+				'_type' => $row_data['_type'],
+				'slug'  => $slug,
 				'url'   => $url,
 			];
+
+// TODO dev test import one post
+if ( $key_row >= 2 ) { break; }
+
 		}
 
 
@@ -264,15 +271,29 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$debug_all_author_names = [];
 		$debug_wrong_posts_urls = [];
 		$debug_all_tags         = [];
-		foreach ( $posts_urls as $url_data ) {
+		foreach ( $posts_urls as $key_url_data => $url_data ) {
 
 			$url  = $url_data['url'];
 			$slug = $url_data['slug'];
 
-			// If post with same URL was imported, skip it.
-			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s", 'newspackmigration_url', $url ) );
+// TODO remove dev helper:
+// if ( 'ucsc-archive-10-000-photos-santa-cruz-history' != $slug ) { continue ; }
+
+			WP_CLI::line( sprintf( '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $posts_urls ), $url ) );
+
+			// If a "publish"-ed post with same URL exists, skip it.
+			$post_id = $wpdb->get_var( $wpdb->prepare(
+				"select wpm.post_id
+					from {$wpdb->postmeta} wpm
+					join wp_posts wp on wp.ID = wpm.post_id 
+					where wpm.meta_key = %s
+					and wpm.meta_value = %s
+					and wp.post_status = 'publish' ; ",
+				'newspackmigration_url',
+				$url
+			) );
 			if ( $post_id ) {
-				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping', $post_id, $url ) );
+				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
 				continue;
 			}
 
@@ -287,18 +308,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				if ( is_array( $get_result ) ) {
 					// Not OK.
 					$debug_wrong_posts_urls[] = $url;
-					$this->logger->log( $log_wrong_urls, sprintf( '%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
+					$this->logger->log( $log_wrong_urls, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
 					continue;
 				}
 
 				$html = $get_result;
 
-				// Save HTML to file.
+				// Cache HTML to file.
 				file_put_contents( $html_cached_file_path, $html );
 			}
 
 			// Crawl and extract all useful data from HTML
-			$crawled_data = $this->crawl_post_data_from_html( $html );
+			$crawled_data = $this->crawl_post_data_from_html( $html, $url );
 
 			// Create post.
 			$post_args = [
@@ -310,6 +331,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'post_date'    => $crawled_data['post_date'],
 			];
 			$post_id   = wp_insert_post( $post_args );
+			WP_CLI::success( sprintf( "Created post ID %d", $post_id ) );
 
 			// Collect postmeta in this array.
 			$postmeta = [
@@ -320,32 +342,33 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
 				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
 				// E.g. "Promoted Content".
-				'newspackmigration_script_tags'        => $crawled_data['script_data']['tags'],
+				'newspackmigration_script_tags'        => $crawled_data['script_data']['tags'] ?? null,
 				'newspackmigration_presentedBy'        => $crawled_data['presented_by'] ?? '',
 			];
 
 			// Import featured image.
-			if ( isset( $data['featured_image_src'] ) ) {
+			if ( isset( $crawled_data['featured_image_src'] ) ) {
+				WP_CLI::line( "Downloading featured image ..." );
 				$attachment_id   = $this->attachments->import_external_file(
-					$data['featured_image_src'],
+					$crawled_data['featured_image_src'],
 					$title       = null,
-					$data['featured_image_caption'],
+					$crawled_data['featured_image_caption'],
 					$description = null,
-					$data['featured_image_alt'],
+					$crawled_data['featured_image_alt'],
 					$post_id,
 					$args        = []
 				);
 				set_post_thumbnail( $post_id, $attachment_id );
 				// Credit goes as Newspack credit meta.
-				if ( $data['featured_image_credit'] ) {
-					$postmeta[ self::MEDIA_CREDIT_META ] = $data['featured_image_credit'];
+				if ( $crawled_data['featured_image_credit'] ) {
+					$postmeta[ self::MEDIA_CREDIT_META ] = $crawled_data['featured_image_credit'];
 				}
 			}
 
 			// Authors.
 			$ga_ids = [];
 			// Get/create GAs.
-			foreach ( $data['post_authors'] as $author_name ) {
+			foreach ( $crawled_data['post_authors'] as $author_name ) {
 				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
 				if ( $ga ) {
 					$ga_id = $ga->ID;
@@ -360,28 +383,31 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Assign GAs to post.
 			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
 			// Also collect all author names for easier debugging/QA-ing.
-			$debug_all_author_names = array_merge( $debug_all_author_names, $post_authors );
+			$debug_all_author_names = array_merge( $debug_all_author_names, $crawled_data['post_authors'] );
 
 			// Categories.
 			$category_parent_id = 0;
-			if ( $data['category_parent_name'] ) {
+			if ( $crawled_data['category_parent_name'] ) {
 				// Get or create parent category.
-				$category_parent_id = wp_create_category( $data['category_parent_name'], 0 );
+				$category_parent_id = wp_create_category( $crawled_data['category_parent_name'], 0 );
 				if ( is_wp_error( $category_parent_id ) ) {
-					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $data['category_parent_name'], $url ) );
+					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_parent_name'], $url, $category_parent_id->get_error_message() ) );
 				}
 			}
 			// Get or create primary category.
-			$category_id = wp_create_category( $data['category_name'], $category_parent_id );
+			$category_id = wp_create_category( $crawled_data['category_name'], $category_parent_id );
+			if ( is_wp_error( $category_id ) ) {
+				throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_name'], $url, $category_id->get_error_message() ) );
+			}
 			// Set category.
 			wp_set_post_categories( $post_id, [ $category_id ] );
 
 			// Assign tags.
-			$tags = $data['script_data']['tags'];
+			$tags = $crawled_data['script_data']['tags'];
 			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
 			wp_set_post_tags( $post_id, $tags );
 			// Collect all tags for QA.
-			$debug_all_tags[] = array_merge( $debug_all_tags, $tags );
+			$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
 
 			// Save the postmeta.
 			foreach ( $postmeta as $meta_key => $meta_value ) {
@@ -395,15 +421,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Debug and QA info.
 		if ( ! empty( $debug_wrong_posts_urls ) ) {
-			WP_CLI::warning( "Check $log_wrong_urls for errors." );
+			WP_CLI::warning( "❗️ Check $log_wrong_urls for invalid URLs." );
 		}
 		if ( ! empty( $debug_all_author_names ) ) {
 			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-			WP_CLI::warning( "QA all matched $log_all_author_names ." );
+			WP_CLI::warning( "⚠️️ QA the following: $log_all_author_names " );
 		}
 		if ( ! empty( $debug_all_tags ) ) {
 			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags ), false );
-			WP_CLI::warning( "QA all matched $log_all_tags ." );
+			WP_CLI::warning( "⚠️️ QA the following: $log_all_tags ." );
 		}
 	}
 
@@ -430,15 +456,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( ! isset( $data['sectionable.section']['_ref'] ) || ! isset( $data['sectionable.section']['_type'] ) ) {
 			return null;
 		}
-		$id_like                           = sprintf( '"_id":"%s"', $data['sectionable.section']['_ref'] );
-		$type_like                         = sprintf( '"_type":"%s"', $data['sectionable.section']['_type'] );
-		$section_data_temp_cache_file_name = $data['sectionable.section']['_type'] . '__' . $data['sectionable.section']['_ref'];
+		$article_ref                       = $data['sectionable.section']['_ref'];
+		$article_type                      = $data['sectionable.section']['_type'];
+		$id_like                           = sprintf( '"_id":"%s"', $article_ref );
+		$type_like                         = sprintf( '"_type":"%s"', $article_type );
+		$section_data_temp_cache_file_name = $article_type . '__' . $article_ref;
 		$section_data_temp_cache_file_path = $section_data_cache_path . '/' . $section_data_temp_cache_file_name;
 
 		$record_table = self::DATA_EXPORT_TABLE;
 		if ( ! file_exists( $section_data_temp_cache_file_path ) ) {
 			$sql = "select data from {$record_table} where data like '{\"cms.site.owner\"%' and data like '%{$id_like}%' and data like '%{$type_like}%' order by id desc limit 1;";
-			WP_CLI::line( sprintf( 'Getting section info' ) );
+			WP_CLI::line( sprintf( 'Querying post URL...' ) );
 			$section_result = $wpdb->get_var( $sql );
 			file_put_contents( $section_data_temp_cache_file_path, $section_result );
 		} else {
@@ -453,16 +481,19 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Get last exploded url segment from, e.g. "cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-32a8-d1f7-a775-feedba580000/environment"
 		if ( ! isset( $section['cms.directory.paths'][0] ) ) {
-			$d = 1;
+			throw new \UnexpectedValueException( sprintf( 'Could not get section data for article slug: %s _ref: %s and _type:%s', $slug, $article_ref, $article_type ) );
 		}
 		$section_paths_exploded = explode( '/', $section['cms.directory.paths'][0] );
 		$section_slug           = end( $section_paths_exploded );
 		if ( ! $section_slug ) {
-			$d = 1;
+			throw new \UnexpectedValueException( sprintf( 'Could not get section for article slug: %s _ref: %s and _type:%s', $slug, $article_ref, $article_type ) );
 		}
 
 		// Get date slug, e.g. '2020-11-18'.
 		$date_slug = date( 'Y-m-d', $data['cms.content.publishDate'] / 1000 );
+		if ( ! $section_slug ) {
+			throw new \UnexpectedValueException( sprintf( 'Could not get date slug for article slug: %s _ref: %s and _type:%s', $slug, $article_ref, $article_type ) );
+		}
 
 		// Compose URL.
 		$url = sprintf(
@@ -499,7 +530,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *      @type ?string presented_by
 	 * }
 	 */
-	public function crawl_post_data_from_html( $html ) {
+	public function crawl_post_data_from_html( $html, $url ) {
 
 		$data = [];
 
@@ -529,7 +560,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$data['post_title'] = $title;
 
 		$subtitle           = $this->filter_selector( 'div.subheadline', $this->crawler ) ?? null;
-		$data['post_title'] = $subtitle;
+		$data['post_title'] = $subtitle ?? null;
 
 		$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 		if ( empty( $post_content ) ) {
@@ -542,7 +573,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( false === $matched ) {
 			throw new \UnexpectedValueException( sprintf( 'Could not get date for post %s', $url ) );
 		}
-		$post_date         = sprintf( '%s-%s-%s$all %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
+		$post_date         = sprintf( '%s-%s-%s %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
 		$data['post_date'] = $post_date;
 
 		// Authors.
@@ -551,9 +582,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$data['post_authors'] = $post_authors;
 
 		// Featured image.
-		$featured_image        = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
-		$featured_image_exists = count( $featured_image->getIterator() ) > 0 ? true : false;
-		if ( $featured_image_exists ) {
+		$featured_image = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
+		if ( $featured_image ) {
 			$featured_image_src         = $featured_image->getAttribute( 'src' );
 			$data['featured_image_src'] = $featured_image_src;
 
@@ -580,7 +610,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Parent category.
 		// E.g. "higher-ed"
-		$section_parent_slug          = $script_data['sectionParentPath'];
+		$section_parent_slug          = $script_data['sectionParentPath'] ?? null;
 		$category_parent_name         = self::SECTIONS[ $section_parent_slug ] ?? null;
 		$data['category_parent_name'] = $category_parent_name;
 
@@ -593,7 +623,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * E.g. "Promoted Content"
 		 * This data is also found in <meta property="article:tag" content="Promoted Content">.
 		 */
-		$presented_by         = $this->filter_selector_element( 'div.brand-content-name', $this->crawler ) ?? null;
+		$presented_by         = $this->filter_selector( 'div.brand-content-name', $this->crawler ) ?? null;
 		$data['presented_by'] = $presented_by;
 
 		return $data;
