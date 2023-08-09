@@ -21,6 +21,46 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	const LOOKOUT_S3_SCHEMA_AND_HOSTNAME = 'https://lookout-local-brightspot.s3.amazonaws.com';
 
 	/**
+	 * Extracted from nav menu:
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/city-life">City Life</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/food-drink">Food &amp; Drink</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/places">Housing</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/civic-life">Civic Life</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/education/higher-ed">Higher Ed</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/education">K-12 Education</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/coast-life">Coast Life</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/wallace-baine">Wallace Baine</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/environment">Environment</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/health-wellness">Health &amp; Wellness</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/business-technology">Business &amp; Technology</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/recreation-sports">Recreation &amp; Sports</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/election-2022">Election 2022 </a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/santa-cruz-county-obituaries">Obituaries</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/partners/civic-groups">Civic Groups</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/partners">Partners</a>
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/lookout-educator-page">For Educators</a>
+	 */
+	const SECTIONS = [
+		'city-life' => 'City Life',
+		'food-drink' => 'Food & Drink',
+		'places' => 'Housing',
+		'civic-life' => 'Civic Life',
+		'higher-ed' => 'Higher Ed',
+		'education' => 'K-12 Education',
+		'coast-life' => 'Coast Life',
+		'wallace-baine' => 'Wallace Baine',
+		'environment' => 'Environment',
+		'health-wellness' => 'Health &amp; Wellness',
+		'business-technology' => 'Business &amp; Technology',
+		'recreation-sports' => 'Recreation &amp; Sports',
+		'election-2022' => 'Election 2022 ',
+		'santa-cruz-county-obituaries' => 'Obituaries',
+		'civic-groups' => 'Civic Groups',
+		'partners' => 'Partners',
+		'lookout-educator-page' => 'For Educators',
+	];
+
+	/**
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
@@ -261,6 +301,8 @@ $wrong_urls = [
 	'https://lookout.co/santacruz/guides/story/2020-10-31/santa-cruz-food-banks-covid-19-hungry-help',
 ];
 
+$authors = [];
+
 // Loop through URLs and scrape.
 		foreach ( $urls_data as $url_data ) {
 
@@ -285,41 +327,75 @@ if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
 
 			// TODO save HTML to file.
 
+
+			/**
+			 * Get all post data.
+			 */
 			$this->crawler->clear();
 			$this->crawler->add( $html );
 
-			// $img_data = $this->crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
+			// Extract some data from this <script> element which contains JSON data we can use.
+			$script_json = $featured_image_caption = $this->filter_selector( 'script#head-dl', $this->crawler );
+			$script_json = ltrim( $script_json, 'var dataLayer = ' );
+			$script_json = rtrim( $script_json, ';' );
+			$script_data = json_decode( $script_json, true );
+			$script_data = $script_data[0];
 
-			// $image = $images->getIterator()[0];
-			// $img_raw_html = $image->ownerDocument->saveHTML( $image );
-			// $img_src = $image->getAttribute( 'src' );
+			// Title, subtitle, content.
+			$title = $this->filter_selector( 'h1.headline', $this->crawler );
+			$subtitle = $this->filter_selector( 'div.subheadline', $this->crawler );
+			$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 
-			$selectors = [
-				'title'          => 'h1.pSt-tTl',
-				'content'        => 'div.body',
+			// Date.
+			$matched = preg_match( '/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/', $script_data['publishDate'], $matches_date ) ;
+			if ( false === $matched ) {
+				// TODO
+				$d=1;
+			}
+			$post_date = sprintf( '%s-%s-%s %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
+
+			// Authors.
+			$authors_text = $this->filter_selector( 'div.author-name', $this->crawler );
+			$authors = array_merge( $authors, $this->format_authors( $authors_text ) );
+
+			// Featured image.
+			$featured_image_caption = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-caption', $this->crawler );
+			$featured_image_credit = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-credit', $this->crawler );
+			$featured_image_credit = $this->format_featured_image_credit( $featured_image_credit );
+			$featured_image = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
+			$featured_image_src = $featured_image->getAttribute( 'src' );
+			$featured_image_alt = $featured_image->getAttribute( 'alt' );
+
+			// Category.
+			// Section name is located both in <meta> element:
+			//      <meta property="article:section" content="UC Santa Cruz">
+			// and in <script> element data:
+			//      $script_data['sectionName]
+			// but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
+			$section_meta = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
+			$category_name = $section_meta->getAttribute( 'content' );
+
+			// Parent category.
+			// E.g. "higher-ed"
+			$section_parent_slug = $script_data['sectionParentPath'];
+			$category_parent_name = self::SECTIONS[ $section_parent_slug ] ?? null;
+
+			// Tags.
+
+			// Presented by.
+			$presented_by = $this->filter_selector_element( 'div.brand-content-name', $this->crawler );
+
+			// More postmeta.
+			$postmeta = [
+				// E.g. "lo-sc"
+				'newspack_script_source' => $script_data['source'] ?? '',
+				// E.g. "uc-santa-cruz"
+				'newspack_script_sectionName' => $script_data['sectionName'],
+				// E.g. "Promoted Content"
+	            // Also found in <meta property="article:tag" content="Promoted Content">.
+				'newspack_script_tags' => $script_data['tags'],
+				'newspack_presentedBy' => $presented_by ?? '',
 			];
-			$title = $this->parse_title( $selectors[ 'title' ], $url );
-			$featured_image = $this->parse_featured_image( $selectors[ 'featured_image' ], $url );
-			$author = $this->parse_author( $selectors[ 'author' ], $url );
-			$excerpt = $this->parse_excerpt( $selectors[ 'excerpt' ], $url );
-			$date = $this->parse_date( $selectors[ 'date' ], $url );
-			$content = $this->parse_content( $selectors[ 'content' ], $url );
-			$categories = $this->parse_categories( $selectors[ 'categories' ], $url );
-			$tags = $this->parse_tags( $selectors[ 'tags' ], $url );
-
-			$post = $this->data_parser->parse( $html, $url, $selectors );
-
-			$title = $this->crawler->filterXpath( 'div[@class="headline"]' );
-			$title = $title->getIterator();
-			count( $title )
-			[0]->textContent;
-			$subtitle = $this->crawler->filterXpath( 'div[@class="subheadline"]' );
-			//
-			// h1 headline
-			// div subheadline
-			$post_content;
-			$post_date;
-
 
 			// Create post.
 			$post_args = [
@@ -332,82 +408,69 @@ if ( in_array( $url_data['url'], $wrong_urls ) ) { continue; }
 			];
 			$post_id = wp_insert_post( $post_args );
 
-
-
-			// Get more postmeta.
-			$postmeta = [
-				"newspack_commentable.enableCommenting" => $data["commentable.enableCommenting"],
-			];
-			if ( $subheadline ) {
-				$postmeta['newspack_post_subtitle'] = $subheadline;
-			}
-
-
-			// Get more post data to update all at once.
-			$post_modified = $this->convert_epoch_timestamp_to_wp_format( $data['publicUpdateDate'] );
-			$post_update_data = [
-				'post_modified'	=> $post_modified,
-			];
-
-
-			// Post URL.
-			// TODO -- find post URL for redirect purposes and store as meta. Looks like it's stored as "canonicalURL" in some related entries.
-			// ? "paths" data ?
-
-
-			// Post excerpt.
-			// TODO -- find excerpt.
-
-
-			// Featured image.
-			$caption = $data['lead'][ 'caption' ];
-			$hide_caption = $data['lead'][ 'hideCaption' ];
-			$credit = $data['lead'][ 'credit' ];
-			$alt = $data['lead'][ 'altText' ];
-			// TODO -- find url and download image.
-			$url;
+			// Import featured image.
 			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
 			set_post_thumbnail( $post_id, $attachment_id );
 
+			// Create and assign authors.
 
-			// Authors.
+			// Create and assign categories.
 
-			// div author-name
-
-			// Categories.
-			$data["sectionable.section"];
-
-			$data["sectionable.secondarySections"];
-
-
-			// "Presented by"
-			// div brand-content-name
-
-
-			// Tags.
-			$data["taggable.tags"];
-
+			// Assign tags.
+			$script_data['tags'];
 
 			// Save postmeta.
 			foreach ( $postmeta as $meta_key => $meta_value ) {
-				update_post_meta( $post_id, $meta_key, $meta_value );
+				if ( ! empty( $meta_value ) ) {
+					update_post_meta( $post_id, $meta_key, $meta_value );
+				}
 			}
-
-
-			// Update post data.
-			if ( ! empty( $post_update_data ) ) {
-				$wpdb->update( $wpdb->posts, $post_update_data, [ 'ID' => $post_id ] );
-			}
-
-
-
-
-
 
 			$d = 1;
 		}
 
+		// TODO -- debug all authors
+
 		// Get response.
+	}
+
+	public function format_featured_image_credit( $featured_image_credit ) {
+		$featured_image_credit = trim( $featured_image_credit, ' ()' );
+
+		return $featured_image_credit;
+	}
+	public function format_authors( $authors_text ) {
+		// Remove 'written by: ' and explode authors by comma, e.g. "Written by: Scott Rappaport, UC Santa Cruz".
+		$authors_text = str_replace( 'Written by: ', '', $authors_text );
+		$authors_text = str_replace( ', ', ',', $authors_text );
+
+		$authors = explode( ',', $authors_text );
+
+		return $authors;
+	}
+
+	public function filter_selector( $selector, $dom_crawler, $get_text = true, $sanitize_text = true ) {
+		$text = null;
+
+		$found_element = $this->data_parser->get_element_by_selector( $selector, $dom_crawler, $single = true );
+		if ( $found_element && true === $get_text ) {
+			// Will return text cleared from formatting.
+			$text = $found_element->textContent;
+		} elseif ( $found_element && false === $get_text ) {
+			// Will return HTML.
+			$text = $found_element->ownerDocument->saveHTML( $found_element );
+		}
+		if ( $found_element && true === $sanitize_text ) {
+			$text = sanitize_text_field( $text );
+		}
+
+		return $text;
+	}
+
+	public function filter_selector_element( $selector, $dom_crawler ) {
+		$found_element = $this->data_parser->get_element_by_selector( $selector, $dom_crawler, $single = true );
+
+		return $found_element;
 	}
 
 	/**

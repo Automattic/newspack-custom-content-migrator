@@ -12,7 +12,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-cms-importers.git",
-                "reference": "a6c230da9aae1b60fa434f523b392ba4c93d2fd7"
+                "reference": "6767c9422977658a8e077867ea9daf972388f1f3"
             },
             "default-branch": true,
             "type": "library",
@@ -21,7 +21,7 @@
                     "newspack-scraper-migrator/lib/class-newspack-wxr-exporter.php"
                 ]
             },
-            "time": "2023-08-09T13:42:43+00:00"
+            "time": "2023-08-09T13:50:56+00:00"
         },
         {
             "name": "automattic/newspack-content-converter",
