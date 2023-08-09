@@ -17,9 +17,9 @@ use Symfony\Component\DomCrawler\Crawler as Crawler;
  */
 class LookoutLocalMigrator implements InterfaceCommand {
 
-	const MEDIA_CREDIT_META = '_media_credit';
-	const DATA_EXPORT_TABLE = 'Record';
-	const CUSTOM_ENTRIES_TABLE = 'newspack_entries';
+	const MEDIA_CREDIT_META              = '_media_credit';
+	const DATA_EXPORT_TABLE              = 'Record';
+	const CUSTOM_ENTRIES_TABLE           = 'newspack_entries';
 	const LOOKOUT_S3_SCHEMA_AND_HOSTNAME = 'https://lookout-local-brightspot.s3.amazonaws.com';
 
 	/**
@@ -43,23 +43,23 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/lookout-educator-page">For Educators</a>
 	 */
 	const SECTIONS = [
-		'city-life' => 'City Life',
-		'food-drink' => 'Food & Drink',
-		'places' => 'Housing',
-		'civic-life' => 'Civic Life',
-		'higher-ed' => 'Higher Ed',
-		'education' => 'K-12 Education',
-		'coast-life' => 'Coast Life',
-		'wallace-baine' => 'Wallace Baine',
-		'environment' => 'Environment',
-		'health-wellness' => 'Health &amp; Wellness',
-		'business-technology' => 'Business &amp; Technology',
-		'recreation-sports' => 'Recreation &amp; Sports',
-		'election-2022' => 'Election 2022 ',
+		'city-life'                    => 'City Life',
+		'food-drink'                   => 'Food & Drink',
+		'places'                       => 'Housing',
+		'civic-life'                   => 'Civic Life',
+		'higher-ed'                    => 'Higher Ed',
+		'education'                    => 'K-12 Education',
+		'coast-life'                   => 'Coast Life',
+		'wallace-baine'                => 'Wallace Baine',
+		'environment'                  => 'Environment',
+		'health-wellness'              => 'Health &amp; Wellness',
+		'business-technology'          => 'Business &amp; Technology',
+		'recreation-sports'            => 'Recreation &amp; Sports',
+		'election-2022'                => 'Election 2022 ',
 		'santa-cruz-county-obituaries' => 'Obituaries',
-		'civic-groups' => 'Civic Groups',
-		'partners' => 'Partners',
-		'lookout-educator-page' => 'For Educators',
+		'civic-groups'                 => 'Civic Groups',
+		'partners'                     => 'Partners',
+		'lookout-educator-page'        => 'For Educators',
 	];
 
 	/**
@@ -131,11 +131,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		require realpath( $this->cwd . '/../../../vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-html-parser.php' );
 
 		$this->attachments = new Attachments();
-		$this->logger = new Logger();
-		$this->scraper = new Newspack_Scraper_Migrator_Util();
-		$this->crawler = new Crawler();
+		$this->logger      = new Logger();
+		$this->scraper     = new Newspack_Scraper_Migrator_Util();
+		$this->crawler     = new Crawler();
 		$this->data_parser = new Newspack_Scraper_Migrator_HTML_Parser();
-		$this->cap = new CoAuthorPlus();
+		$this->cap         = new CoAuthorPlus();
 	}
 
 	/**
@@ -146,7 +146,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -194,7 +194,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		$slug = $newspack_entries_table_row['slug'];
-		$data = json_decode( $newspack_entries_table_row['data'], true);
+		$data = json_decode( $newspack_entries_table_row['data'], true );
 
 		/**
 		 * Example post URL looks like this:
@@ -213,15 +213,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( ! isset( $data['sectionable.section']['_ref'] ) || ! isset( $data['sectionable.section']['_type'] ) ) {
 			return null;
 		}
-		$id_like = sprintf( '"_id":"%s"', $data['sectionable.section']['_ref'] );
-		$type_like = sprintf( '"_type":"%s"', $data['sectionable.section']['_type'] );
+		$id_like                           = sprintf( '"_id":"%s"', $data['sectionable.section']['_ref'] );
+		$type_like                         = sprintf( '"_type":"%s"', $data['sectionable.section']['_type'] );
 		$section_data_temp_cache_file_name = $data['sectionable.section']['_type'] . '__' . $data['sectionable.section']['_ref'];
 		$section_data_temp_cache_file_path = $section_data_cache_path . '/' . $section_data_temp_cache_file_name;
 
 		$record_table = self::DATA_EXPORT_TABLE;
 		if ( ! file_exists( $section_data_temp_cache_file_path ) ) {
 			$sql = "select data from {$record_table} where data like '{\"cms.site.owner\"%' and data like '%{$id_like}%' and data like '%{$type_like}%' order by id desc limit 1;";
-			WP_CLI::line( sprintf( "Getting section info" ) );
+			WP_CLI::line( sprintf( 'Getting section info' ) );
 			$section_result = $wpdb->get_var( $sql );
 			file_put_contents( $section_data_temp_cache_file_path, $section_result );
 		} else {
@@ -231,17 +231,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Check if section data is valid.
 		if ( ! $section || ! isset( $section['cms.directory.paths'] ) || ! $section['cms.directory.paths'] ) {
-			$d=1;
+			$d = 1;
 		}
 
 		// Get last exploded url segment from, e.g. "cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-32a8-d1f7-a775-feedba580000/environment"
 		if ( ! isset( $section['cms.directory.paths'][0] ) ) {
-			$d=1;
+			$d = 1;
 		}
 		$section_paths_exploded = explode( '/', $section['cms.directory.paths'][0] );
-		$section_slug = end( $section_paths_exploded );
+		$section_slug           = end( $section_paths_exploded );
 		if ( ! $section_slug ) {
-			$d=1;
+			$d = 1;
 		}
 
 		// Get date slug, e.g. '2020-11-18'.
@@ -282,7 +282,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *      @type ?string presented_by
 	 * }
 	 */
-	public function get_post_data_from_html( $html, &$debug_all_author_names, &$debug_all_tags ) {
+	public function get_post_data_from_html( $html ) {
 
 		$data = [];
 
@@ -302,88 +302,82 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			throw new \UnexpectedValueException( sprintf( 'Could not get <script> element data for post %s', $url ) );
 		}
 
-		$data[ 'script_data' ] = $script_data;
+		$data['script_data'] = $script_data;
 
 		// Title, subtitle, content.
 		$title = $this->filter_selector( 'h1.headline', $this->crawler );
 		if ( empty( $title ) ) {
 			throw new \UnexpectedValueException( sprintf( 'Could not get title for post %s', $url ) );
 		}
-		$data[ 'post_title' ] = $title;
+		$data['post_title'] = $title;
 
-		$subtitle = $this->filter_selector( 'div.subheadline', $this->crawler ) ?? null;
-		$data[ 'post_title' ] = $subtitle;
+		$subtitle           = $this->filter_selector( 'div.subheadline', $this->crawler ) ?? null;
+		$data['post_title'] = $subtitle;
 
 		$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 		if ( empty( $post_content ) ) {
 			throw new \UnexpectedValueException( sprintf( 'Could not get post content for post %s', $url ) );
 		}
-		$data[ 'post_content' ] = $post_content;
+		$data['post_content'] = $post_content;
 
 		// Date. <script> element has both date and time of publishing.
-		$matched = preg_match( '/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/', $script_data['publishDate'], $matches_date ) ;
+		$matched = preg_match( '/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/', $script_data['publishDate'], $matches_date );
 		if ( false === $matched ) {
 			throw new \UnexpectedValueException( sprintf( 'Could not get date for post %s', $url ) );
 		}
-		$post_date = sprintf( '%s-%s-%s$all %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
-		$data[ 'post_date' ] = $post_date;
+		$post_date         = sprintf( '%s-%s-%s$all %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
+		$data['post_date'] = $post_date;
 
 		// Authors.
-		$authors_text = $this->filter_selector( 'div.author-name', $this->crawler );
-		$post_authors = $this->format_authors( $authors_text );
-		$data[ 'post_authors' ] = $post_authors;
-
-		// Also collect all author names for easier debugging/QA-ing.
-		$debug_all_author_names = array_merge( $debug_all_author_names, $post_authors );
+		$authors_text         = $this->filter_selector( 'div.author-name', $this->crawler );
+		$post_authors         = $this->format_authors( $authors_text );
+		$data['post_authors'] = $post_authors;
 
 		// Featured image.
-		$featured_image = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
+		$featured_image        = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
 		$featured_image_exists = count( $featured_image->getIterator() ) > 0 ? true : false;
 		if ( $featured_image_exists ) {
-			$featured_image_src = $featured_image->getAttribute( 'src' );
-			$data[ 'featured_image_src' ] = $featured_image_src;
+			$featured_image_src         = $featured_image->getAttribute( 'src' );
+			$data['featured_image_src'] = $featured_image_src;
 
-			$featured_image_alt = $featured_image->getAttribute( 'alt' ) ?? null;
-			$data[ 'featured_image_alt' ] = $featured_image_alt;
+			$featured_image_alt         = $featured_image->getAttribute( 'alt' ) ?? null;
+			$data['featured_image_alt'] = $featured_image_alt;
 
-			$featured_image_caption = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-caption', $this->crawler ) ?? null;
-			$data[ 'featured_image_caption' ] = $featured_image_caption;
+			$featured_image_caption         = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-caption', $this->crawler ) ?? null;
+			$data['featured_image_caption'] = $featured_image_caption;
 
-			$featured_image_credit = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-credit', $this->crawler );
-			$featured_image_credit = $this->format_featured_image_credit( $featured_image_credit ) ?? null;
-			$data[ 'featured_image_credit' ] = $featured_image_credit;
+			$featured_image_credit         = $this->filter_selector( 'div.page-lead-media > figure > div.figure-content > div.figure-credit', $this->crawler );
+			$featured_image_credit         = $this->format_featured_image_credit( $featured_image_credit ) ?? null;
+			$data['featured_image_credit'] = $featured_image_credit;
 		}
 
 		// Category.
 		// Section name is located both in <meta> element:
-		//      <meta property="article:section" content="UC Santa Cruz">
+		// <meta property="article:section" content="UC Santa Cruz">
 		// and in <script> element data:
-		//      $script_data['sectionName]
+		// $script_data['sectionName]
 		// but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
-		$section_meta = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
-		$category_name = $section_meta->getAttribute( 'content' );
-		$data[ 'category_name' ] = $category_name;
+		$section_meta          = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
+		$category_name         = $section_meta->getAttribute( 'content' );
+		$data['category_name'] = $category_name;
 
 		// Parent category.
 		// E.g. "higher-ed"
-		$section_parent_slug = $script_data['sectionParentPath'];
-		$category_parent_name = self::SECTIONS[ $section_parent_slug ] ?? null;
-		$data[ 'category_parent_name' ] = $category_parent_name;
+		$section_parent_slug          = $script_data['sectionParentPath'];
+		$category_parent_name         = self::SECTIONS[ $section_parent_slug ] ?? null;
+		$data['category_parent_name'] = $category_parent_name;
 
 		// Tags.
-		$tags = $script_data['tags'] ?? null;
-		$data[ 'tags' ] = $tags;
-
-		// Collect tags for easier QA.
-		$debug_all_tags[] = array_merge( $debug_all_tags, $tags );
+		$tags         = $script_data['tags'] ?? null;
+		$data['tags'] = $tags;
 
 		// Presented by.
 		/**
 		 * E.g. "Promoted Content"
 		 * This data is also found in <meta property="article:tag" content="Promoted Content">.
 		 */
-		$presented_by = $this->filter_selector_element( 'div.brand-content-name', $this->crawler ) ?? null;
-		$data[ 'presented_by' ] = $presented_by;
+		$presented_by         = $this->filter_selector_element( 'div.brand-content-name', $this->crawler ) ?? null;
+		$data['presented_by'] = $presented_by;
 
 		return $data;
 	}
@@ -391,14 +385,19 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
+
+		/**
+		 * Prepare logs and caching.
+		 */
+
 		// Log files.
-		$log_path = $this->cwd . '/logs_and_cache';
-		$log_wrong_urls = 'll_debug__wrong_urls.log';
+		$log_path             = $this->cwd . '/logs_and_cache';
+		$log_wrong_urls       = 'll_debug__wrong_urls.log';
 		$log_all_author_names = 'll_debug__all_author_names.log';
-		$log_all_tags = 'll_debug__all_tags.log';
+		$log_all_tags         = 'll_debug__all_tags.log';
 
 		// Hit timestamp on all logs.
-		$ts = sprintf( "Started: %s", date( 'Y-m-d H:i:s' ) );
+		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_wrong_urls, $ts, false );
 		$this->logger->log( $log_all_author_names, $ts, false );
 		$this->logger->log( $log_all_tags, $ts, false );
@@ -415,15 +414,16 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			mkdir( $scraped_htmls_cache_path, 0777, true );
 		}
 
-		// Get rows from our custom posts table (created by command lookoutlocal-get-posts-from-data-export-table).
-		$entries_table = self::CUSTOM_ENTRIES_TABLE;
-		$newspack_entries_table_rows = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
 
 
 		/**
-		 * We will first loop through all posts and get their URLs.
-		 * URL is hard to find, we must crawl their DB export and search through relational data.
+		 * We will first loop through all the posts to get their URLs.
+		 * URLs are hard to find, since we must crawl their DB export and search through relational data, and all queries are super slow since it's one 6 GB table.
 		 */
+
+		// Get rows from our custom posts table (table was created by command lookoutlocal-get-posts-from-data-export-table).
+		$entries_table       = self::CUSTOM_ENTRIES_TABLE;
+		$newspack_table_rows = $wpdb->get_results( "select slug, data from {$entries_table}", ARRAY_A );
 
 		/**
 		 * @var array $posts_urls All pposts URL data is stored in this array. {
@@ -432,37 +432,46 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * }
 		 */
 		$posts_urls = [];
-		foreach ( $newspack_entries_table_rows as $key_row => $newspack_entries_table_row ) {
-			WP_CLI::line( sprintf( "%d/%d", $key_row + 1, count( $newspack_entries_table_rows ) ) );
+		foreach ( $newspack_table_rows as $key_row => $newspack_table_row ) {
 
-// TODO remove dev helper:
-// if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
+			WP_CLI::line( sprintf( '%d/%d', $key_row + 1, count( $newspack_table_rows ) ) );
+
+			// TODO remove dev helper:
+			// if ( 'debris-flow-evacuations-this-winter' != $result['slug'] ) { continue ; }
 
 			// Get post URL.
-			$url          = $this->get_post_url( $newspack_entries_table_row, $section_data_cache_path );
+			$url          = $this->get_post_url( $newspack_table_row, $section_data_cache_path );
 			$posts_urls[] = [
-				'_id'   => $newspack_entries_table_row["_id"],
-				'_type' => $newspack_entries_table_row["_type"],
-				'slug'  => $newspack_entries_table_row['slug'],
+				'_id'   => $newspack_table_row['_id'],
+				'_type' => $newspack_table_row['_type'],
+				'slug'  => $newspack_table_row['slug'],
 				'url'   => $url,
 			];
-
 		}
 
+
+
 		/**
-		 * Now that we have the URLs, we will loop through them and scrape and import posts.
+		 * Now that we have the URLs, we will scrape them and import posts.
 		 */
-		$post_authors = [];
+		$post_authors           = [];
 		$debug_all_author_names = [];
 		$debug_wrong_posts_urls = [];
-		$debug_all_tags = [];
+		$debug_all_tags         = [];
 		foreach ( $posts_urls as $url_data ) {
 
 			$url  = $url_data['url'];
 			$slug = $url_data['slug'];
 
+			// If post with same URL was imported, skip it.
+			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s", 'newspackmigration_url', $url ) );
+			if ( $post_id ) {
+				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping', $post_id, $url ) );
+				continue;
+			}
+
 			// HTML cache filename and path.
-			$html_cached_filename = $slug . '.html';
+			$html_cached_filename  = $slug . '.html';
 			$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
 
 			// Get HTML from cache or fetch from HTTP.
@@ -472,7 +481,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				if ( is_array( $get_result ) ) {
 					// Not OK.
 					$debug_wrong_posts_urls[] = $url;
-					$this->logger->log( $log_wrong_urls, sprintf( "%s CODE:%s MESSAGE:%s", $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
+					$this->logger->log( $log_wrong_urls, sprintf( '%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $get_result['response']['message'] ), $this->logger::WARNING );
 					continue;
 				}
 
@@ -482,44 +491,55 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				file_put_contents( $html_cached_file_path, $html );
 			}
 
-			// Crawls and extracts all useful post data from HTML
-			$crawled_data = $this->get_post_data_from_html( $html, $debug_all_author_names, $debug_all_tags );
-
-			// Postmeta.
-			$postmeta = [
-				// E.g. "lo-sc".
-				'newspackmigration_script_source' => $crawled_data['script_data']['source'] ?? '',
-				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
-				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
-				// E.g. "Promoted Content".
-				'newspackmigration_script_tags' => $crawled_data['script_data']['tags'],
-				'newspackmigration_presentedBy' => $crawled_data['presented_by'] ?? '',
-			];
+			// Crawl and extract all useful data from HTML
+			$crawled_data = $this->get_post_data_from_html( $html );
 
 			// Create post.
 			$post_args = [
-				'post_title' => $crawled_data['post_title'],
+				'post_title'   => $crawled_data['post_title'],
 				'post_content' => $crawled_data['post_content'],
-				'post_status' => 'publish',
-				'post_type' => 'post',
-				'post_name' => $slug,
-				'post_date' => $crawled_data['post_date'],
+				'post_status'  => 'publish',
+				'post_type'    => 'post',
+				'post_name'    => $slug,
+				'post_date'    => $crawled_data['post_date'],
 			];
-			$post_id = wp_insert_post( $post_args );
+			$post_id   = wp_insert_post( $post_args );
+
+			// Collect postmeta in this array.
+			$postmeta = [
+				'newspackmigration_url'                => $url,
+				'newspackmigration_slug'               => $slug,
+				// E.g. "lo-sc".
+				'newspackmigration_script_source'      => $crawled_data['script_data']['source'] ?? '',
+				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
+				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
+				// E.g. "Promoted Content".
+				'newspackmigration_script_tags'        => $crawled_data['script_data']['tags'],
+				'newspackmigration_presentedBy'        => $crawled_data['presented_by'] ?? '',
+			];
 
 			// Import featured image.
-			if ( isset( $data[ 'featured_image_src' ] ) ) {
-				$attachment_id = $this->attachments->import_external_file( $data[ 'featured_image_src' ], $title = null, $data[ 'featured_image_caption' ], $description = null, $data[ 'featured_image_alt' ], $post_id, $args = [] );
+			if ( isset( $data['featured_image_src'] ) ) {
+				$attachment_id   = $this->attachments->import_external_file(
+					$data['featured_image_src'],
+					$title       = null,
+					$data['featured_image_caption'],
+					$description = null,
+					$data['featured_image_alt'],
+					$post_id,
+					$args        = []
+				);
 				set_post_thumbnail( $post_id, $attachment_id );
-				if ( $data[ 'featured_image_credit' ] ) {
-					$postmeta[ self::MEDIA_CREDIT_META] = $data[ 'featured_image_credit' ];
+				// Credit goes as Newspack credit meta.
+				if ( $data['featured_image_credit'] ) {
+					$postmeta[ self::MEDIA_CREDIT_META ] = $data['featured_image_credit'];
 				}
 			}
 
 			// Authors.
 			$ga_ids = [];
-			// Get or create all GAs.
-			foreach ( $data[ 'post_authors' ] as $author_name ) {
+			// Get/create GAs.
+			foreach ( $data['post_authors'] as $author_name ) {
 				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
 				if ( $ga ) {
 					$ga_id = $ga->ID;
@@ -533,27 +553,31 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			}
 			// Assign GAs to post.
 			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+			// Also collect all author names for easier debugging/QA-ing.
+			$debug_all_author_names = array_merge( $debug_all_author_names, $post_authors );
 
 			// Categories.
 			$category_parent_id = 0;
-			if ( $data[ 'category_parent_name' ] ) {
+			if ( $data['category_parent_name'] ) {
 				// Get or create parent category.
-				$category_parent_id = wp_create_category( $data[ 'category_parent_name' ], 0 );
+				$category_parent_id = wp_create_category( $data['category_parent_name'], 0 );
 				if ( is_wp_error( $category_parent_id ) ) {
 					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s', $category_parent_name, $url ) );
 				}
 			}
 			// Get or create primary category.
-			$category_id = wp_create_category( $data[ 'category_name' ], $category_parent_id );
+			$category_id = wp_create_category( $data['category_name'], $category_parent_id );
 			// Set category.
 			wp_set_post_categories( $post_id, [ $category_id ] );
 
 			// Assign tags.
-			$tags = $data[ 'script_data' ]['tags'];
-			// wp_set_post_tags() also takes a CSV of tags, so maybe this will work out of the box.
+			$tags = $data['script_data']['tags'];
+			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
 			wp_set_post_tags( $post_id, $tags );
+			// Collect all tags for QA.
+			$debug_all_tags[] = array_merge( $debug_all_tags, $tags );
 
-			// Save postmeta.
+			// Save the postmeta.
 			foreach ( $postmeta as $meta_key => $meta_value ) {
 				if ( ! empty( $meta_value ) ) {
 					update_post_meta( $post_id, $meta_key, $meta_value );
@@ -626,14 +650,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	private function wp_remote_get_with_retry( $url, $retried = 0, $retries = 3, $sleep = 2 ) {
 
-		$response = wp_remote_get( $url, [
-			'timeout' => 60,
-			'user-agent' => 'Newspack Scraper Migrator',
-		] );
+		$response = wp_remote_get(
+			$url,
+			[
+				'timeout'    => 60,
+				'user-agent' => 'Newspack Scraper Migrator',
+			] 
+		);
 
 		// Retry if error, or if response code is not 200 and retries are not exhausted.
 		if (
-			( is_wp_error( $response ) || ( 200 != $response["response"]["code"] ) )
+			( is_wp_error( $response ) || ( 200 != $response['response']['code'] ) )
 			&& ( $retried < $retries )
 		) {
 			sleep( $sleep );
@@ -642,7 +669,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		// If everything is fine, return body.
-		if ( ! is_wp_error( $response ) && ( 200 == $response["response"]["code"] ) ) {
+		if ( ! is_wp_error( $response ) && ( 200 == $response['response']['code'] ) ) {
 			$body = wp_remote_retrieve_body( $response );
 
 			return $body;
@@ -668,25 +695,25 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * _ref = "00000182-b2df-d6aa-a783-b6dfd7b50000"
 		 * _type = "7f0435e9-b5f5-3286-9fe0-e839ddd16058"
 		 */
-		foreach ( $data["authorable.authors"] as $data_author ) {
-			$authorable_author_id = $data_author['_ref'];
+		foreach ( $data['authorable.authors'] as $data_author ) {
+			$authorable_author_id   = $data_author['_ref'];
 			$authorable_author_type = $data_author['_type'];
-			$id_like = sprintf( '"_id":"%s"', $authorable_author_id );
-			$type_like = sprintf( '"_type":"%s"', $authorable_author_type );
+			$id_like                = sprintf( '"_id":"%s"', $authorable_author_id );
+			$type_like              = sprintf( '"_type":"%s"', $authorable_author_type );
 			// Find author in DB.
 			$author_json = $wpdb->get_var( "select data from Record where data like '{\"cms.site.owner\"%' and data like '%{$id_like}%' and data like '%{$type_like}%';" );
-// Dev test:
-// $author_json = <<<JSON
-// {"cms.site.owner":{"_ref":"00000175-41f4-d1f7-a775-edfd1bd00000","_type":"ae3387cc-b875-31b7-b82d-63fd8d758c20"},"watcher.watchers":[{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"}],"cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-8091-dffc-a7fd-ecbd1d2d0000/thomas-sawano"],"cms.directory.pathTypes":{"00000175-41f4-d1f7-a775-edfd1bd00000:00000175-8091-dffc-a7fd-ecbd1d2d0000/thomas-sawano":"PERMALINK"},"cms.content.publishDate":1660858690827,"cms.content.publishUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"cms.content.updateDate":1660927400870,"cms.content.updateUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"l10n.locale":"en-US","features.disabledFeatures":[],"shared.content.rootId":null,"shared.content.sourceId":null,"shared.content.version":null,"canonical.canonicalUrl":null,"promotable.hideFromDynamicResults":false,"catimes.seo.suppressSeoSiteDisplayName":false,"hasSource.source":{"_ref":"00000175-66c8-d1f7-a775-eeedf7280000","_type":"289d6a55-9c3a-324b-9772-9c6f94cf4f88"},"cms.seo.keywords":[],"cms.seo.robots":[],"commentable.enableCommenting":false,"feed.disableFeed":false,"feed.renderFullContent":false,"feed.enabledFeedItemTypes":[],"image":{"_ref":"00000182-b2e2-d6aa-a783-b6f3f19d0000","_type":"4da1a812-2b2b-36a7-a321-fea9c9594cb9"},"cover":{"_ref":"00000182-b2de-d6aa-a783-b6dff3bf0000","_type":"4da1a812-2b2b-36a7-a321-fea9c9594cb9"},"section":{"_ref":"00000175-7fd0-dffc-a7fd-7ffd9e6a0000","_type":"ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"},"name":"Thomas Sawano","firstName":"Thomas","lastName":"Sawano","title":"Newsroom Intern","email":"thomas@lookoutlocal.com","fullBiography":"Thomas Sawano joins the Lookout team after two-and-a-half years at City on a Hill Press, the student-run newspaper at UCSC. While there, he reported on the university, arts and culture events, and the city of Santa Cruz. Thomas is deeply interested in local politics and feels fortunate to have begun his journalistic career in this town.<br/><br/>Thomas graduated in 2022 with degrees in Cognitive Science and Philosophy. Though hailing from Los Angeles, he has vowed to never live there again on account of traffic and a lack of actual weather. Thomas loves traveling, going to music festivals, and watching documentaries about the outdoors. He has recently picked up rock climbing, and hopes the sport won’t damage his typing hands <i>too </i>badly.<br/><br/>","shortBiography":"","affiliation":"Lookout Santa Cruz","isExternal":false,"theme.lookout-local.:core:page:Page.hbs._template":null,"theme.lookout-local.:core:promo:Promo.hbs.breaking":false,"theme.lookout-local.:core:promo:Promo.hbs.imageDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.descriptionDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.categoryDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.timestampDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.moreCoverageLinksDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.promoAlignment":null,"theme.lookout-local.:core:promo:Promo.hbs._template":null,"theme.lookout-local.:core:promo:Promo.amp.hbs._template":null,"cms.directory.pathsMode":"MANUAL","_id":"00000182-b2df-d6aa-a783-b6dfd7b50000","_type":"7f0435e9-b5f5-3286-9fe0-e839ddd16058"}
-// JSON;
+			// Dev test:
+			// $author_json = <<<JSON
+			// {"cms.site.owner":{"_ref":"00000175-41f4-d1f7-a775-edfd1bd00000","_type":"ae3387cc-b875-31b7-b82d-63fd8d758c20"},"watcher.watchers":[{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"}],"cms.directory.paths":["00000175-41f4-d1f7-a775-edfd1bd00000:00000175-8091-dffc-a7fd-ecbd1d2d0000/thomas-sawano"],"cms.directory.pathTypes":{"00000175-41f4-d1f7-a775-edfd1bd00000:00000175-8091-dffc-a7fd-ecbd1d2d0000/thomas-sawano":"PERMALINK"},"cms.content.publishDate":1660858690827,"cms.content.publishUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"cms.content.updateDate":1660927400870,"cms.content.updateUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"l10n.locale":"en-US","features.disabledFeatures":[],"shared.content.rootId":null,"shared.content.sourceId":null,"shared.content.version":null,"canonical.canonicalUrl":null,"promotable.hideFromDynamicResults":false,"catimes.seo.suppressSeoSiteDisplayName":false,"hasSource.source":{"_ref":"00000175-66c8-d1f7-a775-eeedf7280000","_type":"289d6a55-9c3a-324b-9772-9c6f94cf4f88"},"cms.seo.keywords":[],"cms.seo.robots":[],"commentable.enableCommenting":false,"feed.disableFeed":false,"feed.renderFullContent":false,"feed.enabledFeedItemTypes":[],"image":{"_ref":"00000182-b2e2-d6aa-a783-b6f3f19d0000","_type":"4da1a812-2b2b-36a7-a321-fea9c9594cb9"},"cover":{"_ref":"00000182-b2de-d6aa-a783-b6dff3bf0000","_type":"4da1a812-2b2b-36a7-a321-fea9c9594cb9"},"section":{"_ref":"00000175-7fd0-dffc-a7fd-7ffd9e6a0000","_type":"ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"},"name":"Thomas Sawano","firstName":"Thomas","lastName":"Sawano","title":"Newsroom Intern","email":"thomas@lookoutlocal.com","fullBiography":"Thomas Sawano joins the Lookout team after two-and-a-half years at City on a Hill Press, the student-run newspaper at UCSC. While there, he reported on the university, arts and culture events, and the city of Santa Cruz. Thomas is deeply interested in local politics and feels fortunate to have begun his journalistic career in this town.<br/><br/>Thomas graduated in 2022 with degrees in Cognitive Science and Philosophy. Though hailing from Los Angeles, he has vowed to never live there again on account of traffic and a lack of actual weather. Thomas loves traveling, going to music festivals, and watching documentaries about the outdoors. He has recently picked up rock climbing, and hopes the sport won’t damage his typing hands <i>too </i>badly.<br/><br/>","shortBiography":"","affiliation":"Lookout Santa Cruz","isExternal":false,"theme.lookout-local.:core:page:Page.hbs._template":null,"theme.lookout-local.:core:promo:Promo.hbs.breaking":false,"theme.lookout-local.:core:promo:Promo.hbs.imageDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.descriptionDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.categoryDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.timestampDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.moreCoverageLinksDisplay":null,"theme.lookout-local.:core:promo:Promo.hbs.promoAlignment":null,"theme.lookout-local.:core:promo:Promo.hbs._template":null,"theme.lookout-local.:core:promo:Promo.amp.hbs._template":null,"cms.directory.pathsMode":"MANUAL","_id":"00000182-b2df-d6aa-a783-b6dfd7b50000","_type":"7f0435e9-b5f5-3286-9fe0-e839ddd16058"}
+			// JSON;
 			$author = json_decode( $author_json, true );
 			// Also exist ['cover']['_ref'] and ['section']['_ref'].
-			$full_name = $author['name'];
+			$full_name  = $author['name'];
 			$first_name = $author['firstName'];
-			$last_name = $author['lastName'];
-			$email = $author['email'];
-			$bio = $author['fullBiography'];
-			$short_bio = $author['shortBiography'];
+			$last_name  = $author['lastName'];
+			$email      = $author['email'];
+			$bio        = $author['fullBiography'];
+			$short_bio  = $author['shortBiography'];
 			// E.g. "Newsroom Intern"
 			$title = $author['title'];
 			// E.g. "Lookout Santa Cruz"
@@ -695,24 +722,24 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$is_external = $author['isExternal'];
 
 			// Avatar image.
-			$image_ref = $author['image']['_ref'];
+			$image_ref  = $author['image']['_ref'];
 			$image_type = $author['image']['_type'];
-			$sql = "select data from Record where data like '{\"cms.site.owner\"%' and data like '%\"_id\":\"{$image_ref}\"%' and data like '%\"_type\":\"{$image_type}\"%' ;";
+			$sql        = "select data from Record where data like '{\"cms.site.owner\"%' and data like '%\"_id\":\"{$image_ref}\"%' and data like '%\"_type\":\"{$image_type}\"%' ;";
 			$image_json = $wpdb->get_var( $sql );
-// Dev test:
-// $image_json = <<<JSON
-// {"cms.site.owner":{"_ref":"00000175-41f4-d1f7-a775-edfd1bd00000","_type":"ae3387cc-b875-31b7-b82d-63fd8d758c20"},"watcher.watchers":[{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"}],"cms.content.publishDate":1660858629241,"cms.content.publishUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"cms.content.updateDate":1660858674492,"cms.content.updateUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"l10n.locale":"en-US","shared.content.version":"00000182-b2e4-daa2-a5fe-b2ed30fe0000","taggable.tags":[],"hasSource.source":{"_ref":"00000175-66c8-d1f7-a775-eeedf7280000","_type":"289d6a55-9c3a-324b-9772-9c6f94cf4f88"},"type":{"_ref":"a95896f6-e74f-3667-a305-b6a50d72056a","_type":"982a8b2a-7600-3bb0-ae68-740f77cd85d3"},"titleFallbackDisabled":false,"file":{"storage":"s3","path":"5b/22/5bc8405647bb99efdd5473aba858/thomas-sawano-white.png","contentType":"image/png","metadata":{"cms.edits":{},"originalFilename":"Thomas Sawano white.png","http.headers":{"Cache-Control":["public, max-age=31536000"],"Content-Length":["1074663"],"Content-Type":["image/png"]},"resizes":[{"storage":"s3","path":"5b/22/5bc8405647bb99efdd5473aba858/resizes/500/thomas-sawano-white.png","contentType":"image/png","metadata":{"width":500,"height":500,"http.headers":{"Cache-Control":["public, max-age=31536000"],"Content-Length":["349214"],"Content-Type":["image/png"]}}}],"width":1080,"File Type":{"Detected File Type Long Name":"Portable Network Graphics","Detected File Type Name":"PNG","Detected MIME Type":"image/png","Expected File Name Extension":"png"},"PNG-IHDR":{"Filter Method":"Adaptive","Interlace Method":"No Interlace","Compression Type":"Deflate","Image Height":"1080","Color Type":"True Color with Alpha","Image Width":"1080","Bits Per Sample":"8"},"PNG-pHYs":{"Pixels Per Unit X":"3780","Pixels Per Unit Y":"3780","Unit Specifier":"Metres"},"PNG-tEXt":{"Textual Data":"Comment: xr:d:DAE5wFeyjSQ:518,j:33207655899,t:22081821"},"height":1080,"cms.crops":{},"cms.focus":{"x":0.4397042465484525,"y":0.2428842504743833}}},"keywords":[],"keywordsFallbackDisabled":false,"dateUploaded":1660858629241,"caption":"","captionFallbackDisabled":false,"credit":"","creditFallbackDisabled":false,"altText":"Thomas Sawano","bylineFallbackDisabled":false,"instructionsFallbackDisabled":false,"sourceFallbackDisabled":false,"copyrightNoticeFallbackDisabled":false,"headlineFallbackDisabled":false,"categoryFallbackDisabled":false,"supplementalCategory":[],"supplementalCategoryFallbackDisabled":false,"writerFallbackDisabled":false,"countryFallbackDisabled":false,"countryCodeFallbackDisabled":false,"origTransRefFallbackDisabled":false,"metadataStateFallbackDisabled":false,"cityFallbackDisabled":false,"width":1080,"height":1080,"_id":"00000182-b2e2-d6aa-a783-b6f3f19d0000","_type":"4da1a812-2b2b-36a7-a321-fea9c9594cb9"}
-// JSON;
+			// Dev test:
+			// $image_json = <<<JSON
+			// {"cms.site.owner":{"_ref":"00000175-41f4-d1f7-a775-edfd1bd00000","_type":"ae3387cc-b875-31b7-b82d-63fd8d758c20"},"watcher.watchers":[{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"}],"cms.content.publishDate":1660858629241,"cms.content.publishUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"cms.content.updateDate":1660858674492,"cms.content.updateUser":{"_ref":"0000017d-a0bb-d2a9-affd-febb7bc60000","_type":"6aa69ae1-35be-30dc-87e9-410da9e1cdcc"},"l10n.locale":"en-US","shared.content.version":"00000182-b2e4-daa2-a5fe-b2ed30fe0000","taggable.tags":[],"hasSource.source":{"_ref":"00000175-66c8-d1f7-a775-eeedf7280000","_type":"289d6a55-9c3a-324b-9772-9c6f94cf4f88"},"type":{"_ref":"a95896f6-e74f-3667-a305-b6a50d72056a","_type":"982a8b2a-7600-3bb0-ae68-740f77cd85d3"},"titleFallbackDisabled":false,"file":{"storage":"s3","path":"5b/22/5bc8405647bb99efdd5473aba858/thomas-sawano-white.png","contentType":"image/png","metadata":{"cms.edits":{},"originalFilename":"Thomas Sawano white.png","http.headers":{"Cache-Control":["public, max-age=31536000"],"Content-Length":["1074663"],"Content-Type":["image/png"]},"resizes":[{"storage":"s3","path":"5b/22/5bc8405647bb99efdd5473aba858/resizes/500/thomas-sawano-white.png","contentType":"image/png","metadata":{"width":500,"height":500,"http.headers":{"Cache-Control":["public, max-age=31536000"],"Content-Length":["349214"],"Content-Type":["image/png"]}}}],"width":1080,"File Type":{"Detected File Type Long Name":"Portable Network Graphics","Detected File Type Name":"PNG","Detected MIME Type":"image/png","Expected File Name Extension":"png"},"PNG-IHDR":{"Filter Method":"Adaptive","Interlace Method":"No Interlace","Compression Type":"Deflate","Image Height":"1080","Color Type":"True Color with Alpha","Image Width":"1080","Bits Per Sample":"8"},"PNG-pHYs":{"Pixels Per Unit X":"3780","Pixels Per Unit Y":"3780","Unit Specifier":"Metres"},"PNG-tEXt":{"Textual Data":"Comment: xr:d:DAE5wFeyjSQ:518,j:33207655899,t:22081821"},"height":1080,"cms.crops":{},"cms.focus":{"x":0.4397042465484525,"y":0.2428842504743833}}},"keywords":[],"keywordsFallbackDisabled":false,"dateUploaded":1660858629241,"caption":"","captionFallbackDisabled":false,"credit":"","creditFallbackDisabled":false,"altText":"Thomas Sawano","bylineFallbackDisabled":false,"instructionsFallbackDisabled":false,"sourceFallbackDisabled":false,"copyrightNoticeFallbackDisabled":false,"headlineFallbackDisabled":false,"categoryFallbackDisabled":false,"supplementalCategory":[],"supplementalCategoryFallbackDisabled":false,"writerFallbackDisabled":false,"countryFallbackDisabled":false,"countryCodeFallbackDisabled":false,"origTransRefFallbackDisabled":false,"metadataStateFallbackDisabled":false,"cityFallbackDisabled":false,"width":1080,"height":1080,"_id":"00000182-b2e2-d6aa-a783-b6f3f19d0000","_type":"4da1a812-2b2b-36a7-a321-fea9c9594cb9"}
+			// JSON;
 			$image = json_decode( $image_json, true );
 			if ( 's3' != $image['file']['storage'] ) {
 				// Debug this.
-				$d=1;
+				$d = 1;
 			}
-			$image_url = self::LOOKOUT_S3_SCHEMA_AND_HOSTNAME . '/' . $image['file']['path'];
+			$image_url   = self::LOOKOUT_S3_SCHEMA_AND_HOSTNAME . '/' . $image['file']['path'];
 			$image_title = $image['file']['metadata']['originalFilename'];
-			$image_alt = $image['altText'];
+			$image_alt   = $image['altText'];
 		}
-		$authorable_author_id = $data["authorable.authors"]['_ref'];
+		$authorable_author_id = $data['authorable.authors']['_ref'];
 		// ,"_type":"7f0435e9-b5f5-3286-9fe0-e839ddd16058"
 
 		return;
@@ -734,16 +761,19 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		foreach ( $lines as $line ) {
 			$data = json_decode( $line, true );
 			if ( ! $data ) {
-				$line = str_replace( "\\\\", "\\", $line ); // Replace double escapes with just one escape.
+				$line = str_replace( '\\\\', '\\', $line ); // Replace double escapes with just one escape.
 				$data = json_decode( $line, true );
 				if ( ! $data ) {
-					$line = str_replace( "\\\\", "\\", $line ); // Replace double escapes with just one escape.
+					$line = str_replace( '\\\\', '\\', $line ); // Replace double escapes with just one escape.
 					$data = json_decode( $line, true );
-					if ( $data ) { $jsons[] = $data; }
-				} else { $jsons[] = $data; }
-			} else { $jsons[] = $data; }
+					if ( $data ) {
+						$jsons[] = $data; }
+				} else {
+					$jsons[] = $data; }
+			} else {
+				$jsons[] = $data; }
 		}
-		$d=1;
+		$d          = 1;
 		$jsons_long = json_encode( $jsons );
 		return;
 
@@ -765,12 +795,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$custom_table = self::CUSTOM_ENTRIES_TABLE;
 
 		// Check if Record table is here.
-		$count_record_table = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(TABLE_NAME) FROM information_schema.TABLES WHERE TABLE_NAME = %s;", $record_table ) );
+		$count_record_table = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(TABLE_NAME) FROM information_schema.TABLES WHERE TABLE_NAME = %s;', $record_table ) );
 		if ( 1 != $count_record_table ) {
 			WP_CLI::error( sprintf( 'Table %s not found.', $record_table ) );
 		}
 
-		$continue = PHP_Utils::readline( sprintf( "Continuing will truncate the existing %s table. Continue? [y/n] ", $record_table ) );
+		$continue = PHP_Utils::readline( sprintf( 'Continuing will truncate the existing %s table. Continue? [y/n] ', $record_table ) );
 		if ( 'y' !== $continue ) {
 			WP_CLI::error( 'Aborting.' );
 		}
@@ -779,44 +809,50 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->create_custom_table( $custom_table, $truncate = true );
 
 		// Read from $record_table and write just posts entries to $custom_table.
-		$offset = 0;
-		$batchSize = 1000;
-		$total_rows = $wpdb->get_var( "SELECT count(*) FROM {$record_table}" );
+		$offset        = 0;
+		$batchSize     = 1000;
+		$total_rows    = $wpdb->get_var( "SELECT count(*) FROM {$record_table}" );
 		$total_batches = ceil( $total_rows / $batchSize );
 		while ( true ) {
 
-			WP_CLI::line( sprintf( "%d/%d getting posts from %s into %s ...", $offset, $total_rows, $record_table, $custom_table ) );
+			WP_CLI::line( sprintf( '%d/%d getting posts from %s into %s ...', $offset, $total_rows, $record_table, $custom_table ) );
 
 			// Query in batches.
-			$sql = "SELECT * FROM {$record_table} ORDER BY id, typeId ASC LIMIT $batchSize OFFSET $offset";
+			$sql  = "SELECT * FROM {$record_table} ORDER BY id, typeId ASC LIMIT $batchSize OFFSET $offset";
 			$rows = $wpdb->get_results( $sql, ARRAY_A );
 
 			if ( count( $rows ) > 0 ) {
 				foreach ( $rows as $row ) {
 
 					// Get row JSON data. It might be readily decodable, or double backslashes may have to be removed up to two times.
-					$data_result = $row[ 'data' ];
-					$data = json_decode( $data_result, true );
+					$data_result = $row['data'];
+					$data        = json_decode( $data_result, true );
 					if ( ! $data ) {
-						$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
-						$data = json_decode( $data_result, true );
+						$data_result = str_replace( '\\\\', '\\', $data_result ); // Replace double escapes with just one escape.
+						$data        = json_decode( $data_result, true );
 						if ( ! $data ) {
-							$data_result = str_replace( "\\\\", "\\", $data_result ); // Replace double escapes with just one escape.
-							$data = json_decode( $data_result, true );
+							$data_result = str_replace( '\\\\', '\\', $data_result ); // Replace double escapes with just one escape.
+							$data        = json_decode( $data_result, true );
 						}
 					}
 
 					// Check if this is a post.
-					$slug = $data['sluggable.slug'] ?? null;
-					$title = $data['headline'] ?? null;
+					$slug         = $data['sluggable.slug'] ?? null;
+					$title        = $data['headline'] ?? null;
 					$post_content = $data['body'] ?? null;
-					$is_a_post = $slug && $title && $post_content;
+					$is_a_post    = $slug && $title && $post_content;
 					if ( ! $is_a_post ) {
 						continue;
 					}
 
 					// Insert to custom table
-					$wpdb->insert( $custom_table, [ 'slug' => $slug, 'data' => json_encode( $data ) ] );
+					$wpdb->insert(
+						$custom_table,
+						[
+							'slug' => $slug,
+							'data' => json_encode( $data ),
+						] 
+					);
 				}
 
 				$offset += $batchSize;
@@ -833,32 +869,32 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public function cmd_import_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
-		$data_jsons = $wpdb->get_col( "SELECT data from %s", self::CUSTOM_ENTRIES_TABLE );
+		$data_jsons = $wpdb->get_col( 'SELECT data from %s', self::CUSTOM_ENTRIES_TABLE );
 		foreach ( $data_jsons as $data_json ) {
 			$data = json_encode( $data_json, true );
 
 			// Get post data.
-			$slug = $data['sluggable.slug'];
-			$title = $data['headline'];
-			$subheadline = $data['subHeadline'];
+			$slug         = $data['sluggable.slug'];
+			$title        = $data['headline'];
+			$subheadline  = $data['subHeadline'];
 			$post_content = $data['body'];
-			$post_date = $this->convert_epoch_timestamp_to_wp_format( $data['cms.content.publishDate'] );
+			$post_date    = $this->convert_epoch_timestamp_to_wp_format( $data['cms.content.publishDate'] );
 
 			// Create post.
 			$post_args = [
-				'post_title' => $title,
+				'post_title'   => $title,
 				'post_content' => $post_content,
-				'post_status' => 'publish',
-				'post_type' => 'post',
-				'post_name' => $slug,
-				'post_date' => $post_date,
+				'post_status'  => 'publish',
+				'post_type'    => 'post',
+				'post_name'    => $slug,
+				'post_date'    => $post_date,
 			];
-			$post_id = wp_insert_post( $post_args );
+			$post_id   = wp_insert_post( $post_args );
 
 
 			// Get more postmeta.
 			$postmeta = [
-				"newspackmigration_commentable.enableCommenting" => $data["commentable.enableCommenting"],
+				'newspackmigration_commentable.enableCommenting' => $data['commentable.enableCommenting'],
 			];
 			if ( $subheadline ) {
 				$postmeta['newspackmigration_post_subtitle'] = $subheadline;
@@ -866,9 +902,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 
 			// Get more post data to update all at once.
-			$post_modified = $this->convert_epoch_timestamp_to_wp_format( $data['publicUpdateDate'] );
+			$post_modified    = $this->convert_epoch_timestamp_to_wp_format( $data['publicUpdateDate'] );
 			$post_update_data = [
-				'post_modified'	=> $post_modified,
+				'post_modified' => $post_modified,
 			];
 
 
@@ -883,16 +919,16 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Featured image.
 			$data['lead'];
 			// These two fields:
-			//     "_id": "00000184-6982-da20-afed-7da6f7680000",
-			//     "_type": "52f00ba5-1f41-3845-91f1-1ad72e863ccb"
-			$data['lead'][ 'leadImage' ];
+			// "_id": "00000184-6982-da20-afed-7da6f7680000",
+			// "_type": "52f00ba5-1f41-3845-91f1-1ad72e863ccb"
+			$data['lead']['leadImage'];
 			// Can be single entry:
-			//      "_ref": "0000017b-75b6-dd26-af7b-7df6582f0000",
-			//      "_type": "4da1a812-2b2b-36a7-a321-fea9c9594cb9"
-			$caption = $data['lead'][ 'caption' ];
-			$hide_caption = $data['lead'][ 'hideCaption' ];
-			$credit = $data['lead'][ 'credit' ];
-			$alt = $data['lead'][ 'altText' ];
+			// "_ref": "0000017b-75b6-dd26-af7b-7df6582f0000",
+			// "_type": "4da1a812-2b2b-36a7-a321-fea9c9594cb9"
+			$caption      = $data['lead']['caption'];
+			$hide_caption = $data['lead']['hideCaption'];
+			$credit       = $data['lead']['credit'];
+			$alt          = $data['lead']['altText'];
 			// TODO -- find url and download image.
 			$url;
 			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
@@ -901,62 +937,62 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Authors.
 			// TODO - search these two fields. Find bios, avatars, etc by checking staff pages at https://lookout.co/santacruz/about .
-			$data["authorable.authors"];
+			$data['authorable.authors'];
 			// Can be multiple entries:
 			// [
-			//      {
-			//          "_ref": "0000017e-5a2e-d675-ad7e-5e2fd5a00000",
-			//          "_type": "7f0435e9-b5f5-3286-9fe0-e839ddd16058"
-			//      }
+			// {
+			// "_ref": "0000017e-5a2e-d675-ad7e-5e2fd5a00000",
+			// "_type": "7f0435e9-b5f5-3286-9fe0-e839ddd16058"
+			// }
 			// ]
-			$data["authorable.oneOffAuthors"];
+			$data['authorable.oneOffAuthors'];
 			// Can be multiple entries:
 			// [
-			// 	{
-			// 		"name":"Corinne Purtill",
-			// 		"_id":"d6ce0bcd-d952-3539-87b9-71bdb93e98c7",
-			// 		"_type":"6d79db11-1e28-338b-986c-1ff580f1986a"
-			// 	},
-			// 	{
-			// 		"name":"Sumeet Kulkarni",
-			// 		"_id":"434ebcb2-e65c-32a6-8159-fb606c93ee0b",
-			// 		"_type":"6d79db11-1e28-338b-986c-1ff580f1986a"
-			// 	}
+			// {
+			// "name":"Corinne Purtill",
+			// "_id":"d6ce0bcd-d952-3539-87b9-71bdb93e98c7",
+			// "_type":"6d79db11-1e28-338b-986c-1ff580f1986a"
+			// },
+			// {
+			// "name":"Sumeet Kulkarni",
+			// "_id":"434ebcb2-e65c-32a6-8159-fb606c93ee0b",
+			// "_type":"6d79db11-1e28-338b-986c-1ff580f1986a"
+			// }
 			// ]
 
-			$data["authorable.primaryAuthorBioOverride"];
+			$data['authorable.primaryAuthorBioOverride'];
 			// ? TODO - search where not empty and see how it's used.
-			$data["hasSource.source"];
+			$data['hasSource.source'];
 			// Can be single entry:
-			//      "_ref": "00000175-66c8-d1f7-a775-eeedf7280000",
-			//      "_type": "289d6a55-9c3a-324b-9772-9c6f94cf4f88"
+			// "_ref": "00000175-66c8-d1f7-a775-eeedf7280000",
+			// "_type": "289d6a55-9c3a-324b-9772-9c6f94cf4f88"
 
 
 			// Categories.
 			// TODO -- is this a taxonomy?
-			$data["sectionable.section"];
+			$data['sectionable.section'];
 			// Can be single entry:
-			//      "_ref": "00000180-62d1-d0a2-adbe-76d9f9e7002e",
-			//      "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
-			$data["sectionable.secondarySections"];
+			// "_ref": "00000180-62d1-d0a2-adbe-76d9f9e7002e",
+			// "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
+			$data['sectionable.secondarySections'];
 			// Can be multiple entries:
 			// [
-			//      {
-			//          "_ref": "00000175-7fd0-dffc-a7fd-7ffd9e6a0000",
-			//          "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
-			//      }
+			// {
+			// "_ref": "00000175-7fd0-dffc-a7fd-7ffd9e6a0000",
+			// "_type": "ba7d9749-a9b7-3050-86ad-15e1b9f4be7d"
+			// }
 			// ]
 
 
 			// Tags.
-			$data["taggable.tags"];
+			$data['taggable.tags'];
 			// TODO -- find tags
 			// Can be multiple entries:
 			// [
-			//      {
-			//          "_ref": "00000175-ecb8-dadf-adf7-fdfe01520000",
-			//          "_type": "90602a54-e7fb-3b69-8e25-236e50f8f7f5"
-			//      }
+			// {
+			// "_ref": "00000175-ecb8-dadf-adf7-fdfe01520000",
+			// "_type": "90602a54-e7fb-3b69-8e25-236e50f8f7f5"
+			// }
 			// ]
 
 
@@ -976,7 +1012,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 	public function convert_epoch_timestamp_to_wp_format( $timestamp ) {
 		$timestamp_seconds = intval( $timestamp ) / 1000;
-		$readable = date('Y-m-d H:i:s', $timestamp_seconds);
+		$readable          = date( 'Y-m-d H:i:s', $timestamp_seconds );
 
 		return $readable;
 	}
