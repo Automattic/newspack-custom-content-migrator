@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use NewspackCustomContentMigrator\Command\PublisherSpecific\Exceptions\Onthewight_No_Wpshortode_Blocks_Found_In_Post;
 use \WP_CLI;
 
 class Attachments {
@@ -15,7 +16,7 @@ class Attachments {
 	 * @return mixed ID of the imported media file.
 	 */
 	public function import_media_from_path( $file ) {
-		$options = [ 'return' => true, ];
+		$options = [ 'return' => true ];
 		$id      = WP_CLI::runcommand( "media import $file --title='favicon' --porcelain", $options );
 
 		return $id;
@@ -69,6 +70,18 @@ class Attachments {
 		}
 		$att_id = media_handle_sideload( $file_array, $post_id, $title, $args );
 
+		// phpcs:disable WordPress.PHP.NoSilencedErrors.Discouraged
+		/**
+		 * TODO -- if image fails because of a wrong filetype, try and convert to JPG of max quality and then import.
+		 */
+		if (
+			is_wp_error( $att_id )
+			&& ( false != strpos( $att_id->get_error_message(), 'not allowed to upload this file type' ) )
+		) {
+			// $this->convert_image();
+		}
+		// phpcs:enable
+
 		// If this was a download and there was an error then clean up the temp file.
 		if ( is_wp_error( $att_id ) ) {
 			@unlink( $file_array['tmp_name'] );
@@ -81,6 +94,57 @@ class Attachments {
 		}
 
 		return $att_id;
+	}
+
+	/**
+	 * Converts an image to JPG, or if it's an SVG to a PNG.
+	 *
+	 * @param string $input_image  Input image file path.
+	 * @param string $output_image Output image file path.
+	 * @param int    $quality      0 worst to 100 best.
+	 *
+	 * @return boolean
+	 */
+	public function convert_image( $input_image, $output_image, $quality = 100 ) {
+
+		// Get image format from signature.
+		$format = exif_imagetype( $input_image );
+
+		/**
+		 * Convert formats to JPG.
+		 */
+		switch ( $format ) {
+			case IMAGETYPE_JPEG:
+				$image_tmp = imagecreatefromjpeg( $input_image );
+				break;
+			case IMAGETYPE_GIF:
+				$image_tmp = imagecreatefromgif( $input_image );
+				break;
+			case IMAGETYPE_PNG:
+				$image_tmp = imagecreatefrompng( $input_image );
+				break;
+			case IMAGETYPE_BMP:
+				$image_tmp = imagecreatefrombmp( $input_image );
+				break;
+			default:
+				$image_tmp = null;
+		}
+
+		// Untested...
+		imagejpeg( $image_tmp, $output_image, $quality );
+		imagedestroy( $image_tmp );
+
+		// Extension from file name.
+		$exploded  = explode( '.', $input_image );
+		$extension = $exploded[ count( $exploded ) - 1 ];
+
+		/**
+		 * Also convert SVGs to PNGs.
+		 */
+
+		// ...
+
+		return true;
 	}
 
 	/**
@@ -99,14 +163,14 @@ class Attachments {
 		$broken_images = [];
 
 		$posts = get_posts(
-            [
+			[
 				'posts_per_page' => $posts_per_batch,
 				'paged'          => $batch,
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
 				'post__in'       => $post_ids,
 			]
-        );
+		);
 
 		$total_posts = count( $posts );
 		$logs        = file_exists( 'broken_media_urls_batch.log' ) ? file_get_contents( 'broken_media_urls_batch.log' ) : '';
@@ -137,12 +201,12 @@ class Attachments {
 
 				if ( is_wp_error( $image_request ) ) {
 					WP_CLI::warning(
-                        sprintf(
-                            'Local image ID (%s) returned an error: %s',
-                            $image_url_to_check,
-                            $image_request->get_error_message()
-                        )
-                    );
+						sprintf(
+							'Local image ID (%s) returned an error: %s',
+							$image_url_to_check,
+							$image_request->get_error_message()
+						)
+					);
 
 					$broken_post_images[] = $image_url_to_check;
 
@@ -231,7 +295,7 @@ class Attachments {
 
 	/**
 	 * Find an attachment by its filename.
-	 * 
+	 *
 	 * @param string $filename The filename.
 	 * @return int The attachment ID.
 	 */

@@ -281,13 +281,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// If on Atomic.
 		if ( '/srv/htdocs/__wp__/' == ABSPATH ) {
-			$public_path = '/srv/htdocs';
+			$public_path    = '/srv/htdocs';
 			$this->temp_dir = '/tmp/scraper_data';
-			$plugin_dir = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
+			$plugin_dir     = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
 		} else {
-			$public_path = rtrim( ABSPATH, '/' );
+			$public_path    = rtrim( ABSPATH, '/' );
 			$this->temp_dir = $public_path . '/scraper_data';
-			$plugin_dir = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
+			$plugin_dir     = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
 		}
 
 		// Newspack_Scraper_Migrator is not autoloaded.
@@ -433,9 +433,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Get post URL.
 			$url_data = $this->get_post_url( $newspack_table_row, $section_data_cache_path );
-			$url = $url_data['url'] ?? null;
+			$url      = $url_data['url'] ?? null;
 			if ( ! $url ) {
-				$this->logger->log( $log_urls_not_found, sprintf( "Not found URL for slug %s", $newspack_table_row['slug'] ), $this->logger::WARNING );
+				$this->logger->log( $log_urls_not_found, sprintf( 'Not found URL for slug %s', $newspack_table_row['slug'] ), $this->logger::WARNING );
 				$urls_not_found[] = $slug;
 				continue;
 			}
@@ -468,24 +468,23 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::line( sprintf( "%d/%d ID %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			/**
 			 * Remove promo and user engagement pieces of content inserted at runtime.
 			 */
-			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+			$post_content         = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 			$post_content_updated = $this->clean_up_promo_and_user_engagement_content( $post_content );
 
 			// Update post_content.
 			if ( ! empty( $post_content_updated ) ) {
 				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
-				$this->logger->log( $log_updated, sprintf( "Updated %d", $post_id ), $this->logger::SUCCESS );
-			}
-
+				$this->logger->log( $log_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
+			}       
 		}
 
 		wp_cache_flush();
-		WP_CLI::line( "Done 👍" );
+		WP_CLI::line( 'Done 👍' );
 	}
 
 	/**
@@ -520,7 +519,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 */
 
 			// Is this a div.html-module?
-			$is_div_class_enchancement       = ( isset( $node->tagName ) && 'div' == $node->tagName ) && ( 'enhancement' == $node->getAttribute( 'class' ) );
+			$is_div_class_enchancement = ( isset( $node->tagName ) && 'div' == $node->tagName ) && ( 'enhancement' == $node->getAttribute( 'class' ) );
 
 			// Check if this $node has a child div.html-module.
 			$has_child_div_class_html_module = false;
@@ -617,16 +616,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
 
 			// If a "publish"-ed post with same URL exists, skip it.
-			$post_id = $wpdb->get_var( $wpdb->prepare(
-				"select wpm.post_id
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"select wpm.post_id
 					from {$wpdb->postmeta} wpm
 					join wp_posts wp on wp.ID = wpm.post_id 
 					where wpm.meta_key = %s
 					and wpm.meta_value = %s
 					and wp.post_status = 'publish' ; ",
-				'newspackmigration_url',
-				$url
-			) );
+					'newspackmigration_url',
+					$url
+				) 
+			);
 			if ( $post_id ) {
 				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
 				continue;
@@ -670,7 +671,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'post_date'    => $crawled_data['post_date'],
 			];
 			$post_id   = wp_insert_post( $post_args );
-			WP_CLI::success( sprintf( "Created post ID %d", $post_id ) );
+			WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
 
 			// Collect postmeta in this array.
 			$postmeta = [
@@ -703,7 +704,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Import featured image.
 			if ( isset( $crawled_data['featured_image_src'] ) ) {
-				WP_CLI::line( "Downloading featured image ..." );
+				WP_CLI::line( 'Downloading featured image ...' );
 				$attachment_id   = $this->attachments->import_external_file(
 					$crawled_data['featured_image_src'],
 					$title       = null,
@@ -791,7 +792,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( ! empty( $debug_all_tags ) ) {
 			// Flatten multidimensional array to single.
 			$debug_all_tags_flattened = [];
-			array_walk_recursive( $debug_all_tags, function( $e ) use ( &$debug_all_tags_flattened ) { $debug_all_tags_flattened[] = $e; } );
+			array_walk_recursive(
+				$debug_all_tags,
+				function( $e ) use ( &$debug_all_tags_flattened ) {
+					$debug_all_tags_flattened[] = $e;
+				} 
+			);
 			// Log.
 			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
 			WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
@@ -801,7 +807,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
 		}
 
-		WP_CLI::line( "Done 👍" );
+		WP_CLI::line( 'Done 👍' );
 	}
 
 	public function get_slug_from_url( $url ) {
@@ -953,7 +959,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 		$data['post_title'] = $title;
 
-		$subtitle           = $this->filter_selector( 'div.subheadline', $this->crawler ) ?? null;
+		$subtitle              = $this->filter_selector( 'div.subheadline > h2', $this->crawler ) ?? null;
 		$data['post_subtitle'] = $subtitle ?? null;
 
 		$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
@@ -1062,7 +1068,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$author_names = explode( ',', $authors_text );
 
 		// Trim all names (wo/ picking up " " spaces).
-		$author_names = array_map( function( $value ) { return trim( $value, '  ' ); }, $author_names );
+		$author_names = array_map(
+			function( $value ) {
+				return trim( $value, '  ' );
+			},
+			$author_names 
+		);
 
 		return $author_names;
 	}
@@ -1170,7 +1181,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$data = json_decode( $json, true );
 
 		// Draft status.
-		$draft = $data['cms.content.draft'] ?? false;
+		$draft  = $data['cms.content.draft'] ?? false;
 		$draft2 = 'cms.content.draft' == $data['dari.visibilities'][0] ?? false;
 
 		/**
@@ -1325,7 +1336,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					}
 
 					// Skip drafts.
-					$draft  = $data['cms.content.draft'] ?? false;
+					$draft = $data['cms.content.draft'] ?? false;
 					// $draft2 = 'cms.content.draft' == $data['dari.visibilities'][0] ?? false;
 					if ( $draft ) {
 						continue;
