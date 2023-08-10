@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \Newspack_Scraper_Migrator_Util;
@@ -267,6 +268,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $cap;
 
 	/**
+	 * Posts instance.
+	 *
+	 * @var Posts Posts instance.
+	 */
+	private $posts;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -292,6 +300,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->crawler     = new Crawler();
 		$this->data_parser = new Newspack_Scraper_Migrator_HTML_Parser();
 		$this->cap         = new CoAuthorPlus();
+		$this->posts       = new Posts();
 	}
 
 	/**
@@ -333,6 +342,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						'optional'    => true,
 					],
 				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-postscrape-posts',
+			[ $this, 'cmd_postscrape_posts' ],
+			[
+				'shortdesc' => 'Second main command :) Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
 			]
 		);
 		WP_CLI::add_command(
@@ -434,6 +450,116 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( ! empty( $urls ) ) {
 			WP_CLI::warning( "👍 URLs saved to $log_urls" );
 		}
+	}
+
+	public function cmd_postscrape_posts( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		// Log files.
+		$log_updated = $this->temp_dir . '/ll_updated_post_content.log';
+
+		// Hit timestamp on all logs.
+		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+		$this->logger->log( $log_updated, $ts, false );
+
+
+		/**
+		 * Clean up post_content and remove runtime inserted promo or user engagement.
+		 */
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( "%d/%d ID %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			/**
+			 * Remove promo and user engagement pieces of content inserted at runtime.
+			 */
+			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+			$post_content_updated = $this->clean_up_promo_and_user_engagement_content( $post_content );
+
+			// Update post_content.
+			if ( ! empty( $post_content_updated ) ) {
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+				$this->logger->log( $log_updated, sprintf( "Updated %d", $post_id ), $this->logger::SUCCESS );
+			}
+
+		}
+
+		wp_cache_flush();
+		WP_CLI::line( "Done 👍" );
+	}
+
+	/**
+	 * @param string $post_content HTML.
+	 *
+	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
+	 */
+	public function clean_up_promo_and_user_engagement_content( $post_content ) {
+
+		$this->crawler->clear();
+		$this->crawler->add( $post_content );
+
+		// Get their main content div.rich-text-body.
+		$div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
+		if ( ! $div_content_crawler ) {
+
+			// Has been cleaned, or this post not scraped from live, as all scraped posts will have this <div>.
+			return null;
+		}
+
+		// Traverse through all child nodes.
+		$post_content_updated = '';
+		foreach ( $div_content_crawler->childNodes->getIterator() as $key_node => $node ) {
+
+			// Get node HTML.
+			$node_html = $node->ownerDocument->saveHTML( $node );
+
+			/**
+			 * Skip div.enhancement which:
+			 *      - has a child <div class="html-module">
+			 *      - has a child <ps-promo>
+			 */
+
+			// Is this a div.html-module?
+			$is_div_class_enchancement       = ( isset( $node->tagName ) && 'div' == $node->tagName ) && ( 'enhancement' == $node->getAttribute( 'class' ) );
+
+			// Check if this $node has a child div.html-module.
+			$has_child_div_class_html_module = false;
+			foreach ( $node->childNodes->getIterator() as $child_node ) {
+				$has_child_div_class_html_module = ( isset( $child_node->tagName ) && 'div' == $child_node->tagName ) && ( 'html-module' == $child_node->getAttribute( 'class' ) );
+				if ( $has_child_div_class_html_module ) {
+					break;
+				}
+			}
+
+			// Check if div.enchancement has a <ps-promo>.
+			$has_child_ps_promo = false;
+			foreach ( $node->childNodes->getIterator() as $child_node ) {
+				$has_child_ps_promo = isset( $child_node->tagName ) && 'ps-promo' == $child_node->tagName;
+				if ( $has_child_ps_promo ) {
+					break;
+				}
+			}
+
+			// Skip this node.
+			if (
+				$is_div_class_enchancement &&
+				( $has_child_div_class_html_module || $has_child_ps_promo )
+			) {
+				continue;
+			}
+
+			// Trim the HTML.
+			$node_html = trim( $node_html );
+			if ( empty( $node_html ) ) {
+				continue;
+			}
+
+			// Append node HTML.
+			$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
+			$post_content_updated .= $node_html;
+		}
+
+		return $post_content_updated;
 	}
 
 	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
@@ -674,6 +800,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
 			WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
 		}
+
+		WP_CLI::line( "Done 👍" );
 	}
 
 	public function get_slug_from_url( $url ) {
