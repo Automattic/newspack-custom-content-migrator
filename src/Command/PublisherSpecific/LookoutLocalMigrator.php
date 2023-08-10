@@ -93,7 +93,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @var false|string Current working directory.
 	 */
-	private $cwd;
+	private $temp_dir;
 
 	/**
 	 * Scraper instance.
@@ -120,15 +120,21 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		// Set it in advance because works differently in different environments.
-		$this->cwd = __DIR__;
-		if ( ! file_exists( $this->cwd ) ) {
-			$this->cwd = getcwd();
+
+		// If on Atomic.
+		if ( '/srv/htdocs/__wp__/' == ABSPATH ) {
+			$public_path = '/srv/htdocs';
+			$this->temp_dir = '/tmp/scraper_data';
+			$plugin_dir = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
+		} else {
+			$public_path = rtrim( ABSPATH, '/' );
+			$this->temp_dir = $public_path . '/scraper_data';
+			$plugin_dir = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
 		}
 
 		// Newspack_Scraper_Migrator is not autoloaded.
-		require realpath( $this->cwd . '/../../../vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-util.php' );
-		require realpath( $this->cwd . '/../../../vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-html-parser.php' );
+		require realpath( $plugin_dir . '/vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-util.php' );
+		require realpath( $plugin_dir . '/vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-html-parser.php' );
 
 		$this->attachments = new Attachments();
 		$this->logger      = new Logger();
@@ -199,25 +205,27 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 
 		// Log files.
-		$log_path             = $this->cwd . '/logs_and_cache';
-		$log_wrong_urls       = 'll_debug__wrong_urls.log';
-		$log_all_author_names = 'll_debug__all_author_names.log';
-		$log_all_tags         = 'll_debug__all_tags.log';
+		$log_path                      = $this->temp_dir . '/logs_and_cache';
+		$log_wrong_urls                = 'll_debug__wrong_urls.log';
+		$log_all_author_names          = 'll_debug__all_author_names.log';
+		$log_all_tags                  = 'll_debug__all_tags.log';
+		$log_all_tags_promoted_content = 'll_debug__all_tags.log';
 
 		// Hit timestamp on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_wrong_urls, $ts, false );
 		$this->logger->log( $log_all_author_names, $ts, false );
 		$this->logger->log( $log_all_tags, $ts, false );
+		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
 
 		// Create folders for caching stuff.
 		// Cache section (category) data to files (because SQLs on `Result` table are super slow).
-		$section_data_cache_path = $log_path . '/cache/section_data';
+		$section_data_cache_path = $log_path . '/cache_sections';
 		if ( ! file_exists( $section_data_cache_path ) ) {
 			mkdir( $section_data_cache_path, 0777, true );
 		}
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-		$scraped_htmls_cache_path = $log_path . '/cache/scraped_htmls';
+		$scraped_htmls_cache_path = $log_path . '/scraped_htmls';
 		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
 			mkdir( $scraped_htmls_cache_path, 0777, true );
 		}
@@ -267,10 +275,11 @@ if ( $key_row >= 2 ) { break; }
 		/**
 		 * Now that we have the URLs, we will scrape them and import the posts.
 		 */
-		$post_authors           = [];
-		$debug_all_author_names = [];
-		$debug_wrong_posts_urls = [];
-		$debug_all_tags         = [];
+		$post_authors                    = [];
+		$debug_all_author_names          = [];
+		$debug_wrong_posts_urls          = [];
+		$debug_all_tags                  = [];
+		$debug_all_tags_promoted_content = [];
 		foreach ( $posts_urls as $key_url_data => $url_data ) {
 
 			$url  = $url_data['url'];
@@ -335,16 +344,21 @@ if ( $key_row >= 2 ) { break; }
 
 			// Collect postmeta in this array.
 			$postmeta = [
-				'newspackmigration_url'                => $url,
-				'newspackmigration_slug'               => $slug,
+				'newspackmigration_url'                   => $url,
+				'newspackmigration_slug'                  => $slug,
 				// E.g. "lo-sc".
-				'newspackmigration_script_source'      => $crawled_data['script_data']['source'] ?? '',
+				'newspackmigration_script_source'         => $crawled_data['script_data']['source'] ?? '',
 				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
-				'newspackmigration_script_sectionName' => $crawled_data['script_data']['sectionName'],
+				'newspackmigration_script_sectionName'    => $crawled_data['script_data']['sectionName'],
 				// E.g. "Promoted Content".
-				'newspackmigration_script_tags'        => $crawled_data['script_data']['tags'] ?? null,
-				'newspackmigration_presentedBy'        => $crawled_data['presented_by'] ?? '',
+				'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? null,
+				'newspackmigration_presentedBy'           => $crawled_data['presented_by'] ?? '',
+				'newspackmigration_tags_promoted_content' => $crawled_data['tags_promoted_content'] ?? '',
 			];
+			// Collect all tags_promoted_content for QA.
+			if ( $crawled_data['tags_promoted_content'] ) {
+				$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
+			}
 
 			// Import featured image.
 			if ( isset( $crawled_data['featured_image_src'] ) ) {
@@ -404,10 +418,12 @@ if ( $key_row >= 2 ) { break; }
 
 			// Assign tags.
 			$tags = $crawled_data['script_data']['tags'];
-			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
-			wp_set_post_tags( $post_id, $tags );
-			// Collect all tags for QA.
-			$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
+			if ( $tags ) {
+				// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
+				wp_set_post_tags( $post_id, $tags );
+				// Collect all tags for QA.
+				$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
+			}
 
 			// Save the postmeta.
 			foreach ( $postmeta as $meta_key => $meta_value ) {
@@ -421,15 +437,19 @@ if ( $key_row >= 2 ) { break; }
 
 		// Debug and QA info.
 		if ( ! empty( $debug_wrong_posts_urls ) ) {
-			WP_CLI::warning( "❗️ Check $log_wrong_urls for invalid URLs." );
+			WP_CLI::warning( "❗️ Check $log_path . '/' . $log_wrong_urls for invalid URLs." );
 		}
 		if ( ! empty( $debug_all_author_names ) ) {
 			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-			WP_CLI::warning( "⚠️️ QA the following: $log_all_author_names " );
+			WP_CLI::warning( "⚠️️ QA the following: $log_path . '/' . $log_all_author_names " );
 		}
 		if ( ! empty( $debug_all_tags ) ) {
 			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags ), false );
-			WP_CLI::warning( "⚠️️ QA the following: $log_all_tags ." );
+			WP_CLI::warning( "⚠️️ QA the following: $log_path . '/' . $log_all_tags ." );
+		}
+		if ( ! empty( $debug_all_tags_promoted_content ) ) {
+			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
+			WP_CLI::warning( "⚠️️ QA the following: $log_path . '/' . $log_all_tags_promoted_content ." );
 		}
 	}
 
@@ -604,8 +624,8 @@ if ( $key_row >= 2 ) { break; }
 		// and in <script> element data:
 		// $script_data['sectionName]
 		// but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
-		$section_meta          = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
-		$category_name         = $section_meta->getAttribute( 'content' );
+		$section_meta_crawler  = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
+		$category_name         = $section_meta_crawler->getAttribute( 'content' );
 		$data['category_name'] = $category_name;
 
 		// Parent category.
@@ -615,8 +635,18 @@ if ( $key_row >= 2 ) { break; }
 		$data['category_parent_name'] = $category_parent_name;
 
 		// Tags.
-		$tags         = $script_data['tags'] ?? null;
-		$data['tags'] = $tags;
+		$tags      = [];
+		$a_crawler = $this->filter_selector_element( 'div.tags > a', $this->crawler, $single = false );
+		if ( $a_crawler->getIterator()->count() > 0 ) {
+			foreach ( $a_crawler as $a_node ) {
+				$tags[] = $a_node->nodeValue;
+			}
+		}
+		// Tag "Promoted Content" found in <script> element too.
+		$tags_promoted_content = $script_data['tags'] ?? null;
+		// Add both tags.
+		$data['tags']                  = ! empty( $tags ) ? $tags : null;
+		$data['tags_promoted_content'] = $tags_promoted_content;
 
 		// Presented by.
 		/**
@@ -682,8 +712,8 @@ if ( $key_row >= 2 ) { break; }
 	 *
 	 * @return false|Crawler
 	 */
-	public function filter_selector_element( $selector, $dom_crawler ) {
-		$found_element = $this->data_parser->get_element_by_selector( $selector, $dom_crawler, $single = true );
+	public function filter_selector_element( $selector, $dom_crawler, $single = true ) {
+		$found_element = $this->data_parser->get_element_by_selector( $selector, $dom_crawler, $single );
 
 		return $found_element;
 	}
