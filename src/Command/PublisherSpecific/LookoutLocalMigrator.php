@@ -62,6 +62,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		'lookout-educator-page'        => 'For Educators',
 	];
 
+	/**
+	 * Fetched from lookout.co manually. Used to populate --urls-file for demo import.
+	 */
 	const INITIAL_DEMO_URLS = [
 		// City Life
 		'https://lookout.co/santacruz/wallace-baine/story/2023-08-06/performing-arts-as-old-guard-passes-baton-on-santa-cruz-scene-how-will-new-leaders-weather-generational-shift',
@@ -450,10 +453,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 
 		// Log files.
-		$log_wrong_urls                = $this->temp_dir . '/ll_debug__wrong_urls.log';
-		$log_all_author_names          = $this->temp_dir . '/ll_debug__all_author_names.log';
-		$log_all_tags                  = $this->temp_dir . '/ll_debug__all_tags.log';
-		$log_all_tags_promoted_content = $this->temp_dir . '/ll_debug__all_tags.log';
+		$log_wrong_urls                   = $this->temp_dir . '/ll_debug__wrong_urls.log';
+		$log_all_author_names             = $this->temp_dir . '/ll_debug__all_author_names.log';
+		$log_all_tags                     = $this->temp_dir . '/ll_debug__all_tags.log';
+		$log_all_tags_promoted_content    = $this->temp_dir . '/ll_debug__all_tags_promoted_content.log';
+		$log_err_importing_featured_image = $this->temp_dir . '/ll_err__featured_image.log';
 
 		// Hit timestamp on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
@@ -461,6 +465,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->logger->log( $log_all_author_names, $ts, false );
 		$this->logger->log( $log_all_tags, $ts, false );
 		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
+		$this->logger->log( $log_err_importing_featured_image, $ts, false );
 
 		// Create folders for caching stuff.
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
@@ -473,12 +478,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		/**
 		 * Scrape and import URLs.
 		 */
-		$post_authors                    = [];
 		$debug_all_author_names          = [];
 		$debug_wrong_posts_urls          = [];
 		$debug_all_tags                  = [];
 		$debug_all_tags_promoted_content = [];
 		foreach ( $urls as $key_url_data => $url ) {
+
+			if ( empty( $url ) ) {
+				continue;
+			}
 
 			WP_CLI::line( sprintf( '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
 
@@ -523,6 +531,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Crawl and extract all useful data from HTML
 			$crawled_data = $this->crawl_post_data_from_html( $html, $url );
 
+			// Get slug from URL.
+			$slug = $this->get_slug_from_url( $url );
+
 			// Create post.
 			$post_args = [
 				'post_title'   => $crawled_data['post_title'],
@@ -537,6 +548,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Collect postmeta in this array.
 			$postmeta = [
+				// Newspack Subtitle postmeta
+				'newspack_post_subtitle'                  => $crawled_data['post_subtitle'] ?? '',
+				// Basic data
 				'newspackmigration_url'                   => $url,
 				'newspackmigration_slug'                  => $slug,
 				// E.g. "lo-sc".
@@ -544,10 +558,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
 				'newspackmigration_script_sectionName'    => $crawled_data['script_data']['sectionName'],
 				// E.g. "Promoted Content".
-				'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? null,
+				'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? '',
 				'newspackmigration_presentedBy'           => $crawled_data['presented_by'] ?? '',
 				'newspackmigration_tags_promoted_content' => $crawled_data['tags_promoted_content'] ?? '',
+				// Author links, to be processed after import.
+				'newspackmigration_author_links'          => $crawled_data['author_links'] ?? '',
+				// Featured img info.
+				'featured_image_src'                      => $crawled_data['featured_image_src'] ?? '',
+				'featured_image_caption'                  => $crawled_data['featured_image_caption'] ?? '',
+				'featured_image_alt'                      => $crawled_data['featured_image_alt'] ?? '',
+				'featured_image_credit'                   => $crawled_data['featured_image_credit'] ?? '',
 			];
+
 			// Collect all tags_promoted_content for QA.
 			if ( $crawled_data['tags_promoted_content'] ) {
 				$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
@@ -565,10 +587,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$post_id,
 					$args        = []
 				);
-				set_post_thumbnail( $post_id, $attachment_id );
-				// Credit goes as Newspack credit meta.
-				if ( $crawled_data['featured_image_credit'] ) {
-					$postmeta[ self::MEDIA_CREDIT_META ] = $crawled_data['featured_image_credit'];
+				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+					$this->logger->log( $log_err_importing_featured_image, sprintf( 'Error importing featured image to post ID: %d src: %s ERR: %s', $post_id, $crawled_data['featured_image_src'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' ), $this->logger::WARNING );
+				} else {
+					set_post_thumbnail( $post_id, $attachment_id );
+					// Credit goes as Newspack credit meta.
+					if ( $crawled_data['featured_image_credit'] ) {
+						$postmeta[ self::MEDIA_CREDIT_META ] = $crawled_data['featured_image_credit'];
+					}
 				}
 			}
 
@@ -637,13 +663,25 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::warning( "⚠️️ QA the following $log_all_author_names " );
 		}
 		if ( ! empty( $debug_all_tags ) ) {
-			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags ), false );
+			// Flatten multidimensional array to single.
+			$debug_all_tags_flattened = [];
+			array_walk_recursive( $debug_all_tags, function( $e ) use ( &$debug_all_tags_flattened ) { $debug_all_tags_flattened[] = $e; } );
+			// Log.
+			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
 			WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
 		}
 		if ( ! empty( $debug_all_tags_promoted_content ) ) {
 			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
 			WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
 		}
+	}
+
+	public function get_slug_from_url( $url ) {
+		$url_path          = trim( wp_parse_url( $url, PHP_URL_PATH ), '/' );
+		$url_path_exploded = explode( '/', $url_path );
+		$slug              = end( $url_path_exploded );
+
+		return $slug;
 	}
 
 	public function sanitize_filename( $string ) {
@@ -788,9 +826,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$data['post_title'] = $title;
 
 		$subtitle           = $this->filter_selector( 'div.subheadline', $this->crawler ) ?? null;
-		$data['post_title'] = $subtitle ?? null;
+		$data['post_subtitle'] = $subtitle ?? null;
 
 		$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+		if ( empty( $post_content ) ) {
+			$post_content = $this->filter_selector( 'div.rich-text-article-body-content', $this->crawler, false, false );
+		}
 		if ( empty( $post_content ) ) {
 			throw new \UnexpectedValueException( sprintf( 'Could not get post content for post %s', $url ) );
 		}
@@ -805,9 +846,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$data['post_date'] = $post_date;
 
 		// Authors.
+		// div.author-name might or might not have <a>s with links to author page.
 		$authors_text         = $this->filter_selector( 'div.author-name', $this->crawler );
-		$post_authors         = $this->format_authors( $authors_text );
-		$data['post_authors'] = $post_authors;
+		$data['post_authors'] = $this->filter_author_names( $authors_text );
+		$data['author_links'] = [];
+		// If there is one or more links to author pages, save them to be processed after import.
+		$author_link_crawler = $this->filter_selector_element( 'div.author-name > a', $this->crawler, $single = false );
+		if ( $author_link_crawler ) {
+			foreach ( $author_link_crawler->getIterator() as $author_link_node ) {
+				$data['author_links'][] = $author_link_node->getAttribute( 'href' );
+			}
+		}
 
 		// Featured image.
 		$featured_image = $this->filter_selector_element( 'div.page-lead-media > figure > img', $this->crawler );
@@ -845,7 +894,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// Tags.
 		$tags      = [];
 		$a_crawler = $this->filter_selector_element( 'div.tags > a', $this->crawler, $single = false );
-		if ( $a_crawler->getIterator()->count() > 0 ) {
+		if ( $a_crawler && $a_crawler->getIterator()->count() > 0 ) {
 			foreach ( $a_crawler as $a_node ) {
 				$tags[] = $a_node->nodeValue;
 			}
@@ -872,14 +921,22 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		return $featured_image_credit;
 	}
-	public function format_authors( $authors_text ) {
-		// Remove 'written by: ' and explode authors by comma, e.g. "Written by: Scott Rappaport, UC Santa Cruz".
-		$authors_text = str_replace( 'Written by: ', '', $authors_text );
+	public function filter_author_names( $authors_text ) {
+
+		$authors_text = trim( $authors_text );
+		$authors_text = ltrim( $authors_text, 'By: ' );
+		$authors_text = ltrim( $authors_text, 'By ' );
+		$authors_text = ltrim( $authors_text, 'Written by: ' );
+		$authors_text = ltrim( $authors_text, 'Written by ' );
+
+		// Explode names by comma.
 		$authors_text = str_replace( ', ', ',', $authors_text );
+		$author_names = explode( ',', $authors_text );
 
-		$authors = explode( ',', $authors_text );
+		// Trim all names (wo/ picking up " " spaces).
+		$author_names = array_map( function( $value ) { return trim( $value, '  ' ); }, $author_names );
 
-		return $authors;
+		return $author_names;
 	}
 
 	/**
