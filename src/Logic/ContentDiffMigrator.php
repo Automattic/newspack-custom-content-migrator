@@ -1053,52 +1053,76 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array  $imported_post_ids_map   Keys are Post IDs on Live Site, values are Post IDs of imported posts on Local Site.
-	 *                                        Will only update attachments for these Posts (e.g. an existing Post could
-	 *                                        legitimately have an att.ID 123, and then another newly imported Post could also have
-	 *                                        had att.ID 123 which has changed to 456 after import. We only want to update the
-	 *                                        newly imported Post's att.ID from 123 to 456, not the existing Post's.
-	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
-	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
-	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
-	 *                                        detailed output of all the changes made.
+	 * @param array  $new_post_ids                Imported local Post IDs.
+	 * @param array  $imported_attachment_ids_map Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param string $log_file_path               Optional. Full path to a log file. If provided, the method will save and append
+	 *                                            a detailed output of all the changes made.
 	 */
-	public function update_featured_images( $imported_post_ids_map, $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
-		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
-			return [];
+	public function update_featured_images( $new_post_ids, $imported_attachment_ids_map, $log_file_path ) {
+		if ( empty( $new_post_ids ) || empty( $imported_attachment_ids_map ) ) {
+			return;
 		}
 
-		$newly_imported_post_ids = array_values( $imported_post_ids_map );
+		/**
+		 * We should only be updating old live site's Post IDs which had '_thumbnail_id's that are found in our "old_id" attachment mapping.
+		 *
+		 * Explanation why:
+		 * for example, we could have imported two different attachments,
+		 *      {"post_type":"attachment","id_old":1111,"id_new":999}
+		 *      {"post_type":"attachment","id_old":1223,"id_new":1111}
+		 * and there could be two posts currently on Staging
+		 *      one with _thumbnail_id 1111
+		 *          --> this one needs to be updated from 1111 to 999
+		 *      second also with _thumbnail_id 1111, but let's say this post was created directly on staging and used the existing ID 1111
+		 *          --> this one's _thumbnail_id MUST NOT be updated from 1111 to 999
+		 *
+		 * So, we should only update _thumbnail_ids for those posts that were imported by us.
+		 */
 
-		$postmeta_table = $this->wpdb->postmeta;
-		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
-		$sql            = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		// phpcs:ignore -- wpdb::prepare is used by wrapper.
-		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
+		// Loop through posts, and update their _thumbnail_id if needed.
+		foreach ( $new_post_ids as $new_post_id ) {
 
-		foreach ( $results as $key_result => $result ) {
-			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
-			$post_id = $result['post_id'] ?? null;
-			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
+			// Get Post's current _thumbnail_id.
+			// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- correctly prepared.
+			$current_thumbnail_id = $this->wpdb->get_var(
+				$this->wpdb->prepare(
+					"SELECT meta_value
+					FROM {$this->live_table_prefix}postmeta
+					WHERE meta_key = '_thumbnail_id'
+					AND post_id = %d",
+					$new_post_id
+				)
+			);
+			// phpcs:enable
+
+			// Check if this _thumbnail_id is used as a key in $imported_attachment_ids_map (keys are "old_id"s, values are "new_id"s).
+			if ( ! array_key_exists( $current_thumbnail_id, $imported_attachment_ids_map ) ) {
 				continue;
 			}
 
-			$old_id = $result['meta_value'] ?? null;
-			$new_id = $imported_attachment_ids[ $old_id ] ?? null;
-			if ( ! is_null( $new_id ) ) {
-				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result['meta_id'] ] );
-				// Log.
-				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$this->log(
-						$log_file_path,
-						json_encode(
-							[
-								'id_old' => (int) $old_id,
-								'id_new' => (int) $new_id,
-							]
-						)
-					);
-				}
+			// Get the new _thumbnail_id and update it.
+			$new_thumbnail_id = $imported_attachment_ids_map[ $current_thumbnail_id ];
+			$updated          = $this->wpdb->update(
+				$this->wpdb->postmeta,
+				[ 'meta_value' => $new_thumbnail_id ],
+				[
+					'post_id'  => $new_post_id,
+					'meta_key' => '_thumbnail_id',
+				]
+			);
+
+			// Log.
+			if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+				$this->log(
+					$log_file_path,
+					json_encode(
+						[
+							'post_id' => (int) $new_post_id,
+							'id_old'  => (int) $current_thumbnail_id,
+							'id_new'  => (int) $new_thumbnail_id,
+						]
+					)
+				);
 			}
 		}
 	}
