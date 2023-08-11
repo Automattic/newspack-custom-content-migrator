@@ -456,23 +456,41 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Log files.
-		$log_updated = $this->temp_dir . '/ll_updated_post_content.log';
+		$log_updated          = $this->temp_dir . '/ll_updated_post_content.log';
+		$log_gas_urls_updated = $this->temp_dir . '/ll_gas_urls_updated.log';
+		$log_err_gas_updated  = $this->temp_dir . '/ll_err__updated_gas.log';
+
+		// Create folders for caching stuff.
+		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+			mkdir( $scraped_htmls_cache_path, 0777, true );
+		}
+
+		// Create folders for caching stuff.
+		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+			mkdir( $scraped_htmls_cache_path, 0777, true );
+		}
+
 
 		// Hit timestamp on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_updated, $ts, false );
+		$this->logger->log( $log_gas_urls_updated, $ts, false );
+		$this->logger->log( $log_err_gas_updated, $ts, false );
 
+		// Get post IDs.
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
 
 		/**
-		 * Clean up post_content and remove runtime inserted promo or user engagement.
+		 * Clean up post_content, and remove runtime inserted promo or user engagement.
 		 */
-		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		WP_CLI::line( 'Cleaning up post_content ...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
-			/**
-			 * Remove promo and user engagement pieces of content inserted at runtime.
-			 */
 			$post_content         = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 			$post_content_updated = $this->clean_up_promo_and_user_engagement_content( $post_content );
 
@@ -480,11 +498,249 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( ! empty( $post_content_updated ) ) {
 				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
 				$this->logger->log( $log_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
-			}       
+			}
 		}
+
+
+		/**
+		 * Next update GA info by scraping and fetching their author pages from live.
+		 */
+		WP_CLI::line( 'Updating GA author data ...' );
+
+		// First get all author pages URLs which were originally stored as Posts' postmeta.
+		$author_pages_urls = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
+			if ( empty( $links_meta ) ) {
+				continue;
+			}
+
+			// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
+			foreach ( $links_meta as $urls ) {
+				foreach ( $urls as $url ) {
+					if ( in_array( $url, $author_pages_urls ) ) {
+						continue;
+					}
+
+					$author_pages_urls[] = $url;
+				}
+			}
+		}
+
+		// Now actually scrape individual author pages and update GAs with that data.
+		foreach ( $author_pages_urls as $author_page_url ) {
+			$this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+		}
+
+
+
+		// Debug and QA info.
+		if ( ! empty( $gas_urls_updated ) ) {
+			$this->logger->log( $log_gas_urls_updated, implode( "\n", $gas_urls_updated ), false );
+			WP_CLI::warning( "⚠️️ QA the following $log_gas_urls_updated " );
+		}
+		WP_CLI::warning( "❗️ Check if any $log_err_gas_updated were logged with invalid unscrapable author pages URLs." );
 
 		wp_cache_flush();
 		WP_CLI::line( 'Done 👍' );
+	}
+
+	public function update_author_info( $url, $scraped_htmls_cache_path, $log_err_gas_updated ) {
+
+		// HTML cache filename and path.
+		$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
+		$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
+
+		// Get author page from cache if exists.
+		$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
+		if ( is_null( $html ) ) {
+
+			// Remote get author page from live.
+			$get_result = $this->wp_remote_get_with_retry( $url );
+			if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
+				// Not OK.
+				$err_gas_updated[] = $url;
+				$msg               = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
+				$this->logger->log( $log_err_gas_updated, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
+				return;
+			}
+
+			$html = $get_result;
+
+			// Cache HTML to file.
+			file_put_contents( $html_cached_file_path, $html );
+		}
+
+		// Crawl and extract all useful data from author page HTML.
+		$crawled_data = $this->crawl_author_data_from_html( $html, $url );
+
+		// Get or create GA.
+		$ga = $this->cap->get_guest_author_by_display_name( $crawled_data['name'] );
+		if ( ! $ga ) {
+			$ga = $this->cap->create_guest_author( [ 'display_name' => $crawled_data['name'] ] );
+		}
+
+		// GA data to update.
+		$ga_update_arr = [];
+
+		// Name is being referenced, so that stays the same.
+
+		// Avatar -- only import and update if not already set, because we'd be importing dupes to the Media Library.
+		$ga_avatar_att_id = get_post_meta( $ga->ID, '_thumbnail_id', true );
+		if ( ! $ga_avatar_att_id && $crawled_data['avatar_url'] ) {
+			WP_CLI::line( sprintf( "Downloading avatar URL for author '%s' ...", $crawled_data['name'] ) );
+			$attachment_id = $this->attachments->import_external_file( $crawled_data['avatar_url'], $crawled_data['name'] );
+			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+				$this->logger->log( $log_err_gas_updated, sprintf( "Error importing avatar image %s for author '%s' ERR: %s", $crawled_data['avatar_url'], $crawled_data['name'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' ), $this->logger::WARNING );
+			} else {
+				$ga_update_arr['avatar'] = $attachment_id;
+			}
+		}
+
+		// Compose social links sentence.
+		$social_blank = 'Follow ' . $crawled_data['name'] . ' on: ';
+		$social       = $social_blank;
+		$link_fn      = function( $href, $text ) {
+			return sprintf( '<a href="%s" target="_blank" rel="noreferrer">%s</a>', $href, $text );
+		};
+		if ( isset( $crawled_data['social_twitter'] ) && ! empty( $crawled_data['social_twitter'] ) ) {
+			$social .= ( $social_blank != $social ) ? ', ' : '';
+			$social .= $link_fn( $crawled_data['social_twitter'], 'Twitter' );
+		}
+		if ( isset( $crawled_data['social_instagram'] ) && ! empty( $crawled_data['social_instagram'] ) ) {
+			$social .= ( $social_blank != $social ) ? ', ' : '';
+			$social .= $link_fn( $crawled_data['social_instagram'], 'Instagram' );
+		}
+		if ( isset( $crawled_data['social_facebook'] ) && ! empty( $crawled_data['social_facebook'] ) ) {
+			$social .= ( $social_blank != $social ) ? ', ' : '';
+			$social .= $link_fn( $crawled_data['social_facebook'], 'Facebook' );
+		}
+		if ( isset( $crawled_data['social_linkedin'] ) && ! empty( $crawled_data['social_linkedin'] ) ) {
+			$social .= ( $social_blank != $social ) ? ', ' : '';
+			$social .= $link_fn( $crawled_data['social_linkedin'], 'LinkedIn' );
+		}
+
+		// Bio = $social . $bio.
+		$ga_update_arr['description'] = '';
+		if ( $social_blank != $social ) {
+			$ga_update_arr['description'] .= $social;
+		}
+		if ( $crawled_data['bio'] ) {
+			$ga_update_arr['description'] .= ! empty( $ga_update_arr['description'] ) ? '. ' : '';
+			$ga_update_arr['description'] .= $crawled_data['bio'];
+		}
+
+		// Email.
+		if ( isset( $crawled_data['social_email'] ) && ! empty( $crawled_data['social_email'] ) ) {
+			$ga_update_arr['user_email'] = $crawled_data['social_email'];
+		}
+
+		// Title.
+		if ( $crawled_data['title'] ) {
+			$ga_update_arr['job_title'] = $crawled_data['title'];
+		}
+
+		// Update the GA.
+		$this->cap->update_guest_author( $ga->ID, $ga_update_arr );
+		WP_CLI::success(
+			sprintf(
+				'Updated GA %s from %s',
+				sprintf(
+					'https://%s/wp-admin/post.php?post=%d&action=edit',
+					wp_parse_url( get_site_url() )['host'],
+					$ga->ID,
+				),
+				$url
+			) 
+		);
+	}
+
+
+	/**
+	 * Crawls all useful post data from HTML.
+	 *
+	 * @param string $html                    HTML.
+	 * @param array  &$debug_all_author_names Stores all author names for easier QA/debugging.
+	 * @param array  &$debug_all_tags         Stores all tags for easier QA/debugging.
+	 *
+	 * @return array $data All posts data crawled from HTML. {
+	 *      @type array   script_data            Decoded data from that one <script> element with useful post info.
+	 *      @type string  post_title
+	 *      @type ?string presented_by
+	 * }
+	 */
+	public function crawl_author_data_from_html( $html, $url ) {
+
+		$data = [];
+
+		/**
+		 * Get all post data.
+		 */
+		$this->crawler->clear();
+		$this->crawler->add( $html );
+
+		// Name
+		$data['name'] = trim( $this->filter_selector( 'div.page-bio > h1.page-bio-author-name', $this->crawler ) );
+
+		// Avatar image.
+		$avatar_crawler     = $this->filter_selector_element( 'div.page-intro-avatar > img', $this->crawler, $single = true );
+		$data['avatar_url'] = $avatar_crawler ? $avatar_crawler->getAttribute( 'src' ) : null;
+
+		// Title, e.g. Politics and Policy Correspondent.
+		$data['title'] = $this->filter_selector( 'div.page-bio > p.page-bio-author-title', $this->crawler );
+
+		// Bio.
+		$data['bio'] = $this->filter_selector( 'div.page-bio > div.page-bio-author-bio', $this->crawler );
+
+		// Social links. Located in ul.social-bar-menu > li > a > href.
+		$ul_crawler = $this->filter_selector_element( 'ul.social-bar-menu', $this->crawler, $single = true );
+		// Also get entire ul.social-bar-menu HTML.
+		$social_list_html               = $ul_crawler->ownerDocument->saveHTML( $ul_crawler );
+		$data['social_links_full_html'] = $social_list_html ?? null;
+		// <ul>
+		if ( $ul_crawler ) {
+			// <li>s
+			$lis = $ul_crawler->getElementsByTagName( 'li' );
+			foreach ( $lis as $li ) {
+				// Get the first <a>.
+				$as = $li->getElementsByTagName( 'a' );
+				if ( $as && $as->count() > 0 ) {
+					$a                   = $as[0];
+					$a_html              = $a->ownerDocument->saveHTML( $a );
+					$social_service_type = $a->getAttribute( 'data-social-service' );
+					switch ( $social_service_type ) {
+						case 'email':
+							$data['social_email'] = str_replace( 'mailto:', '', $a->getAttribute( 'href' ) );
+							break;
+						case 'linkedin':
+							// Oddly the href might have wrong value, e.g. "https://www.linkedin.com/in/https://www.linkedin.com/in/blaire-hobbs-2b278b1a0/".
+							$href = $a->getAttribute( 'href' );
+							// Get the last https:// occurrence in $href.
+							$last_https_pos          = strrpos( $href, 'https://' );
+							$href_cleaned            = substr( $href, $last_https_pos );
+							$data['social_linkedin'] = $href_cleaned;
+							break;
+						case 'twitter':
+							$href                   = $a->getAttribute( 'href' );
+							$data['social_twitter'] = $href;
+							break;
+						case 'instagram':
+							$href                     = $a->getAttribute( 'href' );
+							$data['social_instagram'] = $href;
+							break;
+						case 'facebook':
+							$href                    = $a->getAttribute( 'href' );
+							$data['social_facebook'] = $href;
+							break;
+						default:
+							throw new \UnexpectedValueException( sprintf( "A new type of social link type '%s' used on author page %s. Please update the migrator's crawl_author_data_from_html() method and add support for it.", $social_service_type, $url ) );
+							break;
+					}
+				}
+			}
+		}
+
+		return $data;
 	}
 
 	/**
@@ -626,7 +882,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					and wp.post_status = 'publish' ; ",
 					'newspackmigration_url',
 					$url
-				) 
+				)
 			);
 			if ( $post_id ) {
 				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
@@ -671,7 +927,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'post_date'    => $crawled_data['post_date'],
 			];
 			$post_id   = wp_insert_post( $post_args );
-			WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
+			WP_CLI::line( sprintf( 'Created post ID %d', $post_id ) );
 
 			// Collect postmeta in this array.
 			$postmeta = [
@@ -718,9 +974,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$this->logger->log( $log_err_importing_featured_image, sprintf( 'Error importing featured image to post ID: %d src: %s ERR: %s', $post_id, $crawled_data['featured_image_src'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' ), $this->logger::WARNING );
 				} else {
 					set_post_thumbnail( $post_id, $attachment_id );
-					// Credit goes as Newspack credit meta.
+					// Credit goes as Newspack credit postmeta.
 					if ( $crawled_data['featured_image_credit'] ) {
-						$postmeta[ self::MEDIA_CREDIT_META ] = $crawled_data['featured_image_credit'];
+						update_post_meta( $attachment_id, self::MEDIA_CREDIT_META, $crawled_data['featured_image_credit'] );
 					}
 				}
 			}
@@ -796,7 +1052,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$debug_all_tags,
 				function( $e ) use ( &$debug_all_tags_flattened ) {
 					$debug_all_tags_flattened[] = $e;
-				} 
+				}
 			);
 			// Log.
 			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
@@ -1072,7 +1328,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			function( $value ) {
 				return trim( $value, '  ' );
 			},
-			$author_names 
+			$author_names
 		);
 
 		return $author_names;
