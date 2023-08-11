@@ -348,7 +348,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			'newspack-content-migrator lookoutlocal-postscrape-posts',
 			[ $this, 'cmd_postscrape_posts' ],
 			[
-				'shortdesc' => 'Second main command :) Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
+				'shortdesc' => 'Second main command. Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
 			]
 		);
 		WP_CLI::add_command(
@@ -559,8 +559,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$get_result = $this->wp_remote_get_with_retry( $url );
 			if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
 				// Not OK.
-				$err_gas_updated[] = $url;
-				$msg               = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
+				$msg = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
 				$this->logger->log( $log_err_gas_updated, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
 				return;
 			}
@@ -651,10 +650,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$ga->ID,
 				),
 				$url
-			) 
+			)
 		);
 	}
-
 
 	/**
 	 * Crawls all useful post data from HTML.
