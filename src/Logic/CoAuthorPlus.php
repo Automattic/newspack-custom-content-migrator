@@ -110,6 +110,27 @@ class CoAuthorPlus {
 		// If not provided, automatically set `user_login` from display_name.
 		if ( ! isset( $args['user_login'] ) ) {
 			$args['user_login'] = sanitize_title( $args['display_name'] );
+		} else {
+			/**
+			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
+			 * CAP saves and then retrieves it.
+			 *
+			 * see \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
+			 *   - because they do:
+			 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
+			 *
+			 *   - so for example, if create() gets 'user_login' = '3.42488E+15',
+			 *      - `post_name` will be == 'cap' + sanitize_title(            '3.42488E+15'   ) == "cap-6-20386e15"
+			 *      - but `slug` will be  == 'cap' + sanitize_title( urldecode( '3.42488E+15' ) ) == "cap-6-20386e-15"
+			 *      - which are different.
+			 *
+			 *      => And this is an edge case bug. These GAs will fail with errors if you try and assign them to Posts.
+			 *
+			 * Additionally see \CoAuthors_Plus::update_author_term where wp_insert_term() causes:
+			 *      - wp_terms.name will be == "6.20386e 15"  (comes from get_guest_author_by()'s `user_login`)
+			 *      - while description will contain "6-20386e-15"
+			 */
+			$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
 		}
 
 		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args['user_login'] );
@@ -123,7 +144,100 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Assigns Guest Authors to the Post. Completely overwrites the existing list of authors.
+	 * Updates Guest Author's data.
+	 *
+	 * @param int   $ga_id Guest Author ID.
+	 * @param array $args  {
+	 *     The $args param that can be updated (for the \CoAuthors_Guest_Authors::create method).
+	 *
+	 *     @type string $display_name
+	 *     @type string $first_name
+	 *     @type string $last_name
+	 *     @type string $user_email
+	 *     @type string $website
+	 *     @type string $description
+	 *     @type int    $avatar       Attachment ID for the Avatar image.
+	 * }
+	 *
+	 * user_login field can presently not be updated. If needed, it can probably be done by updating:
+	 *      - wp_postmeta.meta_value where meta_key = 'cap-user_login'
+	 *      - wp_terms.name where term_id matches $ga_id post_id
+	 *      - wp_terms.slug where term_id matches $ga_id post_id
+	 *
+	 * @throws \UnexpectedValueException If $args contains an unsupported key.
+	 */
+	public function update_guest_author( int $ga_id, array $args ) {
+		global $wpdb;
+
+		// Validate args keys.
+		$allowed_args_keys = [
+			'display_name',
+			'first_name',
+			'last_name',
+			'user_email',
+			'website',
+			'description',
+			'avatar',
+		];
+		foreach ( $args as $key => $value ) {
+			if ( ! in_array( $key, $allowed_args_keys, true ) ) {
+				throw new \UnexpectedValueException( 'The `' . $key . '` param is not allowed for Guest Author update.' );
+			}
+		}
+
+		// Sanitize args.
+		$args_sanitized = [];
+		foreach ( $args as $key => $value ) {
+			$key_sanitized                    = esc_sql( $key );
+			$value_sanitized                  = esc_sql( $value );
+			$args_sanitized[ $key_sanitized ] = $value_sanitized;
+		}
+
+		// Update display name.
+		if ( isset( $args_sanitized['display_name'] ) && ! empty( $args_sanitized['display_name'] ) ) {
+			$wpdb->update(
+				$wpdb->posts,
+				[ 'post_title' => $args_sanitized['display_name'] ],
+				[ 'ID' => $ga_id ]
+			);
+			update_post_meta( $ga_id, 'cap-display_name', $args_sanitized['display_name'] );
+		}
+
+		// Update first_name.
+		if ( isset( $args_sanitized['first_name'] ) && ! empty( $args_sanitized['first_name'] ) ) {
+			update_post_meta( $ga_id, 'cap-first_name', $args_sanitized['first_name'] );
+		}
+
+		// Update last_name.
+		if ( isset( $args_sanitized['last_name'] ) && ! empty( $args_sanitized['last_name'] ) ) {
+			update_post_meta( $ga_id, 'cap-last_name', $args_sanitized['last_name'] );
+		}
+
+		// Update user_email.
+		if ( isset( $args_sanitized['user_email'] ) && ! empty( $args_sanitized['user_email'] ) ) {
+			update_post_meta( $ga_id, 'cap-user_email', $args_sanitized['user_email'] );
+		}
+
+		// Update website.
+		if ( isset( $args_sanitized['website'] ) && ! empty( $args_sanitized['website'] ) ) {
+			update_post_meta( $ga_id, 'cap-website', $args_sanitized['website'] );
+		}
+
+		// Update description.
+		if ( isset( $args_sanitized['description'] ) && ! empty( $args_sanitized['description'] ) ) {
+			update_post_meta( $ga_id, 'cap-description', $args_sanitized['description'] );
+		}
+
+		// Update avatar attachment ID.
+		if ( isset( $args_sanitized['avatar'] ) && ! empty( $args_sanitized['avatar'] ) ) {
+			update_post_meta( $ga_id, '_thumbnail_id', $args_sanitized['avatar'] );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Assigns Guest Authors to the Post.
 	 *
 	 * @param array $guest_author_ids Guest Author IDs.
 	 * @param int   $post_id          Post IDs.
@@ -136,6 +250,29 @@ class CoAuthorPlus {
 			$coauthors[]  = $guest_author->user_nicename;
 		}
 		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users );
+	}
+
+	/**
+	 * Assigns either GAs and/or WPUsers authors to Post.
+	 *
+	 * @param array $authors                  Array of mixed Guest Author \stdClass objects and/or \WP_User objects.
+	 * @param int   $post_id                  Post IDs.
+	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
+	 *
+	 * @throws \UnexpectedValueException If $authors contains an unsupported class.
+	 */
+	public function assign_authors_to_post( array $authors, $post_id, bool $append_to_existing_users = false ) {
+		$coauthors_nicenames = [];
+		foreach ( $authors as $author ) {
+			if ( 'stdClass' === $author::class ) {
+				$coauthors_nicenames[] = $author->user_nicename;
+			} elseif ( 'WP_User' === $author::class ) {
+				$coauthors_nicenames[] = $author->data->user_nicename;
+			} else {
+				throw new \UnexpectedValueException( 'The `' . $author::class . '` class is not allowed for Guest Author update.' );
+			}
+		}
+		$this->coauthors_plus->add_coauthors( $post_id, $coauthors_nicenames, $append_to_existing_users );
 	}
 
 	/**
@@ -153,6 +290,30 @@ class CoAuthorPlus {
 
 		// WP User mapping.
 		update_post_meta( $ga_id, 'cap-linked_account', $user->user_login );
+	}
+
+	/**
+	 * Links a Guest Author to an existing WP User.
+	 *
+	 * @param int     $ga_id Guest Author ID.
+	 * @param \WPUser $user  WP User.
+	 */
+	public function unlink_wp_user_from_guest_author( $ga_id, $user ) {
+		delete_post_meta( $ga_id, 'cap-linked_account', $user->user_login );
+	}
+
+	/**
+	 * Returns the Guest Author object which has a linked WP_User with given $user_login_of_linked_wpuser account.
+	 *
+	 * @param int $user_login_of_linked_account user_login of linked WP_User account.
+	 *
+	 * @return ?object Guest Author object or null.
+	 */
+	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser ) {
+		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser );
+		$ga = ( 'guest-author' == $ga->type ) ? $ga : null;
+
+		return $ga;
 	}
 
 	/**
@@ -178,25 +339,97 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * This returns a GA object if that GA's user_login matches the provided user_login, or if that GA's WP_User linked_account
+	 * matches the provided user_login.
+	 *
+	 * Also see self::get_guest_author_by_user_login().
+	 *
+	 * P.S. CAP can sometimes be a bit complicated.
+	 *
+	 * @param int $user_login user_login of existing GA object, or of existing WP_User object linked to a GA user.
+	 *
+	 * @return false|object Guest Author object which has that user_login, or has a linked WP_User with that user_login.
+	 */
+	public function get_guest_author_by_user_login_including_linked_account_login( $user_login ) {
+		$ga = $this->coauthors_plus->get_coauthor_by( 'user_login', $user_login, true );
+		$ga = ( 'guest-author' == $ga->type ) ? $ga : false;
+
+		return $ga;
+	}
+
+	/**
+	 * Gets the Guest Author object by `email` (as defined by the CAP plugin).
+	 *
+	 * @param string $ga_email Guest Author email.
+	 *
+	 * @return false|object Guest Author object.
+	 */
+	public function get_guest_author_by_email( string $ga_email ) {
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_email', $ga_email );
+	}
+
+	/**
 	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return false|object Guest Author object.
+	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
-		// This class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'.
-		$user_login = sanitize_title( $display_name );
+		// phpcs:disable
+		/**
+		 * These two don't work as expected:
+		 *
+		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'display_name', $display_name );
+		 *
+		 *      return $this->coauthors_guest_authors->get_guest_author_by( 'post_title', $display_name );
+		 */
+		// phpcs:enable
 
-		return $this->get_guest_author_by_user_login( $user_login );
+		// Manually querying ID from DB.
+		global $wpdb;
+		$post_ids_results = $wpdb->get_results( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s AND post_type = 'guest-author';", $display_name ), ARRAY_A );
+
+		$gas = [];
+		foreach ( $post_ids_results as $post_id_result ) {
+			$gas[] = $this->get_guest_author_by_id( $post_id_result['ID'] );
+		}
+
+		if ( 1 === count( $post_ids_results ) ) {
+			return $gas[0];
+		}
+
+		return $gas;
+
+
+
+		/**
+		 * Another possible approach, get using user_login, since this class' method self::create_guest_author just sanitizes 'display_name' to get 'user_login'
+		 *      $user_login = sanitize_title( $display_name );
+		 *      return $this->get_guest_author_by_user_login( $user_login );
+		 */
+	}
+
+	/**
+	 * Gets Guest Author's avatar attachment ID.
+	 *
+	 * @param int $ga_id GA ID.
+	 *
+	 * @return int|null Attachment ID or null.
+	 */
+	public function get_guest_authors_avatar_attachment_id( int $ga_id ) {
+		$_thumbnail_id = get_post_meta( $ga_id, '_thumbnail_id', true );
+		$attachment_id = is_numeric( $_thumbnail_id ) ? (int) $_thumbnail_id : null;
+
+		return $attachment_id;
 	}
 
 	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
-	 * 
-	 * @param WP_User|int $wp_user ID of the User or a WP_User object
-	 * 
+	 *
+	 * @param WP_User|int $wp_user ID of the User or a WP_User object.
+	 *
 	 * @return false|object Guest author object.
 	 */
 	public function get_or_create_guest_author_from_user( $wp_user ) {
@@ -223,7 +456,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Gets Post's Guest Authors.
+	 * Gets Post's Guest Authors, leaving out WP User authors.
 	 *
 	 * @param int $post_id Post ID.
 	 *
@@ -234,8 +467,7 @@ class CoAuthorPlus {
 
 		$coauthors = get_coauthors( $post_id );
 
-		// Sometimes get_coauthors() returns the WP_User/Author, too; this could have been a lapse on some end, but just in case,
-		// let's filter out the \WP_User objects.
+		// Also returns \WP_User type authors. Let's filter those out.
 		foreach ( $coauthors as $coauthor ) {
 			if ( $coauthor instanceof \WP_User ) {
 				continue;
@@ -245,6 +477,19 @@ class CoAuthorPlus {
 		}
 
 		return $guest_authors;
+	}
+
+	/**
+	 * Gets all Post authors, both Guest Authors and WP User authors.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return mixed|void
+	 */
+	public function get_all_authors_for_post( $post_id ) {
+		$coauthors = get_coauthors( $post_id );
+
+		return $coauthors;
 	}
 
 	/**
@@ -280,14 +525,145 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * This function will facilitate obtaining all posts for a given Guest Author.
+	 * Gets all post IDs authored by a WP User. Returns all post IDs where th WP_User is:
+	 *   - either the post's single author,
+	 *   - or one of post's co-authors,
+	 *   - and if the WP_user is linked to a Guest Author, this also returns all posts authored by that Guest Author.
+	 *
+	 * Ideally we would use get_posts() with 'author__in' param for this (see https://wordpress.org/support/topic/query-all-posts-of-author-even-if-he-she-is-co-author/),
+	 * but we have witnessed some bugs where it returns postIDs not authored by the WP_User, so we're using WP_Query instead.
+	 *
+	 * More detailed explanation of how this works follows.
+	 *
+	 * -------------------------------------------------
+	 *
+	 * Post authorship can be stored in two different places:
+	 *   1. If CAP plugin was not used (active) on site when a WP_User was created and assigned as post author,
+	 *      the classic `wp_posts`.`post_author` is what determines the post authorship.
+	 *   2. But if CAP plugin was used (active) on site when a WP User was created and assigned to post as author,
+	 *      `wp_term_relationships` will take over as the thing that determines post authors, and `wp_posts`.`post_author`
+	 *      stops being used in authorship data.
+	 *
+	 * It is important to note that both classic WP_Users objects and Guest Authors objects can be used as co-authors (multiple authors).
+	 * A term is always used to represent a Guest Author object, but a WP User may or may not get a term assigned to it if it's used as one of co-authors.
+	 *
+	 * A WP_user may or may not have a corresponding term row which gets created by CAP. If WP_User was assigned as author before CAP was active,
+	 * there will be no term (and `terms_relationships`) row. But if CAP was active while any (co)author was/were assigned to a post,
+	 * a terms row will be created for this WP_User, and `terms_relationships` will be used to designate post (co)authorship.
+	 *
+	 * It is possible that both these data points (`post_author` and `term_relationships`) are used at the same time on site for different
+	 * posts to signify authorship -- old historic posts might have no `term_relationship` entries, and the `post_author` column will be used
+	 * as author, while new posts where CAP was used will be using term_relationships for authors.
+	 *
+	 * Lastly, let's explain how linked/mapped accounts work. If a WP_User is linked to a Guest Author:
+	 *   1. The GA `wp_post` object will get a `wp_postmeta`.`meta_key` = 'cap-linked_account' and `meta_value` == `wp_users`.`user_login`.
+	 *   2. When such a GA is assigned as co-author, the WP_User's term will instead be assigned as co-author via term_relationships,
+	 *      not the GA's term.
+	 * This kind of completely skips using GA as co-author from the data point of view and instead just uses the WP_User as co-author.
+	 *
+	 * @param int    $wpuser_id    WP User ID.
+	 * @param string $post_type    Post type.
+	 * @param array  $post_status  Post statuses.
+	 *
+	 * @return array List of post IDs authored by WP_User.
+	 */
+	public function get_all_posts_by_wp_user( int $wpuser_id, string $post_type = 'post', array $post_status = [ 'publish', 'draft', 'pending', 'future', 'private', 'inherit', 'trash' ] ): array {
+		global $wpdb;
+
+		// Posts authored by this WP User.
+		$post_ids = [];
+
+		// Get the wp_users row.
+		// phpcs:ignore -- usage of users table is needed.
+		$wp_user_row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->users WHERE ID = %d", $wpuser_id ), ARRAY_A );
+
+		// Let's check if this WP_User has a term/term_taxonomy_id assigned to it.
+		$term_id          = $wpdb->get_var( $wpdb->prepare( "SELECT term_id FROM $wpdb->terms WHERE name = %s", $wp_user_row['user_login'] ) );
+		$term_taxonomy_id = null;
+		if ( $term_id ) {
+			$term_taxonomy_id = $wpdb->get_var( $wpdb->prepare( "SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = %d", $term_id ) );
+		}
+
+		// 1 -- get post IDs where this WP_User is a co-author as managed by CAP (via `wp_term_relationships`).
+		$post_status_placeholders = implode( ',', array_fill( 0, count( $post_status ), '%s' ) );
+		// phpcs:disable -- $wpdb->prepare is used and all params are prepared.
+		$post_ids__as_coauthor = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT object_id
+				FROM $wpdb->term_relationships wtr
+				JOIN $wpdb->posts wp ON wp.ID = wtr.object_id
+				WHERE wtr.term_taxonomy_id = %d
+				AND wp.post_type = %s
+				AND wp.post_status IN ($post_status_placeholders)",
+				array_merge(
+					[ $term_taxonomy_id ],
+					[ $post_type ],
+					$post_status
+				)
+			)
+		);
+		// phpcs:enable
+
+		// 2 -- get all post IDs where `wp_posts`.`post_author` == this $wpuser_id.
+		// phpcs:disable -- $wpdb->prepare is used and all params are prepared.
+		$post_ids__as_post_author = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID
+				FROM $wpdb->posts
+				WHERE post_author = %d
+				AND post_type = %s
+				AND post_status IN ($post_status_placeholders)",
+				array_merge(
+					[ $wpuser_id ],
+					[ $post_type ],
+					$post_status,
+				)
+			)
+		);
+		// phpcs:enable
+
+		// 3 -- now we must also check whether CAP has assigned any other co-authors to $post_ids__as_post_author
+		// and exclude those IDs from our results if it has, because existing co-authors will override usage of `wp_posts`.`post_author`.
+		foreach ( $post_ids__as_post_author as $key_post_id__as_post_author => $post_id__as_post_author ) {
+
+			// Get all co-authors -- both WP_Users and Guest Authors types.
+			$authors = $this->get_all_authors_for_post( $post_id__as_post_author );
+
+			// Is our WP_User one of the co-authors for this post?
+			$wp_author_is_one_of_coauthors = false;
+			foreach ( $authors as $author ) {
+				if ( 'stdClass' === $author::class ) {
+					// This is a Guest Author. Doing nothing, just noting that a GA is one of the co-authors here.
+					$do_nothing = true;
+				} elseif ( 'WP_User' === $author::class ) {
+					if ( $author->ID === $wpuser_id ) {
+						$wp_author_is_one_of_coauthors = true;
+					}
+				}
+			}
+
+			// If coauthors were assigned to this post, and our WP_User is NOT one of them, then we must not include this post ID in our results.
+			if ( ! empty( $authors ) && ( false === $wp_author_is_one_of_coauthors ) ) {
+				unset( $post_ids__as_post_author[ $key_post_id__as_post_author ] );
+				$post_ids__as_post_author = array_values( $post_ids__as_post_author );
+			}
+		}
+
+		// And the final post IDs are both these arrays merged -- $post_ids__as_post_author and $post_ids__as_coauthor.
+		$post_ids = array_unique( array_merge( $post_ids__as_post_author, $post_ids__as_coauthor ) );
+
+		return $post_ids;
+	}
+
+	/**
+	 * This function will facilitate obtaining all posts by Guest Author.
 	 *
 	 * @param int  $ga_id Guest Author ID (Post ID).
 	 * @param bool $get_post_objects Flag which determines whether to return array of Post IDs, or Post Objects.
 	 *
-	 * @return int[]|WP_Post[]
+	 * @return int[]|WP_Post[] Array of Post IDs if $get_post_objects is false, or Post Objects if $get_post_objects is true.
 	 */
-	public function get_all_posts_for_guest_author( int $ga_id, bool $get_post_objects = false ) {
+	public function get_all_posts_by_guest_author( int $ga_id, bool $get_post_objects = false ) {
 		global $wpdb;
 
 		$records = $wpdb->get_results(

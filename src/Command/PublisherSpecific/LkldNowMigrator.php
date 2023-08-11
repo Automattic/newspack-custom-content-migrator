@@ -116,7 +116,7 @@ class LkldNowMigrator implements InterfaceCommand {
 		/**
 		 * Migrate avatars from 'WP User Avatars' to Simple Local Avatars
 		 */
-		
+
 		$from_avatar_meta_key = 'wp_user_avatars';
 		$from_avatar_rating_meta_key = 'wp_user_avatars_rating';
 
@@ -129,19 +129,19 @@ class LkldNowMigrator implements InterfaceCommand {
 
 		$second_migration_count = 0;
 
-		foreach ( $users as $user ) {			
+		foreach ( $users as $user ) {
 			$avatar_data = maybe_unserialize( get_user_meta( $user->ID, $from_avatar_meta_key, true ) );
 
 			if ( ! is_array( $avatar_data) ) {
 				continue;
 			}
-			
+
 			// If media_id doesn't exist, try finding the media ID using the avatar URL
 			if ( isset( $avatar_data['media_id'] ) ) {
 				$avatar_id = $avatar_data['media_id'];
 			} else if ( isset( $avatar_data['full'] ) ) {
 				$avatar_id = attachment_url_to_postid( $avatar_data['full'] );
-				
+
 				// Sometimes the avatar is uploaded without being linked to an attachment
 				// in that case we insert a new attachment
 				if ( $avatar_id == 0 ) {
@@ -159,7 +159,7 @@ class LkldNowMigrator implements InterfaceCommand {
 			// If the avatar has a rating (G, PG, R etc.) attached to it, we migrate that too
 			$avatar_rating = get_user_meta( $user->ID, $from_avatar_rating_meta_key, true );
 
-			$result = $this->sla_logic->import_avatar( $user->ID, $avatar_id, $avatar_rating );
+			$result = $this->sla_logic->assign_avatar( $user->ID, $avatar_id, $avatar_rating );
 
 			if ( $result ) {
 				$second_migration_count++;
@@ -199,7 +199,7 @@ class LkldNowMigrator implements InterfaceCommand {
 		<!-- wp:paragraph -->
 		<p>Source: <a href="%s" target="_blank" rel="noreferrer noopener">%s</a></p>
 		<!-- /wp:paragraph -->';
-		
+
 		$args = array(
 			'meta_query' => array(
 				array(
@@ -225,7 +225,7 @@ class LkldNowMigrator implements InterfaceCommand {
 			}
 
 			WP_CLI::log( sprintf( 'Updating post #%d', $post->ID ) );
-			
+
 			$source_link = get_post_meta( $post->ID, $source_link_meta_key, true );
 			$source_name = get_post_meta( $post->ID, $source_name_meta_key, true );
 
@@ -248,11 +248,11 @@ class LkldNowMigrator implements InterfaceCommand {
 				esc_html( $source_name ),
 			);
 
-			$new_post_content = $post->post_content . $formatted_paragraph;	
+			$new_post_content = $post->post_content . $formatted_paragraph;
 
 			$this->log( $log_filename, sprintf( "New content for post #%d:\n%s", $post->ID, $new_post_content ) );
 
-			if ( ! $dry_run ) {				
+			if ( ! $dry_run ) {
 				$result = wp_update_post( array(
 					'ID' => $post->ID,
 					'post_content' => $new_post_content,
@@ -281,9 +281,9 @@ class LkldNowMigrator implements InterfaceCommand {
 			'nopaging' => true,
 			'post_status' => 'any',
 		);
-		
+
 		$query = new WP_Query( $args );
-		
+
 		$block_wrapper = <<<HTML
 <!-- wp:html -->
 <div class="newspack-box %s">
@@ -297,17 +297,17 @@ HTML;
 %s
 <!-- /wp:shortcode -->
 HTML;
-		
+
 		$shortcode_pattern = '/\[themify_box.*?](.*?)\[\/themify_box]/s';
 
 		$shortcodes_manipulator = new SquareBracketsElementManipulator();
-		
+
 		foreach ( $query->posts as $post ) {
 			preg_match_all( $shortcode_pattern, $post->post_content, $matches );
 
 			if ( isset( $matches[1] ) && count( $matches[1] ) > 0  ) {
 				$inner_texts = $matches[1];
-				
+
 				foreach ( $inner_texts as $index => $inner_text ) {
 					$fixed_shortcode = $this->fix_shortcode( $matches[0][ $index ] );
 
@@ -335,7 +335,7 @@ HTML;
 					);
 					WP_CLI::log( sprintf( 'Updated post #%s', $post->ID ) );
 				}
-			} 
+			}
 		}
 
 		WP_CLI::success( 'Finished converting themify_box shortcodes to Group blocks.' );
@@ -394,7 +394,7 @@ HTML;
 
 				$replaces[] = sprintf( $link_template, $link, $label );
 			}
-			
+
 			$searches_with_comments = array_map( function( $shortcode) use( $comment_block_template ) {
 				return sprintf( $comment_block_template, $shortcode );
 			}, $searches );
@@ -422,7 +422,7 @@ HTML;
 	 */
 	public function assign_upload_file_to_attachment( $url ) {
 		$attachment = array(
-			'guid'           => $url, 
+			'guid'           => $url,
 			'post_content'   => '',
 			'post_status'    => 'inherit',
 		);

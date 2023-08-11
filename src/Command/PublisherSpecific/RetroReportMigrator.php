@@ -672,7 +672,7 @@ class RetroReportMigrator implements InterfaceCommand {
 				if ( is_wp_error( $attachment_id ) ) {
 					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_path, $attachment_id->get_error_message() ) );
 				} else {
-					$this->simple_local_avatars->import_avatar( $user_id, $attachment_id );
+					$this->simple_local_avatars->assign_avatar( $user_id, $attachment_id );
 				}
 			}
 		}

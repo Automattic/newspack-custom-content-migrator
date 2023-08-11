@@ -93,7 +93,10 @@ class AttachmentsMigrator implements InterfaceCommand {
 			'newspack-content-migrator attachments-delete-posts-attachments',
 			[ $this, 'cmd_attachment_delete_posts_attachments' ],
 			[
-				'shortdesc' => 'Delete all posts\' attachments.',
+				'shortdesc' => "This command deletes only posts' attachments (just those attachments which belong to posts), and it works in two steps. "
+					. 'First we should run this command without the --confirm-deletion flag, and it will move the attachment files to a temporary folder. This is to double check and make sure we are not about to delete attachments that are still in use, and lets us QA the results first. '
+					. 'Secondly, after we do a manual QA, we run this command a second time with the --confirm-deletion flag, at which point it will actually delete the attachments. '
+					. 'In case we wanted to restore the attachments after the QA, we can use the --restore-attachments  flag.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
