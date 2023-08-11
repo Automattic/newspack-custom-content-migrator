@@ -426,6 +426,26 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * Convenience function to tell if a user has a Guest Author record.
+	 *
+	 * @param WP_User|int $wp_user ID of the User or a WP_User object.
+	 *
+	 * @return bool
+	 */
+	public function is_user_a_guest_author( $wp_user ) {
+		$wp_user = $this->validate_wp_user_object( $wp_user );
+
+		if ( false === $wp_user ) {
+			return false;
+		}
+
+		// Get the GA by using the user login.
+		$guest_author = $this->get_guest_author_by_user_login( $wp_user->data->user_login );
+
+		return ! is_bool( $guest_author );
+	}
+
+	/**
 	 * Gets the corresponding Guest Author for a WP User, creating it if necessary.
 	 *
 	 * @param WP_User|int $wp_user ID of the User or a WP_User object.
@@ -433,14 +453,9 @@ class CoAuthorPlus {
 	 * @return false|object Guest author object.
 	 */
 	public function get_or_create_guest_author_from_user( $wp_user ) {
+		$wp_user = $this->validate_wp_user_object( $wp_user );
 
-		// Convert IDs to WP User objects.
-		if ( is_int( $wp_user ) ) {
-			$wp_user = get_user_by( 'id', $wp_user );
-		}
-
-		// Make sure it's a valid user.
-		if ( ! is_a( $wp_user, 'WP_User' ) ) {
+		if ( false === $wp_user ) {
 			return false;
 		}
 
@@ -728,5 +743,27 @@ class CoAuthorPlus {
 		}
 
 		return $all_gas;
+	}
+
+	/**
+	 * Convenience function to help validate a WP User object. If passed a User ID,
+	 * it will convert it to a WP User object.
+	 *
+	 * @param \WP_User|int $wp_user
+	 *
+	 * @return false|mixed|\WP_User
+	 */
+	private function validate_wp_user_object( $wp_user ) {
+		// Convert IDs to WP User objects.
+		if ( is_int( $wp_user ) ) {
+			$wp_user = get_user_by( 'id', $wp_user );
+		}
+
+		// Make sure it's a valid user.
+		if ( ! is_a( $wp_user, 'WP_User' ) ) {
+			return false;
+		}
+
+		return $wp_user;
 	}
 }
