@@ -966,7 +966,7 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			$live_term_name         = $live_term_row['name'];
+			$live_term_name = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
@@ -1084,7 +1084,7 @@ class ContentDiffMigrator {
 			}
 
 			$old_id = $result['meta_value'] ?? null;
-			$new_id = $imported_attachment_ids[ $result['meta_value'] ] ?? null;
+			$new_id = $imported_attachment_ids[ $old_id ] ?? null;
 			if ( ! is_null( $new_id ) ) {
 				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result['meta_id'] ] );
 				// Log.
