@@ -21,6 +21,9 @@ use wpdb;
  */
 class ContentDiffMigrator {
 
+	// Postmeta telling us what the old live ID was.
+	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
+
 	// Data array keys.
 	const DATAKEY_POST              = 'post';
 	const DATAKEY_POSTMETA          = 'postmeta';
@@ -173,6 +176,67 @@ class ContentDiffMigrator {
 		$results = is_null( $results ) ? [] : $results;
 
 		return $results;
+	}
+
+	/**
+	 * Gets attachments' "old_id"=>"new_id" IDs mapping from the postmeta.
+	 *
+	 * @return array Imported attachment IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_attachment_id_mapping_from_db(): array {
+
+		$attachment_ids_map = [];
+
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					WHERE wpm.meta_key = %s
+					AND wp.post_type = 'attachment';",
+				self::SAVED_META_LIVE_POST_ID,
+			),
+			ARRAY_A
+		);
+		foreach ( $results as $result ) {
+			$attachment_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $attachment_ids_map;
+	}
+
+	/**
+	 * Gets posts' and pages' "old_id"=>"new_id" IDs mapping from the postmeta.
+	 *
+	 * @return array Imported post and pages IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_post_id_mapping_from_db( $post_types = [ 'post', 'page' ] ): array {
+
+		$post_ids_map = [];
+
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- placeholders generated dynamically.
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%d' ) );
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					WHERE wpm.meta_key = %s
+					AND wp.post_type IN ( {$post_types_placeholders} );",
+				array_merge(
+					[ self::SAVED_META_LIVE_POST_ID ] ,
+					$post_types
+				)
+			),
+			ARRAY_A
+		);
+		// phpcs:disable
+
+		foreach ( $results as $result ) {
+			$post_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $post_ids_map;
 	}
 
 	/**

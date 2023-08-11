@@ -30,8 +30,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	const LOG_ERROR                       = 'content-diff__err.log';
 	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
 
-	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
-
 	/**
 	 * Instance.
 	 *
@@ -346,7 +344,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		// If no attachment IDs map was passed, get it from the DB.
 		if ( is_null( $attachment_ids_map ) ) {
 			// Get all attachment old and new IDs.
-			$attachment_ids_map = $this->get_attachments_from_db();
+			$attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
 
 			if ( ! $attachment_ids_map ) {
 				WP_CLI::error( 'No attachment IDs found in the DB.' );
@@ -358,17 +356,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$log = 'update-featured-images-ids.log';
 		$this->log( $log, sprintf( 'Starting %s.', $ts ) );
 
-		// Get local Post IDs that were imported using Content Diff (they will have the self::SAVED_META_LIVE_POST_ID postmeta).
-		$new_post_ids = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT wp.ID
-			FROM {$wpdb->posts} wp
-			JOIN {$wpdb->postmeta} pm ON wp.ID = pm.post_id
-			WHERE p.post_type <> 'attachment'
-			AND pm.meta_key = %s ",
-				self::SAVED_META_LIVE_POST_ID
-			)
-		);
+		// Get local Post IDs that were imported using Content Diff (they will have the ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID postmeta).
+		$imported_post_ids_mapping = self::$logic->get_imported_post_id_mapping_from_db();
+		$new_post_ids              = array_values( $imported_post_ids_mapping );
 
 		// Update attachment IDs.
 		self::$logic->update_featured_images( $new_post_ids, $attachment_ids_map, $log );
@@ -853,7 +843,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			);
 
 			// Save some metas.
-			update_post_meta( $post_id_new, self::SAVED_META_LIVE_POST_ID, $post_id_live );
+			update_post_meta( $post_id_new, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID, $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -948,9 +938,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
 			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
-			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
+			// First try searching by postmeta ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
-				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, self::SAVED_META_LIVE_POST_ID );
+				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID );
 			}
 			// Next try searching for the new parent_id by joining local and live DB tables.
 			if ( is_null( $parent_id_new ) ) {
@@ -1018,7 +1008,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = $this->get_attachments_from_db();
+		$imported_attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
 
 		/**
 		 * Get IDs mapping from DB.
@@ -1243,34 +1233,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 		}
 
 		return $imported_attachment_ids_map;
-	}
-
-	/**
-	 * Gets old => new attachment IDs mapping from the postmeta.
-	 *
-	 * @return array Imported attachment IDs, keys are old/live IDs, values are new/local/Staging IDs.
-	 */
-	private function get_attachments_from_db(): array {
-		global $wpdb;
-
-		$attachment_ids_map = [];
-
-		$results = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT wpm.post_id, wpm.meta_value
-					FROM {$wpdb->postmeta} wpm
-					JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id 
-					WHERE wpm.meta_key = %s
-					AND wp.post_type = 'attachment';",
-				self::SAVED_META_LIVE_POST_ID,
-			),
-			ARRAY_A
-		);
-		foreach ( $results as $result ) {
-			$attachment_ids_map[ $result['meta_value'] ] = $result['post_id'];
-		}
-
-		return $attachment_ids_map;
 	}
 
 	/**
