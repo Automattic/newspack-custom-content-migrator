@@ -492,7 +492,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$post_content         = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
-			$post_content_updated = $this->clean_up_promo_and_user_engagement_content( $post_content );
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content );
 
 			// Update post_content.
 			if ( ! empty( $post_content_updated ) ) {
@@ -746,70 +746,79 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
 	 */
-	public function clean_up_promo_and_user_engagement_content( $post_content ) {
+	public function clean_up_scraped_html( $post_id, $post_content ) {
 
 		$this->crawler->clear();
 		$this->crawler->add( $post_content );
 
-		// Get their main content div.rich-text-body.
+		/**
+		 * Get the outer content div.rich-text-body in which the body HTML is nested.
+		 */
 		$div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
-		if ( ! $div_content_crawler ) {
 
-			// Has been cleaned, or this post not scraped from live, as all scraped posts will have this <div>.
-			return null;
+		/**
+		 * If div.rich-text-body was already removed, just temporarily surround the HTML with a new <div> so that nodes can be traversed the same way as children.
+		 */
+		if ( ! $div_content_crawler ) {
+			$this->crawler->clear();
+			$this->crawler->add( '<div>' . $post_content . '</div>' );
+			$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
 		}
 
-		// Traverse through all child nodes.
+		/**
+		 * OK, now traverse through all child nodes. We will just keept the content inside the <div>, getting rid of the <div> itself.
+		 */
 		$post_content_updated = '';
-		foreach ( $div_content_crawler->childNodes->getIterator() as $key_node => $node ) {
-
-			// Get node HTML.
-			$node_html = $node->ownerDocument->saveHTML( $node );
+		foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
 
 			/**
-			 * Skip div.enhancement which:
-			 *      - has a child <div class="html-module">
-			 *      - has a child <ps-promo>
+			 * Skip specific "div.enhancement"s.
 			 */
+			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
+			if ( $is_div_class_enhancement ) {
 
-			// Is this a div.html-module?
-			$is_div_class_enchancement = ( isset( $node->tagName ) && 'div' == $node->tagName ) && ( 'enhancement' == $node->getAttribute( 'class' ) );
+				// Continue if this div.enhancement has a div > div#newsletter_signup.
+				$enhancement_crawler = new Crawler( $domelement );
+				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
+					continue;
+				}
 
-			// Check if this $node has a child div.html-module.
-			$has_child_div_class_html_module = false;
-			foreach ( $node->childNodes->getIterator() as $child_node ) {
-				$has_child_div_class_html_module = ( isset( $child_node->tagName ) && 'div' == $child_node->tagName ) && ( 'html-module' == $child_node->getAttribute( 'class' ) );
-				if ( $has_child_div_class_html_module ) {
-					break;
+				// Continue if this div.enhancement has a div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"].
+				$enhancement_crawler = new Crawler( $domelement );
+				if ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
+					continue;
+				}
+
+				// Continue if this div.enhancement has a figure > a > img[alt="Student signup banner"]
+				$enhancement_crawler = new Crawler( $domelement );
+				if ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
+					continue;
+				}
+
+				// Continue if this div.enhancement has a ps-promo
+				$enhancement_crawler = new Crawler( $domelement );
+				if ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
+					continue;
+				}
+
+				// Continue if this div.enhancement has a broadstreet-zone
+				$enhancement_crawler = new Crawler( $domelement );
+				if ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
+					continue;
 				}
 			}
 
-			// Check if div.enchancement has a <ps-promo>.
-			$has_child_ps_promo = false;
-			foreach ( $node->childNodes->getIterator() as $child_node ) {
-				$has_child_ps_promo = isset( $child_node->tagName ) && 'ps-promo' == $child_node->tagName;
-				if ( $has_child_ps_promo ) {
-					break;
-				}
-			}
 
-			// Skip this node.
-			if (
-				$is_div_class_enchancement &&
-				( $has_child_div_class_html_module || $has_child_ps_promo )
-			) {
+			// Get domelement HTML.
+			$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
+			$domelement_html = trim( $domelement_html );
+			if ( empty( $domelement_html ) ) {
 				continue;
 			}
 
-			// Trim the HTML.
-			$node_html = trim( $node_html );
-			if ( empty( $node_html ) ) {
-				continue;
-			}
-
-			// Append node HTML.
+			// Append HTML.
 			$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
-			$post_content_updated .= $node_html;
+			$post_content_updated .= $domelement_html;
 		}
 
 		return $post_content_updated;
