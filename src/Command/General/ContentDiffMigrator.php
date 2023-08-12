@@ -284,7 +284,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			'newspack-content-migrator content-diff-update-featured-images-ids',
 			[ $this, 'cmd_update_feat_images_ids' ],
 			[
-				'shortdesc' => 'Updates all featured images thumbnails ID. Takes "old_attachment_ids"=>"new_attachment_ids" from DB, which get saved when Content Diff is performed. But optionally can also take a JSON file with attachment IDs and update only those.',
+				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. Takes "old_attachment_ids"=>"new_attachment_ids" from DB (unless provided with an optional --attachment-ids-json-file) which get saved in DB when Content Diff import is performed.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -296,14 +296,14 @@ class ContentDiffMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'attachment-ids-json-file',
-						'description' => 'Optional. Path to a JSON encoded array where keys are old attachment IDs and values are new attachment IDs.',
+						'description' => 'Optional. Path to a JSON encoded array where keys are old attachment IDs and values are new attachment IDs. If provided, will only update these _thumbnail_ids, and only on those posts which were imported by the Content Diff.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
-						'description' => 'Optional. Will not make changes to DB. And instead of writing to log file will just output to console.',
+						'description' => 'Optional. Will not make changes to DB. And instead of writing to log file will just output changes to console.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
