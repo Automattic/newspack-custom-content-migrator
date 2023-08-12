@@ -1130,19 +1130,19 @@ class ContentDiffMigrator {
 		}
 
 		/**
-		 * We should only be updating old live site's Post IDs which had '_thumbnail_id's that are found in our "old_id" attachment mapping.
+		 * This command will only update '_thumbnail_id's for Posts which were imported by the Content Diff (not any other Posts).
 		 *
 		 * Explanation why:
-		 * for example, we could have imported two different attachments,
+		 * for example, we could have imported two different attachments:
 		 *      {"post_type":"attachment","id_old":1111,"id_new":999}
 		 *      {"post_type":"attachment","id_old":1223,"id_new":1111}
-		 * and there could be two posts currently on Staging
-		 *      one with _thumbnail_id 1111
+		 * and let's say these two posts exist on Staging:
+		 *      - first with '_thumbnail_id' 1111
 		 *          --> this one needs to be updated from 1111 to 999
-		 *      second also with _thumbnail_id 1111, but let's say this post was created directly on staging and used the existing ID 1111
-		 *          --> this one's _thumbnail_id MUST NOT be updated from 1111 to 999
+		 *      - second with '_thumbnail_id' 1111, but let's say this post was created directly on Staging and it used the second attachment with Staging ID 1111
+		 *          --> this one's _thumbnail_id should be updated from 1111 to 999
 		 *
-		 * So, we should only update _thumbnail_ids for those posts that were imported by us.
+		 * Therefore this command will only update '_thumbnail_id's for those Posts that were imported by the Content Diff.
 		 */
 
 		// Loop through posts and update their _thumbnail_id if needed.
@@ -1188,7 +1188,7 @@ class ContentDiffMigrator {
 						'post_id' => (int) $new_post_id,
 						'id_old'  => (int) $current_thumbnail_id,
 						'id_new'  => (int) $new_thumbnail_id,
-					] 
+					]
 				);
 				if ( $dry_run ) {
 					WP_CLI::line( 'Updating _thubnail_id id_old=>id_new ' . $msg );
