@@ -179,7 +179,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets attachments' "old_id"=>"new_id" IDs mapping from the postmeta.
+	 * Gets a list of all Attachments imported by Content Diff, "old_id"=>"new_id" IDs mapping from the postmeta.
 	 *
 	 * @return array Imported attachment IDs, keys are old/live IDs, values are new/local/Staging IDs.
 	 */
@@ -206,7 +206,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets posts' and pages' "old_id"=>"new_id" IDs mapping from the postmeta.
+	 * Gets an array of all Post IDs imported by Content Diff, their "old_id"=>"new_id" from the postmeta.
 	 *
 	 * @return array Imported post and pages IDs, keys are old/live IDs, values are new/local/Staging IDs.
 	 */
