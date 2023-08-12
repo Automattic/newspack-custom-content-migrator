@@ -9,7 +9,6 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use WP_CLI;
 
@@ -43,13 +42,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @var null|ContentDiffMigratorLogic Logic.
 	 */
 	private static $logic = null;
-
-	/**
-	 * Posts logic class.
-	 *
-	 * @var Posts Posts logic.
-	 */
-	private $posts_logic;
 
 	/**
 	 * Prefix of tables from the live DB, which are imported next to local WP tables.
@@ -104,7 +96,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_logic = new Posts();
 	}
 
 	/**

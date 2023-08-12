@@ -1030,7 +1030,7 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			$live_term_name = $live_term_row['name'];
+			$live_term_name         = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
