@@ -3,8 +3,12 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use stdClass;
 use WP_CLI;
+use WP_User;
 
 /**
  * Custom Efecto Cocuyo migration script.
@@ -15,11 +19,28 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	 */
 	private static $instance = null;
 
+	/**
+	 * @var SimpleLocalAvatars Simple Local Avatars logic.
+	 */
+	protected $simple_local_avatar_logic;
+
+	/**
+	 * @var Attachments Attachments logic.
+	 */
+	protected $attachments;
+
+	/**
+	 * @var resource FTP connection.
+	 */
+	protected $ftp;
+
     /**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->simple_local_avatar_logic = new SimpleLocalAvatars();
+		$this->attachments = new Attachments();
 	}
 
 	/**
@@ -54,6 +75,37 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 			[
 				'shortdesc' => 'Converts authors present in the ACF autor_post field into guest authors',
 				'synopsis'  => [],
+			]
+		);
+		
+		WP_CLI::add_command(
+			'newspack-content-migrator efecto-cocuyo-attempt-to-fix-author-profile-images',
+			[ $this, 'cmd_attempt_to_fix_author_profile_images' ],
+			[
+				'shortdesc' => 'Attempts to fix author and guest author profile images',
+				'synopsis' => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'ftp-server',
+						'description' => 'The FTP server for this site',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ftp-user',
+						'description' => 'The FTP user for this site',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ftp-pass',
+						'description' => 'The FTP password for this site',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -151,6 +203,117 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 		}
 
     }
+
+	/**
+	 * This function will attempt to fix a missing avatar issue for Authors and Guest Authors.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_attempt_to_fix_author_profile_images( $args, $assoc_args ) {
+		$ftp_server = $assoc_args['ftp-server'];
+		$ftp_user = $assoc_args['ftp-user'];
+		$ftp_pass = $assoc_args['ftp-pass'];
+
+		$target_meta_keys = [
+//			'author_image',
+			'ce_user_avatar',
+			'ce_user_avatars',
+			'wp_user_avatars',
+			'pp_uploaded_files',
+			'pcg_custom_gravatar',
+			'pp_profile_cover_image',
+		];
+
+		global $wpdb;
+
+		/**
+		 * Structure:
+		 * [
+		 *  user_id => meta_data
+		 * ]
+		 */
+		$old_users = [];
+
+		foreach ( $target_meta_keys as $meta_key ) {
+			$query = $wpdb->prepare( "SELECT * FROM old_usermeta WHERE meta_key = %s AND meta_value <> ''", $meta_key );
+
+			$user_meta_results = $wpdb->get_results( $query );
+
+			foreach ( $user_meta_results as $user_meta_result ) {
+				$old_user = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM old_users WHERE ID = %d", $user_meta_result->user_id ) );
+
+				if ( ! $old_user ) {
+					WP_CLI::log("COULD NOT FIND OLD USER FOR USER ID: {$user_meta_result->user_id}" );
+					continue;
+				}
+
+				$new_user = get_user_by( 'email', $old_user->user_email );
+
+				if ( ! $new_user ) {
+					WP_CLI::log("COULD NOT FIND NEW USER FROM OLD USER EMAIL: {$old_user->user_email}" );
+					continue;
+				}
+
+				if ( ! isset( $old_users[ $new_user->ID ] ) ) {
+					$old_users[ $new_user->ID ] = $user_meta_result;
+				} else {
+					WP_CLI::warning( 'User ID: ' . $new_user->ID . ' has multiple profile pictures ' );
+					var_dump( $old_users[ $new_user->ID ] );
+					var_dump( $user_meta_result );
+				}
+
+				if ( $this->coauthorsplus_logic->is_user_a_guest_author( $new_user ) ) {
+					WP_CLI::log('User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' is a guest author');
+					//
+					$guest_author = $this->coauthorsplus_logic->get_or_create_guest_author_from_user( $new_user );
+					$attachment_id = $this->coauthorsplus_logic->get_guest_authors_avatar_attachment_id( $guest_author->ID );
+
+					if ( is_null( $attachment_id ) ) {
+						WP_CLI::log( 'User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' does not have a profile picture' );
+						//Need to find pointer to profile picture in local media.
+						$success = $this->set_avatar_for_user( $new_user, $guest_author, $user_meta_result, $ftp_server, $ftp_user, $ftp_pass );
+						if ( ! $success ) {
+							unset( $old_users[ $new_user->ID ] );
+						}
+					} else {
+						WP_CLI::log( 'User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' already has a profile picture' );
+						$attachment = get_post( $attachment_id );
+						var_dump( $attachment );
+					}
+				} else {
+					WP_CLI::log('User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' is a regular user');
+
+					$has_local_avatar = $this->simple_local_avatar_logic->user_has_local_avatar( $new_user->ID );
+
+					if ( ! $has_local_avatar ) {
+						$gravatar_url = get_avatar_url( $new_user->ID, [ 'default' => '404' ] );
+						// Check if URL results in 404
+						$response = wp_remote_get( $gravatar_url );
+						$status_code = wp_remote_retrieve_response_code( $response );
+
+						if ( 404 === $status_code ) {
+							WP_CLI::log( 'User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' does not have a profile picture' );
+							$success = $this->set_avatar_for_user( $new_user, null, $user_meta_result, $ftp_server, $ftp_user, $ftp_pass );
+							if ( ! $success ) {
+								unset( $old_users[ $new_user->ID ] );
+							}
+						} else {
+							WP_CLI::log( 'User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' already has a profile picture' );
+							echo WP_CLI::colorize("%GGravatar URL: $gravatar_url%n\n");
+						}
+					} else {
+						WP_CLI::log( 'User ID: ' . $new_user->ID . ', User Email: ' . $new_user->user_email . ' already has a profile picture' );
+						$attachment_id = $this->simple_local_avatar_logic->get_local_avatar_attachment_id( $new_user->ID );
+						$attachment = get_post( $attachment_id );
+						var_dump( $attachment );
+					}
+				}
+			}
+		}
+	}
 
     /**
      * Gets a normalized version of the name after some manual clean up.
@@ -448,4 +611,126 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
         return ! empty( $names[ $name ] ) ? $names[ $name ] : $name;
 
     }
+
+	/**
+	 * @param WP_User $user
+	 * @param stdClass|null $guest_author
+	 * @param stdClass $meta_data
+	 *
+	 * @return bool
+	 */
+	private function set_avatar_for_user( $user, $guest_author, $meta_data, $ftp_server, $ftp_user, $ftp_pass ): bool {
+		global $wpdb;
+
+		$attachment_id = null;
+		if ( is_numeric( $meta_data->meta_value ) ) {
+			//Possibly pointing to an attachment ID?
+			echo WP_CLI::colorize( "%M Numeric: $meta_data->meta_value%n\n" );
+
+			$result = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE post_type = 'attachment' AND ID = %d", intval( $meta_data->meta_value ) ) );
+
+			$attachment_id = $result?->ID;
+		} else if ( is_string( $meta_data->meta_value ) && ! empty( $meta_data->meta_value ) ) {
+			$filename = $meta_data->meta_value;
+			$full_file_path = '';
+			$data = @unserialize( $meta_data->meta_value );
+
+			if ( is_array( $data ) ) {
+				if ( empty( $data['full'] ) ) {
+					echo WP_CLI::colorize( "%R Unable to find file%n\n" );
+					return false;
+				}
+				$filename = basename( $data['full'] );
+				$partial_remote_path = parse_url( $data['full'], PHP_URL_PATH );
+				$partial_remote_path = str_replace( '/wp-content/uploads/', '', $partial_remote_path );
+				$full_file_path = wp_upload_dir()['basedir'] . '/' . $partial_remote_path;
+			}
+
+			echo WP_CLI::colorize( "%Y String: $filename%n\n" );
+
+			$result = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE post_type = 'attachment' AND guid LIKE '%%%s' ORDER BY ID", $meta_data->meta_value ) );
+
+			$attachment_id = $result?->ID;
+
+			if ( is_null( $attachment_id ) ) {
+				WP_CLI::log( 'No attachment record found' );
+				if ( file_exists( $full_file_path ) ) {
+					echo WP_CLI::colorize( "%CFound file locally, creating attachment record for file%n\n" );
+					$attachment_id = $this->attachments->import_external_file( $full_file_path, "Programmatic avatar upload for User ID $user->ID" );
+				} else {
+					$remote_path = '/public_html' . parse_url( $data['full'], PHP_URL_PATH );
+
+					WP_CLI::log( "File not found locally, checking remote server - $remote_path" );
+
+					$this->establish_ftp_connection( $ftp_server, $ftp_user, $ftp_pass );
+//					$full_file_path = '/var/www/html/wp-content/uploads/ftp_test.jpg';
+					$directory = str_replace( $filename, '', $full_file_path );
+					if ( ! is_dir( $directory ) ) {
+						WP_CLI::log( "Creating directory $directory" );
+						mkdir( $directory );
+					}
+					WP_CLI::log( "Downloading to $full_file_path" );
+					$downloaded = ftp_get( $this->ftp, $full_file_path, $remote_path );
+					$this->close_ftp_connection();
+
+					if ( $downloaded && file_exists( $full_file_path ) ) {
+						echo WP_CLI::colorize( "%GFound file on remote server, creating attachment record for file%n\n" );
+						$attachment_id = $this->attachments->import_external_file( $full_file_path, "Programmatic avatar upload for User ID $user->ID" );
+					} else {
+						echo WP_CLI::colorize( "%RUnable to download file from remote server.%n\n");
+					}
+				}
+			}
+		} else {
+			echo WP_CLI::colorize( '%R Unknown type%n' . '\n' );
+			var_dump( $meta_data );
+			return false;
+		}
+
+		if ( ! is_null( $attachment_id ) ) {
+			if ( ! is_null( $guest_author ) ) {
+				echo WP_CLI::colorize( "%GFound file in DB, Attachment ID: $attachment_id, setting profile for Guest Author%n\n" );
+				set_post_thumbnail( $guest_author->ID, $attachment_id );
+			} else {
+				echo WP_CLI::colorize( "%GFound file in DB, Attachment ID: $attachment_id, setting profile for regular User%n\n" );
+				$this->simple_local_avatar_logic->assign_avatar( $user->ID, $attachment_id );
+			}
+			return true;
+		} else {
+			echo WP_CLI::colorize( "%R Unable to find file%n\n" );
+			return false;
+		}
+	}
+
+	/**
+	 * Establishes an FTP connection
+	 *
+	 * @param $ftp_server
+	 * @param $ftp_user
+	 * @param $ftp_pass
+	 *
+	 * @return void
+	 */
+	private function establish_ftp_connection( $ftp_server, $ftp_user, $ftp_pass ) {
+		$this->ftp = ftp_ssl_connect( $ftp_server );
+		$login = ftp_login( $this->ftp, $ftp_user, $ftp_pass );
+
+		if ( ! $this->ftp || ! $login ) {
+			echo WP_CLI::colorize( "%R Unable to connect to FTP server%n\n" );
+			throw new Exception( 'Unable to connect to FTP server' );
+		}
+
+		ftp_pasv( $this->ftp, true );
+	}
+
+	/**
+	 * Closes active FTP connection
+	 *
+	 * @return void
+	 */
+	private function close_ftp_connection() {
+		if ( ! is_null( $this->ftp ) ) {
+			ftp_close( $this->ftp );
+		}
+	}
 }
