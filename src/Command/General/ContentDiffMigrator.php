@@ -316,15 +316,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		);
 	}
 
-	/**
-	 * Callable for `newspack-content-migrator content-diff-update-featured-images-ids`.
-	 *
-	 * @param array $pos_args   Positional arguments.
-	 * @param array $assoc_args Associative arguments.
-	 *
-	 * @return void
-	 */
-	public function cmd_update_feat_images_ids( $pos_args, $assoc_args ) {
+	public function cmd_update_feat_images_ids( $args, $assoc_args ) {
 		global $wpdb;
 
 		// Get params.
@@ -375,9 +367,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$post_ids           = $this->posts_logic->get_all_posts_ids();
 		$old_attachment_ids = array_keys( $attachment_ids_map );
 		self::$logic->update_featured_images( $post_ids, $old_attachment_ids, $attachment_ids_map, $log );
-
-		wp_cache_flush();
-		WP_CLI::success( 'Done.' );
 	}
 
 	/**
