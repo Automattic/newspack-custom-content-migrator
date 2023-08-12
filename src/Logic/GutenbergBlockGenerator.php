@@ -640,11 +640,7 @@ class GutenbergBlockGenerator {
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
 	public function get_youtube( $src, $caption = '' ) {
-		// Remove GET params from $src, otherwise the embed might not work.
-		$src_parsed  = wp_parse_url( $src );
-		$src_cleaned = $src_parsed['scheme'] . '://' . $src_parsed['host'] . $src_parsed['path'];
-
-		return $this->get_core_embed( $src_cleaned, $caption );
+		return $this->get_core_embed( $src, $caption );
 	}
 
 	/**
