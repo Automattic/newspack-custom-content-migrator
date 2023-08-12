@@ -922,7 +922,11 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				// We're not going to validate much more, Chorus should have this right.
 				$src = trim( $src_crawler->getNode( 0 )->textContent );
 
-				$blocks[] = $this->gutenberg_blocks->get_youtube( $src );
+				// Remove GET params from $src, otherwise the embed might not work.
+				$src_parsed  = wp_parse_url( $src );
+				$src_cleaned = $src_parsed['scheme'] . '://' . $src_parsed['host'] . $src_parsed['path'];
+
+				$blocks[] = $this->gutenberg_blocks->get_youtube( $src_cleaned );
 
 				break;
 
