@@ -370,6 +370,7 @@ class CoAuthorPlus {
 
 	/**
 	 * Gets the Guest Author object by `display_name` (as defined by the CAP plugin).
+	 * This search is case insensitive.
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
