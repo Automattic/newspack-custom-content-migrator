@@ -1014,13 +1014,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 		 */
 		$imported_attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
 
-		/**
-		 * Get IDs mapping from DB.
-		 *
-		 * Get live table's Post IDs where their _thumbnail_id is an IN ( "old_id" attachment mapping ).
-		 *  => update those Post IDs' _thumbnail_ids with corresponding "old_id"=>"new_id" mapping
-		 */
-
 		// Get new Post IDs from DB.
 		$new_post_ids = array_values( $imported_post_ids_map );
 
