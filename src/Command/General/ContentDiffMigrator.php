@@ -9,7 +9,6 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use WP_CLI;
 
@@ -45,13 +44,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @var null|ContentDiffMigratorLogic Logic.
 	 */
 	private static $logic = null;
-
-	/**
-	 * Posts logic class.
-	 *
-	 * @var Posts Posts logic.
-	 */
-	private $posts_logic;
 
 	/**
 	 * Prefix of tables from the live DB, which are imported next to local WP tables.
@@ -106,7 +98,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_logic = new Posts();
 	}
 
 	/**
@@ -290,83 +281,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 				],
 			]
 		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator content-diff-update-featured-images-ids',
-			[ $this, 'cmd_update_feat_images_ids' ],
-			[
-				'shortdesc' => 'Updates all featured images thumbnails ID. Takes "old_attachment_ids"=>"new_attachment_ids" from DB, which get saved when Content Diff is performed. But optionally can also take a JSON file with attachment IDs and update only those.',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'export-dir',
-						'description' => 'Path to where log will be written.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'attachment-ids-json-file',
-						'description' => 'Optional. Path to a JSON encoded array where keys are old attachment IDs and values are new attachment IDs.',
-						'optional'    => true,
-						'repeating'   => false,
-					],
-				],
-			]
-		);
-	}
-
-	public function cmd_update_feat_images_ids( $args, $assoc_args ) {
-		global $wpdb;
-
-		// Get params.
-		$attachment_ids_map = null;
-		if ( isset( $assoc_args['attachment-ids-json-file'] ) && file_exists( $assoc_args['attachment-ids-json-file'] ) ) {
-			$attachment_ids_map = json_decode( file_get_contents( $assoc_args['attachment-ids-json-file'] ), true );
-			if ( empty( $attachment_ids_map ) ) {
-				WP_CLI::error( 'No attachment IDs found in the JSON file.' );
-			}
-		}
-		$export_dir = $assoc_args['export-dir'];
-		if ( ! file_exists( $export_dir ) ) {
-			$made = mkdir( $export_dir, 0777, true );
-			if ( false == $made ) {
-				WP_CLI::error( "Could not create export directory $export_dir ." );
-			}
-		}
-
-		// If no attachment IDs map was passed, get it from the DB.
-		if ( is_null( $attachment_ids_map ) ) {
-			// Get all attachment old and new IDs.
-			$results = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT wpm.post_id, wpm.meta_value
-					FROM {$wpdb->postmeta} wpm
-					JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id 
-					WHERE wpm.meta_key = %s
-					AND wp.post_type = 'attachment';",
-					self::SAVED_META_LIVE_POST_ID,
-				),
-				ARRAY_A
-			);
-			foreach ( $results as $result ) {
-				$attachment_ids_map[ $result['meta_value'] ] = $result['post_id'];
-			}
-
-			if ( ! $attachment_ids_map ) {
-				WP_CLI::error( 'No attachment IDs found in the DB.' );
-			}
-		}
-
-		// Timestamp the log.
-		$ts  = gmdate( 'Y-m-d h:i:s a', time() );
-		$log = 'update-featured-images-ids.log';
-		$this->log( $log, sprintf( 'Starting %s.', $ts ) );
-
-		// Update attachment IDs.
-		$post_ids           = $this->posts_logic->get_all_posts_ids();
-		$old_attachment_ids = array_keys( $attachment_ids_map );
-		self::$logic->update_featured_images( $post_ids, $old_attachment_ids, $attachment_ids_map, $log );
 	}
 
 	/**
