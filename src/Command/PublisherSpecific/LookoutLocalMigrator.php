@@ -465,10 +465,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Log files.
-		$log_post_ids_updated = $this->temp_dir . '/ll_updated_post_ids.log';
-		$log_gas_urls_updated = $this->temp_dir . '/ll_gas_urls_updated.log';
-		$log_err_gas_updated  = $this->temp_dir . '/ll_err__updated_gas.log';
-		$log_enhancements     = $this->temp_dir . '/ll_qa__enhancements.log';
+		$log_post_ids_updated   = $this->temp_dir . '/ll_updated_post_ids.log';
+		$log_gas_urls_updated   = $this->temp_dir . '/ll_gas_urls_updated.log';
+		$log_err_gas_updated    = $this->temp_dir . '/ll_err__updated_gas.log';
+		$log_enhancements       = $this->temp_dir . '/ll_qa__enhancements.log';
+		$log_need_oembed_resave = $this->temp_dir . '/ll__need_oembed_resave.log';
 
 		// Create folders for caching stuff.
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
@@ -491,6 +492,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->logger->log( $log_gas_urls_updated, $ts, false );
 		$this->logger->log( $log_err_gas_updated, $ts, false );
 		$this->logger->log( $log_enhancements, $ts, false );
+		$this->logger->log( $log_need_oembed_resave, $ts, false );
 
 		// Get post IDs.
 		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
@@ -499,20 +501,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Clean up post_content, remove inserted promo or user engagement content.
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
-
-
-// $post_ids = [106];
-
-
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
-			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content );
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave );
 			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
-				// $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
 				$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
 			}
 
@@ -521,51 +518,52 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 
-		// /**
-		//  * Next update GA info by scraping and fetching their author pages from live.
-		//  */
-		// WP_CLI::line( 'Updating GA author data ...' );
-		//
-		// // First get all author pages URLs which were originally stored as Posts' postmeta.
-		// $author_pages_urls = [];
-		// foreach ( $post_ids as $key_post_id => $post_id ) {
-		//
-		// 	WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
-		//
-		// 	$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
-		// 	if ( empty( $links_meta ) ) {
-		// 		continue;
-		// 	}
-		//
-		// 	// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
-		// 	foreach ( $links_meta as $urls ) {
-		// 		foreach ( $urls as $url ) {
-		// 			if ( in_array( $url, $author_pages_urls ) ) {
-		// 				continue;
-		// 			}
-		//
-		// 			$author_pages_urls[] = $url;
-		// 		}
-		// 	}
-		// }
-		//
-		// // Now actually scrape individual author pages and update GAs with that data.
-		// foreach ( $author_pages_urls as $author_page_url ) {
-		// 	$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
-		// 	if ( empty( $errs_updating_gas ) ) {
-		// 		$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
-		// 	} else {
-		// 		$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
-		// 	}
-		// }
+		/**
+		 * Next update GA info by scraping and fetching their author pages from live.
+		 */
+		WP_CLI::line( 'Updating GA author data ...' );
+
+		// First get all author pages URLs which were originally stored as Posts' postmeta.
+		$author_pages_urls = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
+			if ( empty( $links_meta ) ) {
+				continue;
+			}
+
+			// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
+			foreach ( $links_meta as $urls ) {
+				foreach ( $urls as $url ) {
+					if ( in_array( $url, $author_pages_urls ) ) {
+						continue;
+					}
+
+					$author_pages_urls[] = $url;
+				}
+			}
+		}
+
+		// Now actually scrape individual author pages and update GAs with that data.
+		foreach ( $author_pages_urls as $author_page_url ) {
+			$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+			if ( empty( $errs_updating_gas ) ) {
+				$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
+			} else {
+				$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
+			}
+		}
 
 
 		WP_CLI::line(
 			'Done. QA the following logs:'
-			. "\n  - ❗ ERRORS: $log_err_gas_updated"
-			. "\n  - ⚠️ $log_enhancements"
-			. "\n  - 👍 $log_post_ids_updated"
-			. "\n  - 👍 $log_gas_urls_updated"
+			. "\n  - ❗  ERRORS: $log_err_gas_updated"
+			. "\n  - ♻️️  $log_need_oembed_resave"
+			. "\n  - ⚠️  $log_enhancements"
+			. "\n  - 👍  $log_post_ids_updated"
+			. "\n  - 👍  $log_gas_urls_updated"
 		);
 		wp_cache_flush();
 	}
@@ -781,7 +779,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
 	 */
-	public function clean_up_scraped_html( $post_id, $post_content ) {
+	public function clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave ) {
 
 		$post_content_updated = '';
 
@@ -817,7 +815,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$enhancement_crawler = new Crawler( $domelement );
 
 				/**
-				 * Keep adding filters which should be skipped from post_content.
+				 * Keep adding banned divs which will be skipped from post_content.
 				 */
 				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
 					continue;
@@ -847,16 +845,159 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					continue;
 				}
 				/**
-				 * Keep adding filters which should be skipped from post_content.
+				 * Keep adding banned divs which will be skipped from post_content.
 				 */
 
-				// YT player.
+
+				/**
+				 * YT player to Gutenberg YT block.
+				 */
 				if ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
+					// Get YT video ID.
 					$player_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
-					$yt_video_id = $player_crawler->getNode(0)->getAttribute('data-video-id');
-					//$this->gutenberg->
-					$custom_html;
-					continue;
+					$yt_video_id    = $player_crawler->getNode(0)->getAttribute('data-video-id');
+					if ( ! $yt_video_id ) {
+						// TODO -- log missing TY link
+					}
+
+					// Get Gutenberg YT block.
+					$yt_link     = "https://www.youtube.com/watch?v=$yt_video_id";
+					$yt_block    = $this->gutenberg->get_youtube( $yt_link );
+					$custom_html = serialize_blocks( [ $yt_block ] );
+
+					// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+					$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
+				}
+
+
+				/**
+				 * Tweet embed to Twitter block.
+				 */
+				if ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
+					// Get Twitter link.
+					$twitter_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
+					$twitter_link = '';
+					foreach ( $twitter_crawler->getIterator() as $twitter_a_domelement ) {
+						$href = $twitter_a_domelement->getAttribute( 'href' );
+						if ( false !== strpos( $href, 'twitter.com' ) ) {
+							$twitter_link = $href;
+							break;
+						}
+					}
+
+					if ( ! empty( $twitter_link ) ) {
+						// Get Gutenberg Twitter block.
+						$twitter_block = $this->gutenberg->get_twitter( $twitter_link );
+						$custom_html   = serialize_blocks( [ $twitter_block ] );
+
+						// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+						$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d Twitter", $post_id ), $this->logger::WARNING );
+					} else {
+						if ( ! $yt_video_id ) {
+							// TODO -- log missing TY link
+						}
+					}
+				}
+
+
+				/**
+				 * ps-carousel slides to Gutenberg gallery block.
+				 */
+				if ( $enhancement_crawler->filter( 'ps-carousel' )->count() ) {
+
+					// First scrape all images data.
+					/**
+					 * @var array $images_data {
+					 *      @type string $src           Image URL.
+					 *      @type string $alt           Image alt text.
+					 *      @type string $credit        Image credit.
+					 *      @type string $attachment_id Image credit.
+					 * }
+					 */
+					$images_data = [];
+					$slides_crawler = $enhancement_crawler->filter( 'ps-carousel > div.carousel-slides > div.carousel-slide' );
+					$img_index = 0;
+					foreach ( $slides_crawler->getIterator() as $div_slide_domelement ) {
+
+						$images_data[ $img_index ] = [
+							'src' => null,
+							'alt' => null,
+							'credit' => null,
+							'attachment_id' => null,
+                       ];
+
+						// New crawler for each slide.
+						$slides_info_crawler = new Crawler( $div_slide_domelement );
+
+						// Get Credit from > div class=carousel-slide-inner ::: data-info-attribution="Cabrillo Robotics"
+						$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner' );
+						if ( $slide_inner_crawler->count() ) {
+							$attribution = $slide_inner_crawler->getNode(0)->getAttribute('data-info-attribution');
+							if ( $attribution ) {
+								$images_data [ $img_index ][ 'credit' ] = $attribution;
+							}
+						}
+
+						// Get Src and Alt from > div class=carousel-slide-inner > div.carousel-slide-media > img ::: alt src
+						$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner > div.carousel-slide-media > img' );
+						if ( $slide_inner_crawler->count() ) {
+							$src = $slide_inner_crawler->getNode(0)->getAttribute('src');
+							if ( ! $src ) {
+								$src = $slide_inner_crawler->getNode(0)->getAttribute('data-flickity-lazyload');
+							}
+							if ( $src ) {
+								$images_data[ $img_index ][ 'src' ] = $src;
+							}
+							$alt = $slide_inner_crawler->getNode(0)->getAttribute('alt');
+							if ( $alt ) {
+								$images_data[ $img_index ][ 'alt' ] = $alt;
+							}
+						}
+
+						$img_index++;
+					}
+
+					// Import images and get attachment IDs.
+					$attachment_ids = [];
+					foreach ( $images_data as $image_data ) {
+
+						if ( ! $image_data['src'] ) {
+							// TODO -- log
+							continue;
+						}
+
+						WP_CLI::line( sprintf( 'Downloading image: %s', $image_data['src'] ) );
+						$attachment_id = $this->attachments->import_external_file(
+							$image_data[ 'src' ],
+							$title = null,
+							$caption = null,
+							$description = null,
+							$image_data[ 'alt' ],
+							$post_id = 0,
+							$args = []
+						);
+
+						if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+							// TODO -- log failed attachment import
+						} else {
+							$attachment_ids[] = $attachment_id;
+							// Save credit as Newspack credit.
+							if ( $image_data[ 'credit' ] ) {
+								update_post_meta( $attachment_id, '_media_credit', $image_data[ 'credit' ] );
+							}
+						}
+					}
+
+					// Get Gutenberg gallery block.
+					if ( ! empty( $attachment_ids ) ) {
+						$slideshow_block = $this->gutenberg->get_jetpack_slideshow( $attachment_ids );
+						$custom_html     = serialize_blocks( [ $slideshow_block ] );
+
+						// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+						$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d JPSlideshow", $post_id ), $this->logger::WARNING );
+					} else {
+						// TODO -- log failed attachment import <-- i.e. failed gallery, but put to same log
+					}
 				}
 
 			}
@@ -914,10 +1055,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( $is_div_class_enhancement ) {
 
 				/**
-				 * Keep adding filters which are approved 'div.enhancement's.
+				 * Keep adding vetted 'div.enhancement's which will end up in post_content.
 				 */
 				$enhancement_crawler = new Crawler( $domelement );
-
 				if ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
 					continue;
 				}
@@ -936,8 +1076,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				if ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
 					continue;
 				}
+				if ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
+					continue;
+				}
 				/**
-				 * Keep adding filters which are approved 'div.enhancement's.
+				 * Keep adding vetted 'div.enhancement's which will end up in post_content.
 				 */
 
 
