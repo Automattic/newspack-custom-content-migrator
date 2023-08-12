@@ -215,7 +215,7 @@ class ContentDiffMigrator {
 		$post_ids_map = [];
 
 		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- placeholders generated dynamically.
-		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%d' ) );
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
 		$results = $this->wpdb->get_results(
 			$this->wpdb->prepare(
 				"SELECT wpm.post_id, wpm.meta_value
@@ -1030,7 +1030,7 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			$live_term_name         = $live_term_row['name'];
+			$live_term_name = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
@@ -1117,13 +1117,15 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array  $new_post_ids                Imported local Post IDs.
+	 * @param array  $imported_post_ids           Imported local Post IDs.
 	 * @param array  $imported_attachment_ids_map Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
 	 * @param string $log_file_path               Optional. Full path to a log file. If provided, the method will save and append
 	 *                                            a detailed output of all the changes made.
+	 * @param bool   $dry_run                     If true, will not make changes to DB, and will output changes to CLI instead of
+	 *                                            saving them to $log_file_path.
 	 */
-	public function update_featured_images( $new_post_ids, $imported_attachment_ids_map, $log_file_path ) {
-		if ( empty( $new_post_ids ) || empty( $imported_attachment_ids_map ) ) {
+	public function update_featured_images( $imported_post_ids, $imported_attachment_ids_map, $log_file_path, $dry_run = false ) {
+		if ( empty( $imported_post_ids ) || empty( $imported_attachment_ids_map ) ) {
 			return;
 		}
 
@@ -1143,15 +1145,15 @@ class ContentDiffMigrator {
 		 * So, we should only update _thumbnail_ids for those posts that were imported by us.
 		 */
 
-		// Loop through posts, and update their _thumbnail_id if needed.
-		foreach ( $new_post_ids as $new_post_id ) {
+		// Loop through posts and update their _thumbnail_id if needed.
+		foreach ( $imported_post_ids as $new_post_id ) {
 
 			// Get Post's current _thumbnail_id.
 			// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- correctly prepared.
 			$current_thumbnail_id = $this->wpdb->get_var(
 				$this->wpdb->prepare(
 					"SELECT meta_value
-					FROM {$this->live_table_prefix}postmeta
+					FROM {$this->wpdb->postmeta}
 					WHERE meta_key = '_thumbnail_id'
 					AND post_id = %d",
 					$new_post_id
@@ -1160,33 +1162,39 @@ class ContentDiffMigrator {
 			// phpcs:enable
 
 			// Check if this _thumbnail_id is used as a key in $imported_attachment_ids_map (keys are "old_id"s, values are "new_id"s).
-			if ( ! array_key_exists( $current_thumbnail_id, $imported_attachment_ids_map ) ) {
+			if ( ! $current_thumbnail_id || ! array_key_exists( $current_thumbnail_id, $imported_attachment_ids_map ) ) {
 				continue;
 			}
 
 			// Get the new _thumbnail_id and update it.
 			$new_thumbnail_id = $imported_attachment_ids_map[ $current_thumbnail_id ];
-			$updated          = $this->wpdb->update(
-				$this->wpdb->postmeta,
-				[ 'meta_value' => $new_thumbnail_id ],
-				[
-					'post_id'  => $new_post_id,
-					'meta_key' => '_thumbnail_id',
-				]
-			);
+			if ( $dry_run ) {
+				$updated = 1;
+			} else {
+				$updated = $this->wpdb->update(
+					$this->wpdb->postmeta,
+					[ 'meta_value' => $new_thumbnail_id ],
+					[
+						'post_id'  => $new_post_id,
+						'meta_key' => '_thumbnail_id',
+					]
+				);
+			}
 
 			// Log.
 			if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-				$this->log(
-					$log_file_path,
-					json_encode(
-						[
-							'post_id' => (int) $new_post_id,
-							'id_old'  => (int) $current_thumbnail_id,
-							'id_new'  => (int) $new_thumbnail_id,
-						]
-					)
+				$msg = json_encode(
+					[
+						'post_id' => (int) $new_post_id,
+						'id_old'  => (int) $current_thumbnail_id,
+						'id_new'  => (int) $new_thumbnail_id,
+					] 
 				);
+				if ( $dry_run ) {
+					WP_CLI::line( 'Updating _thubnail_id id_old=>id_new ' . $msg );
+				} else {
+					$this->log( $log_file_path, $msg );
+				}
 			}
 		}
 	}

@@ -300,6 +300,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Optional. Will not make changes to DB. And instead of writing to log file will just output to console.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -314,9 +321,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_update_feat_images_ids( $pos_args, $assoc_args ) {
-		global $wpdb;
 
-		// Get params.
+		// Get optional JSON list of "old_attachment_ids"=>"new_attachment_ids"mapping.
+		// If not provided, will load from DB, which is recommended.
 		$attachment_ids_map = null;
 		if ( isset( $assoc_args['attachment-ids-json-file'] ) && file_exists( $assoc_args['attachment-ids-json-file'] ) ) {
 			$attachment_ids_map = json_decode( file_get_contents( $assoc_args['attachment-ids-json-file'] ), true );
@@ -324,6 +331,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 				WP_CLI::error( 'No attachment IDs found in the JSON file.' );
 			}
 		}
+
+		// Get export dir param. Will save a detailed log there.
 		$export_dir = $assoc_args['export-dir'];
 		if ( ! file_exists( $export_dir ) ) {
 			$made = mkdir( $export_dir, 0777, true );
@@ -332,30 +341,35 @@ class ContentDiffMigrator implements InterfaceCommand {
 			}
 		}
 
+		// Get dry-run param.
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
 		// If no attachment IDs map was passed, get it from the DB.
 		if ( is_null( $attachment_ids_map ) ) {
-			// Get all attachment old and new IDs.
+			// Get all attachment old and new IDs from DB.
 			$attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
 
 			if ( ! $attachment_ids_map ) {
-				WP_CLI::error( 'No attachment IDs found in the DB.' );
+				WP_CLI::warning( 'No attachment IDs found in the DB. No changes made.' );
+				exit;
 			}
 		}
 
 		// Timestamp the log.
-		$ts  = gmdate( 'Y-m-d h:i:s a', time() );
-		$log = 'update-featured-images-ids.log';
-		$this->log( $log, sprintf( 'Starting %s.', $ts ) );
+		$ts       = gmdate( 'Y-m-d h:i:s a', time() );
+		$log      = 'content-diff__updated-feat-imgs-helper.log';
+		$log_path = $export_dir . '/' . $log;
+		$this->log( $log_path, sprintf( 'Starting %s.', $ts ) );
 
-		// Get local Post IDs that were imported using Content Diff (they will have the ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID postmeta).
+		// Get local Post IDs which were imported using Content Diff (these posts will have the ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID postmeta).
 		$imported_post_ids_mapping = self::$logic->get_imported_post_id_mapping_from_db();
-		$new_post_ids              = array_values( $imported_post_ids_mapping );
+		$imported_post_ids         = array_values( $imported_post_ids_mapping );
 
 		// Update attachment IDs.
-		self::$logic->update_featured_images( $new_post_ids, $attachment_ids_map, $log );
+		self::$logic->update_featured_images( $imported_post_ids, $attachment_ids_map, $log_path, $dry_run );
 
 		wp_cache_flush();
-		WP_CLI::success( 'Done.' );
+		WP_CLI::success( sprintf( 'Done. Log saved to %s', $log_path ) );
 	}
 
 	/**
@@ -985,7 +999,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * }
 	 */
 	public function update_featured_image_ids( $imported_posts_data ) {
-		global $wpdb;
 
 		/**
 		 * Map of all imported post types other than Attachments (Posts, Pages, etc).
