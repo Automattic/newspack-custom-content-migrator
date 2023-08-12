@@ -456,9 +456,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Log files.
-		$log_updated          = $this->temp_dir . '/ll_updated_post_content.log';
+		$log_post_ids_updated = $this->temp_dir . '/ll_updated_post_ids.log';
 		$log_gas_urls_updated = $this->temp_dir . '/ll_gas_urls_updated.log';
 		$log_err_gas_updated  = $this->temp_dir . '/ll_err__updated_gas.log';
+		$log_enhancements     = $this->temp_dir . '/ll_qa__enhancements.log';
 
 		// Create folders for caching stuff.
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
@@ -477,27 +478,31 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Hit timestamp on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
-		$this->logger->log( $log_updated, $ts, false );
+		$this->logger->log( $log_post_ids_updated, $ts, false );
 		$this->logger->log( $log_gas_urls_updated, $ts, false );
 		$this->logger->log( $log_err_gas_updated, $ts, false );
+		$this->logger->log( $log_enhancements, $ts, false );
 
 		// Get post IDs.
 		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
 
 		/**
-		 * Clean up post_content, and remove runtime inserted promo or user engagement.
+		 * Clean up post_content, remove inserted promo or user engagement content.
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
-			$post_content         = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+
 			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content );
+
+			$this->log_remaining_div_enhancements( $log_enhancements, $post_id, $post_content );
 
 			// Update post_content.
 			if ( ! empty( $post_content_updated ) ) {
 				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
-				$this->logger->log( $log_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
+				$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
 			}
 		}
 
@@ -510,6 +515,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// First get all author pages URLs which were originally stored as Posts' postmeta.
 		$author_pages_urls = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
 			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
 			if ( empty( $links_meta ) ) {
 				continue;
@@ -529,23 +537,34 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		// Now actually scrape individual author pages and update GAs with that data.
 		foreach ( $author_pages_urls as $author_page_url ) {
-			$this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+			$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+			if ( empty( $errs_updating_gas ) ) {
+				$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
+			} else {
+				$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
+			}
 		}
 
 
-
-		// Debug and QA info.
-		if ( ! empty( $gas_urls_updated ) ) {
-			$this->logger->log( $log_gas_urls_updated, implode( "\n", $gas_urls_updated ), false );
-			WP_CLI::warning( "⚠️️ QA the following $log_gas_urls_updated " );
-		}
-		WP_CLI::warning( "❗️ Check if any $log_err_gas_updated were logged with invalid unscrapable author pages URLs." );
-
+		WP_CLI::line(
+			'Done. QA the following logs:'
+			. "\n  - ❗ ERRORS: $log_err_gas_updated"
+			. "\n  - ⚠️ $log_enhancements"
+			. "\n  - 👍 $log_post_ids_updated"
+			. "\n  - 👍 $log_gas_urls_updated"
+		);
 		wp_cache_flush();
-		WP_CLI::line( 'Done 👍' );
 	}
 
-	public function update_author_info( $url, $scraped_htmls_cache_path, $log_err_gas_updated ) {
+	/**
+	 * @param $url
+	 * @param $scraped_htmls_cache_path
+	 *
+	 * @return array Error messages if they occurred during GA info update.
+	 */
+	public function update_author_info( $url, $scraped_htmls_cache_path ) {
+
+		$errs_updating_gas = [];
 
 		// HTML cache filename and path.
 		$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
@@ -560,7 +579,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
 				// Not OK.
 				$msg = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
-				$this->logger->log( $log_err_gas_updated, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
+				$errs_updating_gas[] = sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg );
 				return;
 			}
 
@@ -590,7 +609,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( "Downloading avatar URL for author '%s' ...", $crawled_data['name'] ) );
 			$attachment_id = $this->attachments->import_external_file( $crawled_data['avatar_url'], $crawled_data['name'] );
 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
-				$this->logger->log( $log_err_gas_updated, sprintf( "Error importing avatar image %s for author '%s' ERR: %s", $crawled_data['avatar_url'], $crawled_data['name'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' ), $this->logger::WARNING );
+				$errs_updating_gas[] = sprintf( "Error importing avatar image %s for author '%s' ERR: %s", $crawled_data['avatar_url'], $crawled_data['name'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' );
 			} else {
 				$ga_update_arr['avatar'] = $attachment_id;
 			}
@@ -652,6 +671,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$url
 			)
 		);
+
+		return $errs_updating_gas;
 	}
 
 	/**
@@ -777,32 +798,29 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 			if ( $is_div_class_enhancement ) {
 
-				// Continue if this div.enhancement has a div > div#newsletter_signup.
 				$enhancement_crawler = new Crawler( $domelement );
+
+				// Continue if this div.enhancement has a div > div#newsletter_signup.
 				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
 					continue;
 				}
 
 				// Continue if this div.enhancement has a div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"].
-				$enhancement_crawler = new Crawler( $domelement );
 				if ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
 					continue;
 				}
 
 				// Continue if this div.enhancement has a figure > a > img[alt="Student signup banner"]
-				$enhancement_crawler = new Crawler( $domelement );
 				if ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
 					continue;
 				}
 
 				// Continue if this div.enhancement has a ps-promo
-				$enhancement_crawler = new Crawler( $domelement );
 				if ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
 					continue;
 				}
 
 				// Continue if this div.enhancement has a broadstreet-zone
-				$enhancement_crawler = new Crawler( $domelement );
 				if ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
 					continue;
 				}
@@ -822,6 +840,54 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		return $post_content_updated;
+	}
+	/**
+	 * @param string $post_content HTML.
+	 */
+	public function log_remaining_div_enhancements( $log, $post_id, $post_content ) {
+
+		$this->crawler->clear();
+		$this->crawler->add( $post_content );
+
+		/**
+		 * Get the outer content div.rich-text-body in which the body HTML is nested.
+		 */
+		$div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
+
+		/**
+		 * If div.rich-text-body was already removed, just temporarily surround the HTML with a new <div> so that nodes can be traversed the same way as children.
+		 */
+		if ( ! $div_content_crawler ) {
+			$this->crawler->clear();
+			$this->crawler->add( '<div>' . $post_content . '</div>' );
+			$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
+		}
+
+		/**
+		 * OK, now traverse through all child nodes. We will just keept the content inside the <div>, getting rid of the <div> itself.
+		 */
+		$post_content_updated = '';
+		foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
+
+			/**
+			 * Skip specific "div.enhancement"s.
+			 */
+			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
+			if ( $is_div_class_enhancement ) {
+
+				// Breakpoint for 'div.enhancement's.
+				$enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
+
+				$this->logger->log(
+					$log,
+					sprintf(
+						"===PostID %d:\n%s",
+						$post_id,
+						$enchancement_html
+					)
+				);
+
+			}
 	}
 
 	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
