@@ -284,7 +284,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			'newspack-content-migrator content-diff-update-featured-images-ids',
 			[ $this, 'cmd_update_feat_images_ids' ],
 			[
-				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. Takes "old_attachment_ids"=>"new_attachment_ids" from DB (unless provided with an optional --attachment-ids-json-file) which get saved in DB when Content Diff import is performed.',
+				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. It automatically picks up "old_attachment_ids"=>"new_attachment_ids" from DB and updates those (unless provided with an optional --attachment-ids-json-file).',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -322,8 +322,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 */
 	public function cmd_update_feat_images_ids( $pos_args, $assoc_args ) {
 
-		// Get optional JSON list of "old_attachment_ids"=>"new_attachment_ids"mapping.
-		// If not provided, will load from DB, which is recommended.
+		// Get optional JSON list of "old_attachment_ids"=>"new_attachment_ids"mapping. If not provided, will load from DB, which is recommended.
 		$attachment_ids_map = null;
 		if ( isset( $assoc_args['attachment-ids-json-file'] ) && file_exists( $assoc_args['attachment-ids-json-file'] ) ) {
 			$attachment_ids_map = json_decode( file_get_contents( $assoc_args['attachment-ids-json-file'] ), true );
