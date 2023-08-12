@@ -6,6 +6,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Posts;
+use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \Newspack_Scraper_Migrator_Util;
@@ -275,6 +276,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $posts;
 
 	/**
+	 * Gutenberg block generator.
+	 *
+	 * @var GutenbergBlockGenerator Gutenberg block generator.
+	 */
+	private $gutenberg;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -301,6 +309,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->data_parser = new Newspack_Scraper_Migrator_HTML_Parser();
 		$this->cap         = new CoAuthorPlus();
 		$this->posts       = new Posts();
+		$this->gutenberg   = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -490,60 +499,65 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Clean up post_content, remove inserted promo or user engagement content.
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
+
+
+// $post_ids = [106];
+
+
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
 			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content );
-
-			$this->log_remaining_div_enhancements( $log_enhancements, $post_id, $post_content );
-
-			// Update post_content.
+			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
-				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+				// $wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
 				$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
 			}
+
+			// QA remaining 'div.enhancement's.
+			$this->qa_remaining_div_enhancements( $log_enhancements, $post_id, ! empty( $post_content_updated ) ? $post_content_updated : $post_content );
 		}
 
 
-		/**
-		 * Next update GA info by scraping and fetching their author pages from live.
-		 */
-		WP_CLI::line( 'Updating GA author data ...' );
-
-		// First get all author pages URLs which were originally stored as Posts' postmeta.
-		$author_pages_urls = [];
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-
-			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
-
-			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
-			if ( empty( $links_meta ) ) {
-				continue;
-			}
-
-			// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
-			foreach ( $links_meta as $urls ) {
-				foreach ( $urls as $url ) {
-					if ( in_array( $url, $author_pages_urls ) ) {
-						continue;
-					}
-
-					$author_pages_urls[] = $url;
-				}
-			}
-		}
-
-		// Now actually scrape individual author pages and update GAs with that data.
-		foreach ( $author_pages_urls as $author_page_url ) {
-			$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
-			if ( empty( $errs_updating_gas ) ) {
-				$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
-			} else {
-				$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
-			}
-		}
+		// /**
+		//  * Next update GA info by scraping and fetching their author pages from live.
+		//  */
+		// WP_CLI::line( 'Updating GA author data ...' );
+		//
+		// // First get all author pages URLs which were originally stored as Posts' postmeta.
+		// $author_pages_urls = [];
+		// foreach ( $post_ids as $key_post_id => $post_id ) {
+		//
+		// 	WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+		//
+		// 	$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
+		// 	if ( empty( $links_meta ) ) {
+		// 		continue;
+		// 	}
+		//
+		// 	// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
+		// 	foreach ( $links_meta as $urls ) {
+		// 		foreach ( $urls as $url ) {
+		// 			if ( in_array( $url, $author_pages_urls ) ) {
+		// 				continue;
+		// 			}
+		//
+		// 			$author_pages_urls[] = $url;
+		// 		}
+		// 	}
+		// }
+		//
+		// // Now actually scrape individual author pages and update GAs with that data.
+		// foreach ( $author_pages_urls as $author_page_url ) {
+		// 	$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+		// 	if ( empty( $errs_updating_gas ) ) {
+		// 		$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
+		// 	} else {
+		// 		$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
+		// 	}
+		// }
 
 
 		WP_CLI::line(
@@ -769,6 +783,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function clean_up_scraped_html( $post_id, $post_content ) {
 
+		$post_content_updated = '';
+
 		$this->crawler->clear();
 		$this->crawler->add( $post_content );
 
@@ -776,7 +792,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Get the outer content div.rich-text-body in which the body HTML is nested.
 		 */
 		$div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
-
 		/**
 		 * If div.rich-text-body was already removed, just temporarily surround the HTML with a new <div> so that nodes can be traversed the same way as children.
 		 */
@@ -789,8 +804,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		/**
 		 * OK, now traverse through all child nodes. We will just keept the content inside the <div>, getting rid of the <div> itself.
 		 */
-		$post_content_updated = '';
 		foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
+
+			$custom_html = null;
 
 			/**
 			 * Skip specific "div.enhancement"s.
@@ -800,38 +816,61 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 				$enhancement_crawler = new Crawler( $domelement );
 
-				// Continue if this div.enhancement has a div > div#newsletter_signup.
+				/**
+				 * Keep adding filters which should be skipped from post_content.
+				 */
 				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
 					continue;
 				}
-
-				// Continue if this div.enhancement has a div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"].
 				if ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
 					continue;
 				}
-
-				// Continue if this div.enhancement has a figure > a > img[alt="Student signup banner"]
 				if ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
 					continue;
 				}
-
-				// Continue if this div.enhancement has a ps-promo
 				if ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
 					continue;
 				}
-
-				// Continue if this div.enhancement has a broadstreet-zone
 				if ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
 					continue;
 				}
+				if ( $enhancement_crawler->filter( 'div.promo-action' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'figure > a > img[alt="BFCU Home Loans Ad"]' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'figure > a > img[alt="Community Voices election 2022"]' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
+					continue;
+				}
+				/**
+				 * Keep adding filters which should be skipped from post_content.
+				 */
+
+				// YT player.
+				if ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
+					$player_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
+					$yt_video_id = $player_crawler->getNode(0)->getAttribute('data-video-id');
+					//$this->gutenberg->
+					$custom_html;
+					continue;
+				}
+
 			}
 
 
 			// Get domelement HTML.
-			$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
-			$domelement_html = trim( $domelement_html );
-			if ( empty( $domelement_html ) ) {
-				continue;
+			if ( $custom_html ) {
+				$domelement_html = $custom_html;
+			} else {
+				$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
+				$domelement_html = trim( $domelement_html );
+				if ( empty( $domelement_html ) ) {
+					continue;
+				}
 			}
 
 			// Append HTML.
@@ -844,7 +883,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	/**
 	 * @param string $post_content HTML.
 	 */
-	public function log_remaining_div_enhancements( $log, $post_id, $post_content ) {
+	public function qa_remaining_div_enhancements( $log, $post_id, $post_content ) {
 
 		$this->crawler->clear();
 		$this->crawler->add( $post_content );
@@ -853,7 +892,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Get the outer content div.rich-text-body in which the body HTML is nested.
 		 */
 		$div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
-
 		/**
 		 * If div.rich-text-body was already removed, just temporarily surround the HTML with a new <div> so that nodes can be traversed the same way as children.
 		 */
@@ -863,31 +901,62 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
 		}
 
+
 		/**
-		 * OK, now traverse through all child nodes. We will just keept the content inside the <div>, getting rid of the <div> itself.
+		 * QA 'div.enhancement's.
 		 */
-		$post_content_updated = '';
 		foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
 
 			/**
-			 * Skip specific "div.enhancement"s.
+			 * Examine 'div.enhancement's. If they are not one of the vetted ones, log them.
 			 */
 			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 			if ( $is_div_class_enhancement ) {
 
-				// Breakpoint for 'div.enhancement's.
-				$enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
+				/**
+				 * Keep adding filters which are approved 'div.enhancement's.
+				 */
+				$enhancement_crawler = new Crawler( $domelement );
 
+				if ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'div.infobox' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'figure > a[href="mailto:elections@lookoutlocal.com"]' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
+					continue;
+				}
+				if ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
+					continue;
+				}
+				/**
+				 * Keep adding filters which are approved 'div.enhancement's.
+				 */
+
+
+				/**
+				 * Any remaining 'div.enhancement's will be logged and should be QAed for whether they're approved in post_content.
+				 */
+				$enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
 				$this->logger->log(
 					$log,
 					sprintf(
 						"===PostID %d:\n%s",
 						$post_id,
 						$enchancement_html
-					)
+					),
+					false
 				);
 
 			}
+		}
 	}
 
 	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
