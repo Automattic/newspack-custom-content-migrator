@@ -248,10 +248,11 @@ class GutenbergBlockGenerator {
 	 * @param \WP_Post $attachment_post        Image Post.
 	 * @param string   $size                   Image size, full by default.
 	 * @param bool     $link_to_attachment_url Whether to link to the attachment URL or not.
+	 * @param ?string  $custom_link            If provided, will set custom link.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
-	public function get_image( $attachment_post, $size = 'full', $link_to_attachment_url = true ) {
+	public function get_image( $attachment_post, $size = 'full', $link_to_attachment_url = true, $custom_link = null ) {
 		$caption_tag = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
 		$image_alt   = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
 		$image_url   = wp_get_attachment_url( $attachment_post->ID );
@@ -263,8 +264,9 @@ class GutenbergBlockGenerator {
 		// Add <a> link to attachment URL.
 		$a_opening_tag = '';
 		$a_closing_tag = '';
-		if ( $link_to_attachment_url ) {
-			$a_opening_tag = sprintf( '<a href="%s">', $image_url );
+		if ( $link_to_attachment_url || $custom_link ) {
+			$link = $link_to_attachment_url ? $image_url : $custom_link;
+			$a_opening_tag = sprintf( '<a href="%s">', $link );
 			$a_closing_tag = '</a>';
 		}
 
