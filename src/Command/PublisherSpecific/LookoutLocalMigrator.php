@@ -745,35 +745,66 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$args
 		);
 
-		// Retry downloading image from "//lookout.brightspotcdn.com/" by using &url GET param.
+
+		/**
+		 * In case of "Sorry, you are not allowed to upload this file type.",
+		 * retry downloading image from "//lookout.brightspotcdn.com/" by using &url GET param
+		 * by swapping downloaded local tmp file's extension
+		 * from .tmp to actual extension (e.g. .jpg) lets it go through.
+		 */
 		if (
 			is_wp_error( $attachment_id )
 			&& ( false !== strpos( $src, '//lookout.brightspotcdn.com/' ) )
-			&& ( false !== strpos( $attachment_id->get_error_message(), 'not allowed to upload this file type' ) )
+			&& ( false != strpos( $attachment_id->get_error_message(), 'not allowed to upload this file type' ) )
 		) {
-			$url_from_get_param = null;
+			WP_CLI::line( sprintf( "Retrying to download image with manual handling ...", $src ) );
 			$src_parsed = parse_url( $src );
-			foreach ( explode( '&', $src_parsed['query'] ) as $query_segment ) {
-				if ( 0 == strpos( $query_segment, 'url=' ) ) {
-					$url_from_get_param = urldecode( substr( $query_segment, 4 ) );
+			$new_extension  = null;
+			foreach (  explode( '&', $src_parsed['query'] ) as $param ) {
+				/**
+				 * Image $url could look like this:
+				 *      https://lookout.brightspotcdn.com/dims4/default/6bf45a2/2147483647/strip/true/crop/2000x1333+0+0/resize/1680x1120!/quality/90/?url=https%3A%2F%2Fi0.wp.com%2Fcalmatters.org%2Fwp-content%2Fuploads%2F2023%2F06%2F062023-Unhoused-LA-JAH-CM-40.jpg%3Fw%3D2000%26ssl%3D1
+				 * Now let's get the URL from the &url= GET param:
+				 *      ?url=https%3A%2F%2Fi0.wp.com%2Fcalmatters.org%2Fwp-content%2Fuploads%2F2023%2F06%2F062023-Unhoused-LA-JAH-CM-40.jpg%3Fw%3D2000%26ssl%3D1
+				 * and decode it to get this:
+				 *      https://i0.wp.com/calmatters.org/wp-content/uploads/2023/06/062023-Unhoused-LA-JAH-CM-40.jpg?w=2000&ssl=1
+				 * and finally remove the GET query from it to get this:
+				 *      https://i0.wp.com/calmatters.org/wp-content/uploads/2023/06/062023-Unhoused-LA-JAH-CM-40.jpg
+				 * Now we can get the actual image extension from this URL.
+				 */
 
-					// Also strip any GET params from $url_from_get_param.
-					$url_from_get_param_parsed = parse_url( $url_from_get_param );
-					$url_from_get_param = $url_from_get_param_parsed['scheme'] . '://' . $url_from_get_param_parsed['host'] . $url_from_get_param_parsed['path'];
-				}
+				// Get URL from &url= GET param.
+				$url_from_url_get_param = ( 0 == strpos( $param, 'url=' ) ) ? urldecode( substr( $param, 4 ) ) : null;
+
+				// Now remove the GET query from $url_from_url_get_param.
+				$url_from_url_get_param_parsed = parse_url( $url_from_url_get_param );
+				$url_from_url_get_param_wo_get_params = $url_from_url_get_param_parsed['scheme'] . '://' . $url_from_url_get_param_parsed['host'] . $url_from_url_get_param_parsed['path'];
+
+				// Get extension from URL.
+				$new_extension = pathinfo( $url_from_url_get_param_wo_get_params, PATHINFO_EXTENSION );
 			}
 
-			// Retry downloading from $url_from_get_param.
-			if ( ! is_null( $url_from_get_param ) ) {
-				$attachment_id = $this->attachments->import_external_file(
-					$url_from_get_param,
-					$title,
-					$caption,
-					$description,
-					$alt,
-					$post_id,
-					$args
-				);
+			// Download this file to local tmp again.
+			$tmp_file           = download_url( $src );
+			$tmp_file_extension = pathinfo( $tmp_file, PATHINFO_EXTENSION );
+
+			// Rename $tmp_file's extension from e.g. 'tmp' to e.g. 'jpg'.
+			$tmp_file_new = preg_replace( '/' . $tmp_file_extension . '$/', $new_extension, $tmp_file );
+			rename( $tmp_file, $tmp_file_new );
+
+			// Now try to import the local tmp file with the new extension.
+			$attachment_id = $this->attachments->import_external_file(
+				$tmp_file_new,
+				$title,
+				$caption,
+				$description,
+				$alt,
+				$post_id,
+				$args
+			);
+
+			if ( $attachment_id && ! is_wp_error( $attachment_id ) ) {
+				WP_CLI::success( sprintf( "Imported attachment ID %d", $attachment_id ) );
 			}
 		}
 
