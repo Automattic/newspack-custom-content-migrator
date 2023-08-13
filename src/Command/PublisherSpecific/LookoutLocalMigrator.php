@@ -332,14 +332,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-create-custom-table',
-			[ $this, 'cmd_create_custom_table' ],
-			[
-				'shortdesc' => 'Extracts all posts JSONs from the huge `Record` table into a new custom table called self::CUSTOM_ENTRIES_TABLE.',
-				'synopsis'  => [],
-			]
-		);
-		WP_CLI::add_command(
 			'newspack-content-migrator lookoutlocal-scrape-posts',
 			[ $this, 'cmd_scrape_posts' ],
 			[
@@ -359,6 +351,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			[ $this, 'cmd_postscrape_posts' ],
 			[
 				'shortdesc' => 'Second main command. Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-create-custom-table',
+			[ $this, 'cmd_create_custom_table' ],
+			[
+				'shortdesc' => 'Extracts all posts JSONs from the huge `Record` table into a new custom table called self::CUSTOM_ENTRIES_TABLE.',
+				'synopsis'  => [],
 			]
 		);
 		WP_CLI::add_command(
@@ -502,8 +502,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Clean up post_content, remove inserted promo or user engagement content.
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
-
-$post_ids = [73];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
