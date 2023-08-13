@@ -19,7 +19,8 @@ use Symfony\Component\DomCrawler\Crawler as Crawler;
  */
 class LookoutLocalMigrator implements InterfaceCommand {
 
-	const MEDIA_CREDIT_META              = '_media_credit';
+	const META_MEDIA_CREDIT              = '_media_credit';
+	const META_IMAGE_ORIGINAL_URL        = 'newspackmigration_image_original_url';
 	const DATA_EXPORT_TABLE              = 'Record';
 	const CUSTOM_ENTRIES_TABLE           = 'newspack_entries';
 	const LOOKOUT_S3_SCHEMA_AND_HOSTNAME = 'https://lookout-local-brightspot.s3.amazonaws.com';
@@ -501,12 +502,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Clean up post_content, remove inserted promo or user engagement content.
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
+
+$post_ids = [73];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
 			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave );
+
 			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
 				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
@@ -688,6 +692,78 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Fetches image attachment ID from Media Library, or downloads it and creates it if not.
+	 *
+	 * @param string  $src
+	 * @param ?string $title
+	 * @param ?string $caption
+	 * @param ?string $description
+	 * @param ?string $alt
+	 * @param ?int    $post_id
+	 * @param ?string $credit
+	 * @param array   $args
+	 *
+	 * @return ?int Attachment ID, or null if error.
+	 */
+	public function get_or_download_image(
+		$src,
+		$title = null,
+		$caption = null,
+		$description = null,
+		$alt = null,
+		$post_id = null,
+		$credit = null,
+		$args = []
+	) {
+		global $wpdb;
+
+		// First fetch attachment from Media Library if it already exists.
+		$attachment_id = $wpdb->get_var( $wpdb->prepare(
+			"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s and meta_value = %s",
+			self::META_IMAGE_ORIGINAL_URL,
+			$src
+		) );
+		if ( $attachment_id ) {
+			WP_CLI::line( sprintf( "Image '%s' found as attachment ID %d", $src, $attachment_id ) );
+
+			return $attachment_id;
+		}
+
+		// Download and import attachment.
+		WP_CLI::line( sprintf( "Downloading image '%s' ...", $src ) );
+		$attachment_id = $this->attachments->import_external_file(
+			$src,
+			$title,
+			$caption,
+			$description,
+			$alt,
+			$post_id,
+			$args
+		);
+		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+
+			// TODO -- log failed attachment import
+			return null;
+
+		} else {
+
+			// Save original URL as meta.
+			update_post_meta( $attachment_id, self::META_IMAGE_ORIGINAL_URL, $src );
+
+			// Save credit as Newspack credit.
+			if ( $credit ) {
+				// If starts with ( and ends with ), remove them.
+				if ( 0 == strpos( $credit, '(' ) && ')' == substr( $credit, -1 ) ) {
+					$credit = trim( $credit, '()');
+				}
+				update_post_meta( $attachment_id, self::META_MEDIA_CREDIT, $credit );
+			}
+		}
+
+		return $attachment_id;
+	}
+
+	/**
 	 * Crawls all useful post data from HTML.
 	 *
 	 * @param string $html                    HTML.
@@ -806,8 +882,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			$custom_html = null;
 
+			$html_domelement_helper = $domelement->ownerDocument->saveHTML( $domelement );
+
 			/**
-			 * Skip specific "div.enhancement"s.
+			 * Skip or transform specific "div.enhancement"s.
 			 */
 			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 			if ( $is_div_class_enhancement ) {
@@ -815,47 +893,104 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$enhancement_crawler = new Crawler( $domelement );
 
 				/**
-				 * Keep adding banned divs which will be skipped from post_content.
+				 * Skip ( with `continue;` ) or transform 'div.enchancement's ( by setting $custom_html ).
 				 */
 				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
 					continue;
-				}
-				if ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'div.promo-action' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure > a > img[alt="BFCU Home Loans Ad"]' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure > a > img[alt="Community Voices election 2022"]' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
-					continue;
-				}
-				/**
-				 * Keep adding banned divs which will be skipped from post_content.
-				 */
 
+				} elseif ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
+					continue;
 
-				/**
-				 * YT player to Gutenberg YT block.
-				 */
-				if ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
+				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'div.promo-action' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="BFCU Home Loans Ad"]' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Community Voices election 2022"]' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
+					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'figure.figure > a.link > img' )->count() ) {
+
+					/**
+					 * An image within an <a> link: 'div.enhancement' has > figure.figure > a.link > img.image with src containing "//lookout.brightspotcdn.com/".
+					 */
+
+					// If an <a> is surrounding the image, get it
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link' );
+					$href = $helper_crawler->getNode(0) ? $helper_crawler->getNode(0)->getAttribute('href') : null;
+
+					// Get all image data -- src, alt, caption, credit.
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > img' );
+					$src = $helper_crawler->getNode(0)->getAttribute('src');
+					$alt = $helper_crawler->getNode(0)->getAttribute('alt');
+
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > div.figure-content > div.figure-caption' );
+					$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
+
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > div.figure-content > div.figure-credit' );
+					// Not sure why this returns only the first character...
+					//      $credit = $helper_crawler->innerText();
+					$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
+
+					// Download image.
+					WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
+					$attachment_id = $this->get_or_download_image( $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
+
+					// Get Gutenberg image block.
+					$attachment_post = get_post( $attachment_id );
+					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, $href );
+					$custom_html = serialize_blocks( [ $image_block ] );
+
+				} elseif ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
+
+					/**
+					 * An image: 'div.enhancement' has > figure.figure > img.image with src containing "//lookout.brightspotcdn.com/".
+					 */
+
+					// Get all image data -- src, alt, caption, credit.
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > img' );
+					$src = $helper_crawler->getNode(0)->getAttribute('src');
+					$alt = $helper_crawler->getNode(0)->getAttribute('alt');
+
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-caption' );
+					$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
+
+					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-credit' );
+					// Not sure why this returns only the first character...
+					//      $credit = $helper_crawler->innerText();
+					$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
+
+					// Download image.
+					WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
+					$attachment_id = $this->get_or_download_image( $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
+
+					// Get Gutenberg image block.
+					$attachment_post = get_post( $attachment_id );
+					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, null );
+					$custom_html = serialize_blocks( [ $image_block ] );
+
+				} elseif ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
+
+					/**
+					 * YT player to Gutenberg YT block.
+					 */
+
 					// Get YT video ID.
-					$player_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
-					$yt_video_id    = $player_crawler->getNode(0)->getAttribute('data-video-id');
+					$helper_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
+					$yt_video_id    = $helper_crawler->getNode(0)->getAttribute('data-video-id');
 					if ( ! $yt_video_id ) {
 						// TODO -- log missing TY link
 					}
@@ -867,17 +1002,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 					// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
 					$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
-				}
 
+				} elseif ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
 
-				/**
-				 * Tweet embed to Twitter block.
-				 */
-				if ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
+					/**
+					 * Tweet embed to Twitter block.
+					 */
+
 					// Get Twitter link.
-					$twitter_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
+					$helper_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
 					$twitter_link = '';
-					foreach ( $twitter_crawler->getIterator() as $twitter_a_domelement ) {
+					foreach ( $helper_crawler->getIterator() as $twitter_a_domelement ) {
 						$href = $twitter_a_domelement->getAttribute( 'href' );
 						if ( false !== strpos( $href, 'twitter.com' ) ) {
 							$twitter_link = $href;
@@ -897,13 +1032,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 							// TODO -- log missing TY link
 						}
 					}
-				}
 
+				} elseif ( $enhancement_crawler->filter( 'ps-carousel' )->count() ) {
 
-				/**
-				 * ps-carousel slides to Gutenberg gallery block.
-				 */
-				if ( $enhancement_crawler->filter( 'ps-carousel' )->count() ) {
+					/**
+					 * ps-carousel slides to Gutenberg gallery block.
+					 */
 
 					// First scrape all images data.
 					/**
@@ -915,9 +1049,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					 * }
 					 */
 					$images_data = [];
-					$slides_crawler = $enhancement_crawler->filter( 'ps-carousel > div.carousel-slides > div.carousel-slide' );
+					$helper_crawler = $enhancement_crawler->filter( 'ps-carousel > div.carousel-slides > div.carousel-slide' );
 					$img_index = 0;
-					foreach ( $slides_crawler->getIterator() as $div_slide_domelement ) {
+					foreach ( $helper_crawler->getIterator() as $div_slide_domelement ) {
 
 						$images_data[ $img_index ] = [
 							'src' => null,
@@ -931,12 +1065,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 						// Get Credit from > div class=carousel-slide-inner ::: data-info-attribution="Cabrillo Robotics"
 						$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner' );
-						if ( $slide_inner_crawler->count() ) {
-							$attribution = $slide_inner_crawler->getNode(0)->getAttribute('data-info-attribution');
-							if ( $attribution ) {
-								$images_data [ $img_index ][ 'credit' ] = $attribution;
-							}
-						}
+						$attribution = $slide_inner_crawler->count() > 0 ? $slide_inner_crawler->getNode(0)->getAttribute('data-info-attribution') : null;
+						$images_data [ $img_index ][ 'credit' ] = $attribution;
 
 						// Get Src and Alt from > div class=carousel-slide-inner > div.carousel-slide-media > img ::: alt src
 						$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner > div.carousel-slide-media > img' );
@@ -967,25 +1097,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						}
 
 						WP_CLI::line( sprintf( 'Downloading image: %s', $image_data['src'] ) );
-						$attachment_id = $this->attachments->import_external_file(
-							$image_data[ 'src' ],
-							$title = null,
-							$caption = null,
-							$description = null,
-							$image_data[ 'alt' ],
-							$post_id = 0,
-							$args = []
-						);
-
-						if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
-							// TODO -- log failed attachment import
-						} else {
-							$attachment_ids[] = $attachment_id;
-							// Save credit as Newspack credit.
-							if ( $image_data[ 'credit' ] ) {
-								update_post_meta( $attachment_id, '_media_credit', $image_data[ 'credit' ] );
-							}
-						}
+						$attachment_id    = $this->get_or_download_image( $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
+						$attachment_ids[] = $attachment_id;
 					}
 
 					// Get Gutenberg gallery block.
@@ -999,6 +1112,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						// TODO -- log failed attachment import <-- i.e. failed gallery, but put to same log
 					}
 				}
+				/**
+				 * Skip ( with `continue;` ) or transform 'div.enchancement's ( by setting $custom_html ).
+				 */
+
 
 			}
 
@@ -1055,7 +1172,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( $is_div_class_enhancement ) {
 
 				/**
-				 * Keep adding vetted 'div.enhancement's which will end up in post_content.
+				 * Keep adding approved 'div.enhancement's which will end up in post_content.
 				 */
 				$enhancement_crawler = new Crawler( $domelement );
 				if ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
@@ -1079,8 +1196,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				if ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
 					continue;
 				}
+				// If 'div.enhancement' has > ps-interactive-project > iframe with src containing "//joinsubtext.com/lilyonfood", keep it.
+				if ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
+					$iframe_crawler = $enhancement_crawler->filter( 'ps-interactive-project > iframe' );
+					if ( $iframe_crawler && $iframe_crawler->getNode(0) ) {
+						$src = $iframe_crawler->getNode(0)->getAttribute('src');
+						if ( false !== strpos( $src, '//joinsubtext.com/lilyonfood' ) ) {
+							continue;
+						}
+					}
+				}
 				/**
-				 * Keep adding vetted 'div.enhancement's which will end up in post_content.
+				 * Keep adding approved 'div.enhancement's which will end up in post_content.
 				 */
 
 
@@ -1246,24 +1373,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Import featured image.
 			if ( isset( $crawled_data['featured_image_src'] ) ) {
 				WP_CLI::line( 'Downloading featured image ...' );
-				$attachment_id   = $this->attachments->import_external_file(
+				$attachment_id = $this->get_or_download_image(
 					$crawled_data['featured_image_src'],
-					$title       = null,
+					$title = null,
 					$crawled_data['featured_image_caption'],
 					$description = null,
 					$crawled_data['featured_image_alt'],
 					$post_id,
-					$args        = []
+					$crawled_data['featured_image_credit']
 				);
-				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
-					$this->logger->log( $log_err_importing_featured_image, sprintf( 'Error importing featured image to post ID: %d src: %s ERR: %s', $post_id, $crawled_data['featured_image_src'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' ), $this->logger::WARNING );
-				} else {
-					set_post_thumbnail( $post_id, $attachment_id );
-					// Credit goes as Newspack credit postmeta.
-					if ( $crawled_data['featured_image_credit'] ) {
-						update_post_meta( $attachment_id, self::MEDIA_CREDIT_META, $crawled_data['featured_image_credit'] );
-					}
-				}
 			}
 
 			// Authors.
