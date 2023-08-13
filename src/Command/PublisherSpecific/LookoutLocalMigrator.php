@@ -398,6 +398,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Log files.
+		if ( ! file_exists( $this->temp_dir ) ) {
+			mkdir( $this->temp_dir, 0777, true );
+		}
 		$log_urls           = $this->temp_dir . '/ll__get_urls_from_db.log';
 		$log_urls_not_found = $this->temp_dir . '/ll_debug__urls_not_found.log';
 
@@ -466,6 +469,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Log files.
+		if ( ! file_exists( $this->temp_dir ) ) {
+			mkdir( $this->temp_dir, 0777, true );
+		}
 		$log_post_ids_updated   = $this->temp_dir . '/ll_updated_post_ids.log';
 		$log_gas_urls_updated   = $this->temp_dir . '/ll_gas_urls_updated.log';
 		$log_err_gas_updated    = $this->temp_dir . '/ll_err__updated_gas.log';
@@ -503,7 +509,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::line( sprintf( '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
@@ -529,7 +535,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$author_pages_urls = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 
-			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			WP_CLI::line( sprintf( "\n" . "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
 			if ( empty( $links_meta ) ) {
@@ -738,9 +744,43 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$post_id,
 			$args
 		);
+
+		// Retry downloading image from "//lookout.brightspotcdn.com/" by using &url GET param.
+		if (
+			is_wp_error( $attachment_id )
+			&& ( false !== strpos( $src, '//lookout.brightspotcdn.com/' ) )
+			&& ( false !== strpos( $attachment_id->get_error_message(), 'not allowed to upload this file type' ) )
+		) {
+			$url_from_get_param = null;
+			$src_parsed = parse_url( $src );
+			foreach ( explode( '&', $src_parsed['query'] ) as $query_segment ) {
+				if ( 0 == strpos( $query_segment, 'url=' ) ) {
+					$url_from_get_param = urldecode( substr( $query_segment, 4 ) );
+
+					// Also strip any GET params from $url_from_get_param.
+					$url_from_get_param_parsed = parse_url( $url_from_get_param );
+					$url_from_get_param = $url_from_get_param_parsed['scheme'] . '://' . $url_from_get_param_parsed['host'] . $url_from_get_param_parsed['path'];
+				}
+			}
+
+			// Retry downloading from $url_from_get_param.
+			if ( ! is_null( $url_from_get_param ) ) {
+				$attachment_id = $this->attachments->import_external_file(
+					$url_from_get_param,
+					$title,
+					$caption,
+					$description,
+					$alt,
+					$post_id,
+					$args
+				);
+			}
+		}
+
 		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 
 			// TODO -- log failed attachment import
+			// Also log $url_from_get_param if ! is_null()
 			return null;
 
 		} else {
@@ -1244,6 +1284,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 
 		// Log files.
+		if ( ! file_exists( $this->temp_dir ) ) {
+			mkdir( $this->temp_dir, 0777, true );
+		}
 		$log_wrong_urls                   = $this->temp_dir . '/ll_debug__wrong_urls.log';
 		$log_all_author_names             = $this->temp_dir . '/ll_debug__all_author_names.log';
 		$log_all_tags                     = $this->temp_dir . '/ll_debug__all_tags.log';
@@ -1279,7 +1322,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			WP_CLI::line( sprintf( '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
+			WP_CLI::line( sprintf( "\n" . '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
 
 			// If a "publish"-ed post with same URL exists, skip it.
 			$post_id = $wpdb->get_var(
@@ -1337,7 +1380,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'post_date'    => $crawled_data['post_date'],
 			];
 			$post_id   = wp_insert_post( $post_args );
-			WP_CLI::line( sprintf( 'Created post ID %d', $post_id ) );
+			WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
 
 			// Collect postmeta in this array.
 			$postmeta = [
@@ -1380,6 +1423,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$post_id,
 					$crawled_data['featured_image_credit']
 				);
+				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+					// TODO -- handle
+				} else {
+					// Set featured image.
+					set_post_thumbnail( $post_id, $attachment_id );
+				}
 			}
 
 			// Authors.
@@ -1434,8 +1483,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					update_post_meta( $post_id, $meta_key, $meta_value );
 				}
 			}
-
-			$d = 1;
 		}
 
 		// Debug and QA info.
