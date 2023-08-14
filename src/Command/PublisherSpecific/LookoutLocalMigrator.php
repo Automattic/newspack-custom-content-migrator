@@ -477,6 +477,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$log_err_gas_updated    = $this->temp_dir . '/ll_err__updated_gas.log';
 		$log_enhancements       = $this->temp_dir . '/ll_qa__enhancements.log';
 		$log_need_oembed_resave = $this->temp_dir . '/ll__need_oembed_resave.log';
+		$log_err_img_download   = $this->temp_dir . '/ll_err__img_download.log';
 
 		// Create folders for caching stuff.
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
@@ -493,13 +494,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 
-		// Hit timestamp on all logs.
+		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_post_ids_updated, $ts, false );
 		$this->logger->log( $log_gas_urls_updated, $ts, false );
 		$this->logger->log( $log_err_gas_updated, $ts, false );
 		$this->logger->log( $log_enhancements, $ts, false );
 		$this->logger->log( $log_need_oembed_resave, $ts, false );
+		$this->logger->log( $log_err_img_download, $ts, false );
 
 		// Get post IDs.
 		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
@@ -509,11 +511,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$original_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from wp_postmeta where meta_key = 'newspackmigration_url' and post_id = %d;", $post_id ) );
+			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d %s', $key_post_id + 1, count( $post_ids ), $post_id, $original_url ) );
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
-			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave );
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download );
 
 			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
@@ -583,6 +587,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * @return array Error messages if they occurred during GA info update.
 	 */
 	public function update_author_info( $url, $scraped_htmls_cache_path ) {
+		global $wpdb;
 
 		$errs_updating_gas = [];
 
@@ -627,7 +632,18 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$ga_avatar_att_id = get_post_meta( $ga->ID, '_thumbnail_id', true );
 		if ( ! $ga_avatar_att_id && $crawled_data['avatar_url'] ) {
 			WP_CLI::line( sprintf( "Downloading avatar URL for author '%s' ...", $crawled_data['name'] ) );
-			$attachment_id = $this->attachments->import_external_file( $crawled_data['avatar_url'], $crawled_data['name'] );
+
+			// First fetch attachment from Media Library if it already exists.
+			$attachment_id = $wpdb->get_var( $wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s and meta_value = %s",
+				self::META_IMAGE_ORIGINAL_URL,
+				$crawled_data['avatar_url']
+			) );
+			if ( ! $attachment_id ) {
+				// Download.
+				$attachment_id = $this->attachments->import_external_file( $crawled_data['avatar_url'], $crawled_data['name'] );
+			}
+
 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 				$errs_updating_gas[] = sprintf( "Error importing avatar image %s for author '%s' ERR: %s", $crawled_data['avatar_url'], $crawled_data['name'], is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/na' );
 			} else {
@@ -710,6 +726,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * @return ?int Attachment ID, or null if error.
 	 */
 	public function get_or_download_image(
+		$log,
 		$src,
 		$title = null,
 		$caption = null,
@@ -812,6 +829,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// TODO -- log failed attachment import
 			// Also log $url_from_get_param if ! is_null()
+			$this->logger->log(
+				$log,
+				sprintf(
+					"Failed to download attachment %s post_id %d ERR %s",
+					$src,
+					$post_id,
+					is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/'
+				)
+			);
 			return null;
 
 		} else {
@@ -924,7 +950,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
 	 */
-	public function clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave ) {
+	public function clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download ) {
 
 		$post_content_updated = '';
 
@@ -965,31 +991,112 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				 * Skip ( with `continue;` ) or transform 'div.enchancement's ( by setting $custom_html ).
 				 */
 				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'div.promo-action' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="BFCU Home Loans Ad"]' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Community Voices election 2022"]' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
 
 				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
+					// Skip this 'div.enchancement'.
 					continue;
+
+				} elseif ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
+
+					/**
+					 * Transform to quote block.
+					 */
+
+					$quote_text = null;
+					$quote_cite = null;
+
+					$helper_crawler = $enhancement_crawler->filter( 'div.enhancement > div.quote > div.quote-text > blockquote > p.quote-body' );
+					if ( $helper_crawler && $helper_crawler->getNode(0) ) {
+						$helper_node = $helper_crawler->getNode(0);
+						$quote_text = $helper_node->textContent;
+					}
+
+					$helper_crawler = $enhancement_crawler->filter( 'div.enhancement > div.quote > div.quote-text > p.quote-attribution' );
+					if ( $helper_crawler && $helper_crawler->getNode(0) ) {
+						$helper_node = $helper_crawler->getNode(0);
+						$quote_cite = $helper_node->textContent;
+					}
+
+					// Get block if $quote_text is found, or else keep inner HTML.
+					if ( $quote_text ) {
+						// Get quote block.
+						$quote_block = $this->gutenberg->get_quote( $quote_text, $quote_cite );
+						$custom_html = serialize_blocks( [ $quote_block ] );
+					} else {
+						// Keep HTML inside 'div.enhancement'.
+						$helper_node = $enhancement_crawler->filter( 'div.quote-text' )->getNode( 0 );
+						$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+					}
+
+
+				} elseif ( $enhancement_crawler->filter( 'div.infobox' )->count() ) {
+					// Keep HTML inside 'div.enhancement'.
+					$helper_node = $enhancement_crawler->filter( 'div.infobox' )->getNode( 0 );
+					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+				} elseif ( $enhancement_crawler->filter( 'figure > a[href="mailto:elections@lookoutlocal.com"]' )->count() ) {
+					// Keep HTML inside 'div.enhancement'.
+					$helper_node = $enhancement_crawler->filter( 'figure' )->getNode( 0 );
+					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+				} elseif ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
+					// Keep HTML inside 'div.enhancement'.
+					$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
+					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+				} elseif ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
+					// Keep HTML inside 'div.enhancement'.
+					$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
+					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+				} elseif ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
+					// Keep HTML inside 'div.enhancement'.
+					$helper_node = $enhancement_crawler->filter( 'figure.figure' )->getNode( 0 );
+					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+				} elseif ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
+					/**
+					 * If 'div.enhancement' has > ps-interactive-project > iframe with src containing "//joinsubtext.com/lilyonfood", keep it.
+					 */
+					$iframe_crawler = $enhancement_crawler->filter( 'ps-interactive-project > iframe' );
+					if ( $iframe_crawler && $iframe_crawler->getNode(0) ) {
+					$src = $iframe_crawler->getNode(0)->getAttribute('src');
+						if ( false !== strpos( $src, '//joinsubtext.com/lilyonfood' ) ) {
+							// Keep HTML inside 'div.enhancement'.
+							$helper_node = $enhancement_crawler->filter( 'ps-interactive-project' )->getNode( 0 );
+							$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+						}
+					}
 
 				} elseif ( $enhancement_crawler->filter( 'figure.figure > a.link > img' )->count() ) {
 
@@ -1016,7 +1123,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 					// Download image.
 					WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
-					$attachment_id = $this->get_or_download_image( $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
+					$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
 
 					// Get Gutenberg image block.
 					$attachment_post = get_post( $attachment_id );
@@ -1044,7 +1151,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 					// Download image.
 					WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
-					$attachment_id = $this->get_or_download_image( $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
+					$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
 
 					// Get Gutenberg image block.
 					$attachment_post = get_post( $attachment_id );
@@ -1166,7 +1273,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						}
 
 						WP_CLI::line( sprintf( 'Downloading image: %s', $image_data['src'] ) );
-						$attachment_id    = $this->get_or_download_image( $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
+						$attachment_id    = $this->get_or_download_image( $log_err_img_download, $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
 						$attachment_ids[] = $attachment_id;
 					}
 
@@ -1186,13 +1293,19 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				 */
 
 
+
 			}
 
 
-			// Get domelement HTML.
+			/**
+			 * Done skipping or transforming 'div.enchancement's.
+			 * At this point, if $custom_html is set, it will be used, or else the original HTML will.
+			 */
 			if ( $custom_html ) {
+				// Use custom composed HTML.
 				$domelement_html = $custom_html;
 			} else {
+				// Keep this $domelement's HTML.
 				$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
 				$domelement_html = trim( $domelement_html );
 				if ( empty( $domelement_html ) ) {
@@ -1241,46 +1354,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( $is_div_class_enhancement ) {
 
 				/**
-				 * Keep adding approved 'div.enhancement's which will end up in post_content.
-				 */
-				$enhancement_crawler = new Crawler( $domelement );
-				if ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'div.infobox' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure > a[href="mailto:elections@lookoutlocal.com"]' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
-					continue;
-				}
-				if ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
-					continue;
-				}
-				// If 'div.enhancement' has > ps-interactive-project > iframe with src containing "//joinsubtext.com/lilyonfood", keep it.
-				if ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
-					$iframe_crawler = $enhancement_crawler->filter( 'ps-interactive-project > iframe' );
-					if ( $iframe_crawler && $iframe_crawler->getNode(0) ) {
-						$src = $iframe_crawler->getNode(0)->getAttribute('src');
-						if ( false !== strpos( $src, '//joinsubtext.com/lilyonfood' ) ) {
-							continue;
-						}
-					}
-				}
-				/**
-				 * Keep adding approved 'div.enhancement's which will end up in post_content.
-				 */
-
-
-				/**
 				 * Any remaining 'div.enhancement's will be logged and should be QAed for whether they're approved in post_content.
 				 */
 				$enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
@@ -1323,14 +1396,16 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$log_all_tags                     = $this->temp_dir . '/ll_debug__all_tags.log';
 		$log_all_tags_promoted_content    = $this->temp_dir . '/ll_debug__all_tags_promoted_content.log';
 		$log_err_importing_featured_image = $this->temp_dir . '/ll_err__featured_image.log';
+		$log_err_img_download             = $this->temp_dir . '/ll_err__img_download.log';
 
-		// Hit timestamp on all logs.
+		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_wrong_urls, $ts, false );
 		$this->logger->log( $log_all_author_names, $ts, false );
 		$this->logger->log( $log_all_tags, $ts, false );
 		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
 		$this->logger->log( $log_err_importing_featured_image, $ts, false );
+		$this->logger->log( $log_err_img_download, $ts, false );
 
 		// Create folders for caching stuff.
 		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
@@ -1347,6 +1422,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$debug_wrong_posts_urls          = [];
 		$debug_all_tags                  = [];
 		$debug_all_tags_promoted_content = [];
+
 		foreach ( $urls as $key_url_data => $url ) {
 
 			if ( empty( $url ) ) {
@@ -1446,6 +1522,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( isset( $crawled_data['featured_image_src'] ) ) {
 				WP_CLI::line( 'Downloading featured image ...' );
 				$attachment_id = $this->get_or_download_image(
+					$log_err_img_download,
 					$crawled_data['featured_image_src'],
 					$title = null,
 					$crawled_data['featured_image_caption'],
