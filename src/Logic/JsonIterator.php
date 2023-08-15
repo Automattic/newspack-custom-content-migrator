@@ -45,7 +45,7 @@ class JsonIterator {
 
 		// Suppress errors with '@' because we want to specifically errors below.
 		$stream = @fopen( $filename, 'r' );
-		if ( $stream ) {
+		if ( ! $stream ) {
 			$this->logger->log( self::LOG_NAME, "The JSON file with url {$filename} doesn't exist." );
 
 			return new \EmptyIterator();
