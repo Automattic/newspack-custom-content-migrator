@@ -17,6 +17,11 @@ use \WP_CLI;
 class ChorusCmsMigrator implements InterfaceCommand {
 
 	/**
+	 * Meta key for Chorus CMS' original ID.
+	 */
+	const CHORUS_ORIGINAL_ID_META_KEY = 'newspack_chorus_entry_uid';
+
+	/**
 	 * Chorus components to Gutenberg blocks converters.
 	 *
 	 * The way this works is once a Chorus component is found in a post, the 'method' is called with the 'arguments' and it returns Gutenberg blocks.
@@ -35,11 +40,31 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		/**
 		 * These few components with nulls will not be converted.
 		 */
-		'EntryBodyNewsletter'     => [
+		'EntryBodyNewsletter'      => [
 			'method'    => null,
 			'arguments' => null,
 		],
-		'EntryBodyTable'          => [
+		'EntryBodyTable'           => [
+			'method'    => null,
+			'arguments' => null,
+		],
+		'EntryBodyVideo'           => [
+			'method'    => null,
+			'arguments' => null,
+		],
+		'EntryBodyActionbox'       => [
+			'method'    => null,
+			'arguments' => null,
+		],
+		'EntryBodyBlockquote'      => [
+			'method'    => null,
+			'arguments' => null,
+		],
+		'EntryBodyPoll'            => [
+			'method'    => null,
+			'arguments' => null,
+		],
+		'EntryBodyImageComparison' => [
 			'method'    => null,
 			'arguments' => null,
 		],
@@ -47,76 +72,76 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		/**
 		 * Components conversion definitions.
 		 */
-		'EntryBodyParagraph'      => [
+		'EntryBodyParagraph'       => [
 			'method'    => 'component_paragraph_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyImage'          => [
+		'EntryBodyImage'           => [
 			'method'    => 'component_image_to_block',
 			'arguments' => [
 				'component',
 				'post_id',
 			],
 		],
-		'EntryBodyHeading'        => [
+		'EntryBodyHeading'         => [
 			'method'    => 'component_heading_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyHTML'           => [
+		'EntryBodyHTML'            => [
 			'method'    => 'component_html_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyList'           => [
+		'EntryBodyList'            => [
 			'method'    => 'component_list_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyEmbed'          => [
+		'EntryBodyEmbed'           => [
 			'method'    => 'component_embed_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyPullquote'      => [
+		'EntryBodyPullquote'       => [
 			'method'    => 'component_pullquote_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyHorizontalRule' => [
+		'EntryBodyHorizontalRule'  => [
 			'method'    => 'component_horizontal_rule_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodyGallery'        => [
+		'EntryBodyGallery'         => [
 			'method'    => 'component_gallery_to_block',
 			'arguments' => [
 				'component',
 				'post_id',
 			],
 		],
-		'EntryBodyPymEmbed'       => [
+		'EntryBodyPymEmbed'        => [
 			'method'    => 'component_pymembed_to_block',
 			'arguments' => [
 				'component',
 			],
 		],
-		'EntryBodySidebar'        => [
+		'EntryBodySidebar'         => [
 			'method'    => 'component_sidebar_to_block',
 			'arguments' => [
 				'component',
 				'post_id',
 			],
 		],
-		'EntryBodyRelatedList'    => [
+		'EntryBodyRelatedList'     => [
 			'method'    => 'component_related_list_to_block',
 			'arguments' => [
 				'component',
@@ -260,15 +285,15 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Not yet implemented $refresh_authors.
 		$refresh_authors = $assoc_args['refresh-authors'] ?? null;
 		// Not yet implemented $refresh_posts.
-		$refresh_posts   = $assoc_args['refresh-posts'] ?? null;
-		$path            = rtrim( $assoc_args['path-to-export'], '/' );
-		$authors_path    = $path . '/author';
-		$entries_path    = $path . '/entry';
+		$refresh_posts = $assoc_args['refresh-posts'] ?? null;
+		$path          = rtrim( $assoc_args['path-to-export'], '/' );
+		$authors_path  = $path . '/author';
+		$entries_path  = $path . '/entry';
 		if ( ! file_exists( $authors_path ) || ! file_exists( $entries_path ) ) {
 			WP_CLI::error( 'Content not found in path.' );
 		}
 
-		WP_CLI::line( "Checking whether this script knows how to convert all Chorus content components..." );
+		WP_CLI::line( 'Checking whether this script knows how to convert all Chorus content components...' );
 		$this->validate_component_types( $entries_path );
 
 		WP_CLI::line( 'Importing authors...' );
@@ -291,7 +316,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
 		foreach ( $entries_jsons as $entry_json ) {
-			$entry = json_decode( file_get_contents( $entry_json ), true );
+			$data_entry = json_decode( file_get_contents( $entry_json ), true );
+
+			$entry = $this->get_entry_from_data_entry( $data_entry, $entry_json );
 
 			// Loop through components.
 			foreach ( $entry['body']['components'] as $component ) {
@@ -340,12 +367,33 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Not yet implemented.
 		$refresh_authors = false;
 
+		// Get already imported posts original IDs.
+		$imported_original_ids = $this->get_posts_meta_values_by_key( self::CHORUS_ORIGINAL_ID_META_KEY );
+
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
 		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
 			WP_CLI::line( sprintf( '%d/%d', $key_entry_json + 1, count( $entries_jsons ) ) );
 
-			$entry = json_decode( file_get_contents( $entry_json ), true );
+			$data_entry = json_decode( file_get_contents( $entry_json ), true );
+			$entry      = $this->get_entry_from_data_entry( $data_entry, $entry_json );
+
+			if ( 'Entry:8c8acd6d-6369-47e7-aabd-f54f6e1f5edf' !== $entry['uid'] ) {
+				continue;
+			}
+
+			/**
+			 * Skip entry if it's already imported and the $refresh_posts flag is not set.
+			 */
+			if ( ! $refresh_posts && in_array( $entry['uid'], $imported_original_ids, true ) ) {
+				$this->logger->log(
+					'chorus-cms-import-authors-and-posts__info__skip_entry.log',
+					sprintf( 'Skipping entry %s because it\'s already imported.', $entry['uid'] ),
+					$this->logger::WARNING
+				);
+
+				continue;
+			}
 
 			/**
 			 * Import only published entries of type STORY.
@@ -394,15 +442,25 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$post_create_args['post_name'] = $slug;
 
 			/**
-			 * Insert post.
+			 * Insert or fetch post.
 			 */
-			$post_id = wp_insert_post( $post_create_args, true );
+			$post_id = $refresh_posts ? $this->get_post_id_by_meta( self::CHORUS_ORIGINAL_ID_META_KEY, $entry['uid'] ) : wp_insert_post( $post_create_args, true );
 			if ( is_wp_error( $post_id ) ) {
 				$err = $post_id->get_error_message();
 				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorInserting: " . $err );
 				continue;
 			}
-			WP_CLI::success( "Created post ID $post_id for {$entry['url']}" );
+
+			if ( ! $post_id ) {
+				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorGetting. " );
+				continue;
+			}
+
+			WP_CLI::success(
+				$refresh_posts
+				? "Fetched post ID $post_id for {$entry['url']}"
+				: "Created post ID $post_id for {$entry['url']}"
+			);
 
 			/**
 			 * Convert all Chorus entry's "components" to Gutenberg blocks.
@@ -606,8 +664,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 * Set post meta.
 			 */
 			$meta = [
-				'newspack_chorus_entry_uid' => $entry['uid'],
-				'newspack_chorus_entry_url' => $entry['url'],
+				self::CHORUS_ORIGINAL_ID_META_KEY => $entry['uid'],
+				'newspack_chorus_entry_url'       => $entry['url'],
 			];
 			if ( $entry['layoutTemplate'] ) {
 				$meta['newspack_chorus_entry_layout_template'] = $entry['layoutTemplate'];
@@ -615,6 +673,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			foreach ( $meta as $meta_key => $meta_value ) {
 				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
+
+			print_r( $post_id . '=> ' . $entry['uid'] . "\n" );
+			die();
 		}
 	}
 
@@ -1021,11 +1082,15 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				// For all other types, try and get an iframe's src attribute.
 				$this->crawler->clear();
 				$this->crawler->add( $html );
-				$src_crawler = $this->crawler->filterXPath( '//iframe/@src' );
+				$src_crawler    = $this->crawler->filterXPath( '//iframe/@src' );
+				$width_crawler  = $this->crawler->filterXPath( '//iframe/@width' );
+				$height_crawler = $this->crawler->filterXPath( '//iframe/@height' );
 
 				if ( $src_crawler->count() >= 0 ) {
 					$src      = trim( $src_crawler->getNode( 0 )->textContent );
-					$blocks[] = $this->gutenberg_blocks->get_iframe( $src );
+					$width    = $width_crawler->count() >= 0 ? trim( $width_crawler->getNode( 0 )->textContent ) : null;
+					$height   = $height_crawler->count() >= 0 ? trim( $height_crawler->getNode( 0 )->textContent ) : null;
+					$blocks[] = $this->gutenberg_blocks->get_iframe( $src, $width, $height );
 				}
 
 				break;
@@ -1219,5 +1284,61 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		}
 
 		return $blocks;
+	}
+
+	/**
+	 * Get entry data from data entry.
+	 *
+	 * @param array  $data_entry      Data entry.
+	 * @param string $entry_file_path Entry file path.
+	 * @return array Entry data.
+	 */
+	private function get_entry_from_data_entry( $data_entry, $entry_file_path ) {
+		if ( array_key_exists( '__typename', $data_entry ) ) {
+			return $data_entry;
+		}
+
+		if ( ! array_key_exists( 'data', $data_entry ) || ! array_key_exists( 'entry', $data_entry['data'] ) ) {
+			WP_CLI::error( 'No entry found in data entry: ' . $entry_file_path );
+		}
+
+		return $data_entry['data']['entry'];
+	}
+
+	/**
+	 * Get imported posts original IDs.
+	 *
+	 * @param string $meta_key Meta key to search for.
+	 *
+	 * @return array
+	 */
+	private function get_posts_meta_values_by_key( $meta_key ) {
+		global $wpdb;
+
+		return $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s",
+				$meta_key
+			)
+		);
+	}
+
+	/**
+	 * Get post ID by meta.
+	 *
+	 * @param string $meta_name Meta name.
+	 * @param string $meta_value Meta value.
+	 * @return int|null
+	 */
+	private function get_post_id_by_meta( $meta_name, $meta_value ) {
+		global $wpdb;
+
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+				$meta_name,
+				$meta_value
+			)
+		);
 	}
 }
