@@ -378,10 +378,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$data_entry = json_decode( file_get_contents( $entry_json ), true );
 			$entry      = $this->get_entry_from_data_entry( $data_entry, $entry_json );
 
-			if ( 'Entry:8c8acd6d-6369-47e7-aabd-f54f6e1f5edf' !== $entry['uid'] ) {
-				continue;
-			}
-
 			/**
 			 * Skip entry if it's already imported and the $refresh_posts flag is not set.
 			 */
