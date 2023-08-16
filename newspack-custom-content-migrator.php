@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.4.0
+ * Version:     1.5.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -21,6 +21,7 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 
 require_once ABSPATH . 'wp-settings.php';
 
+PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
 PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
@@ -58,11 +59,13 @@ PluginSetup::register_migrators(
 		Command\General\ContentFixerMigrator::class,
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
+		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
+		Command\General\ChorusCmsMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,

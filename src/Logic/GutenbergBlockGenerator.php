@@ -47,6 +47,8 @@ class GutenbergBlockGenerator {
 	 * @param ?string  $link_to         `linkTo` attribute of the Jetpack Tiled Gallery block. Can be null, or "media", or "attachment".
 	 * @param string[] $tile_sizes_list List of tiles sizes in percentages (e.g. ['50', '50']).
 	 *
+	 * @throws \UnexpectedValueException If $link_to param is invalid.
+	 *
 	 * @return array to be used in the serialize_block() or serialize_blocks() function to get the raw content of a Gutenberg Block.
 	 */
 	public function get_jetpack_tiled_gallery( $attachment_ids, $link_to = null, $tile_sizes_list = [ '66.79014', '33.20986', '33.33333', '33.33333', '33.33333', '50.00000', '50.00000' ] ) {
@@ -591,6 +593,46 @@ class GutenbergBlockGenerator {
 	}
 
 	/**
+	 * Generate a Group Block with the constrained layout.
+	 * Since Group block can have three different layouts with different markup and behavior, splitting these into separate methods.
+	 *
+	 * @param array $inner_blocks   Inner blocks.
+	 * @param array $custom_classes Custom classes to be added to the group block.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_group_constrained( $inner_blocks, $custom_classes = [] ) {
+
+		$class_append_custom = ! empty( $custom_classes ) ? implode( ' ', $custom_classes ) : '';
+
+		$inner_content   = [];
+		$inner_content[] = ' <div class="wp-block-group' . ( ! empty( $class_append_custom ) ? ' ' . implode( ' ', $custom_classes ) : '' ) . '">';
+		$inner_content   = array_merge( $inner_content, array_fill( 1, count( $inner_blocks ), null ) );
+		$inner_content[] = '</div> ';
+
+		$attrs = [];
+		if ( ! empty( $custom_classes ) ) {
+			$attrs['className'] = implode( ' ', $custom_classes );
+		}
+		$attrs = array_merge(
+			$attrs,
+			[
+				'layout' => [
+					'type' => 'constrained',
+				],
+			]
+		);
+
+		return [
+			'blockName'    => 'core/group',
+			'attrs'        => $attrs,
+			'innerBlocks'  => $inner_blocks,
+			'innerHTML'    => ' <div class="wp-block-group' . ( ! empty( $class_append_custom ) ? ' ' . implode( ' ', $custom_classes ) : '' ) . '">  </div> ',
+			'innerContent' => $inner_content,
+		];
+	}
+
+	/**
 	 * Generate a List Block.
 	 *
 	 * @param array   $elements List elements.
@@ -618,6 +660,117 @@ class GutenbergBlockGenerator {
 			'innerBlocks'  => array_map( [ $this, 'get_list_item' ], $elements ),
 			'innerHTML'    => '<' . $list_tag . '></' . $list_tag . '>',
 			'innerContent' => $inner_content,
+		];
+	}
+
+	/**
+	 * Generate a Youtube block -- uses core/embed.
+	 *
+	 * @param string $src     YT src.
+	 * @param string $caption Optional.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_youtube( $src, $caption = '' ) {
+		// Remove GET params from $src, otherwise the embed might not work.
+		$src_parsed  = wp_parse_url( $src );
+		$src_cleaned = $src_parsed['scheme'] . '://' . $src_parsed['host'] . $src_parsed['path'];
+
+		return $this->get_core_embed( $src_cleaned, $caption );
+	}
+
+	/**
+	 * Generate a Vimeo block -- uses core/embed.
+	 *
+	 * @param string $src     Vimeo src.
+	 * @param string $caption Optional.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_vimeo( $src, $caption = '' ) {
+		return $this->get_core_embed( $src, $caption );
+	}
+
+	/**
+	 * Generate a Vimeo block -- uses core/embed.
+	 *
+	 * @param string $src     Vimeo src.
+	 * @param string $caption Optional.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_twitter( $src, $caption = '' ) {
+		return [
+			'blockName'    => 'core/embed',
+			'attrs'        => [
+				'url'              => $src,
+				'type'             => 'rich',
+				'providerNameSlug' => 'twitter',
+				'responsive'       => true,
+			],
+			'innerBlocks'  => [],
+			'innerHTML'    => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
+			'innerContent' => [
+				0 => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
+			],
+		];
+	}
+
+	/**
+	 * Generate a core/embed.
+	 *
+	 * @param string $src     Src.
+	 * @param string $caption Optional.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_core_embed( $src, $caption = '' ) {
+		return [
+			'blockName'    => 'core/embed',
+			'attrs'        => [
+				'url'              => $src,
+				'type'             => 'rich',
+				'providerNameSlug' => 'embed-handler',
+				'responsive'       => true,
+				'className'        => 'wp-embed-aspect-16-9 wp-has-aspect-ratio',
+			],
+			'innerBlocks'  => [],
+			'innerHTML'    => ' <figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
+			'innerContent' => [
+				0 => ' <figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
+			],
+		];
+	}
+
+	/**
+	 * Generate a Facebook block (which is visible in menu only after Jetpack connection is registered),
+	 * which uses core/embed in background.
+	 *
+	 * @param string $src     Facebook src.
+	 * @param string $caption Optional.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_facebook( $src, $caption = '' ) {
+		return $this->get_core_embed( $src, $caption );
+	}
+
+	/**
+	 * Generate a Newspack Iframe block.
+	 *
+	 * @param string $src URL.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_iframe( $src ) {
+		return [
+			'blockName'    => 'newspack-blocks/iframe',
+			'attrs'        => [
+				'src' => $src,
+			],
+			'innerBlocks'  => [],
+			'innerHTML'    => '',
+			'innerContent' => [],
 		];
 	}
 
