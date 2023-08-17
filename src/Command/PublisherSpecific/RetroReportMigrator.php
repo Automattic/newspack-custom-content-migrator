@@ -3,7 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\JsonIterator;
+use NewspackCustomContentMigrator\Utils\JsonIterator;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
