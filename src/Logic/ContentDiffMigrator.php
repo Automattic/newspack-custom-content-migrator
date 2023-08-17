@@ -3166,6 +3166,37 @@ class ContentDiffMigrator {
 		}
 	}
 
+    /**
+     * This function will ensure that the core WP DB tables are not empty. This is especially important
+     * for tables like wp_terms, wp_term_taxonomy, and wp_term_relationships. If these tables are empty,
+     * the site's taxonomies will not be recreated, and no terms will be associated with posts.
+     *
+     * @param string $table_prefix Table prefix.
+     * @param string[] $skip_tables Core WP DB tables to skip (without prefix).
+     * @return void
+     */
+    public function validate_core_wp_db_tables_are_not_empty( string $table_prefix, array $skip_tables = [] )
+    {
+        $empty_tables = [];
+
+        foreach ( self::CORE_WP_TABLES as $core_table ) {
+            if ( in_array( $core_table, $skip_tables ) ) {
+                continue;
+            }
+
+            $table_name = $table_prefix . $core_table;
+            $count = intval( $this->wpdb->get_var( "SELECT COUNT(*) FROM $table_name" ) );
+
+            if ( 0 === $count ) {
+                $empty_tables[] = $table_name;
+            }
+        }
+
+        if ( ! empty( $empty_tables ) ) {
+            throw new \RuntimeException( sprintf( 'Core WP DB tables %s are empty.', implode( ', ', $empty_tables ) ) );
+        }
+    }
+
 	/**
 	 * Wrapper for WP's native \get_user_by(), for easier testing.
 	 *

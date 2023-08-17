@@ -1292,15 +1292,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param string $live_table_prefix Live table prefix.
 	 * @param array  $skip_tables       Core WP DB tables to skip (without prefix).
 	 *
-	 * @throws \RuntimeException In case that table collations do not match.
+	 * @throws \RuntimeException In case that table collations do not match, or any core WP tables are empty.
 	 *
 	 * @return void
 	 */
 	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
 		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
+
 		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix, $skip_tables ) ) {
 			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
+
+        self::$logic->validate_core_wp_db_tables_are_not_empty( $live_table_prefix, $skip_tables );
 	}
 
 	/**
