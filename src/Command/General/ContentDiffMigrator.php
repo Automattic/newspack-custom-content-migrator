@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Exceptions\CoreWPTableEmptyException;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use WP_CLI;
@@ -396,6 +397,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 					'skip-tables'       => 'options',
 				]
 			);
+		} catch ( CoreWPTableEmptyException $e ) {
+			// If one of the empty tables is wp_links, we can ignore it. Add any other tables we can ignore to the array below.
+			$ignore_empty_tables = [
+				$live_table_prefix . 'links',
+			];
+
+			$this->handle_core_wp_table_empty_exception( $e, $ignore_empty_tables );
 		}
 
 		// Search distinct Post types in live DB.
@@ -511,6 +519,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 					'skip-tables'       => 'options',
 				]
 			);
+		} catch ( CoreWPTableEmptyException $e ) {
+			// If one of the empty tables is wp_links, we can ignore it. Add any other tables we can ignore to the array below.
+			$ignore_empty_tables = [
+				$live_table_prefix . 'links',
+			];
+
+			$this->handle_core_wp_table_empty_exception( $e, $ignore_empty_tables );
 		}
 
 		// Set constants.
@@ -1287,14 +1302,32 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Handles CoreWPTableEmptyException.
+	 *
+	 * @param CoreWPTableEmptyException $e
+	 * @param array $ignore_empty_tables
+	 *
+	 * @return void
+	 */
+	private function handle_core_wp_table_empty_exception( CoreWPTableEmptyException $e, array $ignore_empty_tables ) {
+		$empty_tables = array_diff( $e->get_tables(), $ignore_empty_tables );
+		if ( empty( $empty_tables ) ) {
+			WP_CLI::warning( sprintf( 'One, or all, of the following tables may be empty and will be ignored: %s', implode( $ignore_empty_tables ) ) );
+		} else {
+			WP_CLI::error( sprintf( 'In order for the content diff operation to proceed, the following empty tables must be addressed: %s', implode( $empty_tables ) ) );
+		}
+	}
+
+	/**
 	 * Validates DB tables.
 	 *
 	 * @param string $live_table_prefix Live table prefix.
 	 * @param array  $skip_tables       Core WP DB tables to skip (without prefix).
 	 *
-	 * @throws \RuntimeException In case that table collations do not match, or any core WP tables are empty.
-	 *
 	 * @return void
+	 * @throws \RuntimeException In case that table collations do not match
+	 * @throws CoreWPTableEmptyException In case that some of the core WP tables are empty
+	 *
 	 */
 	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
 		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );

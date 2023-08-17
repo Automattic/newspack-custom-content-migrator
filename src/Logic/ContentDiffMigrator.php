@@ -7,6 +7,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use NewspackCustomContentMigrator\Exceptions\CoreWPTableEmptyException;
 use \WP_CLI;
 use \WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
@@ -3166,15 +3167,17 @@ class ContentDiffMigrator {
 		}
 	}
 
-    /**
-     * This function will ensure that the core WP DB tables are not empty. This is especially important
-     * for tables like wp_terms, wp_term_taxonomy, and wp_term_relationships. If these tables are empty,
-     * the site's taxonomies will not be recreated, and no terms will be associated with posts.
-     *
-     * @param string $table_prefix Table prefix.
-     * @param string[] $skip_tables Core WP DB tables to skip (without prefix).
-     * @return void
-     */
+	/**
+	 * This function will ensure that the core WP DB tables are not empty. This is especially important
+	 * for tables like wp_terms, wp_term_taxonomy, and wp_term_relationships. If these tables are empty,
+	 * the site's taxonomies will not be recreated, and no terms will be associated with posts.
+	 *
+	 * @param string $table_prefix Table prefix.
+	 * @param string[] $skip_tables Core WP DB tables to skip (without prefix).
+	 *
+	 * @return void
+	 * @throws CoreWPTableEmptyException
+	 */
     public function validate_core_wp_db_tables_are_not_empty( string $table_prefix, array $skip_tables = [] )
     {
         $empty_tables = [];
@@ -3193,7 +3196,7 @@ class ContentDiffMigrator {
         }
 
         if ( ! empty( $empty_tables ) ) {
-            throw new \RuntimeException( sprintf( 'Core WP DB tables %s are empty.', implode( ', ', $empty_tables ) ) );
+            throw new CoreWPTableEmptyException( $empty_tables );
         }
     }
 
