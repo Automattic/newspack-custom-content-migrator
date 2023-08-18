@@ -800,7 +800,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		$this->prev_categories = $this->hack_prev_category_urls();
 				
 		// Setup query vars for MSSQL DB for content types
-		$limit = 100; // row limit per batch
+		$limit = 100; // 100; row limit per batch
 		$start_id = 1; // 1; rows greater than or equal to this ID value
 		$max_id = 2147483647; // useful if upper range is needed. max Int for SQL Server = 2147483647
 
@@ -1115,6 +1115,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 	// returns null or the last id (integer) of nodeId that was processed
 	private function export_posts( $limit, $start_id, $max_id ) {
 
+		$newspack_lf_import_batch = ( count( $this->prev_checksums ) > 0 ) ? 'launch' : 'initial';
+
 		// Setup data array WXR for post content
 		$data = [
 			'site_title'  => $this->site_title,
@@ -1140,6 +1142,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		");
 		$result->execute();
 
+		// updated:
+		// AND cmsDocument.nodeId in(67966, 70586, 70616, 70648, 70670, 70777, 70858, 70992, 71008, 71031, 71046, 71069)
+		// $newspack_lf_import_batch = 'updated';
+
+		// Missing:
+		// AND cmsDocument.nodeId in(44823, 36551, 49257, 40958, 6671, 5562, 6667, 6046, 44741, 44743, 45262, 36175, 44745, 46123, 46125, 44750, 44752, 45495, 45496, 44809, 6785, 35875, 36023, 44893, 44761, 44762, 5678, 6064, 9850, 36259, 35334, 46148, 46149, 47079, 5513, 44764, 44765, 44766, 44767, 44794, 45509, 45510, 44768, 44769, 44770, 36115, 45091, 46681, 44772, 44773, 6646)
+		// $newspack_lf_import_batch = 'missing';
+
+
 		// keep track of last row processed
 		$last_id = null;
 
@@ -1150,7 +1161,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			
 			// handle existing checksums
 			$checksum = md5( serialize( $row ) );
-			if( $this->has_existing_checksum( (string) $row['nodeId'], (string) $row['versionId'], $checksum, $row ) ) {
+			if( 'launch' == $newspack_lf_import_batch && $this->has_existing_checksum( (string) $row['nodeId'], (string) $row['versionId'], $checksum, $row ) ) {
 				WP_CLI::line( 'Exists: ' . $row['nodeId'] );
 				$last_id = (int) $row['nodeId'];
 				continue;
@@ -1219,7 +1230,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 					'newspack_lf_node_id' => (string) $row['nodeId'],
 					'newspack_lf_version_id' => (string) $row['versionId'],
 					'newspack_lf_checksum' => $checksum,
-					'newspack_lf_import_batch' => ( count( $this->prev_checksums ) > 0 ) ? 'launch' : 'initial',
+					'newspack_lf_import_batch' => $newspack_lf_import_batch,
 
 					// helpful for redirects if needed
 					'newspack_lf_slug' => $slug,
