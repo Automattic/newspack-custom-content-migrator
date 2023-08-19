@@ -273,7 +273,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'relation' => 'AND',
 				[
 					'key'     => 'newspack_lf_import_batch',
-					'compare' => 'launch',
+					'value'		=> 'missing',
+					'compare' => '=',
 				],
 			],
 		];
@@ -920,9 +921,13 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// select all post content with images in the content
 		$results = $wpdb->get_results( "
-			SELECT ID, post_content
-			FROM {$wpdb->posts}
-			WHERE post_content like '%<img%'		
+			SELECT p.ID, p.post_content
+			FROM {$wpdb->posts} p
+			JOIN {$wpdb->postmeta} pm 
+				on pm.post_id = p.ID
+				and pm.meta_key = 'newspack_lf_import_batch'
+				and pm.meta_value = 'missing'
+			WHERE p.post_content like '%<img%'		
 		");
 	
 		$report['posts-with-images'] = count( $results );			
@@ -1114,6 +1119,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	// returns null or the last id (integer) of nodeId that was processed
 	private function export_posts( $limit, $start_id, $max_id ) {
+
+		die('need to fix category daily-briefs renamed to daily-brief');
 
 		$newspack_lf_import_batch = ( count( $this->prev_checksums ) > 0 ) ? 'launch' : 'initial';
 
@@ -2059,7 +2066,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		// get term ids for primary categories keyed by slug
 		$categories = array_flip( get_categories( [
-			'slug'   => [ 'daily-briefs', 'magazine', 'web-articles' ],
+			'slug'   => [ 'daily-brief', 'magazine', 'web-articles' ],
 			'fields' => 'id=>slug',
 		]));
 
@@ -2094,7 +2101,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$category_id = null;
 			switch( $content_type ) {
-				case 'dailyBriefArticle': $category_id = $categories['daily-briefs']; break;
+				case 'dailyBriefArticle': $category_id = $categories['daily-brief']; break;
 				case 'magazineArticle': $category_id = $categories['magazine']; break;
 				case 'webArticle': $category_id = $categories['web-articles']; break;
 			}
