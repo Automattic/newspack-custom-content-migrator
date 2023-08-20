@@ -21,6 +21,9 @@ use wpdb;
  */
 class ContentDiffMigrator {
 
+	// Postmeta telling us what the old live ID was.
+	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
+
 	// Data array keys.
 	const DATAKEY_POST              = 'post';
 	const DATAKEY_POSTMETA          = 'postmeta';
@@ -176,6 +179,67 @@ class ContentDiffMigrator {
 	}
 
 	/**
+	 * Gets a list of all Attachments imported by Content Diff, "old_id"=>"new_id" IDs mapping from the postmeta.
+	 *
+	 * @return array Imported attachment IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_attachment_id_mapping_from_db(): array {
+
+		$attachment_ids_map = [];
+
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					WHERE wpm.meta_key = %s
+					AND wp.post_type = 'attachment';",
+				self::SAVED_META_LIVE_POST_ID,
+			),
+			ARRAY_A
+		);
+		foreach ( $results as $result ) {
+			$attachment_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $attachment_ids_map;
+	}
+
+	/**
+	 * Gets an array of all Post IDs imported by Content Diff, their "old_id"=>"new_id" from the postmeta.
+	 *
+	 * @return array Imported post and pages IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_post_id_mapping_from_db( $post_types = [ 'post', 'page' ] ): array {
+
+		$post_ids_map = [];
+
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- placeholders generated dynamically.
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					WHERE wpm.meta_key = %s
+					AND wp.post_type IN ( {$post_types_placeholders} );",
+				array_merge(
+					[ self::SAVED_META_LIVE_POST_ID ] ,
+					$post_types
+				)
+			),
+			ARRAY_A
+		);
+		// phpcs:disable
+
+		foreach ( $results as $result ) {
+			$post_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $post_ids_map;
+	}
+
+	/**
 	 * Finds unique records in live posts table which don't exist in local posts table.
 	 * Uses programmatic approach which requires less memory, but is a bit slower to run.
 	 *
@@ -209,6 +273,9 @@ class ContentDiffMigrator {
 					&& $live_post['post_status'] == $local_post['post_status']
 					&& $live_post['post_date'] == $local_post['post_date']
 				) {
+					// Remove the local post which was found (break; was done), to make the next search a bit faster.
+					unset( $results_local_posts[ $key_local_post ] );
+
 					$found = true;
 					break;
 				}
@@ -217,9 +284,6 @@ class ContentDiffMigrator {
 			// Unique on live, add to $ids.
 			if ( false === $found ) {
 				$ids[] = $live_post['ID'];
-
-				// Remove the local post which was found (break; was done), to make the next search a bit faster.
-				unset( $results_local_posts[ $key_local_post ] );
 			}
 		}
 
@@ -614,7 +678,7 @@ class ContentDiffMigrator {
 		if ( 0 == $category_tree['parent'] ) {
 
 			// Get or create this top parent category.
-			$category_top_parent_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], 0 );
+			$category_top_parent_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], 0 );
 			$category_top_parent_term_id = $category_top_parent_row['term_id'] ?? null;
 			if ( ! $category_top_parent_term_id ) {
 				// Insert it if it doesn't exist.
@@ -639,7 +703,7 @@ class ContentDiffMigrator {
 		}
 
 		// For a non-top-parent category, get or create its tree and return.
-		$category_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], $current_parent_tree['term_id'] );
+		$category_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], $current_parent_tree['term_id'] );
 		$category_term_id = $category_row['term_id'] ?? null;
 		if ( ! $category_term_id ) {
 			$category_term_id = $this->wp_insert_category(
@@ -736,7 +800,47 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets a category array with all the related data.
+	 * Gets category by its name and parent.
+	 *
+	 * @param string $table_prefix    DB table prefix.
+	 * @param string $cat_name        Category name.
+	 * @param string $cat_parent      Category parent's term_id.
+	 *
+	 * @return array {
+	 *     @type string term_id     Category term_id.
+	 *     @type string taxonomy    Should always be 'category'.
+	 *     @type string name        Category name.
+	 *     @type string slug        Category slug.
+	 *     @type string description Category description.
+	 *     @type string count       Category count.
+	 *     @type string parent      Category parent's term_id.
+	 * }
+	 */
+	public function get_category_array_by_name_and_parent( $table_prefix, $cat_name, $cat_parent ) {
+		$table_terms         = esc_sql( $table_prefix . 'terms' );
+		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
+
+		// phpcs:disable -- wpdb::prepare used by wrapper.
+		$category = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+					FROM $table_terms t
+			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
+					WHERE tt.taxonomy = 'category'
+					AND tt.parent = %s
+					AND t.name = %s;",
+				$cat_parent,
+				$cat_name
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return $category;
+	}
+
+	/**
+	 * Gets category by its name, description and parent
 	 *
 	 * @param string $table_prefix    DB table prefix.
 	 * @param string $cat_name        Category name.
@@ -919,7 +1023,14 @@ class ContentDiffMigrator {
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
 			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
 			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
-			$live_term_name         = $live_term_row['name'];
+
+			// Validate live term row, it could be missing or invalid.
+			if ( is_null( $live_term_row ) ) {
+				$error_messages[] = sprintf( 'Faulty term relationship record in live DB, term skipped: posts.ID=%d > term_relationships has term_taxonomy_id=%d > term_taxonomy has term_id=%d >> term_id does not exist in live DB table.', $data['post']['ID'], $live_term_taxonomy_id, $live_term_taxonomy_row['term_id'] );
+				continue;
+			}
+
+			$live_term_name = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
@@ -1006,56 +1117,83 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array  $imported_post_ids_map   Keys are Post IDs on Live Site, values are Post IDs of imported posts on Local Site.
-	 *                                        Will only update attachments for these Posts (e.g. an existing Post could
-	 *                                        legitimately have an att.ID 123, and then another newly imported Post could also have
-	 *                                        had att.ID 123 which has changed to 456 after import. We only want to update the
-	 *                                        newly imported Post's att.ID from 123 to 456, not the existing Post's.
-	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
-	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
-	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
-	 *                                        detailed output of all the changes made.
+	 * @param array  $imported_post_ids           Imported local Post IDs.
+	 * @param array  $imported_attachment_ids_map Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param string $log_file_path               Optional. Full path to a log file. If provided, the method will save and append
+	 *                                            a detailed output of all the changes made.
+	 * @param bool   $dry_run                     If true, will not make changes to DB, and will output changes to CLI instead of
+	 *                                            saving them to $log_file_path.
 	 */
-	public function update_featured_images( $imported_post_ids_map, $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
-		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
-			return [];
+	public function update_featured_images( $imported_post_ids, $imported_attachment_ids_map, $log_file_path, $dry_run = false ) {
+		if ( empty( $imported_post_ids ) || empty( $imported_attachment_ids_map ) ) {
+			return;
 		}
 
-		$newly_imported_post_ids = array_values( $imported_post_ids_map );
+		/**
+		 * This command will only update '_thumbnail_id's for Posts which were imported by the Content Diff (not any other Posts).
+		 *
+		 * Explanation why:
+		 * for example, we could have imported two different attachments:
+		 *      {"post_type":"attachment","id_old":1111,"id_new":999}
+		 *      {"post_type":"attachment","id_old":1223,"id_new":1111}
+		 * and let's say these two posts exist on Staging:
+		 *      - first with '_thumbnail_id' 1111
+		 *          --> this one needs to be updated from 1111 to 999
+		 *      - second with '_thumbnail_id' 1111, but let's say this post was created directly on Staging and it used the second attachment with Staging ID 1111
+		 *          --> this one's _thumbnail_id should be updated from 1111 to 999
+		 *
+		 * Therefore this command will only update '_thumbnail_id's for those Posts that were imported by the Content Diff.
+		 */
 
-		$postmeta_table = $this->wpdb->postmeta;
-		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
-		$sql            = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		// phpcs:ignore -- wpdb::prepare is used by wrapper.
-		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
+		// Loop through posts and update their _thumbnail_id if needed.
+		foreach ( $imported_post_ids as $new_post_id ) {
 
-		foreach ( $results as $key_result => $result ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_result % 2000 ) {
-				echo '.';
-			}
+			// Get Post's current _thumbnail_id.
+			// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- correctly prepared.
+			$current_thumbnail_id = $this->wpdb->get_var(
+				$this->wpdb->prepare(
+					"SELECT meta_value
+					FROM {$this->wpdb->postmeta}
+					WHERE meta_key = '_thumbnail_id'
+					AND post_id = %d",
+					$new_post_id
+				)
+			);
+			// phpcs:enable
 
-			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
-			$post_id = $result['post_id'] ?? null;
-			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
+			// Check if this _thumbnail_id is used as a key in $imported_attachment_ids_map (keys are "old_id"s, values are "new_id"s).
+			if ( ! $current_thumbnail_id || ! array_key_exists( $current_thumbnail_id, $imported_attachment_ids_map ) ) {
 				continue;
 			}
 
-			$old_id = $result['meta_value'] ?? null;
-			$new_id = $imported_attachment_ids[ $result['meta_value'] ] ?? null;
-			if ( ! is_null( $new_id ) ) {
-				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result['meta_id'] ] );
-				// Log.
-				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$this->log(
-						$log_file_path,
-						json_encode(
-							[
-								'id_old' => (int) $old_id,
-								'id_new' => (int) $new_id,
-							]
-						)
-					);
+			// Get the new _thumbnail_id and update it.
+			$new_thumbnail_id = $imported_attachment_ids_map[ $current_thumbnail_id ];
+			if ( $dry_run ) {
+				$updated = 1;
+			} else {
+				$updated = $this->wpdb->update(
+					$this->wpdb->postmeta,
+					[ 'meta_value' => $new_thumbnail_id ],
+					[
+						'post_id'  => $new_post_id,
+						'meta_key' => '_thumbnail_id',
+					]
+				);
+			}
+
+			// Log.
+			if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+				$msg = json_encode(
+					[
+						'post_id' => (int) $new_post_id,
+						'id_old'  => (int) $current_thumbnail_id,
+						'id_new'  => (int) $new_thumbnail_id,
+					]
+				);
+				if ( $dry_run ) {
+					WP_CLI::line( 'Updating _thubnail_id id_old=>id_new ' . $msg );
+				} else {
+					$this->log( $log_file_path, $msg );
 				}
 			}
 		}
@@ -1212,8 +1350,16 @@ class ContentDiffMigrator {
 			$block_innerhtml_updated    = $block['innerHTML'];
 			$block_innercontent_updated = $block['innerContent'][0];
 
+			// We've seen some wp:image blocks with no ID, skip them.
+			if ( ! isset( $block_updated['attrs']['id'] ) ) {
+				continue;
+			}
+
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1251,6 +1397,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1302,7 +1451,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <audio> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
@@ -1340,6 +1492,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole audio HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
@@ -1388,7 +1543,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <video> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerhtml_updated );
@@ -1426,6 +1584,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole video HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $video_html, $video_html_updated, $block_innerhtml_updated );
@@ -1474,7 +1635,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <a> elementa from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerhtml_updated );
@@ -1512,6 +1676,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole a HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $a_html, $a_html_updated, $block_innerhtml_updated );
@@ -1560,7 +1727,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1598,6 +1768,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1649,7 +1822,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get mediaID (attachment ID) from block header.
-			$att_id = $block_updated['attrs']['mediaId'];
+			$att_id = isset( $block_updated['attrs']['mediaId'] ) ? $block_updated['attrs']['mediaId'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1688,10 +1864,8 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			// If it's the same ID, don't update anything.
-			if ( $att_id === $new_att_id ) {
-				continue;
-			}
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1784,6 +1958,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1883,6 +2060,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1984,6 +2164,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -2817,7 +3000,7 @@ class ContentDiffMigrator {
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
-	public function validate_core_wp_db_tables( $table_prefix, $skip_tables = [] ) {
+	public function validate_core_wp_db_tables_exist_in_db( $table_prefix, $skip_tables = [] ) {
 		$all_tables = $this->get_all_db_tables();
 		foreach ( self::CORE_WP_TABLES as $table ) {
 			if ( in_array( $table, $skip_tables ) ) {
@@ -2894,8 +3077,9 @@ class ContentDiffMigrator {
 	 * @return array
 	 */
 	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
+		$collation_comparison = $this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables );
 		return array_filter(
-			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
+			$collation_comparison,
 			fn( $validated_table ) => false === $validated_table['match_bool']
 		);
 	}
@@ -2965,7 +3149,6 @@ class ContentDiffMigrator {
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
-			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );
@@ -2973,7 +3156,8 @@ class ContentDiffMigrator {
 			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
 				$limiter['start'] = $limiter['start'] + $limiter['limit'];
 			} else {
-				throw new \RuntimeException( sprintf( "Got up to (not including) %s. Failed running SQL '%s'.", $limiter['start'], $insert_sql ) );
+				$db_error = ( '' != $this->wpdb->last_error ) ? 'DB error message: ' . $this->wpdb->last_error : 'No DB error message available -- check error and debug logs.';
+				WP_CLI::error( sprintf( "Got up to (not including) %s. Failed running SQL '%s'. %s", $limiter['start'], $insert_sql, $db_error ) );
 			}
 
 			if ( $sleep_in_seconds ) {

@@ -26,8 +26,15 @@ class Logger {
 	 *
 	 * @return string Directory path.
 	 */
-	public function get_le_log_path() {
-		return get_temp_dir() . self::LE_LOG_DIRECTORY;
+	public function get_le_log_path( $filename ) {
+
+		$log_dir = get_temp_dir() . self::LE_LOG_DIRECTORY;
+		if ( ! file_exists( $log_dir ) ) {
+			mkdir( $log_dir );
+		}
+
+		return $log_dir . DIRECTORY_SEPARATOR . $filename . '.log';
+
 	}
 
 	/**
@@ -56,7 +63,6 @@ class Logger {
 			}
 		}
 
-		file_put_contents( $file, "\n" . $message, FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
+		file_put_contents( $file, $message . "\n", FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
 	}
-
 }

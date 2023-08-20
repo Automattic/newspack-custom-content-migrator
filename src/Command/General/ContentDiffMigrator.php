@@ -29,8 +29,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	const LOG_ERROR                       = 'content-diff__err.log';
 	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
 
-	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
-
 	/**
 	 * Instance.
 	 *
@@ -222,7 +220,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'skip-tables',
-						'description' => 'Skip checking a particular set of tables from the collation checks.',
+						'description' => 'CSV of tables to skip checking for collation.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -281,6 +279,96 @@ class ContentDiffMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator content-diff-update-featured-images-ids',
+			[ $this, 'cmd_update_feat_images_ids' ],
+			[
+				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. It automatically picks up "old_attachment_ids"=>"new_attachment_ids" from DB and updates those (unless provided with an optional --attachment-ids-json-file).',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'export-dir',
+						'description' => 'Path to where log will be written.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachment-ids-json-file',
+						'description' => 'Optional. Path to a JSON encoded array where keys are old attachment IDs and values are new attachment IDs. If provided, will only update these _thumbnail_ids, and only on those posts which were imported by the Content Diff.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Optional. Will not make changes to DB. And instead of writing to log file will just output changes to console.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator content-diff-update-featured-images-ids`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_update_feat_images_ids( $pos_args, $assoc_args ) {
+
+		// Get optional JSON list of "old_attachment_ids"=>"new_attachment_ids"mapping. If not provided, will load from DB, which is recommended.
+		$attachment_ids_map = null;
+		if ( isset( $assoc_args['attachment-ids-json-file'] ) && file_exists( $assoc_args['attachment-ids-json-file'] ) ) {
+			$attachment_ids_map = json_decode( file_get_contents( $assoc_args['attachment-ids-json-file'] ), true );
+			if ( empty( $attachment_ids_map ) ) {
+				WP_CLI::error( 'No attachment IDs found in the JSON file.' );
+			}
+		}
+
+		// Get export dir param. Will save a detailed log there.
+		$export_dir = $assoc_args['export-dir'];
+		if ( ! file_exists( $export_dir ) ) {
+			$made = mkdir( $export_dir, 0777, true );
+			if ( false == $made ) {
+				WP_CLI::error( "Could not create export directory $export_dir ." );
+			}
+		}
+
+		// Get dry-run param.
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		// If no attachment IDs map was passed, get it from the DB.
+		if ( is_null( $attachment_ids_map ) ) {
+			// Get all attachment old and new IDs from DB.
+			$attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
+
+			if ( ! $attachment_ids_map ) {
+				WP_CLI::warning( 'No attachment IDs found in the DB. No changes made.' );
+				exit;
+			}
+		}
+
+		// Timestamp the log.
+		$ts       = gmdate( 'Y-m-d h:i:s a', time() );
+		$log      = 'content-diff__updated-feat-imgs-helper.log';
+		$log_path = $export_dir . '/' . $log;
+		$this->log( $log_path, sprintf( 'Starting %s.', $ts ) );
+
+		// Get local Post IDs which were imported using Content Diff (these posts will have the ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID postmeta).
+		$imported_post_ids_mapping = self::$logic->get_imported_post_id_mapping_from_db();
+		$imported_post_ids         = array_values( $imported_post_ids_mapping );
+
+		// Update attachment IDs.
+		self::$logic->update_featured_images( $imported_post_ids, $attachment_ids_map, $log_path, $dry_run );
+
+		wp_cache_flush();
+		WP_CLI::success( sprintf( 'Done. Log saved to %s', $log_path ) );
 	}
 
 	/**
@@ -292,10 +380,23 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
 		$export_dir        = $assoc_args['export-dir'] ?? false;
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
-		$post_types        = $assoc_args['post-types-csv'] ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
+		$post_types        = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
 
 		global $wpdb;
-		$this->validate_dbs( $live_table_prefix, [ 'options' ] );
+		try {
+			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
+		} catch ( \RuntimeException $e ) {
+			WP_CLI::warning( $e->getMessage() );
+			WP_CLI::line( "Now running command `newspack-content-migrator correct-collations-for-live-wp-tables --live-table-prefix={$live_table_prefix} --mode=generous --skip-tables=options` ..." );
+			$this->cmd_correct_collations_for_live_wp_tables(
+				[],
+				[
+					'live-table-prefix' => $live_table_prefix,
+					'mode'              => 'generous',
+					'skip-tables'       => 'options',
+				]
+			);
+		}
 
 		// Search distinct Post types in live DB.
 		$live_table_prefix_escaped = esc_sql( $live_table_prefix );
@@ -315,7 +416,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		// Get list of post types except attachments.
 		$post_types_non_attachments = $post_types;
-		$key = array_search( 'attachment', $post_types_non_attachments );
+		$key                        = array_search( 'attachment', $post_types_non_attachments );
 		if ( false !== $key ) {
 			unset( $post_types_non_attachments[ $key ] );
 			$post_types_non_attachments = array_values( $post_types_non_attachments );
@@ -327,7 +428,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$results_live_posts  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 			$results_local_posts = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 
-			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching for new ones...', count( $results_live_posts ) ) );
+			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_posts ) ) );
 			$new_live_ids = self::$logic->filter_new_live_ids( $results_live_posts, $results_local_posts );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_ids ) ) );
 
@@ -339,7 +440,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$results_live_attachments  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 			$results_local_attachments = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 
-			WP_CLI::log( 'Fetched %s total from live site. Searching for new ones...', count( $results_live_attachments ) );
+			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_attachments ) ) );
 			$new_live_attachment_ids = self::$logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
 			$new_live_ids            = array_merge( $new_live_ids, $new_live_attachment_ids );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_attachment_ids ) ) );
@@ -397,7 +498,20 @@ class ContentDiffMigrator implements InterfaceCommand {
 		}
 
 		// Validate DBs.
-		$this->validate_dbs( $live_table_prefix, [ 'options' ] );
+		try {
+			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
+		} catch ( \RuntimeException $e ) {
+			WP_CLI::warning( $e->getMessage() );
+			WP_CLI::line( "Now running command `newspack-content-migrator correct-collations-for-live-wp-tables --live-table-prefix={$live_table_prefix} --mode=generous --skip-tables=options` ..." );
+			$this->cmd_correct_collations_for_live_wp_tables(
+				[],
+				[
+					'live-table-prefix' => $live_table_prefix,
+					'mode'              => 'generous',
+					'skip-tables'       => 'options',
+				]
+			);
+		}
 
 		// Set constants.
 		$this->live_table_prefix             = $live_table_prefix;
@@ -712,11 +826,12 @@ class ContentDiffMigrator implements InterfaceCommand {
 			// Now import all related Post data.
 			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
-				$this->log( $this->log_error, sprintf( 'Following errors happened in import_posts() for post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new ) );
+				$msg = sprintf( 'Errors during import post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new );
 				foreach ( $import_errors as $import_error ) {
-					$this->log( $this->log_error, sprintf( '- %s', $import_error ) );
+					$msg .= PHP_EOL . '- ' . $import_error;
 				}
-				WP_CLI::warning( sprintf( 'Some errors while importing %s id_old=%d id_new=%d (see log %s).', $post_type, $post_id_live, $post_id_new, $this->log_error ) );
+				$this->log( $this->log_error, $msg );
+				WP_CLI::warning( $msg );
 			}
 
 			// Log imported post.
@@ -732,7 +847,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			);
 
 			// Save some metas.
-			update_post_meta( $post_id_new, self::SAVED_META_LIVE_POST_ID, $post_id_live );
+			update_post_meta( $post_id_new, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID, $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -827,9 +942,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
 			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
-			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
+			// First try searching by postmeta ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
-				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, self::SAVED_META_LIVE_POST_ID );
+				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID );
 			}
 			// Next try searching for the new parent_id by joining local and live DB tables.
 			if ( is_null( $parent_id_new ) ) {
@@ -896,29 +1011,12 @@ class ContentDiffMigrator implements InterfaceCommand {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = $this->get_attachments_from_imported_posts_log( $imported_posts_data );
+		$imported_attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
 
-		// We need the old Live attachment IDs; we'll first search for those then update them with new IDs.
-		$attachment_ids_for_featured_image_update = array_keys( $imported_attachment_ids_map );
+		// Get new Post IDs from DB.
+		$new_post_ids = array_values( $imported_post_ids_map );
 
-		// Skip previously updated Attachment IDs.
-		$updated_featured_images_data = $this->get_data_from_log( $this->log_updated_featured_imgs_ids, [ 'id_old', 'id_new' ] ) ?? [];
-		foreach ( $updated_featured_images_data as $entry ) {
-			$id_old     = $entry['id_old'] ?? null;
-			$key_id_old = array_search( $id_old, $attachment_ids_for_featured_image_update );
-			if ( ! is_null( $id_old ) && false !== $key_id_old ) {
-				unset( $attachment_ids_for_featured_image_update[ $key_id_old ] );
-			}
-		}
-		if ( empty( $attachment_ids_for_featured_image_update ) ) {
-			WP_CLI::log( 'All posts already had their featured image IDs updated, moving on.' );
-			return;
-		}
-		if ( array_keys( $imported_attachment_ids_map ) !== $attachment_ids_for_featured_image_update ) {
-			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
-			WP_CLI::log( sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) ) );
-		}
-		self::$logic->update_featured_images( $imported_post_ids_map, $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
+		self::$logic->update_featured_images( $new_post_ids, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
 
 	/**
@@ -1015,12 +1113,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function cmd_correct_collations_for_live_wp_tables( $args, $assoc_args ) {
 		$live_table_prefix = $assoc_args['live-table-prefix'];
 		$mode              = $assoc_args['mode'];
-		$backup_prefix     = $assoc_args['backup-table-prefix'];
-		$skip_tables       = [];
-
-		if ( ! empty( $assoc_args['skip-tables'] ) ) {
-			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
-		}
+		$backup_prefix     = isset( $assoc_args['backup-table-prefix'] ) ? $assoc_args['backup-table-prefix'] : 'collationbak_';
+		$skip_tables       = isset( $assoc_args['skip-tables'] ) ? explode( ',', $assoc_args['skip-tables'] ) : [];
 
 		$tables_with_differing_collations = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
 
@@ -1047,8 +1141,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 				break;
 		}
 
+		WP_CLI::log( "Now fixing $live_table_prefix tables collations..." );
 		foreach ( $tables_with_differing_collations as $result ) {
-			WP_CLI::log( 'Addressing ' . $result['table'] );
+			WP_CLI::log( 'Addressing ' . $result['table'] . ' table...' );
 			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
 		}
 	}
@@ -1192,7 +1287,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Validates DBs.
+	 * Validates DB tables.
 	 *
 	 * @param string $live_table_prefix Live table prefix.
 	 * @param array  $skip_tables       Core WP DB tables to skip (without prefix).
@@ -1201,14 +1296,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function validate_dbs( string $live_table_prefix, array $skip_tables ): void {
-		try {
-			self::$logic->validate_core_wp_db_tables( $live_table_prefix, $skip_tables );
-			if ( ! self::$logic->are_table_collations_matching( $live_table_prefix ) ) {
-				throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
-			}
-		} catch ( \Exception $e ) {
-			WP_CLI::error( sprintf( 'validate_dbs exception: %s', $e->getMessage() ) );
+	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
+		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
+		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix, $skip_tables ) ) {
+			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
 	}
 
