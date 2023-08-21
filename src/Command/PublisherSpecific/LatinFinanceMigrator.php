@@ -222,6 +222,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-set-subtitles',
+			[ $this, 'cmd_set_subtitles' ],
+			[
+				'shortdesc' => 'Sets subtitles from excerpts.',
+				'synopsis'  => [],
+			]
+		);
+
 	}
 
 	/**
@@ -1085,6 +1094,46 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::success( 'Done' );
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-set-subtitles'.
+	 *
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_set_subtitles( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+
+		WP_CLI::line( "Doing latinfinance-set-subtitles..." );
+
+		$data = $wpdb->get_results( "
+			select p.ID, p.post_excerpt, pm2.meta_value
+			from $wpdb->posts p
+			join $wpdb->postmeta pm1 on pm1.post_id = p.ID and pm1.meta_key = 'newspack_lf_import_batch' and pm1.meta_value = 'missing'
+			left outer join $wpdb->postmeta pm2 on pm2.post_id = p.ID and pm2.meta_key = 'newspack_post_subtitle'
+			where p.post_type='post' AND p.post_status = 'publish' AND p.post_excerpt != ''
+			HAVING pm2.meta_value is null
+		", ARRAY_A );
+
+		foreach ( $data as $post_data ) {
+		
+			if ( empty( trim( $post_data['post_excerpt'] ) ) ) {
+				WP_CLI::warning( 'Skipping blank trimmed excerpt' );
+				continue;
+			}
+
+			update_post_meta( $post_data['ID'], 'newspack_post_subtitle', $post_data['post_excerpt'] );
+
+			WP_CLI::line( 'Updated: ' . $post_data['ID'] );
+		
+		}
+
+		wp_cache_flush();
+
+		WP_CLI::success( 'Done.' );
+
 	}
 
 
