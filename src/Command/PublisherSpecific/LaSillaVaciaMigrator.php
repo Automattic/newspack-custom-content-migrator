@@ -17,7 +17,9 @@ use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use \WP_CLI;
 
 class LaSillaVaciaMigrator implements InterfaceCommand
@@ -602,6 +604,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	private $logger;
 
 	/**
+	 * JSON Iterator.
+	 *
+	 * @var null|JsonIterator
+	 */
+	private $json_iterator;
+
+	/**
 	 * Attachments.
 	 *
 	 * @var Attachments $attachments
@@ -634,6 +643,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	    $this->attachments = new Attachments();
 	    $this->taxonomy = new Taxonomy();
 	    $this->images = new Images();
+		$this->json_iterator = new JsonIterator();
     }
 
 	/**
@@ -924,6 +934,30 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 ]
             ]
         );
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-update-podcasts',
+			[ $this, 'update_podcasts' ],
+			[
+				'shortdesc' => 'Go over podcasts and update their data if necessary.',
+				'synopsis' => [
+					[
+						'type' => 'assoc',
+						'name' => 'import-json',
+						'description' => 'The file that contains podcasts data.',
+						'optional' => false,
+						'repeating' => false,
+					],
+					[
+						'type' => 'assoc',
+						'name' => 'media-dir',
+						'description' => 'The directory where the media folder is located',
+						'optional' => false,
+						'repeating' => false,
+					],
+				]
+			]
+		);
     }
 
     private function reset_db()
@@ -2303,6 +2337,77 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             }
         }
     }
+
+	// Updates podcasts with their audio files and prepends an audio block to the post content.
+	public function update_podcasts( array $args, array $assoc_args) : void {
+
+		$command_meta_key = 'update_podcasts';
+		$command_meta_version = 'v1';
+		$log_file = "{$command_meta_key}_{$command_meta_version}.log";
+		global $wpdb;
+
+		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $podcast ) {
+			// Find the existing podcast/article.
+			$existing_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_original_article_id' and meta_value = %s",
+				$podcast->id ) );
+
+			if ( ! $existing_id ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Could not find a post to update with original ID %d.", $podcast->id ),
+					Logger::ERROR
+				);
+				continue;
+			}
+
+			if ( MigrationMeta::get( $existing_id, $command_meta_key, 'post' ) === $command_meta_version ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Post ID %d already has been updated to %s. Skipping.", $existing_id,
+						$command_meta_version )
+				);
+				continue;
+			}
+
+			if ( empty( $podcast->audio ) ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Podcast ID %d has no audio file.", $podcast->id ),
+					Logger::ERROR
+				);
+				continue;
+			}
+
+			// Strip the "media" folder part of the path in the json.
+			$file_path = $assoc_args['media-dir'] . str_ireplace( '/media', '', $podcast->audio );
+
+			if ( ! file_exists( $file_path ) ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Cant' find audio file %s for podcast with original ID %d.", $file_path, $podcast->id ),
+					Logger::ERROR
+				);
+				continue;
+			}
+
+			$attachment_id = $this->attachments->import_external_file( $file_path );
+			$audio_url     = wp_get_attachment_url( $attachment_id );
+			$audio_block   = <<<BLOCK
+<!-- wp:audio {"id":$attachment_id} -->
+<figure class="wp-block-audio"><audio controls src="$audio_url"></audio></figure>
+<!-- /wp:audio -->
+BLOCK;
+
+			$post               = get_post( $existing_id );
+			$post->post_content = $audio_block . $post->post_content;
+			wp_update_post( $post );
+
+			MigrationMeta::update( $existing_id, $command_meta_key, 'post', $command_meta_version );
+
+			WP_CLI::success( sprintf( "Updated post ID %d with audio file %s", $existing_id, $file_path ) );
+		}
+
+	}
 
     /**
      * @param string $html
