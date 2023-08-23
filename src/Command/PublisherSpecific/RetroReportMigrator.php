@@ -3,12 +3,13 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use stdClass;
+use NewspackCustomContentMigrator\Utils\JsonIterator;
+use \NewspackCustomContentMigrator\Utils\Logger;
+use \NewspackCustomContentMigrator\Logic\Attachments;
+use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use \NewspackCustomContentMigrator\Logic\Sponsors;
 use \WP_CLI;
-use WP_Query;
 
 /**
  * Custom migration scripts for Retro Report.
@@ -17,7 +18,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	public const META_PREFIX = 'newspack_rr_';
 
-	public const BASE_URL = 'https://data.retroreport-org.pages.dev';
+	public const JSON_API_BASE_URL = 'https://data.retroreport-org.pages.dev';
 
 	public const CF_TOKEN_OPTION = 'newspack_rr_cf_token';
 
@@ -31,6 +32,18 @@ class RetroReportMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
+	 * @var Logger.
+	 */
+	private $logger;
+
+	/**
+	 * File name to use for logging.
+	 *
+	 * @var string
+	 */
+	private $log_name;
+
+	/**
 	 * Attachments logic.
 	 *
 	 * @var null|Attachments
@@ -40,9 +53,16 @@ class RetroReportMigrator implements InterfaceCommand {
 	/**
 	 * Simple Local Avatars.
 	 *
-	 * @var null|Simple_Local_Avatars
+	 * @var null|SimpleLocalAvatars
 	 */
 	private $simple_local_avatars;
+
+	/**
+	 * JSON Iterator.
+	 *
+	 * @var null|JsonIterator
+	 */
+	private $json_iterator;
 
 	/**
 	 * CAP logic.
@@ -50,6 +70,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var null|CoAuthorPlus
 	 */
 	private $co_authors_plus;
+
+	/**
+	 * Sponsors logic.
+	 *
+	 * @var null|Sponsors
+	 */
+	private $sponsors;
 
 	/**
 	 * List of core wp_posts fields
@@ -64,6 +91,13 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var array
 	 */
 	private $core_meta;
+
+	/**
+	 * Common CLI arguments for commands.
+	 *
+	 * @var array
+	 */
+	private $common_arguments;
 
 	/**
 	 * Fields mappings from JSON fields to WP fields
@@ -86,18 +120,31 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	private $content_formatters;
 
+	/**
+	 * Dry run mode - set to true to prevent changes.
+	 *
+	 * @var bool
+	 */
+	private $dryrun;
+
 
 	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->logger = new Logger();
+
 		$this->attachments = new Attachments();
 
 		$this->co_authors_plus = new CoAuthorPlus();
 
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 
-		$this->core_fields = array(
+		$this->json_iterator = new JsonIterator();
+
+		$this->sponsors = new Sponsors();
+
+		$this->core_fields = array_flip( [
 			'post_author',
 			'post_date_gmt',
 			'post_content',
@@ -107,22 +154,20 @@ class RetroReportMigrator implements InterfaceCommand {
 			'post_name',
 			'post_modified_gmt',
 			'tags_input',
-		);
+			'post_category',
+		] );
 
-		$this->core_fields = array_flip( $this->core_fields );
-
-		$this->core_meta = array(
+		$this->core_meta = array_flip( [
 			'_thumbnail_id',
 			'_wp_page_template'
-		);
+		] );
 
-		$this->core_meta = array_flip( $this->core_meta );
-
+		$this->set_common_arguments();
 		$this->set_fields_mappings();
 		$this->set_post_types();
 		$this->set_content_formatters();
 
-		add_filter( 'http_request_args', array( $this, 'add_cf_token_to_requests' ), 10, 2 );
+		add_filter( 'http_request_args', [ $this, 'add_cf_token_to_requests' ], 10, 2 );
 	}
 
 
@@ -140,6 +185,67 @@ class RetroReportMigrator implements InterfaceCommand {
 		return self::$instance;
 	}
 
+	private function set_common_arguments() {
+		$this->common_arguments = [
+			[
+				'type'        => 'flag',
+				'name'        => 'dry-run',
+				'optional'    => true,
+				'description' => 'Whether to actually make updates or not.'
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'category',
+				'optional'    => true,
+				'description' => 'Category name (about, board, articles, etc.).'
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'json-file',
+				'optional'    => false,
+				'description' => 'Path to the JSON file.',
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'guest-author',
+				'optional'    => true,
+				'description' => 'ID of the guest author to assign to post.',
+				'default'     => 'post',
+			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'template',
+				'optional'    => true,
+				'description' => 'Name of the template to use for imported posts',
+				'default'     => 'default',
+				'options'     => [ 'default', 'single-feature.php', 'single-wide.php' ],
+			],
+
+		];
+	}
+
+	/**
+	 * Determine whether we're in a dry-run and set a class var accordingly.
+	 *
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 *
+	 * @return void
+	 */
+	private function set_dry_run( $assoc_args ) {
+		$this->dryrun = array_key_exists( 'dry-run', $assoc_args );
+	}
+
+	/**
+	 * Set a log name that corresponds to the particular operation.
+	 *
+	 * @param string $name The name to use for this operation.
+	 *
+	 * @return void
+	 */
+	private function set_log_name( $name ) {
+		$this->log_name = 'retroreport_' . $name;
+	}
+
 	/**
 	 * See InterfaceCommand::register_commands.
 	 */
@@ -147,128 +253,111 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-add-cf-token',
-			array( $this, 'cmd_retro_report_add_cf_token' ),
-			array(
+			[ $this, 'cmd_retro_report_add_cf_token' ],
+			[
 				'shortdesc' => 'Add the CloudFlare authorization token (CF_Authorization cookie) for later use (to download images for now).',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
 						'type'        => 'assoc',
 						'name'        => 'token',
 						'optional'    => false,
 						'description' => 'The CF authorization token.',
-					),
-				),
-			)
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-delete-post-by-unique-id',
+			[ $this, 'cmd_delete_by_unique_id' ],
+			[
+				'shortdesc' => 'Delete an imported by via the unique ID in the JSON import',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'unique_id',
+						'optional'    => false,
+						'description' => 'The unique ID'
+					]
+				]
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-author-assignment-fixer',
+			[ $this, 'cmd_fix_authors' ],
+			[
+				'shortdesc' => 'Resolve issues with author assignment',
+				'synopsis'  => array_merge( $this->common_arguments, [
+					[
+						'type'        => 'assoc',
+						'name'        => 'staff_json',
+						'optional'    => false,
+						'description' => 'The JSON file where we can find the staff info.'
+					]
+				] ),
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-posts',
-			array( $this, 'cmd_retro_report_import_posts' ),
-			array(
+			[ $this, 'cmd_retro_report_import_posts' ],
+			[
 				'shortdesc' => 'Import posts from a JSON file',
-				'synopsis'  => array(
-					array(
-						'type'        => 'assoc',
-						'name'        => 'category',
-						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).'
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'post-type',
-						'optional'    => false,
-						'description' => 'The post type to be imported as (default is `post`).',
-						'default'     => 'post',
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'guest-author',
-						'optional'    => true,
-						'description' => 'ID of the guest author to assign to post.',
-						'default'     => 'post',
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'template',
-						'optional'    => true,
-						'description' => 'Name of the template to use for imported posts',
-						'default'     => 'default',
-						'options'     => array( 'default', 'single-feature.php', 'single-wide.php' ),
-					),
-					array(
+				'synopsis'  => array_merge( $this->common_arguments, [
+					[
 						'type'        => 'assoc',
 						'name'        => 'featured_image_position',
 						'optional'    => true,
 						'description' => 'Name of the template to use for imported posts',
 						'default'     => 'default',
-						'options'     => array( 'default', 'large', 'small', 'behind', 'beside', 'above', 'hidden' ),
-					),
-				),
-			)
+						'options'     => [ 'default', 'large', 'small', 'behind', 'beside', 'above', 'hidden' ],
+					],
+				] ),
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-staff',
-			array( $this, 'cmd_retro_report_import_staff' ),
-			array(
+			[ $this, 'cmd_retro_report_import_staff' ],
+			[
 				'shortdesc' => 'Import staff from a JSON file',
-				'synopsis'  => array(
-					array(
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					),
-				),
-			)
+				'synopsis'  => $this->common_arguments,
+			]
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator retro-report-import-listings',
-			array( $this, 'cmd_retro_report_import_listings' ),
-			array(
+			[ $this, 'cmd_retro_report_import_listings' ],
+			[
 				'shortdesc' => 'Import listings from a JSON file',
-				'synopsis'  => array(
-					array(
-						'type'        => 'assoc',
-						'name'        => 'type',
-						'optional'    => false,
-						'description' => 'Listing type (one of "generic", "events", "mktplce", "place")',
-						'options'     => array( 'events', 'generic', 'mktplce', 'place' ),
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'json-file',
-						'optional'    => false,
-						'description' => 'Path to the JSON file.',
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'category',
-						'optional'    => false,
-						'description' => 'Category name (about, board, articles, etc.).',
-					),
-					array(
+				'synopsis'  => array_merge( $this->common_arguments, [
+					[
 						'type'        => 'assoc',
 						'name'        => 'category-parent',
 						'optional'    => true,
 						'description' => 'Category name (about, board, articles, etc.).',
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'guest-author',
-						'optional'    => true,
-						'description' => 'ID of the guest author to assign to post.',
-						'default'     => 'post',
-					),
-				),
-			)
+					],
+				] ),
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-import-reusable-blocks',
+			[ $this, 'cmd_retro_report_import_reusable_blocks' ],
+			[
+				'shortdesc' => 'Import re-usable from a JSON file',
+				'synopsis'  => $this->common_arguments,
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator retro-report-import-sponsors',
+			[ $this, 'cmd_retro_report_import_sponsors' ],
+			[
+				'shortdesc' => 'Import sponsors from a JSON file',
+				'synopsis'  => $this->common_arguments,
+			]
 		);
 
 	}
@@ -288,38 +377,171 @@ class RetroReportMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator retro-report-delete-post-by-unique-id`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_delete_by_unique_id( $args, $assoc_args ) {
+		$unique_id = $args[0];
+		$post = $this->get_post_from_unique_id( $unique_id );
+		if ( ! is_a( $post, 'WP_Post' ) ) {
+			WP_CLI::error( sprintf( 'No post found with unique ID %s', $unique_id ) );
+			return;
+		}
+
+		$delete = wp_delete_post( $post->ID, true );
+		if ( false === $delete || is_null( $delete ) ) {
+			WP_CLI::error( sprintf( 'Failed to delete post ID %d', $post->ID ) );
+			return;
+		}
+
+		WP_CLI::success( sprintf( 'Deleted post %d with unique ID %s', $post->ID, $unique_id ) );
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator author-assignment-fixer`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_authors( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
+		$category   = $assoc_args['category'];
+		$json       = $this->validate_json_file( $assoc_args );
+		$log_name   = 'fix-authors-' . $category;
+
+		foreach ( $json as $item ) {
+
+			$unique_id = $item->unique_id;
+
+			$this->logger->log( $log_name, sprintf( 'Processing ID %s...', $unique_id ) );
+
+			$post = $this->get_post_from_unique_id( $unique_id );
+			if ( ! $post ) {
+				$this->logger->log( $log_name, sprintf( 'No post found for id %s', $unique_id ), false );
+				continue;
+			}
+
+			$author_id     = get_post_field( 'post_author', $post->ID );
+			$guest_authors = $this->co_authors_plus->get_guest_authors_for_post( $post->ID );
+			if ( ! empty( $author_id ) || ! empty( $guest_authors ) ) {
+				continue; // We have either an author or guest authors assigned, so skip.
+			}
+
+			// Get the fields mapping just for authors/guest authors.
+			$fields        = $this->load_mappings( $category );
+			$keys          = array_column( $fields, 'target' );
+			$authors_index = array_search( 'post_author', $keys );
+			$ga_index      = array_search( self::META_PREFIX . 'guest_authors', $keys );
+
+			// Get the staff ID for post author.
+			if ( $authors_index ) {
+				$author_json_field = $fields[ $authors_index ]->name;
+				$staff_id          = $item->{ $author_json_field };
+			}
+
+			// Get the staff IDs for guest authors.
+			if ( $ga_index ) {
+				$ga_json_field = $fields[ $ga_index ]->name;
+				$staff_id      = $item->{ $ga_json_field };
+			}
+
+			if ( ! isset( $staff_id ) ) {
+				$this->logger->log( $log_name, sprintf( 'Failed to get a staff ID for %s', $unique_id ), false );
+				continue;
+			}
+
+			// Try to find the user/GA from the staff IDs.
+			$staff_ids = ( is_array( $staff_id ) ) ? $staff_id : [ $staff_id ];
+			$wp_users  = [];
+
+			foreach ( $staff_ids as $staff_uid ) {
+				$wp_user = $this->get_user_from_staff_id( $staff_uid );
+				if ( empty( $wp_user ) ) {
+					$wp_user = [ $this->find_alternative_user( $staff_uid, $assoc_args['staff_json'] ) ];
+				}
+
+				if ( is_a( $wp_user[0], 'WP_User' ) ) {
+					$wp_users[ $staff_uid ] = $wp_user[0];
+				}
+			}
+
+			// Hopefully we found users, but log it if we don't, and skip this item.
+			if ( empty( $wp_users ) ) {
+				$this->logger->log( $log_name, sprintf( 'No users found for item %s', $unique_id ) );
+				continue;
+			}
+
+			// Assign the author if that's what we need to do.
+			if ( $authors_index ) {
+				$update = ( $this->dryrun ) ? true : wp_update_post(
+					[
+						'ID' => $post->ID,
+						'post_author' => $wp_users[ array_key_first( $wp_users ) ]->ID,
+					]
+				);
+				if ( ! $update ) {
+					$this->logger->log( $log_name, sprintf( 'Failed to update post %d', $post->ID ) );
+				}
+			}
+
+			// Set Guest Authors if we have them.
+			if ( $ga_index ) {
+				$gas_to_add = [];
+				foreach ( $wp_users as $user ) {
+					$guest_author = $this->co_authors_plus->get_or_create_guest_author_from_user( $user );
+					$gas_to_add[] = $guest_author;
+				}
+
+				// $this->co_authors_plus->assign_guest_authors_to_post( $ga_id );
+			}
+
+		}
+	}
+
+	/**
 	 * Callable for `newspack-content-migrator retro-report-import-posts`
 	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_posts( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
 		$category  = $assoc_args['category'];
-		$ga_id     = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
+		$ga_id     = isset( $assoc_args['guest-author'] ) ? $assoc_args['guest-author'] : null;
 		$posts     = $this->validate_json_file( $assoc_args );
 		$post_type = $this->get_post_type( $category );
+		$fields    = $this->load_mappings( $category );
 
-		// Check if the category already exists.
-		$category_id = $this->get_or_create_category( $category );
+		$this->set_log_name( $category );
 
-		WP_CLI::log( sprintf( 'Using category %s ID %d.', $category, $category_id ) );
+		// Only use the CLI argument-supplied category as the post category if the field mapping
+		// doesn't explicitly include post categories to pull from JSON values.
+		if ( ! array_search( 'post_category', wp_list_pluck( $fields,'target' ) ) ) {
 
-		$fields = $this->load_mappings( $category );
+			// Check if the category already exists.
+			$category_id = $this->get_or_create_category( $category );
+			$this->logger->log( $this->log_name, sprintf( 'Using category %s ID %d.', $category, $category_id ) );
+
+		}
 
 		WP_CLI::log( 'The fields that are going to be imported are:' );
-
 		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
-$posts = [ $posts[0] ];
+
 		foreach ( $posts as $post ) {
-			WP_CLI::log( sprintf( 'Importing post "%s"...', $post->title ) );
+			$this->logger->log( $this->log_name, sprintf( 'Importing post "%s"...', $post->title ) );
 
 			if ( $this->post_exists( $post, $post_type ) ) {
-				WP_CLI::log( sprintf( 'Post "%s" is already imported. Skipping...', $post->title ) );
+				$this->logger->log( $this->log_name, sprintf( 'Post "%s" is already imported. Skipping...', $post->title ) );
 				continue;
 			}
 
 			// Specify the template to use, if needed.
-			if ( 'default' !== $assoc_args['template'] ) {
+			if ( isset( $assoc_args['template'] ) && 'default' !== $assoc_args['template'] ) {
 				$post->template = esc_attr( $assoc_args['template'] );
 			}
 
@@ -330,16 +552,18 @@ $posts = [ $posts[0] ];
 
 			$post_id = $this->import_post( $post, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
-				WP_CLI::warning( sprintf( 'Could not add post "%s".', $post->title ) );
-				WP_CLI::warning( $post_id->get_error_message() );
+				$this->logger->log( $this->log_name, sprintf( 'Could not add post "%1$s" because "%2$s".', $post->title, $post_id->get_error_message() ) );
 				continue;
 			}
 
-			wp_set_post_categories( $post_id, array( $category_id ) );
+			// If we set categories using JSON values, don't override that.
+			if ( ! array_search( 'post_category', wp_list_pluck( $fields,'target' ) ) ) {
+				wp_set_post_categories( $post_id, [ $category_id ] );
+			}
 
 			if ( $ga_id ) {
 				$this->co_authors_plus->assign_guest_authors_to_post(
-					array( $ga_id ),
+					[ $ga_id ],
 					$post_id,
 					true
 				);
@@ -354,8 +578,11 @@ $posts = [ $posts[0] ];
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_staff( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+		$this->set_log_name( 'staff' );
+
 		if ( ! $this->simple_local_avatars->is_sla_plugin_active() ) {
-			WP_CLI::error( 'Simple Local Avatars not found. Install and activate it before using this command.' );
+			$this->logger->log( $this->log_name, 'Simple Local Avatars not found. Install and activate it before using this command.' );
 			return;
 		}
 
@@ -382,11 +609,11 @@ $posts = [ $posts[0] ];
 			$full_name = sprintf( '%s %s', $first_name, $last_name );
 
 			if ( $this->user_exists( $user ) ) {
-				WP_CLI::log( sprintf( 'User %s already exists. Skipping...', $full_name ) );
+				$this->logger->log( $this->log_name, sprintf( 'User %s already exists. Skipping...', $full_name ) );
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Importing user %s...', $full_name ) );
+			$this->logger->log( $this->log_name, sprintf( 'Importing user %s...', $full_name ) );
 
 			if ( 'none' == $position || null == $position ) {
 				$position = '';
@@ -408,15 +635,15 @@ $posts = [ $posts[0] ];
 				$wp_role = 'editor';
 			}
 
-			$user_meta = array(
+			$user_meta = [
 				'newspack_job_title'               => $position,
 				'newspack_role'                    => $role,
 				'twitter'                          => $twitter,
 				$this->get_meta_key( 'images' )    => $images,
 				$this->get_meta_key( 'unique_id' ) => $unique_id,
-			);
+			];
 
-			$user_args = array(
+			$user_args = [
 				'first_name'    => $first_name,
 				'last_name'     => $last_name,
 				'nickname'      => $username,
@@ -428,13 +655,12 @@ $posts = [ $posts[0] ];
 				'description'   => property_exists( $user, 'content' ) ? $user->content : '',
 				'meta_input'    => $user_meta,
 				'role'          => $wp_role,
-			);
+			];
 
-			$user_id = wp_insert_user( $user_args );
-
+			// Insert the new user.
+			$user_id = ( $this->dryrun ) ? true : wp_insert_user( $user_args );
 			if ( is_wp_error( $user_id ) ) {
-				WP_CLI::warning( sprintf( 'There was a problem importing user %s', $full_name ) );
-				WP_CLI::warning( $user_id->get_error_message() );
+				$this->logger->log( $this->log_name, sprintf( 'There was a problem importing user %1$s because: %2$s', $full_name, $user_id->get_error_message() ) );
 				continue;
 			}
 
@@ -442,14 +668,13 @@ $posts = [ $posts[0] ];
 			$image = $this->get_object_property( $user, 'image' );
 
 			if ( $image ) {
-				$image_url     = self::BASE_URL . $image;
-				$attachment_id = $this->attachments->import_external_file( $image_url );
+				$image_path     = untrailingslashit( ABSPATH ) . $image;
+				$attachment_id = $this->attachments->import_external_file( $image_path );
 
-				WP_CLI::log( sprintf( 'Importing the avatar for user %s...', $full_name ) );
+				$this->logger->log( $this->log_name, sprintf( 'Importing the avatar for user %s...', $full_name ) );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
-					WP_CLI::warning( $attachment_id->get_error_message() );
+					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_path, $attachment_id->get_error_message() ) );
 				} else {
 					$this->simple_local_avatars->assign_avatar( $user_id, $attachment_id );
 				}
@@ -465,40 +690,48 @@ $posts = [ $posts[0] ];
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_retro_report_import_listings( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
 		$listings        = $this->validate_json_file( $assoc_args );
 		$category        = sanitize_text_field( $assoc_args['category'] );
 		$category_parent = array_key_exists( 'category-parent', $assoc_args ) ? sanitize_text_field( $assoc_args['category-parent'] ) : false;
 		$category_id     = $this->get_or_create_category( $category, $category_parent );
 		$fields          = $this->load_mappings( $category );
-		$post_type       = sprintf( 'newspack_lst_%s', $assoc_args['type'] );
+		$post_type       = $this->get_post_type( $category );
 		$ga_id           = isset( $assoc_args['guest-auhor'] ) ? $assoc_args['guest-auhor'] : null;
 
-		\WP_CLI::log( 'The fields that are going to be imported are:' );
-		\WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+		$this->set_log_name( $category );
+
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
 
 		foreach ( $listings as $listing ) {
 
-			\WP_CLI::log( sprintf( 'Importing listing "%s"...', $listing->title ) );
+			$this->logger->log( $this->log_name, sprintf( 'Importing listing "%s"...', $listing->title ) );
 
 			if ( $this->post_exists( $listing, $post_type ) ) {
-				\WP_CLI::log( sprintf( 'Listing "%s" is already imported. Skipping...', $listing->title ) );
+				$this->logger->log( $this->log_name, sprintf( 'Listing "%s" is already imported. Skipping...', $listing->title ) );
 				continue;
+			}
+
+			// Specify the template to use, if needed.
+			if ( isset( $assoc_args['template'] ) && 'default' !== $assoc_args['template'] ) {
+				$listing->template = esc_attr( $assoc_args['template'] );
 			}
 
 			// Import the post!
 			$post_id = $this->import_post( $listing, $post_type, $fields, $category );
 			if ( is_wp_error( $post_id ) ) {
-				\WP_CLI::warning( sprintf( 'Could not add post "%s".', $listing->title ) );
-				\WP_CLI::warning( $post_id->get_error_message() );
+				$this->logger->log( $this->log_name, sprintf( 'Could not add post "%1$s" because: %2$s', $listing->title, $post_id->get_error_message() ) );
 				continue;
 			}
 
 			// Set the categories.
-			wp_set_post_categories( $post_id, array( $category_id ) );
+			wp_set_post_categories( $post_id, [ $category_id ] );
 
 			if ( $ga_id ) {
 				$this->co_authors_plus->assign_guest_authors_to_post(
-					array( $ga_id ),
+					[ $ga_id ],
 					$post_id,
 					true
 				);
@@ -509,6 +742,102 @@ $posts = [ $posts[0] ];
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator retro-report-import-listings`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_reusable_blocks( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
+		$blocks    = $this->validate_json_file( $assoc_args );
+		$category  = sanitize_text_field( $assoc_args['category'] );
+		$fields    = $this->load_mappings( $category );
+		$post_type = $this->get_post_type( $category );
+
+		$this->set_log_name( $category );
+
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+
+		foreach ( $blocks as $block ) {
+
+			$this->logger->log( $this->log_name, sprintf( 'Importing re-usable block "%s"...', $block->title ) );
+
+			// Make sure we set them to published.
+			$block->publish = 'publish';
+
+			// Import the post!
+			$post_id = $this->import_post( $block, $post_type, $fields, $category );
+			if ( is_wp_error( $post_id ) ) {
+				$this->logger->log( $this->log_name, sprintf( 'Could not add post "%1$s" because: %2$s', $block->title, $post_id->get_error_message() ) );
+				continue;
+			}
+
+		}
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator retro-report-import-sponsors`
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_retro_report_import_sponsors( $args, $assoc_args ) {
+		$this->set_dry_run( $assoc_args );
+
+		$sponsors  = $this->validate_json_file( $assoc_args );
+		$category  = sanitize_text_field( $assoc_args['category'] );
+		$fields    = $this->load_mappings( $category );
+		$post_type = $this->get_post_type( $category );
+
+		$this->set_log_name( $category );
+
+		WP_CLI::log( 'The fields that are going to be imported are:' );
+		WP_CLI\Utils\format_items( 'table', $fields, 'name,type,target' );
+
+		foreach ( $sponsors as $sponsor ) {
+
+			$this->logger->log( $this->log_name, sprintf( 'Importing sponsor "%s"...', $sponsor->title ) );
+
+			if ( $this->post_exists( $sponsor, $post_type ) ) {
+				$this->logger->log( $this->log_name, sprintf( 'Partner "%s" is already imported. Skipping...', $sponsor->title ) );
+				continue;
+			}
+
+			// Import the post!
+			$post_id = $this->import_post( $sponsor, $post_type, $fields, $category );
+			if ( is_wp_error( $post_id ) ) {
+				$this->logger->log( $this->log_name, sprintf( 'Could not add post "%1$s" because: %2$s', $sponsor->title, $post_id->get_error_message() ) );
+				continue;
+			}
+
+			// Add the sponsor to the related posts.
+			if ( isset( $sponsor->related_content ) ) {
+
+				foreach ( $sponsor->related_content as $related ) {
+
+					$related_post = $this->get_post_from_unique_id( $related );
+					if ( ! $related_post ) {
+						$this->logger->log( $this->log_name, sprintf( 'Failed to find related post for unique ID %s', $related ), false );
+						continue;
+					}
+
+					// Use the Sponsors utility.
+					$add_sponsor = $this->sponsors->add_sponsor_to_post( $post_id, $related_post->ID );
+					if ( ! $add_sponsor ) {
+						$this->logger->log( $this->log_name, sprintf( 'Failed to attach sponsor %1$d to post %2$d', $post_id, $related_post->ID ), true );
+					} else {
+						$this->logger->log( $this->log_name, sprintf( 'Successfully attached sponsor %1$d to post %2$d', $post_id, $related_post->ID ), false );
+					}
+				}
+			}
+
+		}
+	}
+
+	/**
 	 * Import an object as a WP post.
 	 *
 	 * @param object $object A standard object with post fields.
@@ -516,17 +845,17 @@ $posts = [ $posts[0] ];
 	 * @param array  $post_fields An array containing the mapping of each field.
 	 * @param string $category The name of the post's category.
 	 *
-	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
+	 * @return int|\WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function import_post( $object, $post_type, $post_fields, $category ) {
-		$post_args = array(
+		$post_args = [
 			'post_type' => $post_type,
-		);
+		];
 
-		$post_meta = array(
+		$post_meta = [
 			self::META_PREFIX . 'type'      => $category,
 			self::META_PREFIX . 'unique_id' => $object->unique_id,
-		);
+		];
 
 		$post_authors = [];
 
@@ -545,12 +874,22 @@ $posts = [ $posts[0] ];
 			}
 
 			$formatted_value = $this->format_post_field( $field, $value );
+			if ( is_null( $formatted_value ) ) {
+				$formatted_value = '';
+			}
+
 			if ( $field->is_meta ) {
 				$post_meta[ $field->target ] = $formatted_value;
 			} else if ( 'authors' === $field->type ) {
 				$post_authors = $formatted_value;
 			} else {
-				$post_args[ $field->target ] = $formatted_value;
+				// Account for multiple JSON fields contributing to one post arg. E.g. arrays
+				// of terms coming from multiple JSON fields.
+				if ( array_key_exists( $field->target, $post_args ) && is_array( $post_args[ $field->target ] ) ) {
+					$post_args[ $field->target ] = array_merge( $post_args[ $field->target ], $formatted_value );
+				} else {
+					$post_args[ $field->target ] = $formatted_value;
+				}
 			}
 		}
 
@@ -569,6 +908,9 @@ $posts = [ $posts[0] ];
 	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function add_post( $post_args, $post_meta, $post_authors ) {
+		if ( $this->dryrun ) {
+			return 1;
+		}
 
 		$post_id = wp_insert_post( $post_args, true );
 
@@ -589,81 +931,6 @@ $posts = [ $posts[0] ];
 	}
 
 	/**
-	 * Convert a field's value to the necessary format.
-	 * For example, convert an image URL to attachment ID by importing it,
-	 * convert "draft": false to post_status=publish etc.
-	 *
-	 * @param object $field The field object.
-	 * @param mixed  $value The field's value (could be anything).
-	 *
-	 * @return mixed The formatted value.
-	 */
-	public function format_post_field( $field, $value ) {
-
-		// @TODO use a mechanism like in $this->is_array_item()?
-		if ( false !== strpos( $field->name, '->' ) && ! empty( $value ) ) {
-			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
-			$value = $value->$prop;
-		}
-
-		if ( 'string' == $field->type || 'array' == $field->type || 'boolean' == $field->type ) {
-			switch ( $field->target ) {
-				case 'post_status':
-					if ( true === $value ) {
-						return 'draft';
-					}
-
-					if ( false === $value ) {
-						return 'publish';
-					}
-
-					return $value;
-				case 'post_name':
-					$path_parts = explode( '/', trim( $value, '/' ) );
-					$slug       = end( $path_parts );
-					return $slug;
-
-				case "post_author":
-					if ( ! empty( $value ) ) {
-						// Just grab the first user for core post_author.
-						$author = $this->get_user_from_staff_id( $value[0] );
-						return ( empty( $author ) ) ? false : $author;
-					}
-
-			}
-		}
-
-		// Convert dates to WordPress' precious format.
-		if ( 'date' === $field->type ) {
-			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
-		}
-
-		// Process multiple authors into CAP guest authors.
-		if ( 'authors' === $field->type ) {
-			$authors = $this->convert_authors_to_guest_authors( $value );
-			return $authors;
-		}
-
-		if ( 'thumbnail' == $field->type && $value ) {
-
-			WP_CLI::log( sprintf( 'Importing thumbnail from %s', $value ) );
-
-			$image_url     = self::BASE_URL . $value;
-			$attachment_id = $this->attachments->import_external_file( $image_url );
-
-			if ( is_wp_error( $attachment_id ) ) {
-				WP_CLI::warning( sprintf( 'There was a problem importing the image %s.', $image_url ) );
-				WP_CLI::warning( $attachment_id->get_error_message() );
-				return $value;
-			}
-
-			return $attachment_id;
-		}
-
-		return maybe_serialize( $value );
-	}
-
-	/**
 	 * Check if a post has already been imported.
 	 *
 	 * @param object $post The post object (from JSON, not WP_Post).
@@ -674,16 +941,20 @@ $posts = [ $posts[0] ];
 	public function post_exists( $post, $post_type = 'post' ) {
 		$unique_id = $post->unique_id;
 
-		$query = new WP_Query(
-			array(
-				'meta_key'    => self::META_PREFIX . 'unique_id',
-				'meta_value'  => $unique_id,
-				'post_type'   => $post_type,
+		$query = get_posts(
+			[
+				'post_type'   => get_post_types(),
 				'post_status' => 'any',
-			),
+				'meta_query'  => [
+					[
+						'key'   => self::META_PREFIX . 'unique_id',
+						'value' => $unique_id,
+					],
+				]
+			]
 		);
 
-		return $query->post_count > 0;
+		return ( count( $query ) > 0 );
 	}
 
 	/**
@@ -702,6 +973,33 @@ $posts = [ $posts[0] ];
 	}
 
 	/**
+	 * Find a duplicate/alternative user for a given unique_id.
+	 *
+	 * The staff JSON includes duplicates, but these are effectively not imported
+	 * so for some content we need to find the duplicate.
+	 *
+	 * @param string $unique_id  Unique ID of the staff member.
+	 * @param string $staff_json The JSON file with all staff members.
+	 *
+	 * @return WP_User|bool The User object or false if not found.
+	 */
+	private function find_alternative_user( $unique_id, $staff_json ) {
+
+		// Find the object form the staff JSON that matches this unique ID.
+		$staff     = $this->validate_json_file( [ 'json-file' => $staff_json ] );
+		$keys      = array_column( $staff, 'unique_id' );
+		$index     = array_search( $unique_id, $keys );
+		$staff_obj = $staff[ $index ];
+
+		// Find the already imported duplicate user.
+		$username = sprintf( '%s.%s', strtolower( $staff_obj->first_name ), strtolower( $staff_obj->last_name ) );
+		$wp_user  = get_user_by( 'login', $username );
+
+		return $wp_user;
+
+	}
+
+	/**
 	 * Grab the user account based on the original staff ID.
 	 *
 	 * @param int $staff_id Staff ID from the JSON import.
@@ -710,10 +1008,10 @@ $posts = [ $posts[0] ];
 	 */
 	private function get_user_from_staff_id( $staff_id ) {
 		return get_users(
-			array(
+			[
 				'meta_key'   => self::META_PREFIX . 'unique_id',
 				'meta_value' => $staff_id,
-			),
+			],
 		);
 	}
 
@@ -731,7 +1029,7 @@ $posts = [ $posts[0] ];
 
 		$posts = get_posts( [
 			'posts_per_page' => 1,
-			'post_type'      => 'any',
+			'post_type'      => get_post_types(), // 'any' doesn't include reusable blocks.
 			'meta_query'     => [
 				[
 					'key'   => self::META_PREFIX . 'unique_id',
@@ -793,113 +1091,168 @@ $posts = [ $posts[0] ];
 	 * @return void
 	 */
 	public function set_fields_mappings() {
-		$this->fields_mappings['Education profiles'] = array(
-			array( 'title',   'string',  'post_title' ),
-			array( 'content', 'string',  'post_content' ),
-			array( 'draft',   'boolean', 'post_status' ),
-			array( 'lastmod', 'date',    'post_modified_gmt' ),
-			array( 'lastmod', 'date',    'post_date_gmt' ),
-			array( 'path',    'string',  'post_name' ),
-			array( 'path',    'string',  'path' ),
-		);
+		$this->fields_mappings['Education profiles'] = [
+			[ 'title',   'string',  'post_title' ],
+			[ 'content', 'string',  'post_content' ],
+			[ 'draft',   'boolean', 'post_status' ],
+			[ 'lastmod', 'date',    'post_modified_gmt' ],
+			[ 'lastmod', 'date',    'post_date_gmt' ],
+			[ 'path',    'string',  'post_name' ],
+			[ 'path',    'string',  'path' ],
+		];
 
-		$this->fields_mappings['Education resources'] = array(
-			array( 'title',       'string',    'post_title' ),
-			array( 'content',     'string',    'post_content' ),
-			array( 'draft',       'boolean',   'post_status' ),
-			array( 'lastmod',     'date',      'post_modified_gmt' ),
-			array( 'lastmod',     'date',      'post_date_gmt' ),
-			array( 'path',        'string',    'post_name' ),
-			array( 'path',        'string',    'path' ),
-			array( 'description', 'string',    'newspack_article_summary' ),
-			array( 'subtitle',    'string',    'newspack_post_subtitle' ),
-			array( 'images[0]',   'thumbnail', '_thumbnail_id' ),
-		);
+		$this->fields_mappings['Standards'] = [
+			[ 'title',   'string',  'post_title' ],
+			[ 'content', 'string',  'post_content' ],
+			[ 'draft',   'boolean', 'post_status' ],
+			[ 'lastmod', 'date',    'post_modified_gmt' ],
+			[ 'lastmod', 'date',    'post_date_gmt' ],
+			[ 'path',    'string',  'post_name' ],
+			[ 'path',    'string',  'path' ],
+		];
 
-		$this->fields_mappings['Standards'] = array(
-			array( 'title',   'string',  'post_title' ),
-			array( 'content', 'string',  'post_content' ),
-			array( 'draft',   'boolean', 'post_status' ),
-			array( 'lastmod', 'date',    'post_modified_gmt' ),
-			array( 'lastmod', 'date',    'post_date_gmt' ),
-			array( 'path',    'string',  'post_name' ),
-			array( 'path',    'string',  'path' ),
-		);
+		$this->fields_mappings['Links'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'content',     'string',  'post_content' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'lastmod',     'date',    'post_modified_gmt' ],
+			[ 'publishdate', 'date',    'post_date_gmt' ],
+			[ 'description', 'string',  'post_excerpt' ],
+			[ 'path',        'string',  'post_name' ],
+			[ 'description', 'string',  'description' ],
+			[ 'path',        'string',  'path' ],
+			[ 'date',        'string',  'date' ],
+			[ 'images',      'array',   'images' ],
+		];
 
-		$this->fields_mappings['Links'] = array(
-			array( 'title',       'string',  'post_title' ),
-			array( 'content',     'string',  'post_content' ),
-			array( 'draft',       'boolean', 'post_status' ),
-			array( 'lastmod',     'date',    'post_modified_gmt' ),
-			array( 'publishdate', 'date',    'post_date_gmt' ),
-			array( 'description', 'string',  'post_excerpt' ),
-			array( 'path',        'string',  'post_name' ),
-			array( 'description', 'string',  'description' ),
-			array( 'path',        'string',  'path' ),
-			array( 'date',        'string',  'date' ),
-			array( 'images',      'array',   'images' ),
-		);
+		$this->fields_mappings['Video'] = [
+			[ 'title',                        'string',    'post_title' ],
+			[ 'video_source[0]',              'array',     'post_content' ],
+			[ 'draft',                        'boolean',   'post_status' ],
+			[ 'lastmod',                      'date',      'post_modified_gmt' ],
+			[ 'publishdate',                  'date',      'post_date_gmt' ],
+			[ 'video_source[0]->description', 'string',    'newspack_post_subtitle' ],
+			[ 'video_source[0]->description', 'string',    'newspack_article_summary' ],
+			[ 'video_source[0]->image',       'thumbnail', '_thumbnail_id' ],
+			[ 'video_source[0]->video_id',    'string',    'video_id' ],
+		];
 
-		$this->fields_mappings['Video'] = array(
-			array( 'title',                        'string',    'post_title' ),
-			array( 'video_source[0]',              'array',     'post_content' ),
-			array( 'draft',                        'boolean',   'post_status' ),
-			array( 'lastmod',                      'date',      'post_modified_gmt' ),
-			array( 'publishdate',                  'date',      'post_date_gmt' ),
-			array( 'video_source[0]->description', 'string',    'newspack_post_subtitle' ),
-			array( 'video_source[0]->description', 'string',    'newspack_article_summary' ),
-			array( 'video_source[0]->image',       'thumbnail', '_thumbnail_id' ),
-			array( 'video_source[0]->video_id',    'string',    'video_id' ),
-		);
+		$this->fields_mappings['Articles'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'content',     'string',  'post_content' ],
+			[ 'blocks',      'array',   'post_content' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'authors',     'array',   'post_author' ],
+			[ 'authors',     'authors', 'guest_authors' ],
+			[ 'description', 'string',  'newspack_article_summary' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'image->file', 'string',  '_thumbnail_id' ],
+		];
 
-		$this->fields_mappings['Articles'] = array(
-			array( 'title',       'string',  'post_title' ),
-			array( 'content',     'string',  'post_content' ),
-			array( 'blocks',      'array',   'post_content' ),
-			array( 'draft',       'boolean', 'post_status' ),
-			array( 'authors',     'array',   'post_author' ),
-			array( 'authors',     'authors', 'guest_authors' ),
-			array( 'description', 'string',  'newspack_article_summary' ),
-			array( 'publishdate', 'string',  'post_date_gmt' ),
-			array( 'lastmod',     'string',  'post_modified_gmt' ),
-			array( 'image->file', 'string',  '_thumbnail_id' ),
-		);
+		$this->fields_mappings['Events'] = [
+			[ 'title',       'string',    'post_title' ],
+			[ 'description', 'string',    'post_content' ],
+			[ 'draft',       'boolean',   'post_status' ],
+			[ 'lastmod',     'string',    'post_date_gmt' ],
+			[ 'lastmod',     'string',    'post_modified_gmt' ],
+			[ 'images[0]',   'thumbnail', '_thumbnail_id' ],
+			[ 'link',        'string',    'link' ],
+			[ 'time_start',  'string',    'newspack_listings_event_start_date' ],
+		];
 
-		$this->fields_mappings['Events'] = array(
-			array( 'title',       'string',    'post_title' ),
-			array( 'description', 'string',    'post_content' ),
-			array( 'draft',       'boolean',   'post_status' ),
-			array( 'lastmod',     'string',    'post_date_gmt' ),
-			array( 'lastmod',     'string',    'post_modified_gmt' ),
-			array( 'images[0]',   'thumbnail', '_thumbnail_id' ),
-			array( 'link',        'string',    'link' ),
-			array( 'time_start',  'string',    'newspack_listings_event_start_date' ),
-		);
+		$this->fields_mappings['Profiles'] = [
+			[ 'title',        'string',    'post_title' ],
+			[ 'description',  'string',    'post_content' ],
+			[ 'draft',        'boolean',   'post_status' ],
+			[ 'lastmod',      'string',    'post_date_gmt' ],
+			[ 'lastmod',      'string',    'post_modified_gmt' ],
+			[ 'image',        'thumbnail', '_thumbnail_id' ],
+			[ 'profile_type', 'string',    'tags_input' ],
+		];
 
-		$this->fields_mappings['Profiles'] = array(
-			array( 'title',        'string',    'post_title' ),
-			array( 'description',  'string',    'post_content' ),
-			array( 'draft',        'boolean',   'post_status' ),
-			array( 'lastmod',      'string',    'post_date_gmt' ),
-			array( 'lastmod',      'string',    'post_modified_gmt' ),
-			array( 'image',        'thumbnail', '_thumbnail_id' ),
-			array( 'profile_type', 'string',    'tags_input' ),
-		);
+		$this->fields_mappings['Multi-Media'] = [
+			[ 'title',                   'string',    'post_title' ],
+			[ 'description',             'string',    'post_content' ],
+			[ 'description',             'string',    'newspack_article_summary' ],
+			[ 'draft',                   'boolean',   'post_status' ],
+			[ 'path',                    'boolean',   'post_name' ],
+			[ 'publishdate',             'string',    'post_date_gmt' ],
+			[ 'lastmod',                 'string',    'post_modified_gmt' ],
+			[ 'tagline',                 'string',    'post_excerpt' ],
+			[ 'images[0]',               'thumbnail', '_thumbnail_id' ],
+			[ 'report_type',             'string',    'tags_input' ],
+			[ 'template',                'string',    '_wp_page_template' ],
+			[ 'featured_image_position', 'string',    'newspack_featured_image_position' ],
+		];
 
-		$this->fields_mappings['Multi-Media'] = array(
-			array( 'title',                   'string',    'post_title' ),
-			array( 'description',             'string',    'post_content' ),
-			array( 'description',             'string',    'newspack_article_summary' ),
-			array( 'draft',                   'boolean',   'post_status' ),
-			array( 'path',                    'boolean',   'post_name' ),
-			array( 'publishdate',             'string',    'post_date_gmt' ),
-			array( 'lastmod',                 'string',    'post_modified_gmt' ),
-			array( 'tagline',                 'string',    'post_excerpt' ),
-			array( 'images[0]',               'thumbnail', '_thumbnail_id' ),
-			array( 'report_type',             'string',    'tags_input' ),
-			array( 'template',                'string',    '_wp_page_template' ),
-			array( 'featured_image_position', 'string',    'newspack_featured_image_position' ),
-		);
+		$this->fields_mappings['Standards'] = [
+			[ 'title',   'string', 'post_title' ],
+			[ 'content', 'string', 'post_content' ],
+			[ 'publish', 'string', 'post_status' ],
+		];
+
+		$this->fields_mappings['Library'] = [
+			[ 'title',                   'string',    'post_title' ],
+			[ 'summary',                 'string',    'post_content' ],
+			[ 'summary',                 'string',    'post_content' ],
+			[ 'education_subjects',      'array',     'post_category' ],
+			[ 'education_topics',        'array',     'post_category' ],
+			[ 'education_levels',        'array',     'post_category' ],
+			[ 'standards_ap',            'array',     'tags_input' ],
+			[ 'standards_ap_biology',    'array',     'tags_input' ],
+			[ 'standards_ap_envscience', 'array',     'tags_input' ],
+			[ 'standards_ap_govpol',     'array',     'tags_input' ],
+			[ 'standards_ap_humgeo',     'array',     'tags_input' ],
+			[ 'standards_ap_psychology', 'array',     'tags_input' ],
+			[ 'standards_ccss',          'array',     'tags_input' ],
+			[ 'standards_ncss',          'array',     'tags_input' ],
+			[ 'standards_ngss',          'array',     'tags_input' ],
+			[ 'standards_nshspc',        'array',     'tags_input' ],
+			[ 'video',                   'thumbnail', '_thumbnail_id' ],
+			[ 'lastmod',                 'string',    'post_date_gmt' ],
+			[ 'lastmod',                 'string',    'post_modified_gmt' ],
+			[ 'draft',                   'boolean',   'post_status' ],
+		];
+
+		$this->fields_mappings['Partner'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'draft',       'string',  'post_status' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'website',     'string',  'newspack_sponsor_url' ],
+			[ 'images[0]',   'string',  '_thumbnail_id' ],
+		];
+
+		$this->fields_mappings['Playlist'] = [
+			[ 'title',       'string',  'post_title' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'description', 'boolean', 'post_content' ],
+		];
+
+		$this->fields_mappings['Transcript'] = [
+			[ 'title',       'string',  'post_title'],
+			[ 'publishdate', 'string',  'post_date_gmt'],
+			[ 'lastmod',     'string',  'post_modified_gmt'],
+			[ 'draft',       'boolean', 'post_status' ],
+			[ 'content',     'string',  'post_content' ],
+			[ 'template',    'string',  '_wp_page_template' ],
+		];
+
+		$this->fields_mappings['Series'] = [
+			[ 'title', 'string', 'post_title' ],
+			[ 'authors',     'array',   'post_author' ],
+			[ 'producers',   'authors', 'guest_authors' ],
+			[ 'description', 'string',  'newspack_article_summary' ],
+			[ 'description', 'string',  'post_content' ],
+			[ 'publishdate', 'string',  'post_date_gmt' ],
+			[ 'lastmod',     'string',  'post_modified_gmt' ],
+			[ 'images[0]',   'string',  '_thumbnail_id' ],
+			[ 'draft',       'boolean', 'post_status' ],
+		];
 
 	}
 
@@ -912,22 +1265,22 @@ $posts = [ $posts[0] ];
 	 */
 	public function load_mappings( $category ) {
 		if ( ! isset( $this->fields_mappings[ $category ] ) ) {
-			WP_CLI::error( 'The given category does not exist.' );
+			$this->logger->log( $this->log_name, 'The given category does not exist.' );
 		}
 
-		$fields = array();
+		$fields = [];
 
 		foreach ( $this->fields_mappings[ $category ] as $field ) {
 			list( $name, $type, $target ) = $field;
 
 			$is_meta = $this->is_meta_field( $target );
 
-			$fields[] = (object) array(
+			$fields[] = (object) [
 				'name'    => $name,
 				'type'    => $type,
 				'is_meta' => $is_meta,
 				'target'  => $is_meta ? $this->get_meta_key( $target ) : $target,
-			);
+			];
 		}
 
 		return $fields;
@@ -942,7 +1295,7 @@ $posts = [ $posts[0] ];
 	 */
 	public function get_post_type( $category ) {
 		if ( ! isset( $this->post_types[ $category ] ) ) {
-			WP_CLI::error( 'The given category does not exist.' );
+			$this->logger->log( $this->log_name, 'The given category does not exist.' );
 		}
 
 		return $this->post_types[ $category ];
@@ -969,6 +1322,139 @@ $posts = [ $posts[0] ];
 	}
 
 	/**
+	 * Convert a field's value to the necessary format.
+	 * For example, convert an image URL to attachment ID by importing it,
+	 * convert "draft": false to post_status=publish etc.
+	 *
+	 * @param object $field The field object.
+	 * @param mixed  $value The field's value (could be anything).
+	 *
+	 * @return mixed The formatted value.
+	 */
+	public function format_post_field( $field, $value ) {
+
+		// @TODO use a mechanism like in $this->is_array_item()?
+		if ( false !== strpos( $field->name, '->' ) && ! empty( $value ) ) {
+			$prop = substr( $field->name, strpos( $field->name, '->' ) + 2 );
+			$value = $value->$prop;
+		}
+
+		if ( 'string' == $field->type || 'array' == $field->type || 'boolean' == $field->type ) {
+			switch ( $field->target ) {
+				case 'post_status':
+					if ( true === $value ) {
+						return 'draft';
+					}
+
+					if ( false === $value ) {
+						return 'publish';
+					}
+					break;
+
+					return $value;
+				case 'post_name':
+					$path_parts = explode( '/', trim( $value, '/' ) );
+					$slug       = end( $path_parts );
+					return $slug;
+
+				case "post_author":
+					if ( ! empty( $value ) ) {
+						// Just grab the first user for core post_author.
+						$author = $this->get_user_from_staff_id( $value[0] );
+						return ( empty( $author ) ) ? false : $author;
+					}
+					break;
+
+				case "post_category":
+					switch ( $field->name ) {
+						case 'education_subjects':
+							$parent_name = 'Education Subjects';
+							$this->get_or_create_category( $parent_name, 'In the Classroom' );
+							break;
+
+						case 'education_topics':
+							$parent_name = 'Education Topics';
+							$this->get_or_create_category( $parent_name, 'In the Classroom' );
+							break;
+
+						case 'education_levels':
+							$parent_name = 'Education Levels';
+							$this->get_or_create_category( $parent_name, 'In the Classroom' );
+							break;
+
+					}
+
+					if ( isset( $parent_name ) ) {
+						$value = array_map(
+							function ( $value ) use ( $parent_name ) {
+								return $this->get_or_create_category( $value, $parent_name );
+							},
+							$value
+						);
+					} else {
+						$value = array_map( [ $this, 'get_or_create_category' ], $value );
+					}
+
+					return $value;
+
+				case "tags_input":
+					if ( is_array( $value ) ) {
+						$value = array_map(
+							function ( $value ) {
+								$tag_id = $this->get_reusable_block_tag_from_unique_id( $value );
+								return ( false !== $tag_id ) ? absint( $tag_id ) : false;
+							},
+							$value
+						);
+					}
+					return $value;
+
+			}
+		}
+
+		// Convert dates to WordPress' precious format.
+		if ( 'date' === $field->type ) {
+			$value = date( 'Y-m-d H:i:s', strtotime( $value ) );
+		}
+
+		// Process multiple authors into CAP guest authors.
+		if ( 'authors' === $field->type ) {
+			$authors = $this->convert_authors_to_guest_authors( $value );
+			return $authors;
+		}
+
+		if ( 'thumbnail' == $field->type && $value ) {
+
+			if ( 'video' === $field->name ) {
+
+				// Get the video post from the ID.
+				$video_post = $this->get_post_from_unique_id( $value );
+				if ( ! is_a( $video_post, 'WP_Post' ) ) {
+					return false;
+				}
+
+				$attachment_id = get_post_meta( $video_post->ID, '_thumbnail_id', true );
+
+			} else {
+
+				$this->logger->log( $this->log_name, sprintf( 'Importing thumbnail from %s', $value ) );
+
+				$image_path     = untrailingslashit( ABSPATH ) . $value;
+				$attachment_id = $this->attachments->import_external_file( $image_path );
+
+				if ( is_wp_error( $attachment_id ) ) {
+					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_path, $attachment_id->get_error_message() ) );
+					return $value;
+				}
+
+			}
+			return $attachment_id;
+		}
+
+		return maybe_serialize( $value );
+	}
+
+	/**
 	 * Check if a field should be saved in meta or in wp_posts table.
 	 *
 	 * @param string $field The field name.
@@ -988,6 +1474,9 @@ $posts = [ $posts[0] ];
 	 * @return array The modified args.
 	 */
 	public function add_cf_token_to_requests( $args, $url ) {
+		// It looks like the API has changed and no longer requires the CF token, so returning.
+		return $args;
+
 		if ( strpos( $url, 'pages.dev' ) === false ) {
 			return $args;
 		}
@@ -995,7 +1484,7 @@ $posts = [ $posts[0] ];
 		$cf_token = get_option( self::CF_TOKEN_OPTION );
 
 		if ( ! $cf_token ) {
-			WP_CLI::error( 'HTTP requests to CloudFlare will not work because the CF token does not exist. Aborting.' );
+			$this->logger->log( $this->log_name, 'HTTP requests to CloudFlare will not work because the CF token does not exist. Aborting.' );
 		}
 
 		$args['cookies']['CF_Authorization'] = $cf_token;
@@ -1021,15 +1510,20 @@ $posts = [ $posts[0] ];
 	 * @return void
 	 */
 	public function set_post_types() {
-		$this->post_types['Standards']           = 'wp_block';
-		$this->post_types['Links']               = 'post';
-		$this->post_types['Profiles']            = 'newspack_lst_generic';
-		$this->post_types['Education resources'] = 'post';
-		$this->post_types['Video']               = 'post';
-		$this->post_types['Articles']            = 'post';
-		$this->post_types['Events']              = 'newspack_lst_event';
-		$this->post_types['Profiles']            = 'newspack_lst_generic';
-		$this->post_types['Multi-Media']         = 'post';
+		$this->post_types['Standards']   = 'wp_block';
+		$this->post_types['Links']       = 'post';
+		$this->post_types['Profiles']    = 'newspack_lst_generic';
+		$this->post_types['Video']       = 'post';
+		$this->post_types['Articles']    = 'post';
+		$this->post_types['Events']      = 'newspack_lst_event';
+		$this->post_types['Profiles']    = 'newspack_lst_generic';
+		$this->post_types['Multi-Media'] = 'post';
+		$this->post_types['Standards']   = 'wp_block';
+		$this->post_types['Library']     = 'post';
+		$this->post_types['Partner']     = 'newspack_spnsrs_cpt';
+		$this->post_types['Playlist']    = 'newspack_lst_generic';
+		$this->post_types['Transcript']  = 'post';
+		$this->post_types['Series']      = 'post';
 	}
 
 	/**
@@ -1038,13 +1532,17 @@ $posts = [ $posts[0] ];
 	 * @return void
 	 */
 	public function set_content_formatters() {
-		$this->content_formatters['Education profiles'] = array( $this, 'format_education_profiles_content' );
-		$this->content_formatters['Education resources'] = array( $this, 'format_education_resources_content' );
-		$this->content_formatters['Video'] = array( $this, 'format_video_content' );
-		$this->content_formatters['Articles'] = array( $this, 'format_article_content' );
-		$this->content_formatters['Events'] = array( $this, 'format_events_content' );
-		$this->content_formatters['Profiles'] = array( $this, 'format_profiles_content' );
-		$this->content_formatters['Multi-Media'] = array( $this, 'format_multimedia_content' );
+		$this->content_formatters['Education profiles'] = [ $this, 'format_education_profiles_content' ];
+		$this->content_formatters['Video']              = [ $this, 'format_video_content' ];
+		$this->content_formatters['Articles']           = [ $this, 'format_article_content' ];
+		$this->content_formatters['Events']             = [ $this, 'format_events_content' ];
+		$this->content_formatters['Profiles']           = [ $this, 'format_profiles_content' ];
+		$this->content_formatters['Multi-Media']        = [ $this, 'format_multimedia_content' ];
+		$this->content_formatters['Standards']          = [ $this, 'format_standards_content' ];
+		$this->content_formatters['Library']            = [ $this, 'format_education_library_content' ];
+		$this->content_formatters['Playlist']           = [ $this, 'format_playlist_content' ];
+		$this->content_formatters['Transcript']         = [ $this, 'format_transcript_content' ];
+		$this->content_formatters['Series']             = [ $this, 'format_series_content' ];
 	}
 
 	/**
@@ -1089,28 +1587,6 @@ HTML;
 			$post->location,
 			$post->description,
 		);
-	}
-
-	/**
-	 * Format post content for Education Resources posts.
-	 *
-	 * Merges imported data with a post template specifically for Education Resources content.
-	 *
-	 * @param array $post Array of post data as retrieved from the JSON.
-	 *
-	 * @return string Constructed post template.
-	 */
-	public function format_education_resources_content( $post ) {
-		// WIP
-		$content_code = <<<HTML
-
-HTML;
-		$video_block = <<<HTML
-
-HTML;
-		$single_block_content = <<<HTML
-
-HTML;
 	}
 
 	/**
@@ -1403,6 +1879,451 @@ HTML;
 	}
 
 	/**
+	 * Format post content for Standards posts.
+	 *
+	 * Merges imported data with a post template specifically for Standards content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_standards_content( $post ) {
+
+		// Generate the content paragraph block.
+		$content = $this->convert_copy_to_blocks( $post->content );
+
+		// Get the tag.
+		$tag = term_exists( $post->title, 'post_tag' );
+		if ( is_null( $tag ) ) {
+			$tag = wp_create_term( $post->title, 'post_tag' );
+		}
+
+		// Generate the view more link paragraph block.
+		$view_more = sprintf(
+			'<!-- wp:paragraph --><p><a href="%s">View More</a></p><!-- /wp:paragraph -->',
+			get_term_link( (int) $tag['term_id'], 'post_tag' )
+		);
+
+		return $content . $view_more;
+	}
+
+	/**
+	 * Format post content for Education Library posts.
+	 *
+	 * Merges imported data with a post template specifically for Education Library content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	public function format_education_library_content( $post ) {
+
+		// Content placeholder.
+		$content = '';
+
+		// Get the video ID.
+		$video_id = $post->video;
+		if ( ! empty( $video_id ) ) {
+			$video_post = $this->get_post_from_unique_id( $video_id );
+			$youtube_id = get_post_meta( $video_post->ID, 'newspack_rr_video_id', true );
+			if ( $youtube_id && ! empty( $youtube_id ) ) {
+				$content .= $this->format_video_block( $youtube_id );
+			}
+		}
+
+		// Dump the video description.
+		$content .= '<!-- wp:paragraph --><p>ABOUT THIS VIDEO</p><!-- /wp:paragraph -->';
+		$content .= sprintf( '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->', esc_html( $post->summary ) );
+
+		// Prepare the lesson plans section.
+		$lesson_plan_template = '<!-- wp:paragraph --><p><a href="%1$s">%2$s</a></p><!-- /wp:paragraph -->';
+		$lesson_plans_output  = '';
+		foreach ( $post->summary_ctas as $plan ) {
+			$lesson_plans_output .= sprintf( $lesson_plan_template, $plan->url, $plan->copy );
+		}
+
+		// Append the lesson plans section.
+		$content .= <<<HTML
+		<!-- wp:columns -->
+		<div class="wp-block-columns"><!-- wp:column -->
+		<div class="wp-block-column"><!-- wp:group {"layout":{"type":"constrained"}} -->
+		<div class="wp-block-group">$lesson_plans_output</div>
+		<!-- /wp:group --></div>
+		<!-- /wp:column -->
+
+		<!-- wp:column -->
+		<div class="wp-block-column"><!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+		<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:paragraph -->
+		<p>Find similar lessons plans:</p>
+		<!-- /wp:paragraph -->
+
+		<!-- wp:post-terms {"term":"category"} /--></div>
+		<!-- /wp:group --></div>
+		<!-- /wp:column --></div>
+		<!-- /wp:columns -->
+		HTML;
+
+		// Start the objectives section.
+		$content .= '<!-- wp:paragraph --><p>Objectives</p><!-- /wp:paragraph -->';
+		$content .= '<!-- wp:paragraph --><p>Students will:</p><!-- /wp:paragraph -->';
+
+		// Convert the "Students Will" copy to a proper list.
+		$students_will = str_replace( 'Students will:', '', $post->learn_for_students );
+		$content .= $this->convert_markdown_unordered_lists( $students_will );
+
+		// Convert the questions into lists.
+		$comprehension_questions = array_map(
+			function ( $question ) {
+				return $this->convert_markdown_unordered_lists( $question->question );
+			},
+			$post->comprehension_questions
+		);
+		$comprehension_questions_output = implode( '', $comprehension_questions );
+
+		// Convert the resources into HTML.
+		$resource_output = '';
+		foreach ( $post->resources as $resource ) {
+			$resource_output .= sprintf(
+				'<!-- wp:paragraph --><p>%1$s <a href="%2$s">%3$s</a></p><!-- /wp:paragraph -->',
+				$resource->headline,
+				$resource->link,
+				$resource->source,
+			);
+		}
+
+		// Combine questions and resources to add the For Teachers section.
+		$content .= <<<HTML
+		<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+		<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:heading -->
+		<h2>For Teachers</h2>
+		<!-- /wp:heading -->
+
+		<!-- wp:heading {"level":4} -->
+		<h4>Essential Questions</h4>
+		<!-- /wp:heading -->
+
+		$comprehension_questions_output
+
+		<!-- wp:heading {"level":4} -->
+		<h4>Additional Resources</h4>
+		<!-- /wp:heading -->
+
+		$resource_output</div>
+		<!-- /wp:group -->
+		HTML;
+
+		// Prepare the "For Teachers" section using standards.
+		$standards = array_merge(
+			$post->standards_ap,
+			$post->standards_ap_biology,
+			$post->standards_ap_envscience,
+			$post->standards_ap_govpol,
+			$post->standards_ap_humgeo,
+			$post->standards_ap_psychology,
+			$post->standards_ccss,
+			$post->standards_ncss,
+			$post->standards_ngss,
+			$post->standards_nshspc,
+		);
+		if ( ! empty( $standards ) ) {
+
+			$standards_group    = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} --><div class="wp-block-group has-light-gray-background-color has-background">%s</div><!-- /wp:group -->';
+			$standard_template  = '<!-- wp:heading {"level":4} --><h4>%s</h4><!-- /wp:heading --><!-- wp:block {"ref":%d} /-->';
+			$standard_output    = array_map(
+				function( $standard ) use ( $standard_template ) {
+					$block = $this->get_post_from_unique_id( $standard );
+					return ( is_a( $block, 'WP_Post' ) ) ?
+						sprintf( $standard_template, get_the_title( $block->ID ), $block->ID ) :
+						false;
+				},
+				$standards
+			);
+
+			// Bring each standard together and insert into the group block.
+			$content .= sprintf( $standards_group, implode( '', $standard_output) );
+
+		}
+
+		// Prepare the related posts section.
+		if ( $post->related && ! empty( $post->related ) ) {
+
+			$related_template = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+			<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:newspack-blocks/homepage-articles {"excerptLength":25,"showDate":false,"showAuthor":false,"postLayout":"grid","columns":4,"postsToShow":4,"specificPosts":%s,"typeScale":3,"sectionHeader":"More Like this","specificMode":true} /--></div>
+			<!-- /wp:group -->';
+
+			// Convert the array of JSON unique IDs to an array of WP Post IDs .
+			$related_posts = array_map(
+				function ( $unique_id ) {
+					$post = $this->get_post_from_unique_id( $unique_id );
+					return ( is_a( $post, 'WP_Post' ) ) ? $post->ID : false;
+				},
+				$post->related
+			);
+
+			// Add the section, dropping the IDs into the homepage posts block.
+			if ( ! empty( $related_posts ) ) {
+				$content .= sprintf( $related_template, wp_json_encode( $related_posts ) );
+			}
+
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Format post content for Playlist posts.
+	 *
+	 * Merges imported data with a post template specifically for Playlist content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	private function format_playlist_content( $post ) {
+
+		$content = '';
+
+		// Build the main video columns block.
+		if ( ! isset( $post->related_videos) || empty( $post->related_videos ) ) {
+			return false; // Nothing to print out.
+		}
+
+		$video_id = $post->related_videos[0];
+		$video_post = $this->get_post_from_unique_id( $video_id );
+		if ( ! is_a( $video_post, 'WP_Post' ) ) {
+			return false;
+		}
+
+		$youtube_id        = get_post_meta( $video_post->ID, self::META_PREFIX . 'video_id', true );
+		$youtube_video     = $this->format_video_block( $youtube_id );
+		$video_title       = get_the_title( $video_post );
+		$video_description = get_post_meta( $video_post->ID, 'newspack_article_summary', true );
+		$content          .= <<<HTML
+		<!-- wp:columns -->
+		<div class="wp-block-columns"><!-- wp:column {"width":"66.66%"} -->
+		<div class="wp-block-column" style="flex-basis:66.66%">$youtube_video</div>
+		<!-- /wp:column -->
+
+		<!-- wp:column {"width":"33.33%"} -->
+		<div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:heading -->
+		<h2>$video_title</h2>
+		<!-- /wp:heading -->
+
+		<!-- wp:paragraph -->
+		<p>$video_description</p>
+		<!-- /wp:paragraph --></div>
+		<!-- /wp:column --></div>
+		<!-- /wp:columns -->
+		HTML;
+
+		$related_template = '<!-- wp:newspack-blocks/homepage-articles {"showExcerpt":false,"showDate":false,"minHeight":25,"showAuthor":false,"postLayout":"grid","columns":5,"postsToShow":100,"specificPosts":%1$s,"mediaPosition":"behind","typeScale":2,"sectionHeader":"See more stories about %2$s","specificMode":true} /-->';
+		$related_video_ids = array_map(
+			function ( $unique_id ) {
+				$post = $this->get_post_from_unique_id( $unique_id );
+				return ( ! is_a( $post, 'WP_Post' ) ) ? false : $post->ID;
+			},
+			array_slice( $post->related_videos, 1 )
+		);
+		if ( ! empty( $related_video_ids ) ) {
+			$content .= sprintf( $related_template, wp_json_encode( $related_video_ids ), $video_title );
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Format post content for Transcript posts.
+	 *
+	 * Merges imported data with a post template specifically for Transcript content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	private function format_transcript_content( $post ) {
+		return ( isset( $post->content ) ) ? $this->convert_copy_to_blocks( $post->content ) : '';
+	}
+
+	/**
+	 * Format post content for Series posts.
+	 *
+	 * Merges imported data with a post template specifically for Series content.
+	 *
+	 * @param object $post Object of post data as retrieved from the JSON.
+	 *
+	 * @return string Constructed post template.
+	 */
+	private function format_series_content( $post ) {
+		$content = '';
+
+		// Description.
+		if ( isset( $post->description ) ) {
+			$content .= sprintf(
+				'<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->',
+				esc_html( $post->description )
+			);
+		}
+
+		// Blocks
+		if ( isset( $post->blocks ) && ! empty( $post->blocks ) ) {
+			foreach ( $post->blocks as $block ) {
+				if (
+					! property_exists( $block, 'video_id') ||
+					! property_exists( $block, 'ctas') ||
+					empty( $block->ctas ) ||
+					empty( $block->video_id )
+				) {
+					continue;
+				}
+
+				$youtube_video = $this->format_video_block( $block->video_id );
+				$title         = esc_html( $block->title );
+				$caption       = esc_html( $block->caption );
+				$cta_copy      = esc_html( $block->ctas[0]->copy );
+				$cta_url       = esc_html( $block->ctas[0]->url );
+
+				// Add to content, flip-flopping based on media_position
+				$content .= ( 'Left' === $block->media_position ) ? <<<HTML
+				<!-- wp:group {"layout":{"type":"constrained"}} -->
+				<div class="wp-block-group"><!-- wp:columns -->
+				<div class="wp-block-columns"><!-- wp:column {"width":"66.66%"} -->
+				<div class="wp-block-column" style="flex-basis:66.66%">$youtube_video</div>
+				<!-- /wp:column -->
+
+				<!-- wp:column {"width":"33.33%"} -->
+				<div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:heading -->
+				<h2>$title</h2>
+				<!-- /wp:heading -->
+
+				<!-- wp:paragraph -->
+				<p>$caption</p>
+				<!-- /wp:paragraph -->
+
+				<!-- wp:buttons -->
+				<div class="wp-block-buttons"><!-- wp:button -->
+				<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="$cta_url">$cta_copy</a></div>
+				<!-- /wp:button --></div>
+				<!-- /wp:buttons --></div>
+				<!-- /wp:column --></div>
+				<!-- /wp:columns --></div>
+				<!-- /wp:group -->
+				HTML : <<<HTML
+				<!-- wp:group {"layout":{"type":"constrained"}} -->
+				<div class="wp-block-group"><!-- wp:columns -->
+				<div class="wp-block-columns"><!-- wp:column {"width":"33.33%"} -->
+				<div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:heading -->
+				<h2>$title</h2>
+				<!-- /wp:heading -->
+
+				<!-- wp:paragraph -->
+				<p>$caption</p>
+				<!-- /wp:paragraph -->
+
+				<!-- wp:buttons -->
+				<div class="wp-block-buttons"><!-- wp:button -->
+				<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="$cta_url">$cta_copy</a></div>
+				<!-- /wp:button --></div>
+				<!-- /wp:buttons --></div>
+				<!-- /wp:column -->
+
+				<!-- wp:column {"width":"66.7%"} -->
+				<div class="wp-block-column" style="flex-basis:66.7%">$youtube_video</div>
+				<!-- /wp:column --></div>
+				<!-- /wp:columns --></div>
+				<!-- /wp:group -->
+				HTML;
+			}
+		}
+
+		// Funders section.
+		if ( isset( $post->funders ) && ! empty( $post->funders ) ) {
+			$funders       = [];
+			$funder_images = [];
+			foreach ( $post->funders as $funder ) {
+				$funder_post = $this->get_post_from_unique_id( $funder );
+				if ( ! is_a( $funder_post, 'WP_Post' ) ) {
+					$this->logger->log( $this->log_name, sprintf( 'No posts found for funder unique ID %s', $funder ), false );
+					continue;
+				}
+
+				$funder_name = get_the_title( $funder_post->ID );
+				$funder_url  = get_post_meta( $funder_post->ID, 'newspack_sponsor_url', true );
+				$funders[]   = sprintf( '<a href="%1$s">%2$s</a>', esc_url( $funder_url ), esc_html( $funder_name ) );
+				$funder_images[] = get_the_post_thumbnail( $funder_post );
+			}
+
+			$funders_output = '<!-- wp:paragraph --><p>A special thank you to ';
+			// Generate a writen list of funders, separating with a comma or "and" where appropriate
+			// and ensuring funders names that don't start "The" are prefixed with it.
+			for ( $i = 0; $i < count( $funders ); $i++ ) {
+
+				$the = ( false !== strpos( $funders[ $i ], 'The' ) ) ? true : false;
+
+				if ( $i === 0 ) {
+					$tpl = ( $the ) ? 'the %s' : '%s';
+				} else if ( $i !== count( $funders )-1 ) {
+					$tpl = ( $the ) ? ', the %s' : ', %s';
+				} else {
+					$tpl = ( $the ) ? ' and the %s' : ' and %s';
+				}
+
+				$funders_output .= sprintf( $tpl, $funders[ $i ] );
+			}
+			$funders_output .= ' for supporting this project.</p><!-- /wp:paragraph -->';
+
+			// Dump the images.
+			if ( count( $funder_images ) === 1 ) {
+				$funders_output .= implode( '', $funder_images );
+			} else {
+				$columns = '<!-- wp:columns --><div class="wp-block-columns">%s</div><!-- /wp:columns -->';
+				$column  = '<!-- wp:column --><div class="wp-block-column">%s</div><!-- /wp:column -->';
+
+				// Split the array into an array of columns and rows.
+				$number_of_rows = count( $funder_images ) / 2;
+				$columns_rows   = [];
+				for ( $i = 0; $i < $number_of_rows; $i++ ) {
+					$columns_rows[ $i ] = ( isset( $funder_images[ $i++ ] ) ) ? [
+						$funder_images[ $i ],
+						$funder_images[ $i++ ],
+					] : [ $funder_images[ $i ] ];
+				}
+
+				// Combine the images into columns blocks.
+				foreach ( $columns_rows as $row ) {
+					$col1 = sprintf( $column, $row[0] );
+					$col2 = sprintf( $column, $row[0] );
+
+					// Print out the columns, or just the image if there's only one.
+					$funders_output .= ( count( $row ) > 1 ) ? sprintf( $columns, $col1 . $col2 ) : $row[0];
+				}
+			}
+
+			// Add our completed funders content.
+			$content .= $funders_output;
+
+		}
+
+		// Related section.
+		if ( isset( $post->related ) && ! empty( $post->related ) ) {
+			$related_template = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->
+			<div class="wp-block-group has-light-gray-background-color has-background"><!-- wp:newspack-blocks/homepage-articles {"showDate":false,"showAuthor":false,"showCategory":true,"postLayout":"grid","columns":4,"postsToShow":4,"specificPosts":%1$s,"typeScale":2,"sectionHeader":"Related"} /--></div>
+			<!-- /wp:group -->';
+			$related_post_ids = array_map(
+				function ( $unique_id ) {
+					$post = $this->get_post_from_unique_id( $unique_id );
+					return ( ! is_a( $post, 'WP_Post' ) ) ? false : $post->ID;
+				},
+				array_slice( $post->related, 1 )
+			);
+			if ( ! empty( $related_video_ids ) ) {
+				$content .= sprintf( $related_template, wp_json_encode( $related_video_ids ) );
+			}
+		}
+
+		return $content;
+	}
+
+	/**
 	 * Convert paragraph HTML to blocks.
 	 *
 	 * Intended to be used for any "copy" values from the JSON imports.
@@ -1443,15 +2364,35 @@ HTML;
 		return implode( '', $new_blocks );
 	}
 
+	/**
+	 * Convert markdown lists to Gutenberg list blocks.
+	 *
+	 * @param string $content The markdown content.
+	 *
+	 * @return string WP Block HTML
+	 */
+	private function convert_markdown_unordered_lists( $content ) {
+		$items        = array_filter( explode( '* ', $content ) );
+		$ul_template  = '<!-- wp:list --><ul>%s</ul><!-- /wp:list -->';
+		$li_template  = '<!-- wp:list-item --><li>%s</li><!-- /wp:list-item -->';
+		$items_markup = '';
+
+		foreach ( $items as $item ) {
+			$items_markup = sprintf( $li_template, esc_html( $item ) );
+		}
+
+		return sprintf( $ul_template, $items_markup );
+	}
+
 	private function format_image_block( $block ) {
 
 		$filename = explode( '/', $block->image );
 		$filename = end( $filename );
 		$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
 		if ( is_null( $attachment_id ) ) {
-			$image_url     = self::BASE_URL . $block->image;
+			$image_path    = untrailingslashit( ABSPATH ) . $block->image;
 			$attachment_id = $this->attachments->import_external_file(
-				$image_url,     // Image URL.
+				$image_path,     // Image URL.
 				$block->copy, // Title.
 				$block->copy, // Caption.
 				$block->copy, // Description.
@@ -1548,7 +2489,7 @@ https://www.youtube.com/watch?v=%1$s
 		$index          = $matches[2][0];
 		$property_value = $this->get_object_property( $object, $property_name );
 
-		return $property_value[ $index ];
+		return ( is_null( $property_value ) ) ? false : $property_value[ $index ];
 	}
 
 	/**
@@ -1566,25 +2507,23 @@ https://www.youtube.com/watch?v=%1$s
 	 * Validate the JSON file and return it's decoded contents.
 	 *
 	 * @param array $assoc_args The array of associate arguments passed to the CLI command.
-	 * @return mixed The decoded JSON, if possible.
+	 * @return iterable An iterable with each item in the json as an object.
 	 */
-	private function validate_json_file( $assoc_args ) {
+	private function validate_json_file( $assoc_args ): iterable {
 
 		if ( ! array_key_exists( 'json-file', $assoc_args ) ) {
-			WP_CLI::error( 'No JSON file provided. Please feed me JSON.' );
+			$this->logger->log( $this->log_name, 'No JSON file provided. Please feed me JSON.' );
 		}
 
-		$json_file = $assoc_args['json-file'];
-		if ( ! file_exists( $json_file ) ) {
-			WP_CLI::error( 'The provided JSON file doesn\'t exist.' );
+		$json_file = $assoc_args['json-file'] ?? null;
+		if ( str_starts_with( $json_file, 'json/' ) ) {
+			// The API changed and paths changed so the "json" part is no longer there.
+			// The migrate commands use a path and this will ensure that the old commands work too.
+			$json_file = substr( $json_file, 5 );
 		}
+		$json_url = self::JSON_API_BASE_URL . '/' . $json_file;
 
-		$data = json_decode( file_get_contents( $json_file ) );
-		if ( null === $data ) {
-			WP_CLI::error( 'Could not decode the JSON data. Exiting...' );
-		}
-
-		return $data;
+		return $this->json_iterator->items( $json_url );
 	}
 
 	/**
@@ -1607,20 +2546,50 @@ https://www.youtube.com/watch?v=%1$s
 
 		// If not, create it.
 		if ( 0 === $category_id ) {
-			\WP_CLI::log( sprintf( 'Category %s not found. Creating it....', $name ) );
+			$this->logger->log( $this->log_name, sprintf( 'Category %s not found. Creating it....', $name ) );
 
 			// Create the category, under it's parent if required.
-			$category_id = ( $parent_id ) ?
+			$category_id = ( isset( $parent_id ) ) ?
 				wp_create_category( $name, $parent_id ) :
 				wp_create_category( $name );
 
 			if ( is_wp_error( $category_id ) ) {
-				\WP_CLI::warning( sprintf( 'Failed to create %s category', $name ) );
+				$this->logger->log( $this->log_name, sprintf( 'Failed to create %s category', $name ) );
 				$category_id = false;
 			}
 
 		}
 
 		return $category_id;
+	}
+
+	/**
+	 * Gets the title of an imported reusable block.
+	 *
+	 * Each Standard is imported as a reusable block, with the unique ID stored as meta.
+	 * This function finds the block with the ID and returns the tag it's associated with.
+	 *
+	 * @param string $unique_id The unique ID from the JSON import.
+	 *
+	 * @return string|bool Title of the re-usable block. False if not found.
+	 */
+	private function get_reusable_block_title_from_unique_id( $unique_id ) {
+		$block = $this->get_post_from_unique_id( $unique_id );
+		if ( ! $block ) {
+			return false;
+		}
+		return $block->post_title;
+	}
+
+	private function get_reusable_block_tag_from_unique_id( $unique_id ) {
+		$title = $this->get_reusable_block_title_from_unique_id( $unique_id );
+		if ( ! $title ) {
+			return false;
+		}
+
+		$tag   = wp_create_tag( $title );
+		$value = ( ! is_wp_error( $tag ) ) ? $tag['term_id'] : false;
+
+		return $value;
 	}
 }
