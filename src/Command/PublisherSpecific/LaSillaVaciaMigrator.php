@@ -12,6 +12,7 @@ use Exception;
 use Generator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
@@ -954,6 +955,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 						'description' => 'The directory where the media folder is located',
 						'optional' => false,
 						'repeating' => false,
+					],
+				]
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-update-user-slugs',
+			[ $this, 'update_user_slugs' ],
+			[
+				'shortdesc' => 'Go over users and guest users to fix their slugs.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Skip writing?',
 					],
 				]
 			]
@@ -2409,6 +2426,106 @@ BLOCK;
 
 	}
 
+	// TODO. Rename maybe depending on
+	public function update_user_slugs( $args, $assoc_args): void {
+		$command_meta_key     = 'update_user_slugs'; //TODO. fix lige det med versioner ordenligt
+		$command_meta_version = 1;
+		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$dry_run              = WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
+
+		global $wpdb;
+		// Get the users that have an email as their username.
+		$user_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM {$wpdb->users} WHERE user_login LIKE '%@%';"
+			)
+		);
+
+		$post_logic    = new Posts();
+		$guest_authors = array_fill_keys( $post_logic->get_all_posts_ids( 'guest-author' ), [] );
+
+		foreach ( $user_ids as $user_id ) {
+
+			if ( MigrationMeta::get( $user_id, $command_meta_key, 'user' ) >= $command_meta_version ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "User with ID %d already has been updated to %s. Skipping.", $user_id,
+						$command_meta_version )
+				);
+				continue;
+			}
+
+			$user                = get_user_by( 'id', $user_id );
+			$old_nicename        = $user->user_nicename;
+			$user->user_nicename = substr( sanitize_title( $user->display_name ), 0, 50 );
+
+
+			$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user->user_login );
+			if ( ! empty( $ga->ID ) ) {
+				$guest_authors[ $ga->ID ] = [
+					'new_nicename' => $user->user_nicename,
+					'old_nicename' => $old_nicename,
+				];
+			}
+
+			if ( ! $dry_run ) {
+				if ( is_wp_error( wp_update_user( $user ) ) ) {
+					$this->logger->log(
+						$log_file,
+						sprintf( "Could not update user nicename for user ID %d.", $user_id ),
+						Logger::ERROR
+					);
+					continue;
+				}
+				MigrationMeta::update( $user_id, $command_meta_key, 'user', $command_meta_version );
+			}
+
+			WP_CLI::success( sprintf( "Updated nicename on user with ID %d", $user_id ) );
+		}
+
+
+		foreach ( $guest_authors as $post_id => $data ) {
+
+			if ( MigrationMeta::get( $post_id, $command_meta_key, 'post' ) === $command_meta_version ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Guest user with post ID %d already has been updated to %s. Skipping.", $post_id,
+						$command_meta_version )
+				);
+				continue;
+			}
+			$post            = get_post( $post_id );
+			$slug            = $data['new_nicename'] ?? substr( sanitize_title( $post->post_title ), 0, 200 );
+			$old_post_name   = $post->post_name;
+			$post->post_name = 'cap-' . $slug;
+
+			if ( ! $dry_run ) {
+				if ( is_wp_error( wp_update_post( $post ) ) ) {
+					$this->logger->log(
+						$log_file,
+						sprintf( "Could not update post name for guest user with post ID %d.", $post_id ),
+						Logger::ERROR
+					);
+					continue;
+				}
+				update_post_meta( $post_id, 'cap-user_login', $slug );
+
+				$sql    = $wpdb->prepare(
+					"UPDATE {$wpdb->terms} SET slug = '%s' WHERE slug = '%s'",
+					$post->post_name,
+					'cap-' . ( $data['old_nicename'] ?? $old_post_name )
+				);
+				$result = $wpdb->query( $sql );
+
+				MigrationMeta::update( $post_id, $command_meta_key, 'user', $command_meta_version );
+			}
+
+			WP_CLI::success( sprintf( "Updated post_name on guest user with ID %d", $post_id ) );
+
+		}
+
+	}
+
     /**
      * @param string $html
      * @return string
@@ -2511,5 +2628,6 @@ BLOCK;
             WP_CLI::log( $message );
         }
     }
+
 }
 
