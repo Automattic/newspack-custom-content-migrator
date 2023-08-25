@@ -1404,15 +1404,4 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 	}
 
-	/**
-	 * Simple file logging.
-	 *
-	 * @param string $file    File name or path.
-	 * @param string $message Log message.
-	 */
-	public function log( $file, $message ) {
-		$message .= "\n";
-		file_put_contents( $file, $message, FILE_APPEND );
-	}
-
 }
