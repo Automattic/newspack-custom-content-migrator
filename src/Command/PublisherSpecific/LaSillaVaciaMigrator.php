@@ -967,6 +967,20 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				'shortdesc' => 'Go over users and guest users to fix their slugs.',
 				'synopsis'  => [
 					[
+						'type' => 'assoc',
+						'name' => 'user-id',
+						'description' => 'A specific user ID to run the command on',
+						'optional' => true,
+						'repeating' => false,
+					],
+					[
+						'type' => 'assoc',
+						'name' => 'guest-author-id',
+						'description' => 'A specific guest user post ID to run the command on',
+						'optional' => true,
+						'repeating' => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
 						'optional'    => true,
@@ -2426,23 +2440,46 @@ BLOCK;
 
 	}
 
-	// TODO. Rename maybe depending on
+	// Update user slugs. They were using emails (without '@') and this changes it to the display name instead.
 	public function update_user_slugs( $args, $assoc_args): void {
-		$command_meta_key     = 'update_user_slugs'; //TODO. fix lige det med versioner ordenligt
+		$command_meta_key     = 'update_user_slugs';
 		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 		$dry_run              = WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
 
+		$single_user_id         = $assoc_args['user-id'] ?? false;
+		$single_guest_author_id = $assoc_args['guest-author-id'] ?? false;
+
+		if ( $single_user_id && $single_guest_author_id ) {
+			WP_CLI::error( "You can't use both --user-id and --guest-author-id at the same time." );
+		}
+
+		$is_single_run = ( $single_user_id xor $single_guest_author_id );
+
 		global $wpdb;
-		// Get the users that have an email as their username.
-		$user_ids = $wpdb->get_col(
-			$wpdb->prepare(
-				"SELECT ID FROM {$wpdb->users} WHERE user_login LIKE '%@%';"
-			)
-		);
+
+		$user_ids = [];
+		if ( $single_user_id ) {
+			$user_ids = [ get_user_by( 'ID', $assoc_args['user-id'] ) ];
+		} elseif ( ! $is_single_run ) {
+			// Get the users that have an email as their username.
+			$user_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM {$wpdb->users} WHERE user_login LIKE '%@%';"
+				)
+			);
+		}
 
 		$post_logic    = new Posts();
-		$guest_authors = array_fill_keys( $post_logic->get_all_posts_ids( 'guest-author' ), [] );
+		$guest_authors = [];
+		if ( $single_guest_author_id ) {
+			$single_user = get_post( $assoc_args['guest-author-id'] );
+			if ( $single_user && 'guest-author' === $single_user->post_type ) {
+				$guest_authors = [ $assoc_args['guest-author-id'] => [] ];
+			}
+		} elseif ( ! $is_single_run ) {
+			$guest_authors = array_fill_keys( $post_logic->get_all_posts_ids( 'guest-author' ), [] );
+		}
 
 		foreach ( $user_ids as $user_id ) {
 
@@ -2483,10 +2520,8 @@ BLOCK;
 			WP_CLI::success( sprintf( "Updated nicename on user with ID %d", $user_id ) );
 		}
 
-
 		foreach ( $guest_authors as $post_id => $data ) {
-
-			if ( MigrationMeta::get( $post_id, $command_meta_key, 'post' ) === $command_meta_version ) {
+			if ( MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
 				$this->logger->log(
 					$log_file,
 					sprintf( "Guest user with post ID %d already has been updated to %s. Skipping.", $post_id,
@@ -2512,16 +2547,15 @@ BLOCK;
 
 				$sql    = $wpdb->prepare(
 					"UPDATE {$wpdb->terms} SET slug = '%s' WHERE slug = '%s'",
-					$post->post_name,
+					$slug,
 					'cap-' . ( $data['old_nicename'] ?? $old_post_name )
 				);
-				$result = $wpdb->query( $sql );
+				$wpdb->query( $sql );
 
-				MigrationMeta::update( $post_id, $command_meta_key, 'user', $command_meta_version );
+				MigrationMeta::update( $post_id, $command_meta_key, 'term', $command_meta_version );
 			}
 
 			WP_CLI::success( sprintf( "Updated post_name on guest user with ID %d", $post_id ) );
-
 		}
 
 	}
