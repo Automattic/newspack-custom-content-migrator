@@ -2546,16 +2546,17 @@ BLOCK;
 				update_post_meta( $post_id, 'cap-user_login', $slug );
 
 				$sql    = $wpdb->prepare(
-					"UPDATE {$wpdb->terms} SET slug = '%s' WHERE slug = '%s'",
-					$slug,
-					'cap-' . ( $data['old_nicename'] ?? $old_post_name )
+					"UPDATE {$wpdb->terms} SET slug = '%s', name = '%s' WHERE slug = '%s'",
+					$post->post_name,
+					$post->post_title,
+					empty( $data['old_nicename'] ) ? $old_post_name : 'cap-' . $data['old_nicename']
 				);
 				$wpdb->query( $sql );
 
 				MigrationMeta::update( $post_id, $command_meta_key, 'term', $command_meta_version );
 			}
 
-			WP_CLI::success( sprintf( "Updated post_name on guest user with ID %d", $post_id ) );
+			WP_CLI::success( sprintf( "Updated slug for %s: %s", $post->post_title, get_author_posts_url( $post->ID ) . $slug ) );
 		}
 
 	}
