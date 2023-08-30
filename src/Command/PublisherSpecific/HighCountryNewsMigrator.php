@@ -551,6 +551,24 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				],
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-delete-weird-categories',
+			array( $this, 'delete_weird_categories' ),
+			array(
+				'shortdesc' => 'Deletes categories that were really articles.',
+				'synopsis'  => [
+					'synopsis'  => [
+						[
+							'type'        => 'flag',
+							'name'        => 'dry-run',
+							'optional'    => true,
+							'description' => 'Whether to do a dry-run without making updates.',
+						],
+					],
+				],
+			)
+		);
 	}
 
 	public function cmd_migrate_authors_from_scrape() {
@@ -2005,6 +2023,39 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
+	}
+	// There were a bunch of categories under issues that were not issues, but looked
+	// more like articles. This function deletes them.
+	public function delete_weird_categories( array $args, array $assoc_args ): void {
+		$dry_run = WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
+
+		$issue_term_id = 385;
+		global $wpdb;
+		// Issues slugs should be a number (e.g. 35 or 9.21). The query gets the issues that
+		// don't have number slugs and don't have any posts associated with it.
+		$sql = $wpdb->prepare( "SELECT wt.term_id
+			FROM {$wpdb->terms} wt
+				LEFT JOIN {$wpdb->term_relationships} wtr ON wtr.term_taxonomy_id = wt.term_id
+			WHERE wtr.term_taxonomy_id IS NULL
+				AND wt.term_id IN (SELECT term_id FROM {$wpdb->term_taxonomy} WHERE parent =  %d)
+				AND wt.slug NOT REGEXP '^[0-9]'", [ $issue_term_id ] );
+
+		$category_ids = $wpdb->get_col( $sql );
+		$num_cats     = count( $category_ids );
+
+		$progress = WP_CLI\Utils\make_progress_bar(
+			sprintf( 'Deleting %d weird issue catergories', $num_cats ),
+			$num_cats
+		);
+
+		foreach ( $category_ids as $cat_id ) {
+			if ( ! $dry_run && is_wp_error( wp_delete_term( $cat_id, 'category' ) ) ) {
+				WP_CLI::error( 'Deleting issue category with %d triggered an error', $cat_id );
+			}
+			$progress->tick();
+		}
+		$progress->finish();
+		WP_CLI::success( 'Deleted weird issue categories' );
 	}
 
 	/**
