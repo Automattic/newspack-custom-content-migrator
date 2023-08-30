@@ -19,7 +19,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Meta key for Chorus CMS' original ID.
 	 */
-	const CHORUS_ORIGINAL_ID_META_KEY = 'newspack_chorus_entry_uid';
+	const CHORUS_ORIGINAL_ID_META_KEY            = 'newspack_chorus_entry_uid';
+	const CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY = 'newspack_original_image_url';
 
 	/**
 	 * Chorus components to Gutenberg blocks converters.
@@ -83,6 +84,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			'arguments' => [
 				'component',
 				'post_id',
+				'refresh_attachment_data',
 			],
 		],
 		'EntryBodyHeading'         => [
@@ -139,6 +141,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			'arguments' => [
 				'component',
 				'post_id',
+				'refresh_attachment_data',
 			],
 		],
 		'EntryBodyRelatedList'     => [
@@ -253,6 +256,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 					[
+						'type'        => 'assoc',
+						'name'        => 'start-index',
+						'description' => 'If used, will start importing from this index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'refresh-authors',
 						'description' => 'If used, will refresh all author data from JSONs, even if author exists.',
@@ -263,6 +273,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						'type'        => 'flag',
 						'name'        => 'refresh-posts',
 						'description' => "If used, will refresh all posts or 'entries' data from JSONs, even if post exists.",
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-attachment-data',
+						'description' => 'If used, will refresh attachment data (caption, title, ...), even if they exist.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -285,10 +302,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Not yet implemented $refresh_authors.
 		$refresh_authors = $assoc_args['refresh-authors'] ?? null;
 		// Not yet implemented $refresh_posts.
-		$refresh_posts = $assoc_args['refresh-posts'] ?? null;
-		$path          = rtrim( $assoc_args['path-to-export'], '/' );
-		$authors_path  = $path . '/author';
-		$entries_path  = $path . '/entry';
+		$refresh_posts           = $assoc_args['refresh-posts'] ?? null;
+		$refresh_attachment_data = $assoc_args['refresh-attachment-data'] ?? false;
+		$start_index             = $assoc_args['start-index'] ?? 0;
+		$path                    = rtrim( $assoc_args['path-to-export'], '/' );
+		$authors_path            = $path . '/author';
+		$entries_path            = $path . '/entry';
 		if ( ! file_exists( $authors_path ) || ! file_exists( $entries_path ) ) {
 			WP_CLI::error( 'Content not found in path.' );
 		}
@@ -300,7 +319,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$this->import_authors( $authors_path, $refresh_authors );
 
 		WP_CLI::line( 'Importing posts...' );
-		$this->import_entries( $entries_path, $refresh_posts );
+		$this->import_entries( $entries_path, $start_index, $refresh_posts, $refresh_authors, $refresh_attachment_data );
 
 		WP_CLI::success( 'Done. Check *.log files.' );
 	}
@@ -356,16 +375,17 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Imports posts.
 	 *
-	 * @param string $entries_path
+	 * @param string $entries_path Path to "entries/" folder (path should include the "entries" folder ;) ).
+	 * @param int    $start_index Start importing from this index.
 	 * @param bool   $refresh_posts Not yet implemented.
+	 * @param bool   $refresh_authors Not yet implemented.
+	 * @param bool   $refresh_attachment_data Refresh attachments metadata.
 	 *
+	 * @throws \RuntimeException If argument is missing.
 	 * @return void
 	 */
-	public function import_entries( $entries_path, $refresh_posts ) {
+	public function import_entries( $entries_path, $start_index, $refresh_posts, $refresh_authors, $refresh_attachment_data ) {
 		global $wpdb;
-
-		// Not yet implemented.
-		$refresh_authors = false;
 
 		// Get already imported posts original IDs.
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::CHORUS_ORIGINAL_ID_META_KEY );
@@ -373,6 +393,10 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
 		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
+			if ( $key_entry_json + 1 < $start_index ) {
+				continue;
+			}
+
 			WP_CLI::line( sprintf( '%d/%d', $key_entry_json + 1, count( $entries_jsons ) ) );
 
 			$data_entry = json_decode( file_get_contents( $entry_json ), true );
@@ -440,7 +464,24 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			/**
 			 * Insert or fetch post.
 			 */
-			$post_id = $refresh_posts ? $this->get_post_id_by_meta( self::CHORUS_ORIGINAL_ID_META_KEY, $entry['uid'] ) : wp_insert_post( $post_create_args, true );
+			$post_id = $this->get_post_id_by_meta( self::CHORUS_ORIGINAL_ID_META_KEY, $entry['uid'] );
+			// If the post exists and we don't want to refresh it, skip it.
+			if ( ! $refresh_posts && $post_id ) {
+				$this->logger->log(
+					'chorus-cms-import-authors-and-posts__info__skip_entry.log',
+					sprintf( 'Skipping entry %s because it\'s already imported.', $entry['uid'] ),
+					$this->logger::WARNING
+				);
+
+				continue;
+			}
+
+			$post_created = false;
+			if ( ! $post_id ) {
+				$post_id      = wp_insert_post( $post_create_args );
+				$post_created = true;
+			}
+
 			if ( is_wp_error( $post_id ) ) {
 				$err = $post_id->get_error_message();
 				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorInserting: " . $err );
@@ -448,14 +489,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			}
 
 			if ( ! $post_id ) {
-				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorGetting. " );
+				$this->logger->log( 'chorus__error__insert_post.log', "uid: {$entry['uid']} errorGetting." );
 				continue;
 			}
 
 			WP_CLI::success(
-				$refresh_posts
-				? "Fetched post ID $post_id for {$entry['url']}"
-				: "Created post ID $post_id for {$entry['url']}"
+				$post_created
+				? "Created post ID $post_id for {$entry['url']}"
+				: "Fetched post ID $post_id for {$entry['url']}"
 			);
 
 			/**
@@ -464,6 +505,34 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 */
 			$blocks = [];
 			foreach ( $entry['body']['components'] as $component ) {
+
+				// Skip "Think Locally, Act Locally" campaign.
+				if (
+					'EntryBodyHeading' === $component['__typename']
+					&& array_key_exists( 'html', $component['contents'] )
+					&& 'Think Locally, Act Locally' === trim( $component['contents']['html'] )
+					) {
+						$this->logger->log(
+							'chorus-cms-import-authors-and-posts__info__skip_think_locally_campaign.log',
+							sprintf( 'Entry %s (wp ID: %d) contains a "Think Locally, Act Locally" campaign.', $entry['uid'], $post_id ),
+							$this->logger::WARNING
+						);
+					break;
+				}
+
+				// Skip embeded Google Docs.
+				if (
+					'EntryBodyEmbed' === $component['__typename']
+					&& isset( $component['embed']['provider']['name'] )
+					&& 'Google Docs' === $component['embed']['provider']['name']
+					) {
+						$this->logger->log(
+							'chorus-cms-import-authors-and-posts__info__skip_embeded_google_docs.log',
+							sprintf( 'Entry %s (wp ID: %d) contains an embeded Google Doc.', $entry['uid'], $post_id ),
+							$this->logger::WARNING
+						);
+					break;
+				}
 
 				// Get conversion method name.
 				$method = self::COMPONENT_CONVERTERS[ $component['__typename'] ]['method'];
@@ -503,15 +572,24 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$url     = $entry['leadImage']['asset']['url'];
 				$credit  = $entry['leadImage']['asset']['credit']['html'] ?? null;
 				$title   = $entry['leadImage']['asset']['title'] ?? null;
-				$caption = $entry['leadImage']['asset']['sourceCaption'] ?? null;
+				$caption = $this->get_caption_from_asset( $entry['leadImage'] );
 
-				// Download featured image.
-				WP_CLI::line( "Downloading featured image {$url} ..." );
-				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+				// If the image is already imported return its ID.
+				$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
+				if ( ! $attachment_id ) {
+					// Download featured image.
+					WP_CLI::line( "Downloading featured image {$url} ..." );
+					$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+				}
+
 				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 					$this->logger->log( 'chorus__error__import_featured_image.log', "url: {$url} errorInserting: " . ( is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ) );
 					break;
 				}
+
+				// Save the original URL in the meta.
+				update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
 
 				// Set is as featured image.
 				set_post_thumbnail( $post_id, $attachment_id );
@@ -531,6 +609,21 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						);
 					}
 				}
+
+				// Set distribution details.
+				if ( ! $entry['leadImage']['asset']['usageRights'] ) {
+					update_post_meta( $post_id, '_navis_media_can_distribute', true );
+				}
+
+				if ( $refresh_attachment_data ) {
+					// Update attachment metadata.
+					$attachment_data = [
+						'ID'           => $attachment_id,
+						'post_title'   => $title,
+						'post_excerpt' => $caption,
+					];
+					wp_update_post( $attachment_data );
+				}
 			}
 
 			/**
@@ -541,7 +634,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$ga_id                            = $this->get_or_create_ga_from_author_data(
 				$entry['author']['firstName'],
 				$entry['author']['lastName'],
-				$display_name                 = null,
+				$this->get_author_display_name( $entry['authorProfile'] ),
 				$entry['author']['uid'],
 				$entry['author']['username'],
 				$short_bio                    = null,
@@ -565,24 +658,26 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 */
 			if ( $entry['contributors'] && ! empty( $entry['contributors'] ) ) {
 				foreach ( $entry['contributors'] as $contributor ) {
-					$ga_id = $this->get_or_create_ga_from_author_data(
-						$contributor['authorProfile']['user']['firstName'],
-						$contributor['authorProfile']['user']['lastName'],
-						$contributor['authorProfile']['name'],
-						$contributor['authorProfile']['user']['uid'],
-						$contributor['authorProfile']['user']['username'],
-						$contributor['authorProfile']['shortBio'],
-						$contributor['authorProfile']['socialLinks'],
-						$refresh_authors
-					);
-					if ( $ga_id ) {
-						$ga_ids[] = $ga_id;
-					} else {
-						$this->logger->log(
-							'chorus-cms-import-authors-and-posts__err__assign_author.log',
-							sprintf( 'Could not assign Contributor to post ID %d, url %s, firstName: %s lastName: %s display_name: %s uid: %s username: %s short_bio: %s social_links: %s', $post_id, $entry['url'], $contributor['authorProfile']['user']['firstName'], $contributor['authorProfile']['user']['lastName'], $contributor['authorProfile']['name'], $contributor['authorProfile']['user']['uid'], $contributor['authorProfile']['user']['username'], $contributor['authorProfile']['shortBio'], printf( $contributor['authorProfile']['socialLinks'], true ) ),
-							$this->logger::WARNING
+					if ( $contributor['authorProfile'] ) {
+						$ga_id = $this->get_or_create_ga_from_author_data(
+							$contributor['authorProfile']['user']['firstName'],
+							$contributor['authorProfile']['user']['lastName'],
+							$this->get_author_display_name( $contributor['authorProfile'] ),
+							$contributor['authorProfile']['user']['uid'],
+							$contributor['authorProfile']['user']['username'],
+							$contributor['authorProfile']['shortBio'],
+							$contributor['authorProfile']['socialLinks'],
+							$refresh_authors
 						);
+						if ( ! is_wp_error( $ga_id ) ) {
+							$ga_ids[] = $ga_id;
+						} else {
+							$this->logger->log(
+								'chorus-cms-import-authors-and-posts__err__assign_author.log',
+								sprintf( 'Could not assign Contributor to post ID %d, url %s, firstName: %s lastName: %s display_name: %s uid: %s username: %s short_bio: %s social_links: %s', $post_id, $entry['url'], $contributor['authorProfile']['user']['firstName'], $contributor['authorProfile']['user']['lastName'], $contributor['authorProfile']['name'], $contributor['authorProfile']['user']['uid'], $contributor['authorProfile']['user']['username'], $contributor['authorProfile']['shortBio'], printf( $contributor['authorProfile']['socialLinks'], true ) ),
+								$this->logger::WARNING
+							);
+						}
 					}
 				}
 			}
@@ -595,6 +690,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			if ( $entry['additionalContributors'] && ! empty( trim( $entry['additionalContributors']['plaintext'] ) ) ) {
 				$author_names = $this->get_author_names_from_additional_contributors_field( $entry['additionalContributors']['plaintext'] );
 				foreach ( $author_names as $author_name ) {
+					if ( ! $author_name || empty( $author_name ) ) {
+						continue;
+					}
 					// Additional contributors go only by name, so no need for $author_args.
 					$ga    = $this->coauthors_plus->get_guest_author_by_display_name( $author_name );
 					$ga_id = $ga ? $ga->ID : null;
@@ -627,16 +725,26 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$category_ids = [];
 
 			// Set primary.
-			$category_name_primary    = $entry['primaryCommunityGroup']['name'];
-			$category_primary_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name_primary, 0 );
-			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_primary_term_id );
-			$category_ids[] = $category_primary_term_id;
+			if ( $entry['primaryCommunityGroup'] ) {
+				$category_name_primary = $entry['primaryCommunityGroup']['name'];
+				if ( 'front page' !== strtolower( $category_name_primary ) ) {
+					$category_primary_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name_primary, 0 );
+					update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_primary_term_id );
+					$category_ids[] = $category_primary_term_id;
+				}
+			}
 
 			// Set other categories.
 			foreach ( $entry['communityGroups'] as $community_group ) {
-				$category_name    = $community_group['name'];
-				$category_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
-				$category_ids[]   = $category_term_id;
+				if ( ! isset( $community_group['name'] ) ) {
+					continue;
+				}
+				$category_name = $community_group['name'];
+
+				if ( 'front page' !== strtolower( $category_name ) ) {
+					$category_term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+					$category_ids[]   = $category_term_id;
+				}
 			}
 
 			// Set post categories.
@@ -670,15 +778,70 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
 
-			print_r( $post_id . '=> ' . $entry['uid'] . "\n" );
-			die();
+			/**
+			 * Set SEO data.
+			 */
+			if ( $entry['seoHeadline'] ) {
+				update_post_meta( $post_id, '_yoast_wpseo_title', $entry['seoHeadline'] . ' %%page%% %%sep%% %%sitename%%' );
+			}
+
+			if ( isset( $entry['seoDescription'] ) && $entry['seoDescription'] ) {
+				update_post_meta( $post_id, '_yoast_wpseo_metadesc', $entry['seoDescription'] );
+			}
+
+			if ( isset( $entry['socialHeadline'] ) && $entry['socialHeadline'] ) {
+				update_post_meta( $post_id, '_yoast_wpseo_opengraph-title', $entry['socialHeadline'] );
+				update_post_meta( $post_id, '_yoast_wpseo_twitter-title', $entry['socialHeadline'] );
+			}
+
+			if ( isset( $entry['socialDescription']['html'] ) && $entry['socialDescription']['html'] ) {
+				update_post_meta( $post_id, '_yoast_wpseo_opengraph-title', $entry['socialDescription']['html'] );
+				update_post_meta( $post_id, '_yoast_wpseo_twitter-title', $entry['socialDescription']['html'] );
+			}
+
+			// TODO: Refactor downloading images from Chorus to a separate method.
+			if ( isset( $entry['seoImage']['asset']['url'] ) && $entry['seoImage']['asset']['url'] ) {
+				if ( 'IMAGE' != $entry['leadImage']['asset']['type'] ) {
+					continue;
+				}
+				$url     = $entry['seoImage']['asset']['url'];
+				$credit  = $entry['seoImage']['asset']['credit']['html'] ?? null;
+				$title   = $entry['seoImage']['asset']['title'] ?? null;
+				$caption = $this->get_caption_from_asset( $entry['seoImage'] );
+
+				// If the image is already imported return its ID.
+				$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
+				if ( ! $attachment_id ) {
+					// Download seo image.
+					WP_CLI::line( "Downloading seo image {$url} ..." );
+					$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+				}
+
+				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+					$this->logger->log( 'chorus__error__import_seo_image.log', "url: {$url} errorInserting: " . ( is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : 'na/' ) );
+					break;
+				}
+
+				// Save the original URL in the meta.
+				update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
+				// Save credit as Newspack credit.
+				update_post_meta( $attachment_id, '_media_credit', $credit );
+
+				// Set Social image.
+				update_post_meta( $post_id, '_yoast_wpseo_opengraph-image', wp_get_attachment_url( $attachment_id ) );
+				update_post_meta( $post_id, '_yoast_wpseo_twitter-image', wp_get_attachment_url( $attachment_id ) );
+				update_post_meta( $post_id, '_yoast_wpseo_opengraph-image-id', $attachment_id );
+				update_post_meta( $post_id, '_yoast_wpseo_twitter-image-id', $attachment_id );
+			}
 		}
 	}
 
 	/**
 	 * Format date from Chorus CMS to WordPress.
 	 *
-	 * @param $chorus_date
+	 * @param $chorus_date string Date in Chorus format, e.g. '2023-06-13T21:05:36.000Z'.
 	 *
 	 * @return array|string|string[]|null
 	 */
@@ -706,7 +869,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$ga_id = $this->get_or_create_ga_from_author_data(
 				$author['user']['firstName'],
 				$author['user']['lastName'],
-				$author['name'],
+				$this->get_author_display_name( $author ),
 				$author['uid'],
 				$author['user']['username'],
 				$author['shortBio'],
@@ -1075,19 +1238,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				break;
 
 			default:
-				// For all other types, try and get an iframe's src attribute.
-				$this->crawler->clear();
-				$this->crawler->add( $html );
-				$src_crawler    = $this->crawler->filterXPath( '//iframe/@src' );
-				$width_crawler  = $this->crawler->filterXPath( '//iframe/@width' );
-				$height_crawler = $this->crawler->filterXPath( '//iframe/@height' );
-
-				if ( $src_crawler->count() >= 0 ) {
-					$src      = trim( $src_crawler->getNode( 0 )->textContent );
-					$width    = $width_crawler->count() >= 0 ? trim( $width_crawler->getNode( 0 )->textContent ) : null;
-					$height   = $height_crawler->count() >= 0 ? trim( $height_crawler->getNode( 0 )->textContent ) : null;
-					$blocks[] = $this->gutenberg_blocks->get_iframe( $src, $width, $height );
-				}
+				// For all other types, use the HTML block.
+				$blocks[] = $this->gutenberg_blocks->get_html( $html );
 
 				break;
 		}
@@ -1114,8 +1266,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	public function component_pymembed_to_block( $component ) {
 		$blocks = [];
 
-		$src      = $component['url'];
-		$blocks[] = $this->gutenberg_blocks->get_iframe( $src );
+		$blocks[] = $this->gutenberg_blocks->get_html( $component['format']['html'] );
 
 		return $blocks;
 	}
@@ -1157,17 +1308,23 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one image block.
 	 */
-	public function component_image_to_block( $component ) {
+	public function component_image_to_block( $component, $post_id, $refresh_attachment_data ) {
 		$blocks = [];
 
 		$url     = $component['image']['url'];
+		$credit  = $component['image']['asset']['credit']['html'] ?? null;
 		$title   = isset( $component['image']['asset']['title'] ) && ! empty( $component['image']['asset']['title'] ) ? $component['image']['asset']['title'] : null;
 		$caption = isset( $component['image']['caption']['plaintext'] ) && ! empty( $component['image']['caption']['plaintext'] ) ? $component['image']['caption']['plaintext'] : null;
 
-		// Import image.
-		WP_CLI::line( sprintf( 'Downloading image %s ...', $url ) );
-		$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
-		update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
+		// If the image is already imported return its ID.
+		$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
+		if ( ! $attachment_id ) {
+			// Import image.
+			WP_CLI::line( sprintf( 'Downloading image %s ...', $url ) );
+			$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+		}
+
 		// Logg errors.
 		if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 			$this->logger->log(
@@ -1176,9 +1333,45 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$this->logger::WARNING
 			);
 		}
+
+		if ( $refresh_attachment_data ) {
+			// Update attachment metadata.
+			$attachment_data = [
+				'ID'           => $attachment_id,
+				'post_title'   => $title,
+				'post_excerpt' => $caption,
+			];
+			wp_update_post( $attachment_data );
+		}
+
 		$attachment_post = get_post( $attachment_id );
 
-		$blocks[] = $this->gutenberg_blocks->get_image( $attachment_post );
+		// Save the original URL in the meta.
+		update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
+		// Save credit as Newspack credit.
+		update_post_meta( $attachment_id, '_media_credit', $credit );
+
+		// Set distribution details.
+		if ( isset( $component['image']['asset']['usageRights'] ) && ! $component['image']['asset']['usageRights'] ) {
+			update_post_meta( $post_id, '_navis_media_can_distribute', true );
+		}
+
+		// Setting size and alignment.
+		$image_size  = 'full';
+		$image_align = null;
+
+		if ( isset( $component['placement']['alignment'] ) && $component['placement']['alignment'] ) {
+			if ( 'FLOAT_LEFT' === $component['placement']['alignment'] ) {
+				$image_align = 'left';
+				$image_size  = 'medium';
+			} elseif ( 'FLOAT_RIGHT' === $component['placement']['alignment'] ) {
+				$image_align = 'right';
+				$image_size  = 'medium';
+			}
+		}
+
+		$blocks[] = $this->gutenberg_blocks->get_image( $attachment_post, $image_size, true, null, $image_align );
 
 		return $blocks;
 	}
@@ -1199,10 +1392,23 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$caption = $image['caption']['html'];
 			$url     = $image['url'];
 
-			// Import image.
-			WP_CLI::line( sprintf( 'Downloading gallery image %d/%d %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
-			$attachment_id = $this->attachments->import_external_file( $url, $title, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] );
-			update_post_meta( $attachment_id, 'newspack_original_image_url', $url );
+			// If the image is already imported return its ID.
+			$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
+			if ( ! $attachment_id ) {
+				// Import image.
+				WP_CLI::line( sprintf( 'Downloading gallery image %d/%d %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
+				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, $description = null, $alt = null, $post_id = 0, $args = [] );
+
+				// Set distribution details.
+				if ( ! $component['image']['asset']['usageRights'] ) {
+					update_post_meta( $post_id, '_navis_media_can_distribute', true );
+				}
+			}
+
+			// Save the original URL in the meta.
+			update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+
 			// Log errors.
 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 				$this->logger->log(
@@ -1226,10 +1432,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * Converts Chorus content component to Gutenberg block(s).
 	 *
 	 * @param array $sidebar_component Component data.
+	 * @param int   $post_id           Post ID.
+	 * @param bool  $refresh_attachment_data Whether to refresh attachment data.
 	 *
+	 * @throws \RuntimeException If argument is not set in context.
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns _________________.
 	 */
-	public function component_sidebar_to_block( $sidebar_component, $post_id ) {
+	public function component_sidebar_to_block( $sidebar_component, $post_id, $refresh_attachment_data ) {
 		$blocks = [];
 
 		$inner_blocks = [];
@@ -1245,13 +1454,16 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			}
 
 			// Call the method and merge resulting converted block.
-			$inner_blocks = array_merge(
-				$inner_blocks,
-				call_user_func_array( 'self::' . $method, $arguments )
-			);
+			$inner_blocks = array_merge( $inner_blocks, call_user_func_array( 'self::' . $method, $arguments ) );
 		}
 
-		$group_block = $this->gutenberg_blocks->get_group_constrained( $inner_blocks, [ 'group-sidebar' ] );
+		$group_classes = [ 'group-sidebar' ];
+
+		if ( array_key_exists( 'placement', $sidebar_component ) && array_key_exists( 'alignment', $sidebar_component['placement'] ) && $sidebar_component['placement']['alignment'] ) {
+			$group_classes[] = 'group-sidebar-align-' . strtolower( $sidebar_component['placement']['alignment'] );
+		}
+
+		$group_block = $this->gutenberg_blocks->get_group_constrained( $inner_blocks, $group_classes );
 		$blocks[]    = $group_block;
 
 		return $blocks;
@@ -1265,6 +1477,10 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks().
 	 */
 	public function component_related_list_to_block( $component ) {
+		if ( ! array_key_exists( 'items', $component ) ) {
+			return [];
+		}
+
 		$blocks = [];
 
 		$li_elements = [];
@@ -1336,5 +1552,43 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$meta_value
 			)
 		);
+	}
+
+	/**
+	 * Get post ID by meta.
+	 *
+	 * @param array $lead_image Lead image data.
+	 * @return string|null Caption.
+	 */
+	private function get_caption_from_asset( $lead_image ) {
+		$caption = null;
+
+		if ( isset( $lead_image['caption']['html'] ) ) {
+			return $lead_image['caption']['html'];
+		} elseif ( isset( $lead_image['asset']['sourceCaption'] ) ) {
+			return $lead_image['asset']['sourceCaption'];
+		} elseif ( isset( $lead_image['asset']['captionHtml'] ) ) {
+			return $lead_image['asset']['captionHtml'];
+		} elseif ( isset( $lead_image['asset']['title'] ) ) {
+			return $lead_image['asset']['title'];
+		}
+
+		return $caption;
+	}
+
+	/**
+	 * Get author display name.
+	 *
+	 * @param array $author_profile Author profile.
+	 * @return string Author display name.
+	 */
+	private function get_author_display_name( $author_profile ) {
+		$display_name = $author_profile['name'];
+
+		if ( ! empty( $author_profile['title'] ) ) {
+			$display_name .= ', ' . $author_profile['title'];
+		}
+
+		return $display_name;
 	}
 }
