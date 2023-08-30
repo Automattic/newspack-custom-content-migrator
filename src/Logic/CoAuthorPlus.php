@@ -311,6 +311,11 @@ class CoAuthorPlus {
 	 */
 	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser ) {
 		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser );
+
+		if ( false === $ga ) {
+			return null;
+		}
+
 		$ga = ( 'guest-author' == $ga->type ) ? $ga : null;
 
 		return $ga;
