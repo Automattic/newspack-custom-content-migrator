@@ -793,13 +793,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'optional' => false,
                         'repeating' => false,
                     ],
-                    [
-                        'type' => 'flag',
-                        'name' => 'reset-db',
-                        'description' => 'Resets the database for a fresh import.',
-                        'optional' => true,
-                        'repeating' => false,
-                    ]
+	                [
+		                'type' => 'assoc',
+		                'name' => 'start-at-id',
+		                'description' => 'The original user ID to start at.',
+		                'optional' => true,
+		                'repeating' => false,
+	                ]
                 ]
             ]
         );
@@ -841,6 +841,70 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 ]
             ]
         );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-update-migrated-articles',
+            [ $this, 'cmd_update_migrated_articles' ],
+            [
+                'shortdesc' => 'Update migrated articles',
+                'synopsis'  => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV articles.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'media-location',
+		                'description' => 'Path to media directory',
+		                'optional' => false,
+		                'repeating' => false,
+	                ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'start-at-id',
+		                'description' => 'Original article ID to start from',
+		                'optional' => true,
+		                'repeating' => false,
+	                ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'end-at-id',
+		                'description' => 'Original article ID to end at',
+		                'optional' => true,
+		                'repeating' => false,
+	                ],
+                ]
+            ]
+        );
+
+        WP_CLI::add_command(
+            'newspack-content-migrator la-silla-vacia-update-author-metadata',
+            [ $this, 'cmd_update_user_metadata' ],
+            [
+                'shortdesc' => 'Update or insert missing author metadata',
+                'synopsis'  => [
+                    [
+                        'type' => 'assoc',
+                        'name' => 'import-json',
+                        'description' => 'The file which contains LSV articles.',
+                        'optional' => false,
+                        'repeating' => false,
+                    ]
+                ]
+            ]
+        );
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-link-wp-user-to-guest-author',
+			[ $this, 'link_wp_users_to_guest_authors' ],
+			[
+				'shortdesc' => 'Link WP users to guest authors',
+				'synopsis'  => [],
+			]
+		);
 
         WP_CLI::add_command(
             'newspack-content-migrator la-silla-devhelper-ivans-helper',
@@ -1475,14 +1539,19 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      */
     public function migrate_users($args, $assoc_args )
     {
-        if ( $assoc_args['reset-db'] ) {
-            $this->reset_db();
-        }
+		$start_at_id = $assoc_args['start-at-id'] ?? null;
+		$skip = ! is_null( $start_at_id );
 
         $unmigrated_users_file_path = 'unmigrated-users.json';
         $unmigrated_users = [];
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
+			if ( $skip && $user['id'] < $start_at_id ) {
+				continue;
+			} else {
+				$skip = false;
+			}
+
             $this->file_logger( "ID: {$user['id']} | EMAIL: {$user['email']} | NAME: {$user['name']}" );
 
             $is_valid_email = filter_var( $user['email'], FILTER_VALIDATE_EMAIL );
@@ -1515,7 +1584,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     'role' => 'subscriber',
                     'meta_input' => [
                         'original_user_id' => $user['id'],
-                    ]
+	                    'original_system_role' => $user['user_group_name'] ?? '',
+                    ],
                 ]
             );
 
@@ -1933,12 +2003,30 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	            $original_article_id = $article['id'] ?? 0;
 	        }
 
+			/*// No longer want this function to handle articles if they've already been imported.
+	        $original_article_id_exists = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT post_id, meta_value 
+					FROM $wpdb->postmeta 
+					WHERE meta_key = 'newspack_original_article_id' 
+					  AND meta_value = %d",
+					$original_article_id
+				)
+	        );
+			$original_article_id_exists = ! is_null( $original_article_id_exists );
+
+	        if ( $original_article_id_exists ) {
+		        WP_CLI::warning( sprintf( "Article ID %d already exists. Skipping.", $original_article_id ) );
+				continue;
+	        }*/
+
 			$additional_meta = [];
 	        $featured_image_attachment_id = null;
 
 	        $post_title = '';
 	        $post_excerpt = '';
 	        $post_date = '';
+            $post_modified = '';
 	        $post_name = '';
 			$article_authors = [];
 			$article_tags = [];
@@ -1977,7 +2065,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				}
 			} elseif ( 'Silla Académica' == $assoc_args['category-name'] ) {
 				$post_title = trim( $article['post_title'] );
-				$post_date = $article['publishedAt'];
+                $post_date = $article['post_date'];
+				$post_modified = $article['publishedAt'] ?? $post_date;
 				$post_name = $article['post_name'];
 				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : [];
 				if ( isset( $article['image'] ) ) {
@@ -1993,6 +2082,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				$post_title = trim( $article['post_title'] );
 				$post_excerpt = $article['post_excerpt'] ?? '';
 				$post_date = $article['post_date'];
+                $post_modified = $article['publishedAt'] ?? $post_date;
 				$post_name = $article['post_name'];
 				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : [];
 				if ( isset( $article['tags'] ) && ! is_null( $article['tags'] ) && ! empty( $article['tags'] ) ) {
@@ -2121,7 +2211,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	        $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
 	        $createdOnGmt = $createdOnDT->format( $datetime_format );
 
-	        $modifiedOnDT = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
+            if ( empty( $post_modified ) ) {
+                $post_modified = $post_date;
+            }
+
+	        $modifiedOnDT = new DateTime( $post_modified, new DateTimeZone( 'America/Bogota' ) );
 	        $modifiedOn   = $modifiedOnDT->format( $datetime_format );
 	        $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
 	        $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
@@ -2138,8 +2232,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			}
             $article_data = [
                 'post_author' => 0,
-                'post_date' => $createdOn,
-                'post_date_gmt' => $createdOnGmt,
+                'post_date' => $modifiedOn,
+                'post_date_gmt' => $modifiedOnGmt,
                 'post_content' => $html,
                 'post_title' => $post_title,
                 'post_excerpt' => $post_excerpt,
@@ -2150,8 +2244,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 'post_name' => $post_name,
                 'to_ping' => '',
                 'pinged' => '',
-                'post_modified' => $modifiedOn,
-                'post_modified_gmt' => $modifiedOnGmt,
+                'post_modified' => $createdOn,
+                'post_modified_gmt' => $createdOnGmt,
                 'post_content_filtered' => '',
                 'post_parent' => 0,
                 'menu_order' => 0,
@@ -2271,6 +2365,611 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 		if ( ! empty( $skip_base64_html_ids ) ) {
 			WP_CLI::error( sprintf( "Done with errors -- skipped importing post_content (because HTML contained B64 which failed during post creation) for original IDs -- these post_contents should be inserted manually : %s", implode( ',', $skip_base64_html_ids ) ) );
+		}
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function cmd_update_migrated_articles( $args, $assoc_args )
+    {
+        global $wpdb;
+
+		$start_at_id = $assoc_args['start-at-id'] ?? null;
+		$end_at_id = $assoc_args['end-at-id'] ?? null;
+		$skip = ! is_null( $start_at_id );
+		$end = ! is_null( $end_at_id );
+
+		$media_location = $assoc_args['media-location'];
+
+        $original_article_id_to_new_article_id_map = $wpdb->get_results(
+				"SELECT meta_value as original_article_id, post_id as new_article_id 
+                FROM $wpdb->postmeta 
+                WHERE meta_key = 'newspack_original_article_id'",
+            OBJECT_K
+        );
+        $original_article_id_to_new_article_id_map = array_map( function( $item ) {
+            return intval( $item->new_article_id );
+        }, $original_article_id_to_new_article_id_map );
+
+		$tags_and_category_taxonomy_ids = $wpdb->get_results(
+			"SELECT term_taxonomy_id, term_id FROM $wpdb->term_taxonomy WHERE taxonomy IN ( 'post_tag', 'category' )",
+			OBJECT_K
+		);
+		$tags_and_category_taxonomy_ids = array_map( function( $item ) {
+			return intval( $item->term_id );
+		}, $tags_and_category_taxonomy_ids );
+
+        $datetime_format = 'Y-m-d H:i:s';
+
+		$replace_accents = [
+			'á' => 'a',
+			'é' => 'e',
+			'í' => 'i',
+			'ó' => 'o',
+			'ú' => 'u',
+			'ñ' => 'n',
+			'Á' => 'A',
+			'É' => 'E',
+			'Í' => 'I',
+			'Ó' => 'O',
+			'Ú' => 'U',
+			'Ñ' => 'N',
+		];
+
+        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
+	        if ( $skip && $start_at_id != $article['id']) {
+		        continue;
+	        } else {
+		        $skip = false;
+	        }
+
+//            if ( 19375 === $article['id'] ) {
+				echo "Handling OAID: {$article['id']}";
+
+	            if ( ! array_key_exists( $article['id'], $original_article_id_to_new_article_id_map ) ) {
+		            echo WP_CLI::colorize( " %YCORRESPONDING POST ID NOT FOUND. Skipping...%n\n\n" );
+		            continue;
+	            }
+
+	            $post_id = $original_article_id_to_new_article_id_map[ $article['id'] ];
+				echo " | WPAID: $post_id\n";
+
+	            $post_data = [];
+	            $post_meta = [];
+
+                /*
+                 * PUBLISHED DATE UPDATE SECTION
+                 * * */
+                $post_date = date( $datetime_format, time() );
+                $post_modified = '';
+
+                if ( isset( $article['post_date'] ) ) {
+                    $post_date = $article['post_date'];
+                }
+
+                if ( isset( $article['publishedAt'] ) ) {
+                    $post_modified = $article['publishedAt'];
+                }
+
+                if ( empty( $post_modified ) && isset( $article['post_modified'] ) ) {
+                    $post_modified = $article['post_modified'];
+                }
+
+                $createdOnDT     = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
+                $createdOn       = $createdOnDT->format( $datetime_format );
+                $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+                $createdOnGmt = $createdOnDT->format( $datetime_format );
+
+                if ( empty( $post_modified ) ) {
+                    $post_modified = $post_date;
+                }
+
+                $modifiedOnDT = new DateTime( $post_modified, new DateTimeZone( 'America/Bogota' ) );
+                $modifiedOn   = $modifiedOnDT->format( $datetime_format );
+                $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+                $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
+
+				$post_data['post_date'] = $modifiedOn;
+				$post_data['post_date_gmt'] = $modifiedOnGmt;
+				$post_data['post_modified'] = $createdOn;
+				$post_data['post_modified_gmt'] = $createdOnGmt;
+                /* * *
+                 * PUBLISHED DATE UPDATE SECTION
+                 */
+
+                /*
+                 * POST AUTHOR UPDATE SECTION
+                 * * */
+	            if ( ! empty( $article['post_author'] ) ) {
+		            $first_author_original_id = array_shift( $article['post_author'] );
+		            try {
+			            $author          = new MigrationAuthor( $first_author_original_id );
+			            $author_assigned = $author->assign_to_post( $post_id );
+
+			            if ( $author_assigned ) {
+				            echo WP_CLI::colorize( "%WAssigned {$author->get_output_description()} to post ID {$post_id}%n\n" );
+			            }
+		            } catch ( Exception $e ) {
+			            echo WP_CLI::colorize( "%Y{$e->getMessage()}%n\n" );
+		            }
+
+		            foreach ( $article['post_author'] as $original_author_id ) {
+			            try {
+				            $author          = new MigrationAuthor( $original_author_id );
+				            $author_assigned = $author->assign_to_post(
+					            $post_id,
+					            true
+				            );
+
+				            if ( $author_assigned ) {
+					            echo WP_CLI::colorize( "%WAssigned {$author->get_output_description()} to post ID {$post_id}%n\n" );
+				            }
+			            } catch ( Exception $e ) {
+				            echo WP_CLI::colorize( "%Y{$e->getMessage()}%n\n" );
+			            }
+		            }
+	            }
+                /* * *
+                 * POST AUTHOR UPDATE SECTION
+                 */
+
+                /*
+                 * IMPORT KEYWORDS SECTION
+                 * * */
+	            if ( ! empty( $article['keywords'] ) ) {
+		            $first_keyword = array_shift( $article['keywords'] );
+					$post_meta['_yoast_wpseo_focuskw'] = $first_keyword;
+
+					$post_meta['_yoast_wpseo_focuskeywords'] = [];
+		            foreach ( $article['keywords'] as $keyword ) {
+						$post_meta['_yoast_wpseo_focuskeywords'][] = [
+							'keyword' => $keyword,
+							'score' => 50,
+						];
+		            }
+					$post_meta['_yoast_wpseo_focuskeywords'] = json_encode( $post_meta['_yoast_wpseo_focuskeywords'] );
+	            }
+	            /* * *
+				 * IMPORT KEYWORDS SECTION
+				 */
+
+                /*
+                 * FEATURED IMAGE SECTION
+                 * * */
+	            $has_featured_image = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT meta_id, meta_value FROM $wpdb->postmeta WHERE meta_key = '_thumbnail_id' AND post_id = %d",
+						$post_id
+					)
+	            );
+				$has_featured_image = ! is_null( $has_featured_image );
+				if ( ! $has_featured_image ) {
+					if ( ! empty( $article['image'] ) ) {
+						$filename       = $article['image']['name'];
+						$full_file_path = $media_location . '/' . $filename;
+
+						if ( ! file_exists( $full_file_path ) ) {
+							$modified_file_name = str_replace(
+								array_keys( $replace_accents ),
+								array_values( $replace_accents ),
+								$filename
+							);
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+							$full_file_path = $media_location . '/' . $modified_file_name;
+						}
+
+						if ( ! file_exists( $full_file_path ) ) {
+							$quoted_file_name = "'$filename'";
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$quoted_file_name ...%n\n" );
+							$full_file_path = $media_location . '/' . $quoted_file_name;
+						}
+
+						if ( ! file_exists( $full_file_path ) ) {
+							$quoted_file_name = "'$filename'";
+							$quoted_file_name = str_replace(
+								array_keys( $replace_accents ),
+								array_values( $replace_accents ),
+								$quoted_file_name
+							);
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$quoted_file_name ...%n\n" );
+							$full_file_path = $media_location . '/' . $quoted_file_name;
+						}
+
+						if ( ! file_exists( $full_file_path ) ) {
+							$modified_file_name = strtolower( str_replace( ' ', '_', $filename ) );
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+							$full_file_path = $media_location . '/' . $modified_file_name;
+						}
+
+						if ( ! file_exists( $full_file_path ) ) {
+							$modified_file_name = strtolower(
+								str_replace(
+									array_keys( $replace_accents ),
+									array_values( $replace_accents ),
+									$filename
+								)
+							);
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+							$full_file_path = $media_location . '/' . $modified_file_name;
+						}
+
+						if ( ! file_exists( $full_file_path ) ) {
+							$modified_file_name = strtolower( str_replace( ' ', '_', $filename ) );
+							$modified_file_name = strtolower(
+								str_replace(
+									array_keys( $replace_accents ),
+									array_values( $replace_accents ),
+									$modified_file_name
+								)
+							);
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+							$full_file_path = $media_location . '/' . $modified_file_name;
+						}
+
+						if ( file_exists( $full_file_path ) ) {
+							update_post_meta( $post_id, 'newspack_featured_image_position', '' );
+							$featured_image_attachment_id = $this->attachments->import_external_file(
+								$full_file_path,
+								$article['image']['FriendlyName'],
+								$article['image']['caption'] ?? '',
+								null,
+								null,
+								$post_id
+							);
+
+							if ( is_wp_error( $featured_image_attachment_id ) || ! $featured_image_attachment_id ) {
+								$msg = sprintf(
+									"ERROR: (OAID) %d, WPAID %d, error importing featured image %s err: %s\n",
+									$article['id'],
+									$post_id,
+									$full_file_path,
+									is_wp_error( $featured_image_attachment_id )
+										? $featured_image_attachment_id->get_error_message() : '/'
+								);
+								echo $msg;
+							} else {
+								$post_meta['_thumbnail_id'] = $featured_image_attachment_id;
+								$msg = sprintf(
+									"(OAID) %d, WPAID %d, imported featured image attachment ID %d\n",
+									$article['id'],
+									$post_id,
+									$featured_image_attachment_id
+								);
+								echo WP_CLI::colorize( "%b$msg%n" );
+							}
+						} else {
+							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path%n\n" );
+						}
+					}
+				}
+                /* * *
+                 * FEATURED IMAGE SECTION
+                 * /
+
+                /*
+                 * VIDEO AS FEATURED IMAGE SECTION
+                 * * */
+                $html = $article['post_html'];
+
+                if ( ! is_null( $article['video'] ) ) {
+                    $src = $article['video']['name'];
+                    $html = '<iframe src="' . $src . '" style="width:100%;height:500px;overflow:auto;">' . $src . '</iframe>' . $html;
+
+                    $featured_image_update = $wpdb->update(
+                        $wpdb->postmeta,
+                        [
+                            'meta_key'   => 'newspack_featured_image_position',
+                            'meta_value' => 'hidden',
+                        ],
+                        [
+                            'post_id' => $post_id,
+                            'meta_key' => 'newspack_featured_image_position'
+                        ]
+                    );
+
+                    echo WP_CLI::colorize( "%wFeatured image update: $featured_image_update%n\n" );
+                }
+				$post_data['post_content'] = $html;
+                /* * *
+                 * VIDEO AS FEATURED IMAGE SECTION
+                 */
+
+	            /*
+                 * TAXONOMY SECTION
+                 * * */
+	            $tag_term_ids = [];
+	            foreach ( $article['tags'] as $tag ) {
+					$taxonomy = $tag['taxonomy'];
+					$term_taxonomy_id = $tag['term_taxonomy_id'];
+
+					if ( ! array_key_exists( $term_taxonomy_id, $tags_and_category_taxonomy_ids ) ) {
+			            echo WP_CLI::colorize( "%m$taxonomy term_taxonomy_id: $term_taxonomy_id does not exist in DB%n\n" );
+						continue;
+		            }
+
+					$tag_term_ids[] = $tags_and_category_taxonomy_ids[ $term_taxonomy_id ];
+	            }
+	            if ( ! empty( $tag_term_ids ) ) {
+		            $result = wp_set_post_terms( $post_id, $tag_term_ids );
+	            }
+
+				$category_term_ids = [];
+				foreach ( $article['categories'] as $category ) {
+					$taxonomy = $category['taxonomy'];
+					$term_taxonomy_id = $category['term_taxonomy_id'];
+
+					if ( ! array_key_exists( $term_taxonomy_id, $tags_and_category_taxonomy_ids ) ) {
+						echo WP_CLI::colorize( "%m$taxonomy term_taxonomy_id: $term_taxonomy_id does not exist in DB%n\n" );
+						continue;
+					}
+
+					$category_term_ids[] = $tags_and_category_taxonomy_ids[ $term_taxonomy_id ];
+				}
+	            if ( ! empty( $category_term_ids ) ) {
+		            $result = wp_set_post_terms( $post_id, $category_term_ids, 'category' );
+	            }
+	            /* * *
+				 * TAXONOMY SECTION
+				 */
+
+                $execution = $wpdb->update(
+                    $wpdb->posts,
+                    $post_data,
+                    [
+                        'ID' => $post_id
+                    ]
+                );
+
+	            if ( ! empty( $post_meta ) ) {
+		            foreach ( $post_meta as $meta_key => $meta_value ) {
+			            update_post_meta( $post_id, $meta_key, $meta_value );
+		            }
+	            }
+
+                /*$execution = wp_update_post(
+                    [
+                        'ID' => $post_id,
+                        'post_content' => $article['post_html']
+                    ]
+                );*/
+	            if ( (bool) $execution ) {
+					echo WP_CLI::colorize( "%GPost updated: $post_id%n\n\n" );
+	            } else {
+		            echo WP_CLI::colorize( "%RPost update failed: $post_id%n\n\n" );
+	            }
+//                die();
+//            }
+	        if ( $end && $end_at_id == $article['id'] ) {
+		        break;
+	        }
+        }
+
+		wp_cache_flush();
+    }
+
+    /**
+     * @param array $args
+     * @param array $assoc_args
+     * @return void
+     */
+    public function cmd_update_user_metadata( $args, $assoc_args )
+    {
+        global $wpdb;
+
+        foreach ( $this->json_generator( $assoc_args['import-json'] ) as $import_user ) {
+            unset( $import_user['bio'] );
+
+            $login = WP_CLI::colorize( '%RNO LOGIN%n');
+            if ( isset( $import_user['user_login'] ) ) {
+                $login = WP_CLI::colorize( "%Y{$import_user['user_login']}%n" );
+            } else if ( isset( $import_user['slug'] ) ) {
+                $login = WP_CLI::colorize( "%Y{$import_user['slug']}%n" );
+            }
+
+            $email = ! empty( $import_user['user_email'] ) ? WP_CLI::colorize("%C{$import_user['user_email']}%n") : WP_CLI::colorize( '%RNO EMAIL%n');
+            $role = $import_user['xpr_rol'] ?? $import_user['role'] ?? WP_CLI::colorize( "%wNO ROLE%n" );
+
+            echo "{$import_user['id']}\t$login\t$email\t$role\n";
+			$identifier = '';
+	        if ( ! empty( $import_user['user_email'] ) ) {
+		        $identifier = $import_user['user_email'];
+	        } else if ( ! empty( $import_user['user_login'] ) ) {
+		        $identifier = $import_user['user_login'];
+	        } else if ( ! empty( $import_user['slug'] ) ) {
+		        $identifier = $import_user['slug'];
+	        }
+
+            if ( empty( $identifier ) ) {
+                echo WP_CLI::colorize( "%RNO IDENTIFIER FOUND. %n\n" );
+                continue;
+            }
+
+            $db_user = get_user_by( 'email', $identifier );
+
+            if ( ! $db_user ) {
+                $db_user = get_user_by( 'login', $identifier );
+            }
+
+            if ( ! $db_user ) {
+                echo WP_CLI::colorize( "%M User not found. %n\n" );
+                continue;
+            }
+
+            echo WP_CLI::colorize( "%W wp_users.ID: $db_user->ID%n\n" );
+
+            $original_user_id = $wpdb->get_row(
+                $wpdb->prepare( "SELECT meta_value, umeta_id FROM $wpdb->usermeta 
+                            WHERE meta_key = 'original_user_id' 
+                              AND user_id = %d 
+                              AND meta_value = %d", $db_user->ID, $import_user['id'] )
+            );
+
+            if ( ! is_null( $original_user_id ) ) {
+                echo WP_CLI::colorize( "%G User has original_user_id metadata: $original_user_id->meta_value.%n\n" );
+                continue;
+            }
+
+            $insertion = $wpdb->insert(
+                $wpdb->usermeta,
+                [
+                    'user_id' => $db_user->ID,
+                    'meta_key' => 'original_user_id',
+                    'meta_value' => $import_user['id']
+                ]
+            );
+
+            if ( ! $insertion ) {
+                echo WP_CLI::colorize( "%R Error inserting original_user_id metadata. %n\n" );
+            } else {
+                echo WP_CLI::colorize( "%G Success inserting original_user_id metadata. %n\n" );
+            }
+        }
+    }
+
+    public function link_wp_users_to_guest_authors()
+    {
+	    global $wpdb;
+
+		// Fix any guest authors with multiple accounts.
+	    $guest_authors_with_multiple_accounts = $wpdb->get_results(
+			"SELECT 
+    				sub.meta_value as email, 
+    				GROUP_CONCAT( sub.post_id ORDER BY sub.post_id ) as post_ids, 
+    				COUNT( sub.post_id ) as counter 
+				FROM (
+    				SELECT *
+					FROM wp_postmeta
+					WHERE meta_key = 'cap-user_email' 
+					  AND meta_value <> ''
+				) as sub
+				GROUP BY sub.meta_value
+				HAVING counter > 1
+				ORDER BY counter DESC"
+	    );
+
+	    if ( ! empty( $guest_authors_with_multiple_accounts ) ) {
+		    WP_CLI::log( "Guest Authors with multiple accounts found. Attempting to remediate..." );
+		    foreach ( $guest_authors_with_multiple_accounts as $guest_author_row ) {
+			    $guest_author_ids = explode( ',', $guest_author_row->post_ids );
+				$number_of_ids = count( $guest_author_ids );
+				echo WP_CLI::colorize( "%y$guest_author_row->email%n %wwith $number_of_ids GA IDs found%n\n" );
+				$first_guest_author_id = array_shift( $guest_author_ids );
+				echo WP_CLI::colorize( "%wKeeping $first_guest_author_id%n\n" );
+
+				$first_guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $first_guest_author_id );
+				/*$original_user_ids = $wpdb->get_col(
+					$wpdb->prepare(
+						"SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'original_user_id' AND post_id = %d",
+						$first_guest_author_id
+					)
+				);*/
+
+				$facebook_url = get_post_meta( $first_guest_author_id, 'facebook_url', true );
+				$linkedin_url = get_post_meta( $first_guest_author_id, 'linkedin_url', true );
+			    foreach ( $guest_author_ids as $guest_author_id ) {
+				    $other_original_user_ids = $wpdb->get_col(
+						$wpdb->prepare(
+							"SELECT meta_value 
+							FROM $wpdb->postmeta 
+							WHERE meta_key = 'original_user_id' 
+							  AND post_id = %d 
+							  AND meta_value NOT IN ( 
+							      SELECT meta_value 
+							      FROM $wpdb->postmeta 
+							      WHERE meta_key = 'original_user_id' 
+							        AND post_id = %d
+							   )",
+							$guest_author_id,
+							$first_guest_author_id
+						)
+				    );
+					$number_of_other_original_user_ids = count( $other_original_user_ids );
+					echo WP_CLI::colorize( "%wFound $number_of_other_original_user_ids other original_user_ids, adding to $first_guest_author_id..%n\n" );
+					foreach ( $other_original_user_ids as $other_original_user_id ) {
+						$insertion = $wpdb->insert(
+							$wpdb->postmeta,
+							[
+								'post_id' => $first_guest_author_id,
+								'meta_key' => 'original_user_id',
+								'meta_value' => $other_original_user_id
+							]
+						);
+
+						if ( ! $insertion ) {
+							echo WP_CLI::colorize( "%mFailed to add $other_original_user_id..%n\n" );
+						} else {
+							echo WP_CLI::colorize( "%wAdded $other_original_user_id%n\n" );
+						}
+					}
+
+				    if ( empty( $facebook_url ) ) {
+					    $facebook_url = get_post_meta( $guest_author_id, 'facebook_url', true );
+					    if ( ! empty( $facebook_url ) ) {
+						    update_post_meta( $first_guest_author_id, 'facebook_url', $facebook_url );
+					    }
+				    }
+
+				    if ( empty( $linkedin_url ) ) {
+					    $linkedin_url = get_post_meta( $guest_author_id, 'linkedin_url', true );
+					    if ( ! empty( $linkedin_url ) ) {
+						    update_post_meta( $first_guest_author_id, 'linkedin_url', $linkedin_url );
+					    }
+				    }
+
+				    $result = $this->coauthorsplus_logic->delete_ga(
+						$guest_author_id,
+						sanitize_title( $first_guest_author->user_login )
+				    );
+
+				    if ( is_wp_error( $result ) ) {
+					    echo WP_CLI::colorize( "%RError deleting GA ID $guest_author_id: {$result->get_error_message()}%n\n" );
+				    } else {
+						echo WP_CLI::colorize( "%CDeleted GA ID $guest_author_id%n\n" );
+				    }
+			    }
+		    }
+	    }
+
+		$users_and_original_system_ids = $wpdb->get_results(
+			"SELECT 
+    			sub.*, 
+    			u.user_login 
+			FROM (
+    			SELECT 
+    			    user_id, 
+    			    GROUP_CONCAT( meta_value ) as original_system_ids
+    			FROM wp_usermeta um 
+    			WHERE meta_key = 'original_user_id' 
+    			GROUP BY user_id) as sub
+			INNER JOIN wp_users u ON sub.user_id = u.ID"
+		);
+
+		foreach ( $users_and_original_system_ids as $user ) {
+			WP_CLI::log( "Checking User ID: $user->user_id" );
+			// Check if original_system_ids exists in wp_postmeta. If so, then we must link GA to WP User.
+			$guest_author_row = $wpdb->get_row(
+				"SELECT 
+    					post_id as guest_author_id 
+				FROM $wpdb->postmeta 
+				WHERE meta_key = 'original_user_id' 
+				  AND meta_value IN ( $user->original_system_ids )"
+			);
+
+			if ( ! $guest_author_row ) {
+				WP_CLI::warning( "No guest author found, skipping..." );
+				continue;
+			}
+
+			$first_guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_row->guest_author_id );
+
+			if ( ! empty( $first_guest_author->linked_account ) ) {
+				WP_CLI::warning( "Guest author already linked to: $first_guest_author->linked_account (wp_user.user_login $user->user_login ) skipping..." );
+				continue;
+			}
+
+			$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author_row->guest_author_id, get_user_by( 'id', $user->user_id ) );
+			echo WP_CLI::colorize( "%GLinking to Guest Author ID: $guest_author_row->guest_author_id%n\n" );
 		}
     }
 
@@ -2513,3 +3212,165 @@ BLOCK;
     }
 }
 
+class MigrationAuthor {
+
+	protected CoAuthorPlus $coauthorsplus_logic;
+
+	protected int $original_system_id;
+
+	protected string $description = '';
+
+	protected ?\WP_User $wp_user = null;
+
+	protected ?\stdClass $guest_author = null;
+
+	/**
+	 * @throws Exception
+	 */
+	public function __construct( int $original_system_id ) {
+		$this->original_system_id = $original_system_id;
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->find_user_from_original_system_id();
+		$this->set_output_description();
+	}
+
+	public function get_original_system_id(): int {
+		return $this->original_system_id;
+	}
+
+	public function get_wp_user(): \WP_User {
+		return $this->wp_user;
+	}
+
+	public function get_guest_author(): \stdClass {
+		return $this->guest_author;
+	}
+
+	public function is_wp_user(): bool {
+		return ! is_null( $this->wp_user );
+	}
+
+	public function is_guest_author(): bool {
+		return ! is_null( $this->guest_author );
+	}
+
+	public function get_output_description(): string {
+		return $this->description;
+	}
+
+	public function assign_to_post( int $post_id, bool $append = false ): bool {
+		$assigned_to_post = $this->coauthorsplus_logic
+			->coauthors_plus
+			->add_coauthors(
+				$post_id,
+				$this->get_author_data( $append ),
+				$append
+			);
+
+		// TODO Remove this block once PR is accepted: https://github.com/Automattic/Co-Authors-Plus/pull/988
+		if ( ! $assigned_to_post ) {
+			if ( $this->is_guest_author() && ! $this->is_wp_user() ) {
+				return true;
+			} else if ( $this->is_wp_user() ) {
+				// Must update `wp_posts.post_author` manually here.
+				$update = wp_update_post(
+					[
+						'ID'            => $post_id,
+						'post_author'   => $this->get_wp_user()->ID,
+					]
+				);
+
+				if ( is_wp_error( $update ) ) {
+					return false;
+				} else {
+					return (bool) $update;
+				}
+			}
+		} else {
+			return $assigned_to_post;
+		}
+
+		// TODO Uncomment this block once PR is accepted: https://github.com/Automattic/Co-Authors-Plus/pull/988
+		/*if ( ! $assigned_to_post && ! $append && ! $this->is_wp_user() && $this->is_guest_author() ) {
+			return true;
+		} else {
+			return $assigned_to_post;
+		}*/
+	}
+
+	private function set_output_description(): void {
+		$description = '';
+
+		if ( $this->is_wp_user() ) {
+			$description .= "WP_User.ID: {$this->get_wp_user()->ID}";
+		}
+
+		if ( $this->is_guest_author() ) {
+			if ( ! empty( $description ) ) {
+				$description .= " | ";
+			}
+			$description .= "GA.ID: {$this->get_guest_author()->ID}";
+		}
+
+		$this->description = $description;
+	}
+
+	private function get_author_data( bool $appending = false ): array {
+		$author_data = [
+			'wp_user' => null,
+			'guest_author' => null,
+		];
+
+		if ( $this->is_wp_user() ) {
+			$author_data['wp_user'] = $this->get_wp_user()->user_nicename;
+		}
+
+		if ( $this->is_guest_author() ) {
+			$author_data['guest_author'] = $this->get_guest_author()->user_nicename;
+		}
+
+		if ( $appending ) {
+			// If appending author, must remove wp_user to not overwrite wp_post.post_author
+			unset( $author_data['wp_user'] );
+		}
+
+		return array_values( array_filter( $author_data ) );
+	}
+
+	/**
+	 * @throws Exception
+	 */
+	private function find_user_from_original_system_id(): void {
+		global $wpdb;
+		// Check wp_usermeta first
+		$usermeta_check = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT user_id FROM $wpdb->usermeta WHERE meta_key = 'original_user_id' AND meta_value = %d",
+				$this->get_original_system_id()
+			)
+		);
+
+		if ( ! is_null( $usermeta_check ) ) {
+			$this->wp_user = get_user_by( 'id', $usermeta_check->user_id );
+
+			$this->guest_author = $this->coauthorsplus_logic->get_guest_author_by_linked_wpusers_user_login( $this->wp_user->user_login );
+
+			return;
+		}
+
+		$guest_author_check = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'original_user_id' AND meta_value = %d",
+				$this->get_original_system_id()
+			)
+		);
+
+		if ( ! is_null( $guest_author_check ) ) {
+			$this->guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_check->post_id );
+
+			return;
+		}
+
+		throw new \Exception( "Could not find user with original_user_id: {$this->get_original_system_id()}" );
+	}
+}
