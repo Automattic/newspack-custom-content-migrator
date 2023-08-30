@@ -729,6 +729,11 @@ class CoAuthorPlus {
 	 * @return bool|WP_Error $success True on success, WP_Error on a failure.
 	 */
 	public function delete_ga( $id, $reassign_to = false ) {
+		if ( false !== filter_var( $reassign_to, FILTER_VALIDATE_EMAIL ) ) {
+			// This means $reasign_to is an email, so let's sanitize it.
+			$reassign_to = sanitize_title( $reassign_to );
+		}
+
 		return $this->coauthors_guest_authors->delete( $id, $reassign_to );
 	}
 
