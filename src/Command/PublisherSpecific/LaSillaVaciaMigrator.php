@@ -2482,33 +2482,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                  * POST AUTHOR UPDATE SECTION
                  * * */
 	            if ( ! empty( $article['post_author'] ) ) {
-		            $first_author_original_id = array_shift( $article['post_author'] );
-		            try {
-			            $author          = new MigrationAuthor( $first_author_original_id );
-			            $author_assigned = $author->assign_to_post( $post_id );
+					$migration_post_authors = new MigrationPostAuthors( $article['post_author'] );
+					$assigned_to_post = $migration_post_authors->assign_to_post( $post_id );
 
-			            if ( $author_assigned ) {
-				            echo WP_CLI::colorize( "%WAssigned {$author->get_output_description()} to post ID {$post_id}%n\n" );
-			            }
-		            } catch ( Exception $e ) {
-			            echo WP_CLI::colorize( "%Y{$e->getMessage()}%n\n" );
-		            }
-
-		            foreach ( $article['post_author'] as $original_author_id ) {
-			            try {
-				            $author          = new MigrationAuthor( $original_author_id );
-				            $author_assigned = $author->assign_to_post(
-					            $post_id,
-					            true
-				            );
-
-				            if ( $author_assigned ) {
-					            echo WP_CLI::colorize( "%WAssigned {$author->get_output_description()} to post ID {$post_id}%n\n" );
-				            }
-			            } catch ( Exception $e ) {
-				            echo WP_CLI::colorize( "%Y{$e->getMessage()}%n\n" );
-			            }
-		            }
+					if ( $assigned_to_post ) {
+						foreach ( $migration_post_authors->get_authors() as $migration_author ) {
+							echo WP_CLI::colorize( "%WAssigned {$migration_author->get_output_description()} to post ID {$post_id}%n\n" );
+						}
+					}
 	            }
                 /* * *
                  * POST AUTHOR UPDATE SECTION
@@ -3259,6 +3240,7 @@ class MigrationAuthor {
 	}
 
 	public function assign_to_post( int $post_id, bool $append = false ): bool {
+		var_dump( $this->get_author_data( $append ) );
 		$assigned_to_post = $this->coauthorsplus_logic
 			->coauthors_plus
 			->add_coauthors(
@@ -3298,6 +3280,33 @@ class MigrationAuthor {
 		}*/
 	}
 
+	public function get_author_data( bool $appending = false ): array {
+		// TODO Once PR is accepted: https://github.com/Automattic/Co-Authors-Plus/pull/988 we can return with 'guest_author' immediately, if available, since it should be linked to WP_User.
+		$author_data = [
+			'wp_user' => null,
+			'guest_author' => null,
+		];
+
+		if ( $this->is_wp_user() ) {
+			$author_data['wp_user'] = $this->get_wp_user()->user_nicename;
+		} else {
+			unset( $author_data['wp_user'] );
+		}
+
+		if ( $this->is_guest_author() ) {
+			$author_data['guest_author'] = $this->get_guest_author()->user_nicename;
+		} else {
+			unset( $author_data['guest_author'] );
+		}
+
+		if ( $appending && $this->is_guest_author() ) {
+			// If appending author, must remove wp_user to not overwrite wp_post.post_author
+			unset( $author_data['wp_user'] );
+		}
+
+		return array_values( $author_data );
+	}
+
 	private function set_output_description(): void {
 		$description = '';
 
@@ -3313,28 +3322,6 @@ class MigrationAuthor {
 		}
 
 		$this->description = $description;
-	}
-
-	private function get_author_data( bool $appending = false ): array {
-		$author_data = [
-			'wp_user' => null,
-			'guest_author' => null,
-		];
-
-		if ( $this->is_wp_user() ) {
-			$author_data['wp_user'] = $this->get_wp_user()->user_nicename;
-		}
-
-		if ( $this->is_guest_author() ) {
-			$author_data['guest_author'] = $this->get_guest_author()->user_nicename;
-		}
-
-		if ( $appending ) {
-			// If appending author, must remove wp_user to not overwrite wp_post.post_author
-			unset( $author_data['wp_user'] );
-		}
-
-		return array_values( array_filter( $author_data ) );
 	}
 
 	/**
@@ -3372,5 +3359,58 @@ class MigrationAuthor {
 		}
 
 		throw new \Exception( "Could not find user with original_user_id: {$this->get_original_system_id()}" );
+	}
+}
+
+class MigrationPostAuthors {
+
+
+	protected CoAuthorPlus $coauthorsplus_logic;
+
+	/**
+	 * @var MigrationAuthor[] $authors
+	 */
+	protected array $authors = [];
+
+	/**
+	 * @var MigrationAuthor|null $first_wp_user
+	 */
+	protected ?MigrationAuthor $first_wp_user = null;
+
+	/**
+	 * @throws Exception
+	 */
+	public function __construct( array $original_author_ids ) {
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+
+		foreach ( $original_author_ids as $original_author_id ) {
+			$author = new MigrationAuthor( $original_author_id );
+
+			if ( is_null( $this->first_wp_user ) && $author->is_wp_user() ) {
+				$this->first_wp_user = $author;
+			}
+
+			$this->authors[] = $author;
+		}
+	}
+
+	public function assign_to_post( int $post_id ) {
+		$author_data = [];
+
+		foreach ( $this->get_authors() as $author ) {
+			$author_data = array_merge( $author_data, $author->get_author_data() );
+		}
+
+		var_dump(['first' => $author_data]);
+		$assigned_to_post = $this->coauthorsplus_logic->coauthors_plus->add_coauthors( $post_id, $author_data );
+
+		return $assigned_to_post;
+	}
+
+	/**
+	 * @return MigrationAuthor[]
+	 */
+	public function get_authors(): array {
+		return $this->authors;
 	}
 }
