@@ -1,6 +1,6 @@
 <?php
 
-namespace NewspackCustomContentMigrator\Utils;
+namespace NewspackCustomContentMigrator\Logic;
 
 use InvalidArgumentException;
 
