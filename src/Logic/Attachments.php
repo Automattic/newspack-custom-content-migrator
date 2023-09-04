@@ -106,12 +106,14 @@ class Attachments {
 	}
 
 	/**
-	 * @param string $filepath
-	 * @param string $filename
+	 * Try to get the attachment ID for a file if one just like it has already been uploaded.
+	 *
+	 * @param string $filepath The path on the file system of the file to check if we have already uploaded.
+	 * @param string $filename (Optional) The file name including file extension – exclude if it is on the file path.
 	 *
 	 * @return int|null Attachment ID if found, null otherwise.
 	 */
-	public function maybe_get_exisiting_attachment_id( $filepath, $filename = '' ): int|null {
+	public function maybe_get_exisiting_attachment_id( string $filepath, string $filename = '' ): int|null {
 		if ( ! file_exists( $filepath ) ) {
 			return null;
 		}
@@ -119,6 +121,7 @@ class Attachments {
 		if ( empty( $filename ) ) {
 			$filename = basename( $filepath );
 		}
+
 		global $wpdb;
 		$like = '%' . $wpdb->esc_like( $filename );
 		$sql  = $wpdb->prepare(
