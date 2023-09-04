@@ -1022,6 +1022,30 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				]
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-create-missing-podcasts',
+			[ $this, 'create_missing_podcasts' ],
+			[
+				'shortdesc' => 'Create podcasts with only an audio file.',
+				'synopsis' => [
+					[
+						'type' => 'assoc',
+						'name' => 'import-json',
+						'description' => 'The file that contains podcasts data.',
+						'optional' => false,
+						'repeating' => false,
+					],
+					[
+						'type' => 'assoc',
+						'name' => 'media-dir',
+						'description' => 'The directory where the media folder is located',
+						'optional' => false,
+						'repeating' => false,
+					],
+				]
+			]
+		);
     }
 
     private function reset_db()
@@ -3051,6 +3075,84 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             }
         }
     }
+
+	public function create_missing_podcasts( array $args, array $assoc_args ) {
+		$command_meta_key = 'create_missing_podcasts';
+		$command_meta_version = 'v1';
+		$log_file = "{$command_meta_key}_{$command_meta_version}.log";
+
+		global $wpdb;
+		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $podcast ) {
+
+			$existing_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_original_article_id' and meta_value = %s",
+				$podcast->id ) );
+			if ( $existing_id ) {
+				$this->logger->log(
+					$log_file,
+					sprintf(
+						"Podcast with original ID %d has already been imported to post id %d. Skipping",
+						$podcast->id,
+						$existing_id
+					),
+					Logger::ERROR
+				);
+				continue;
+			}
+
+			// Strip the "media" folder part of the path in the json.
+			$file_path = $assoc_args['media-dir'] . str_ireplace( '/media', '', $podcast->audio );
+
+			if ( ! file_exists( $file_path ) ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Cant' find audio file %s for podcast with original ID %d.", $file_path, $podcast->id ),
+					Logger::ERROR
+				);
+				continue;
+			}
+
+			$attachment_id = $this->attachments->import_external_file( $file_path );
+			$audio_url     = wp_get_attachment_url( $attachment_id );
+			$audio_block   = <<<BLOCK
+<!-- wp:audio {"id":$attachment_id} -->
+<figure class="wp-block-audio"><audio controls src="$audio_url"></audio></figure>
+<!-- /wp:audio -->
+BLOCK;
+
+			$post = [
+				'post_title'     => $podcast->title,
+				'post_content'   => $audio_block,
+				'comment_status' => 'closed',
+				'post_date'      => $podcast->createdAt,
+				'post_status'    => 'publish',
+				'post_author'    => 6, // Hard code to Karen because the futuro del futuro posts have no author.
+				'meta_input'     => [
+					'newspack_original_article_id' => $podcast->id,
+				]
+			];
+
+			$sanctioned_categories = [
+				5001, // Podcasts
+				5005 // El futuro del futuro
+			];
+
+			if ( ! empty ( $podcast->categories ) ) {
+				$cats = array_map(
+					fn( $cat ) => (int) $cat->id,
+					$podcast->categories );
+
+				$post['post_category'] = array_filter(
+					$cats,
+					fn( $id ) => in_array( $id, $sanctioned_categories, true )
+				);
+			}
+			if ( ! is_wp_error( wp_insert_post( $post ) ) ) {
+
+				WP_CLI::success( sprintf( "Updated post ID %d with audio file %s", $existing_id, $file_path ) );
+			}
+
+		}
+	}
 
 	// Updates podcasts with their audio files and prepends an audio block to the post content.
 	public function update_podcasts( array $args, array $assoc_args) : void {
