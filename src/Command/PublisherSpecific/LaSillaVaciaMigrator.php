@@ -1038,6 +1038,21 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 						'repeating' => false,
 					],
 					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Skip writing?',
+					],
+				]
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-update-guest-author-slugs',
+			[ $this, 'update_guest_author_slugs' ],
+			[
+				'shortdesc' => 'Go over guest users to fix their slugs.',
+				'synopsis'  => [
+					[
 						'type' => 'assoc',
 						'name' => 'guest-author-id',
 						'description' => 'A specific guest user post ID to run the command on',
@@ -3154,6 +3169,72 @@ BLOCK;
 
 	}
 
+	// Update guest author slugs. This updates the post title and the term slug if necessary.
+	public function update_guest_author_slugs( $args, $assoc_args): void {
+		$command_meta_key     = 'update_guest_author_slugs';
+		$command_meta_version = 1;
+		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$dry_run              = WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
+
+		$single_guest_author_id = $assoc_args['guest-author-id'] ?? false;
+
+		$post_logic    = new Posts();
+		$guest_authors = [];
+		if ( $single_guest_author_id ) {
+			$single_ga = get_post( $assoc_args['guest-author-id'] );
+			// Make sure the ID is for a guest author.
+			if ( $single_ga && 'guest-author' === $single_ga->post_type ) {
+				$guest_authors = [ $assoc_args['guest-author-id'] => [] ];
+			}
+		} else {
+			$guest_authors = $post_logic->get_all_posts_ids( 'guest-author' );
+		}
+
+		global $wpdb;
+
+		foreach ( $guest_authors as $ga_id ) {
+
+			if ( MigrationMeta::get( $ga_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				$this->logger->log(
+					$log_file,
+					sprintf( "Guest user with post ID %d already has been updated to %s. Skipping.", $ga_id,
+						$command_meta_version )
+				);
+				continue;
+			}
+
+			$post            = get_post( $ga_id );
+			$new_slug        = substr( sanitize_title( $post->post_title ), 0, 200 );
+			$old_post_name   = $post->post_name;
+			$post->post_name = 'cap-' . $new_slug;
+
+			if ( ! $dry_run ) {
+				if ( is_wp_error( wp_update_post( $post ) ) ) {
+					$this->logger->log(
+						$log_file,
+						sprintf( "Could not update post name for guest user with post ID %d.", $ga_id ),
+						Logger::ERROR
+					);
+					continue;
+				}
+				update_post_meta( $ga_id, 'cap-user_login', $new_slug );
+
+				$wpdb->query( $wpdb->prepare(
+					"UPDATE {$wpdb->terms} SET slug = '%s', name = '%s' WHERE slug = '%s'",
+					$post->post_name,
+					$post->post_title,
+					$old_post_name
+				) );
+
+				MigrationMeta::update( $ga_id, $command_meta_key, 'post', $command_meta_version );
+			}
+
+			WP_CLI::success( sprintf( "Updated slug for %s: %s", $post->post_title,
+				get_author_posts_url( $post->ID ) . $new_slug ) );
+		}
+
+	}
+
 	// Update user slugs. They were using emails (without '@') and this changes it to the display name instead.
 	public function update_user_slugs( $args, $assoc_args): void {
 		$command_meta_key     = 'update_user_slugs';
@@ -3171,7 +3252,6 @@ BLOCK;
 		$is_single_run = ( $single_user_id xor $single_guest_author_id );
 
 		global $wpdb;
-
 		$user_ids = [];
 		if ( $single_user_id ) {
 			$user_ids = [ get_user_by( 'ID', $assoc_args['user-id'] ) ];
@@ -3182,17 +3262,6 @@ BLOCK;
 					"SELECT ID FROM {$wpdb->users} WHERE user_login LIKE '%@%';"
 				)
 			);
-		}
-
-		$post_logic    = new Posts();
-		$guest_authors = [];
-		if ( $single_guest_author_id ) {
-			$single_user = get_post( $assoc_args['guest-author-id'] );
-			if ( $single_user && 'guest-author' === $single_user->post_type ) {
-				$guest_authors = [ $assoc_args['guest-author-id'] => [] ];
-			}
-		} elseif ( ! $is_single_run ) {
-			$guest_authors = array_fill_keys( $post_logic->get_all_posts_ids( 'guest-author' ), [] );
 		}
 
 		foreach ( $user_ids as $user_id ) {
@@ -3206,18 +3275,24 @@ BLOCK;
 				continue;
 			}
 
-			$user                = get_user_by( 'id', $user_id );
-			$old_nicename        = $user->user_nicename;
-			$user->user_nicename = substr( sanitize_title( $user->display_name ), 0, 50 );
+			$user         = get_user_by( 'id', $user_id );
+			$new_nicename = substr( sanitize_title( $user->display_name ), 0, 50 );
 
-
-			$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user->user_login );
-			if ( ! empty( $ga->ID ) ) {
-				$guest_authors[ $ga->ID ] = [
-					'new_nicename' => $user->user_nicename,
-					'old_nicename' => $old_nicename,
-				];
+			if ( empty( $new_nicename ) ) {
+				$this->logger->log(
+					$log_file,
+					sprintf(
+						"User with user ID %d and email %s does not have first name, last name or anything to make a slug from.",
+						$user_id,
+						$user->user_email
+					),
+					Logger::WARNING
+				);
+				continue;
 			}
+
+			$old_nicename        = $user->user_nicename;
+			$user->user_nicename = $new_nicename;
 
 			if ( ! $dry_run ) {
 				if ( is_wp_error( wp_update_user( $user ) ) ) {
@@ -3231,48 +3306,9 @@ BLOCK;
 				MigrationMeta::update( $user_id, $command_meta_key, 'user', $command_meta_version );
 			}
 
-			WP_CLI::success( sprintf( "Updated nicename on user with ID %d", $user_id ) );
+			WP_CLI::success( sprintf( "Updated nicename from %s to %s on user with ID %d ", $old_nicename,
+				$user->user_nicename, $user_id ) );
 		}
-
-		foreach ( $guest_authors as $post_id => $data ) {
-			if ( MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				$this->logger->log(
-					$log_file,
-					sprintf( "Guest user with post ID %d already has been updated to %s. Skipping.", $post_id,
-						$command_meta_version )
-				);
-				continue;
-			}
-			$post            = get_post( $post_id );
-			$slug            = $data['new_nicename'] ?? substr( sanitize_title( $post->post_title ), 0, 200 );
-			$old_post_name   = $post->post_name;
-			$post->post_name = 'cap-' . $slug;
-
-			if ( ! $dry_run ) {
-				if ( is_wp_error( wp_update_post( $post ) ) ) {
-					$this->logger->log(
-						$log_file,
-						sprintf( "Could not update post name for guest user with post ID %d.", $post_id ),
-						Logger::ERROR
-					);
-					continue;
-				}
-				update_post_meta( $post_id, 'cap-user_login', $slug );
-
-				$sql    = $wpdb->prepare(
-					"UPDATE {$wpdb->terms} SET slug = '%s', name = '%s' WHERE slug = '%s'",
-					$post->post_name,
-					$post->post_title,
-					empty( $data['old_nicename'] ) ? $old_post_name : 'cap-' . $data['old_nicename']
-				);
-				$wpdb->query( $sql );
-
-				MigrationMeta::update( $post_id, $command_meta_key, 'term', $command_meta_version );
-			}
-
-			WP_CLI::success( sprintf( "Updated slug for %s: %s", $post->post_title, get_author_posts_url( $post->ID ) . $slug ) );
-		}
-
 	}
 
     /**
