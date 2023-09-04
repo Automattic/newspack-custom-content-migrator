@@ -5,10 +5,15 @@ namespace NewspackCustomContentMigrator\Logic;
 use \WP_CLI;
 
 class Attachments {
+
+	/**
+	 * @var null|string The subdirectory to use for the upload directory when the add_upload_path_filter is active.
+	 */
+	private $upload_subdir = null;
+
+
 	/**
 	 * Imports a media object from file and returns the ID.
-	 *
-	 * @deprecated Warning: this function is quite slow, and the new function `import_external_file` here should be used instead.
 	 *
 	 * @param string $file Media file full path.
 	 *
@@ -101,7 +106,7 @@ class Attachments {
 	 * @param integer   $posts_per_batch Total of posts tohandle per batch.
 	 * @param integer   $batch Current batch in the loop.
 	 * @param integer   $start_index Index from where to start the loop.
-	 * @param func|null $logger Method to log results.
+	 * @param callable|null $logger Method to log results.
 	 *
 	 * @return mixed[] Array of the broken URLs indexed by the post IDs.
 	 */
@@ -257,4 +262,42 @@ class Attachments {
 
 		return $attachment_id;
 	}
+
+	/**
+	 * Change the subdirectory in the uploads folder that files go to.
+	 *
+	 * Don't forget to remove the filter again after you're done – use remove_upload_path_filter().
+	 *
+	 * @param string $path Subdirectory you want uploads to go to.
+	 *
+	 * @return void
+	 *
+	 */
+	public function add_upload_path_filter( string $path ): void {
+		$this->upload_subdir = $path;
+		add_filter( 'upload_dir', [ $this, 'filter_upload_directory' ] );
+	}
+
+	/**
+	 * Remove the upload path filter and reset the instance variable holding the path.
+	 *
+	 * @return void
+	 */
+	public function remove_upload_path_filter(): void {
+		$this->upload_subdir = null;
+		remove_filter( 'upload_dir', [ $this, 'filter_upload_directory' ] );
+	}
+
+	/**
+	 * Filter implementation. Don't call directly - use add_upload_path_filter() instead.
+	 */
+	public function filter_upload_directory( $dirs ) {
+		if ( null !== $this->upload_subdir ) {
+			$dirs['subdir'] = '/' . $this->upload_subdir;
+			$dirs['path']   = $dirs['basedir'] . $dirs['subdir'];
+		}
+
+		return $dirs;
+	}
+
 }
