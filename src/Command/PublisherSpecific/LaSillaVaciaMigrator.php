@@ -832,13 +832,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'optional' => false,
                         'repeating' => false,
                     ],
-                    [
-                        'type' => 'flag',
-                        'name' => 'reset-db',
-                        'description' => 'Resets the database for a fresh import.',
-                        'optional' => true,
-                        'repeating' => false,
-                    ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'media-location',
+		                'description' => 'Path to media directory',
+		                'optional' => false,
+		                'repeating' => false,
+	                ],
                 ]
             ]
         );
@@ -1973,9 +1973,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		global $wpdb;
 
 		$incremental_import = isset( $assoc_args['incremental-import'] ) ? true : false;
-        if ( isset( $assoc_args['reset-db'] ) ) {
-            $this->reset_db();
-        }
+
+		$media_location = $assoc_args['media-location'];
 
 		$skip_base64_html_ids = [];
 
@@ -1990,6 +1989,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			'En Vivo',
 			'Silla Llena',
 			'Publicaciones',
+			'Red de Expertos'
 		];
 		if ( ! in_array( $assoc_args['category-name'], $category_names ) ) {
 			WP_CLI::error( sprintf( "Category name '%s' not found.", $assoc_args['category-name'] ) );
@@ -2109,19 +2109,23 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				if ( isset( $article['url'] ) ) {
 					$additional_meta['newspack_url'] = $article['url'];
 				}
-			} elseif ( 'Silla Nacional' == $assoc_args['category-name'] ) {
+			} elseif ( in_array( $assoc_args['category-name'], [ 'Silla Nacional', 'Silla Llena', 'Red de Expertos' ] ) ) {
 				$post_title = trim( $article['post_title'] );
 				$post_excerpt = $article['post_excerpt'] ?? '';
 				$post_date = $article['post_date'];
-                $post_modified = $article['publishedAt'] ?? $post_date;
+				if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+					$post_date = $article['publishedAt'];
+				}
+                $post_modified = $article['post_modified'] ?? $post_date;
+				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
+					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				}
 				$post_name = $article['post_name'];
 				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : [];
+
+				$current_term_taxonomies = $this->get_current_term_taxonomies();
 				if ( isset( $article['tags'] ) && ! is_null( $article['tags'] ) && ! empty( $article['tags'] ) ) {
-					foreach ( $article['tags'] as $article_tag ) {
-						if ( isset( $article_tag['name'] ) && ! empty( $article_tag['name'] ) ) {
-							$article_tags[] = $article_tag['name'];
-						}
-					}
+					$article_tags = $this->handle_article_terms( $article['tags'], $current_term_taxonomies );
 				}
 				if ( isset( $article['image'] ) ) {
 					$additional_meta['newspack_image'] = $article['image'];
@@ -2286,9 +2290,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 'meta_input' => $meta_input,
             ];
 
-            if ( 1 === count( $article_authors ) ) {
+            /*if ( 1 === count( $article_authors ) ) {
                 $article_data['post_author'] = $authors[ $article_authors[0] ] ?? 0;
-            }
+            }*/
 
 			if ( isset( $article['customfields'] ) ) {
 	            foreach ( $article['customfields'] as $customfield ) {
@@ -2315,17 +2319,26 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 			if ( ! is_null( $featured_image_attachment_id ) ) {
 				set_post_thumbnail( $post_id, $featured_image_attachment_id );
+			} else {
+				if ( isset( $article['image'] ) ) {
+					$this->handle_featured_image( $article['image'], $article['id'], $post_id, $media_location );
+				}
 			}
 
-            if ( count( $article_authors ) > 1 ) {
-                $guest_author_query = "SELECT 
-                        post_id 
-                    FROM $wpdb->postmeta 
-                    WHERE meta_key = 'original_user_id' 
-                      AND meta_value IN (" . implode( ',', $article_authors ) . ')';
-                $guest_author_ids = $wpdb->get_col( $guest_author_query );
+	        if ( ! empty( $article_authors) ) {
+				try {
+					$migration_post_authors = new MigrationPostAuthors( $article_authors );
+					$assigned_to_post       = $migration_post_authors->assign_to_post( $post_id );
 
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( $guest_author_ids, $post_id, false );
+					if ( $assigned_to_post ) {
+						foreach ( $migration_post_authors->get_authors() as $migration_author ) {
+							echo WP_CLI::colorize( "%WAssigned {$migration_author->get_output_description()} to post ID {$post_id}%n\n" );
+						}
+					}
+				} catch ( Exception $e ) {
+					$message = strtoupper( $e->getMessage() );
+					echo WP_CLI::colorize( "%Y$message%n\n" );
+				}
 				/**
 				 * This existing code below doesn't work -- it's not finding the $term_taxonomy_ids.
 				 * Plus we have a one-liner for this 👆.
@@ -2355,7 +2368,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             }
 
 			// Set categories.
-	        $some_categories_were_set = false;
+	        /*$some_categories_were_set = false;
             foreach ( $article['categories'] as $category ) {
 				// Get category name.
 				$category_name = null;
@@ -2376,11 +2389,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			// And if no cats were assigned, at least assign the top level category.
 			if ( false === $some_categories_were_set ) {
                 wp_set_post_terms( $post_id, $top_category_term_id, 'category', true );
-			}
+			}*/
+	        if ( ! empty( $article['categories'] ) ) {
+		        $category_ids = $this->handle_article_terms( $article['categories'], $this->get_current_term_taxonomies() );
+				wp_set_post_terms( $post_id, $category_ids, 'category' );
+	        }
 
 			// Set tags.
 	        if ( ! empty( $article_tags ) ) {
-		        wp_set_post_tags( $post_id, $article_tags, false );
+		        wp_set_post_terms( $post_id, $article_tags );
 	        }
 
 			// It's not recommended to modify the guid
@@ -2423,30 +2440,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             return intval( $item->new_article_id );
         }, $original_article_id_to_new_article_id_map );
 
-		$tags_and_category_taxonomy_ids = $wpdb->get_results(
-			"SELECT term_taxonomy_id, term_id FROM $wpdb->term_taxonomy WHERE taxonomy IN ( 'post_tag', 'category' )",
-			OBJECT_K
-		);
-		$tags_and_category_taxonomy_ids = array_map( function( $item ) {
-			return intval( $item->term_id );
-		}, $tags_and_category_taxonomy_ids );
+		$tags_and_category_taxonomy_ids = $this->get_current_term_taxonomies();
 
         $datetime_format = 'Y-m-d H:i:s';
-
-		$replace_accents = [
-			'á' => 'a',
-			'é' => 'e',
-			'í' => 'i',
-			'ó' => 'o',
-			'ú' => 'u',
-			'ñ' => 'n',
-			'Á' => 'A',
-			'É' => 'E',
-			'Í' => 'I',
-			'Ó' => 'O',
-			'Ú' => 'U',
-			'Ñ' => 'N',
-		];
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
 	        if ( $skip && $start_at_id != $article['id']) {
@@ -2513,33 +2509,19 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                  * POST AUTHOR UPDATE SECTION
                  * * */
 	            if ( ! empty( $article['post_author'] ) ) {
-		            $first_author_original_id = array_shift( $article['post_author'] );
-		            try {
-			            $author          = new MigrationAuthor( $first_author_original_id );
-			            $author_assigned = $author->assign_to_post( $post_id );
+					try {
+						$migration_post_authors = new MigrationPostAuthors( $article['post_author'] );
+						$assigned_to_post       = $migration_post_authors->assign_to_post( $post_id );
 
-			            if ( $author_assigned ) {
-				            echo WP_CLI::colorize( "%WAssigned {$author->get_output_description()} to post ID {$post_id}%n\n" );
-			            }
-		            } catch ( Exception $e ) {
-			            echo WP_CLI::colorize( "%Y{$e->getMessage()}%n\n" );
-		            }
-
-		            foreach ( $article['post_author'] as $original_author_id ) {
-			            try {
-				            $author          = new MigrationAuthor( $original_author_id );
-				            $author_assigned = $author->assign_to_post(
-					            $post_id,
-					            true
-				            );
-
-				            if ( $author_assigned ) {
-					            echo WP_CLI::colorize( "%WAssigned {$author->get_output_description()} to post ID {$post_id}%n\n" );
-				            }
-			            } catch ( Exception $e ) {
-				            echo WP_CLI::colorize( "%Y{$e->getMessage()}%n\n" );
-			            }
-		            }
+						if ( $assigned_to_post ) {
+							foreach ( $migration_post_authors->get_authors() as $migration_author ) {
+								echo WP_CLI::colorize( "%WAssigned {$migration_author->get_output_description()} to post ID {$post_id}%n\n" );
+							}
+						}
+					} catch ( Exception $e ) {
+						$message = strtoupper( $e->getMessage() );
+						echo WP_CLI::colorize( "%Y$message%n\n" );
+					}
 	            }
                 /* * *
                  * POST AUTHOR UPDATE SECTION
@@ -2577,101 +2559,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				$has_featured_image = ! is_null( $has_featured_image );
 				if ( ! $has_featured_image ) {
 					if ( ! empty( $article['image'] ) ) {
-						$filename       = $article['image']['name'];
-						$full_file_path = $media_location . '/' . $filename;
-
-						if ( ! file_exists( $full_file_path ) ) {
-							$modified_file_name = str_replace(
-								array_keys( $replace_accents ),
-								array_values( $replace_accents ),
-								$filename
-							);
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
-							$full_file_path = $media_location . '/' . $modified_file_name;
-						}
-
-						if ( ! file_exists( $full_file_path ) ) {
-							$quoted_file_name = "'$filename'";
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$quoted_file_name ...%n\n" );
-							$full_file_path = $media_location . '/' . $quoted_file_name;
-						}
-
-						if ( ! file_exists( $full_file_path ) ) {
-							$quoted_file_name = "'$filename'";
-							$quoted_file_name = str_replace(
-								array_keys( $replace_accents ),
-								array_values( $replace_accents ),
-								$quoted_file_name
-							);
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$quoted_file_name ...%n\n" );
-							$full_file_path = $media_location . '/' . $quoted_file_name;
-						}
-
-						if ( ! file_exists( $full_file_path ) ) {
-							$modified_file_name = strtolower( str_replace( ' ', '_', $filename ) );
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
-							$full_file_path = $media_location . '/' . $modified_file_name;
-						}
-
-						if ( ! file_exists( $full_file_path ) ) {
-							$modified_file_name = strtolower(
-								str_replace(
-									array_keys( $replace_accents ),
-									array_values( $replace_accents ),
-									$filename
-								)
-							);
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
-							$full_file_path = $media_location . '/' . $modified_file_name;
-						}
-
-						if ( ! file_exists( $full_file_path ) ) {
-							$modified_file_name = strtolower( str_replace( ' ', '_', $filename ) );
-							$modified_file_name = strtolower(
-								str_replace(
-									array_keys( $replace_accents ),
-									array_values( $replace_accents ),
-									$modified_file_name
-								)
-							);
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
-							$full_file_path = $media_location . '/' . $modified_file_name;
-						}
-
-						if ( file_exists( $full_file_path ) ) {
-							update_post_meta( $post_id, 'newspack_featured_image_position', '' );
-							$featured_image_attachment_id = $this->attachments->import_external_file(
-								$full_file_path,
-								$article['image']['FriendlyName'],
-								$article['image']['caption'] ?? '',
-								null,
-								null,
-								$post_id
-							);
-
-							if ( is_wp_error( $featured_image_attachment_id ) || ! $featured_image_attachment_id ) {
-								$msg = sprintf(
-									"ERROR: (OAID) %d, WPAID %d, error importing featured image %s err: %s\n",
-									$article['id'],
-									$post_id,
-									$full_file_path,
-									is_wp_error( $featured_image_attachment_id )
-										? $featured_image_attachment_id->get_error_message() : '/'
-								);
-								echo $msg;
-							} else {
-								$post_meta['_thumbnail_id'] = $featured_image_attachment_id;
-								$msg = sprintf(
-									"(OAID) %d, WPAID %d, imported featured image attachment ID %d\n",
-									$article['id'],
-									$post_id,
-									$featured_image_attachment_id
-								);
-								echo WP_CLI::colorize( "%b$msg%n" );
-							}
-						} else {
-							echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path%n\n" );
-						}
+						$this->handle_featured_image(
+							$article['image'],
+							intval( $article['id'] ),
+							$post_id,
+							$media_location
+						);
 					}
 				}
                 /* * *
@@ -2709,34 +2602,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	            /*
                  * TAXONOMY SECTION
                  * * */
-	            $tag_term_ids = [];
-	            foreach ( $article['tags'] as $tag ) {
-					$taxonomy = $tag['taxonomy'];
-					$term_taxonomy_id = $tag['term_taxonomy_id'];
-
-					if ( ! array_key_exists( $term_taxonomy_id, $tags_and_category_taxonomy_ids ) ) {
-			            echo WP_CLI::colorize( "%m$taxonomy term_taxonomy_id: $term_taxonomy_id does not exist in DB%n\n" );
-						continue;
-		            }
-
-					$tag_term_ids[] = $tags_and_category_taxonomy_ids[ $term_taxonomy_id ];
-	            }
+	            $tag_term_ids = $this->handle_article_terms( $article['tags'], $tags_and_category_taxonomy_ids );
 	            if ( ! empty( $tag_term_ids ) ) {
 		            $result = wp_set_post_terms( $post_id, $tag_term_ids );
 	            }
 
-				$category_term_ids = [];
-				foreach ( $article['categories'] as $category ) {
-					$taxonomy = $category['taxonomy'];
-					$term_taxonomy_id = $category['term_taxonomy_id'];
-
-					if ( ! array_key_exists( $term_taxonomy_id, $tags_and_category_taxonomy_ids ) ) {
-						echo WP_CLI::colorize( "%m$taxonomy term_taxonomy_id: $term_taxonomy_id does not exist in DB%n\n" );
-						continue;
-					}
-
-					$category_term_ids[] = $tags_and_category_taxonomy_ids[ $term_taxonomy_id ];
-				}
+				$category_term_ids = $this->handle_article_terms( $article['categories'], $tags_and_category_taxonomy_ids );
 	            if ( ! empty( $category_term_ids ) ) {
 		            $result = wp_set_post_terms( $post_id, $category_term_ids, 'category' );
 	            }
@@ -2857,6 +2728,150 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             }
         }
     }
+
+	private function get_current_term_taxonomies() {
+		global $wpdb;
+
+		$tags_and_category_taxonomy_ids = $wpdb->get_results(
+			"SELECT term_taxonomy_id, term_id FROM $wpdb->term_taxonomy WHERE taxonomy IN ( 'post_tag', 'category' )",
+			OBJECT_K
+		);
+
+		return array_map( function( $item ) {
+			return intval( $item->term_id );
+		}, $tags_and_category_taxonomy_ids );
+	}
+
+	private function handle_article_terms( array $terms, array $current_term_taxonomy_ids ) {
+		$term_ids = [];
+
+		foreach ( $terms as $term ) {
+			$taxonomy = $term['taxonomy'];
+			$term_taxonomy_id = $term['term_taxonomy_id'];
+
+			if ( ! array_key_exists( $term_taxonomy_id, $current_term_taxonomy_ids ) ) {
+				echo WP_CLI::colorize( "%m$taxonomy term_taxonomy_id: $term_taxonomy_id does not exist in DB%n\n" );
+				continue;
+			}
+
+			$term_ids[] = $current_term_taxonomy_ids[ $term_taxonomy_id ];
+		}
+
+		return $term_ids;
+	}
+
+	private function handle_featured_image( $image, int $original_article_id, int $post_id, string $media_location ): void {
+		$filename       = $image['name'];
+		$full_file_path = $media_location . '/' . $filename;
+
+		$replace_accents = [
+			'á' => 'a',
+			'é' => 'e',
+			'í' => 'i',
+			'ó' => 'o',
+			'ú' => 'u',
+			'ñ' => 'n',
+			'Á' => 'A',
+			'É' => 'E',
+			'Í' => 'I',
+			'Ó' => 'O',
+			'Ú' => 'U',
+			'Ñ' => 'N',
+		];
+
+		if ( ! file_exists( $full_file_path ) ) {
+			$modified_file_name = str_replace(
+				array_keys( $replace_accents ),
+				array_values( $replace_accents ),
+				$filename
+			);
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+			$full_file_path = $media_location . '/' . $modified_file_name;
+		}
+
+		if ( ! file_exists( $full_file_path ) ) {
+			$quoted_file_name = "'$filename'";
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$quoted_file_name ...%n\n" );
+			$full_file_path = $media_location . '/' . $quoted_file_name;
+		}
+
+		if ( ! file_exists( $full_file_path ) ) {
+			$quoted_file_name = "'$filename'";
+			$quoted_file_name = str_replace(
+				array_keys( $replace_accents ),
+				array_values( $replace_accents ),
+				$quoted_file_name
+			);
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$quoted_file_name ...%n\n" );
+			$full_file_path = $media_location . '/' . $quoted_file_name;
+		}
+
+		if ( ! file_exists( $full_file_path ) ) {
+			$modified_file_name = strtolower( str_replace( ' ', '_', $filename ) );
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+			$full_file_path = $media_location . '/' . $modified_file_name;
+		}
+
+		if ( ! file_exists( $full_file_path ) ) {
+			$modified_file_name = strtolower(
+				str_replace(
+					array_keys( $replace_accents ),
+					array_values( $replace_accents ),
+					$filename
+				)
+			);
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+			$full_file_path = $media_location . '/' . $modified_file_name;
+		}
+
+		if ( ! file_exists( $full_file_path ) ) {
+			$modified_file_name = strtolower( str_replace( ' ', '_', $filename ) );
+			$modified_file_name = strtolower(
+				str_replace(
+					array_keys( $replace_accents ),
+					array_values( $replace_accents ),
+					$modified_file_name
+				)
+			);
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path, searching for $media_location/$modified_file_name ...%n\n" );
+			$full_file_path = $media_location . '/' . $modified_file_name;
+		}
+
+		if ( file_exists( $full_file_path ) ) {
+			update_post_meta( $post_id, 'newspack_featured_image_position', '' );
+			$featured_image_attachment_id = $this->attachments->import_external_file(
+				$full_file_path,
+				$image['FriendlyName'],
+				$image['caption'] ?? '',
+				null,
+				null,
+				$post_id
+			);
+
+			if ( is_wp_error( $featured_image_attachment_id ) || ! $featured_image_attachment_id ) {
+				$msg = sprintf(
+					"ERROR: (OAID) %d, WPAID %d, error importing featured image %s err: %s\n",
+					$original_article_id,
+					$post_id,
+					$full_file_path,
+					is_wp_error( $featured_image_attachment_id )
+						? $featured_image_attachment_id->get_error_message() : '/'
+				);
+				echo $msg;
+			} else {
+				update_post_meta( $post_id, '_thumbnail_id', $featured_image_attachment_id );
+				$msg = sprintf(
+					"(OAID) %d, WPAID %d, imported featured image attachment ID %d\n",
+					$original_article_id,
+					$post_id,
+					$featured_image_attachment_id
+				);
+				echo WP_CLI::colorize( "%b$msg%n" );
+			}
+		} else {
+			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path%n\n" );
+		}
+	}
 
     public function link_wp_users_to_guest_authors()
     {
@@ -3451,6 +3466,35 @@ class MigrationAuthor {
 		}*/
 	}
 
+	public function get_author_data( bool $appending = false ): array {
+		// TODO Once PR is accepted: https://github.com/Automattic/Co-Authors-Plus/pull/988 we can return with 'guest_author' immediately, if available, since it should be linked to WP_User.
+		$author_data = [
+			'wp_user' => null,
+			'guest_author' => null,
+		];
+
+		if ( $this->is_guest_author() ) {
+//			$author_data['guest_author'] = $this->get_guest_author()->user_nicename;
+			return [ $this->get_guest_author()->user_nicename ];
+		} else {
+//			unset( $author_data['guest_author'] );
+		}
+
+		if ( $this->is_wp_user() ) {
+//			$author_data['wp_user'] = $this->get_wp_user()->user_nicename;
+			return [ $this->get_wp_user()->user_nicename ];
+		} else {
+//			unset( $author_data['wp_user'] );
+		}
+
+		/*if ( $appending && $this->is_guest_author() ) {
+			// If appending author, must remove wp_user to not overwrite wp_post.post_author
+			unset( $author_data['wp_user'] );
+		}
+
+		return array_values( $author_data );*/
+	}
+
 	private function set_output_description(): void {
 		$description = '';
 
@@ -3466,28 +3510,6 @@ class MigrationAuthor {
 		}
 
 		$this->description = $description;
-	}
-
-	private function get_author_data( bool $appending = false ): array {
-		$author_data = [
-			'wp_user' => null,
-			'guest_author' => null,
-		];
-
-		if ( $this->is_wp_user() ) {
-			$author_data['wp_user'] = $this->get_wp_user()->user_nicename;
-		}
-
-		if ( $this->is_guest_author() ) {
-			$author_data['guest_author'] = $this->get_guest_author()->user_nicename;
-		}
-
-		if ( $appending ) {
-			// If appending author, must remove wp_user to not overwrite wp_post.post_author
-			unset( $author_data['wp_user'] );
-		}
-
-		return array_values( array_filter( $author_data ) );
 	}
 
 	/**
@@ -3525,5 +3547,57 @@ class MigrationAuthor {
 		}
 
 		throw new \Exception( "Could not find user with original_user_id: {$this->get_original_system_id()}" );
+	}
+}
+
+class MigrationPostAuthors {
+
+
+	protected CoAuthorPlus $coauthorsplus_logic;
+
+	/**
+	 * @var MigrationAuthor[] $authors
+	 */
+	protected array $authors = [];
+
+	/**
+	 * @var MigrationAuthor|null $first_wp_user
+	 */
+	protected ?MigrationAuthor $first_wp_user = null;
+
+	/**
+	 * @throws Exception
+	 */
+	public function __construct( array $original_author_ids ) {
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+
+		foreach ( $original_author_ids as $original_author_id ) {
+			$author = new MigrationAuthor( $original_author_id );
+
+			if ( is_null( $this->first_wp_user ) && $author->is_wp_user() ) {
+				$this->first_wp_user = $author;
+			}
+
+			$this->authors[] = $author;
+		}
+	}
+
+	public function assign_to_post( int $post_id ) {
+		$author_data = [];
+
+		foreach ( $this->get_authors() as $author ) {
+			$author_data = array_merge( $author_data, $author->get_author_data() );
+		}
+
+		$assigned_to_post = $this->coauthorsplus_logic->coauthors_plus->add_coauthors( $post_id, $author_data );
+
+		return $assigned_to_post;
+	}
+
+	/**
+	 * @return MigrationAuthor[]
+	 */
+	public function get_authors(): array {
+		return $this->authors;
 	}
 }
