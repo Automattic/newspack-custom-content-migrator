@@ -3077,9 +3077,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     }
 
 	public function create_missing_podcasts( array $args, array $assoc_args ) {
-		$command_meta_key = 'create_missing_podcasts';
+		$command_meta_key     = 'create_missing_podcasts';
 		$command_meta_version = 'v1';
-		$log_file = "{$command_meta_key}_{$command_meta_version}.log";
+		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 
 		global $wpdb;
 		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $podcast ) {
@@ -3111,26 +3111,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				continue;
 			}
 
-			$attachment_id = $this->attachments->import_external_file( $file_path );
-			$audio_url     = wp_get_attachment_url( $attachment_id );
-			$audio_block   = <<<BLOCK
-<!-- wp:audio {"id":$attachment_id} -->
-<figure class="wp-block-audio"><audio controls src="$audio_url"></audio></figure>
-<!-- /wp:audio -->
-BLOCK;
-
-			$post = [
+			$post                  = [
 				'post_title'     => $podcast->title,
-				'post_content'   => $audio_block,
-				'comment_status' => 'closed',
 				'post_date'      => $podcast->createdAt,
-				'post_status'    => 'publish',
+				'comment_status' => 'closed',
 				'post_author'    => 6, // Hard code to Karen because the futuro del futuro posts have no author.
 				'meta_input'     => [
 					'newspack_original_article_id' => $podcast->id,
 				]
 			];
-
 			$sanctioned_categories = [
 				5001, // Podcasts
 				5005 // El futuro del futuro
@@ -3146,12 +3135,44 @@ BLOCK;
 					fn( $id ) => in_array( $id, $sanctioned_categories, true )
 				);
 			}
-			if ( ! is_wp_error( wp_insert_post( $post ) ) ) {
 
-				WP_CLI::success( sprintf( "Updated post ID %d with audio file %s", $existing_id, $file_path ) );
+			$post_id = wp_insert_post( $post );
+
+			$attachment_id = $this->attachments->import_external_file( $file_path, false, false, false, false, $post_id );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log(
+					$log_file,
+					sprintf(
+						"Error importing audio file %s for podcast with original ID %d. Error: %s",
+						$file_path,
+						$podcast->id,
+						$attachment_id->get_error_message()
+					),
+					Logger::ERROR
+				);
+				// No need for a post if we don't have the audio file.
+				wp_delete_post( $post_id );
 			}
 
+			$audio_url   = wp_get_attachment_url( $attachment_id );
+			$audio_block = <<<BLOCK
+<!-- wp:audio {"id":$attachment_id} -->
+<figure class="wp-block-audio"><audio controls src="$audio_url"></audio></figure>
+<!-- /wp:audio -->
+BLOCK;
+			// Now add the block with the audio file link.
+			$updated_post = [
+				'ID'           => $post_id,
+				'post_content' => $audio_block,
+				'post_status'  => 'publish',
+			];
+			if ( ! is_wp_error( wp_update_post( $updated_post ) ) ) {
+
+				WP_CLI::success( sprintf( "Updated post ID %d with audio file %s", $post_id, $file_path ) );
+			}
 		}
+
 	}
 
 	// Updates podcasts with their audio files and prepends an audio block to the post content.
