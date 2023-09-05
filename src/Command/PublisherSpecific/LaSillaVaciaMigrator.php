@@ -2490,10 +2490,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
                 $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
 
-				$post_data['post_date'] = $modifiedOn;
-				$post_data['post_date_gmt'] = $modifiedOnGmt;
-				$post_data['post_modified'] = $createdOn;
-				$post_data['post_modified_gmt'] = $createdOnGmt;
+				$post_data['post_date'] = $createdOn;
+				$post_data['post_date_gmt'] = $createdOnGmt;
+				$post_data['post_modified'] = $modifiedOn;
+				$post_data['post_modified_gmt'] = $modifiedOnGmt;
                 /* * *
                  * PUBLISHED DATE UPDATE SECTION
                  */
