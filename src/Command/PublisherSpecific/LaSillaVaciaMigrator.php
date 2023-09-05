@@ -2465,7 +2465,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 $post_modified = '';
 
                 if ( isset( $article['post_date'] ) ) {
-                    $post_date = $article['post_date'];
+					$post_date = $article['post_date'];
+
+	                if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+		                $post_date = $article['publishedAt'];
+	                }
+                } else {
+					$post_date = $article['publishedAt'];
                 }
 
                 if ( isset( $article['publishedAt'] ) ) {
@@ -2604,6 +2610,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	            if ( ! empty( $category_term_ids ) ) {
 		            $result = wp_set_post_terms( $post_id, $category_term_ids, 'category' );
 	            }
+
+	            if ( ! empty( $article['categories'] ) ) {
+					$first_category = array_shift( $article['categories'] );
+					$post_meta['_yoast_wpseo_primary_category'] = $first_category['term_taxonomy_id'];
+				}
 	            /* * *
 				 * TAXONOMY SECTION
 				 */
