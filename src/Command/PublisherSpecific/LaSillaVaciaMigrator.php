@@ -2225,6 +2225,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				continue;
 	        }
 
+			if ( 'Podcasts' == $assoc_args['category-name'] ) {
+				$audio_result = $this->handle_podcast_audio( $article['audio'], $media_location );
+
+				if ( ! is_null( $audio_result ) ) {
+					$html = $audio_result . $html;
+				}
+			}
+
 	        // Check if post 'html' or 'post_content' exists in JSON.
 	        if ( empty( $html ) ) {
 		        $msg = sprintf( "ERROR: Article ID %d '%s' has no post_content", $original_article_id, $post_title );
@@ -3255,6 +3263,23 @@ BLOCK;
 			WP_CLI::success( sprintf( "Updated post ID %d with audio file %s", $existing_id, $file_path ) );
 		}
 
+	}
+
+	private function handle_podcast_audio( string $audio, string $media_location ) {
+		// Strip the "media" folder part of the path in the json.
+		$file_path = $media_location . str_ireplace( '/media', '', $audio );
+
+		if ( ! file_exists( $file_path ) ) {
+			return null;
+		}
+
+		$attachment_id = $this->attachments->import_external_file( $file_path );
+		$audio_url     = wp_get_attachment_url( $attachment_id );
+		return <<<BLOCK
+<!-- wp:audio {"id":$attachment_id} -->
+<figure class="wp-block-audio"><audio controls src="$audio_url"></audio></figure>
+<!-- /wp:audio -->
+BLOCK;
 	}
 
     /**
