@@ -2179,7 +2179,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			}
 
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
-	        $original_article_slug = $post_name ?? '';
+	        $original_article_slug = sanitize_title( $post_name ) ?? '';
 	        $hashed_import_id = md5( $post_title . $original_article_slug );
 	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
 
