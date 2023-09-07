@@ -401,6 +401,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 			// If one of the empty tables is wp_links, we can ignore it. Add any other tables we can ignore to the array below.
 			$ignore_empty_tables = [
 				$live_table_prefix . 'links',
+				$live_table_prefix . 'termmeta',
+				$live_table_prefix . 'comments',
+				$live_table_prefix . 'commentmeta',
 			];
 
 			$this->handle_core_wp_table_empty_exception( $e, $ignore_empty_tables );
@@ -523,6 +526,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 			// If one of the empty tables is wp_links, we can ignore it. Add any other tables we can ignore to the array below.
 			$ignore_empty_tables = [
 				$live_table_prefix . 'links',
+				$live_table_prefix . 'termmeta',
+				$live_table_prefix . 'comments',
+				$live_table_prefix . 'commentmeta',
 			];
 
 			$this->handle_core_wp_table_empty_exception( $e, $ignore_empty_tables );
