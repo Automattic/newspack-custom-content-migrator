@@ -694,13 +694,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		                'optional' => true,
 		                'repeating' => false,
 	                ],
-                    [
-                        'type' => 'flag',
-                        'name' => 'reset-db',
-                        'description' => 'Resets the database for a fresh import.',
-                        'optional' => true,
-                        'repeating' => false,
-                    ]
                 ],
             ]
         );
@@ -1129,10 +1122,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      */
     public function migrate_authors( $args, $assoc_args )
     {
-        if ( $assoc_args['reset-db'] ) {
-            $this->reset_db();
-        }
-
 		$specific_emails = isset( $assoc_args['emails-csv'] ) ? explode( ',', $assoc_args['emails-csv'] ) : null;
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
@@ -1143,6 +1132,17 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			}
 
             $role = $author['xpr_rol'] ?? $author['role'] ?? 'antiguos usuarios';
+
+	        if ( ! array_key_exists( 'user_email', $author ) && array_key_exists( 'email', $author ) ) {
+		        $author['user_email'] = $author['email'];
+	        } else {
+		        echo "Skipping because missing email";
+		        continue;
+	        }
+
+	        if ( empty( $author['user_login'] ) ) {
+		        $author['user_login'] = substr( $author['user_email'], 0, strpos( $author['user_email'], '@' ) );
+	        }
 
             $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: $role" );
             $author_data = [
@@ -1187,10 +1187,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     $guest_author_data = [
                         'user_login' => $author['user_login'],
                         'user_email' => $author['user_email'],
-                        'first_name' => $author['user_name'] ?? '',
-                        'last_name' => $author['user_lastname'] ?? '',
-                        'display_name' => $author['display_name'],
-                        'description' => strip_tags( $author['bio'] ),
+                        'first_name' => $author['user_name'] ?? $author['name'] ?? '',
+                        'last_name' => $author['user_lastname'] ?? $author['lastname'] ?? '',
+                        'description' => strip_tags( $author['bio'] ?? '' ),
                         // TODO handle avatar for guest author
 
                         /*if ( is_array( $author['image'] ) ) {
@@ -1198,6 +1197,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         }*/
                         // 'avatar' => $this->handle_profile_photo( $author['image'] );
                     ];
+
+		            if ( empty( $guest_author_data['display_name'] ) ) {
+			            $guest_author_data['display_name'] = $guest_author_data['first_name'] . ' ' . $guest_author_data['last_name'];
+						$author['display_name'] = $guest_author_data['display_name'];
+		            }
 
                     $this->file_logger( json_encode( $guest_author_data ), false );
 
@@ -1216,17 +1220,17 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					}
 
                     update_post_meta( $post_id, 'original_user_id', $author['id'] );
-                    update_post_meta( $post_id, 'original_role_id', $author['xpr_role_id'] );
-                    update_post_meta( $post_id, 'red', $author['red'] );
-                    update_post_meta( $post_id, 'description', $author['bio'] );
-                    update_post_meta( $post_id, 'xpr_usuario_de_twitter', $author['xpr_UsuariodeTwitter'] );
-                    update_post_meta( $post_id, 'usuario_de_twitter', $author['UsuariodeTwitter'] );
-                    update_post_meta( $post_id, 'ocupacion', $author['xpr_ocupacion'] );
-                    update_post_meta( $post_id, 'genero', $author['xpr_genero'] );
-                    update_post_meta( $post_id, 'facebook_url', $author['FacebookURL'] );
-                    update_post_meta( $post_id, 'linkedin_url', $author['LinkedInURL'] );
-                    update_post_meta( $post_id, 'instagram_url', $author['InstagramURL'] );
-                    update_post_meta( $post_id, 'whatsapp', $author['whatsApp'] );
+                    update_post_meta( $post_id, 'original_role_id', $author['xpr_role_id'] ?? null );
+                    update_post_meta( $post_id, 'red', $author['red'] ?? null );
+                    update_post_meta( $post_id, 'description', $author['bio'] ?? null );
+                    update_post_meta( $post_id, 'xpr_usuario_de_twitter', $author['xpr_UsuariodeTwitter'] ?? null );
+                    update_post_meta( $post_id, 'usuario_de_twitter', $author['UsuariodeTwitter'] ?? null );
+                    update_post_meta( $post_id, 'ocupacion', $author['xpr_ocupacion'] ?? null );
+                    update_post_meta( $post_id, 'genero', $author['xpr_genero'] ?? null );
+                    update_post_meta( $post_id, 'facebook_url', $author['FacebookURL'] ?? null );
+                    update_post_meta( $post_id, 'linkedin_url', $author['LinkedInURL'] ?? null );
+                    update_post_meta( $post_id, 'instagram_url', $author['InstagramURL'] ?? null );
+                    update_post_meta( $post_id, 'whatsapp', $author['whatsApp'] ?? null );
 					WP_CLI::success( "GA ID $post_id created." );
                     continue 2;
             }
