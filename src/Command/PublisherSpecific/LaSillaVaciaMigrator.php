@@ -2520,7 +2520,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 		$original_article_ids_query = "SELECT meta_value as original_article_id, post_id as new_article_id 
                 FROM $wpdb->postmeta 
-                WHERE meta_key = 'newspack_original_article_id'",
+                WHERE meta_key = 'newspack_original_article_id'";
+
+	    if ( $skip ) {
+		    $original_article_ids_query .= " AND meta_value >= $start_at_id";
+	    }
+
+		if ( $end ) {
+			$original_article_ids_query .= " AND meta_value <= $end_at_id";
+		}
+
+        $original_article_id_to_new_article_id_map = $wpdb->get_results(
+			$original_article_ids_query,
             OBJECT_K
         );
         $original_article_id_to_new_article_id_map = array_map( function( $item ) {
