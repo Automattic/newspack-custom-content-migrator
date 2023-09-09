@@ -3602,6 +3602,14 @@ class MigrationPostAuthors {
 
 		$assigned_to_post = $this->coauthorsplus_logic->coauthors_plus->add_coauthors( $post_id, $author_data );
 
+		if ( ! $assigned_to_post && is_null( $this->first_wp_user ) ) {
+			foreach ( $this->get_authors() as $author ) {
+				if ( $author->is_guest_author() ) {
+					return true;
+				}
+			}
+		}
+
 		return $assigned_to_post;
 	}
 
