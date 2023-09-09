@@ -2003,11 +2003,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
         $authors = $wpdb->get_results( $authors_sql, OBJECT_K );
         $authors = array_map( fn( $value ) => (int) $value->ID, $authors );
 
-        $imported_hashed_ids_sql = "SELECT meta_value, post_id
+        /*$imported_hashed_ids_sql = "SELECT meta_value, post_id
             FROM wp_postmeta
             WHERE meta_key IN ('hashed_import_id')";
         $imported_hashed_ids = $wpdb->get_results( $imported_hashed_ids_sql, OBJECT_K );
-        $imported_hashed_ids = array_map( fn( $value ) => (int) $value->post_id, $imported_hashed_ids );
+        $imported_hashed_ids = array_map( fn( $value ) => (int) $value->post_id, $imported_hashed_ids );*/
+	    $original_article_ids = $wpdb->get_results( "SELECT meta_value, post_id FROM wp_postmeta WHERE meta_key = 'newspack_original_article_id'", OBJECT_K );
+		$original_article_ids = array_map( fn( $value ) => (int) $value->post_id, $original_article_ids );
 
 		// Count total articles, but don't do it for very large files because of memory consumption -- a rough count is good enough for just approx. progress.
 	    if ( 'Silla Académica' == $assoc_args['category-name'] ) {
@@ -2029,6 +2031,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	            $original_article_id = $article['head_id'] ?? 0;
 	        } else {
 	            $original_article_id = $article['id'] ?? 0;
+	        }
+
+	        if ( true === $incremental_import && array_key_exists( $original_article_id, $original_article_ids ) ) {
+		        WP_CLI::line( sprintf( "Article was imported as Post ID %d, skipping.", $original_article_ids[ $original_article_id ] ) );
+		        continue;
 	        }
 
 			/*// No longer want this function to handle articles if they've already been imported.
@@ -2184,19 +2191,19 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
 	        $original_article_slug = sanitize_title( $post_name ) ?? '';
-	        $hashed_import_id = md5( $post_title . $original_article_slug );
+//	        $hashed_import_id = md5( $post_title . $original_article_slug );
 	        $this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
 
 
 	        // Skip importing post if $incremental_import is true and post already exists.
-	        if ( true === $incremental_import ) {
+	        /*if ( true === $incremental_import ) {
 				$existing_postid_by_original_article_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_original_article_id' and meta_value = %s", $original_article_id ) );
-		        $existing_postid_by_hashed_import_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_hashed_import_id' and meta_value = %s", $hashed_import_id ) );
+		        //$existing_postid_by_hashed_import_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_hashed_import_id' and meta_value = %s", $hashed_import_id ) );
 				if ( $existing_postid_by_original_article_id && $existing_postid_by_hashed_import_id && $existing_postid_by_original_article_id == $existing_postid_by_hashed_import_id ) {
 					WP_CLI::line( sprintf( "Article was imported as Post ID %d, skipping.", $existing_postid_by_original_article_id ) );
 					continue;
 				}
-	        }
+	        }*/
 
 	        // Get content.
 	        $html = '';
@@ -2263,7 +2270,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			$meta_input = [
 				'newspack_original_article_id' => $original_article_id,
 //                    'canonical_url' => $article['CanonicalUrl'],
-				'newspack_hashed_import_id' => $hashed_import_id,
+//				'newspack_hashed_import_id' => $hashed_import_id,
 				'newspack_original_article_categories' => $article['categories'],
 				'newspack_original_post_author' => $article_authors,
 			];
@@ -2305,9 +2312,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	            }
 			}
 
-            $new_post_id = $imported_hashed_ids[ $hashed_import_id ] ?? null;
+//            $new_post_id = $imported_hashed_ids[ $hashed_import_id ] ?? null;
 
-            if ( ! is_null( $new_post_id ) ) {
+            /*if ( ! is_null( $new_post_id ) ) {
                 $this->file_logger( "Found existing post with ID: $new_post_id. Updating..." );
                 // Setting the ID to the existing post ID will update the existing post.
                 $article_data['ID'] = $new_post_id;
@@ -2318,7 +2325,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                         'object_id' => $new_post_id,
                     ]
                 );
-            }
+            }*/
 
             $post_id = wp_insert_post( $article_data );
 
