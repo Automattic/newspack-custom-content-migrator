@@ -2760,6 +2760,43 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		wp_cache_flush();
     }
 
+	public function cmd_force_update_specific_articles( $args, $assoc_args ) {
+		$post_ids = $assoc_args['post-ids'] ?? [];
+		$original_article_ids = $assoc_args['original-article-ids'] ?? [];
+		
+		if ( is_string( $post_ids ) ) {
+			$post_ids = explode( ',', $post_ids );
+		}
+
+		if ( is_string( $original_article_ids ) ) {
+			$original_article_ids = explode( ',', $original_article_ids );
+		}
+
+		global $wpdb;
+
+		if ( ! empty( $post_ids ) ) {
+			$post_id_placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+			$original_article_ids_in_db = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT meta_value as original_article_id
+					FROM $wpdb->postmeta
+					WHERE meta_key = 'newspack_original_article_id'
+					  AND post_id IN ( $post_id_placeholders )",
+					$post_ids
+				)
+			);
+			$original_article_ids_in_db = array_map( fn( $item ) => intval( $item->original_article_id ), $original_article_ids_in_db );
+			$original_article_ids = array_unique( array_merge( $original_article_ids, $original_article_ids_in_db ) );
+		}
+
+		foreach ( $original_article_ids as $original_article_id ) {
+			$assoc_args['start-at-id'] = $original_article_id;
+			$assoc_args['end-at-id'] = $original_article_id;
+
+			$this->cmd_update_migrated_articles( $args,  $assoc_args );
+		}
+	}
+
     /**
      * @param array $args
      * @param array $assoc_args
