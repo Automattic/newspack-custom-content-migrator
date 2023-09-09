@@ -2511,8 +2511,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 		$media_location = $assoc_args['media-location'];
 
-        $original_article_id_to_new_article_id_map = $wpdb->get_results(
-				"SELECT meta_value as original_article_id, post_id as new_article_id 
+	    $update_published_date = $assoc_args['published-date'] ?? false;
+	    $update_post_authors = $assoc_args['post-authors'] ?? false;
+	    $update_keywords = $assoc_args['keywords'] ?? false;
+	    $update_featured_image = $assoc_args['featured-image'] ?? false;
+		$update_video_as_featured_image = $assoc_args['video-featured-image'] ?? false;
+		$update_taxonomy = $assoc_args['taxonomy'] ?? false;
+
+		$original_article_ids_query = "SELECT meta_value as original_article_id, post_id as new_article_id 
                 FROM $wpdb->postmeta 
                 WHERE meta_key = 'newspack_original_article_id'",
             OBJECT_K
@@ -2548,45 +2554,40 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	        /*
 			 * PUBLISHED DATE UPDATE SECTION
 			 * * */
-	        $post_date     = date( $datetime_format, time() );
-	        $post_modified = '';
+	        if ( $update_published_date ) {
+		        $post_date     = date( $datetime_format, time() );
+		        $post_modified = '';
+		        if ( isset( $article['post_date'] ) ) {
+			        $post_date = $article['post_date'];
 
-	        if ( isset( $article['post_date'] ) ) {
-		        $post_date = $article['post_date'];
-
-		        if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+			        if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+				        $post_date = $article['publishedAt'];
+			        }
+		        } else {
 			        $post_date = $article['publishedAt'];
 		        }
-	        } else {
-		        $post_date = $article['publishedAt'];
+		        if ( isset( $article['publishedAt'] ) ) {
+			        $post_modified = $article['publishedAt'];
+		        }
+		        if ( empty( $post_modified ) && isset( $article['post_modified'] ) ) {
+			        $post_modified = $article['post_modified'];
+		        }
+		        $createdOnDT = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
+		        $createdOn   = $createdOnDT->format( $datetime_format );
+		        $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+		        $createdOnGmt = $createdOnDT->format( $datetime_format );
+		        if ( empty( $post_modified ) ) {
+			        $post_modified = $post_date;
+		        }
+		        $modifiedOnDT = new DateTime( $post_modified, new DateTimeZone( 'America/Bogota' ) );
+		        $modifiedOn   = $modifiedOnDT->format( $datetime_format );
+		        $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
+		        $modifiedOnGmt                  = $modifiedOnDT->format( $datetime_format );
+		        $post_data['post_date']         = $createdOn;
+		        $post_data['post_date_gmt']     = $createdOnGmt;
+		        $post_data['post_modified']     = $modifiedOn;
+		        $post_data['post_modified_gmt'] = $modifiedOnGmt;
 	        }
-
-	        if ( isset( $article['publishedAt'] ) ) {
-		        $post_modified = $article['publishedAt'];
-	        }
-
-	        if ( empty( $post_modified ) && isset( $article['post_modified'] ) ) {
-		        $post_modified = $article['post_modified'];
-	        }
-
-	        $createdOnDT = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
-	        $createdOn   = $createdOnDT->format( $datetime_format );
-	        $createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
-	        $createdOnGmt = $createdOnDT->format( $datetime_format );
-
-	        if ( empty( $post_modified ) ) {
-		        $post_modified = $post_date;
-	        }
-
-	        $modifiedOnDT = new DateTime( $post_modified, new DateTimeZone( 'America/Bogota' ) );
-	        $modifiedOn   = $modifiedOnDT->format( $datetime_format );
-	        $modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
-	        $modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
-
-	        $post_data['post_date']         = $createdOn;
-	        $post_data['post_date_gmt']     = $createdOnGmt;
-	        $post_data['post_modified']     = $modifiedOn;
-	        $post_data['post_modified_gmt'] = $modifiedOnGmt;
 	        /* * *
 			 * PUBLISHED DATE UPDATE SECTION
 			 */
@@ -2594,19 +2595,21 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	        /*
 			 * POST AUTHOR UPDATE SECTION
 			 * * */
-	        if ( ! empty( $article['post_author'] ) ) {
-		        try {
-			        $migration_post_authors = new MigrationPostAuthors( $article['post_author'] );
-			        $assigned_to_post       = $migration_post_authors->assign_to_post( $post_id );
+	        if ( $update_post_authors ) {
+		        if ( ! empty( $article['post_author'] ) ) {
+			        try {
+				        $migration_post_authors = new MigrationPostAuthors( $article['post_author'] );
+				        $assigned_to_post       = $migration_post_authors->assign_to_post( $post_id );
 
-			        if ( $assigned_to_post ) {
-				        foreach ( $migration_post_authors->get_authors() as $migration_author ) {
-					        echo WP_CLI::colorize( "%WAssigned {$migration_author->get_output_description()} to post ID {$post_id}%n\n" );
+				        if ( $assigned_to_post ) {
+					        foreach ( $migration_post_authors->get_authors() as $migration_author ) {
+						        echo WP_CLI::colorize( "%WAssigned {$migration_author->get_output_description()} to post ID {$post_id}%n\n" );
+					        }
 				        }
+			        } catch ( Exception $e ) {
+				        $message = strtoupper( $e->getMessage() );
+				        echo WP_CLI::colorize( "%Y$message%n\n" );
 			        }
-		        } catch ( Exception $e ) {
-			        $message = strtoupper( $e->getMessage() );
-			        echo WP_CLI::colorize( "%Y$message%n\n" );
 		        }
 	        }
 	        /* * *
@@ -2616,18 +2619,20 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	        /*
 			 * IMPORT KEYWORDS SECTION
 			 * * */
-	        if ( ! empty( $article['keywords'] ) ) {
-		        $first_keyword                     = array_shift( $article['keywords'] );
-		        $post_meta['_yoast_wpseo_focuskw'] = $first_keyword;
+	        if ( $update_keywords ) {
+		        if ( ! empty( $article['keywords'] ) ) {
+			        $first_keyword                     = array_shift( $article['keywords'] );
+			        $post_meta['_yoast_wpseo_focuskw'] = $first_keyword;
 
-		        $post_meta['_yoast_wpseo_focuskeywords'] = [];
-		        foreach ( $article['keywords'] as $keyword ) {
-			        $post_meta['_yoast_wpseo_focuskeywords'][] = [
-				        'keyword' => $keyword,
-				        'score'   => 50,
-			        ];
+			        $post_meta['_yoast_wpseo_focuskeywords'] = [];
+			        foreach ( $article['keywords'] as $keyword ) {
+				        $post_meta['_yoast_wpseo_focuskeywords'][] = [
+					        'keyword' => $keyword,
+					        'score'   => 50,
+				        ];
+			        }
+			        $post_meta['_yoast_wpseo_focuskeywords'] = json_encode( $post_meta['_yoast_wpseo_focuskeywords'] );
 		        }
-		        $post_meta['_yoast_wpseo_focuskeywords'] = json_encode( $post_meta['_yoast_wpseo_focuskeywords'] );
 	        }
 	        /* * *
 			 * IMPORT KEYWORDS SECTION
@@ -2636,21 +2641,23 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	        /*
 			 * FEATURED IMAGE SECTION
 			 * * */
-	        $has_featured_image = $wpdb->get_row(
-		        $wpdb->prepare(
-			        "SELECT meta_id, meta_value FROM $wpdb->postmeta WHERE meta_key = '_thumbnail_id' AND post_id = %d",
-			        $post_id
-		        )
-	        );
-	        $has_featured_image = ! is_null( $has_featured_image );
-	        if ( ! $has_featured_image ) {
-		        if ( ! empty( $article['image'] ) ) {
-			        $this->handle_featured_image(
-				        $article['image'],
-				        intval( $article['id'] ),
-				        $post_id,
-				        $media_location
-			        );
+	        if ( $update_featured_image ) {
+		        $has_featured_image = $wpdb->get_row(
+			        $wpdb->prepare(
+				        "SELECT meta_id, meta_value FROM $wpdb->postmeta WHERE meta_key = '_thumbnail_id' AND post_id = %d",
+				        $post_id
+			        )
+		        );
+		        $has_featured_image = ! is_null( $has_featured_image );
+		        if ( ! $has_featured_image ) {
+			        if ( ! empty( $article['image'] ) ) {
+				        $this->handle_featured_image(
+					        $article['image'],
+					        intval( $article['id'] ),
+					        $post_id,
+					        $media_location
+				        );
+			        }
 		        }
 	        }
 	        /* * *
@@ -2660,29 +2667,31 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			/*
 			 * VIDEO AS FEATURED IMAGE SECTION
 			 * * */
-	        $html = $article['post_html'];
-			$html = str_replace( '//www.lasillavacia.com', '//lasillavacia-staging.newspackstaging.com', $html );
-			$html = str_replace( '//lasillavacia.com', '//lasillavacia-staging.newspackstaging.com', $html );
 
-	        if ( ! is_null( $article['video'] ) ) {
-		        $src  = $article['video']['name'];
-		        $html = '<iframe src="' . $src . '" style="width:100%;height:500px;overflow:auto;">' . $src . '</iframe>' . $html;
+	        if ( $update_video_as_featured_image ) {
+		        $html = $article['post_html'];
+		        $html = str_replace( '//www.lasillavacia.com', '//lasillavacia-staging.newspackstaging.com', $html );
+		        $html = str_replace( '//lasillavacia.com', '//lasillavacia-staging.newspackstaging.com', $html );
+		        if ( ! is_null( $article['video'] ) ) {
+			        $src  = $article['video']['name'];
+			        $html = '<iframe src="' . $src . '" style="width:100%;height:500px;overflow:auto;">' . $src . '</iframe>' . $html;
 
-		        $featured_image_update = $wpdb->update(
-			        $wpdb->postmeta,
-			        [
-				        'meta_key'   => 'newspack_featured_image_position',
-				        'meta_value' => 'hidden',
-			        ],
-			        [
-				        'post_id'  => $post_id,
-				        'meta_key' => 'newspack_featured_image_position'
-			        ]
-		        );
+			        $featured_image_update = $wpdb->update(
+				        $wpdb->postmeta,
+				        [
+					        'meta_key'   => 'newspack_featured_image_position',
+					        'meta_value' => 'hidden',
+				        ],
+				        [
+					        'post_id'  => $post_id,
+					        'meta_key' => 'newspack_featured_image_position'
+				        ]
+			        );
 
-		        echo WP_CLI::colorize( "%wFeatured image update: $featured_image_update%n\n" );
+			        echo WP_CLI::colorize( "%wFeatured image update: $featured_image_update%n\n" );
+		        }
+		        $post_data['post_content'] = $html;
 	        }
-	        $post_data['post_content'] = $html;
 	        /* * *
 			 * VIDEO AS FEATURED IMAGE SECTION
 			 */
@@ -2690,42 +2699,46 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	        /*
 			 * TAXONOMY SECTION
 			 * * */
-	        $tag_term_ids = $this->handle_article_terms( $article['tags'], $tags_and_category_taxonomy_ids );
-	        if ( ! empty( $tag_term_ids ) ) {
-		        $result = wp_set_post_terms( $post_id, $tag_term_ids );
-	        }
-
-	        $category_term_ids = $this->handle_article_terms( $article['categories'], $tags_and_category_taxonomy_ids );
-	        if ( ! empty( $category_term_ids ) ) {
-		        $result = wp_set_post_terms( $post_id, $category_term_ids, 'category' );
-	        }
-
-	        if ( ! empty( $article['categories'] ) ) {
-		        $first_category                             = array_shift( $article['categories'] );
-		        $post_meta['_yoast_wpseo_primary_category'] = $first_category['term_taxonomy_id'];
+	        if ( $update_taxonomy ) {
+		        $tag_term_ids = $this->handle_article_terms( $article['tags'], $tags_and_category_taxonomy_ids );
+		        if ( ! empty( $tag_term_ids ) ) {
+			        $result = wp_set_post_terms( $post_id, $tag_term_ids );
+		        }
+		        $category_term_ids = $this->handle_article_terms( $article['categories'], $tags_and_category_taxonomy_ids );
+		        if ( ! empty( $category_term_ids ) ) {
+			        $result = wp_set_post_terms( $post_id, $category_term_ids, 'category' );
+		        }
+		        if ( ! empty( $article['categories'] ) ) {
+			        $first_category                             = array_shift( $article['categories'] );
+			        $post_meta['_yoast_wpseo_primary_category'] = $first_category['term_taxonomy_id'];
+		        }
 	        }
 	        /* * *
 			 * TAXONOMY SECTION
 			 */
 
-	        $execution = $wpdb->update(
-		        $wpdb->posts,
-		        $post_data,
-		        [
-			        'ID' => $post_id
-		        ]
-	        );
+	        if ( ! empty( $post_data ) ) {
+		        $execution = $wpdb->update(
+			        $wpdb->posts,
+			        $post_data,
+			        [
+				        'ID' => $post_id
+			        ]
+		        );
+
+		        if ( $execution ) {
+			        echo WP_CLI::colorize( "%GPost updated: $post_id%n\n\n" );
+		        } else {
+			        echo WP_CLI::colorize( "%RPost update failed: $post_id%n\n\n" );
+		        }
+	        } else {
+				echo WP_CLI::colorize( "%yNo post data to update%n\n\n" );
+	        }
 
 	        if ( ! empty( $post_meta ) ) {
 		        foreach ( $post_meta as $meta_key => $meta_value ) {
 			        update_post_meta( $post_id, $meta_key, $meta_value );
 		        }
-	        }
-			
-	        if ( $execution ) {
-		        echo WP_CLI::colorize( "%GPost updated: $post_id%n\n\n" );
-	        } else {
-		        echo WP_CLI::colorize( "%RPost update failed: $post_id%n\n\n" );
 	        }
 
 	        if ( $end && $end_at_id == $article['id'] ) {
