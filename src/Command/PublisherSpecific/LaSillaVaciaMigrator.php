@@ -835,43 +835,112 @@ class LaSillaVaciaMigrator implements InterfaceCommand
             ]
         );
 
+		$update_migrated_articles_synopsis = [
+			[
+				'type' => 'assoc',
+				'name' => 'import-json',
+				'description' => 'The file which contains LSV articles.',
+				'optional' => false,
+				'repeating' => false,
+			],
+			[
+				'type' => 'assoc',
+				'name' => 'media-location',
+				'description' => 'Path to media directory',
+				'optional' => false,
+				'repeating' => false,
+			],
+			[
+				'type' => 'assoc',
+				'name' => 'start-at-id',
+				'description' => 'Original article ID to start from',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'assoc',
+				'name' => 'end-at-id',
+				'description' => 'Original article ID to end at',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'published-date',
+				'description' => 'If this flag is set, it will update the published date of the post.',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'post-authors',
+				'description' => "If this flag is set, it will update the post's post authors.",
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'keywords',
+				'description' => 'If this flag is set, it will update/set the yoast keywords for the post.',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'featured-image',
+				'description' => 'If this flag is set, it will update/set the featured image for the post.',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'video-featured-image',
+				'description' => 'If this flag is set, it will update/set a video as the featured image for the post.',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'taxonomy',
+				'description' => 'If this flag is set, it will update/set the taxonomy for the post.',
+				'optional' => true,
+				'repeating' => false,
+			],
+		];
+
         WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-update-migrated-articles',
             [ $this, 'cmd_update_migrated_articles' ],
             [
                 'shortdesc' => 'Update migrated articles',
-                'synopsis'  => [
-                    [
-                        'type' => 'assoc',
-                        'name' => 'import-json',
-                        'description' => 'The file which contains LSV articles.',
-                        'optional' => false,
-                        'repeating' => false,
-                    ],
-	                [
-		                'type' => 'assoc',
-		                'name' => 'media-location',
-		                'description' => 'Path to media directory',
-		                'optional' => false,
-		                'repeating' => false,
-	                ],
-	                [
-		                'type' => 'assoc',
-		                'name' => 'start-at-id',
-		                'description' => 'Original article ID to start from',
-		                'optional' => true,
-		                'repeating' => false,
-	                ],
-	                [
-		                'type' => 'assoc',
-		                'name' => 'end-at-id',
-		                'description' => 'Original article ID to end at',
-		                'optional' => true,
-		                'repeating' => false,
-	                ],
-                ]
+                'synopsis'  => $update_migrated_articles_synopsis
             ]
         );
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-update-specific-articles',
+			[ $this, 'cmd_force_update_specific_articles'],
+			[
+				'shortdesc' => 'Force update specific artilces by Post or Original Article IDs',
+				'synopsis' => [
+					[
+						'type' => 'assoc',
+						'name' => 'post-ids',
+						'description' => 'The Post IDs which need to get updated.',
+						'optional' => false,
+						'repeating' => false,
+					],
+					[
+						'type' => 'assoc',
+						'name' => 'original-article-ids',
+						'description' => 'The Original Article IDs which need to get updated.',
+						'optional' => false,
+						'repeating' => false,
+					],
+					...$update_migrated_articles_synopsis,
+				]
+			]
+		);
 
         WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-update-author-metadata',
