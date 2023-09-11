@@ -44,7 +44,7 @@ class DownloadMissingImages implements InterfaceCommand {
 		$this->logger           = new Logger();
 
 		$this->command_meta_version = date( 'Y-m-d-H:i' );
-		$this->log_file             = "{$this->command_meta_key}_{$this->command_meta_key}.log";
+		$this->log_file             = "{$this->command_meta_key}_{$this->command_meta_version}.log";
 	}
 
 	/**
@@ -84,6 +84,13 @@ class DownloadMissingImages implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'post-id-range',
+						'description' => 'Post ID range to process - separated by a dash, e.g. 1-1000',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'post-id',
 						'description' => 'Only run on the given post ID',
 						'optional'    => true,
@@ -94,12 +101,37 @@ class DownloadMissingImages implements InterfaceCommand {
 		);
 	}
 
-	public function cmd_download_missing_images( $args, $assoc_args ) {
-		$this->download_missing_images( $assoc_args['media-dir'], $assoc_args['post-types'], $assoc_args['post-id'] ?? '' );
+	public function parse_range_args( array $assoc_args ) {
+		$range = [];
+		if ( ! empty( $assoc_args['post-id-range'] ) ) {
+			$vals  = explode( '-', $assoc_args['post-id-range'] );
+			$range = [
+				'min' => (int) $vals[0],
+				'max' => (int) $vals[1],
+			];
+		}
+		if ( ! empty( $assoc_args['post-id'] ) ) {
+			$range = [
+				'post-id' => $assoc_args['post-id'],
+			];
+		}
+		return $range;
 	}
 
-	public function download_missing_images( string $media_location, string $post_types, string $only_post_id = '' ) {
+	// You can use this command raw from CLI, but you might want to implement
+	// the filters "newspack_content_migrator_download_images_sanctioned_hosts" and
+	// "newspack_content_migrator_download_images_path_translations" to have it do
+	// more.
+	public function cmd_download_missing_images( $args, $assoc_args ): void {
+		$this->download_missing_images(
+			$assoc_args['media-dir'],
+			$assoc_args['post-types'] ?? '',
+			$assoc_args
+		);
+	}
 
+	public function download_missing_images( string $media_location, string $post_types, array $range_args = [] ): void {
+		$range = $this->parse_range_args( $range_args );
 		if ( ! path_is_absolute( $media_location ) ) {
 			$media_location = realpath( $media_location );
 			if ( ! $media_location ) {
@@ -113,20 +145,13 @@ class DownloadMissingImages implements InterfaceCommand {
 			'hosts'    => [],
 		] );
 
-		$sanctioned_hosts = array_keys( $path_translations['hosts'] );
+		$sanctioned_hosts = apply_filters( 'newspack_content_migrator_download_images_sanctioned_hosts',
+			array_keys( $path_translations['hosts'] )
+		);
 
-		$data_arr = self::get_posts_and_image_urls( $post_types, $only_post_id );
+		$post_types = $post_types ? explode( ',', $post_types ) : [ 'post' ];
+		$data_arr = self::get_posts_and_image_urls( $post_types, $range );
 		foreach ( $data_arr as $data ) {
-			if ( MigrationMeta::get( $data['post']->ID, $this->command_meta_key, 'post' ) >= $this->command_meta_key ) {
-				WP_CLI::log(
-					sprintf(
-						'Images already downloaded for post ID %d. Skipping.',
-						$data['post']->ID
-					)
-				);
-				continue;
-			}
-
 			WP_CLI::log( sprintf( 'Processing post ID %d: %s', $data['post']->ID, get_permalink( $data['post']->ID ) ) );
 
 			$urls_to_replace = [];
@@ -145,7 +170,7 @@ class DownloadMissingImages implements InterfaceCommand {
 					continue;
 				}
 
-				$id = $this->process_url( $url, $data['post'], $media_location, $skip_urls, $path_translations );
+				$id = $this->process_url( $url, $data['post'], $media_location, $path_translations );
 				if ( $id ) {
 					$urls_to_replace[ $url ] = wp_get_attachment_url( $id );
 				} else {
@@ -167,11 +192,11 @@ class DownloadMissingImages implements InterfaceCommand {
 					Logger::WARNING );
 			}
 
-			MigrationMeta::update( $data['post']->ID, $this->command_meta_key, 'post', $this->command_meta_version ); // TODO
+			MigrationMeta::update( $data['post']->ID, $this->command_meta_key, 'post', $this->command_meta_version );
 		}
 	}
 
-	public function process_url( string $url, \WP_Post $post, string $media_location, array $skip_urls, array $path_translations ): int|false {
+	public function process_url( string $url, \WP_Post $post, string $media_location, array $path_translations ): int|false {
 
 		$url_host            = parse_url( $url, PHP_URL_HOST );
 		$url_path            = parse_url( $url, PHP_URL_PATH );
@@ -239,7 +264,7 @@ class DownloadMissingImages implements InterfaceCommand {
 				if ( is_wp_error( $success ) ) {
 					return false;
 				}
-
+				$this->logger->log( $this->log_file, "Moved file from $url_path to " . get_attached_file( $attachment_id ), Logger::LINE );
 				return $attachment_id;
 			}
 			$this->logger->log( $this->log_file, "Attachment {$attachment_id} exists in the database, but the file $url_path is missing.", Logger::WARNING );
@@ -309,25 +334,33 @@ class DownloadMissingImages implements InterfaceCommand {
 	}
 
 	/**
-	 * @param $assoc_args
-	 * @param $this ->command_meta_key
-	 * @param $this ->command_meta_key
+	 * @param string $post_types comma separated list of post types.
+	 * @param array $range Just process this post ID.
 	 *
 	 * @return iterable
 	 */
-	public function get_posts_and_image_urls( string $post_types, string $only_post_id = '' ): iterable {
-		$post_types = $post_types ? explode( ',', $post_types ) : [ 'post' ];
-
+	private function get_posts_and_image_urls( array $post_types, array $range ): iterable {
 		$ids = [];
-		if ( ! empty( $only_post_id ) ) {
-			if ( in_array( get_post_type( $only_post_id ), $post_types ) ) {
-				$ids = [ (int) $only_post_id ];
+		if ( ! empty( $range['post-id'] ) ) {
+			if ( in_array( get_post_type( $range['post-id'] ), $post_types ) ) {
+				$ids = [ (int) $range['post-id'] ];
 			}
+		} elseif ( isset( $range['min'] ) && isset( $range['max'] ) ) {
+			$ids = $this->postsLogic->get_post_ids_in_range( $range['min'], $range['max'], $post_types );
 		} else {
 			$ids = $this->postsLogic->get_all_posts_ids( $post_types );
 		}
 
 		foreach ( $ids as $post_id ) {
+			if ( MigrationMeta::get( $post_id, $this->command_meta_key, 'post' ) >= $this->command_meta_key ) {
+				WP_CLI::log(
+					sprintf(
+						'Images already downloaded for post ID %d. Skipping.',
+						$post_id
+					)
+				);
+				continue;
+			}
 
 			$post       = get_post( $post_id );
 			$image_urls = array_unique( $this->attachmentsLogic->get_images_sources_from_content( $post->post_content ) );

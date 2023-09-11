@@ -1125,6 +1125,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'post-id-range',
+						'description' => 'Post ID range to process - separated by a dash, e.g. 1-1000',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'post-id',
 						'description' => 'Only run on the given post ID',
 						'optional'    => true,
@@ -3257,33 +3264,38 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 	public function download_missing_images( array $args, array $assoc_args ):void {
 
-		add_filter( 'newspack_content_migrator_download_images_skip_url_starts', function ( $skip_url_starts ) {
-			$skip_url_starts[] = 'http://lasillavacia.bb'; // This website seems to be long dead.
-			return $skip_url_starts;
-		});
+		add_filter( 'newspack_content_migrator_download_images_sanctioned_hosts', function ( $hosts ) {
+			$hosts[] = parse_url( home_url(), PHP_URL_HOST );
+
+			return $hosts;
+		} );
 
 		add_filter( 'newspack_content_migrator_download_images_path_translations', function ( $paths ) {
 
 			$paths['relative'] += [
 				'/sites' => 'https://archivo.lasillavacia.com',
-				'/media'  => 'https://www.lasillavacia.com',
+				'/media' => 'https://www.lasillavacia.com',
 			];
-			$paths['hosts'] += [
-				'lasillavacia.com'              => 'https://www.lasillavacia.com/media',
-				'www.lasillavacia.com'          => 'https://www.lasillavacia.com/media',
-				'lasilla.com'                   => 'https://www.lasillavacia.com/media',
-				'www.lasilla.com'               => 'https://www.lasillavacia.com/media',
-				'archivo.lasillavacia.com'      => 'https://www.lasillavacia.com/media', // ??
+			$paths['hosts']    += [
+				'lasillavacia.com'         => 'https://www.lasillavacia.com/media',
+				'www.lasillavacia.com'     => 'https://www.lasillavacia.com/media',
+				'lasilla.com'              => 'https://www.lasillavacia.com/media',
+				'www.lasilla.com'          => 'https://www.lasillavacia.com/media',
+				'archivo.lasillavacia.com' => 'https://www.lasillavacia.com/media',
 			];
+
 			return $paths;
-		});
+		} );
 
 		$imageHelper = DownloadMissingImages::get_instance();
 
 		$imageHelper->download_missing_images(
 			$assoc_args['media-dir'],
 			'post',
-			$assoc_args['post-id'] ?? '',
+			[
+				'post-id' => $assoc_args['post-id'] ?? '',
+				'post-id-range' => $assoc_args['post-id-range'] ?? ''
+			],
 		);
 
 	}
