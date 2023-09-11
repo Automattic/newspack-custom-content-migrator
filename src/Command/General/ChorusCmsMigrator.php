@@ -266,6 +266,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'timezone-string',
+						'description' => "PHP timezone string (e.g. 'America/New_York', 'Europe/Berlin', 'UTC', ...). It is assumed that Chorus' timestamps are in UTC, so we need to specify Publisher's local timezone to convert them properly. For full list of available timezone strings (then click region for list of strings, e.g. https://www.php.net/manual/en/timezones.america.php).",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'start-index',
 						'description' => 'If used, will start importing from this index.',
 						'optional'    => true,
@@ -304,37 +311,79 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 	public function cmd_temp_dev_helper_scripts( $pos_args, $assoc_args ) {
 
+		global $wpdb;
+
+
 		/**
-		 * We're waiting to determine how to format their dates.
-		 * Here's the proper way to convert their timestamps, e.g. from current to CEST TZ.
+		 * Update all dates/timestamps to correct NYC timezone.
 		 */
-		// $timestamp = "2023-08-01T09:00:00.000Z";
-		// $date_time = \DateTime::createFromFormat( 'Y-m-d\TH:i:s.u\Z', $timestamp );
-		//
-		// // Get timestamp for specific TZ (here Central European Summer Time).
-		// $date_time->setTimezone( new \DateTimeZone( 'Europe/Berlin' ) );
-		// $wp_timestamp = $date_time->format( 'Y-m-d H:i:s' );
-		// echo "\nCEST: $wp_timestamp \n";
-		//
-		// return;
+		// Correct all dates to this timezone.
+		$timezone_string = 'America/New_York';
+		// Updated/processed post IDs.
+		$post_ids = [];
+		// Get JSONs.
+		$entries_path_1 = '/tmp/setup/initial_export_archive/export_test/entry';
+		$entries_path_2 = '/tmp/second_content_migration/content-export/entry';
+		$entries_jsons = glob( $entries_path_1 . '/*.json' );
+		$entries_jsons = array_merge( $entries_jsons, glob( $entries_path_2 . '/*.json' ) );
+		$missing_uids = [];
+		$missing_jsons = [];
+		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
+			// Load data.
+			$data_entry = json_decode( file_get_contents( $entry_json ), true );
+			$entry = $this->get_entry_from_data_entry( $data_entry, $entry_json );
+			// Get imported post ID.
+			$uid = $entry['uid'];
+			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::CHORUS_ORIGINAL_ID_META_KEY, $uid ) );
+			if ( ! $post_id ) {
+				$missing_uids[] = $uid;
+				$missing_jsons[] = $entry_json;
+			}
+			WP_CLI::line( sprintf( '%d/%d ID %d UID %s', $key_entry_json + 1, count( $entries_jsons ), $post_id, $uid ) );
+			// Will update post data from this array.
+			$post_update = [];
+			// Get corrected dates.
+			$post_date = $this->format_chorus_date( $entry['publishDate'], $timezone_string );
+			$post_update['post_date'] = $post_date;
+			$post_update['post_date_gmt'] = $post_date;
+			if ( $entry["updatedAt"] ) {
+				$post_modified = $this->format_chorus_date( $entry['updatedAt'], $timezone_string );
+				$post_update['post_modified'] = $post_modified;
+				$post_update['post_modified_gmt'] = $post_modified;
+			}
+			// Save.
+			if ( ! empty( $post_update ) ) {
+				$wpdb->update( $wpdb->posts, $post_update, [ 'ID' => $post_id ] );
+				WP_CLI::success( "Updated $post_id." );
+			}
+		}
+		// Log if UIDs not found in DB.
+		if ( count( $missing_jsons ) > 0 ) {
+			$file_uids = 'missing_uids.txt';
+			$file_jsons = 'missing_jsons.txt';
+			file_put_contents( $file_uids, implode( "\n", $missing_uids ) );
+			file_put_contents( $file_jsons, implode( "\n", $missing_jsons ) );
+			WP_CLI::warning( "Missing UID(s) in DB. List of JSON files and UIDs saved to files $file_uids , $file_jsons" );
+		}
+		return;
+
 
 
 		/**
 		 * Copy excerpts to "newspack_post_subtitle" postmeta, as well.
 		 */
-		$post_ids = $this->posts->get_all_posts_ids();
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-			$excerpt = get_the_excerpt( $post_id );
-			if ( ! $excerpt ) {
-				continue;
-			}
-
-			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
-			update_post_meta( $post_id, 'newspack_post_subtitle', $excerpt );
-			WP_CLI::success( "Updated ID $post_id." );
-		}
-
-		WP_CLI::line( "Done." );
+		// $post_ids = $this->posts->get_all_posts_ids();
+		// foreach ( $post_ids as $key_post_id => $post_id ) {
+		// 	$excerpt = get_the_excerpt( $post_id );
+		// 	if ( ! $excerpt ) {
+		// 		continue;
+		// 	}
+		//
+		// 	WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+		// 	update_post_meta( $post_id, 'newspack_post_subtitle', $excerpt );
+		// 	WP_CLI::success( "Updated ID $post_id." );
+		// }
+		// WP_CLI::line( "Done." );
 
 	}
 
@@ -361,6 +410,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		if ( ! file_exists( $authors_path ) || ! file_exists( $entries_path ) ) {
 			WP_CLI::error( 'Content not found in path.' );
 		}
+		$timezone_string = rtrim( $assoc_args['timezone-string'], '/' );
 
 		WP_CLI::line( 'Checking whether this script knows how to convert all Chorus content components...' );
 		$this->validate_component_types( $entries_path );
@@ -369,7 +419,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$this->import_authors( $authors_path, $refresh_authors );
 
 		WP_CLI::line( 'Importing posts...' );
-		$this->import_entries( $entries_path, $start_index, $refresh_posts, $refresh_authors, $refresh_attachment_data );
+		$this->import_entries( $entries_path, $timezone_string, $start_index, $refresh_posts, $refresh_authors, $refresh_attachment_data );
 
 		WP_CLI::success( 'Done. Check *.log files.' );
 	}
@@ -426,6 +476,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * Imports posts.
 	 *
 	 * @param string $entries_path Path to "entries/" folder (path should include the "entries" folder ;) ).
+	 * @param string $timezone_string PHP timezone string.
 	 * @param int    $start_index Start importing from this index.
 	 * @param bool   $refresh_posts Not yet implemented.
 	 * @param bool   $refresh_authors Not yet implemented.
@@ -434,7 +485,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * @throws \RuntimeException If argument is missing.
 	 * @return void
 	 */
-	public function import_entries( $entries_path, $start_index, $refresh_posts, $refresh_authors, $refresh_attachment_data ) {
+	public function import_entries( $entries_path, $timezone_string, $start_index, $refresh_posts, $refresh_authors, $refresh_attachment_data ) {
 		global $wpdb;
 
 		// Get already imported posts original IDs.
@@ -497,7 +548,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			/**
 			 * Post date.
 			 */
-			$publish_date = $this->format_chorus_date( $entry['publishDate'] );
+			$publish_date = $this->format_chorus_date( $entry['publishDate'], $timezone_string );
 			if ( ! $publish_date ) {
 				$publish_date = date( 'Y-m-d H:i:s' );
 			}
@@ -803,7 +854,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			/**
 			 * Updated date.
 			 */
-			$updated_date = $this->format_chorus_date( $entry['updatedAt'] );
+			$updated_date = $this->format_chorus_date( $entry['updatedAt'], $timezone_string );
 			if ( $updated_date ) {
 				$post_update_data['post_modified']     = $updated_date;
 				$post_update_data['post_modified_gmt'] = $updated_date;
@@ -893,17 +944,25 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 	/**
 	 * Format date from Chorus CMS to WordPress.
+	 * It is assumed that Chorus' timestamps are in UTC timezone.
 	 *
-	 * @param $chorus_date string Date in Chorus format, e.g. '2023-06-13T21:05:36.000Z'.
+	 * @param string  $chorus_date     Date in Chorus format, e.g. '2023-06-13T21:05:36.000Z'.
+	 * @param ?string $timezone_string Optional, default is "UTC". Chorus uses the following format for timestamps, e.g. "2022-03-24T15:43:10.364Z".
+	 *                                 Expected timezone of this timestamp is UTC. Provide a specific PHP timezone string to convert to that one.
+	 *                                 See https://www.php.net/manual/en/timezones.php for list of timezone strings (then click
+	 *                                 region for list of strings, e.g. https://www.php.net/manual/en/timezones.america.php).
 	 *
 	 * @return array|string|string[]|null
 	 */
-	public function format_chorus_date( $chorus_date ) {
+	public function format_chorus_date( $chorus_timestamp, $timezone_string = 'UTC' ) {
 
-		// Extract e.g. '2023-06-13 21:05:36' from '2023-06-13T21:05:36.000Z'.
-		$wp_date = preg_replace( '/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}).*/', '$1 $2', $chorus_date );
+		$date_time = \DateTime::createFromFormat( 'Y-m-d\TH:i:s.u\Z', $chorus_timestamp );
 
-		return $wp_date;
+		// Get WP timestamp in specific TZ.
+		$date_time->setTimezone( new \DateTimeZone( $timezone_string ) );
+		$wp_timestamp = $date_time->format( 'Y-m-d H:i:s' );
+
+		return $wp_timestamp;
 	}
 
 	/**
