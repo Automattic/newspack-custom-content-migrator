@@ -2239,8 +2239,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				$post_title = trim( $article['title'] );
 				$post_name = $article['slug'];
 
+				$date_part = date( 'Y-m-d' );
 				// Date may be faulty.
-				$date_part = $this->is_date_valid( $article['StartDate'], 'Y-m-d' ) ? $article['StartDate'] : date("Y-m-d");;
+				if ( ! is_null( $article['StartDate'] ) && $this->is_date_valid( $article['StartDate'] ) ) {
+					$date_part =  $article['StartDate'];
+				}
 
 				// Very faulty time, contains many formats and some pure errors.
 				$time_part = ( $article['time'] != "None" ? $article['time'] : '00:00:00' );
@@ -2256,6 +2259,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				if ( isset( $article['canonical'] ) ) {
 					$additional_meta['newspack_canonical'] = $article['canonical'];
 				}
+
+				$article['categories'] = array_map( function ( $category ) {
+
+					$category['term_taxonomy_id'] = $category['id'];
+					$category['taxonomy']         = 'category';
+
+					return $category;
+				}, $article['categories'] );
 			}
 
 	        // Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
@@ -2786,7 +2797,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				)
 			);
 			$original_article_ids_in_db = array_map( fn( $item ) => intval( $item->original_article_id ), $original_article_ids_in_db );
-			$original_article_ids = array_unique( array_merge( $original_article_ids, $original_article_ids_in_db ) );
+			$original_article_ids = array_filter( array_unique( array_merge( $original_article_ids, $original_article_ids_in_db ) ) );
 		}
 
 		foreach ( $original_article_ids as $original_article_id ) {
