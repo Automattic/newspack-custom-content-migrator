@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Attachments;
+use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Logic\Taxonomy;
 use \NewspackCustomContentMigrator\Utils\Logger;
@@ -192,6 +193,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
+	 * Posts instance.
+	 *
+	 * @var Posts Posts instance.
+	 */
+	private $posts;
+
+	/**
 	 * GutenbergBlockGenerator instance.
 	 *
 	 * @var GutenbergBlockGenerator GutenbergBlockGenerator instance.
@@ -219,6 +227,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$this->coauthors_plus   = new CoAuthorPlus();
 		$this->logger           = new Logger();
 		$this->attachments      = new Attachments();
+		$this->posts            = new Posts();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
 		$this->crawler          = new Crawler();
 		$this->taxonomy         = new Taxonomy();
@@ -286,6 +295,47 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator chorus-cms-temp-dev-helper-scripts',
+			[ $this, 'cmd_temp_dev_helper_scripts' ],
+		);
+	}
+
+	public function cmd_temp_dev_helper_scripts( $pos_args, $assoc_args ) {
+
+		/**
+		 * We're waiting to determine how to format their dates.
+		 * Here's the proper way to convert their timestamps, e.g. from current to CEST TZ.
+		 */
+		// $timestamp = "2023-08-01T09:00:00.000Z";
+		// $date_time = \DateTime::createFromFormat( 'Y-m-d\TH:i:s.u\Z', $timestamp );
+		//
+		// // Get timestamp for specific TZ (here Central European Summer Time).
+		// $date_time->setTimezone( new \DateTimeZone( 'Europe/Berlin' ) );
+		// $wp_timestamp = $date_time->format( 'Y-m-d H:i:s' );
+		// echo "\nCEST: $wp_timestamp \n";
+		//
+		// return;
+
+
+		/**
+		 * Copy excerpts to "newspack_post_subtitle" postmeta, as well.
+		 */
+		$post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			$excerpt = get_the_excerpt( $post_id );
+			if ( ! $excerpt ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			update_post_meta( $post_id, 'newspack_post_subtitle', $excerpt );
+			WP_CLI::success( "Updated ID $post_id." );
+		}
+
+		WP_CLI::line( "Done." );
+
 	}
 
 	/**
