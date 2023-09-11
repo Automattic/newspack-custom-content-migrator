@@ -774,6 +774,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			if ( $entry['layoutTemplate'] ) {
 				$meta['newspack_chorus_entry_layout_template'] = $entry['layoutTemplate'];
 			}
+			if ( $post_create_args['post_excerpt'] ) {
+				$meta['newspack_post_subtitle'] = $post_create_args['post_excerpt'];
+			}
 			foreach ( $meta as $meta_key => $meta_value ) {
 				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
