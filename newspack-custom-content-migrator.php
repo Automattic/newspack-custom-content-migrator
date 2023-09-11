@@ -66,6 +66,7 @@ PluginSetup::register_migrators(
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
 		Command\General\ChorusCmsMigrator::class,
+		Command\General\DownloadMissingImages::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
