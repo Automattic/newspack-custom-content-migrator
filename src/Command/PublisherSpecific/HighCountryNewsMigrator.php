@@ -9,7 +9,10 @@ use DOMElement;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\MigrationMeta;
 use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
+use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
@@ -46,6 +49,16 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	private $gutenberg_block_generator;
 
 	/**
+	 * @var JsonIterator
+	 */
+	private $json_iterator;
+
+	/**
+	 * @var RedirectionLogic
+	 */
+	private $redirection_logic;
+
+	/**
 	 * Instance of Attachments Login
 	 *
 	 * @var null|Attachments
@@ -67,6 +80,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			self::$instance->logger                    = new Logger();
 			self::$instance->gutenberg_block_generator = new GutenbergBlockGenerator();
 			self::$instance->attachments               = new Attachments();
+			self::$instance->json_iterator             = new JsonIterator();
+			self::$instance->redirection_logic         = new RedirectionLogic();
 		}
 
 		return self::$instance;
@@ -347,6 +362,22 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					),
+				),
+			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-generate-redirects',
+			array( $this, 'hcn_generate_redirects' ),
+			array(
+				'shortdesc' => 'Generate redirects.',
+				'synopsis'  => array(
+					[
+						'type'        => 'assoc',
+						'name'        => 'articles-json',
+						'description' => 'Path to the Articles JSON file.',
+						'optional'    => false,
+					],
 				),
 			)
 		);
@@ -2056,6 +2087,43 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		}
 		$progress->finish();
 		WP_CLI::success( 'Deleted weird issue categories' );
+	}
+
+	/**
+	 * Callback for the command hcn-generate-redirects.
+	 */
+	public function hcn_generate_redirects( array $args, array $assoc_args ): void {
+		$log_file = 'hcn_generate_redirects.log';
+		$home_url = home_url();
+
+		global $wpdb;
+		foreach ( $this->json_iterator->items( $assoc_args['articles-json'] ) as $article ) {
+			if ( empty( $article->aliases ) ) {
+				continue;
+			}
+
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'plone_article_UID' and meta_value = %s",
+				$article->UID ) );
+			if ( ! $post_id ) {
+				$this->logger->log( $log_file, sprintf( 'Post with plone_article_UID %s not found', $article->UID ), Logger::WARNING );
+				continue;
+			}
+
+			foreach ( $article->aliases as $alias ) {
+				$existing_redirects = $this->redirection_logic->get_redirects_by_exact_from_url( $alias );
+				if ( ! empty( $existing_redirects ) ) {
+					foreach ( $existing_redirects as $existing_redirect ) {
+						$existing_redirect->delete();
+					}
+				}
+				$this->redirection_logic->create_redirection_rule(
+					'For Plone ID ' . $article->UID,
+					$alias,
+					"/?p=$post_id"
+				);
+				$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $alias ), Logger::SUCCESS );
+			}
+		}
 	}
 
 	/**
