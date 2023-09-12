@@ -888,7 +888,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			[
 				'type' => 'flag',
 				'name' => 'featured-image',
-				'description' => 'If this flag is set, it will update/set the featured image for the post.',
+				'description' => 'If this flag is set, it will set the featured image for the post.',
+				'optional' => true,
+				'repeating' => false,
+			],
+			[
+				'type' => 'flag',
+				'name' => 'remove-existing-featured-image',
+				'description' => 'If this flag is set, it will update the featured image for the post.',
 				'optional' => true,
 				'repeating' => false,
 			],
@@ -2528,6 +2535,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	    $update_featured_image = $assoc_args['featured-image'] ?? false;
 		$update_video_as_featured_image = $assoc_args['video-featured-image'] ?? false;
 		$update_taxonomy = $assoc_args['taxonomy'] ?? false;
+	    $remove_existing_featured_image = $assoc_args['remove-existing-featured-image'] ?? false;
 
 		$original_article_ids_query = "SELECT meta_value as original_article_id, post_id as new_article_id 
                 FROM $wpdb->postmeta 
@@ -2671,7 +2679,20 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			        )
 		        );
 		        $has_featured_image = ! is_null( $has_featured_image );
-		        if ( ! $has_featured_image ) {
+
+				if ( $has_featured_image && $remove_existing_featured_image ) {
+					$wpdb->delete(
+						$wpdb->postmeta,
+						[
+							'post_id' => $post_id,
+							'meta_key' => '_thumbnail_id'
+						]
+					);
+
+					$has_featured_image = false;
+				}
+
+				if ( ! $has_featured_image ) {
 			        if ( ! empty( $article['image'] ) ) {
 				        $this->handle_featured_image(
 					        $article['image'],
