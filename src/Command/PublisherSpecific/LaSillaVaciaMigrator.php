@@ -2939,8 +2939,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		return $term_ids;
 	}
 
-	private function handle_featured_image( $image, int $original_article_id, int $post_id, string $media_location ): void {
-		$filename       = $image['name'];
+	public function handle_featured_image( $image, int $original_article_id, int $post_id, string $media_location ) {
+		$filename       = $image['FriendlyName'] ?? $image['name'];
 		$full_file_path = $media_location . '/' . $filename;
 
 		$replace_accents = [
@@ -3017,10 +3017,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		}
 
 		if ( file_exists( $full_file_path ) ) {
-			update_post_meta( $post_id, 'newspack_featured_image_position', '' );
+			if ( $post_id !== 0 ) {
+				update_post_meta( $post_id, 'newspack_featured_image_position', '' );
+			}
 			$featured_image_attachment_id = $this->attachments->import_external_file(
 				$full_file_path,
-				$image['FriendlyName'],
+				$image['FriendlyName'] ?? $image['name'],
 				$image['caption'] ?? '',
 				null,
 				null,
@@ -3038,7 +3040,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				);
 				echo $msg;
 			} else {
-				update_post_meta( $post_id, '_thumbnail_id', $featured_image_attachment_id );
+				if ( $post_id !== 0 ) {
+					update_post_meta( $post_id, '_thumbnail_id', $featured_image_attachment_id );
+				}
 				$msg = sprintf(
 					"(OAID) %d, WPAID %d, imported featured image attachment ID %d\n",
 					$original_article_id,
@@ -3046,10 +3050,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					$featured_image_attachment_id
 				);
 				echo WP_CLI::colorize( "%b$msg%n" );
+				return $featured_image_attachment_id;
 			}
 		} else {
 			echo WP_CLI::colorize( "%mFile doesn't exist: $full_file_path%n\n" );
 		}
+
+		return 0;
 	}
 
     public function link_wp_users_to_guest_authors()
