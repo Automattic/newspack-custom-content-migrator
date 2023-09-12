@@ -2038,7 +2038,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				LEFT JOIN {$wpdb->term_relationships} wtr ON wtr.term_taxonomy_id = wt.term_id
 			WHERE wtr.term_taxonomy_id IS NULL
 				AND wt.term_id IN (SELECT term_id FROM {$wpdb->term_taxonomy} WHERE parent =  %d)
-				AND wt.slug NOT REGEXP '^[0-9]'", [ $issue_term_id ] );
+				AND wt.slug REGEXP '[a-z]'", [ $issue_term_id ] );
 
 		$category_ids = $wpdb->get_col( $sql );
 		$num_cats     = count( $category_ids );
