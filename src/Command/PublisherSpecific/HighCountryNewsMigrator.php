@@ -2116,12 +2116,21 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						$existing_redirect->delete();
 					}
 				}
+				// We will use a regex redirect for the /hcn/hcn/ prefix, so remove that.
+				$no_prefix          = str_replace( '/hcn/hcn', '', $alias );
+				$existing_redirects = $this->redirection_logic->get_redirects_by_exact_from_url( $no_prefix );
+				if ( ! empty( $existing_redirects ) ) {
+					foreach ( $existing_redirects as $existing_redirect ) {
+						$existing_redirect->delete();
+					}
+				}
+
 				$this->redirection_logic->create_redirection_rule(
-					'For Plone ID ' . $article->UID,
-					$alias,
+					'Plone ID ' . $article->UID,
+					$no_prefix,
 					"/?p=$post_id"
 				);
-				$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $alias ), Logger::SUCCESS );
+				$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
 			}
 		}
 	}
