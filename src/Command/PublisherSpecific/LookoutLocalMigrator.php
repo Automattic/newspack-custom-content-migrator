@@ -336,6 +336,21 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			[ $this, 'cmd_get_urls_from_sitemap' ],
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-scrape-posts',
+			[ $this, 'cmd_scrape_posts' ],
+			[
+				'shortdesc' => 'Main command. Scrape posts from live and imports them. Make sure to run lookoutlocal-create-custom-table first.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'urls-file',
+						'description' => 'File with URLs to scrape and import, one URL per line.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator lookoutlocal-postscrape-posts',
 			[ $this, 'cmd_postscrape_posts' ],
 			[
