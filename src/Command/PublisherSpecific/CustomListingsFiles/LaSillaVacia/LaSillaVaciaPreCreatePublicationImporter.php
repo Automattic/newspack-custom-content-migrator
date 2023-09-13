@@ -100,8 +100,7 @@ class LaSillaVaciaPreCreatePublicationImporter extends Abstract_Callable_Pre_Cre
 				);
 
 	            if ( $post_id ) {
-//		            $lsv_migrator->handle_featured_image( $image, $row['id'], 0, '/tmp/media_content/bak_Media' );
-		            $featured_image_id = $lsv_migrator->handle_featured_image( $image, $row['id'], 0, '/Users/edc598/Local_Sites/la-silla-vacia-complete-content/app/public/wp-content/Media' );
+		            $featured_image_id = $lsv_migrator->handle_featured_image( $image, $row['id'], 0, '/tmp/media_content/bak_Media' );
 
 		            if ( $featured_image_id ) {
 						$row['image_attachment_id'] = $featured_image_id;

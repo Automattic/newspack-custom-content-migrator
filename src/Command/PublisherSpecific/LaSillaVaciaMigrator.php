@@ -949,6 +949,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			]
 		);
 
+	    WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-set-featured-images-for-detector-de-mentiras',
+		    [ $this, 'cmd_set_featured_images_for_detector_de_mentiras' ],
+		    [
+			    'shortdesc' => 'Go through DB and find meta data for featured images for Detector de Mentiras posts and set them as featured images.',
+			    'synopsis'  => []
+		    ]
+	    );
+
         WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-update-author-metadata',
             [ $this, 'cmd_update_user_metadata' ],
@@ -2826,6 +2835,37 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			$assoc_args['end-at-id'] = $original_article_id;
 
 			$this->cmd_update_migrated_articles( $args,  $assoc_args );
+		}
+	}
+
+	public function cmd_set_featured_images_for_detector_de_mentiras( $args, $assoc_args )
+	{
+		global $wpdb;
+
+		$post_meta_posts_to_check = $wpdb->get_results(
+			"SELECT * FROM $wpdb->postmeta 
+         		WHERE meta_key = 'newspack_picture' 
+         		  AND post_id IN (
+					SELECT object_id 
+					FROM wp_term_relationships 
+					WHERE term_taxonomy_id IN (4984,5429,5499,5633,5669) 
+					)"
+		);
+
+		foreach ( $post_meta_posts_to_check as $postmeta ) {
+			$has_featured_image = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT meta_id FROM $wpdb->postmeta WHERE meta_key = '_thumbnail_id' AND post_id = %d",
+					$postmeta->post_id
+				)
+			);
+			$has_featured_image = ! is_null( $has_featured_image );
+
+			if ( ! $has_featured_image ) {
+				$picture = maybe_unserialize( $postmeta->meta_value );
+				$picture['FriendlyName'] = $picture['name'];
+				$this->handle_featured_image( $picture, 0, $postmeta->post_id, '/tmp/media_content/bak_Media' );
+			}
 		}
 	}
 
