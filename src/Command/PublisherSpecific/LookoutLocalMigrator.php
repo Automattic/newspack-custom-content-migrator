@@ -332,19 +332,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-scrape-posts',
-			[ $this, 'cmd_scrape_posts' ],
-			[
-				'shortdesc' => 'Main command. Scrape posts from live and imports them. Make sure to run lookoutlocal-create-custom-table first.',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'urls-file',
-						'description' => 'File with URLs to scrape and import, one URL per line.',
-						'optional'    => true,
-					],
-				],
-			]
+			'newspack-content-migrator lookoutlocal-get-all-urls-from-sitemap',
+			[ $this, 'cmd_get_urls_from_sitemap' ],
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator lookoutlocal-postscrape-posts',
@@ -392,6 +381,94 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+	}
+
+	/**
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_get_urls_from_sitemap( $pos_args, $assoc_args ) {
+
+		// Hardcoded sitemap index URL.
+		$sitemap_index_url = 'https://lookout.co/santacruz/sitemap.xml';
+		$log = 'll__all_urls.txt';
+
+		WP_CLI::line( "Fetching URLs from sitemap index $sitemap_index_url , please hold ..." );
+		$urls = $this->fetch_and_parse_sitemap_index($sitemap_index_url);
+
+		if ( ! empty( $urls ) ) {
+			@unlink( $log );
+			foreach ( $urls as $url_data ) {
+				file_put_contents( $log, $url_data['loc'] . "\n", FILE_APPEND );
+			}
+			WP_CLI::success( 'Done. URLs saved to ' . $log );
+		} else {
+			WP_CLI::error( 'Failed to retrieve sitemap index or URLs.' );
+		}
+	}
+
+	/**
+	 * Fetch and parse URLs from a sitemap index.
+	 *
+	 * @param $sitemap_index_url
+	 *
+	 * @return array
+	 */
+	public function fetch_and_parse_sitemap_index( $sitemap_index_url ) {
+		$xml = file_get_contents( $sitemap_index_url );
+		if ( false === $xml ) {
+			return [];
+		}
+
+		$xml = simplexml_load_string( $xml );
+		if ( $xml === false ) {
+			return [];
+		}
+
+		$all_urls = [];
+		foreach ( $xml->sitemap as $sitemap ) {
+			$sitemap_url = (string) $sitemap->loc;
+			$urls = $this->fetch_and_parse_sitemap( $sitemap_url );
+
+			// Merge the URLs from this sitemap into the result array
+			$all_urls = array_merge( $all_urls, $urls );
+		}
+
+		return $all_urls;
+	}
+
+	/**
+	 * Fetch and parse URLs from a sitemap.
+	 *
+	 * @param $sitemap_url
+	 *
+	 * @return array
+	 */
+	public function fetch_and_parse_sitemap( $sitemap_url ) {
+		$xml = file_get_contents( $sitemap_url );
+		if ( false === $xml ) {
+			return [];
+		}
+
+		$xml = simplexml_load_string( $xml );
+		if ( false === $xml ) {
+			return [];
+		}
+
+		$urls = [];
+		foreach ( $xml->url as $url ) {
+			$loc = (string) $url->loc;
+			$lastmod = (string) $url->lastmod;
+
+			$urls[] = [
+				'loc' => $loc,
+				'lastmod' => $lastmod,
+			];
+		}
+
+		return $urls;
 	}
 
 	public function cmd_get_urls_from_record_table( $pos_args, $assoc_args ) {
