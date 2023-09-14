@@ -9,6 +9,7 @@ use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsE
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use \NewspackCustomContentMigrator\Logic\Taxonomy;
 
 /**
  * Custom migration scripts for Saporta News.
@@ -47,6 +48,13 @@ class CCMMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
+	 * Taxonomy logic class.
+	 *
+	 * @var Taxonomy $taxonomy_logic Taxonomy logic class.
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -55,6 +63,7 @@ class CCMMigrator implements InterfaceCommand {
 		$this->gutenberg_block_generator         = new GutenbergBlockGenerator();
 		$this->attachments_logic                 = new AttachmentsLogic();
 		$this->logger                            = new Logger();
+		$this->taxonomy_logic                    = new Taxonomy();
 	}
 
 	/**
@@ -189,6 +198,23 @@ class CCMMigrator implements InterfaceCommand {
 						'name'        => 'posts-per-batch',
 						'description' => 'Posts to import per batch',
 						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ccm-update-categories-from-csv',
+			[ $this, 'cmd_update_categories_from_csv' ],
+			[
+				'shortdesc' => 'Update categories from CSV file.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv',
+						'description' => 'CSV file with categories to update.',
+						'optional'    => false,
 						'repeating'   => false,
 					],
 				],
@@ -698,5 +724,147 @@ class CCMMigrator implements InterfaceCommand {
 
 			update_post_meta( $post->ID, '_newspack_migration_migrate_co_authors', true );
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator ccm-update-categories-from-csv`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_update_categories_from_csv( $args, $assoc_args ) {
+		$log_file     = 'ccm_cp_categories_update.log';
+		$csv_filepath = $assoc_args['csv'];
+
+		if ( ! is_file( $csv_filepath ) ) {
+			WP_CLI::error( 'CSV file not found.' );
+		}
+
+		$categories_data = $this->get_data_from_csv( $csv_filepath );
+
+		foreach ( $categories_data as $i => $category_data ) {
+			if ( $i < 2 ) {
+				continue; // Skip.
+			}
+
+			$source_term_id      = intval( $category_data['Remove this term'] );
+			$destination_term_id = intval( $category_data['Add this term'] );
+
+			// Check IDs.
+			$source_category      = get_category( $source_term_id );
+			$destination_category = get_category( $destination_term_id );
+			if ( is_null( $source_category ) ) {
+				WP_CLI::warning( 'Wrong source category ID: ' . $source_term_id );
+				continue;
+			}
+			if ( is_null( $destination_category ) ) {
+				WP_CLI::warning( 'Wrong destination category ID: ' . $destination_term_id );
+				continue;
+			}
+			if ( $source_term_id == $destination_term_id ) {
+				WP_CLI::warning( 'Source and destination categories are the same. No changes made.' . $source_term_id . ' != ' . $destination_term_id );
+				continue;
+			}
+
+
+			$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
+
+			// Update category count.
+			$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
+		}
+
+		wp_cache_flush();
+		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * This function will execute the updates required to make the wp_term_taxonomy.count column
+	 * match the actual, real number of rows in wp_term_relationships table.
+	 *
+	 * @param array $rows Should be the results which show actual taxonomy counts (from wp_term_relationships)vs what is stored.
+	 */
+	protected function update_counts_for_taxonomies( array $rows ) {
+		global $wpdb;
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Updating counts for taxonomies...', count( $rows ) );
+
+		foreach ( $rows as $row ) {
+			$wpdb->update( $wpdb->term_taxonomy, [ 'count' => $row->counter ], [ 'term_taxonomy_id' => $row->term_taxonomy_id ] );
+			$progress_bar->tick();
+		}
+
+		$progress_bar->finish();
+	}
+
+	/**
+	 * WARNING -- this method does not fetch rows where counts are zero, which might cause errors if updating all records is needed.
+	 *
+	 * Returns the list of term_taxonomy_id's which have count values
+	 * that don't match real values in wp_term_relationships.
+	 *
+	 * @return stdClass[]
+	 */
+	protected function get_unsynced_taxonomy_rows() {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			"SELECT
+	            tt.term_taxonomy_id,
+       			t.term_id,
+       			t.name,
+       			t.slug,
+       			tt.taxonomy,
+	            tt.count,
+	            sub.counter
+			FROM $wpdb->term_taxonomy tt LEFT JOIN (
+			    SELECT
+			           term_taxonomy_id,
+			           COUNT(object_id) as counter
+			    FROM $wpdb->term_relationships
+			    GROUP BY term_taxonomy_id
+			    ) as sub
+			ON tt.term_taxonomy_id = sub.term_taxonomy_id
+			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
+			WHERE sub.counter IS NOT NULL
+			  AND tt.count <> sub.counter
+			  AND tt.taxonomy IN ('category', 'post_tag')"
+		);
+	}
+
+	/**
+	 * Get data from CSV file.
+	 *
+	 * @param string $story_csv_file_path Path to the CSV file containing the stories to import.
+	 * @return array Array of data.
+	 */
+	private function get_data_from_csv( $story_csv_file_path ) {
+		$data = [];
+
+		if ( ! file_exists( $story_csv_file_path ) ) {
+			WP_CLI::error( 'File does not exist: ' . $story_csv_file_path, Logger::ERROR );
+		}
+
+		$csv_file = fopen( $story_csv_file_path, 'r' );
+		if ( false === $csv_file ) {
+			WP_CLI::error( 'Could not open file: ' . $story_csv_file_path, Logger::ERROR );
+		}
+
+		$csv_headers = fgetcsv( $csv_file );
+		if ( false === $csv_headers ) {
+			WP_CLI::error( 'Could not read CSV headers from file: ' . $story_csv_file_path, Logger::ERROR );
+		}
+
+		$csv_headers = array_map( 'trim', $csv_headers );
+
+		while ( ( $csv_row = fgetcsv( $csv_file ) ) !== false ) {
+			$csv_row = array_map( 'trim', $csv_row );
+			$csv_row = array_combine( $csv_headers, $csv_row );
+
+			$data[] = $csv_row;
+		}
+
+		fclose( $csv_file );
+
+		return $data;
 	}
 }
