@@ -84,5 +84,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
+		Command\PublisherSpecific\MustangNewsMigrator::class,
 	)
 );
