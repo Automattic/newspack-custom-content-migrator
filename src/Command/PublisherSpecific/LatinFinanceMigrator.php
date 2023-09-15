@@ -866,23 +866,23 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		$path = "./sql-staging/newsletters/campaigns_content/";
 
-		$files = glob( $path . '*.txt' );
+		$files = glob( $path . '*.html' );
 		foreach( $files as $filepath ) {
 
-			if( preg_match( '/-(daily-brief-test|do-not-send).txt$/', $filepath ) ) continue;
-			if( preg_match( '/\/[0-9]+_test.txt$/', $filepath ) ) continue;
-			if( preg_match( '/\/[0-9]+_test-?[0-9]+.txt$/', $filepath ) ) continue;
+			if( preg_match( '/-(daily-brief-test|do-not-send).html$/', $filepath ) ) continue;
+			if( preg_match( '/\/[0-9]+_test.html$/', $filepath ) ) continue;
+			if( preg_match( '/\/[0-9]+_test-?[0-9]+.html$/', $filepath ) ) continue;
 			
 			// WP_CLI::line( $filepath );
 
 			$contents = file_get_contents( $filepath );
 
-			if( ! preg_match( '/\*\* Daily Brief/', $contents ) ) continue;
+			if( ! preg_match( '/>Daily Brief</', $contents ) ) continue;
 
 			// echo $contents;
 
 			// formats: Nov 1, 2017 | Nov, 1 2017 | 1 November 2017
-			if( ! preg_match( '/\*\* ([A-Za-z]+,? [0-9]{1,2},? [0-9]{4}|[0-9]{1,2} [A-Za-z]+ [0-9]{4})/', $contents, $date_matches ) ) continue;
+			if( ! preg_match( '/>([A-Za-z]+,? [0-9]{1,2},? [0-9]{4}|[0-9]{1,2} [A-Za-z]+ [0-9]{4})</', $contents, $date_matches ) ) continue;
 
 			if( empty( $date_matches[1] ) ) {
 				$this->mylog('newsletters-no-date-found-in-file', $filepath );
@@ -924,7 +924,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			
 			$file = $file_arr[0];
 			$file = preg_replace( '#./sql-staging/newsletters/campaigns_content/[0-9]+_\-?#', '', $file );
-			$file = preg_replace( '/\-?.txt$/', '', $file );
+			$file = preg_replace( '/\-?.html$/', '', $file );
 			
 			// make sure there is a title
 			if( empty( $titles[$file] ) ) {
@@ -1033,6 +1033,8 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 	private function cmd_export_from_mailchimp_to_wxr( $to_process ) {
 		
+		global $wpdb;
+
 		/*
 		Array
 			(
@@ -1045,11 +1047,135 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 		foreach( $to_process as $item ) {
 			
-			print_r($item);
+			// print_r($item);
 
 			// parse the file
-			$contents = file_get_contents( $item['file'] );
-			echo $contents;
+			$content = trim( file_get_contents( $item['file'] ) );
+
+			$content = trim( preg_replace( '/^.*?<body/s', '', $content ) );
+			$content = trim( preg_replace( '/^.*?>/', '', $content ) );
+
+			$content = trim( preg_replace( '/<\/html>$/', '', $content ) );
+			$content = trim( preg_replace( '/<\/body>$/', '', $content ) );
+
+			if( ! preg_match( '/^<div class="aspNetHidden"/', $content ) ) {
+				$this->mylog( 'newsletters-html-starting-issues', $item );
+				continue;
+			}
+
+			if( ! preg_match( '/<\/div>$/', $content ) ) {
+				$this->mylog( 'newsletters-html-ending-issues', $item );
+				continue;
+			}
+
+
+			// get links to replace
+			preg_match_all( '/<h2.*?href="([^"]+)".*?>([^>]+)<.*?\n.*?>([^<]+)<\/p>/', $content, $matches, PREG_SET_ORDER );
+
+			if( count( $matches ) < 5 ) {
+				$this->mylog( 'newsletters-html-link-count-issue', array( $item, $matches ) );
+				continue;
+			}
+
+			// 	[0] => <h2 style="margin-top: 0;color: #0886b6;font-size: 18px;font-weight: bold;margin-bottom: 5px;font-family: Calibri Light, Calibri, Helvetica, Arial !important;box-sizing: border-box;"><a href="https://www.latinfinance.com/daily-briefs/2023/8/25/citi-buys-into-peru-fx-fintech" style="color: #0886b6;text-decoration: none;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">Citi buys into Peru FX fintech</a></h2>
+			// 																		<p style="line-height: 1.5em;text-align: left;margin-top: 0;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">US lender invests in currency exchange platform Rextie</p>
+			// 	[1] => https://www.latinfinance.com/daily-briefs/2023/8/25/citi-buys-into-peru-fx-fintech
+			// 	[2] => Citi buys into Peru FX fintech
+			// 	[3] => US lender invests in currency exchange platform Rextie
+
+			// print_r($matches); 
+			
+
+			$this->mylog( 'newsletters-content-before', $content );
+
+
+			foreach( $matches as $match ) {
+
+				// get post based on url
+				$url_path = parse_url( $match[1], PHP_URL_PATH );
+				// WP_CLI::line( $url_path );
+
+				$post_id = url_to_postid( $url_path );
+				
+				if( ! ( $post_id > 0 ) ) {
+					// try to replace the end of the url with a newly sanitized title
+					$url_path_2 = preg_replace( '/[^\/]+$/', sanitize_title( $match[2] ), preg_replace( '/\/$/', '', $url_path ) );
+					// WP_CLI::line($url_path_2);
+					$post_id = url_to_postid( $url_path_2 );
+				}
+
+				if( ! ( $post_id > 0 ) ) {
+					$sql = $wpdb->prepare("
+						select ID from wp_posts 
+						where post_name like %s
+						and DATE_FORMAT(post_date, %s) = %s
+					", array( sanitize_title( $match[2] ) . '%', '%Y-%m-%d', $item['date'] ) );
+					// echo $sql;
+					$post_id = $wpdb->get_var( $sql );
+					// echo $post_id;
+					// exit();
+				}
+
+				if( ! ( $post_id > 0 ) ) {
+					WP_CLI::warning( 'No post id based on match url: ' . $url_path );
+					$content = str_replace( $match[0], '<!--newspack-lf-newsletters-no-post-id-->' . $match[0] . '<!--/newspack-lf-newsletters-no-post-id-->', $content );
+					continue;
+				}
+
+				// replace with a shortcode
+				$replacement = str_replace( '>' . $match[3] . '<', '><!--' . $match[3] . '-->[newsletters_lf_insert_post_content id=' . $post_id . ']<', $match[0] );
+				$content = str_replace( $match[0], $replacement, $content );
+
+				// WP_CLI::line( $post_id );
+
+				// if( $item['date'] == '2022-01-01' ) exit();
+
+			}
+
+			$this->mylog( 'newsletters-content-after', $content );
+
+			exit();
+
+
+
+
+
+
+
+
+
+
+
+			$dom = new \DOMDocument;
+			$dom->loadHtml("<html><head><meta charset=\"UTF-8\"><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"></head><body>".$content."</body></html>");
+
+			$xpath = new \DOMXPath($dom);
+			$elements = $xpath->query('//*');
+
+			foreach ($elements as $element) {
+				echo "Node name: " . $element->nodeName . "\n";
+				echo "Node value: " . $element->nodeValue . "\n";
+				echo "Attributes: ";
+				
+				foreach ($element->attributes as $attribute) {
+					echo $attribute->name . "=\"" . $attribute->value . "\" ";
+				}
+				
+				echo "\n----------\n";
+			}
+
+			exit();
+
+			var_dump($dom);
+
+
+			// <h2 style="margin-top: 0;color: #0886b6;font-size: 18px;font-weight: bold;margin-bottom: 5px;font-family: Calibri Light, Calibri, Helvetica, Arial !important;box-sizing: border-box;"><a href="https://www.latinfinance.com/daily-briefs/2023/8/25/brazilian-exporters-cool-on-yuan-trade-with-argentina" style="color: #0886b6;text-decoration: none;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">Brazilian exporters cool on yuan trade with Argentina</a></h2>
+            // <p style="line-height: 1.5em;text-align: left;margin-top: 0;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">Finance minister says the measure is good for exporters, but trade group says China will be the big winner</p>
+
+
+
+			// WP_CLI::line( $content ); 
+			
 			exit();
 			
 		}
