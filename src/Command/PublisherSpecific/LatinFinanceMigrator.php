@@ -118,6 +118,15 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-export-from-mailchimp',
+			[ $this, 'cmd_export_from_mailchimp' ],
+			[
+				'shortdesc' => 'Exports content from Mailchimp backups.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-export-from-mssql',
 			[ $this, 'cmd_export_from_mssql' ],
 			[
@@ -786,6 +795,270 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		WP_CLI::success( 'Done.  Report was exported to WP_CONTENT_DIR.  Nothing was deleted, do by hand using WP_URL column in export.' );
 
 	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-export-from-mailchimp'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_export_from_mailchimp( $pos_args, $assoc_args ) {
+		
+		WP_CLI::line( "Doing latinfinance-export-from-mailchimp..." );
+
+		global $wpdb;
+
+		$csv_path = './sql-staging/newsletters/campaigns.csv';
+		if( ! is_file( $csv_path ) ) {
+			WP_CLI::error( 'Could not find CSV at path: ' . $csv_path );
+		}
+		
+		// read
+		$handle = fopen( $csv_path, 'r' );
+		if ( $handle == FALSE ) {
+			WP_CLI::error( 'Could not fopen CSV at path: ' . $csv_path );
+		}
+
+		$titles = array();
+		$row_counter = -1;
+		while ( ( $row = fgetcsv( $handle ) ) !== FALSE ) {
+			
+			$row_counter++;
+			
+			// skip header row
+			if( $row_counter == 0 ) continue;
+
+			// csv data integrity
+			if( 40 != count( $row ) ) {
+				WP_CLI::error( 'Error row column count mismatch: ' . print_r( $row, true ) );
+			}
+
+			// 0 = Title
+			// 1 = Subject
+			// 2 = Audience
+			// 3 = Send Date
+			// 4 = Send Weekday
+			// 5 = Total Recipients
+
+			$post_name = $row[0];
+			$post_name = preg_replace('/(&|\')/', '-', $post_name );
+			$post_name = preg_replace('/[^\x00-\x7F]/u', '-', $post_name ); // ’|ú|ã|É
+			$post_name = sanitize_title( $post_name );
+
+			if( empty( $titles[$post_name]) ) $titles[$post_name] = array();
+			$titles[$post_name][] = array( $row[0], $row[3], $row[5 ] );
+
+		}
+
+		$this->mylog( 'newsletters-titles-from-csv', $titles );
+
+		// print_r($titles);
+		// exit();
+
+		// close
+		fclose($handle);
+
+
+		$report = [
+			'dates' => [],
+		];
+
+
+		$path = "./sql-staging/newsletters/campaigns_content/";
+
+		$files = glob( $path . '*.txt' );
+		foreach( $files as $filepath ) {
+
+			if( preg_match( '/-(daily-brief-test|do-not-send).txt$/', $filepath ) ) continue;
+			if( preg_match( '/\/[0-9]+_test.txt$/', $filepath ) ) continue;
+			if( preg_match( '/\/[0-9]+_test-?[0-9]+.txt$/', $filepath ) ) continue;
+			
+			// WP_CLI::line( $filepath );
+
+			$contents = file_get_contents( $filepath );
+
+			if( ! preg_match( '/\*\* Daily Brief/', $contents ) ) continue;
+
+			// echo $contents;
+
+			// formats: Nov 1, 2017 | Nov, 1 2017 | 1 November 2017
+			if( ! preg_match( '/\*\* ([A-Za-z]+,? [0-9]{1,2},? [0-9]{4}|[0-9]{1,2} [A-Za-z]+ [0-9]{4})/', $contents, $date_matches ) ) continue;
+
+			if( empty( $date_matches[1] ) ) {
+				$this->mylog('newsletters-no-date-found-in-file', $filepath );
+				continue;
+			}
+
+			$dt = strtotime( str_replace(',', '', $date_matches[1] ) );
+			if( false == $dt ) {
+				WP_CLI::error( 'Strtotime issue.' );
+			}
+
+			$date = date("Y-m-d", $dt );
+
+			if( empty( $report['dates'][$date] ) ) $report['dates'][$date] = array();
+			$report['dates'][$date][] = $filepath;
+				
+			// exit();
+
+		}
+
+		// print_r( $report );
+
+		// filter out any dates that have more than 1 file
+		// todo: handle these by hand?
+		$singles = array_filter( $report['dates'], function( $v, $n ) {
+			
+			if( 1 == count( $v ) ) return true;
+			
+			$this->mylog('newsletters-multiple-files-per-day', array( $n, $v ) );
+			
+			return false;
+
+		}, ARRAY_FILTER_USE_BOTH );
+
+		$to_process = array();
+
+		// make sure each file has a title associated with it from the CSV
+		foreach( $singles as $date => $file_arr ) {
+			
+			$file = $file_arr[0];
+			$file = preg_replace( '#./sql-staging/newsletters/campaigns_content/[0-9]+_\-?#', '', $file );
+			$file = preg_replace( '/\-?.txt$/', '', $file );
+			
+			// make sure there is a title
+			if( empty( $titles[$file] ) ) {
+				
+				$this->mylog( 'newsletters-no-title-found', array( $date, $file, $file_arr ) );
+				continue;
+			}
+
+			// make sure just 1 title row was found in CSV
+			if( 1 != count( $titles[$file] ) ) {
+				
+				$this->mylog( 'newsletters-found-muliple-title-rows', array( $date, $file, $file_arr, $titles[$file] ) );
+				continue;
+			}
+
+			// check if postname exists
+			$post_id = $wpdb->get_var( $wpdb->prepare("
+				select ID
+				from wp_posts
+				where post_name = %s
+			", array( $file ) ) );
+
+			// post already exists
+			if( $post_id > 0 ) {
+				$this->mylog( 'newsletters-post-name-exists', array( $date, $file, $file_arr ) );
+				continue;
+			}
+
+			// make sure csv row has proper values
+			$title_row = $titles[$file][0];
+			
+			// good amount of send count
+			if( $title_row[2] < 250 ) {
+				$this->mylog( 'newsletters-send-count-too-low', array( $date, $file, $file_arr, $title_row ) );
+				continue;
+			}
+
+			// make sure send date matches file parse date
+			if( ! preg_match( '/^' . date('M d, Y', strtotime( $date ) ) . '/', $title_row[1] ) ) {
+				$this->mylog( 'newsletters-send-date-does-not-match', array( $date, $file, $file_arr, $title_row ) );
+				continue;
+			}
+
+
+			$to_process[] = [
+				'date' => $date,
+				'file' => $file_arr[0],
+				'title' => $title_row[0],
+				'slug' => $file,
+			];
+
+			// WP_CLI::line( $date . ' ' . $file . ' ' . print_r( $titles[$file], true ) );
+
+
+		}
+		
+		// print_r($to_process);
+		// exit();
+
+
+		// process newest first
+		$this->cmd_export_from_mailchimp_to_wxr( array_reverse( $to_process ) );
+
+		// // clear out some values that don't match HTML + TXT versions
+		// $files = array_values( array_filter( $files, function ( $v ) {
+			
+		// 	if( $v == './sql-staging/newsletters/campaigns_content/273381_welcome.html'
+		// 		|| $v == './sql-staging/newsletters/campaigns_content/274101_daily-brief-welcome-series.txt'
+		// 		|| $v == './sql-staging/newsletters/campaigns_content/274613_untitled.html'
+		// 		|| $v == './sql-staging/newsletters/campaigns_content/274621_latinfinance-daily-brief-5-october-2018.html'
+		// 		|| $v == './sql-staging/newsletters/campaigns_content/274781_free-to-paid-trial-campaign-santander.txt'
+		// 		|| $v == './sql-staging/newsletters/campaigns_content/275149_signup-confirmation.html'
+		// 	) return false;
+		
+		// 	return true;
+			
+		// } ) );
+
+		// // make sure HTML + TXT files match
+		// for( $i = 0; $i < count( $files ); $i += 2 ) {
+
+		// 	WP_CLI::line( $files[$i] );
+		// 	WP_CLI::line( $files[$i+1] );
+
+		// 	$filename1 = preg_replace( '/\.(html)$/', '', $files[$i] );
+		// 	$filename2 = preg_replace( '/\.(txt)$/', '', $files[$i+1] );
+
+		// 	if( $filename1 != $filename2 ) WP_CLI::error( 'Filenames do not match.' );
+
+		// 	WP_CLI::line ( 'HTML and TXT exist.' );
+
+		// }
+
+		// parse the TXT versions
+
+		// CSV parsing
+
+		// set path to file
+
+		// print_r( $report );
+
+		WP_CLI::success( 'Done' );
+
+	
+	}
+
+	private function cmd_export_from_mailchimp_to_wxr( $to_process ) {
+		
+		/*
+		Array
+			(
+				[date] => 2023-08-28
+				[file] => ./sql-staging/newsletters/campaigns_content/293481_brazil-plans-slb-debut-by-early-2024-unacem-buys-us-cement-plant-s-p-says-third-guacolda-debt-swap-possible.txt
+				[title] => Brazil plans SLB debut by early 2024 - Unacem buys US cement plant - S&P says third Guacolda debt swap possible
+				[slug] => brazil-plans-slb-debut-by-early-2024-unacem-buys-us-cement-plant-s-p-says-third-guacolda-debt-swap-possible
+			)
+		*/
+
+		foreach( $to_process as $item ) {
+			
+			print_r($item);
+
+			// parse the file
+			$contents = file_get_contents( $item['file'] );
+			echo $contents;
+			exit();
+			
+		}
+
+	}
+
+
+
+
 
 	/**
 	 * Callable for 'newspack-content-migrator latinfinance-export-from-mssql'.
