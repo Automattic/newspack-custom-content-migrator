@@ -986,57 +986,34 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 
 		// process newest first
-		$this->cmd_export_from_mailchimp_to_wxr( array_reverse( $to_process ) );
+		$to_process = array_reverse( $to_process );
 
-		// // clear out some values that don't match HTML + TXT versions
-		// $files = array_values( array_filter( $files, function ( $v ) {
-			
-		// 	if( $v == './sql-staging/newsletters/campaigns_content/273381_welcome.html'
-		// 		|| $v == './sql-staging/newsletters/campaigns_content/274101_daily-brief-welcome-series.txt'
-		// 		|| $v == './sql-staging/newsletters/campaigns_content/274613_untitled.html'
-		// 		|| $v == './sql-staging/newsletters/campaigns_content/274621_latinfinance-daily-brief-5-october-2018.html'
-		// 		|| $v == './sql-staging/newsletters/campaigns_content/274781_free-to-paid-trial-campaign-santander.txt'
-		// 		|| $v == './sql-staging/newsletters/campaigns_content/275149_signup-confirmation.html'
-		// 	) return false;
+		$batch_size = 1;
+		for ($i = 0; $i < count($to_process); $i += $batch_size) {
+			$this->cmd_export_from_mailchimp_to_wxr( array_slice( $to_process, $i, $batch_size ), $i );
+			exit();
+		}
 		
-		// 	return true;
-			
-		// } ) );
-
-		// // make sure HTML + TXT files match
-		// for( $i = 0; $i < count( $files ); $i += 2 ) {
-
-		// 	WP_CLI::line( $files[$i] );
-		// 	WP_CLI::line( $files[$i+1] );
-
-		// 	$filename1 = preg_replace( '/\.(html)$/', '', $files[$i] );
-		// 	$filename2 = preg_replace( '/\.(txt)$/', '', $files[$i+1] );
-
-		// 	if( $filename1 != $filename2 ) WP_CLI::error( 'Filenames do not match.' );
-
-		// 	WP_CLI::line ( 'HTML and TXT exist.' );
-
-		// }
-
-		// parse the TXT versions
-
-		// CSV parsing
-
-		// set path to file
-
-		// print_r( $report );
-
 		WP_CLI::success( 'Done' );
 
 	
 	}
 
-	private function cmd_export_from_mailchimp_to_wxr( $to_process ) {
+	private function cmd_export_from_mailchimp_to_wxr( $to_process, $start_index ) {
 		
 		global $wpdb;
 
+		// Setup data array WXR for post content
+		$wxr_data = [
+			'site_title'  => $this->site_title,
+			'site_url'    => $this->site_url,
+			'export_file' => '',
+			'posts'       => [],
+		];
+
+				
 		/*
-		Array
+		Item Array
 			(
 				[date] => 2023-08-28
 				[file] => ./sql-staging/newsletters/campaigns_content/293481_brazil-plans-slb-debut-by-early-2024-unacem-buys-us-cement-plant-s-p-says-third-guacolda-debt-swap-possible.txt
@@ -1044,7 +1021,6 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				[slug] => brazil-plans-slb-debut-by-early-2024-unacem-buys-us-cement-plant-s-p-says-third-guacolda-debt-swap-possible
 			)
 		*/
-
 		foreach( $to_process as $item ) {
 			
 			// print_r($item);
@@ -1086,7 +1062,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			// print_r($matches); 
 			
 
-			$this->mylog( 'newsletters-content-before', $content );
+			// $this->mylog( 'newsletters-content-before', $content );
 
 
 			foreach( $matches as $match ) {
@@ -1117,7 +1093,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				}
 
 				if( ! ( $post_id > 0 ) ) {
-					WP_CLI::warning( 'No post id based on match url: ' . $url_path );
+					// WP_CLI::warning( 'No post id based on match url: ' . $url_path );
 					$content = str_replace( $match[0], '<!--newspack-lf-newsletters-no-post-id-->' . $match[0] . '<!--/newspack-lf-newsletters-no-post-id-->', $content );
 					continue;
 				}
@@ -1126,59 +1102,42 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				$replacement = str_replace( '>' . $match[3] . '<', '><!--' . $match[3] . '-->[newsletters_lf_insert_post_content id=' . $post_id . ']<', $match[0] );
 				$content = str_replace( $match[0], $replacement, $content );
 
-				// WP_CLI::line( $post_id );
-
-				// if( $item['date'] == '2022-01-01' ) exit();
-
-			}
-
-			$this->mylog( 'newsletters-content-after', $content );
-
-			exit();
-
-
-
-
-
-
-
-
-
-
-
-			$dom = new \DOMDocument;
-			$dom->loadHtml("<html><head><meta charset=\"UTF-8\"><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"></head><body>".$content."</body></html>");
-
-			$xpath = new \DOMXPath($dom);
-			$elements = $xpath->query('//*');
-
-			foreach ($elements as $element) {
-				echo "Node name: " . $element->nodeName . "\n";
-				echo "Node value: " . $element->nodeValue . "\n";
-				echo "Attributes: ";
-				
-				foreach ($element->attributes as $attribute) {
-					echo $attribute->name . "=\"" . $attribute->value . "\" ";
-				}
-				
-				echo "\n----------\n";
-			}
-
-			exit();
-
-			var_dump($dom);
-
-
-			// <h2 style="margin-top: 0;color: #0886b6;font-size: 18px;font-weight: bold;margin-bottom: 5px;font-family: Calibri Light, Calibri, Helvetica, Arial !important;box-sizing: border-box;"><a href="https://www.latinfinance.com/daily-briefs/2023/8/25/brazilian-exporters-cool-on-yuan-trade-with-argentina" style="color: #0886b6;text-decoration: none;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">Brazilian exporters cool on yuan trade with Argentina</a></h2>
-            // <p style="line-height: 1.5em;text-align: left;margin-top: 0;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">Finance minister says the measure is good for exporters, but trade group says China will be the big winner</p>
-
-
-
-			// WP_CLI::line( $content ); 
+			} // each h2 match
 			
-			exit();
-			
-		}
+			// Add values to a single post array
+			$wxr_data['posts'][] = [
+				
+				'title'   => $item['title'],
+				'url'    => $item['slug'],
+				'content' => $content,
+				'excerpt' => '',
+				'author'  => 'LatinFinance',
+				'date'    => $item['date'],
+				'meta'    => [
+					
+					'background_color' => '#efefef',
+					'is_public' => '1',
+					'newsletter_sent' => '1',
+					'senderName' => 'LatinFinance',
+					'template_id' => '69981',
+
+					'newspack_lf_import_item' => json_encode( $item ),
+					'newspack_lf_import_batch' => 'newsletters',
+					'newspack_lf_slug' => $item['slug'],
+
+				],
+
+			]; // post
+
+		} // each item
+
+
+		$fileslug = $this->export_path  . '/latinfinance-newsletters-' . $start_index;
+		$wxr_data['export_file'] = $fileslug . '.xml';
+
+		// Create WXR file
+		Newspack_WXR_Exporter::generate_export( $wxr_data );
+		WP_CLI::success( sprintf( "\n" . 'Posts exported to file %s ...', $wxr_data['export_file'] ) );
 
 	}
 
