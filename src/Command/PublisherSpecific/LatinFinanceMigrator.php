@@ -988,10 +988,9 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// process newest first
 		$to_process = array_reverse( $to_process );
 
-		$batch_size = 1;
-		for ($i = 0; $i < count($to_process); $i += $batch_size) {
+		$batch_size = 100;
+		for ($i = 0; $i < count( $to_process ); $i += $batch_size) {
 			$this->cmd_export_from_mailchimp_to_wxr( array_slice( $to_process, $i, $batch_size ), $i );
-			exit();
 		}
 		
 		WP_CLI::success( 'Done' );
@@ -1033,6 +1032,17 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$content = trim( preg_replace( '/<\/html>$/', '', $content ) );
 			$content = trim( preg_replace( '/<\/body>$/', '', $content ) );
+
+			$content = trim( preg_replace( '/<tr>.*?Not displaying correctly.*?<\/tr>/s', '', $content ) );
+			
+		// 	<tr>
+		// 	<td class="align-center" colspan="2" style="word-break: break-word;vertical-align: top;text-align: center;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">
+		// 		Not displaying correctly? <a href="*|ARCHIVE|*" style="color: #0886b6;text-decoration: none;font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">View this email online</a><br><br><br>
+		// 		<img class="email-masthead_logo" src="https://www.latinfinance.com/images/lf-logo.png" style="font-family: Helvetica, Arial, sans-serif;box-sizing: border-box;">
+		// 	</td>
+		// </tr>
+
+
 
 			if( ! preg_match( '/^<div class="aspNetHidden"/', $content ) ) {
 				$this->mylog( 'newsletters-html-starting-issues', $item );
@@ -1094,16 +1104,28 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 				if( ! ( $post_id > 0 ) ) {
 					// WP_CLI::warning( 'No post id based on match url: ' . $url_path );
-					$content = str_replace( $match[0], '<!--newspack-lf-newsletters-no-post-id-->' . $match[0] . '<!--/newspack-lf-newsletters-no-post-id-->', $content );
+					$content = str_replace( $match[0], '<!--newspack_lf_newsletters_no_post_id-->' . $match[0] . '<!--/newspack_lf_newsletters_no_post_id-->', $content );
 					continue;
 				}
 
 				// replace with a shortcode
-				$replacement = str_replace( '>' . $match[3] . '<', '><!--' . $match[3] . '-->[newsletters_lf_insert_post_content id=' . $post_id . ']<', $match[0] );
+				$replacement = str_replace( '>' . $match[3] . '<', '><!--' . $match[3] . '--></p>[newsletters_lf_insert_post_content id=' . $post_id . ']<p><', $match[0] );
 				$content = str_replace( $match[0], $replacement, $content );
 
+
 			} // each h2 match
-			
+
+			// prepend an identifiter just incase
+			$content = '<!--newspack_lf_newsletters_mailchimp_import-->
+				<style>
+				table.email-wrapper {
+					font-size: var(--newspack-theme-font-size-md);
+				}
+			  	table td {
+			  		border: none;
+				}
+				</style>' . $content;
+
 			// Add values to a single post array
 			$wxr_data['posts'][] = [
 				
@@ -1115,11 +1137,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				'date'    => $item['date'],
 				'meta'    => [
 					
-					'background_color' => '#efefef',
+					// 'background_color' => '#efefef',
 					'is_public' => '1',
-					'newsletter_sent' => '1',
-					'senderName' => 'LatinFinance',
-					'template_id' => '69981',
+					// 'newsletter_sent' => '1',
+					// 'senderName' => 'LatinFinance',
+					// 'template_id' => '69981',
 
 					'newspack_lf_import_item' => json_encode( $item ),
 					'newspack_lf_import_batch' => 'newsletters',
