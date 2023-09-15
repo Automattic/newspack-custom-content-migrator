@@ -44,7 +44,15 @@ class Logger {
 	 * @param string         $message Log message.
 	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
 	 */
-	public function log( $file, $message, $level = 'line' ) {
+	public function log( $file, $message, $level = 'line', bool $exit_on_error = false ) {
+		$log_line_prefix = '';
+		if ( in_array($level, [ self::SUCCESS, self::WARNING, self::ERROR ], true ) ) {
+			// Prepend the level to the message for easier grepping in the log file.
+			$log_line_prefix .= strtoupper( $level ) . ': ';
+		}
+
+		file_put_contents( $file, $log_line_prefix . $message . "\n", FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
+
 		if ( $level ) {
 			switch ( $level ) {
 				case ( self::SUCCESS ):
@@ -54,7 +62,7 @@ class Logger {
 					WP_CLI::warning( $message );
 		            break;
 				case ( self::ERROR ):
-					WP_CLI::error( $message );
+					WP_CLI::error( $message, $exit_on_error );
 		            break;
 				case ( self::LINE ):
 				default:
@@ -63,6 +71,6 @@ class Logger {
 			}
 		}
 
-		file_put_contents( $file, $message . "\n", FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
 	}
+
 }
