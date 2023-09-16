@@ -29,8 +29,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	const LOG_ERROR                       = 'content-diff__err.log';
 	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
 
-	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
-
 	/**
 	 * Instance.
 	 *
@@ -281,6 +279,96 @@ class ContentDiffMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator content-diff-update-featured-images-ids',
+			[ $this, 'cmd_update_feat_images_ids' ],
+			[
+				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. It automatically picks up "old_attachment_ids"=>"new_attachment_ids" from DB and updates those (unless provided with an optional --attachment-ids-json-file).',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'export-dir',
+						'description' => 'Path to where log will be written.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachment-ids-json-file',
+						'description' => 'Optional. Path to a JSON encoded array where keys are old attachment IDs and values are new attachment IDs. If provided, will only update these _thumbnail_ids, and only on those posts which were imported by the Content Diff.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Optional. Will not make changes to DB. And instead of writing to log file will just output changes to console.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator content-diff-update-featured-images-ids`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_update_feat_images_ids( $pos_args, $assoc_args ) {
+
+		// Get optional JSON list of "old_attachment_ids"=>"new_attachment_ids"mapping. If not provided, will load from DB, which is recommended.
+		$attachment_ids_map = null;
+		if ( isset( $assoc_args['attachment-ids-json-file'] ) && file_exists( $assoc_args['attachment-ids-json-file'] ) ) {
+			$attachment_ids_map = json_decode( file_get_contents( $assoc_args['attachment-ids-json-file'] ), true );
+			if ( empty( $attachment_ids_map ) ) {
+				WP_CLI::error( 'No attachment IDs found in the JSON file.' );
+			}
+		}
+
+		// Get export dir param. Will save a detailed log there.
+		$export_dir = $assoc_args['export-dir'];
+		if ( ! file_exists( $export_dir ) ) {
+			$made = mkdir( $export_dir, 0777, true );
+			if ( false == $made ) {
+				WP_CLI::error( "Could not create export directory $export_dir ." );
+			}
+		}
+
+		// Get dry-run param.
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		// If no attachment IDs map was passed, get it from the DB.
+		if ( is_null( $attachment_ids_map ) ) {
+			// Get all attachment old and new IDs from DB.
+			$attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
+
+			if ( ! $attachment_ids_map ) {
+				WP_CLI::warning( 'No attachment IDs found in the DB. No changes made.' );
+				exit;
+			}
+		}
+
+		// Timestamp the log.
+		$ts       = gmdate( 'Y-m-d h:i:s a', time() );
+		$log      = 'content-diff__updated-feat-imgs-helper.log';
+		$log_path = $export_dir . '/' . $log;
+		$this->log( $log_path, sprintf( 'Starting %s.', $ts ) );
+
+		// Get local Post IDs which were imported using Content Diff (these posts will have the ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID postmeta).
+		$imported_post_ids_mapping = self::$logic->get_imported_post_id_mapping_from_db();
+		$imported_post_ids         = array_values( $imported_post_ids_mapping );
+
+		// Update attachment IDs.
+		self::$logic->update_featured_images( $imported_post_ids, $attachment_ids_map, $log_path, $dry_run );
+
+		wp_cache_flush();
+		WP_CLI::success( sprintf( 'Done. Log saved to %s', $log_path ) );
 	}
 
 	/**
@@ -759,7 +847,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			);
 
 			// Save some metas.
-			update_post_meta( $post_id_new, self::SAVED_META_LIVE_POST_ID, $post_id_live );
+			update_post_meta( $post_id_new, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID, $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -854,9 +942,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
 			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
-			// First try searching by postmeta self::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
+			// First try searching by postmeta ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
-				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, self::SAVED_META_LIVE_POST_ID );
+				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID );
 			}
 			// Next try searching for the new parent_id by joining local and live DB tables.
 			if ( is_null( $parent_id_new ) ) {
@@ -923,29 +1011,12 @@ class ContentDiffMigrator implements InterfaceCommand {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = $this->get_attachments_from_imported_posts_log( $imported_posts_data );
+		$imported_attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
 
-		// We need the old Live attachment IDs; we'll first search for those then update them with new IDs.
-		$attachment_ids_for_featured_image_update = array_keys( $imported_attachment_ids_map );
+		// Get new Post IDs from DB.
+		$new_post_ids = array_values( $imported_post_ids_map );
 
-		// Skip previously updated Attachment IDs.
-		$updated_featured_images_data = $this->get_data_from_log( $this->log_updated_featured_imgs_ids, [ 'id_old', 'id_new' ] ) ?? [];
-		foreach ( $updated_featured_images_data as $entry ) {
-			$id_old     = $entry['id_old'] ?? null;
-			$key_id_old = array_search( $id_old, $attachment_ids_for_featured_image_update );
-			if ( ! is_null( $id_old ) && false !== $key_id_old ) {
-				unset( $attachment_ids_for_featured_image_update[ $key_id_old ] );
-			}
-		}
-		if ( empty( $attachment_ids_for_featured_image_update ) ) {
-			WP_CLI::log( 'All posts already had their featured image IDs updated, moving on.' );
-			return;
-		}
-		if ( array_keys( $imported_attachment_ids_map ) !== $attachment_ids_for_featured_image_update ) {
-			$attachment_ids_for_featured_image_update = array_values( $attachment_ids_for_featured_image_update );
-			WP_CLI::log( sprintf( '%s of total %d attachments IDs already had their featured images imported, continuing from there..', count( $imported_attachment_ids_map ) - count( $attachment_ids_for_featured_image_update ), count( $imported_attachment_ids_map ) ) );
-		}
-		self::$logic->update_featured_images( $imported_post_ids_map, $attachment_ids_for_featured_image_update, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
+		self::$logic->update_featured_images( $new_post_ids, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
 
 	/**
