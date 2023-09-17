@@ -9,6 +9,36 @@ use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \WP_CLI;
 
+/**
+ * This class implements the logic for migrating content from Embarcadero custom CMS.
+ *
+ * The export contains content in different CSV files, and a folder with all the images.
+ *
+ * To migrate the content we need to run the following commands:
+ *     - wp newspack-content-migrator embarcadero-import-posts-content \
+ *       --index-from=0 \
+ *       --index-to=2000 \
+ *       --story-csv-file-path=/path/to/story.csv \
+ *       --story-byline-email-file-path=/path/to/story_byline_email.csv \
+ *       --story-sections-file-path=/path/to/story_sections.csv \
+ *       --story-photos-file-path=/path/to/story_photos.csv \
+ *       --story-photos-dir-path=/path/to/photos \
+ *       --story-media-file-path=/path/to/story_media.csv \
+ *       --story-carousel-items-dir-path=/path/to/story_carousel_items.csv
+ *
+ *     - wp newspack-content-migrator embarcadero-migrate-post-tags \
+ *       --story-tags-csv-file-path=/path/to/story_tags.csv
+ *
+ *     - wp newspack-content-migrator embarcadero-migrate-posts-featured-image \
+ *       --story-photos-file-path=/path/to/story_photos.csv \
+ *       --story-photos-dir-path=/path/to/photos
+ *
+ *     - wp newspack-content-migrator embarcadero-migrate-more-posts-block \
+ *       --story-csv-file-path=/path/to/story.csv \
+ *       --story-media-file-path=/path/to/story_media.csv
+ *
+ * @package NewspackCustomContentMigrator
+ */
 class EmbarcaderoMigrator implements InterfaceCommand {
 	const LOG_FILE                                 = 'embarcadero_importer.log';
 	const TAGS_LOG_FILE                            = 'embarcadero_tags_migrator.log';
@@ -80,8 +110,22 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			'newspack-content-migrator embarcadero-import-posts-content',
 			array( $this, 'cmd_embarcadero_import_posts_content' ),
 			[
-				'shortdesc' => 'Import Embarcadero\s post content.',
+				'shortdesc' => 'Import Embarcadero\'s post content.',
 				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-from',
+						'description' => 'Start importing from this index in the CSV file.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-to',
+						'description' => 'Import till this index in the CSV file.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
@@ -129,6 +173,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'name'        => 'story-carousel-items-dir-path',
 						'description' => 'Path to the CSV file containing the stories\'s carousel items to import.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-content',
+						'description' => 'Refresh the content of the posts that were already imported.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -199,6 +250,37 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-images',
+			array( $this, 'cmd_embarcadero_migrate_images' ),
+			[
+				'shortdesc' => 'Migrate images that we missed by the import-posts-content command.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-file-path',
+						'description' => 'Path to the CSV file containing the stories\'s photos to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-dir-path',
+						'description' => 'Path to the directory containing the stories\'s photos files to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -215,6 +297,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_dir_path             = $assoc_args['story-photos-dir-path'];
 		$story_media_csv_file_path         = $assoc_args['story-media-file-path'];
 		$story_carousel_items_dir_path     = $assoc_args['story-carousel-items-dir-path'];
+		$refresh_content                   = isset( $assoc_args['refresh-content'] ) ? true : false;
+		$index_from                        = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
+		$index_to                          = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 
 		// Validate co-authors plugin is active.
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
@@ -229,23 +314,25 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$carousel_items        = $this->get_data_from_csv( $story_carousel_items_dir_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_ORIGINAL_ID_META_KEY );
 
-		// Skip already imported posts.
-		$posts = array_values(
-			array_filter(
-				$posts,
-				function( $post ) use ( $imported_original_ids ) {
-					return ! in_array( $post['story_id'], $imported_original_ids );
-				}
-			)
-		);
+		// Get selected posts.
+		if ( -1 !== $index_to ) {
+			$posts = array_slice( $posts, $index_from, $index_to - $index_from + 1 );
+		}
+
+		// Skip already imported posts if needed.
+		if ( ! $refresh_content ) {
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function( $post ) use ( $imported_original_ids ) {
+						return ! in_array( $post['story_id'], $imported_original_ids );
+					}
+				)
+			);
+		}
 
 		foreach ( $posts as $post_index => $post ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Importing post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
-
-			// var_dump( $post['seo_link'] );
-			// if ( ! str_contains( $post['story_text'], '{photo' ) ) {
-			// continue;
-			// }
 
 			$contributor_index = array_search( $post['byline'], array_column( $contributors, 'full_name' ) );
 
@@ -281,17 +368,47 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$post_data['post_modified'] = gmdate( 'Y-m-d H:i:s', $post['date_updated_epoch'] );
 			}
 
-			// Create the post.
-			$wp_post_id = wp_insert_post( $post_data );
+			// Create or get the post.
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
 
-			if ( is_wp_error( $wp_post_id ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create post "%s": %s', $post['headline'], $wp_post_id->get_error_message() ), Logger::WARNING );
+			// If the post exists and we don't want to refresh it, skip it.
+			if ( ! $refresh_content && $wp_post_id ) {
+				$this->logger->log(
+					self::LOG_FILE,
+					sprintf( 'Skipping entry %s because it\'s already imported.', $post['story_id'] ),
+					$this->logger::WARNING
+				);
+
 				continue;
 			}
 
-			if ( 0 === $wp_post_id ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create post "%s"', $post['headline'] ), Logger::WARNING );
+			$post_created = false;
+			if ( ! $wp_post_id ) {
+				$wp_post_id   = wp_insert_post( $post_data );
+				$post_created = true;
+			}
+
+			if ( is_wp_error( $wp_post_id ) ) {
+				$err = $wp_post_id->get_error_message();
+				$this->logger->log( self::LOG_FILE, "uid: {$post['story_id']} errorInserting: " . $err );
 				continue;
+			}
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log( self::LOG_FILE, "uid: {$post['story_id']} errorGetting." );
+				continue;
+			}
+
+			WP_CLI::success(
+				$post_created
+				? "Created post ID $wp_post_id for {$post['seo_link']}"
+				: "Fetched post ID $wp_post_id for {$post['seo_link']}"
+			);
+
+			if ( $refresh_content && ! $post_created ) {
+				// Update post data.
+				$post_data['ID'] = $wp_post_id;
+				wp_update_post( $post_data );
 			}
 
 			// Migrate post content shortcodes.
@@ -418,7 +535,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		}
 
 		foreach ( $grouped_tags as $story_id => $tags ) {
-			$wp_post_id = $this->get_post_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $story_id );
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $story_id );
 
 			if ( ! $wp_post_id ) {
 				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $story_id ), Logger::WARNING );
@@ -459,8 +576,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		foreach ( $featured_photos as $post_index => $photo ) {
 			$this->logger->log( self::FEATURED_IMAGES_LOG_FILE, sprintf( 'Importing featured image %d/%d: %d', $post_index + 1, count( $featured_photos ), $photo['photo_id'] ), Logger::LINE );
 
-			$wp_post_id         = $this->get_post_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $photo['story_id'] );
-			$attachment_post_id = $this->get_post_by_meta( self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $photo['photo_id'] );
+			$wp_post_id         = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $photo['story_id'] );
+			$attachment_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $photo['photo_id'] );
 
 			if ( ! $wp_post_id ) {
 				$this->logger->log( self::FEATURED_IMAGES_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $photo['story_id'] ), Logger::WARNING );
@@ -526,7 +643,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		foreach ( $posts as $post_index => $post ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Importing post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
 
-			$wp_post_id = $this->get_post_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
 
 			if ( ! $wp_post_id ) {
 				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
@@ -573,7 +690,52 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find more_stories %s for the post %d', $post['story_id'], $wp_post_id ), Logger::WARNING );
 			}
 
-			update_post_meta( $post['story_id'], self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY, $post['story_id'] );
+			update_post_meta( $wp_post_id, self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY, $post['story_id'] );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-images".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_images( $args, $assoc_args ) {
+		$story_csv_file_path        = $assoc_args['story-csv-file-path'];
+		$story_photos_csv_file_path = $assoc_args['story-photos-file-path'];
+		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
+
+		$posts  = $this->get_data_from_csv( $story_csv_file_path );
+		$photos = $this->get_data_from_csv( $story_photos_csv_file_path );
+
+		foreach ( $posts as $post_index => $post ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating images for the post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
+
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			$wp_post = get_post( $wp_post_id );
+
+			if ( ! str_contains( $wp_post->post_content, '{photo' ) ) {
+				continue;
+			}
+
+			$updated_content = $this->migrate_photos( $wp_post_id, $wp_post->post_content, $photos, $story_photos_dir_path );
+
+			if ( $updated_content !== $wp_post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $wp_post_id,
+						'post_content' => $updated_content,
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
+			}
 		}
 	}
 
@@ -1007,7 +1169,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return int|bool Attachment ID or false if not found.
 	 */
 	private function get_attachment_from_media( $wp_post_id, $media, $story_photos_dir_path ) {
-		$attachment_id = $this->get_post_by_meta( self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $media['photo_id'] );
+		$attachment_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $media['photo_id'] );
 
 		if ( $attachment_id ) {
 			return $attachment_id;
@@ -1038,7 +1200,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param string $meta_value Meta value.
 	 * @return int|null
 	 */
-	private function get_post_by_meta( $meta_name, $meta_value ) {
+	private function get_post_id_by_meta( $meta_name, $meta_value ) {
 		global $wpdb;
 
 		return $wpdb->get_var(
