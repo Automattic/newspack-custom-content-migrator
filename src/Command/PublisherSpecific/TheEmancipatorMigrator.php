@@ -1,10 +1,17 @@
 <?php
+/**
+ * Migration tasks for The Emancipator.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use CWS_PageLinksTo;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use WP_CLI;
 use WP_CLI\ExitException;
@@ -14,23 +21,23 @@ use WP_CLI\ExitException;
  */
 class TheEmancipatorMigrator implements InterfaceCommand {
 
-	const CATEGORY_ID_OPINION = 8;
+	const CATEGORY_ID_OPINION         = 8;
 	const CATEGORY_ID_THE_EMANCIPATOR = 9;
 
 	/**
-	 * @var null | TheEmancipatorMigrator
+	 * Singleton instance.
+	 *
+	 * @var null|TheEmancipatorMigrator
 	 */
 	private static $instance = null;
 
-	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
-	 */
-	private $coauthorsplus_logic;
+	private CoAuthorPlus $coauthorsplus_logic;
 
-	/**
-	 * @var Posts $posts_logic
-	 */
 	private Posts $posts_logic;
+
+	private Attachments $attachments_logic;
+
+	private GutenbergBlockGenerator $gutenberg_block_gen;
 
 	/**
 	 * Private constructor.
@@ -38,6 +45,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
 		$this->posts_logic         = new Posts();
+		$this->attachments_logic   = new Attachments();
+		$this->gutenberg_block_gen = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -53,12 +62,31 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		return self::$instance;
 	}
 
-	/**
-	 * See InterfaceCommand::register_commands.
-	 *
-	 * @throws \Exception
-	 */
 	public function register_commands(): void {
+
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-list-content-refresh',
+			function () {
+				echo esc_html(
+					<<<EOT
+# Empty the trash
+wp post delete $( wp post list --post_status=trash --type=post_type --format=ids )
+wp newspack-content-migrator emancipator-taxonomy
+wp newspack-content-migrator emancipator-authors
+wp newspack-content-migrator emancipator-bylines
+wp newspack-content-migrator emancipator-post-subtitles
+wp newspack-content-migrator emancipator-redirects
+wp newspack-content-migrator emancipator-process-images
+
+# With UI/manually
+# Maybe delete authors with 0 posts \n
+EOT
+				);
+			},
+			[
+				'shortdesc' => 'Print commands needed to do a content refresh.',
+			]
+		);
 
 		$synopsis = '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>]';
 
@@ -106,16 +134,129 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 				'synopsis'  => $synopsis,
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-process-images',
+			[ $this, 'cmd_process_images' ],
+			[
+				'shortdesc' => 'Add captions and credits and download missing images.',
+				'synopsis'  => $synopsis,
+			]
+		);
+
+	}
+
+	public function cmd_process_images( array $args, array $assoc_args ): void {
+		WP_CLI::log( 'Downloading missing images and adding image credits' );
+
+		$dry_run = $assoc_args['dry-run'] ?? false;
+
+		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			$attached_image_guids = array_map(
+				fn( $image ) => pathinfo( $image->guid, PATHINFO_FILENAME ),
+				get_attached_media( 'image', $post->ID )
+			);
+
+			if ( ! empty( $attached_image_guids ) ) {
+				$meta        = get_post_meta( $post->ID );
+				$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+
+				// The promo items are the featured images. See if we can get data from that
+				// and update the featured image.
+				foreach ( $api_content['promo_items'] ?? [] as $item ) {
+					$attachment_id = array_search( $item['_id'], $attached_image_guids );
+					if ( $attachment_id ) {
+						$this->update_image_byline( $attachment_id, $item, $dry_run );
+					}
+				}
+			}
+
+			// Get image info from the api content for images in the body.
+			$content_img = array_reduce(
+				$api_content['content_elements'],
+				function ( $carry, $item ) {
+					if ( 'image' === $item['type'] ) {
+						$carry[ pathinfo( $item['url'], PATHINFO_BASENAME ) ] = [
+							...$item,
+						];
+					}
+
+					return $carry;
+				},
+				[] 
+			);
+
+			$replace_in_content = false;
+			$blocks             = parse_blocks( $post->post_content );
+			foreach ( $blocks as $idx => $block ) {
+				if ( 'core/image' !== $block['blockName'] ) {
+					continue;
+				};
+				if ( ! preg_match( '@src="(.*?)"@i', $block['innerHTML'], $matches ) ) {
+					// This does not look like an image url, so bail.
+					continue;
+				}
+
+				$url        = $matches[1];
+				$basename   = pathinfo( $url, PATHINFO_BASENAME );
+				$image_info = $content_img[ $basename ] ?? [];
+				$caption    = $image_info['caption'] ?? false;
+				WP_CLI::log( "\t processing image " . $url );
+
+				if ( ! strpos( $url, 'wp-content/uploads' ) ) {
+					$maybe_already_attached = array_filter(
+						get_attached_media( 'image', $post->ID ),
+						fn( $v ) => str_ends_with( $v->guid, basename( $url ) )
+					);
+					if ( ! empty( $maybe_already_attached[0]->ID ) ) {
+						// This image is already attached to this post.
+						$attachment_id = $maybe_already_attached[0]->ID;
+					} else {
+						$attachment_id = $this->attachments_logic->import_external_file(
+							$url,
+							false,
+							$caption,
+							false,
+							false,
+							$post->ID
+						);
+					}
+
+					if ( ! is_wp_error( $attachment_id ) ) {
+						if ( ! empty( $image_info ) ) {
+							// Update the byline on the newly imported image.
+							$this->update_image_byline( $attachment_id, $image_info, $dry_run );
+						}
+
+						$blocks[ $idx ]     = $this->gutenberg_block_gen->get_image(
+							get_post( $attachment_id ),
+							'large',
+							false
+						);
+						$replace_in_content = true;
+					}
+				}
+			}
+
+			if ( $replace_in_content ) {
+				$post_data = [
+					'ID'           => $post->ID,
+					'post_content' => serialize_blocks( $blocks ),
+				];
+				wp_update_post( $post_data );
+			}
+		}
+
 	}
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
 
-		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator".' );
+		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator" categories.' );
 
 		$dry_run = $assoc_args['dry-run'] ?? false;
 
 		// Remove the categories "opinion" and "the emancipator" from all posts.
-		foreach ( $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
 			if ( ! $dry_run ) {
 				wp_remove_object_terms( $post->ID, self::CATEGORY_ID_OPINION, 'category' );
 				wp_remove_object_terms( $post->ID, self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
@@ -146,23 +287,13 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		}
 	}
 
-	/**
-	 * Process post subtitles.
-	 *
-	 * @param array $args
-	 * @param array $assoc_args
-	 *
-	 * @return void
-	 */
-	public function cmd_post_subtitles( $args, $assoc_args ): void {
+	public function cmd_post_subtitles( array $args, array $assoc_args ): void {
 
 		WP_CLI::log( 'Processing post subtitles' );
-		$counter = 0;
 		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
+		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
-			$counter ++;
 
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
@@ -172,14 +303,15 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			}
 		}
 
-		WP_CLI::success( sprintf( 'Finished processing %s post subtitles', $counter ) );
+		WP_CLI::success( 'Finished processing post subtitles' );
 	}
 
 	/**
 	 * Create redirects for articles that are just redirects. Uses the Page Links To plugin.
+	 *
 	 * @throws WP_CLI\ExitException
 	 */
-	public function cmd_redirects( $args, $assoc_args ): void {
+	public function cmd_redirects( array $args, array $assoc_args ): void {
 		if ( ! class_exists( 'CWS_PageLinksTo' ) ) {
 			WP_CLI::error( 'Page Links To plugin not found. Install and activate it before using this command.' );
 		}
@@ -187,37 +319,29 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::log( 'Processing redirects into page links to.' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
 
-		foreach ( $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
 			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
-			if ( ! $dry_run && $redirect_to && ! CWS_PageLinksTo::get_link( $post )) {
+			if ( ! $dry_run && $redirect_to && ! CWS_PageLinksTo::get_link( $post ) ) {
 				CWS_PageLinksTo::set_link( $post->ID, $redirect_to );
 			}
 		}
 		WP_CLI::success( 'Finished processing redirects' );
 	}
 
-	/**
-	 * Find the user that owns the post in the serialized API content and assign it as the post author.
-	 * If the user doesn't exist, create it and assign the author role.
-	 *
-	 * @param array $args
-	 * @param array $assoc_args
-	 *
-	 * @return void
-	 * @throws WP_CLI\ExitException
-	 */
-	public function cmd_post_authors( $args, $assoc_args ): void {
+
+	public function cmd_post_authors( array $args, array $assoc_args ): void {
 		WP_CLI::log( 'Processing post authors' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
 
-		foreach ( $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
-
+		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
+			// Find the user that owns the post in the serialized API content and assign it as the post author.
+			// If the user doesn't exist, create it and assign the author role.
 			$real_author_email = $api_content['revision']['user_id'] ?? false;
 			if ( ! $real_author_email ) {
 				continue;
@@ -251,10 +375,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	/**
 	 * Add bylines (co-authors) for posts.
 	 * Also delete the "credit paragraphs" at the bottom of the post content if possible.
-	 *
-	 * @throws ExitException
 	 */
-	public function cmd_post_bylines( $args, $assoc_args ): void {
+	public function cmd_post_bylines( array $args, array $assoc_args ): void {
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
@@ -263,10 +385,9 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		WP_CLI::log( 'Processing bylines' );
 		$counter = 0;
 		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts   = $this->posts_logic->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
+		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
-			$counter ++;
 			$credits     = [];
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
@@ -290,17 +411,20 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 					if ( empty( $maybe_co_author ) ) {
 						$author_description = $this->find_byline_credit( $co_author, $post->post_content );
 
-						$co_author_id = $this->coauthorsplus_logic->create_guest_author( [
-							'display_name' => $co_author,
-							'description'  => wp_strip_all_tags( $author_description ),
-						] );
+						$co_author_id = $this->coauthorsplus_logic->create_guest_author(
+							[
+								'display_name' => $co_author,
+								'description'  => wp_strip_all_tags( $author_description ),
+							] 
+						);
 						if ( ! empty( $author_description ) ) {
-							$to_replace         = sprintf( '<!-- wp:paragraph -->%s<!-- /wp:paragraph -->',
-								$author_description );
+							$to_replace         = sprintf(
+								'<!-- wp:paragraph -->%s<!-- /wp:paragraph -->',
+								$author_description 
+							);
 							$post->post_content = str_replace( $to_replace, '', $post->post_content );
 							$replace_in_content = true;
-						}
-
+						}                   
 					} elseif ( is_object( $maybe_co_author ) ) {
 						$co_author_id = $maybe_co_author->ID;
 					}
@@ -309,14 +433,15 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 						// Link the co-author created with the WP User with the same name if it exists.
 						$co_author_wp_user = get_user_by( 'login', $co_author );
 						if ( $co_author_wp_user ) {
-							$this->coauthorsplus_logic->link_guest_author_to_wp_user( $co_author_id,
-								$co_author_wp_user );
+							$this->coauthorsplus_logic->link_guest_author_to_wp_user(
+								$co_author_id,
+								$co_author_wp_user 
+							);
 						}
 						$co_author_ids[] = $co_author_id;
-					}
-
+					}               
 				}
-				if ( ! empty ( $co_author_ids ) ) {
+				if ( ! empty( $co_author_ids ) ) {
 					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_author_ids, $post->ID );
 				}
 
@@ -330,7 +455,25 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			}
 		}
 
-		WP_CLI::success( sprintf( 'Finished processing %s posts for bylines', $counter ) );
+		WP_CLI::success( 'Finished processing bylines' );
+	}
+
+	private function update_image_byline( int $attachment_id, array $item, bool $dry_run ): void {
+		if ( 'image' !== $item['type'] || ! $attachment_id ) {
+			return;
+		}
+		$maybe_byline = $this->get_byline_from_credits( $item );
+		if ( $maybe_byline && ! $dry_run ) {
+			$attachment_data = array(
+				'ID'           => $attachment_id,
+				'post_excerpt' => $item['caption'] ?? '',
+			);
+
+			if ( ! wp_update_post( $attachment_data, true ) ) {
+				WP_CLI::error( sprintf( 'Failed to update attachment with ID %d', $attachment_id ) );
+			}
+			update_post_meta( $attachment_id, '_media_credit', $maybe_byline );
+		}
 	}
 
 	/**
@@ -342,7 +485,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 *
 	 * @return string
 	 */
-	private function find_byline_credit( $name, $content ): string {
+	private function find_byline_credit( string $name, string $content ): string {
 		// We're looking for a paragraph that starts with "$name is ...".
 		$looking_for = sprintf( '<p><i>%s is', $name );
 		// Loop backwards through the blocks array because the "credits paragraphs" are at the bottom.
@@ -358,6 +501,42 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		}
 
 		return '';
+	}
+
+	private function get_byline_from_credits( array $item ): string {
+		if ( ! empty( $item['credits']['by'][0]['byline'] ) ) {
+			return $item['credits']['by'][0]['byline'];
+		}
+		if ( ! empty( $item['credits']['by'][0]['name'] ) ) {
+			return $item['credits']['by'][0]['name'];
+		}
+
+		return '';
+	}
+
+	private function get_all_wp_posts( string $post_type, array $post_statuses = [], array $args = [], bool $log_progress = true ): iterable {
+		if ( ! empty( $args['post-id'] ) ) {
+			$all_ids = [ $args['post-id'] ];
+		} else {
+			$all_ids = $this->posts_logic->get_all_posts_ids( $post_type, $post_statuses );
+			if ( ! empty( $args['num-posts'] ) ) {
+				$all_ids = array_slice( $all_ids, 0, $args['num-posts'] );
+			}
+		}
+		$total_posts = count( $all_ids );
+		$home_url    = home_url();
+		$counter     = 0;
+		if ( $log_progress ) {
+			WP_CLI::log( sprintf( 'Processing %d posts', count( $all_ids ) ) );
+		}
+
+		foreach ( $all_ids as $post_id ) {
+			$post = get_post( $post_id );
+			if ( $post instanceof \WP_Post ) {
+				WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++ $counter, $total_posts, "${home_url}?p=${post_id}" ) );
+				yield $post;
+			}
+		}
 	}
 
 }

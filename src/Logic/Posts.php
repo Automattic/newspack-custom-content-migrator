@@ -365,31 +365,6 @@ SQL;
 	}
 
 	/**
-	 * @param string $post_type
-	 * @param array $post_statuses optional
-	 * @param array $args optional
-	 *
-	 * @return \Generator<\WP_Post>
-	 */
-	public function get_all_wp_posts( string $post_type, array $post_statuses = [], array $args = [] ): \Generator {
-		if ( ! empty( $args['post-id'] ) ) {
-			$all_ids = [ $args['post-id'] ];
-		} else {
-			$all_ids = $this->get_all_posts_ids( $post_type, $post_statuses );
-			if ( ! empty( $args['num-posts'] ) ) {
-				$all_ids = array_slice( $all_ids, 0, $args['num-posts'] );
-			}
-		}
-
-		foreach ( $all_ids as $post_id ) {
-			$post = get_post( $post_id );
-			if ( $post instanceof \WP_Post ) {
-				yield $post;
-			}
-		}
-	}
-
-	/**
 	 * Batch posts and execute a callback action on each one, with a wait time between the batches.
 	 *
 	 * @param array    $query_args Arguments to retrieve posts, the same as the ones for get_posts function.
