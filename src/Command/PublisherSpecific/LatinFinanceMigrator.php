@@ -988,7 +988,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		// process newest first
 		$to_process = array_reverse( $to_process );
 
-		$batch_size = 100;
+		$batch_size = 50;
 		for ($i = 0; $i < count( $to_process ); $i += $batch_size) {
 			$this->cmd_export_from_mailchimp_to_wxr( array_slice( $to_process, $i, $batch_size ), $i );
 		}
