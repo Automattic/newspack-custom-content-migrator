@@ -1405,7 +1405,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$this->setup();
 
 		$main_term_id       = intval( $assoc_args['main-term-id'] );
-		$other_term_ids     = intval( $assoc_args['other-term-ids'] );
+		$other_term_ids     = $assoc_args['other-term-ids'];
 		$include_taxonomies = $assoc_args['include-taxonomies'] ?? [];
 		$exclude_taxonomies = $assoc_args['exclude-taxonomies'] ?? [];
 		$new_taxonomy       = $assoc_args['new-taxonomy'];
@@ -1419,8 +1419,9 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$exclude_taxonomies = explode( ',', $exclude_taxonomies );
 		}
 
-		if ( ! is_array( $other_term_ids ) ) {
-			$other_term_ids = [ $other_term_ids ];
+		if ( ! empty( $other_term_ids ) ) {
+			$other_term_ids = explode( ',', $other_term_ids );
+			$other_term_ids = array_map( fn( $other_term_id ) => intval( $other_term_id ), $other_term_ids );
 		}
 
 		$this->merge_terms(
