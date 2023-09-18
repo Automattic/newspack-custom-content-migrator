@@ -48,6 +48,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const EMBARCADERO_IMPORTED_TAG_META_KEY        = '_newspack_import_tag_id';
 	const EMBARCADERO_IMPORTED_FEATURED_META_KEY   = '_newspack_import_featured_image_id';
 	const EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY = '_newspack_import_more_posts_image_id';
+	const EMBARCADERO_IMPORTED_COMMENT_META_KEY    = '_newspack_import_comment_id';
 	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY   = '_newspack_media_import_id';
 	const DEFAULT_AUTHOR_NAME                      = 'Staff';
 
@@ -281,6 +282,37 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-comments',
+			array( $this, 'cmd_embarcadero_migrate_comments' ),
+			[
+				'shortdesc' => 'Migrate comments that we missed by the import-posts-content command.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'comments-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories\'s comments to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'comments-zones-file-path',
+						'description' => 'Path to the CSV file containing the comments\'s zones to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-file-path',
+						'description' => 'Path to the CSV file containing the comments\'s users to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -339,7 +371,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$wp_contributor_id = null;
 			if ( false !== $contributor_index ) {
 				$contributor       = $contributors[ $contributor_index ];
-				$wp_contributor_id = $this->get_or_create_contributor( $contributor['full_name'], $contributor['email_address'] );
+				$wp_contributor_id = $this->get_or_create_user( $contributor['full_name'], $contributor['email_address'], 'contributor' );
 
 				if ( is_wp_error( $wp_contributor_id ) ) {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'], $wp_contributor_id->get_error_message() ), Logger::WARNING );
@@ -740,6 +772,94 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-comments".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_comments( $args, $assoc_args ) {
+		$comments_csv_file_path       = $assoc_args['comments-csv-file-path'];
+		$comments_zones_csv_file_path = $assoc_args['comments-zones-file-path'];
+		$users_file_path              = $assoc_args['users-file-path'];
+		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_COMMENT_META_KEY );
+
+		$comments = $this->get_data_from_csv( $comments_csv_file_path );
+		$comments = array_reverse( $comments );
+		$zones    = $this->get_data_from_csv( $comments_zones_csv_file_path );
+		$users    = $this->get_data_from_csv( $users_file_path );
+
+		// Skip already imported comments.
+		$comments = array_values(
+			array_filter(
+				$comments,
+				function( $comment ) use ( $imported_original_ids ) {
+					return ! in_array( $comment['comment_id'], $imported_original_ids );
+				}
+			)
+		);
+
+		foreach ( $comments as $comment_index => $comment ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ), Logger::LINE );
+
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $comment['topic_id'] );
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $comment['topic_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			// Get or create subscriber user.
+			$user_index = array_search( $comment['user_id'], array_column( $users, 'user_id' ) );
+			if ( false === $user_index ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find user %s for the comment %d', $comment['user_id'], $comment['comment_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			$raw_user = $users[ $user_index ];
+
+			$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
+
+			if ( is_wp_error( $wp_user_id ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'], $wp_user_id->get_error_message() ), Logger::WARNING );
+				$wp_user_id = null;
+			}
+
+			$wp_user = get_user_by( 'id', $wp_user_id );
+
+			$comment_data = [
+				'comment_post_ID'      => $wp_post_id,
+				'comment_approved'     => 'no' === $comment['hide'],
+				'user_id'              => $wp_user->ID,
+				'comment_author'       => $wp_user->user_login,
+				'comment_author_email' => $wp_user->user_email,
+				'comment_author_url'   => $wp_user->user_url,
+				'comment_author_IP'    => $comment['ip_address'],
+				'comment_content'      => $comment['comment'],
+				'comment_date_gmt'     => gmdate( 'Y-m-d H:i:s', $comment['posted_epoch'] ),
+				'comment_meta'         => [],
+			];
+
+			// Get user zone.
+			$zone_index = array_search( $comment['zone_id'], array_column( $zones, 'zone_id' ) );
+			if ( false !== $zone_index ) {
+				$comment_data['comment_meta']['zone_name'] = $zones[ $zone_index ]['name'];
+				$comment_data['comment_meta']['zone_type'] = $zones[ $zone_index ]['type'];
+			}
+
+			$comment_id = wp_insert_comment( $comment_data );
+
+			if ( is_wp_error( $comment_id ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create comment %s: %s', $comment['comment_id'], $comment_id->get_error_message() ), Logger::WARNING );
+				continue;
+			}
+
+			update_comment_meta( $comment_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $comment['comment_id'] );
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Created comment %d with the ID %d', $comment['comment_id'], $comment_id ), Logger::SUCCESS );
+		}
+	}
+
+	/**
 	 * Get data from CSV file.
 	 *
 	 * @param string $story_csv_file_path Path to the CSV file containing the stories to import.
@@ -765,6 +885,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$csv_headers = array_map( 'trim', $csv_headers );
 
 		while ( ( $csv_row = fgetcsv( $csv_file ) ) !== false ) {
+			if ( count( $csv_row ) !== count( $csv_headers ) ) {
+				$this->logger->log( self::LOG_FILE, 'Could not read CSV row (' . current( $csv_row ) . ') from file: ' . $story_csv_file_path, Logger::WARNING );
+				continue;
+			}
 			$csv_row = array_map( 'trim', $csv_row );
 			$csv_row = array_combine( $csv_headers, $csv_row );
 
@@ -795,16 +919,36 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Get imported comments original IDs.
+	 *
+	 * @param string $meta_key Meta key to search for.
+	 *
+	 * @return array
+	 */
+	private function get_comments_meta_values_by_key( $meta_key ) {
+		global $wpdb;
+
+		return $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_value FROM $wpdb->commentmeta WHERE meta_key = %s",
+				$meta_key
+			)
+		);
+	}
+
+	/**
 	 * Get or create a contributor.
 	 *
 	 * @param string $full_name Full name of the contributor.
 	 * @param string $email_address Email address of the contributor.
+	 * @param string $role Role of the user.
+	 *
 	 * @return int|null WP user ID.
 	 */
-	private function get_or_create_contributor( $full_name, $email_address ) {
+	private function get_or_create_user( $full_name, $email_address, $role ) {
 		// Check if user exists.
 		$wp_user = get_user_by( 'email', $email_address );
-		if ( $wp_user ) {
+		if ( $wp_user && ! empty( $email_address ) ) {
 			return $wp_user->ID;
 		}
 
@@ -816,7 +960,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		// Set the Contributor role.
 		$user = new \WP_User( $wp_user_id );
-		$user->set_role( 'contributor' );
+		$user->set_role( $role );
 
 		// Set WP User display name.
 		wp_update_user(
