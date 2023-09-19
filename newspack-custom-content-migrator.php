@@ -45,6 +45,7 @@ PluginSetup::register_migrators(
 		Command\General\NewslettersMigrator::class,
 		Command\General\TaxonomyMigrator::class,
 		Command\General\ReusableBlocksMigrator::class,
+		Command\General\JSONManipulatorMigrator::class,
 		Command\General\SportsPressMigrator::class,
 		Command\General\FeaturedImagesMigrator::class,
 		Command\General\ContentDiffMigrator::class,

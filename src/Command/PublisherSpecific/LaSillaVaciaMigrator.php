@@ -696,6 +696,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		                'optional' => true,
 		                'repeating' => false,
 	                ],
+	                [
+		                'type' => 'assoc',
+		                'name' => 'media-location',
+		                'description' => 'Path to media directory',
+		                'optional' => false,
+		                'repeating' => false,
+	                ],
                 ],
             ]
         );
@@ -1343,6 +1350,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     public function migrate_authors( $args, $assoc_args )
     {
 		$specific_emails = isset( $assoc_args['emails-csv'] ) ? explode( ',', $assoc_args['emails-csv'] ) : null;
+		$media_location = $assoc_args['media-location'];
 
         foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
 
@@ -1353,11 +1361,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
             $role = $author['xpr_rol'] ?? $author['role'] ?? 'antiguos usuarios';
 
-	        if ( ! array_key_exists( 'user_email', $author ) && array_key_exists( 'email', $author ) ) {
-		        $author['user_email'] = $author['email'];
-	        } else {
-		        echo "Skipping because missing email";
-		        continue;
+	        if ( ! array_key_exists( 'user_email', $author ) ) {
+		        if ( array_key_exists( 'email', $author ) ) {
+			        $author['user_email'] = $author['email'];
+		        } else {
+			        echo "Skipping because missing email\n";
+			        continue;
+		        }
 	        }
 
 	        if ( empty( $author['user_login'] ) ) {
@@ -1366,34 +1376,26 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
             $this->file_logger( "Attempting to create User. email: {$author['user_email']} | login: {$author['user_login']} | role: $role" );
             $author_data = [
-                'user_login' => $author['user_login'],
+                'user_login' => substr( $author['user_email'], 0, strpos( $author['user_email'], '@' ) ),
                 'user_pass' => wp_generate_password( 24 ),
                 'user_email' => $author['user_email'],
                 'user_registered' => $author['user_registered'],
                 'first_name' => $author['user_name'] ?? '',
                 'last_name' => $author['user_lastname'] ?? '',
                 'display_name' => $author['display_name'],
-                'meta_input' => [
-                    'original_user_id' => $author['id'],
-                    'original_role_id' => $author['xpr_role_id'],
-                    'red' => $author['red'],
-                    'description' => $author['bio'],
-                    'xpr_usuario_de_twitter' => $author['xpr_UsuariodeTwitter'],
-                    'usuario_de_twitter' => $author['UsuariodeTwitter'],
-                    'ocupacion' => $author['xpr_ocupacion'],
-                    'genero' => $author['xpr_genero'] ?? '',
-                    'facebook_url' => $author['FacebookURL'],
-                    'linkedin_url' => $author['LinkedInURL'],
-                    'instagram_url' => $author['InstagramURL'],
-                    'whatsapp' => $author['whatsApp'],
-                ]
             ];
+
+			$guest_author_required = false;
 
             switch ( $role ) {
                 case 'author':
                 case 'editor':
                     $author_data['role'] = $author['xpr_rol'];
                     break;
+	            case 'SillaLlenaExpertos':
+					$author_data['role'] = 'contributor';
+					$guest_author_required = true;
+					break;
                 case 'admin':
                     $author_data['role'] = 'administrator';
                     break;
@@ -1455,14 +1457,96 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                     continue 2;
             }
 
+	        $meta = [
+		        'original_user_id' => $author['id'],
+		        'original_role_id' => $author['xpr_role_id'],
+		        'red' => $author['red'],
+		        'description' => $author['bio'],
+		        'xpr_usuario_de_twitter' => $author['xpr_UsuariodeTwitter'],
+		        'usuario_de_twitter' => $author['UsuariodeTwitter'],
+		        'ocupacion' => $author['xpr_ocupacion'],
+		        'genero' => $author['xpr_genero'] ?? '',
+		        'facebook_url' => $author['FacebookURL'],
+		        'linkedin_url' => $author['LinkedInURL'],
+		        'instagram_url' => $author['InstagramURL'],
+		        'whatsapp' => $author['whatsApp'],
+	        ];
+
             $this->file_logger( json_encode( $author_data ), false );
             $user_id = wp_insert_user( $author_data );
             if ( is_wp_error( $user_id ) ) {
-                $this->file_logger( $user_id->get_error_message() );
-                continue;
+				$field = 'login';
+				$value = $author_data['user_login'];
+
+				if ( $user_id->get_error_code() === 'existing_user_email' ) {
+					$field = 'email';
+					$value = $author_data['user_email'];
+                }
+
+				if ( $user_id->get_error_code() === 'existing_user_login' || $user_id->get_error_code() === 'existing_user_email' ) {
+					echo WP_CLI::colorize( "%YUser already exists. Attempting to link existing user to guest author.%n\n" );
+					$user = get_user_by( $field, $value );
+					$this->insert_user_meta( $user->ID, $meta );
+					$linked_guest_author = $this->coauthorsplus_logic->get_guest_author_by_linked_wpusers_user_login( $user->user_login );
+
+					if ( ! $linked_guest_author ) {
+						$this->file_logger( "Creating Guest Author {$author['user_email']}." );
+						$new_guest_author_id = $this->coauthorsplus_logic->create_guest_author_from_wp_user( $user->ID );
+
+						if ( is_wp_error( $new_guest_author_id ) ) {
+							if ( $new_guest_author_id->get_error_code() === 'duplicate-field' ) {
+								$unlinked_guest_author = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'login', $user->user_login );
+
+								if ( false === $unlinked_guest_author ) {
+									$this->file_logger( "Error: Guest author with login {$user->user_login} not found." );
+									continue;
+								}
+								$this->coauthorsplus_logic->link_guest_author_to_wp_user( $unlinked_guest_author->ID, $user );
+								$linked_guest_author = $unlinked_guest_author;
+							} else {
+								$this->file_logger( $new_guest_author_id->get_error_message() );
+								continue;
+							}
+						} else {
+							$linked_guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $new_guest_author_id );
+						}
+					}
+
+					if ( is_array( $author['image'] ) ) {
+						$author['image'] = $author['image'][0];
+					}
+
+					if ( ! empty( $author['image'] ) ) {
+						$this->file_logger( "Creating User's avatar. File: {$author['image']}" );
+						$file_path_parts = explode( '/', $author['image'] );
+						$filename = array_pop( $file_path_parts );
+						$avatar_attachment_id = $this->handle_profile_photo( $filename, $media_location );
+
+						$this->simple_local_avatars->assign_avatar( $user->ID, $avatar_attachment_id );
+					}
+
+					update_post_meta( $linked_guest_author->ID, 'original_user_id', $author['id'] );
+					update_post_meta( $linked_guest_author->ID, 'original_role_id', $author['xpr_role_id'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'red', $author['red'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'description', $author['bio'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'xpr_usuario_de_twitter', $author['xpr_UsuariodeTwitter'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'usuario_de_twitter', $author['UsuariodeTwitter'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'ocupacion', $author['xpr_ocupacion'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'genero', $author['xpr_genero'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'facebook_url', $author['FacebookURL'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'linkedin_url', $author['LinkedInURL'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'instagram_url', $author['InstagramURL'] ?? null );
+					update_post_meta( $linked_guest_author->ID, 'whatsapp', $author['whatsApp'] ?? null );
+					continue;
+				} else {
+					$this->file_logger( $user_id->get_error_message() );
+					continue;
+				}
             }
 
             $this->file_logger( "User created. ID: $user_id" );
+
+			$this->insert_user_meta( $user_id, $meta );
 
             if ( is_array( $author['image'] ) ) {
                 $author['image'] = $author['image'][0];
@@ -1472,12 +1556,36 @@ class LaSillaVaciaMigrator implements InterfaceCommand
                 $this->file_logger( "Creating User's avatar. File: {$author['image']}" );
                 $file_path_parts = explode( '/', $author['image'] );
                 $filename = array_pop( $file_path_parts );
-                $avatar_attachment_id = $this->handle_profile_photo( $filename );
+                $avatar_attachment_id = $this->handle_profile_photo( $filename, $media_location );
 
-                $this->simple_local_avatars->import_avatar( $user_id, $avatar_attachment_id );
+                $this->simple_local_avatars->assign_avatar( $user_id, $avatar_attachment_id );
             }
+
+	        if ( $guest_author_required ) {
+		        $guest_author_id = $this->coauthorsplus_logic->create_guest_author_from_wp_user( $user_id );
+		        update_post_meta( $guest_author_id, 'original_user_id', $author['id'] );
+		        update_post_meta( $guest_author_id, 'original_role_id', $author['xpr_role_id'] ?? null );
+		        update_post_meta( $guest_author_id, 'red', $author['red'] ?? null );
+		        update_post_meta( $guest_author_id, 'description', $author['bio'] ?? null );
+		        update_post_meta( $guest_author_id, 'xpr_usuario_de_twitter', $author['xpr_UsuariodeTwitter'] ?? null );
+		        update_post_meta( $guest_author_id, 'usuario_de_twitter', $author['UsuariodeTwitter'] ?? null );
+		        update_post_meta( $guest_author_id, 'ocupacion', $author['xpr_ocupacion'] ?? null );
+		        update_post_meta( $guest_author_id, 'genero', $author['xpr_genero'] ?? null );
+		        update_post_meta( $guest_author_id, 'facebook_url', $author['FacebookURL'] ?? null );
+		        update_post_meta( $guest_author_id, 'linkedin_url', $author['LinkedInURL'] ?? null );
+		        update_post_meta( $guest_author_id, 'instagram_url', $author['InstagramURL'] ?? null );
+		        update_post_meta( $guest_author_id, 'whatsapp', $author['whatsApp'] ?? null );
+	        }
         }
     }
+
+	private function insert_user_meta( int $user_id, array $meta ) {
+		foreach ( $meta as $meta_key => $meta_value ) {
+			if ( ! empty( $meta_value ) ) {
+				update_user_meta( $user_id, $meta_key, $meta_value );
+			}
+		}
+	}
 
 	/**
 	 * Goes through all users JSON files, and if their avatars are not set, imports them from file expected to be found in media folder path.
@@ -4133,8 +4241,20 @@ BLOCK;
      * @param string $filename
      * @return int
      */
-    private function handle_profile_photo(string $filename): int
+    private function handle_profile_photo( string $filename, string $media_location ): int
     {
+		$media_location = trailingslashit( $media_location );
+		if ( file_exists( $media_location . $filename ) ) {
+			return $this->attachments->import_external_file(
+				$media_location . $filename,
+				false,
+				false,
+				false,
+				false,
+				0,
+			);
+		}
+
         $base_dir = wp_upload_dir()['basedir'];
 
         $output = shell_exec( "find '$base_dir' -name '$filename'" );
