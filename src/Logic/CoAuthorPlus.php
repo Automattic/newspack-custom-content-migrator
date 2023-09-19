@@ -279,7 +279,7 @@ class CoAuthorPlus {
 	 * Links a Guest Author to an existing WP User.
 	 *
 	 * @param int     $ga_id Guest Author ID.
-	 * @param \WPUser $user  WP User.
+	 * @param \WP_User $user  WP User.
 	 */
 	public function link_guest_author_to_wp_user( $ga_id, $user ) {
 		// Since GAs and WP Users can't have the same login, update it if they're the same.

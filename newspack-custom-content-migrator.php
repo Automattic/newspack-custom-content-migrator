@@ -76,6 +76,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
+		Command\PublisherSpecific\CCMMigrator::class,
 		Command\PublisherSpecific\RenoMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
@@ -83,5 +84,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
+		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 	)
 );
