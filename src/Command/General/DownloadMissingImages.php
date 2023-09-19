@@ -291,6 +291,24 @@ class DownloadMissingImages implements InterfaceCommand {
 
 		}
 
+		if ( file_exists( trailingslashit( $media_location) . $url_path ) ) {
+			$local_path = trailingslashit( $media_location) . $url_path;
+			// The file is where it should be, but the DB does not know about it. Let's import it.
+			$attachment_id = $this->attachmentsLogic->import_external_file(
+				$local_path,
+				false,
+				false,
+				false,
+				false,
+				$post->ID );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				return false;
+			}
+
+			return $attachment_id;
+		}
+
 		return false;
 	}
 
