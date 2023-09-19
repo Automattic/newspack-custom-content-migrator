@@ -1043,7 +1043,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		    [ $this, 'driver_update_wp_user_logins_and_nicenames' ],
 		    [
 			    'shortdesc' => 'Updates guest author slug.',
-			    'synopsis' => []
+			    'synopsis' => [
+				    [
+					    'type' => 'assoc',
+					    'name' => 'wp-user-id',
+					    'description' => 'WP_User ID.',
+					    'optional' => false,
+					    'repeating' => false,
+				    ]
+			    ]
 		    ]
 	    );
 
@@ -3429,29 +3437,41 @@ class LaSillaVaciaMigrator implements InterfaceCommand
              OR user_email = 'newspack@automattic.com' 
              OR user_login = 'adminnewspack'");
 
-		$users = $wpdb->get_results(
-			"SELECT ID, user_login, user_nicename, user_email, display_name FROM $wpdb->users
+		$user_id = $assoc_args['wp-user-id'] ?? null;
+
+		if ( ! is_null( $user_id ) && $newspack_admin_id != $user_id ) {
+			$users          = $wpdb->get_results(
+				"SELECT ID, user_login, user_nicename, user_email, display_name FROM $wpdb->users
+				WHERE ID = $user_id"
+			);
+			$count_of_users = count( $users );
+			WP_CLI::log( "$count_of_users users will be processed" );
+			$this->cmd_update_wp_user_logins_and_nicenames( $users );
+		} else {
+			$users          = $wpdb->get_results(
+				"SELECT ID, user_login, user_nicename, user_email, display_name FROM $wpdb->users
 				WHERE user_login IN (
 				    SELECT meta_value FROM wp_postmeta WHERE meta_key = 'cap-linked_account' AND meta_value <> ''
 				    ) AND ID NOT IN ( $newspack_admin_id )"
-		);
-		$count_of_users = count( $users );
-		WP_CLI::log( "$count_of_users users will be processed" );
-		$this->cmd_update_wp_user_logins_and_nicenames( $users, [ $newspack_admin_id ] );
+			);
+			$count_of_users = count( $users );
+			WP_CLI::log( "$count_of_users users will be processed" );
+			$this->cmd_update_wp_user_logins_and_nicenames( $users );
 
-		$exclude_user_ids = [
-			$newspack_admin_id,
-			...array_map( fn( $item ) => $item->ID, $users ),
-		];
-		$imploded_exclude_user_ids = implode( ',', $exclude_user_ids );
-		$users = $wpdb->get_results(
-			"SELECT ID, user_login, user_nicename, user_email, display_name FROM $wpdb->users
+			$exclude_user_ids          = [
+				$newspack_admin_id,
+				...array_map( fn( $item ) => $item->ID, $users ),
+			];
+			$imploded_exclude_user_ids = implode( ',', $exclude_user_ids );
+			$users                     = $wpdb->get_results(
+				"SELECT ID, user_login, user_nicename, user_email, display_name FROM $wpdb->users
 				WHERE user_email LIKE '%lasillavacia%' 
 				  AND ID NOT IN ( $imploded_exclude_user_ids )"
-		);
-		$count_of_users = count( $users );
-		WP_CLI::log( "$count_of_users users will be processed" );
-		$this->cmd_update_wp_user_logins_and_nicenames( $users );
+			);
+			$count_of_users            = count( $users );
+			WP_CLI::log( "$count_of_users users will be processed" );
+			$this->cmd_update_wp_user_logins_and_nicenames( $users );
+		}
 	}
 
 	public function cmd_update_wp_user_logins_and_nicenames( array $users ) {
@@ -3491,6 +3511,33 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				echo WP_CLI::colorize( "%GSuccess updating user_login and user_nicename%n\n" );
 			} else {
 				echo WP_CLI::colorize( "%RFailed updating user_login and user_nicename%n\n" );
+			}
+
+			$author_term = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE tt.taxonomy = 'author' AND t.slug = %s",
+					"cap-{$user->user_nicename}"
+				)
+			);
+
+			if ( $author_term ) {
+				$author_term_updated = $wpdb->update(
+					$wpdb->terms,
+					[
+						'slug' => "cap-$new_user_nicename",
+					],
+					[
+						'term_id' => $author_term->term_id,
+					]
+				);
+
+				if ( false === $author_term_updated ) {
+					echo WP_CLI::colorize( "%RFailed updating author term%n\n" );
+				} else {
+					echo WP_CLI::colorize( "%GSuccess updating author term%n\n" );
+				}
+			} else {
+				echo WP_CLI::colorize( "%wNo author term found%n\n" );
 			}
 
 			$cap_linked_account = $wpdb->get_row(
@@ -3556,13 +3603,30 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		$count_of_posts = count( $posts );
 		echo WP_CLI::colorize( "%w$count_of_posts posts found for Guest Author%n\n" );
 
+		$user_login = sanitize_title( $guest_author->display_name );
+		$final_user_login = $user_login;
+
+		$attempt = 1;
+		do {
+
+			$existing_coauthor = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', $final_user_login, true );
+
+			if ( $existing_coauthor && 'guest-author' == $existing_coauthor->type ) {
+				$final_user_login = $user_login . '-' . $attempt;
+				$attempt++;
+			} else {
+				break;
+			}
+		} while ( true );
+
 		$new_guest_author_id = $this->coauthorsplus_logic->create_guest_author( [
 			'display_name' => $guest_author->display_name,
-			'first_name' => $guest_author->first_name,
-			'last_name' => $guest_author->last_name,
-			'user_email' => $guest_author->user_email,
-			'website' => $guest_author->website,
-			'description' => $guest_author->description,
+			'user_login'   => $final_user_login,
+			'first_name'   => $guest_author->first_name,
+			'last_name'    => $guest_author->last_name,
+			'user_email'   => $guest_author->user_email,
+			'website'      => $guest_author->website,
+			'description'  => $guest_author->description,
 		] );
 
 		$new_guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $new_guest_author_id );
@@ -3619,6 +3683,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				'post_id' => $guest_author_id,
 			]
 		);
+
+		$new_guest_author_url = get_home_url() . "/author/{$new_guest_author->user_nicename}/";
+
+		echo WP_CLI::colorize( "%M$new_guest_author_url%n\n" );
 	}
 
 	public function cmd_set_author_for_posts( $args, $assoc_args ) {
