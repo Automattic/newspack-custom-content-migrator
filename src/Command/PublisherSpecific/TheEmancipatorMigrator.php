@@ -14,7 +14,6 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use WP_CLI;
-use WP_CLI\ExitException;
 
 /**
  * Custom migration scripts for The Emancipator.
@@ -152,15 +151,15 @@ EOT
 		$dry_run = $assoc_args['dry-run'] ?? false;
 
 		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			$meta        = get_post_meta( $post->ID );
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+
 			$attached_image_guids = array_map(
 				fn( $image ) => pathinfo( $image->guid, PATHINFO_FILENAME ),
 				get_attached_media( 'image', $post->ID )
 			);
 
 			if ( ! empty( $attached_image_guids ) ) {
-				$meta        = get_post_meta( $post->ID );
-				$api_content = maybe_unserialize( $meta['api_content_element'][0] );
-
 				// The promo items are the featured images. See if we can get data from that
 				// and update the featured image.
 				foreach ( $api_content['promo_items'] ?? [] as $item ) {
@@ -172,26 +171,20 @@ EOT
 			}
 
 			// Get image info from the api content for images in the body.
-			$content_img = array_reduce(
-				$api_content['content_elements'],
-				function ( $carry, $item ) {
-					if ( 'image' === $item['type'] ) {
-						$carry[ pathinfo( $item['url'], PATHINFO_BASENAME ) ] = [
-							...$item,
-						];
-					}
-
-					return $carry;
-				},
-				[] 
-			);
+			$content_img = [];
+			foreach ( $api_content['content_elements'] as $element ) {
+				if ( empty( $element['type'] ) || 'image' !== $element['type'] ) {
+					continue;
+				}
+				$content_img[ pathinfo( $element['url'], PATHINFO_BASENAME ) ] = $element;
+			}
 
 			$replace_in_content = false;
 			$blocks             = parse_blocks( $post->post_content );
 			foreach ( $blocks as $idx => $block ) {
 				if ( 'core/image' !== $block['blockName'] ) {
 					continue;
-				};
+				}
 				if ( ! preg_match( '@src="(.*?)"@i', $block['innerHTML'], $matches ) ) {
 					// This does not look like an image url, so bail.
 					continue;
@@ -386,7 +379,6 @@ EOT
 		}
 
 		WP_CLI::log( 'Processing bylines' );
-		$counter = 0;
 		$dry_run = $assoc_args['dry-run'] ?? false;
 		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
@@ -418,16 +410,16 @@ EOT
 							[
 								'display_name' => $co_author,
 								'description'  => wp_strip_all_tags( $author_description ),
-							] 
+							]
 						);
 						if ( ! empty( $author_description ) ) {
 							$to_replace         = sprintf(
 								'<!-- wp:paragraph -->%s<!-- /wp:paragraph -->',
-								$author_description 
+								$author_description
 							);
 							$post->post_content = str_replace( $to_replace, '', $post->post_content );
 							$replace_in_content = true;
-						}                   
+						}
 					} elseif ( is_object( $maybe_co_author ) ) {
 						$co_author_id = $maybe_co_author->ID;
 					}
@@ -438,11 +430,11 @@ EOT
 						if ( $co_author_wp_user ) {
 							$this->coauthorsplus_logic->link_guest_author_to_wp_user(
 								$co_author_id,
-								$co_author_wp_user 
+								$co_author_wp_user
 							);
 						}
 						$co_author_ids[] = $co_author_id;
-					}               
+					}
 				}
 				if ( ! empty( $co_author_ids ) ) {
 					$this->coauthorsplus_logic->assign_guest_authors_to_post( $co_author_ids, $post->ID );
@@ -462,7 +454,7 @@ EOT
 	}
 
 	private function update_image_byline( int $attachment_id, array $item, bool $dry_run ): void {
-		if ( 'image' !== $item['type'] || ! $attachment_id ) {
+		if ( empty( $item['type'] ) || 'image' !== $item['type'] || ! $attachment_id ) {
 			return;
 		}
 		$maybe_byline = $this->get_byline_from_credits( $item );
