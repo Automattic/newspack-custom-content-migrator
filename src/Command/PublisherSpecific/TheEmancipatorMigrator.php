@@ -208,10 +208,13 @@ EOT
 						get_attached_media( 'image', $post->ID ),
 						fn( $v ) => str_ends_with( $v->guid, basename( $url ) )
 					);
+
 					if ( ! empty( $maybe_already_attached[0]->ID ) ) {
+						WP_CLI::log( "\t\t we already had this image, so skipping download " . $url );
 						// This image is already attached to this post.
 						$attachment_id = $maybe_already_attached[0]->ID;
 					} else {
+						WP_CLI::log( "\t\t downloading image " . $url );
 						$attachment_id = $this->attachments_logic->import_external_file(
 							$url,
 							false,
@@ -230,7 +233,7 @@ EOT
 
 						$blocks[ $idx ]     = $this->gutenberg_block_gen->get_image(
 							get_post( $attachment_id ),
-							'large',
+							'full',
 							false
 						);
 						$replace_in_content = true;
