@@ -40,17 +40,18 @@ use \WP_CLI;
  * @package NewspackCustomContentMigrator
  */
 class EmbarcaderoMigrator implements InterfaceCommand {
-	const LOG_FILE                                 = 'embarcadero_importer.log';
-	const TAGS_LOG_FILE                            = 'embarcadero_tags_migrator.log';
-	const FEATURED_IMAGES_LOG_FILE                 = 'embarcadero_featured_images_migrator.log';
-	const MORE_POSTS_LOG_FILE                      = 'embarcadero_more_posts_migrator.log';
-	const EMBARCADERO_ORIGINAL_ID_META_KEY         = '_newspack_import_id';
-	const EMBARCADERO_IMPORTED_TAG_META_KEY        = '_newspack_import_tag_id';
-	const EMBARCADERO_IMPORTED_FEATURED_META_KEY   = '_newspack_import_featured_image_id';
-	const EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY = '_newspack_import_more_posts_image_id';
-	const EMBARCADERO_IMPORTED_COMMENT_META_KEY    = '_newspack_import_comment_id';
-	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY   = '_newspack_media_import_id';
-	const DEFAULT_AUTHOR_NAME                      = 'Staff';
+	const LOG_FILE                                  = 'embarcadero_importer.log';
+	const TAGS_LOG_FILE                             = 'embarcadero_tags_migrator.log';
+	const FEATURED_IMAGES_LOG_FILE                  = 'embarcadero_featured_images_migrator.log';
+	const MORE_POSTS_LOG_FILE                       = 'embarcadero_more_posts_migrator.log';
+	const EMBARCADERO_ORIGINAL_ID_META_KEY          = '_newspack_import_id';
+	const EMBARCADERO_IMPORTED_TAG_META_KEY         = '_newspack_import_tag_id';
+	const EMBARCADERO_IMPORTED_FEATURED_META_KEY    = '_newspack_import_featured_image_id';
+	const EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY  = '_newspack_import_more_posts_image_id';
+	const EMBARCADERO_IMPORTED_COMMENT_META_KEY     = '_newspack_import_comment_id';
+	const EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY = '_newspack_import_print_issue_id';
+	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY    = '_newspack_media_import_id';
+	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
 	/**
 	 * @var null|InterfaceCommand Instance.
@@ -307,6 +308,51 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'users-file-path',
 						'description' => 'Path to the CSV file containing the comments\'s users to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-print-issues',
+			array( $this, 'cmd_embarcadero_migrate_print_issues' ),
+			[
+				'shortdesc' => 'Migrate print issues that we missed by the import-posts-content command.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'publication-name',
+						'description' => 'Publication name to use for the print issues.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'print-issues-csv-file-path',
+						'description' => 'Path to the CSV file containing print issues to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'print-sections-csv-file-path',
+						'description' => 'Path to the CSV file containing print sections to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'print-pdf-dir-path',
+						'description' => 'Path to the directory containing the print issues PDF files to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'print-cover-dir-path',
+						'description' => 'Path to the directory containing the print issues cover files to import.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -784,7 +830,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_COMMENT_META_KEY );
 
 		$comments = $this->get_data_from_csv( $comments_csv_file_path );
-		$comments = array_reverse( $comments );
 		$zones    = $this->get_data_from_csv( $comments_zones_csv_file_path );
 		$users    = $this->get_data_from_csv( $users_file_path );
 
@@ -856,6 +901,87 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			update_comment_meta( $comment_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $comment['comment_id'] );
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Created comment %d with the ID %d', $comment['comment_id'], $comment_id ), Logger::SUCCESS );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-print-issues".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
+		$publication_name             = $assoc_args['publication-name'];
+		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
+		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
+		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
+		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
+		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY );
+
+		$print_issues   = $this->get_data_from_csv( $print_issues_csv_file_path );
+		$print_sections = $this->get_data_from_csv( $print_sections_csv_file_path );
+
+		// Skip already imported print issues.
+		$print_issues = array_values(
+			array_filter(
+				$print_issues,
+				function( $print_issue ) use ( $imported_original_ids ) {
+					return ! in_array( $print_issue['issue_number'], $imported_original_ids );
+				}
+			)
+		);
+
+		foreach ( $print_issues as $print_issue_index => $print_issue ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $print_issue + 1, count( $print_issues ), $print_issue['topic_id'] ), Logger::LINE );
+
+			// Get PDF file path from $print_issue['seo_link'].
+			// seo_link is in the format yyyy/mm/dd.
+			// The PDF file path is in the format $print_pdf_dir_path . '/' . $year . '/yyyy_mm_dd.dvw.section1.pdf'.
+			$seo_link = explode( '/', $print_issue['seo_link'] );
+			$year     = $seo_link[0];
+
+			// Check if the year is correct.
+			if ( ! is_numeric( $year ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not get year from seo_link %s', $print_issue['seo_link'] ), Logger::WARNING );
+				continue;
+			}
+
+			$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.dvw.section1.pdf';
+
+			if ( ! file_exists( $pdf_file_path ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find PDF file %s', $pdf_file_path ), Logger::WARNING );
+				continue;
+			}
+
+			// Get author based on the publication name.
+			$author_id = $this->get_or_create_user( $publication_name, '', 'editor' );
+
+			// Create a new issue post.
+			$wp_issue_post_id = wp_insert_post(
+				[
+					'post_type'    => 'post',
+					'post_title'   => $print_issue['issue_number'],
+					'post_status'  => 'publish',
+					'post_author'  => $author_id,
+					'post_content' => '',
+				]
+			);
+
+			if ( is_wp_error( $wp_issue_post_id ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create issue %s: %s', $print_issue['issue_number'], $wp_issue_post_id->get_error_message() ), Logger::WARNING );
+				continue;
+			}
+
+			// Upload file.
+			$file_post_id = $this->attachments->import_external_file( $media_path, null, $media['caption'], null . null, $wp_post_id );
+
+			$post_content_blocks = [
+				$this->gutenberg_block_generator->get_file_2(),
+			];
+
+			update_comment_meta( $comment_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $comment['issue_number'] );
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Created comment %d with the ID %d', $comment['issue_number'], $comment_id ), Logger::SUCCESS );
 		}
 	}
 
