@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.5.0
+ * Version:     1.5.1
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -23,7 +23,6 @@ require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
-PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
 	array(
 		// General.
