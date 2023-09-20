@@ -37,6 +37,18 @@ use \WP_CLI;
  *       --story-csv-file-path=/path/to/story.csv \
  *       --story-media-file-path=/path/to/story_media.csv
  *
+ *     - wp newspack-content-migrator embarcadero-migrate-comments \
+ *       --comments-csv-file-path=/path/to/comments.csv \
+ *       --comments-zones-file-path=/path/to/comment_zones.csv
+ *
+ *     - wp newspack-content-migrator embarcadero-migrate-print-issues \
+ *       --publication-name="Danville San Ramon" \
+ *       --publication-email="info@danvillesanramon.com" \
+ *       --print-issues-csv-file-path=/path/to/print_issues.csv \
+ *       --print-sections-csv-file-path=/path/to/print_sections.csv \
+ *       --print-pdf-dir-path=/path/to/morguepdf \
+ *       --print-cover-dir-path=/path/to/covers
+ *
  * @package NewspackCustomContentMigrator
  */
 class EmbarcaderoMigrator implements InterfaceCommand {
