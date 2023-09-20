@@ -330,6 +330,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'publication-email',
+						'description' => 'Publication email to use for the print issues.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'print-issues-csv-file-path',
 						'description' => 'Path to the CSV file containing print issues to import.',
 						'optional'    => false,
@@ -912,6 +919,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
 		$publication_name             = $assoc_args['publication-name'];
+		$publication_email            = $assoc_args['publication-email'];
 		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
 		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
 		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
@@ -932,7 +940,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $print_issue + 1, count( $print_issues ), $print_issue['topic_id'] ), Logger::LINE );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'] ), Logger::LINE );
 
 			// Get PDF file path from $print_issue['seo_link'].
 			// seo_link is in the format yyyy/mm/dd.
@@ -954,13 +962,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			// Get author based on the publication name.
-			$author_id = $this->get_or_create_user( $publication_name, '', 'editor' );
+			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
 
 			// Create a new issue post.
 			$wp_issue_post_id = wp_insert_post(
 				[
 					'post_type'    => 'post',
-					'post_title'   => $print_issue['issue_number'],
+					'post_title'   => $print_issue['seo_link'],
 					'post_status'  => 'publish',
 					'post_author'  => $author_id,
 					'post_content' => '',
@@ -972,16 +980,65 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// Issue section.
+			$section_name  = 'Section ' . $print_issue['sections'];
+			$section_index = array_search( $print_issue['sections'], array_column( $print_sections, 'section_id' ) );
+			if ( false === $section_index ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['section_id'], $print_issue['issue_number'] ), Logger::WARNING );
+			} else {
+				$section_name = $print_sections[ $section_index ]['section_title'];
+			}
+
 			// Upload file.
-			$file_post_id = $this->attachments->import_external_file( $media_path, null, $media['caption'], null . null, $wp_post_id );
+			$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+
+			if ( is_wp_error( $file_post_id ) ) {
+				wp_delete_post( $wp_issue_post_id, true );
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload file %s: %s', $pdf_file_path, $file_post_id->get_error_message() ), Logger::WARNING );
+				continue;
+			}
+
+			$attachment_post = get_post( $file_post_id );
 
 			$post_content_blocks = [
-				$this->gutenberg_block_generator->get_file_2(),
+				$this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name ),
 			];
 
-			update_comment_meta( $comment_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $comment['issue_number'] );
+			$post_content = serialize_blocks( $post_content_blocks );
 
-			$this->logger->log( self::LOG_FILE, sprintf( 'Created comment %d with the ID %d', $comment['issue_number'], $comment_id ), Logger::SUCCESS );
+			wp_update_post(
+				[
+					'ID'           => $wp_issue_post_id,
+					'post_content' => $post_content,
+				]
+			);
+
+			// Handle post cover.
+			$cover_file_path = $print_cover_dir_path . '/' . $seo_link[0] . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.cover.jpg';
+
+			if ( ! is_file( $cover_file_path ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find cover file %s', $cover_file_path ), Logger::WARNING );
+			} else {
+				$cover_file_post_id = $this->attachments->import_external_file( $cover_file_path, null, null, null, null, $wp_issue_post_id );
+
+				if ( is_wp_error( $cover_file_post_id ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload cover file %s: %s', $cover_file_path, $cover_file_post_id->get_error_message() ), Logger::WARNING );
+					continue;
+				} else {
+					update_post_meta( $wp_issue_post_id, '_thumbnail_id', $cover_file_post_id );
+					update_post_meta( $wp_issue_post_id, 'newspack_featured_image_position', 'hidden' );
+				}
+			}
+
+			// Set post category as Print Edition > YYYY.
+			$print_edition_category_id = $this->get_or_create_category( 'Print Edition' );
+			$year_category_id          = $this->get_or_create_category( $year, $print_edition_category_id );
+
+			wp_set_post_categories( $wp_issue_post_id, [ $year_category_id ] );
+
+			update_comment_meta( $wp_issue_post_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $print_issue['issue_number'] );
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Created post issue %d with the ID %d', $print_issue['issue_number'], $wp_issue_post_id ), Logger::SUCCESS );
 		}
 	}
 
@@ -1193,15 +1250,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * Get or create a category.
 	 *
 	 * @param string $name Category name.
+	 * @param int    $parent_id Parent category ID.
+	 *
 	 * @return int|null Category ID.
 	 */
-	private function get_or_create_category( $name ) {
+	private function get_or_create_category( $name, $parent_id = null ) {
 		$term = get_term_by( 'name', $name, 'category' );
 		if ( $term ) {
 			return $term->term_id;
 		}
 
-		$term = wp_insert_term( $name, 'category' );
+		$args = [];
+
+		if ( $parent_id ) {
+			$args['parent'] = $parent_id;
+		}
+
+		$term = wp_insert_term( $name, 'category', $args );
 		if ( is_wp_error( $term ) ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Could not create category %s: %s', $name, $term->get_error_message() ), Logger::ERROR );
 			return null;
@@ -1449,7 +1514,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$media_path  = $story_photos_dir_path . '/' . $media['photo_year'] . '/' . $media_month . '/' . $media['photo_day'] . '/' . $media['photo_id'] . '_original.jpg';
 
 		if ( file_exists( $media_path ) ) {
-			$attachment_id = $this->attachments->import_external_file( $media_path, null, $media['caption'], null . null, $wp_post_id );
+			$attachment_id = $this->attachments->import_external_file( $media_path, null, $media['caption'], null, null, $wp_post_id );
 			if ( is_wp_error( $attachment_id ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not import photo %s for the post %d: %s', $media_path, $wp_post_id, $attachment_id->get_error_message() ), Logger::WARNING );
 				return false;
