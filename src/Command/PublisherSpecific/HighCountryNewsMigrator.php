@@ -2096,6 +2096,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		$log_file = 'hcn_generate_redirects.log';
 		$home_url = home_url();
 
+		$categories = get_categories( [
+			'fields' => 'slugs',
+		] );
+
 		global $wpdb;
 		foreach ( $this->json_iterator->items( $assoc_args['articles-json'] ) as $article ) {
 			if ( empty( $article->aliases ) ) {
@@ -2125,12 +2129,17 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 					}
 				}
 
-				$this->redirection_logic->create_redirection_rule(
-					'Plone ID ' . $article->UID,
-					$no_prefix,
-					"/?p=$post_id"
-				);
-				$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
+				$alias_parts = explode( '/', trim( $no_prefix, '/' ) );
+				// If the alias is the category we would already have that because of " wp option get permalink_structure %category%/%postname%/".
+				// If there are more than 2 parts, e.g. /issues/123/post-name, then it's OK to create the alias.
+				if ( ! in_array( $alias_parts[0], $categories, true ) || count( $alias_parts ) > 2 ) {
+					$this->redirection_logic->create_redirection_rule(
+						'Plone ID ' . $article->UID,
+						$no_prefix,
+						"/?p=$post_id"
+					);
+					$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
+				}
 			}
 		}
 	}
