@@ -101,21 +101,8 @@ class LedeMigrator implements InterfaceCommand {
 
 		global $wpdb;
 
-		/**
-		 * Validate that live tables posts and postmeta exist.
-		 */
-		$live_posts_table    = esc_sql( $live_table_prefix . 'posts' );
-		$live_postmeta_table = esc_sql( $live_table_prefix . 'postmeta' );
-		// phpcs:ignore -- Table name properly escaped.
-		$test_var = $wpdb->get_var( "select 1 from $live_posts_table;" );
-		if ( ! $test_var ) {
-			throw new \RuntimeException( sprintf( 'Table %s not found -- needed to access original Lede Author data.', $live_posts_table ) );
-		}
-		// phpcs:ignore -- Table name properly escaped.
-		$test_var = $wpdb->get_var( "select 1 from $live_postmeta_table;" );
-		if ( ! $test_var ) {
-			throw new \RuntimeException( sprintf( 'Table %s not found -- needed to access original Lede Author data.', $live_postmeta_table ) );
-		}
+		// Validate that live tables posts and postmeta exist.
+		$this->validate_tables_exist( [ $live_table_prefix . 'posts', $live_table_prefix . 'postmeta', $live_table_prefix . 'users', $live_table_prefix . 'usermeta' ] );
 
 		WP_CLI::line( 'Converting Lede Authors profiles to GAs and assigning them to all posts...' );
 		$post_ids = $this->posts->get_all_posts_ids();
@@ -134,5 +121,26 @@ class LedeMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		WP_CLI::line( 'Done.' );
+	}
+
+	/**
+	 * Checks that local tables exist.
+	 *
+	 * @param array $tables Table names.
+	 *
+	 * @throws \RuntimeException If required live tables don't exist.
+	 *
+	 * @return void
+	 */
+	public function validate_tables_exist( array $tables ) {
+		global $wpdb;
+		foreach ( $tables as $table ) {
+			$table = esc_sql( $table );
+			// phpcs:ignore -- Table name properly escaped.
+			$test_var = $wpdb->get_var( "select 1 from $table;" );
+			if ( ! $test_var ) {
+				throw new \RuntimeException( sprintf( "Table `%s` not found and it's needed to access original Lede Author data.", $table ) );
+			}
+		}
 	}
 }
