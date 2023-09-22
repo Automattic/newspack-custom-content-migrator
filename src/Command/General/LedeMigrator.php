@@ -101,7 +101,7 @@ class LedeMigrator implements InterfaceCommand {
 
 		global $wpdb;
 
-		// Validate that live tables posts and postmeta exist.
+		// Validate that required live tables exist. Needed to access original IDs of author Post objects, terms and WP_Users -- because these IDs might get changed when imported on top of an existing site. Future improvement -- switch to fetching original ID from DB, however we need to implement saving imported WP_User's original ID in DB first.
 		$this->validate_tables_exist( [ $live_table_prefix . 'posts', $live_table_prefix . 'postmeta', $live_table_prefix . 'users', $live_table_prefix . 'usermeta' ] );
 
 		WP_CLI::line( 'Converting Lede Authors profiles to GAs and assigning them to all posts...' );
