@@ -95,10 +95,11 @@ class LedeMigrator implements InterfaceCommand {
 	 * @throws \RuntimeException If required live tables don't exist.
 	 */
 	public function cmd_migrate_authors_to_gas( array $pos_args, array $assoc_args ) {
-		global $wpdb;
 
-		// Get args.
+		// Args.
 		$live_table_prefix = $assoc_args['live-table-prefix'];
+
+		global $wpdb;
 
 		/**
 		 * Validate that live tables posts and postmeta exist.
@@ -117,10 +118,8 @@ class LedeMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( 'Converting Lede Authors profiles to GAs and assigning them to all posts...' );
-		// $post_ids = $this->posts->get_all_posts_ids();
-		$post_ids = [ 640615 ];
+		$post_ids = $this->posts->get_all_posts_ids();
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-
 			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
 			$ga_ids = $this->lede->convert_lede_authors_to_gas_for_post( $live_table_prefix, $post_id );
