@@ -3,15 +3,36 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use \NewspackCustomContentMigrator\Logic\Lede;
+use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \WP_CLI;
 
+/**
+ * Lede migration commands.
+ */
 class LedeMigrator implements InterfaceCommand {
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
+
+	/**
+	 * Lede instance.
+	 *
+	 * @var Lede Lede instance.
+	 */
+	private $lede;
+
+	/**
+	 * Posts instance.
+	 *
+	 * @var Posts Posts instance.
+	 */
+	private $posts;
 
 	/**
 	 * CoAuthorPlus instance.
@@ -24,7 +45,9 @@ class LedeMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->cap = new CoAuthorPlus();
+		$this->lede  = new Lede();
+		$this->posts = new Posts();
+		$this->cap   = new CoAuthorPlus();
 	}
 
 	/**
@@ -35,7 +58,7 @@ class LedeMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -45,123 +68,52 @@ class LedeMigrator implements InterfaceCommand {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator lede-migrate-authors-to-gas',
+		WP_CLI::add_command(
+			'newspack-content-migrator lede-migrate-authors-to-gas',
 			[ $this, 'cmd_migrate_authors_to_gas' ],
 			[
 				'shortdesc' => 'Migrates that custom Lede Authors plugin data to GA authors.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => "Live posts and postmeta tables need to be available for this scipt to access original IDs of author Post objects, terms and WP_Users -- because these IDs might get changed when imported on top of an existing site. As a future improvement, this could be replaced with CDiff's original-post-id metas which we already have in the DB, but need to check whether we store them for WP_Users.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator lede-migrate-authors-to-gas` command.
+	 * Callable for 'newspack-content-migrator lede-migrate-authors-to-gas'.
 	 *
-	 * @param array $pos_args
-	 * @param array $assoc_args
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_migrate_authors_to_gas( $pos_args, $assoc_args ) {
+	public function cmd_migrate_authors_to_gas( array $pos_args, array $assoc_args ) {
 
-		// Create all GAs.
-		global $wpdb;
-		// Live https://atlanta.capitalbnews.org/cop-city-unrest/
-		// Staging ID 3395
-		//      Madeline Thigpen
-		//      Adam Mahoney
-		// Get all post_type = 'profile'.
-		$profile_posts_rows = $wpdb->get_results( "SELECT * FROM {$wpdb->posts} WHERE post_type = 'profile';", ARRAY_A );
-		if ( empty( $profile_posts_rows ) ) {
-			WP_CLI::error( "No objects of post_type = 'profile' found. Looks like the 'custom Lede authors plugin' was not used on this site." );
-		}
-		foreach ( $profile_posts_rows as $profile_post_row ) {
-			$ga_args = [];
+		$live_table_prefix = $assoc_args['live-table-prefix'];
 
-			if ( empty( $profile_post_row['post_title'] ) ) {
-				// Log warning
-				$d=1;
-			}
+		WP_CLI::line( 'Converting Lede Authors profiles to GAs and assigning them to all posts...' );
+		// $post_ids = $this->posts->get_all_posts_ids();
+		$post_ids = [ 640615 ];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
 
-			// Get author data available from wp_posts.
-			$ga_args['display_name'] = $profile_post_row['post_title'];
-			if ( ! empty( $profile_post_row['post_content'] ) ) {
-				$ga_args['description'] = $profile_post_row['post_content'];
-			}
-			if ( ! empty( $profile_post_row['post_name'] ) ) {
-				$ga_args['user_login'] = $profile_post_row['post_name'];
-			}
+			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 
-			// Get author data available from wp_postmeta.
-			$profile_postmeta_rows = $wpdb->get_results( "SELECT * FROM {$wpdb->postmeta} WHERE post_id = {$profile_post_row['ID']};", ARRAY_A );
-			$social_links = [];
-			foreach ( $profile_postmeta_rows as $profile_postmeta_row ) {
-
-				// user_login might also be stored as postmeta. Override if exists.
-				if ( 'user_login' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['user_login'] = $profile_postmeta_row['meta_value'];
+			$ga_ids = $this->lede->convert_lede_authors_to_gas_for_post( $live_table_prefix, $post_id );
+			// Output results.
+			if ( $ga_ids ) {
+				foreach ( $ga_ids as $ga_id ) {
+					$ga = $this->cap->get_guest_author_by_id( $ga_id );
+					WP_CLI::line( sprintf( "- GA ID %d '%s'", $ga_id, $ga->display_name ) );
 				}
-
-				// Email might be stored as two different metas.
-				if ( 'user_email' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['user_email'] = $profile_postmeta_row['meta_value'];
-				}
-				if ( 'email' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['user_email'] = $profile_postmeta_row['meta_value'];
-				}
-
-				// Short bio might also be stored as short_bio meta_key. Append it to description after line break.
-				if ( 'short_bio' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['description'] .= ! empty( $ga_args['description'] ) ? "\n" : '';
-					$ga_args['description'] .= $profile_postmeta_row['meta_value'];
-				}
-
-				if ( 'first_name' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['first_name'] = $profile_postmeta_row['meta_value'];
-				}
-				if ( 'last_name' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['last_name'] = $profile_postmeta_row['meta_value'];
-				}
-
-				// Avatar.
-				if ( '_thumbnail_id' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$ga_args['avatar'] = $profile_postmeta_row['meta_value'];
-				}
-
-				// There could also be a linked WP_User ID.
-				$linked_wp_user_id = null;
-				if ( 'user_id' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					// Confirm that WP_User exists.
-					$user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE ID = %d;", $profile_postmeta_row['meta_value'] ) );
-					if ( $user_id ) {
-						$linked_wp_user_id = $user_id;
-					}
-				}
-
-				// Get additional social links.
-				if ( 'twitter' == $profile_postmeta_row['meta_key'] && ! empty( $profile_postmeta_row['meta_value'] ) ) {
-					$social_links[] = '<a href="' . $profile_postmeta_row['meta_value'] . '" $social_links>Twitter @' . $profile_postmeta_row['meta_value'] . '</a>';
-				}
-			}
-
-			// Simply append social links to the description.
-			if ( ! empty( $social_links ) ) {
-				$ga_args['description'] .= ! empty( $ga_args['description'] ) ? ' ' : '';
-				$ga_args['description'] .= implode( ' ', $social_links );
-			}
-
-
-			// Before creating, check if GA already exists.
-
-
-			$ga_id = $this->cap->create_guest_author( $ga_args );
-			// Handle error.
-
-			// Link WP_User.
-			if ( $linked_wp_user_id ) {
-				$wp_user = get_user_by( 'ID', $linked_wp_user_id );
-				$this->cap->link_guest_author_to_wp_user( $ga_id, $wp_user );
 			}
 		}
 
-
-		// Assign GAs to posts.
+		wp_cache_flush();
+		WP_CLI::line( 'Done.' );
 	}
 }
