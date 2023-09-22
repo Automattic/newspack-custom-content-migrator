@@ -91,10 +91,30 @@ class LedeMigrator implements InterfaceCommand {
 	 *
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @throws \RuntimeException If required live tables don't exist.
 	 */
 	public function cmd_migrate_authors_to_gas( array $pos_args, array $assoc_args ) {
+		global $wpdb;
 
+		// Get args.
 		$live_table_prefix = $assoc_args['live-table-prefix'];
+
+		/**
+		 * Validate that live tables posts and postmeta exist.
+		 */
+		$live_posts_table    = esc_sql( $live_table_prefix . 'posts' );
+		$live_postmeta_table = esc_sql( $live_table_prefix . 'postmeta' );
+		// phpcs:ignore -- Table name properly escaped.
+		$test_var = $wpdb->get_var( "select 1 from $live_posts_table;" );
+		if ( ! $test_var ) {
+			throw new \RuntimeException( sprintf( 'Table %s not found -- needed to access original Lede Author data.', $live_posts_table ) );
+		}
+		// phpcs:ignore -- Table name properly escaped.
+		$test_var = $wpdb->get_var( "select 1 from $live_postmeta_table;" );
+		if ( ! $test_var ) {
+			throw new \RuntimeException( sprintf( 'Table %s not found -- needed to access original Lede Author data.', $live_postmeta_table ) );
+		}
 
 		WP_CLI::line( 'Converting Lede Authors profiles to GAs and assigning them to all posts...' );
 		// $post_ids = $this->posts->get_all_posts_ids();
