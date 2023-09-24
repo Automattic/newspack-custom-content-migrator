@@ -145,6 +145,24 @@ class LatinFinanceMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator latinfinance-fix-awards-bylines',
+			[ $this, 'cmd_fix_awards_bylines' ],
+			[
+				'shortdesc' => 'Update bylines for awards categories',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'cats',
+						'description' => 'List of category ids: 1,2,3',
+						'optional'    => false,
+						'repeating'   => false,
+						'default'     => '',
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator latinfinance-fix-duplicate-categories',
 			[ $this, 'cmd_fix_duplicate_categories' ],
 			[
@@ -1313,6 +1331,81 @@ class LatinFinanceMigrator implements InterfaceCommand {
 				$this->mylog( 'checksum-multiple', array( $k, $v ) );
 			}
 		}
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator latinfinance-fix-awards-bylines'.
+	 *
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_fix_awards_bylines( $pos_args, $assoc_args ) {
+
+		// arguments
+		$cats = isset( $assoc_args[ 'cats' ] ) ? $assoc_args[ 'cats' ] : '';
+		
+		if( ! preg_match( '/^[0-9]+(,[0-9]+)*$/', $cats ) ) {
+			WP_CLI::error( "Required --cats=1,2,3 must be in list format." );
+		}
+
+		// Install and activate the CAP plugin if missing.
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( 'Co-Authors Plus plugin must be installed/activated.' );
+		}
+
+		// run
+		WP_CLI::line( 'Doing command for cats: ' . $cats );
+
+		$query = new WP_Query( array(
+			'cat'   => $cats,
+			'posts_per_page' => -1,
+			'fields'		 => 'ids',
+		));
+
+		if ( empty( $query->posts ) ) {
+			WP_CLI::error( 'No posts found for cats list.' );
+		}
+
+		WP_CLI::line( 'Posts found count: ' . count( $query->posts ) );
+
+		$csv = array();
+
+		foreach ( $query->posts as $post_id ) {
+			
+			// add to csv for review
+			$csv_row['ID'] = $post_id;
+
+			$csv_row['Title'] = get_the_title( $post_id );
+
+			$authors = array_map( function( $v ) {
+				if( isset( $v->data) && isset( $v->data->display_name )) {
+					if( 'lf-import-user' == $v->data->display_name ) return 'LatinFinance';
+					return $v->data->display_name;
+				}
+				return $v->display_name;
+			}, get_coauthors( $post_id ) );
+
+			$csv_row['Byline'] = implode( ', ', $authors ); ;
+
+			$db_user = get_the_author_meta( 'display_name' , get_post_field ( 'post_author', $post_id) );
+			if( 'lf-import-user' != $db_user) {
+				WP_CLI::error( 'DB user mismatch for post: ' . $post_id );
+			}
+			// $csv_row['DB User'] = $db_user;
+
+			$csv_row['Category'] = implode( ', ', wp_get_post_terms( $post_id, 'category', array( 'fields' => 'names', 'include' => $cats ) ) );
+
+			$csv_row['Link'] = str_replace( home_url(), 'https://latinfinance.com', get_permalink ( $post_id ) );
+
+			// print_r($csv_row);
+			$csv[] = $csv_row;
+
+		}
+
+		$this->log_to_csv( $csv, $this->export_path  . '/latinfinance-awards-bylines.csv' );
+
+
 	}
 
 	/**
