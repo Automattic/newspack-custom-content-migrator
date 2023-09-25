@@ -3,4 +3,4 @@
 
 ---
 
-- [x] confirmed that PHPCS has been run
+- [ ] confirmed that PHPCS has been run
