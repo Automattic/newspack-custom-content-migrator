@@ -1354,6 +1354,11 @@ class LatinFinanceMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Co-Authors Plus plugin must be installed/activated.' );
 		}
 
+		$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( 'latinfinance-awards' );
+		if ( false === $guest_author ) {
+			WP_CLI::error( 'latinfinance-awards user not found.');
+		} 
+		
 		// run
 		WP_CLI::line( 'Doing command for cats: ' . $cats );
 
@@ -1398,13 +1403,23 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$csv_row['Link'] = str_replace( home_url(), 'https://latinfinance.com', get_permalink ( $post_id ) );
 
+			// do replacement
+			WP_CLI::line( 'Doing replacement for: ' . print_r( $csv_row, true ) );
+
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $guest_author->ID ), $post_id );
+
+
 			// print_r($csv_row);
 			$csv[] = $csv_row;
 
+			
+
+
 		}
 
-		$this->log_to_csv( $csv, $this->export_path  . '/latinfinance-awards-bylines.csv' );
+		// for testing: $this->log_to_csv( $csv, $this->export_path  . '/latinfinance-awards-bylines.csv' );
 
+		WP_CLI::success( 'Replacement count: ' . count( $csv ) );
 
 	}
 
