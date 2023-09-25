@@ -1395,7 +1395,7 @@ class LatinFinanceMigrator implements InterfaceCommand {
 
 			$db_user = get_the_author_meta( 'display_name' , get_post_field ( 'post_author', $post_id) );
 			if( 'lf-import-user' != $db_user) {
-				WP_CLI::error( 'DB user mismatch for post: ' . $post_id );
+				WP_CLI::warning( 'DB user mismatch for post: ' . $post_id . ' user: ' . $db_user );
 			}
 			// $csv_row['DB User'] = $db_user;
 
