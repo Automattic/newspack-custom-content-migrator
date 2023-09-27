@@ -90,7 +90,7 @@ class Taxonomy {
 	 *
 	 * @return string|null Term ID or null if not found.
 	 */
-	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) : null|string {
+	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) {
 		global $wpdb;
 
 		$existing_term_id = $wpdb->get_var(
@@ -118,7 +118,7 @@ class Taxonomy {
 	 *
 	 * @return string Category term ID.
 	 */
-	public function get_or_create_category_by_name_and_parent_id( string $cat_name, int $cat_parent_id = 0 ) : string|null {
+	public function get_or_create_category_by_name_and_parent_id( string $cat_name, int $cat_parent_id = 0 ) {
 		global $wpdb;
 
 		// Get term_id if it exists.
