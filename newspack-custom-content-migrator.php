@@ -60,6 +60,7 @@ PluginSetup::register_migrators(
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
+		Command\General\PloneCMSMigrator::class,
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
@@ -70,6 +71,9 @@ PluginSetup::register_migrators(
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
+		Command\PublisherSpecific\SearchLightNMMigrator::class,
+		Command\PublisherSpecific\CalMattersMigrator::class,
+		Command\PublisherSpecific\HighCountryNewsMigrator::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Command\PublisherSpecific\SentinelColoradoMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,
