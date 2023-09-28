@@ -78,7 +78,7 @@ class BlockClubChicagoMigrator implements InterfaceCommand {
 			'newspack-content-migrator blockclubchicago-migrate-flourish-embeds',
 			[ $this, 'cmd_migrate_flourish' ],
 			[
-				'shortdesc' => 'Refactors Flourish to a Gutenberg block.',
+				'shortdesc' => 'Refactors Flourish usage to a corresponding Gutenberg block.',
 				'synopsis'  => [],
 			]
 		);
@@ -107,15 +107,15 @@ class BlockClubChicagoMigrator implements InterfaceCommand {
 
 			WP_CLI::line( $post_id );
 
+			$post_content_updated = $post_content;
 			foreach ( $matches[0] as $match ) {
 				$flourish_html = $match[0];
 				$url = $this->blocks_manipulator->get_attribute( $flourish_html, 'url' );
 
-				$embed_block = $this->blocks->get_core_embed( $url );
-				$embed_html = serialize_block( $embed_block );
+				$iframe_block = $this->blocks->get_iframe( $url );
+				$iframe_html = serialize_block( $iframe_block );
 
-				$post_content_updated = $post_content;
-				$post_content_updated = str_replace( $flourish_html, $embed_html, $post_content_updated );
+				$post_content_updated = str_replace( $flourish_html, $iframe_html, $post_content_updated );
 
 				$wpdb->update(
 					$wpdb->posts,
