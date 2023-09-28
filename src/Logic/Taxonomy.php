@@ -116,7 +116,7 @@ class Taxonomy {
 	 *
 	 * @throws \RuntimeException If nonexisting $cat_parent_id is given.
 	 *
-	 * @return string Category term ID.
+	 * @return string|null Category term ID.
 	 */
 	public function get_or_create_category_by_name_and_parent_id( string $cat_name, int $cat_parent_id = 0 ) {
 		global $wpdb;
