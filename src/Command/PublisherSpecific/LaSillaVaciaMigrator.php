@@ -1320,6 +1320,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				]
 			]
 		);
+		
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-fix-incorrect-author-terms',
+			[ $this, 'cmd_fix_incorrect_author_terms' ],
+			[
+				'shortdesc' => 'Fix incorrect author terms',
+				'synopsis' => []
+			]
+		);
     }
 
     private function reset_db()
@@ -4187,8 +4196,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		$damaged_profiles = $wpdb->get_results(
 			"SELECT sub.slug, GROUP_CONCAT(sub.term_id) as term_ids, COUNT(sub.term_id) as counter
 			FROM (SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id
-			      FROM wp_terms t
-			               LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
+			      FROM $wpdb->terms t
+			               LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 			      WHERE tt.taxonomy = 'author' AND tt.count <> 0) as sub
 			GROUP BY sub.slug
 			HAVING counter > 1
@@ -4245,120 +4254,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					WP_CLI::error( "User not found via email: $email" );
 				}
 
-				$cap_fields = [
-					'cap-user_login',
-					'cap-user_nicename',
-					'cap-user_email',
-					'cap-linked_account',
-				];
-
-				$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_post->ID, $cap_fields );
-
-				$cap_user_login = $this->get_guest_author_user_login( $user );
-
-				echo WP_CLI::colorize( "%BWP_User vs wp_postmeta fields%n\n");
-				$comparison = $this->output_value_comparison_table(
-					$cap_fields,
-					[
-						'cap-user_login' => $cap_user_login,
-						'cap-user_email' => $user->user_email,
-						'cap-linked_account' => $user->user_login,
-					],
-					$filtered_author_cap_fields,
-					true,
-					'User Fields',
-					'Post Meta Fields',
-				);
-
-				if ( ! empty( $comparison['different'] ) ) {
-					// Update Post Meta to match WP_User fields
-					foreach ( $comparison['different'] as $key => $value ) {
-						echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Post Meta Fields']}%n to %G%U{$value['User Fields']}%n\n" );
-						$wpdb->update(
-							$wpdb->postmeta,
-							[
-								'meta_value' => $value['User Fields'],
-							],
-							[
-								'post_id' => $guest_author_post->ID,
-								'meta_key' => $key,
-							]
-						);
-					}
-				}
-
-				echo WP_CLI::colorize( "%BWP_User vs wp_terms fields%n\n");
-				$comparison = $this->output_value_comparison_table(
-					[
-						'name',
-						'slug'
-					],
-					[
-						'name' => $user->user_login,
-						'slug' => 'cap-' . $user->user_nicename,
-					],
-					[
-						'name' => $connected_guest_author_term->name,
-						'slug' => $connected_guest_author_term->slug,
-					],
-					true,
-					'User Fields',
-					'Author Term Fields'
-				);
-				if ( ! empty( $comparison['different'] ) ) {
-					// Update Post Meta to match WP_User fields
-					foreach ( $comparison['different'] as $key => $value ) {
-						echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Author Term Fields']}%n to %G%U{$value['User Fields']}%n\n" );
-						$wpdb->update(
-							$wpdb->terms,
-							[
-								$key => $value['User Fields'],
-							],
-							[
-								'term_id' => $connected_guest_author_term->term_id,
-							]
-						);
-					}
-				}
-
-				echo WP_CLI::colorize( "%BGuest Author (wp_posts) vs wp_postmeta field%n\n");
-				$comparison = $this->output_value_comparison_table(
-					[
-						'post_name',
-					],
-					[
-						'post_name' => $guest_author_post->post_name,
-					],
-					[
-						'post_name' => $filtered_author_cap_fields['cap-user_login'],
-					],
-					true,
-					'Guest Author Fields',
-					'Post Meta Fields'
-				);
-				if ( ! empty( $comparison['different'] ) ) {
-					// Update Post Meta to match WP_User fields
-					foreach ( $comparison['different'] as $key => $value ) {
-						echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Guest Author Fields']}%n to %G%U{$value['Post Meta Fields']}%n\n" );
-						if ( 'post_name' === $key ) {
-							$cap_user_login = 'cap-' . $filtered_author_cap_fields['cap-user_login'];
-
-							if ( $cap_user_login !== $value['Guest Author Fields'] ) {
-								$wpdb->update(
-									$wpdb->postmeta,
-									[
-										'meta_value' => $cap_user_login,
-									],
-									[
-										'meta_key' => 'cap-user_login',
-										'post_id' => $guest_author_post->ID,
-									]
-								);
-							}
-						}
-					}
-				}
-
+				$this->fix_author_term_data_from_guest_author( $guest_author_post->ID, $connected_guest_author_term, $user );
 			}
 
 			$term_ids_placeholders = implode( ',', array_fill( 0, count( $term_ids ), '%d' ) );
@@ -4389,154 +4285,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					// This likely means that the guest author does not have a WP_User login.
 					// The $id likely belongs to a post.
 					// Display author term and post
-					echo WP_CLI::colorize( "%BGuest Author Record%n\n" );
-					$this->output_post_table( [ $id ] );
-					$post = get_post( $id );
-					echo WP_CLI::colorize( "%BAuthor Term%n\n" );
-					$this->output_terms_table( [ $loose_guest_author_term->term_id ] );
-					$filtered_author_cap_fields = $this->get_filtered_cap_fields(
-						$id,
-						[
-							'cap-user_login',
-							'cap-user_nicename',
-							'cap-user_email',
-							'cap-linked_account',
-							'cap-display_name',
-						]
-					);
-					echo WP_CLI::colorize( "%BPost Meta Fields%n\n" );
-					$this->output_comparison_table( [], $filtered_author_cap_fields );
-
-					$display_name = $this->ask_prompt( "Use '{$filtered_author_cap_fields['cap-display_name']}' as display_name? (y/n)" );
-					$display_name = strtolower( $display_name );
-
-					if ( 'y' === $display_name ) {
-						$display_name = $filtered_author_cap_fields['cap-display_name'];
-					} else {
-						$display_name = $this->ask_prompt( "Enter display_name:" );
-					}
-
-					$sanitized_display_name = sanitize_title( $display_name );
-					$use_sanitized_display_name_as_user_login = $this->ask_prompt( "Use '$sanitized_display_name' as user_login? (y/n)" );
-					$use_sanitized_display_name_as_user_login = strtolower( $use_sanitized_display_name_as_user_login );
-					if ( 'y' === $use_sanitized_display_name_as_user_login ) {
-						$user_login = $sanitized_display_name;
-					} else {
-						$user_login = $filtered_author_cap_fields['cap-user_login'];
-
-						if ( is_email( $user_login ) ) {
-							$user_login = substr( $user_login, 0, strpos( $user_login, '@' ) );
-						} else {
-							$response = $this->ask_prompt( "Would you like to update user_login ('$user_login')? (y/n)" );
-							$response = strtolower( $response );
-
-							if ( 'y' === $response ) {
-								$user_login = $this->ask_prompt( "Enter user_login:" );
-							}
-						}
-					}
-
-					if ( ! str_starts_with( $user_login, 'cap-' ) ) {
-						$user_login = "cap-$user_login";
-					}
-
-					echo WP_CLI::colorize( "%BUser Login vs CAP User Login%n\n" );
-					$comparison = $this->output_value_comparison_table(
-						[
-							'cap-user_login',
-						],
-						[
-							'cap-user_login' => $user_login,
-						],
-						[
-							'cap-user_login' => $filtered_author_cap_fields['cap-user_login'],
-						]
-					);
-					if ( ! empty( $comparison['different'] ) ) {
-						foreach ( $comparison['different'] as $key => $value ) {
-							echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['right']}%n to %G%U{$value['left']}%n\n" );
-							$filtered_author_cap_fields['cap-user_login'] = $value['left'];
-							$wpdb->update(
-								$wpdb->postmeta,
-								[
-									'meta_value' => $value['left'],
-								],
-								[
-									'meta_key' => $key,
-									'post_id' => $id,
-								]
-							);
-						}
-					}
-
-					echo WP_CLI::colorize( "%BDisplay Name vs WP_Post Title%n\n" );
-					$comparison = $this->output_value_comparison_table(
-						[
-							'post_title',
-						],
-						[
-							'post_name' => $filtered_author_cap_fields['cap-user_login'],
-							'post_title' => $display_name,
-						],
-						[
-							'post_name' => $post->post_name,
-							'post_title' => $post->post_title,
-						]
-					);
-					if ( ! empty( $comparison['different'] ) ) {
-						foreach ( $comparison['different'] as $key => $value ) {
-							echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['right']}%n to %G%U{$value['left']}%n\n" );
-							$post->$key = $value['left'];
-							$wpdb->update(
-								$wpdb->posts,
-								[
-									$key => $value['left'],
-								],
-								[
-									'id' => $id,
-								]
-							);
-						}
-					}
-
-					echo WP_CLI::colorize( "%BCAP Display Name vs Author Term%n\n" );
-					$comparison = $this->output_value_comparison_table(
-						[
-							'name',
-							'slug',
-						],
-						[
-							'name' => $post->post_title,
-							'slug' => $filtered_author_cap_fields['cap-user_login'],
-						],
-						[
-							'name' => $loose_guest_author_term->name,
-							'slug' => $loose_guest_author_term->slug,
-						]
-					);
-					if ( ! empty( $comparison['different'] ) ) {
-						foreach ( $comparison['different'] as $key => $value ) {
-							echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['right']}%n to %G%U{$value['left']}%n\n" );
-							$wpdb->update(
-								$wpdb->terms,
-								[
-									$key => $value['left'],
-								],
-								[
-									'term_id' => $loose_guest_author_term->term_id,
-								]
-							);
-						}
-					}
-
-					$wpdb->insert(
-						$wpdb->term_relationships,
-						[
-							'object_id' => $id,
-							'term_taxonomy_id' => $loose_guest_author_term->term_taxonomy_id,
-						]
-					);
-
+					$this->handle_fixing_standalone_guest_author_data( $id, $loose_guest_author_term );
 					continue;
 				}
 
@@ -4565,62 +4314,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				// user_nicename should equal cap-<user_nicename> = wp_terms.slug
 				// user_login should equal user_login = wp_terms.name
 
-				$user_nicename = $this->get_user_nicename( $user );
-				$this->high_contrast_output( 'user_nicename', $user_nicename );
-
-				if ( $user_nicename !== $user->user_nicename ) {
-					echo WP_CLI::colorize( "%wUpdating user_nicename%n: " );
-					$user->user_nicename = $user_nicename;
-					$user_updated = $wpdb->update(
-						$wpdb->users,
-						[
-							'user_nicename' => $user_nicename,
-						],
-						[
-							'ID' => $user->ID,
-						]
-					);
-
-					if ( false === $user_updated ) {
-						echo WP_CLI::colorize( "%RFailed%n\n" );
-					} else {
-						echo WP_CLI::colorize( "%GSuccess%n\n" );
-					}
-				}
-
-				echo WP_CLI::colorize( "%BWP_User vs Author Term Fields%n\n");
-				$comparison = $this->output_value_comparison_table(
-					[
-						'name',
-						'slug',
-					],
-					[
-						'name' => $user->user_login,
-						'slug' => 'cap-' . $user->user_nicename,
-					],
-					[
-						'name' => $loose_guest_author_term->name,
-						'slug' => $loose_guest_author_term->slug,
-					],
-					true,
-					'WP_User',
-					'Author Term'
-				);
-				if ( ! empty( $comparison['different'] ) ) {
-					// Update Post Meta to match WP_User fields
-					foreach ( $comparison['different'] as $key => $value ) {
-						echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Author Term']}%n to %G%U{$value['WP_User']}%n\n" );
-						$wpdb->update(
-							$wpdb->terms,
-							[
-								$key => $value['WP_User'],
-							],
-							[
-								'term_id' => $loose_guest_author_term->term_id,
-							]
-						);
-					}
-				}
+				$this->fix_standalone_wp_user_author_term_data( $user, $loose_guest_author_term );
 
 
 				// user_nicename should equal cap-<user_nicename> = wp_posts.post_name
@@ -4672,6 +4366,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 				}
 
 				echo WP_CLI::colorize( "%BGuest Author (wp_posts) vs wp_postmeta field%n\n");
+				if ( ! str_starts_with( $filtered_author_cap_fields['cap-user_login'], 'cap-' ) ) {
+					$filtered_author_cap_fields['cap-user_login'] = 'cap-' . $filtered_author_cap_fields['cap-user_login'];
+				}
 				$comparison = $this->output_value_comparison_table(
 					[
 						'post_name',
@@ -4691,20 +4388,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 					foreach ( $comparison['different'] as $key => $value ) {
 						echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Guest Author Fields']}%n to %G%U{$value['Post Meta']}%n\n" );
 						if ( 'post_name' === $key ) {
-							$cap_user_login = 'cap-' . $filtered_author_cap_fields['cap-user_login'];
-
-							if ( $cap_user_login !== $value['Guest Author Fields'] ) {
-								$wpdb->update(
-									$wpdb->postmeta,
-									[
-										'meta_value' => $cap_user_login,
-									],
-									[
-										'meta_key' => 'cap-user_login',
-										'post_id' => $guest_author_post->ID,
-									]
-								);
-							}
+							$wpdb->update(
+								$wpdb->postmeta,
+								[
+									'meta_value' => $value['Post Meta'],
+								],
+								[
+									'meta_key' => 'cap-user_login',
+									'post_id' => $guest_author_post->ID,
+								]
+							);
 						}
 					}
 				}
@@ -4758,7 +4451,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		}
 	}
 
-	private function output_terms_table( array $term_ids ) {
+	private function output_terms_table( array $term_ids ): void {
 		global $wpdb;
 
 		$term_ids_placeholders = implode( ',', array_fill( 0, count( $term_ids ), '%d' ) );
@@ -4784,7 +4477,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		WP_CLI\Utils\format_items( 'table', $author_terms, [ 'term_id', 'name', 'slug', 'term_taxonomy_id', 'taxonomy', 'description', 'count', 'parent' ] );
 	}
 
-	private function output_post_table( array $post_ids ) {
+	private function output_post_table( array $post_ids ): void {
 		global $wpdb;
 
 		$post_ids_placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
@@ -4814,7 +4507,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		);
 	}
 
-	private function get_guest_author_post_by_id( int $post_id ) {
+	private function get_guest_author_post_by_id( int $post_id ): ?object {
 		global $wpdb;
 
 		return $wpdb->get_row(
@@ -4856,9 +4549,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 			return sanitize_title( $user->first_name . '-' . $user->last_name );
 		}
 
-		$user_nicename = $this->ask_prompt( "No display name found, please enter a user_nicename, or (h)alt execution: " );
+		$user_nicename = $this->ask_prompt( "No display name found. Would you like to (u)pdate user_nicename, (s)et a display_name, or (h)alt execution: " );
 
-		if ( 'h' === $user_nicename ) {
+		if ( 's' === $user_nicename ) {
+			$user->display_name = $this->ask_prompt( "Enter display name: " );
+			return $this->get_user_nicename( $user );
+		}
+
+		if ( 'u' === $user_nicename ) {
+			return $this->ask_prompt( "Enter user_nicename: " );
+		}
+
+		if ( 'h' === $user_nicename || ! in_array( strtolower( $user_nicename ), [ 's', 'u' ] ) ) {
 			die();
 		}
 
@@ -4999,14 +4701,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 			if ( 'c' !== $response ) {
 				if ( 'u' === $response ) {
-					$id = $this->ask_prompt( "Please enter the correct email:" );
+					$id = $this->ask_prompt( "Please enter the correct email" );
 				} else {
 					die();
 				}
 			}
 		}
 
-		return $id;
+		return intval( $id );
 	}
 
 	private function extract_email_from_term_description( string $description ) {
@@ -5019,7 +4721,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 
 			if ( 'c' !== $response ) {
 				if ( 'u' === $response ) {
-					$email = $this->ask_prompt( "Please enter the correct email:" );
+					$email = $this->ask_prompt( "Please enter the correct email" );
 				} else {
 					die();
 				}
@@ -5069,6 +4771,924 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 		fwrite( STDOUT, "$question: " );
 
 		return strtolower( trim( fgets( STDIN ) ) );
+	}
+
+	private function fix_wp_user_wp_post_postmeta_data( WP_User $user, $guest_author_id ) {
+		global $wpdb;
+
+		$cap_fields = [
+			'cap-user_login',
+			'cap-user_nicename',
+			'cap-user_email',
+			'cap-linked_account',
+		];
+
+		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
+
+		$cap_user_login = $this->get_guest_author_user_login( $user );
+
+		echo WP_CLI::colorize( "%BWP_User vs wp_postmeta fields%n\n");
+		$comparison = $this->output_value_comparison_table(
+			$cap_fields,
+			[
+				'cap-user_login' => $cap_user_login,
+				'cap-user_email' => $user->user_email,
+				'cap-linked_account' => $user->user_login,
+			],
+			$filtered_author_cap_fields,
+			true,
+			'User Fields',
+			'Post Meta Fields',
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			// Update Post Meta to match WP_User fields
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Post Meta Fields']}%n to %G%U{$value['User Fields']}%n\n" );
+				$wpdb->update(
+					$wpdb->postmeta,
+					[
+						'meta_value' => $value['User Fields'],
+					],
+					[
+						'post_id' => $guest_author_id,
+						'meta_key' => $key,
+					]
+				);
+			}
+		}
+	}
+
+	private function fix_wp_post_postmeta_data( $post_record ) {
+		echo WP_CLI::colorize( "%BGuest Author (wp_posts) vs wp_postmeta field%n\n");
+		global $wpdb;
+
+		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $post_record->ID, [ 'cap-user_login' ] );
+
+		$comparison = $this->output_value_comparison_table(
+			[
+				'post_name',
+			],
+			[
+				'post_name' => $post_record->post_name,
+			],
+			[
+				'post_name' => $filtered_author_cap_fields['cap-user_login'],
+			],
+			true,
+			'Guest Author Fields',
+			'Post Meta Fields'
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			// Update Post Meta to match WP_User fields
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Guest Author Fields']}%n to %G%U{$value['Post Meta Fields']}%n\n" );
+				if ( 'post_name' === $key ) {
+					$cap_user_login = 'cap-' . $filtered_author_cap_fields['cap-user_login'];
+
+					if ( $cap_user_login !== $value['Guest Author Fields'] ) {
+						$wpdb->update(
+							$wpdb->postmeta,
+							[
+								'meta_value' => $cap_user_login,
+							],
+							[
+								'meta_key' => 'cap-user_login',
+								'post_id' => $post_record->ID,
+							]
+						);
+					}
+				}
+			}
+		}
+	}
+
+	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user ) {
+		global $wpdb;
+
+		$guest_author_record = $this->get_guest_author_post_by_id( $guest_author_id );
+		$cap_fields = [
+			'cap-user_login',
+			'cap-user_email',
+			'cap-linked_account',
+			'cap-display_name',
+		];
+		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
+
+		$user_display_name = $user->display_name;
+		$post_meta_display_name = $filtered_author_cap_fields['cap-display_name'] ?? '';
+		$guest_author_display_name = $post_meta_display_name;
+
+		if ( empty( $post_meta_display_name ) && ! empty( $user_display_name ) ) {
+			$guest_author_display_name = $user_display_name;
+		} else if ( $user_display_name !== $guest_author_display_name ) {
+			$this->high_contrast_output( 'User Display Name', $user_display_name );
+			$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
+			$prompt = $this->ask_prompt( "Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution" );
+
+			if ( 'u' === $prompt ) {
+				$guest_author_display_name = $user_display_name;
+			} if ( 'g' === $prompt) {
+				$user->display_name = $post_meta_display_name;
+			} else if ( 'h' === $prompt ) {
+				die();
+			}
+		}
+
+		$this->insert_guest_author_term_relationship( $guest_author_id, $term->term_taxonomy_id );
+
+		if ( $guest_author_display_name !== $post_meta_display_name ) {
+			echo WP_CLI::colorize( "%wUpdating%n %Wcap-display_name:%n %C{$post_meta_display_name}%n to %G%U{$guest_author_display_name}%n\n" );
+			$wpdb->update(
+				$wpdb->postmeta,
+				[
+					'meta_value' => $guest_author_display_name,
+				],
+				[
+					'post_id' => $guest_author_id,
+					'meta_key' => 'cap-display_name',
+				]
+			);
+		}
+
+		echo WP_CLI::colorize( "%BDisplay Name vs WP_Posts.post_title%n\n");
+		$comparison = $this->output_value_comparison_table(
+			[
+				'post_title',
+			],
+			[
+				'post_title' => $guest_author_record->post_title,
+			],
+			[
+				'post_title' => $guest_author_display_name,
+			],
+			true,
+			'WP_Posts.post_title',
+			'Display Name'
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			// Update Post Meta to match WP_User fields
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['WP_Posts.post_title']}%n to %G%U{$value['Display Name']}%n\n" );
+				$guest_author_record->$key = $value['Display Name'];
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_title' => $value['Display Name'],
+					],
+					[
+						'ID' => $guest_author_id,
+					]
+				);
+			}
+		}
+
+		$this->update_user_nicename_if_necessary( $user );
+
+		$cap_user_login = $this->get_guest_author_user_login( $user );
+
+		echo WP_CLI::colorize( "%Guest Author vs wp_postmeta field%n\n");
+		$comparison = $this->output_value_comparison_table(
+			[
+				'cap-user_login',
+			],
+			[
+				'cap-user_login' => $cap_user_login,
+			],
+			[
+				'cap-user_login' => $filtered_author_cap_fields['cap-user_login'],
+			],
+			true,
+			'Guest Author',
+			'Post Meta'
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			// Update Post Meta to match WP_User fields
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Post Meta']}%n to %G%U{$value['Guest Author']}%n\n" );
+				$filtered_author_cap_fields['cap-user_login'] = $value['Guest Author'];
+				$wpdb->update(
+					$wpdb->postmeta,
+					[
+						'meta_value' => $value['Guest Author'],
+					],
+					[
+						'post_id' => $guest_author_id,
+						'meta_key' => $key,
+					]
+				);
+			}
+		}
+
+		echo WP_CLI::colorize( "%BGuest Author (wp_posts) vs wp_postmeta field%n\n");
+		$comparison = $this->output_value_comparison_table(
+			[
+				'post_name',
+			],
+			[
+				'post_name' => $guest_author_record->post_name,
+			],
+			[
+				'post_name' => $filtered_author_cap_fields['cap-user_login'],
+			],
+			true,
+			'Guest Author Fields',
+			'Post Meta'
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			// Update Post Meta to match WP_User fields
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Guest Author Fields']}%n to %G%U{$value['Post Meta']}%n\n" );
+				if ( 'post_name' === $key ) {
+					if ( ! str_starts_with( $filtered_author_cap_fields['cap-user_login'], 'cap-' ) ) {
+						$cap_user_login = 'cap-' . $filtered_author_cap_fields['cap-user_login'];
+					}
+
+					if ( $cap_user_login !== $value['Guest Author Fields'] ) {
+						$wpdb->update(
+							$wpdb->postmeta,
+							[
+								'meta_value' => $cap_user_login,
+							],
+							[
+								'meta_key' => 'cap-user_login',
+								'post_id' => $guest_author_id,
+							]
+						);
+					}
+				}
+			}
+		}
+
+		echo WP_CLI::colorize( "%BGuest Author Record vs WP_Terms%n\n");
+		$comparison = $this->output_value_comparison_table(
+			[
+				'name',
+				'slug',
+			],
+			[
+				'name' => $guest_author_record->post_title,
+				'slug' => $filtered_author_cap_fields['cap-user_login'],
+			],
+			[
+				'name' => $term->name,
+				'slug' => $term->slug,
+			],
+			true,
+			'Guest Author Record',
+			'Author Term'
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Author Term']}%n to %G%U{$value['Guest Author Record']}%n\n" );
+				$wpdb->update(
+					$wpdb->terms,
+					[
+						$key => $value['Guest Author Record'],
+					],
+					[
+						'term_id' => $term->term_id,
+					]
+				);
+			}
+		}
+
+		$this->update_author_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+	}
+
+	private function procure_unique_user_login( $user_login ) {
+		$user_by_login = get_user_by( 'login', $user_login );
+		$guest_author_by_login = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', $user_login );
+
+		if ( $user_by_login || $guest_author_by_login ) {
+			$user_login = $this->ask_prompt( "User login '$user_login' already exists. Please enter a new user login, or (h)alt execution: " );
+
+			if ( 'h' === $user_login ) {
+				die();
+			}
+
+			$this->procure_unique_user_login( $user_login );
+		}
+
+		return $user_login;
+	}
+	private function fix_standalone_wp_user_author_term_data( WP_User $user, $term ) {
+		echo WP_CLI::colorize( "%BWP_User vs Author Term Fields%n\n");
+		global $wpdb;
+
+		$user_login = $user->user_login;
+		if ( is_email( $user_login ) ) {
+			echo WP_CLI::colorize( "%YUser login is an email and must be updated: $user_login%n\n" );
+			$user_login = $this->procure_unique_user_login(
+				substr( $user_login, 0, strpos( $user_login, '@' ) )
+			);
+
+			$updated = $wpdb->update(
+				$wpdb->users,
+				[
+					'user_login' => $user_login,
+				],
+				[
+					'ID' => $user->ID,
+				]
+			);
+
+			if ( $updated ) {
+				$user->user_login = $user_login;
+			}
+		}
+
+		$this->high_contrast_output( 'user_login', $user->user_login );
+		$this->update_user_nicename_if_necessary( $user );
+
+		$comparison = $this->output_value_comparison_table(
+			[
+				'name',
+				'slug',
+			],
+			[
+				'name' => $user->user_login,
+				'slug' => 'cap-' . $user->user_nicename,
+			],
+			[
+				'name' => $term->name,
+				'slug' => $term->slug,
+			],
+			true,
+			'WP_User',
+			'Author Term'
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			// Update Post Meta to match WP_User fields
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['Author Term']}%n to %G%U{$value['WP_User']}%n\n" );
+				$wpdb->update(
+					$wpdb->terms,
+					[
+						$key => $value['WP_User'],
+					],
+					[
+						'term_id' => $term->term_id,
+					]
+				);
+			}
+		}
+
+		$this->update_author_description( $user, $term );
+	}
+
+	private function handle_fixing_standalone_guest_author_data( $guest_author_id, $term ) {
+		global $wpdb;
+
+		echo WP_CLI::colorize( "%BGuest Author Record%n\n" );
+		$this->output_post_table( [ $guest_author_id ] );
+		$post = get_post( $guest_author_id );
+		echo WP_CLI::colorize( "%BAuthor Term%n\n" );
+		$this->output_terms_table( [ $term->term_id ] );
+		$filtered_author_cap_fields = $this->get_filtered_cap_fields(
+			$guest_author_id,
+			[
+				'cap-user_login',
+				'cap-user_nicename',
+				'cap-user_email',
+				'cap-linked_account',
+				'cap-display_name',
+			]
+		);
+		echo WP_CLI::colorize( "%BPost Meta Fields%n\n" );
+		$this->output_comparison_table( [], $filtered_author_cap_fields );
+
+		$display_name = $this->ask_prompt( "Use '{$filtered_author_cap_fields['cap-display_name']}' as display_name? (y/n)" );
+		$display_name = strtolower( $display_name );
+
+		if ( 'y' === $display_name ) {
+			$display_name = $filtered_author_cap_fields['cap-display_name'];
+		} else {
+			$display_name = $this->ask_prompt( "Enter display_name:" );
+		}
+
+		$sanitized_display_name = sanitize_title( $display_name );
+		$use_sanitized_display_name_as_user_login = $this->ask_prompt( "Use '$sanitized_display_name' as user_login? (y/n)" );
+		$use_sanitized_display_name_as_user_login = strtolower( $use_sanitized_display_name_as_user_login );
+		if ( 'y' === $use_sanitized_display_name_as_user_login ) {
+			$user_login = $sanitized_display_name;
+		} else {
+			$user_login = $filtered_author_cap_fields['cap-user_login'];
+
+			if ( is_email( $user_login ) ) {
+				$user_login = substr( $user_login, 0, strpos( $user_login, '@' ) );
+			} else {
+				$response = $this->ask_prompt( "Would you like to update user_login ('$user_login')? (y/n)" );
+				$response = strtolower( $response );
+
+				if ( 'y' === $response ) {
+					$user_login = $this->ask_prompt( "Enter user_login:" );
+				}
+			}
+		}
+
+		if ( ! str_starts_with( $user_login, 'cap-' ) ) {
+			$user_login = "cap-$user_login";
+		}
+
+		echo WP_CLI::colorize( "%BUser Login vs CAP User Login%n\n" );
+		$comparison = $this->output_value_comparison_table(
+			[
+				'cap-user_login',
+			],
+			[
+				'cap-user_login' => $user_login,
+			],
+			[
+				'cap-user_login' => $filtered_author_cap_fields['cap-user_login'],
+			]
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['right']}%n to %G%U{$value['left']}%n\n" );
+				$filtered_author_cap_fields['cap-user_login'] = $value['left'];
+				$wpdb->update(
+					$wpdb->postmeta,
+					[
+						'meta_value' => $value['left'],
+					],
+					[
+						'meta_key' => $key,
+						'post_id' => $guest_author_id,
+					]
+				);
+			}
+		}
+
+		echo WP_CLI::colorize( "%BDisplay Name vs WP_Post Title%n\n" );
+		$comparison = $this->output_value_comparison_table(
+			[
+				'post_title',
+			],
+			[
+				'post_name' => $filtered_author_cap_fields['cap-user_login'],
+				'post_title' => $display_name,
+			],
+			[
+				'post_name' => $post->post_name,
+				'post_title' => $post->post_title,
+			]
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['right']}%n to %G%U{$value['left']}%n\n" );
+				$post->$key = $value['left'];
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						$key => $value['left'],
+					],
+					[
+						'id' => $guest_author_id,
+					]
+				);
+			}
+		}
+
+		echo WP_CLI::colorize( "%BCAP Display Name vs Author Term%n\n" );
+		$comparison = $this->output_value_comparison_table(
+			[
+				'name',
+				'slug',
+			],
+			[
+				'name' => $post->post_title,
+				'slug' => $filtered_author_cap_fields['cap-user_login'],
+			],
+			[
+				'name' => $term->name,
+				'slug' => $term->slug,
+			]
+		);
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				echo WP_CLI::colorize( "%wUpdating%n %W$key:%n %C{$value['right']}%n to %G%U{$value['left']}%n\n" );
+				$wpdb->update(
+					$wpdb->terms,
+					[
+						$key => $value['left'],
+					],
+					[
+						'term_id' => $term->term_id,
+					]
+				);
+			}
+		}
+
+		$term_relationship_exists = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->term_relationships WHERE object_id = %d AND term_taxonomy_id = %d",
+				$guest_author_id,
+				$term->term_taxonomy_id
+			)
+		);
+		$term_relationship_exists = ! empty( $term_relationship_exists );
+
+		if ( ! $term_relationship_exists ) {
+			$wpdb->insert(
+				$wpdb->term_relationships,
+				[
+					'object_id' => $guest_author_id,
+					'term_taxonomy_id' => $term->term_taxonomy_id,
+				]
+			);
+		}
+	}
+
+	private function get_author_term_description( $author ) {
+		// @see https://github.com/Automattic/Co-Authors-Plus/blob/e9e76afa767bc325123c137df3ad7af169401b1f/php/class-coauthors-plus.php#L1623
+		$fields = [
+			'display_name',
+			'first_name',
+			'last_name',
+			'user_login',
+			'ID',
+			'user_email',
+		];
+
+		$values = [];
+		foreach ( $fields as $field ) {
+			$values[] = $author->$field;
+		}
+
+		return implode( ' ', $values );
+	}
+
+	private function update_author_description( $user, $term ) {
+		$description = $this->get_author_term_description( $user );
+
+		if ( $description !== $term->description ) {
+			echo WP_CLI::colorize( "%wUpdating%n %Wwp_term_taxonomy.description%n from %C{$term->description}%n to %G%U{$description}%n\n" );
+			global $wpdb;
+			$wpdb->update(
+				$wpdb->term_taxonomy,
+				[
+					'description' => $description,
+				],
+				[
+					'term_taxonomy_id' => $term->term_taxonomy_id,
+				]
+			);
+		}
+	}
+
+	public function cmd_fix_incorrect_author_terms( $args, $assoc_args ) {
+		global $wpdb;
+
+		$unlinked_author_terms = $wpdb->get_results(
+			"SELECT
+                t.term_id,
+                t.name,
+                t.slug,
+                tt.term_taxonomy_id,
+                tt.description
+            FROM $wpdb->terms t 
+            LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+                WHERE tt.taxonomy = 'author' 
+                  AND tt.term_taxonomy_id NOT IN ( 
+                    SELECT 
+                        tr.term_taxonomy_id 
+                    FROM wp_term_relationships tr 
+                        LEFT JOIN wp_posts p ON tr.object_id = p.ID 
+                    WHERE p.post_type = 'guest-author' 
+                  ) AND t.term_id NOT IN (
+                      SELECT
+                          term_id
+                      FROM $wpdb->termmeta 
+                      WHERE meta_key = 'updated_by_fix_incorrect_author_terms'
+                  )"
+		);
+
+		foreach ( $unlinked_author_terms as $author_term ) {
+			echo "\n\n\n";
+			$this->high_contrast_output( 'wp-term.term_id', $author_term->term_id );
+			$this->high_contrast_output( 'wp_term.name', $author_term->name );
+			$this->high_contrast_output( 'wp_term.slug', $author_term->slug );
+			$this->high_contrast_output( 'wp_term.description', $author_term->description );
+			// Confirm that the term does not belong to a Guest Author.
+			// If it does, ensure that the guest author and wp_term fields are correct.
+			// Insert relationship into wp_term_relationships.
+			// If does not belong to a GA, then look for a WP_User with the same email or user ID.
+			// If found, ensure that the wp_user and wp_term fields are correct.
+
+			$description_id    = $this->extract_id_from_description( $author_term->description );
+			$description_email = $this->extract_email_from_term_description( $author_term->description );
+//			$this->high_contrast_output( 'Description ID', $description_id );
+//			$this->high_contrast_output( 'Description Email', $description_email );
+
+			$guest_author_post = $this->get_guest_author_post_by_id( $description_id );
+
+			if ( null === $guest_author_post ) {
+				echo WP_CLI::colorize( "%wGuest Author not found. Dealing with a WP_User?%n\n");
+				// Confirm slug does not result in wp_post
+				$guest_author_by_post_name_query = "SELECT * FROM $wpdb->posts WHERE post_type = 'guest-author' AND post_name = %s";
+				$guest_author_records = $wpdb->get_results(
+					$wpdb->prepare(
+						$guest_author_by_post_name_query,
+						$author_term->slug
+					)
+				);
+
+				if ( empty( $guest_author_records ) ) {
+					// Check one more time, with modified slug
+					if ( str_starts_with( $author_term->slug, 'cap-' ) ) {
+						$modified_slug = substr( $author_term->slug, 4 );
+					} else {
+						$modified_slug = 'cap-' . $author_term->slug;
+					}
+
+					$guest_author_records = $wpdb->get_results(
+						$wpdb->prepare(
+							$guest_author_by_post_name_query,
+							$modified_slug
+						)
+					);
+				}
+
+				if ( ! empty( $guest_author_records ) ) {
+					$count = count( $guest_author_records );
+					echo WP_CLI::colorize( "%w$count Guest Author posts found for $author_term->slug.%n\n");
+					// Multiple Guest Author records exist. These need to be merged.
+					if ( $count === 1 ) {
+						// Guest Author Record exists, but is not tied to the author term.
+
+						$this->fix_author_term_data_from_guest_author(
+							$guest_author_records[0]->ID,
+							$author_term,
+							$this->get_user_from_possible_identifiers( $description_id, $description_email )
+						);
+					}
+				} else {
+					echo WP_CLI::colorize( "%wConfirmed no Guest Authors for $author_term->slug.%n\n");
+
+					$user = $this->get_user_from_possible_identifiers( $description_id, $description_email );
+
+					$cap_linked_accounts = $wpdb->get_results(
+						$wpdb->prepare(
+							"SELECT 
+    								p.ID, 
+    								p.post_name, 
+    								p.post_type, 
+    								p.post_title, 
+    								pm.meta_key, 
+    								pm.meta_value 
+								FROM $wpdb->posts p INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
+								WHERE pm.meta_key = 'cap-linked_account' 
+								  AND pm.meta_value = %s",
+							$user->user_login
+						)
+					);
+
+					$count_of_cap_linked_accounts = count( $cap_linked_accounts );
+
+					if ( $count_of_cap_linked_accounts > 1 ) {
+						echo WP_CLI::colorize( "%wMultiple Guest Authors found with cap-linked_account = {$user->user_login}.%n\n");
+						// This is a problem. We need to figure out which one is correct.
+						var_dump( $cap_linked_accounts );
+						echo "Halting execution";
+						die();
+					} else if ( $count_of_cap_linked_accounts === 1 ) {
+						// This means that this guest author is tied to a WP_User, but the wp_term_relationships table doesn't have the record for this guest author record
+						echo WP_CLI::colorize( "%wConfirmed one Guest Author with cap-linked_account = {$user->user_login}.%n\n");
+						$this->high_contrast_output( 'wp_posts.ID', $cap_linked_accounts[0]->ID );
+						$this->high_contrast_output( 'wp_posts.post_name', $cap_linked_accounts[0]->post_name );
+						$this->high_contrast_output( 'wp_posts.post_type', $cap_linked_accounts[0]->post_type );
+
+						// Needs to go through process where WP_User and Guest Author data is handled
+						$this->fix_author_term_data_from_guest_author( $cap_linked_accounts[0]->ID, $author_term, $user );
+						$wpdb->insert(
+							$wpdb->termmeta,
+							[
+								'term_id' => $author_term->term_id,
+								'meta_key' => 'updated_by_fix_incorrect_author_terms',
+								'meta_value' => 1,
+							]
+						);
+						continue;
+					} else {
+						echo WP_CLI::colorize( "%wConfirmed no Guest Authors with cap-linked_account = {$user->user_login}.%n\n");
+					}
+
+					// This is only a WP_User and an Author Term which need to be verified to ensure data points match
+					$this->fix_standalone_wp_user_author_term_data( $user, $author_term );
+					$wpdb->insert(
+						$wpdb->termmeta,
+						[
+							'term_id' => $author_term->term_id,
+							'meta_key' => 'updated_by_fix_incorrect_author_terms',
+							'meta_value' => 1,
+						]
+					);
+				}
+			} else {
+				echo WP_CLI::colorize( "%wGuest Author found.%n\n");
+				// We have a Guest Author, check if GA is linked to WP_User
+				$cap_linked_account = $this->get_filtered_cap_fields( $guest_author_post->ID, [ 'cap-linked_account' ] );
+
+				if ( $cap_linked_account ) {
+					echo WP_CLI::colorize( "%wGuest Author is linked to a WP_User.%n\n");
+					$this->high_contrast_output( 'cap-linked_account', $cap_linked_account['cap-linked_account'] );
+					// Check that the necessary fields are correct along with WP_User fields
+					$this->fix_author_term_data_from_guest_author(
+						$guest_author_post->ID,
+						$author_term,
+						get_user_by( 'user_login', $cap_linked_account['cap-linked_account'] )
+					);
+					$wpdb->insert(
+						$wpdb->termmeta,
+						[
+							'term_id' => $author_term->term_id,
+							'meta_key' => 'updated_by_fix_incorrect_author_terms',
+							'meta_value' => 1,
+						]
+					);
+				} else {
+					echo WP_CLI::colorize( "%wGuest Author is not linked to a WP_User.%n\n");
+					// This is likely a standalone Guest Author, check that the necessary fields are correct.
+					// Check email just to be safe though.
+
+					$user_by_email = get_user_by( 'email', $description_email );
+
+					if ( $user_by_email ) {
+						echo WP_CLI::colorize( "%wWP_User found via email.%n\n");
+						// Check that necessary fields are correct along with WP_User fields
+						$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author_post->ID, $user_by_email );
+						$this->fix_author_term_data_from_guest_author( $guest_author_post->ID, $author_term, $user_by_email );
+					} else {
+						// This is definitely a standalone Guest Author, check that the necessary fields are correct.
+						$this->handle_fixing_standalone_guest_author_data( $guest_author_post->ID, $author_term );
+					}
+					$wpdb->insert(
+						$wpdb->termmeta,
+						[
+							'term_id' => $author_term->term_id,
+							'meta_key' => 'updated_by_fix_incorrect_author_terms',
+							'meta_value' => 1,
+						]
+					);
+				}
+			}
+		}
+	}
+
+	private function get_user_from_possible_identifiers( int $user_id, string $user_email ) {
+		$user_by_id = get_user_by( 'id', $user_id );
+		$user_by_email = get_user_by( 'email', $user_email );
+
+		if ( $user_by_id ) {
+			echo WP_CLI::colorize( "%gWP_User found via ID.%n\n");
+		} else {
+			$user_by_id->ID = PHP_INT_MIN;
+		}
+
+		if ( $user_by_email ) {
+			echo WP_CLI::colorize( "%gWP_User found via email.%n\n");
+		} else {
+			$user_by_email->ID = PHP_INT_MAX;
+		}
+
+		if ( $user_by_id->ID === $user_by_email->ID ) {
+			echo WP_CLI::colorize( "%wWP_User by ID and by email match.%n\n");
+		} else {
+			echo WP_CLI::colorize( "%rWP_User by ID and by email do not match.%n\n");
+			// This is a problem. We need to figure out which one is correct.
+			echo "Halting execution";
+			die();
+		}
+
+		// If $user_by_id and $user_by_email are not the same user, then execution would be halted. So it is safe to do this.
+		return $user_by_id ?: $user_by_email;
+	}
+
+	private function insert_guest_author_term_relationship( int $guest_author_id, int $term_taxonomy_id ) {
+		global $wpdb;
+
+		// Double confirm that the term_taxonomy_id doesn't already have a guest-author tied to it
+		$guest_author_posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				p.ID as post_id, 
+    				p.post_name,
+    				p.post_title,
+    				p.post_type, 
+    				tr.term_taxonomy_id 
+				FROM $wpdb->term_relationships tr LEFT JOIN $wpdb->posts p ON tr.object_id = p.ID 
+				WHERE p.post_type = 'guest-author' AND tr.term_taxonomy_id = %d",
+				$term_taxonomy_id
+			)
+		);
+
+		if ( ! empty( $guest_author_posts ) ) {
+			echo WP_CLI::colorize( "%RGuest Author Relationship already exists for term_taxonomy_id = $term_taxonomy_id%n\n" );
+			foreach ( $guest_author_posts as $guest_author_post ) {
+				$this->high_contrast_output( 'Post ID', $guest_author_post->post_id );
+				$this->high_contrast_output( 'Post name', $guest_author_post->post_name );
+				$this->high_contrast_output( 'Post Title', $guest_author_post->post_title );
+				$this->high_contrast_output( 'Post Type', $guest_author_post->post_type );
+			}
+			die();
+		}
+
+		$term_relationship_insert = $wpdb->insert(
+			$wpdb->term_relationships,
+			[
+				'object_id' => $guest_author_id,
+				'term_taxonomy_id' => $term_taxonomy_id,
+				'term_order' => 0,
+			]
+		);
+
+		if ( $term_relationship_insert ) {
+			echo WP_CLI::colorize( "%wInserted wp_term_relationship record: (object_id: %W{$guest_author_id}%n, term_taxonomy_id: %W{$term_taxonomy_id}%n)%n\n");
+		} else {
+			echo WP_CLI::colorize( "%rUnable to insert wp_term_relationship record.%n\n" );
+		}
+	}
+
+	private function update_user_nicename_if_necessary( WP_User $user ) {
+		global $wpdb;
+
+		$user_nicename = $this->get_user_nicename( $user );
+		$this->high_contrast_output( 'user_nicename', $user_nicename );
+
+		if ( $user_nicename !== $user->user_nicename ) {
+			echo WP_CLI::colorize( "%wUpdating user_nicename%n: " );
+			$user->user_nicename = $user_nicename;
+			$user_updated = $wpdb->update(
+				$wpdb->users,
+				[
+					'user_nicename' => $user_nicename,
+				],
+				[
+					'ID' => $user->ID,
+				]
+			);
+
+			if ( false === $user_updated ) {
+				echo WP_CLI::colorize( "%RFailed%n\n" );
+			} else {
+				echo WP_CLI::colorize( "%GSuccess%n\n" );
+			}
+		}
+	}
+
+	public function create_author_taxonomy_record( $author, int $term_id ) {
+		$coauthor_slug = $author->user_nicename;
+
+		if ( ! str_starts_with( $coauthor_slug, 'cap-' ) ) {
+			$coauthor_slug = "cap-$coauthor_slug";
+		}
+
+		global $wpdb;
+		$slug_exists = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->terms WHERE slug = %s",
+				$coauthor_slug
+			)
+		);
+
+		if ( ! empty( $slug_exists ) ) {
+			echo WP_CLI::colorize( "%YSlug already exists%n\n" );
+			return $slug_exists;
+		}
+
+		$is_tied_to_author_taxonomy = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->term_taxonomy WHERE term_id = %d AND taxonomy = 'author'",
+				$term_id
+			)
+		);
+
+		if ( ! empty( $is_tied_to_author_taxonomy ) ) {
+			echo WP_CLI::colorize( "%YTerm already tied to author taxonomy%n\n" );
+			return $is_tied_to_author_taxonomy;
+		}
+
+		$result = $wpdb->insert(
+			$wpdb->term_taxonomy,
+			[
+				'term_id' => $term_id,
+				'taxonomy' => 'author',
+				'description' => $this->get_author_term_description( $author ),
+				'parent' => 0,
+				'count' => 0,
+			]
+		);
+
+		if ( $result ) {
+			return $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE term_id = %d AND taxonomy = 'author'",
+					$term_id
+				)
+			);
+		} else {
+			return $result;
+		}
 	}
 
 	public function cmd_update_guest_author_slug( $args, $assoc_args )
