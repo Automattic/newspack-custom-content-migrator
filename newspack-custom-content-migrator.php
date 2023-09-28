@@ -87,3 +87,15 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 	)
 );
+
+if ( str_starts_with( phpversion(), '8' ) ) {
+	// The array is keyed with the prefix the class tends to use on commands.
+	// We could load only one publisher at if we wanted to at a later time, but this is good for now.
+	$publishers_on_8 = [
+		'emancipator' => Command\PublisherSpecific\TheEmancipatorMigrator::class,
+	];
+
+	if ( ! empty( $publishers_on_8 ) ) {
+		PluginSetup::register_migrators( $publishers_on_8 );
+	}
+}
