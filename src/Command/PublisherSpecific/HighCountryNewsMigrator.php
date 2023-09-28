@@ -600,7 +600,220 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				],
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-import-issues-as-pages',
+			[ $this, 'import_issues_as_pages' ],
+			[
+				'synopsis'  => [
+					'type'        => 'assoc',
+					'name'        => 'issues-json',
+					'description' => 'Path to the Issues JSON file.',
+					'optional'    => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'blobs-folder-path',
+					'description' => 'Path to the blobs folder.',
+					'optional'    => false,
+				],
+				[
+					'type'        => 'assoc',
+					'name'        => 'pdfurls-json',
+					'description' => 'Path to the PDF URLs JSON file.',
+					'optional'    => false,
+				],
+				'shortdesc' => 'Import issues as pages and clean up issue categories.',
+			]
+		);
 	}
+
+	public function import_issues_as_pages( array $args, array $assoc_args ) {
+//			$block = $this->gutenberg_block_generator->get_homepage_articles_for_category(388);
+//			$my_post = [
+//				'post_title'    => 'My custom page 2',
+//				'post_content'  => serialize_block($block),
+//				'post_status'   => 'publish',
+//				'post_author'   => 1,
+//				'post_type'     => 'page',
+//				'post_parent' => 181243
+//			];
+//
+//			// Insert the post into the database
+//			wp_insert_post( $my_post );
+
+		$command_meta_key     = 'import_issues_as_pages';
+		$command_meta_version = 1;
+		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+
+		$pdfurls_array = [];
+		foreach ( (array) json_decode( file_get_contents( $assoc_args['pdfurls-json'] ), ) as $arr ) {
+			$pdfurls_array[ $arr->UID ] = $arr->pdfurl;
+		}
+
+		$blobs_folder       = rtrim( $assoc_args['blobs-folder-path'], '/' ) . '/';
+		$issues_category_id = $this->get_or_create_category( 'Issues' );
+		$counter            = 0;
+
+		foreach ( $this->json_iterator->items( $assoc_args['issues-json'] ) as $issue ) {
+			$slug = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
+			$name = gmdate( 'F j, Y', strtotime( $issue->effective ) );
+			$cat  = get_category_by_slug( $slug );
+			if ( ! $cat ) {
+				$id  = wp_create_category( $name, $issues_category_id );
+				$cat = get_term( $id, 'category' );
+			}
+			if ( ! $cat instanceof \WP_Term ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find or create category for %s', $issue->{'@id'} ), Logger::ERROR );
+				continue;
+			}
+
+//			if ( MigrationMeta::get( $cat->term_id, $command_meta_key, 'term' ) >= $command_meta_version ) {
+//				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_term_link( $cat->term_id ), $command_meta_version ) );
+//				continue;
+//			}
+
+			$pdf_id       = $this->get_issue_pdf_attachment_id( $issue, $pdfurls_array );
+			$content_args = [
+				'description'         => $issue->description ?? '',
+				'image_attachment_id' => 0,
+				'pdf_id'              => $pdf_id,
+			];
+
+			if ( ! $pdf_id ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find a PDF for %s', $issue->{'@id'} ), Logger::WARNING );
+			}
+
+			if ( ! empty( $issue->image ) ) {
+				$image_id = $this->get_attachment_id_from_issue_image(
+					[
+						'blob_path' => $issue->image->blob_path,
+						'filename'  => $issue->image->filename,
+					],
+					$blobs_folder
+				);
+				if ( ! is_wp_error( $image_id ) ) {
+					if ( ! empty( $issue->title ) ) {
+						wp_update_post( [
+							'ID'           => $image_id,
+							'post_excerpt' => $issue->title,
+						] );
+					}
+
+					$content_args['image_attachment_id'] = $image_id;
+				} else {
+					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
+				}
+			}
+			$page_content = $this->get_issue_page_content_for_category( $cat->term_id, ...$content_args );
+			$post_date = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
+			$page         = [
+				'post_title'    => $name,
+				'post_content'  => $page_content,
+				'post_name'     => $slug,
+				'post_status'   => 'publish',
+				'post_author'   => 1,
+				'post_type'     => 'page',
+				'post_parent'   => 180483, // TODO. Create it on staging and get the ID.
+				'post_category' => [ $cat->term_id ],
+				'post_date' => 		$post_date->format( 'Y-m-d H:i:s'),
+
+			];
+
+			$page_id = wp_insert_post( $page );
+			WP_CLI::log( sprintf( 'Created page %s', get_permalink( $page_id ) ));
+
+			wp_update_term(
+				$cat->term_id,
+				'category',
+				[
+					'name'        => $name,
+					'slug'        => $slug,
+					'description' => '' // Remove the HTML that was already added earlier.
+				] );
+			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
+			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
+			WP_CLI::line( ++ $counter . ': ' );
+		}
+
+	}
+
+	private function get_issue_page_content_for_category( int $category_id, string $description, int $image_attachment_id, int $pdf_id ): string {
+		$left_column_blocks  = [ $this->gutenberg_block_generator->get_paragraph( $description, '', '', 'small' ) ];
+		$right_column_blocks = [];
+		if ( 0 !== $image_attachment_id ) {
+			$img_post              = get_post( $image_attachment_id );
+			$right_column_blocks[] = $this->gutenberg_block_generator->get_image( $img_post, 'full', false );
+		}
+		if ( 0 !== $pdf_id ) {
+			$link = wp_get_attachment_url( $pdf_id );
+			$right_column_blocks[] = $this->gutenberg_block_generator->get_paragraph( '<a href="' . $link . '">Download the Digital Issue</a>' );
+		}
+		$left_column      = $this->gutenberg_block_generator->get_column( $left_column_blocks );
+		$right_column     = $this->gutenberg_block_generator->get_column( $right_column_blocks );
+		$content_blocks[] = $this->gutenberg_block_generator->get_columns( [ $left_column, $right_column ] );
+		$content_blocks[] = $this->gutenberg_block_generator->get_separator( 'is-style-wide' );
+
+		$content_blocks[] = $this->gutenberg_block_generator->get_homepage_articles_for_category(
+			[ $category_id ],
+			[
+				'moreButton'     => true,
+				'moreButtonText' => 'More from this issue',
+				'showAvatar'     => false,
+				'postsToShow'    => 16,
+				'mediaPosition'  => 'left',
+			]
+		);
+
+		return array_reduce(
+			$content_blocks,
+			fn( string $carry, array $item ): string => $carry . serialize_block( $item ),
+			''
+		);
+	}
+
+	private function get_issue_image_html( object $issue, string $blobs_folder ): string {
+		if ( empty( $issue->image ) ) {
+			return '';
+		}
+		$image_id = $this->get_attachment_id_from_issue_image(
+			[
+				'blob_path' => $issue->image->blob_path,
+				'filename'  => $issue->image->filename,
+			],
+			$blobs_folder
+		);
+		if ( is_wp_error( $image_id ) ) {
+			return '';
+		}
+		$title               = $issue->title ?? '';
+		return wp_get_attachment_image( $image_id, [250, 300], false, ['alt' => $title] );
+	}
+
+	private function get_issue_pdf_attachment_id( object $issue, array $pdfurls ): int {
+		// The pagesuite urls all don't work, so no need to try to download them if it's the pagesuite url.
+		if ( ! empty( $issue->digitalEditionURL ) && ! str_starts_with( $issue->digitalEditionURL, 'http://edition.pagesuite-professional' ) ) {
+			$pdf_attachment_id = $this->attachments->import_external_file( $issue->digitalEditionURL );
+			if ( ! is_wp_error( $pdf_attachment_id ) ) {
+				return $pdf_attachment_id;
+			}
+		}
+
+		$effective_date = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
+		$issue_year     = $effective_date->format( 'Y' );
+		// The archived PDFs only go as far as Dec. 1993, but if it's earlier let's see if we have the url
+		if ( $issue_year < 1994 && array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
+			$pdf_name          = 'https://s3.amazonaws.com/hcn-media/archive-pdf/' . $pdfurls[ $issue->UID ];
+			$pdf_attachment_id = $this->attachments->import_external_file( $pdf_name );
+
+			if ( ! is_wp_error( $pdf_attachment_id ) ) {
+				return $pdf_attachment_id;
+			}
+		}
+
+		return 0;
+	}
+
 
 	public function cmd_migrate_authors_from_scrape() {
 		$last_processed_post_id = PHP_INT_MAX;
@@ -2254,12 +2467,16 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	 *
 	 * @param array  $image_data Image data ['blob_path', 'filename'].
 	 * @param string $blob_path Blob path.
-	 * @return int|WP_error attachment ID.
+	 * @return int|\WP_error attachment ID.
 	 */
 	private function get_attachment_id_from_issue_image( $image_data, $blob_path ) {
 		$filename                  = $image_data['filename'];
 		$tmp_destination_file_path = WP_CONTENT_DIR . '/uploads/' . $filename;
 		$file_blob_path            = $blob_path . $image_data['blob_path'];
+		if ( ! file_exists( $file_blob_path ) ) {
+			return new \WP_Error( 'file_not_found', sprintf( 'File %s not found', $file_blob_path ) );
+		}
+
 		file_put_contents( $tmp_destination_file_path, file_get_contents( $file_blob_path ) );
 
 		$attachment_id = $this->attachments->import_external_file( $tmp_destination_file_path, $image_data['filename'] );
