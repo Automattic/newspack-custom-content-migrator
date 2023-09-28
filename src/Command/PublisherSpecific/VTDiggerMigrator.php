@@ -3456,7 +3456,7 @@ HTML;
 	 *
 	 * @return array|null
 	 */
-	public function get_acf_author_meta( string $author_name ) : array|null {
+	public function get_acf_author_meta( string $author_name ) {
 		global $wpdb;
 
 		$post_id = $wpdb->get_var(
