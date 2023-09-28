@@ -1126,9 +1126,15 @@ class TaxonomyMigrator implements InterfaceCommand {
 			}
 
 			WP_CLI::line( "Adding count: $taxonomy_record->count to main count: $first_taxonomy_record->count" );
-			$update_count_sql = "UPDATE $wpdb->term_taxonomy SET count = count + $taxonomy_record->count WHERE term_taxonomy_id = $first_taxonomy_record->term_taxonomy_id";
-			$this->output_sql( $update_count_sql );
-			$update_count = $wpdb->query( $update_count_sql );
+			$update_count = $wpdb->update(
+				$wpdb->term_taxonomy,
+				[
+					'count' => $first_taxonomy_record->count + $taxonomy_record->count,
+				],
+				[
+					'term_taxonomy_id' => $first_taxonomy_record->term_taxonomy_id,
+				]
+			);
 
 			if ( false !== $update_count ) {
 				$this->output( 'Count updated.', '%C' );
@@ -1192,10 +1198,10 @@ class TaxonomyMigrator implements InterfaceCommand {
 	public function delete_loose_terms( array $term_ids = [] ) {
 		global $wpdb;
 		$imploded_term_ids  = implode( ', ', $term_ids );
-		$loose_term_ids_sql = "SELECT * FROM $wpdb->terms t 
+		$loose_term_ids_sql = "SELECT t.term_id, wtt.term_taxonomy_id FROM $wpdb->terms t 
     		LEFT JOIN $wpdb->term_taxonomy wtt on t.term_id = wtt.term_id 
-			WHERE t.term_id IN ($imploded_term_ids) AND wtt.term_taxonomy_id IS NULL";
-		$this->output_sql( $imploded_term_ids );
+			WHERE t.term_id IN ( $imploded_term_ids ) AND wtt.term_taxonomy_id IS NULL";
+		$this->output_sql( $loose_term_ids_sql );
 		$loose_term_ids = $wpdb->get_results( $loose_term_ids_sql );
 
 		if ( ! empty( $loose_term_ids ) ) {
@@ -1203,12 +1209,18 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 			$this->output( 'Deleting loose term_ids: ' . implode( ', ', $loose_term_ids ) );
 			foreach ( $loose_term_ids as $loose_term_id ) {
-				$wpdb->delete(
+				$result = $wpdb->delete(
 					$wpdb->terms,
 					[
 						'term_id' => $loose_term_id,
 					]
 				);
+
+				if ( ! $result ) {
+					$this->output( "Unable to delete term_id: $loose_term_id" );
+				} else {
+					$this->output( "Deleted term_id: $loose_term_id" );
+				}
 			}
 		}
 	}
@@ -1393,7 +1405,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$this->setup();
 
 		$main_term_id       = intval( $assoc_args['main-term-id'] );
-		$other_term_ids     = intval( $assoc_args['other-term-ids'] );
+		$other_term_ids     = $assoc_args['other-term-ids'];
 		$include_taxonomies = $assoc_args['include-taxonomies'] ?? [];
 		$exclude_taxonomies = $assoc_args['exclude-taxonomies'] ?? [];
 		$new_taxonomy       = $assoc_args['new-taxonomy'];
@@ -1407,8 +1419,9 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$exclude_taxonomies = explode( ',', $exclude_taxonomies );
 		}
 
-		if ( ! is_array( $other_term_ids ) ) {
-			$other_term_ids = [ $other_term_ids ];
+		if ( ! empty( $other_term_ids ) ) {
+			$other_term_ids = explode( ',', $other_term_ids );
+			$other_term_ids = array_map( fn( $other_term_id ) => intval( $other_term_id ), $other_term_ids );
 		}
 
 		$this->merge_terms(

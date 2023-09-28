@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.5.0
+ * Version:     1.5.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -23,7 +23,6 @@ require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
-PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
 	array(
 		// General.
@@ -67,6 +66,7 @@ PluginSetup::register_migrators(
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
 		Command\General\ChorusCmsMigrator::class,
+		Command\General\LedeMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -80,6 +80,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
+		Command\PublisherSpecific\CCMMigrator::class,
 		Command\PublisherSpecific\RenoMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
@@ -87,5 +88,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
+		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 	)
 );
