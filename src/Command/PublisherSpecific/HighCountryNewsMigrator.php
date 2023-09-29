@@ -628,112 +628,126 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function import_issues_as_pages( array $args, array $assoc_args ) {
-//			$block = $this->gutenberg_block_generator->get_homepage_articles_for_category(388);
-//			$my_post = [
-//				'post_title'    => 'My custom page 2',
-//				'post_content'  => serialize_block($block),
-//				'post_status'   => 'publish',
-//				'post_author'   => 1,
-//				'post_type'     => 'page',
-//				'post_parent' => 181243
-//			];
-//
-//			// Insert the post into the database
-//			wp_insert_post( $my_post );
+	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = 'import_issues_as_pages';
 		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 
+		// cat HCNNewsArticle.json | jq '. [] | select(."pdfurl"|test("pdf$")) | {UID: .parent.UID, pdfurl}' | jq -s . > pdfurls.json
 		$pdfurls_array = [];
 		foreach ( (array) json_decode( file_get_contents( $assoc_args['pdfurls-json'] ), ) as $arr ) {
 			$pdfurls_array[ $arr->UID ] = $arr->pdfurl;
 		}
 
+		global $wpdb;
 		$blobs_folder       = rtrim( $assoc_args['blobs-folder-path'], '/' ) . '/';
 		$issues_category_id = $this->get_or_create_category( 'Issues' );
-		$counter            = 0;
+		$issues_parent_page_post_id = 180504;
 
 		foreach ( $this->json_iterator->items( $assoc_args['issues-json'] ) as $issue ) {
-			$slug = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
-			$name = gmdate( 'F j, Y', strtotime( $issue->effective ) );
-			$cat  = get_category_by_slug( $slug );
+			$slug      = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
+			$post_date           = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
+			$issue_name = $post_date->format( 'F j, Y' );
+
+			$cat = get_category_by_slug( $slug );
 			if ( ! $cat ) {
-				$id  = wp_create_category( $name, $issues_category_id );
+				$id = wp_insert_category( [
+					'cat_name'          => $slug,
+					'category_nicename' => $issue_name,
+					'category_parent'   => $issues_category_id
+				] );
+
 				$cat = get_term( $id, 'category' );
 			}
 			if ( ! $cat instanceof \WP_Term ) {
 				$this->logger->log( $log_file, sprintf( 'Could not find or create category for %s', $issue->{'@id'} ), Logger::ERROR );
 				continue;
 			}
+			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
+
 
 //			if ( MigrationMeta::get( $cat->term_id, $command_meta_key, 'term' ) >= $command_meta_version ) {
 //				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_term_link( $cat->term_id ), $command_meta_version ) );
 //				continue;
 //			}
+			$post_date_formatted = $post_date->format( 'Y-m-d H:i:s' );
 
-			$pdf_id       = $this->get_issue_pdf_attachment_id( $issue, $pdfurls_array );
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_issue_page_UID' AND meta_value = %s",
+					$issue->UID,
+				)
+			);
+			if ( ! $post_id ) {
+				$post_id = wp_insert_post( [
+					'post_title'   => $issue_name,
+					'post_content' => '',
+					'post_name'    => $slug,
+					'post_date'    => $post_date_formatted,
+					'post_category' => [ $cat->term_id, $issues_category_id ],
+				] );
+				WP_CLI::log( sprintf( 'Created page %s', get_permalink( $post_id ) ) );
+			}
+
+			$pdf_id = $this->get_issue_pdf_attachment_id( $post_id, $issue, $pdfurls_array );
+			if ( ! $pdf_id ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find a PDF for %s', $issue->{'@id'} ), Logger::WARNING );
+			}
+
 			$content_args = [
 				'description'         => $issue->description ?? '',
 				'image_attachment_id' => 0,
 				'pdf_id'              => $pdf_id,
 			];
 
-			if ( ! $pdf_id ) {
-				$this->logger->log( $log_file, sprintf( 'Could not find a PDF for %s', $issue->{'@id'} ), Logger::WARNING );
-			}
-
 			if ( ! empty( $issue->image ) ) {
-				$image_id = $this->get_attachment_id_from_issue_image(
-					[
-						'blob_path' => $issue->image->blob_path,
-						'filename'  => $issue->image->filename,
-					],
-					$blobs_folder
+				$blob_file_path = trailingslashit( realpath( $blobs_folder ) ) . $issue->image->blob_path;
+				$image_id       = $this->attachments->import_attachment_for_post(
+					$post_id,
+					$blob_file_path,
+					'Magazine cover: ' . $issue_name,
+					[],
+					$issue->image->filename
 				);
-				if ( ! is_wp_error( $image_id ) ) {
-					if ( ! empty( $issue->title ) ) {
-						wp_update_post( [
-							'ID'           => $image_id,
-							'post_excerpt' => $issue->title,
-						] );
-					}
 
+				if ( ! is_wp_error( $image_id ) ) {
 					$content_args['image_attachment_id'] = $image_id;
 				} else {
 					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
 				}
 			}
 			$page_content = $this->get_issue_page_content_for_category( $cat->term_id, ...$content_args );
-			$post_date = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
 			$page         = [
-				'post_title'    => $name,
+				'ID'            => $post_id,
+				'post_title'    => $issue_name,
 				'post_content'  => $page_content,
 				'post_name'     => $slug,
 				'post_status'   => 'publish',
 				'post_author'   => 1,
 				'post_type'     => 'page',
-				'post_parent'   => 180483, // TODO. Create it on staging and get the ID.
-				'post_category' => [ $cat->term_id ],
-				'post_date' => 		$post_date->format( 'Y-m-d H:i:s'),
-
+				'post_parent'   => $issues_parent_page_post_id,
+				'post_category' => [ $cat->term_id, $issues_category_id ],
+				'post_date'     => $post_date_formatted,
+				'meta_input'    => [
+					'plone_issue_page_UID' => $issue->UID,
+				]
 			];
 
-			$page_id = wp_insert_post( $page );
-			WP_CLI::log( sprintf( 'Created page %s', get_permalink( $page_id ) ));
+			wp_update_post( $page );
+			update_post_meta( $page['ID'], 'plone_issue_page_UID', $issue->UID );
+			WP_CLI::log( sprintf( 'Updated issue page %s', get_permalink( $page['ID'] ) ) );
 
 			wp_update_term(
 				$cat->term_id,
 				'category',
 				[
-					'name'        => $name,
+					'name'        => $issue_name,
 					'slug'        => $slug,
 					'description' => '' // Remove the HTML that was already added earlier.
 				] );
 			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
 			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
-			WP_CLI::line( ++ $counter . ': ' );
 		}
 
 	}
@@ -790,10 +804,10 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		return wp_get_attachment_image( $image_id, [250, 300], false, ['alt' => $title] );
 	}
 
-	private function get_issue_pdf_attachment_id( object $issue, array $pdfurls ): int {
+	private function get_issue_pdf_attachment_id( int $post_id, object $issue, array $pdfurls ): int {
 		// The pagesuite urls all don't work, so no need to try to download them if it's the pagesuite url.
 		if ( ! empty( $issue->digitalEditionURL ) && ! str_starts_with( $issue->digitalEditionURL, 'http://edition.pagesuite-professional' ) ) {
-			$pdf_attachment_id = $this->attachments->import_external_file( $issue->digitalEditionURL );
+			$pdf_attachment_id = $this->attachments->import_external_file( $issue->digitalEditionURL, null, null, null, null, $post_id  );
 			if ( ! is_wp_error( $pdf_attachment_id ) ) {
 				return $pdf_attachment_id;
 			}
@@ -804,7 +818,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		// The archived PDFs only go as far as Dec. 1993, but if it's earlier let's see if we have the url
 		if ( $issue_year < 1994 && array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
 			$pdf_name          = 'https://s3.amazonaws.com/hcn-media/archive-pdf/' . $pdfurls[ $issue->UID ];
-			$pdf_attachment_id = $this->attachments->import_external_file( $pdf_name );
+			$pdf_attachment_id = $this->attachments->import_external_file( $pdf_name,null, null, null, null, $post_id );
 
 			if ( ! is_wp_error( $pdf_attachment_id ) ) {
 				return $pdf_attachment_id;
