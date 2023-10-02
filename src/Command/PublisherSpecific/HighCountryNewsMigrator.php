@@ -97,15 +97,13 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			'description' => 'Path to the articles JSON file.',
 			'optional'    => false,
 		];
-
-		$issues_json_arg = [
-			'synopsis'  => [
-				'type'        => 'assoc',
-				'name'        => 'issues-json',
-				'description' => 'Path to the Issues JSON file.',
-				'optional'    => false,
-			],
+		$issues_json_arg   = [
+			'type'        => 'assoc',
+			'name'        => 'issues-json',
+			'description' => 'Path to the Issues JSON file.',
+			'optional'    => false,
 		];
+
 
 		WP_CLI::add_command(
 			'newspack-content-migrator highcountrynews-migrate-authors-from-scrape',
@@ -322,7 +320,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Fix posts categories and tags.',
 				'synopsis'  => array(
-					$articles_json_arg,
+					[
+						$articles_json_arg,
+					],
 					array(
 						'type'        => 'assoc',
 						'name'        => 'batch',
@@ -347,7 +347,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Generate redirects CSV file.',
 				'synopsis'  => array(
-					$articles_json_arg,
+					[
+						$articles_json_arg,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'output-dir',
@@ -378,7 +380,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Generate redirects.',
 				'synopsis'  => array(
-					$articles_json_arg,
+					[
+						$articles_json_arg,
+						],
 				),
 			)
 		);
@@ -389,7 +393,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Migrate Headlines.',
 				'synopsis'  => array(
-					$articles_json_arg,
+					[
+						$articles_json_arg,
+					],
 					array(
 						'type'        => 'assoc',
 						'name'        => 'batch',
@@ -414,7 +420,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Migrate related stories.',
 				'synopsis'  => array(
-					$articles_json_arg,
+					[
+						$articles_json_arg,
+					],
 					array(
 						'type'        => 'assoc',
 						'name'        => 'batch',
@@ -570,13 +578,11 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Deletes categories that were really articles.',
 				'synopsis'  => [
-					'synopsis'  => [
-						[
-							'type'        => 'flag',
-							'name'        => 'dry-run',
-							'optional'    => true,
-							'description' => 'Whether to do a dry-run without making updates.',
-						],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
 					],
 				],
 			)
@@ -586,14 +592,15 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			'newspack-content-migrator highcountrynews-import-issues-as-pages',
 			[ $this, 'import_issues_as_pages' ],
 			[
-				'synopsis'  => $issues_json_arg,
-				[
-					'type'        => 'assoc',
-					'name'        => 'blobs-folder-path',
-					'description' => 'Path to the blobs folder.',
-					'optional'    => false,
+				'synopsis' => [
+					$issues_json_arg,
+					[
+						'type'        => 'assoc',
+						'name'        => 'blobs-folder-path',
+						'description' => 'Path to the blobs folder.',
+						'optional'    => false,
+					],
 				],
-
 				'shortdesc' => 'Import issues as pages and clean up issue categories.',
 			]
 		);
@@ -602,7 +609,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			'newspack-content-migrator highcountrynews-delete-download-entire-issue-posts',
 			[ $this, 'delete_download_entire_issue_posts' ],
 			[
-				'synopsis'  => $articles_json_arg,
+				'synopsis'  => [
+					$articles_json_arg,
+				],
 				'shortdesc' => 'Delete all the "Download entire issue" posts that are obsolete because we now have pages for issues that include the download.',
 			]
 		);
@@ -685,7 +694,7 @@ QUERY;
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = 'import_issues_as_pages';
-		$command_meta_version = 2;
+		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 
 		$pdfurls_array = $this->get_pdf_urls_from_json( $assoc_args['articles-json'] );
