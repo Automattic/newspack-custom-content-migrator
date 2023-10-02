@@ -97,6 +97,16 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			'description' => 'Path to the articles JSON file.',
 			'optional'    => false,
 		];
+
+		$issues_json_arg = [
+			'synopsis'  => [
+				'type'        => 'assoc',
+				'name'        => 'issues-json',
+				'description' => 'Path to the Issues JSON file.',
+				'optional'    => false,
+			],
+		];
+
 		WP_CLI::add_command(
 			'newspack-content-migrator highcountrynews-migrate-authors-from-scrape',
 			[ $this, 'cmd_migrate_authors_from_scrape' ],
@@ -508,12 +518,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array(
 				'shortdesc' => 'Migrate Issues meta data.',
 				'synopsis'  => array(
-					[
-						'type'        => 'assoc',
-						'name'        => 'issues-json',
-						'description' => 'Path to the Issues JSON file.',
-						'optional'    => false,
-					],
+					$issues_json_arg,
 					[
 						'type'        => 'assoc',
 						'name'        => 'blobs-folder-path',
@@ -529,14 +534,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			array( $this, 'hcn_fix_issues_categories_slug' ),
 			array(
 				'shortdesc' => 'Fix Issues categories slug.',
-				'synopsis'  => array(
-					[
-						'type'        => 'assoc',
-						'name'        => 'issues-json',
-						'description' => 'Path to the Issues JSON file.',
-						'optional'    => false,
-					],
-				),
+				'synopsis'  => [
+						$issues_json_arg,
+				],
 			)
 		);
 
@@ -586,12 +586,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			'newspack-content-migrator highcountrynews-import-issues-as-pages',
 			[ $this, 'import_issues_as_pages' ],
 			[
-				'synopsis'  => [
-					'type'        => 'assoc',
-					'name'        => 'issues-json',
-					'description' => 'Path to the Issues JSON file.',
-					'optional'    => false,
-				],
+				'synopsis'  => $issues_json_arg,
 				[
 					'type'        => 'assoc',
 					'name'        => 'blobs-folder-path',
@@ -602,6 +597,53 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 				'shortdesc' => 'Import issues as pages and clean up issue categories.',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator highcountrynews-delete-download-entire-issue-posts',
+			[ $this, 'delete_download_entire_issue_posts' ],
+			[
+				'synopsis'  => $articles_json_arg,
+				'shortdesc' => 'Delete all the "Download entire issue" posts that are obsolete because we now have pages for issues that include the download.',
+			]
+		);
+
+	}
+
+	/**
+	 * There were a bunch of posts that are now obsolete because we have pages for issues that include the download.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException
+	 */
+	public function delete_download_entire_issue_posts( array $args, array $assoc_args ): void {
+		$uids_to_delete          = [];
+		$articles_json_file_path = $assoc_args['articles-json'];
+		$jq_query                = <<<QUERY
+cat $articles_json_file_path | jq '. [] | select(."id"|test("download-entire-issue")) | .UID' | jq -rs @csv
+QUERY;
+		exec( $jq_query, $output_array );
+		if ( ! empty( $output_array[0] ) ) {
+			$uids_to_delete = str_getcsv( $output_array[0] );
+		}
+		if ( empty( $uids_to_delete ) ) {
+			WP_CLI::error( 'No posts to delete.' );
+		}
+
+		$counter = 0;
+		$total   = count( $uids_to_delete );
+		foreach ( $uids_to_delete as $uid ) {
+			WP_CLI::log( sprintf( 'Processing (%d/%d): %s', ++ $counter, $total, $uid ) );
+
+			$post_id = $this->get_post_id_from_uid( $uid );
+			if ( empty( $post_id ) ) {
+				WP_CLI::warning( sprintf( 'Could not find post for %s', $uid ) );
+				continue;
+			}
+			wp_delete_post( $post_id );
+		}
 	}
 
 	/**
@@ -664,7 +706,7 @@ QUERY;
 
 			$slug       = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
 			$post_date  = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
-			$issue_name = $post_date->format( 'F j, Y' );
+			$issue_name = $post_date->format( 'Y' ) . ' Magazine: ' . $post_date->format( 'F j' ) . ': ' . $issue->title;
 
 			$cat = get_category_by_slug( $slug );
 			if ( ! $cat ) {
@@ -689,6 +731,20 @@ QUERY;
 			}
 			$post_date_formatted = $post_date->format( 'Y-m-d H:i:s' );
 
+			$page_data          = [
+				'post_title'    => $issue_name,
+				'post_name'     => $slug,
+				'post_status'   => 'publish',
+				'post_author'   => 1,
+				'post_type'     => 'page',
+				'post_parent'   => $issues_parent_page_post_id,
+				'post_category' => [ $cat->term_id, $issues_category_id ],
+				'post_date'     => $post_date_formatted,
+				'meta_input'    => [
+					'plone_issue_page_UID' => $issue->UID,
+				]
+			];
+
 			$post_id = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_issue_page_UID' AND meta_value = %s",
@@ -696,13 +752,7 @@ QUERY;
 				)
 			);
 			if ( ! $post_id ) {
-				$post_id = wp_insert_post( [
-					'post_title'    => $issue_name,
-					'post_content'  => '',
-					'post_name'     => $slug,
-					'post_date'     => $post_date_formatted,
-					'post_category' => [ $cat->term_id, $issues_category_id ],
-				] );
+				$post_id = wp_insert_post( $page_data );
 				$this->logger->log( $log_file, sprintf( 'Created page for issue %s', $issue->{'@id'} ), Logger::SUCCESS );
 			}
 
@@ -729,26 +779,12 @@ QUERY;
 				}
 			}
 
-			$page_content = $this->get_issue_page_content_for_category( $cat->term_id, $issue->description ?? '', $image_id, $pdf_id );
-			$page         = [
-				'ID'            => $post_id,
-				'post_title'    => $issue_name,
-				'post_content'  => $page_content,
-				'post_name'     => $slug,
-				'post_status'   => 'publish',
-				'post_author'   => 1,
-				'post_type'     => 'page',
-				'post_parent'   => $issues_parent_page_post_id,
-				'post_category' => [ $cat->term_id, $issues_category_id ],
-				'post_date'     => $post_date_formatted,
-				'meta_input'    => [
-					'plone_issue_page_UID' => $issue->UID,
-				]
-			];
+			$page_data['ID'] = $post_id;
+			$page_data['post_content'] = $this->get_issue_page_content_for_category( $cat->term_id, $issue->description ?? '', $image_id, $pdf_id );
 
-			wp_update_post( $page );
-			update_post_meta( $page['ID'], 'plone_issue_page_UID', $issue->UID );
-			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page['ID'] ) ), Logger::SUCCESS );
+			wp_update_post( $page_data );
+			update_post_meta( $page_data['ID'], 'plone_issue_page_UID', $issue->UID );
+			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page_data['ID'] ) ), Logger::SUCCESS );
 
 			wp_update_term(
 				$cat->term_id,
@@ -756,7 +792,7 @@ QUERY;
 				[
 					'name'        => $issue_name,
 					'slug'        => $slug,
-					'description' => '' // Remove the HTML that was already added earlier on issues.
+					'description' => '' // Remove the HTML if it was already added earlier on issues.
 				] );
 			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
 			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
@@ -809,22 +845,43 @@ QUERY;
 		);
 	}
 
+	/**
+	 * Tries various tricks to get the PDF attachment ID for an issue.
+	 *
+	 * @param int $post_id The post ID to attach the PDF to.
+	 * @param object $issue The issue object.
+	 * @param array $pdfurls array of UID => pdfurl. See get_pdf_urls_from_json().
+	 *
+	 * @return int The attachment ID or 0 if not found.
+	 * @throws Exception
+	 */
 	private function get_issue_pdf_attachment_id( int $post_id, object $issue, array $pdfurls ): int {
-		// The pagesuite urls all don't work, so no need to try to download them if it's the pagesuite url.
-		if ( ! empty( $issue->digitalEditionURL ) && ! str_starts_with( $issue->digitalEditionURL, 'http://edition.pagesuite-professional' ) ) {
-			$pdf_attachment_id = $this->attachments->import_external_file( $issue->digitalEditionURL, null, null, null, null, $post_id  );
+		if ( array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
+			$pdf_url          = 'https://s3.amazonaws.com/hcn-media/archive-pdf/' . $pdfurls[ $issue->UID ];
+			$pdf_attachment_id = $this->attachments->import_attachment_for_post(
+				$post_id,
+				$pdf_url,
+			);
 			if ( ! is_wp_error( $pdf_attachment_id ) ) {
 				return $pdf_attachment_id;
 			}
 		}
 
-		$effective_date = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
-		$issue_year     = $effective_date->format( 'Y' );
-		// The archived PDFs only go as far as Dec. 1993, but if it's earlier let's see if we have the url
-		if ( $issue_year < 1994 && array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
-			$pdf_name          = 'https://s3.amazonaws.com/hcn-media/archive-pdf/' . $pdfurls[ $issue->UID ];
-			$pdf_attachment_id = $this->attachments->import_external_file( $pdf_name,null, null, null, null, $post_id );
-
+		// The pagesuite urls all don't work, so no need to try to download them if it's the pagesuite url.
+		if ( ! empty( $issue->digitalEditionURL ) && ! str_starts_with( $issue->digitalEditionURL, 'http://edition.pagesuite-professional' ) ) {
+			$filename = basename( $issue->digitalEditionURL );
+			// Create a filename for the ones that don't have a .pdf extension.
+			if ( ! str_ends_with( $filename, '.pdf' ) ) {
+				$effective_date = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
+				$filename       = 'issue-' . $effective_date->format( 'Y_m_d' ) . '.pdf';
+			}
+			$pdf_attachment_id = $this->attachments->import_attachment_for_post(
+				$post_id,
+				$issue->digitalEditionURL,
+				'',
+				[],
+				$filename
+			);
 			if ( ! is_wp_error( $pdf_attachment_id ) ) {
 				return $pdf_attachment_id;
 			}
@@ -2455,6 +2512,28 @@ QUERY;
 
 			WP_CLI::success( "Redirects CSV file generated: $output_file_path" );
 		}
+	}
+
+	/**
+	 * Helper to get post ID from the Plone ID.
+	 *
+	 * @param string $uid Plone ID
+	 *
+	 * @return int Post ID or 0 if we couldn't find it.
+	 */
+	private function get_post_id_from_uid( string $uid ): int {
+		global $wpdb;
+		$post_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_article_UID' AND meta_value = %s",
+				$uid
+			)
+		);
+		if ( ! empty( $post_id ) ) {
+			return (int) $post_id;
+		}
+
+		return 0;
 	}
 
 	/**
