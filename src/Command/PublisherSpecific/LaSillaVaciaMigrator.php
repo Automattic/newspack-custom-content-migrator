@@ -668,8 +668,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     /**
      * {@inheritDoc}
      */
-    public function register_commands()
-    {
+    public function register_commands() {
         WP_CLI::add_command(
             'newspack-content-migrator la-silla-vacia-establish-taxonomy',
             [ $this, 'establish_taxonomy' ],
@@ -1396,8 +1395,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
 	    );
     }
 
-    private function reset_db()
-    {
+    private function reset_db() {
         WP_CLI::runcommand(
             'db reset --yes --defaults',
             [
@@ -1421,8 +1419,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
     /**
      * @void
      */
-    public function establish_taxonomy()
-    {
+    public function establish_taxonomy() {
         $this->create_categories( $this->category_tree );
 
         foreach ( $this->tags as $tag ) {
@@ -1434,8 +1431,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      * @param array $categories
      * @param int $parent_id
      */
-    public function create_categories( array $categories, int $parent_id = 0 )
-    {
+    public function create_categories( array $categories, int $parent_id = 0 ) {
         foreach ($categories as $category) {
             $created_category_id = wp_create_category( $category['name'], $parent_id );
 
@@ -1452,8 +1448,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      * @param string $json_path
      * @return Generator
      */
-    private function json_generator( string $file, string $json_path = '' )
-    {
+    private function json_generator( string $file, string $json_path = '' ) {
         $file = file_get_contents( $file );
         $json = json_decode( $file, true );
 
@@ -1475,8 +1470,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      * @param $args
      * @param $assoc_args
      */
-    public function migrate_authors( $args, $assoc_args )
-    {
+    public function migrate_authors( $args, $assoc_args ) {
 		$specific_emails = isset( $assoc_args['emails-csv'] ) ? explode( ',', $assoc_args['emails-csv'] ) : null;
 		$media_location = $assoc_args['media-location'];
 
@@ -1922,8 +1916,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand
      * @param $args
      * @param $assoc_args
      */
-    public function migrate_expertos_as_guest_authors( $args, $assoc_args )
-    {
+    public function migrate_expertos_as_guest_authors( $args, $assoc_args ) {
 		$media_location = $assoc_args['media-location'];
 
 	    $specific_fullnames = isset( $assoc_args['fullnames-csv'] ) ? explode( ',', $assoc_args['fullnames-csv'] ) : null;

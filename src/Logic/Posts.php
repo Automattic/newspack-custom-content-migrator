@@ -43,6 +43,16 @@ class Posts {
 		return $ids;
 	}
 
+	/**
+	 * This function conveniently returns all post IDs in a given range.
+	 *
+	 * @param int          $from_id From Post ID.
+	 * @param int          $to_id  To Post ID.
+	 * @param array        $post_types Target Post Types.
+	 * @param string|array $post_status Target Post Statuses.
+	 *
+	 * @return array
+	 */
 	public function get_post_ids_in_range( int $from_id, int $to_id, array $post_types, $post_status = '' ): array {
 		if ( empty( $post_status ) ) {
 			$post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ];

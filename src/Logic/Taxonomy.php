@@ -99,8 +99,10 @@ class Taxonomy {
 			where tt.taxonomy = %s and t.name = %s and tt.parent = %d;";
 
 		// First try with converting name chars to HTML entities.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$existing_term_id = $wpdb->get_var(
 			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 				$query_prepare,
 				$taxonomy,
 				htmlentities( $name ),
@@ -110,8 +112,10 @@ class Taxonomy {
 
 		// Try without converting name chars to HTML entities.
 		if ( ! $existing_term_id ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$existing_term_id = $wpdb->get_var(
 				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 					$query_prepare,
 					$taxonomy,
 					$name,
@@ -221,8 +225,8 @@ class Taxonomy {
 
 		if ( ! empty( $taxonomies ) ) {
 			$query .= 'AND tt.taxonomy IN ( '
-			          . implode(',', array_fill( 0, count( $taxonomies ), '%s' ) )
-			          . ' )';
+					  . implode( ',', array_fill( 0, count( $taxonomies ), '%s' ) )
+					  . ' )';
 		}
 
 		$query .= ' ORDER BY t.term_id, tt.term_taxonomy_id ASC';
