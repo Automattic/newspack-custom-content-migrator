@@ -138,9 +138,9 @@ class Taxonomy {
 
 		$existing_term_id = $wpdb->get_var(
 			$wpdb->prepare(
-				"select t.term_id 
+				"select t.term_id
 					from {$wpdb->terms} t
-					join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+					join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id
 					where tt.taxonomy = %s and t.name = %s and tt.parent = %d;",
 				$taxonomy,
 				htmlentities( $name ),
@@ -177,9 +177,9 @@ class Taxonomy {
 		if ( 0 != $cat_parent_id ) {
 			$existing_cat_parent_id = $wpdb->get_var(
 				$wpdb->prepare(
-					"select t.term_id 
+					"select t.term_id
 						from {$wpdb->terms} t
-						join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+						join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id
 						where tt.taxonomy = 'category' and tt.term_id = %d;",
 					$cat_parent_id
 				)
@@ -209,12 +209,12 @@ class Taxonomy {
 		global $wpdb;
 
 		return $wpdb->get_results(
-			"SELECT 
-			t.slug, 
+			"SELECT
+			t.slug,
 			GROUP_CONCAT( DISTINCT tt.taxonomy ORDER BY tt.taxonomy SEPARATOR ', ' ) as taxonomies,
-			GROUP_CONCAT( 
-			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy ) 
-			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  ' 
+			GROUP_CONCAT(
+			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy )
+			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  '
 			    ) as 'term_id:term_taxonomy_id:taxonomy',
 			COUNT( DISTINCT tt.term_taxonomy_id ) as term_taxonomy_id_count
 			FROM $wpdb->terms t
@@ -236,21 +236,21 @@ class Taxonomy {
 	public function get_terms_and_taxonomies_by_slug( string $slug, array $taxonomies = [ 'category', 'post_tag' ] ) {
 		global $wpdb;
 
-		$query = "SELECT 
-	                t.term_id, 
-	                t.name, t.slug, 
-	                tt.term_taxonomy_id, 
-	                tt.taxonomy, 
-	                tt.parent, 
-	                tt.count 
+		$query = "SELECT
+	                t.term_id,
+	                t.name, t.slug,
+	                tt.term_taxonomy_id,
+	                tt.taxonomy,
+	                tt.parent,
+	                tt.count
 				FROM $wpdb->terms t
 				INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 				WHERE t.slug = %s";
 
 		if ( ! empty( $taxonomies ) ) {
 			$query .= 'AND tt.taxonomy IN ( '
-			          . implode(',', array_fill( 0, count( $taxonomies ), '%s' ) )
-			          . ' )';
+					  . implode( ',', array_fill( 0, count( $taxonomies ), '%s' ) )
+					  . ' )';
 		}
 
 		$query .= ' ORDER BY t.term_id, tt.term_taxonomy_id ASC';
