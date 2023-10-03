@@ -48,6 +48,33 @@ class Taxonomy {
 		$source_term_taxonomy_id      = $this->get_term_taxonomy_id_by_term_id( $source_term_id );
 		$destination_term_taxonomy_id = $this->get_term_taxonomy_id_by_term_id( $destination_term_id );
 
+		// Get post IDs with both categories.
+		$posts_with_both_categories = get_posts(
+			[
+				'fields'         => 'ids',
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'tax_query'      => [
+					'relation' => 'AND',
+					[
+						'taxonomy' => 'category',
+						'field'    => 'term_taxonomy_id',
+						'terms'    => [ $source_term_taxonomy_id ],
+					],
+					[
+						'taxonomy' => 'category',
+						'field'    => 'term_taxonomy_id',
+						'terms'    => [ $destination_term_taxonomy_id ],
+					],
+				],
+			]
+		);
+
+		// Delete the source category from those posts.
+		if ( ! empty( $posts_with_both_categories ) ) {
+			$this->delete_object_relational_mapping_term_taxonomy_id( $source_term_taxonomy_id, $posts_with_both_categories );
+		}
+
 		$this->update_object_relational_mapping_term_taxonomy_id( $source_term_taxonomy_id, $destination_term_taxonomy_id );
 
 		$this->fix_taxonomy_term_counts( 'category' );
@@ -77,7 +104,23 @@ class Taxonomy {
 	public function update_object_relational_mapping_term_taxonomy_id( $old_term_taxonomy_id, $new_term_taxonomy_id ) {
 		global $wpdb;
 
-		return $wpdb->get_var( $wpdb->prepare( "UPDATE {$wpdb->term_relationships} SET term_taxonomy_id = %d WHERE term_taxonomy_id = %d ;", $new_term_taxonomy_id, $old_term_taxonomy_id ) );
+		return $wpdb->update( $wpdb->term_relationships, [ 'term_taxonomy_id' => $new_term_taxonomy_id ], [ 'term_taxonomy_id' => $old_term_taxonomy_id ] );
+	}
+
+	/**
+	 * Runs a direct DB DELETE on wp_term_relationships table and deletes all rows with a given term_taxonomy_id and post_ids.
+	 *
+	 * @param int   $term_taxonomy_id Term_taxonomy_id.
+	 * @param array $post_ids          Post IDs.
+	 *
+	 * @return string|null Return from $wpdb::query().
+	 */
+	public function delete_object_relational_mapping_term_taxonomy_id( $term_taxonomy_id, $post_ids ) {
+		global $wpdb;
+
+		$object_id_placeholders = implode( ', ', array_fill( 0, count( $post_ids ), '%d' ) );
+
+		return $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->term_relationships} WHERE object_id IN( $object_id_placeholders ) and term_taxonomy_id = %d", array_merge( $post_ids, [ $term_taxonomy_id ] ) ) ); //phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
 
 	/**
