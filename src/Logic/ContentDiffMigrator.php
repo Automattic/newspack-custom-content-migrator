@@ -21,6 +21,9 @@ use wpdb;
  */
 class ContentDiffMigrator {
 
+	// Postmeta telling us what the old live ID was.
+	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
+
 	// Data array keys.
 	const DATAKEY_POST              = 'post';
 	const DATAKEY_POSTMETA          = 'postmeta';
@@ -173,6 +176,67 @@ class ContentDiffMigrator {
 		$results = is_null( $results ) ? [] : $results;
 
 		return $results;
+	}
+
+	/**
+	 * Gets a list of all Attachments imported by Content Diff, "old_id"=>"new_id" IDs mapping from the postmeta.
+	 *
+	 * @return array Imported attachment IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_attachment_id_mapping_from_db(): array {
+
+		$attachment_ids_map = [];
+
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					WHERE wpm.meta_key = %s
+					AND wp.post_type = 'attachment';",
+				self::SAVED_META_LIVE_POST_ID,
+			),
+			ARRAY_A
+		);
+		foreach ( $results as $result ) {
+			$attachment_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $attachment_ids_map;
+	}
+
+	/**
+	 * Gets an array of all Post IDs imported by Content Diff, their "old_id"=>"new_id" from the postmeta.
+	 *
+	 * @return array Imported post and pages IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_post_id_mapping_from_db( $post_types = [ 'post', 'page' ] ): array {
+
+		$post_ids_map = [];
+
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- placeholders generated dynamically.
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					WHERE wpm.meta_key = %s
+					AND wp.post_type IN ( {$post_types_placeholders} );",
+				array_merge(
+					[ self::SAVED_META_LIVE_POST_ID ] ,
+					$post_types
+				)
+			),
+			ARRAY_A
+		);
+		// phpcs:disable
+
+		foreach ( $results as $result ) {
+			$post_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $post_ids_map;
 	}
 
 	/**
@@ -959,7 +1023,14 @@ class ContentDiffMigrator {
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
 			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
 			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
-			$live_term_name         = $live_term_row['name'];
+
+			// Validate live term row, it could be missing or invalid.
+			if ( is_null( $live_term_row ) ) {
+				$error_messages[] = sprintf( 'Faulty term relationship record in live DB, term skipped: posts.ID=%d > term_relationships has term_taxonomy_id=%d > term_taxonomy has term_id=%d >> term_id does not exist in live DB table.', $data['post']['ID'], $live_term_taxonomy_id, $live_term_taxonomy_row['term_id'] );
+				continue;
+			}
+
+			$live_term_name = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
@@ -1046,51 +1117,83 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array  $imported_post_ids_map   Keys are Post IDs on Live Site, values are Post IDs of imported posts on Local Site.
-	 *                                        Will only update attachments for these Posts (e.g. an existing Post could
-	 *                                        legitimately have an att.ID 123, and then another newly imported Post could also have
-	 *                                        had att.ID 123 which has changed to 456 after import. We only want to update the
-	 *                                        newly imported Post's att.ID from 123 to 456, not the existing Post's.
-	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
-	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
-	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
-	 *                                        detailed output of all the changes made.
+	 * @param array  $imported_post_ids           Imported local Post IDs.
+	 * @param array  $imported_attachment_ids_map Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param string $log_file_path               Optional. Full path to a log file. If provided, the method will save and append
+	 *                                            a detailed output of all the changes made.
+	 * @param bool   $dry_run                     If true, will not make changes to DB, and will output changes to CLI instead of
+	 *                                            saving them to $log_file_path.
 	 */
-	public function update_featured_images( $imported_post_ids_map, $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
-		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
-			return [];
+	public function update_featured_images( $imported_post_ids, $imported_attachment_ids_map, $log_file_path, $dry_run = false ) {
+		if ( empty( $imported_post_ids ) || empty( $imported_attachment_ids_map ) ) {
+			return;
 		}
 
-		$newly_imported_post_ids = array_values( $imported_post_ids_map );
+		/**
+		 * This command will only update '_thumbnail_id's for Posts which were imported by the Content Diff (not any other Posts).
+		 *
+		 * Explanation why:
+		 * for example, we could have imported two different attachments:
+		 *      {"post_type":"attachment","id_old":1111,"id_new":999}
+		 *      {"post_type":"attachment","id_old":1223,"id_new":1111}
+		 * and let's say these two posts exist on Staging:
+		 *      - first with '_thumbnail_id' 1111
+		 *          --> this one needs to be updated from 1111 to 999
+		 *      - second with '_thumbnail_id' 1111, but let's say this post was created directly on Staging and it used the second attachment with Staging ID 1111
+		 *          --> this one's _thumbnail_id should be updated from 1111 to 999
+		 *
+		 * Therefore this command will only update '_thumbnail_id's for those Posts that were imported by the Content Diff.
+		 */
 
-		$postmeta_table = $this->wpdb->postmeta;
-		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
-		$sql            = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		// phpcs:ignore -- wpdb::prepare is used by wrapper.
-		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
+		// Loop through posts and update their _thumbnail_id if needed.
+		foreach ( $imported_post_ids as $new_post_id ) {
 
-		foreach ( $results as $key_result => $result ) {
-			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
-			$post_id = $result['post_id'] ?? null;
-			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
+			// Get Post's current _thumbnail_id.
+			// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- correctly prepared.
+			$current_thumbnail_id = $this->wpdb->get_var(
+				$this->wpdb->prepare(
+					"SELECT meta_value
+					FROM {$this->wpdb->postmeta}
+					WHERE meta_key = '_thumbnail_id'
+					AND post_id = %d",
+					$new_post_id
+				)
+			);
+			// phpcs:enable
+
+			// Check if this _thumbnail_id is used as a key in $imported_attachment_ids_map (keys are "old_id"s, values are "new_id"s).
+			if ( ! $current_thumbnail_id || ! array_key_exists( $current_thumbnail_id, $imported_attachment_ids_map ) ) {
 				continue;
 			}
 
-			$old_id = $result['meta_value'] ?? null;
-			$new_id = $imported_attachment_ids[ $result['meta_value'] ] ?? null;
-			if ( ! is_null( $new_id ) ) {
-				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result['meta_id'] ] );
-				// Log.
-				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$this->log(
-						$log_file_path,
-						json_encode(
-							[
-								'id_old' => (int) $old_id,
-								'id_new' => (int) $new_id,
-							]
-						)
-					);
+			// Get the new _thumbnail_id and update it.
+			$new_thumbnail_id = $imported_attachment_ids_map[ $current_thumbnail_id ];
+			if ( $dry_run ) {
+				$updated = 1;
+			} else {
+				$updated = $this->wpdb->update(
+					$this->wpdb->postmeta,
+					[ 'meta_value' => $new_thumbnail_id ],
+					[
+						'post_id'  => $new_post_id,
+						'meta_key' => '_thumbnail_id',
+					]
+				);
+			}
+
+			// Log.
+			if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+				$msg = json_encode(
+					[
+						'post_id' => (int) $new_post_id,
+						'id_old'  => (int) $current_thumbnail_id,
+						'id_new'  => (int) $new_thumbnail_id,
+					]
+				);
+				if ( $dry_run ) {
+					WP_CLI::line( 'Updating _thubnail_id id_old=>id_new ' . $msg );
+				} else {
+					$this->log( $log_file_path, $msg );
 				}
 			}
 		}
@@ -2632,6 +2735,8 @@ class ContentDiffMigrator {
 	 * @return int Inserted User ID.
 	 */
 	public function insert_user( $user_row ) {
+		$old_user_id = $user_row['ID'];
+
 		$insert_user_row = $user_row;
 		unset( $insert_user_row['ID'] );
 
@@ -2639,6 +2744,19 @@ class ContentDiffMigrator {
 		if ( 1 != $inserted ) {
 			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) );
 		}
+
+		// Last inserted ID.
+		$new_user_id = $this->wpdb->insert_id;
+
+		// Save original user ID as usermeta.
+		$this->wpdb->insert(
+			$this->wpdb->usermeta,
+			[
+				'user_id'    => $new_user_id,
+				'meta_key'   => self::SAVED_META_LIVE_POST_ID,
+				'meta_value' => $old_user_id,
+			]
+		);
 
 		return $this->wpdb->insert_id;
 	}
@@ -2897,7 +3015,7 @@ class ContentDiffMigrator {
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
-	public function validate_core_wp_db_tables( $table_prefix, $skip_tables = [] ) {
+	public function validate_core_wp_db_tables_exist_in_db( $table_prefix, $skip_tables = [] ) {
 		$all_tables = $this->get_all_db_tables();
 		foreach ( self::CORE_WP_TABLES as $table ) {
 			if ( in_array( $table, $skip_tables ) ) {
@@ -2974,8 +3092,9 @@ class ContentDiffMigrator {
 	 * @return array
 	 */
 	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
+		$collation_comparison = $this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables );
 		return array_filter(
-			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
+			$collation_comparison,
 			fn( $validated_table ) => false === $validated_table['match_bool']
 		);
 	}
@@ -3045,7 +3164,6 @@ class ContentDiffMigrator {
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
-			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );

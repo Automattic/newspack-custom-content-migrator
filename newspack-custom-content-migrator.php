@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.3.3
+ * Version:     1.5.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -21,8 +21,8 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 
 require_once ABSPATH . 'wp-settings.php';
 
+PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
-PluginSetup::setup_wordpress_importer();
 PluginSetup::register_migrators(
 	array(
 		// General.
@@ -58,19 +58,31 @@ PluginSetup::register_migrators(
 		Command\General\ContentFixerMigrator::class,
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
+		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
+		Command\General\PloneCMSMigrator::class,
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
+		Command\General\UsersMigrator::class,
+		Command\General\EmbarcaderoMigrator::class,
+		Command\General\ChorusCmsMigrator::class,
+		Command\General\LedeMigrator::class,
+		Command\General\DownloadMissingImages::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
+		Command\PublisherSpecific\SearchLightNMMigrator::class,
+		Command\PublisherSpecific\CalMattersMigrator::class,
+		Command\PublisherSpecific\HighCountryNewsMigrator::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Command\PublisherSpecific\SentinelColoradoMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,
 		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
+		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
+		Command\PublisherSpecific\CCMMigrator::class,
 		Command\PublisherSpecific\RenoMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
@@ -78,6 +90,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
+		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 		Command\PublisherSpecific\BaristanetMigrator::class,
 	)
 );

@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Logic;
 
 use \WP_CLI;
+use WP_Error;
 
 class Attachments {
 	/**
@@ -15,7 +16,7 @@ class Attachments {
 	 * @return mixed ID of the imported media file.
 	 */
 	public function import_media_from_path( $file ) {
-		$options = [ 'return' => true, ];
+		$options = [ 'return' => true ];
 		$id      = WP_CLI::runcommand( "media import $file --title='favicon' --porcelain", $options );
 
 		return $id;
@@ -53,10 +54,31 @@ class Attachments {
 			$tmpfname = wp_tempnam( $path );
 			copy( $path, $tmpfname );
 		}
+
+		if ( ! file_exists( $tmpfname ) || filesize( $tmpfname ) < 1 ) {
+			return new WP_Error( sprintf( 'File %s was not found or it was empty', $path ) );
+		}
+
 		$file_array = [
 			'name'     => wp_basename( $path ),
 			'tmp_name' => $tmpfname,
 		];
+
+		// If the path does not have a file extension, let's try to find one for it.
+		// Without the extension, the upload will fail because WP will not allow that "file type".
+		if ( ! pathinfo( $path, PATHINFO_EXTENSION ) ) {
+			$mimetype           = mime_content_type( $tmpfname );
+			$probably_extension = array_search( $mimetype, wp_get_mime_types() );
+			if ( ! empty( $probably_extension ) ) {
+				$file_array['name'] .= '.' . $probably_extension;
+			}
+		}
+
+		$maybe_exising_attachment_id = $this->maybe_get_existing_attachment_id( $file_array['tmp_name'], $file_array['name'] );
+		if ( null !== $maybe_exising_attachment_id ) {
+			@unlink( $file_array['tmp_name'] );
+			return $maybe_exising_attachment_id;
+		}
 
 		if ( $title ) {
 			$args['post_title'] = $title;
@@ -84,14 +106,54 @@ class Attachments {
 	}
 
 	/**
+	 * Try to get the attachment ID for a file if one just like it has already been uploaded.
+	 *
+	 * @param string $filepath The path on the file system of the file to check if we have already uploaded.
+	 * @param string $filename (Optional) The file name including file extension – exclude if it is on the file path.
+	 *
+	 * @return int|null Attachment ID if found, null otherwise.
+	 */
+	public function maybe_get_existing_attachment_id( string $filepath, string $filename = '' ) {
+		if ( ! file_exists( $filepath ) ) {
+			return null;
+		}
+
+		if ( empty( $filename ) ) {
+			$filename = basename( $filepath );
+		}
+
+		global $wpdb;
+		$like = '%' . $wpdb->esc_like( $filename );
+		$sql  = $wpdb->prepare(
+			"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
+			$like
+		);
+
+		foreach ( $wpdb->get_col( $sql ) as $attachment_id ) {
+
+			$candidate_path = get_attached_file( $attachment_id );
+			// Check the file sizes first. It's a fast operation and will save us from having to do the md5 check.
+			if ( ! file_exists( $candidate_path ) || ( filesize( $candidate_path ) !== filesize( $filepath ) ) ) {
+				continue;
+			}
+
+			if ( md5_file( $candidate_path ) === md5_file( $filepath ) ) {
+				return $attachment_id;
+			}       
+		}
+
+		return null;
+	}
+
+	/**
 	 * Return broken attachment URLs from posts.
 	 *
-	 * @param int[]     $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
-	 * @param boolean   $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
-	 * @param integer   $posts_per_batch Total of posts tohandle per batch.
-	 * @param integer   $batch Current batch in the loop.
-	 * @param integer   $start_index Index from where to start the loop.
-	 * @param func|null $logger Method to log results.
+	 * @param int[]         $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
+	 * @param boolean       $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
+	 * @param integer       $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer       $batch Current batch in the loop.
+	 * @param integer       $start_index Index from where to start the loop.
+	 * @param callable|null $logger Method to log results.
 	 *
 	 * @return mixed[] Array of the broken URLs indexed by the post IDs.
 	 */
@@ -99,14 +161,14 @@ class Attachments {
 		$broken_images = [];
 
 		$posts = get_posts(
-            [
+			[
 				'posts_per_page' => $posts_per_batch,
 				'paged'          => $batch,
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ),
 				'post__in'       => $post_ids,
 			]
-        );
+		);
 
 		$total_posts = count( $posts );
 		$logs        = file_exists( 'broken_media_urls_batch.log' ) ? file_get_contents( 'broken_media_urls_batch.log' ) : '';
@@ -137,12 +199,12 @@ class Attachments {
 
 				if ( is_wp_error( $image_request ) ) {
 					WP_CLI::warning(
-                        sprintf(
-                            'Local image ID (%s) returned an error: %s',
-                            $image_url_to_check,
-                            $image_request->get_error_message()
-                        )
-                    );
+						sprintf(
+							'Local image ID (%s) returned an error: %s',
+							$image_url_to_check,
+							$image_request->get_error_message()
+						)
+					);
 
 					$broken_post_images[] = $image_url_to_check;
 
@@ -241,7 +303,7 @@ class Attachments {
 		$attachment_id = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
-				'%' . $filename . '%',
+				'%' . $filename,
 			),
 		);
 
