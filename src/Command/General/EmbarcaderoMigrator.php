@@ -594,10 +594,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Imported post %d/%d: %d with the ID %d', $post_index + 1, count( $posts ), $post['story_id'], $wp_post_id ), Logger::SUCCESS );
-
-			if ( 2000 === $post_index ) {
-				break;
-			}
 		}
 	}
 
