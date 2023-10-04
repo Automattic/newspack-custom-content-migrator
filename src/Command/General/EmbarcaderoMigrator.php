@@ -50,7 +50,7 @@ use \WP_CLI;
  *       --print-pdf-dir-path=/path/to/morguepdf \
  *       --print-cover-dir-path=/path/to/covers
  *
- * *** One method to fix CSVs which can't be read (because of quotes in wrong places):
+ * *** How to fix CSVs if migrator reports that some rows can't be read (different count of header columns and found data columns for a row):
  *  1. convert your CSV to TSV using OSX's Pages
  *  2. feed the TSV to the helper command embarcadero-helper-fix-tsv-file and get a new fixed TSV file
  *  3. feed the new fixed TSV file instead of the --csv-file= argument in the import command -- it will also accept TSVs, even though the argument name says CSV
