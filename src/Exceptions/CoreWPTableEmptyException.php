@@ -16,7 +16,7 @@ class CoreWPTableEmptyException extends \Exception {
 	 */
 	public function __construct( array $tables ) {
 		$this->tables = $tables;
-		parent::__construct( sprintf( 'The following core WP Tables are empty: %s' , implode( $this->tables ) ) );
+		parent::__construct( sprintf( 'The following core WP Tables are empty: %s', implode( $this->tables ) ) );
 	}
 
 	/**
@@ -24,8 +24,7 @@ class CoreWPTableEmptyException extends \Exception {
 	 *
 	 * @return string[]
 	 */
-	public function get_tables(): array
-	{
+	public function get_tables(): array {
 		return $this->tables;
 	}
 }
