@@ -898,6 +898,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $comments as $comment_index => $comment ) {
+			if ( empty( $comment['comment'] ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Skipping empty comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ), Logger::LINE );
+				continue;
+			}
+
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ), Logger::LINE );
 
 			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $comment['topic_id'] );
@@ -910,30 +915,40 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Get or create subscriber user.
 			$user_index = array_search( $comment['user_id'], array_column( $users, 'user_id' ) );
 			if ( false === $user_index ) {
+				// Will skip providing user data.
+				$wp_user = null;
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find user %s for the comment %d', $comment['user_id'], $comment['comment_id'] ), Logger::WARNING );
-				continue;
+			} else {
+				// Get WP_User object.
+				$raw_user = $users[ $user_index ];
+
+				// Update default email.
+				if ( 'blank' == $raw_user['email'] ) {
+					// Using "@newspack.com" for security reasons (a valid domain not owned by us or the Publisher could emulate this email).
+					$raw_user['email'] = uniqid() . '@newspack.com';
+				}
+
+				$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
+
+				if ( is_wp_error( $wp_user_id ) ) {
+					$wp_user    = null;
+					$wp_user_id = null;
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', $wp_user_id->get_error_message() ), Logger::WARNING );
+				} else {
+					$wp_user = get_user_by( 'id', $wp_user_id );
+				}
 			}
 
-			$raw_user = $users[ $user_index ];
-
-			$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
-
-			if ( is_wp_error( $wp_user_id ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'], $wp_user_id->get_error_message() ), Logger::WARNING );
-				$wp_user_id = null;
-			}
-
-			$wp_user = get_user_by( 'id', $wp_user_id );
 
 			$comment_data = [
 				'comment_post_ID'      => $wp_post_id,
 				'comment_approved'     => 'no' === $comment['hide'],
-				'user_id'              => $wp_user->ID,
-				'comment_author'       => $wp_user->user_login,
-				'comment_author_email' => $wp_user->user_email,
-				'comment_author_url'   => $wp_user->user_url,
-				'comment_author_IP'    => $comment['ip_address'],
-				'comment_content'      => $comment['comment'],
+				'user_id'              => $wp_user ? $wp_user->ID : '',
+				'comment_author'       => $wp_user ? $wp_user->user_login : '',
+				'comment_author_email' => $wp_user ? $wp_user->user_email : '',
+				'comment_author_url'   => $wp_user ? $wp_user->user_url : '',
+				'comment_author_IP'    => $comment['ip_address'] ?? '',
+				'comment_content'      => $comment['comment'] ?? '',
 				'comment_date_gmt'     => gmdate( 'Y-m-d H:i:s', $comment['posted_epoch'] ),
 				'comment_meta'         => [],
 			];
@@ -1287,21 +1302,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$wp_user_id = wp_create_user( $email_address, wp_generate_password(), $email_address );
 		if ( is_wp_error( $wp_user_id ) ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Could not create user %s: %s', $full_name, $wp_user_id->get_error_message() ), Logger::ERROR );
+		} else {
+
+			// Set the Contributor role.
+			$user = new \WP_User( $wp_user_id );
+			$user->set_role( $role );
+
+			// Set WP User display name.
+			wp_update_user(
+				[
+					'ID'           => $wp_user_id,
+					'display_name' => $full_name,
+					'first_name'   => current( explode( ' ', $full_name ) ),
+					'last_name'    => join( ' ', array_slice( explode( ' ', $full_name ), 1 ) ),
+				]
+			);
 		}
 
-		// Set the Contributor role.
-		$user = new \WP_User( $wp_user_id );
-		$user->set_role( $role );
-
-		// Set WP User display name.
-		wp_update_user(
-			[
-				'ID'           => $wp_user_id,
-				'display_name' => $full_name,
-				'first_name'   => current( explode( ' ', $full_name ) ),
-				'last_name'    => join( ' ', array_slice( explode( ' ', $full_name ), 1 ) ),
-			]
-		);
 
 		return $wp_user_id;
 	}
