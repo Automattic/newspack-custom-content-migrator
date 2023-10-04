@@ -786,6 +786,8 @@ QUERY;
 
 				if ( ! is_wp_error( $image_attachment_id ) ) {
 					$image_id = $image_attachment_id;
+					$page_data['meta_input']['_thumbnail_id'] = $image_id;
+					$page_data['meta_input']['newspack_featured_image_position'] = 'hidden';
 				} else {
 					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
 				}
