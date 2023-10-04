@@ -11,6 +11,7 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Exceptions\CoreWPTableEmptyException;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
+use RuntimeException;
 use WP_CLI;
 
 /**
@@ -386,7 +387,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		global $wpdb;
 		try {
 			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
-		} catch ( \RuntimeException $e ) {
+		} catch ( RuntimeException $e ) {
 			WP_CLI::warning( $e->getMessage() );
 			WP_CLI::line( "Now running command `newspack-content-migrator correct-collations-for-live-wp-tables --live-table-prefix={$live_table_prefix} --mode=generous --skip-tables=options` ..." );
 			$this->cmd_correct_collations_for_live_wp_tables(
@@ -511,7 +512,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		// Validate DBs.
 		try {
 			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
-		} catch ( \RuntimeException $e ) {
+		} catch ( RuntimeException $e ) {
 			WP_CLI::warning( $e->getMessage() );
 			WP_CLI::line( "Now running command `newspack-content-migrator correct-collations-for-live-wp-tables --live-table-prefix={$live_table_prefix} --mode=generous --skip-tables=options` ..." );
 			$this->cmd_correct_collations_for_live_wp_tables(
@@ -1178,7 +1179,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param string $where_operand           Search operand, can be '==' or '!='.
 	 * @param bool   $return_first            If true, return just the first matched entry, otherwise returns all matched entries.
 	 *
-	 * @throws \RuntimeException In case an unsupported $where_operand was given.
+	 * @throws RuntimeException In case an unsupported $where_operand was given.
 	 *
 	 * @return array Found results. Mind that if $return_first is true, it will return a one-dimensional array,
 	 *               and if $return_first is false, it will return two-dimensional array with all matched elements as subarrays.
@@ -1189,7 +1190,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		// Validate $where_operand.
 		if ( ! in_array( $where_operand, $supported_where_operands ) ) {
-			throw new \RuntimeException( sprintf( 'Where operand %s is not supported.', $where_operand ) );
+			throw new RuntimeException( sprintf( 'Where operand %s is not supported.', $where_operand ) );
 		}
 
 		foreach ( $imported_posts_log_data as $entry ) {
@@ -1331,14 +1332,14 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param array  $skip_tables       Core WP DB tables to skip (without prefix).
 	 *
 	 * @return void
-	 * @throws \RuntimeException In case that table collations do not match.
+	 * @throws RuntimeException In case that table collations do not match.
 	 * @throws CoreWPTableEmptyException In case that some of the core WP tables are empty.
 	 */
 	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
 		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
 
 		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix, $skip_tables ) ) {
-			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
+			throw new RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
 
 		self::$logic->validate_core_wp_db_tables_are_not_empty( $live_table_prefix, $skip_tables );
