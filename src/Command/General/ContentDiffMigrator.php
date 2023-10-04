@@ -1311,7 +1311,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * Handles CoreWPTableEmptyException.
 	 *
 	 * @param CoreWPTableEmptyException $e
-	 * @param array $ignore_empty_tables
+	 * @param array                     $ignore_empty_tables
 	 *
 	 * @return void
 	 */
@@ -1333,7 +1333,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @return void
 	 * @throws \RuntimeException In case that table collations do not match
 	 * @throws CoreWPTableEmptyException In case that some of the core WP tables are empty
-	 *
 	 */
 	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
 		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
@@ -1342,7 +1341,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
 
-        self::$logic->validate_core_wp_db_tables_are_not_empty( $live_table_prefix, $skip_tables );
+		self::$logic->validate_core_wp_db_tables_are_not_empty( $live_table_prefix, $skip_tables );
 	}
 
 	/**
