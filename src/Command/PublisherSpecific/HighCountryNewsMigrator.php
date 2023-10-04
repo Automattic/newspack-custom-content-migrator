@@ -594,6 +594,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			[
 				'synopsis' => [
 					$issues_json_arg,
+					$articles_json_arg,
 					[
 						'type'        => 'assoc',
 						'name'        => 'blobs-folder-path',
@@ -706,6 +707,8 @@ QUERY;
 		$blobs_folder               = rtrim( $assoc_args['blobs-folder-path'], '/' ) . '/';
 		$issues_category_id         = $this->get_or_create_category( 'Issues' );
 		$issues_parent_page_post_id = 180504;
+		$default_author = 223746;
+		$the_magazine_tag_id = 7640;
 
 		$total_issues = $this->json_iterator->count_json_array_entries( $assoc_args['issues-json'] );
 		$counter      = 0;
@@ -715,7 +718,7 @@ QUERY;
 
 			$slug       = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
 			$post_date  = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
-			$issue_name = $post_date->format( 'Y' ) . ' Magazine: ' . $post_date->format( 'F j' ) . ': ' . $issue->title;
+			$issue_name = $post_date->format( 'F j, Y' ) . ': ' . $issue->title;
 
 			$cat = get_category_by_slug( $slug );
 			if ( ! $cat ) {
@@ -744,7 +747,7 @@ QUERY;
 				'post_title'    => $issue_name,
 				'post_name'     => $slug,
 				'post_status'   => 'publish',
-				'post_author'   => 1,
+				'post_author'   => $default_author, // We don't bother finding an author – it's not displayed on the current live site either.
 				'post_type'     => 'page',
 				'post_parent'   => $issues_parent_page_post_id,
 				'post_category' => [ $cat->term_id, $issues_category_id ],
@@ -792,6 +795,7 @@ QUERY;
 			$page_data['post_content'] = $this->get_issue_page_content_for_category( $cat->term_id, $issue->description ?? '', $image_id, $pdf_id );
 
 			wp_update_post( $page_data );
+			wp_set_post_tags( $post_id, [ $the_magazine_tag_id ], true  );
 			update_post_meta( $page_data['ID'], 'plone_issue_page_UID', $issue->UID );
 			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page_data['ID'] ) ), Logger::SUCCESS );
 
