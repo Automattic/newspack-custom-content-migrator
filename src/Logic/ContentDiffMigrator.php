@@ -2736,6 +2736,8 @@ class ContentDiffMigrator {
 	 * @return int Inserted User ID.
 	 */
 	public function insert_user( $user_row ) {
+		$old_user_id = $user_row['ID'];
+
 		$insert_user_row = $user_row;
 		unset( $insert_user_row['ID'] );
 
@@ -2743,6 +2745,19 @@ class ContentDiffMigrator {
 		if ( 1 != $inserted ) {
 			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) );
 		}
+
+		// Last inserted ID.
+		$new_user_id = $this->wpdb->insert_id;
+
+		// Save original user ID as usermeta.
+		$this->wpdb->insert(
+			$this->wpdb->usermeta,
+			[
+				'user_id'    => $new_user_id,
+				'meta_key'   => self::SAVED_META_LIVE_POST_ID,
+				'meta_value' => $old_user_id,
+			]
+		);
 
 		return $this->wpdb->insert_id;
 	}
