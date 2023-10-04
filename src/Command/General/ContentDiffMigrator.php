@@ -1310,8 +1310,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 	/**
 	 * Handles CoreWPTableEmptyException.
 	 *
-	 * @param CoreWPTableEmptyException $e
-	 * @param array                     $ignore_empty_tables
+	 * @param CoreWPTableEmptyException $e Exception object which specifies which tables are empty.
+	 * @param array                     $ignore_empty_tables Array of tables to ignore if empty.
 	 *
 	 * @return void
 	 */
