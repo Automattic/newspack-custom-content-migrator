@@ -67,6 +67,7 @@ PluginSetup::register_migrators(
 		Command\General\EmbarcaderoMigrator::class,
 		Command\General\ChorusCmsMigrator::class,
 		Command\General\LedeMigrator::class,
+		Command\General\DownloadMissingImages::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -80,6 +81,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
+		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
 		Command\PublisherSpecific\CCMMigrator::class,
 		Command\PublisherSpecific\RenoMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
@@ -89,5 +91,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
+		Command\PublisherSpecific\BaristanetMigrator::class,
 	)
 );
