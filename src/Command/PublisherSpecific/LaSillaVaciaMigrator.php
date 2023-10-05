@@ -7365,7 +7365,7 @@ BLOCK;
 			return $media_location . $path;
 		};
 
-		/*$posts = $wpdb->get_results(
+		$posts = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT 
     				ID, 
@@ -7376,11 +7376,6 @@ BLOCK;
 				  AND ID > %d",
 				'%' . $wpdb->esc_like( 'lasilla.com' ) . '%',
 				$after_post_id
-			)
-		);*/
-		$posts = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT ID, post_content FROM $wpdb->posts WHERE ID = 41021"
 			)
 		);
 
