@@ -1,4 +1,7 @@
 <?php
+/**
+ * Custom migrator for QCityMetro.
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
@@ -12,12 +15,15 @@ use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use WP_CLI;
 
+/**
+ * QCityMetro migrator.
+ */
 class QCityMetroMigrator implements InterfaceCommand {
 
 	/**
-	 * DublinInquirerMigrator Instance.
+	 * QCityMetroMigrator Instance.
 	 *
-	 * @var DublinInquirerMigrator
+	 * @var QCityMetroMigrator
 	 */
 	private static $instance;
 
@@ -31,7 +37,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 	/**
 	 * Get Instance.
 	 *
-	 * @return DublinInquirerMigrator
+	 * @return QCityMetroMigrator
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -45,6 +51,8 @@ class QCityMetroMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Inherited method.
+	 *
 	 * @inheritDoc
 	 */
 	public function register_commands() {
@@ -136,24 +144,27 @@ class QCityMetroMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * @throws Exception
+	 * Migrates Church Listings.
 	 */
 	public function cmd_migrate_church_listings() {
 		$post_content_template = '<!-- wp:paragraph -->'
-		                         . '{website}{separator}{telephone} '
-		                         . '<!-- /wp:paragraph -->'
-		                         . '{address} '
-		                         . '{church_special} '
-		                         . '<!-- wp:paragraph -->'
-		                         . '<p>Founded: {founded}</p>'
-		                         . '<!-- /wp:paragraph -->';
+								. '{website}{separator}{telephone} '
+								. '<!-- /wp:paragraph -->'
+								. '{address} '
+								. '{church_special} '
+								. '<!-- wp:paragraph -->'
+								. '<p>Founded: {founded}</p>'
+								. '<!-- /wp:paragraph -->';
 		global $wpdb;
 
 		$this->update_church_taxonomies();
 
 		$parent_category_id = wp_create_category( 'Business Listing' );
 
-		$church_listings_query = "SELECT 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$church_listings = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
        			ID, 
        			post_author, 
        			post_date, 
@@ -161,9 +172,10 @@ class QCityMetroMigrator implements InterfaceCommand {
        			post_status, 
        			post_modified 
 			FROM $wpdb->posts 
-			WHERE post_type = 'church_listing'";
-
-		$church_listings = $wpdb->get_results( $church_listings_query );
+			WHERE post_type = %s",
+				'church_listing'
+			)
+		);
 
 		foreach ( $church_listings as $church_listing ) {
 			$meta = get_post_meta( $church_listing->ID );
@@ -242,8 +254,10 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 				wp_set_post_categories( $place_listing_id, $child_category_ids, true );
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$old_terms = $wpdb->get_results(
-					"SELECT 
+					$wpdb->prepare(
+						"SELECT 
        						* 
 						FROM $wpdb->terms t 
        					    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
@@ -252,12 +266,15 @@ class QCityMetroMigrator implements InterfaceCommand {
 						      SELECT 
 						             term_taxonomy_id 
 						      FROM $wpdb->term_relationships 
-						      WHERE object_id = $church_listing->ID 
-						      )"
+						      WHERE object_id = %d
+						      )",
+						$church_listing->ID
+					)
 				);
 
 				foreach ( $old_terms as $old_term ) {
-					$slug     = str_replace( '-old', '', $old_term->slug );
+					$slug = str_replace( '-old', '', $old_term->slug );
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 					$new_term = $wpdb->get_row(
 						$wpdb->prepare(
 							"SELECT * FROM $wpdb->terms t 
@@ -270,6 +287,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 					);
 
 					if ( $new_term ) {
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
 						$wpdb->insert(
 							$wpdb->term_relationships,
 							[
@@ -285,18 +303,26 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Command which handles migration of business listings.
+	 *
+	 * @return void
+	 */
 	public function cmd_migrate_business_listings() {
 		$post_content_template = '<!-- wp:paragraph -->'
-		                         . '<p>{website}{separator}{telephone}</p>'
-		                         . '<!-- /wp:paragraph -->'
-		                         . '{address}'
-		                         . '{black_owned}';
+								. '<p>{website}{separator}{telephone}</p>'
+								. '<!-- /wp:paragraph -->'
+								. '{address}'
+								. '{black_owned}';
 
 		global $wpdb;
 
 		$this->update_business_taxonomies();
 
-		$business_listings_query = "SELECT
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$business_listings = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
 				ID, 
        			post_author, 
        			post_date, 
@@ -304,9 +330,10 @@ class QCityMetroMigrator implements InterfaceCommand {
        			post_status, 
        			post_modified 
 			FROM $wpdb->posts 
-			WHERE post_type = 'business_listing'";
-
-		$business_listings = $wpdb->get_results( $business_listings_query );
+			WHERE post_type = %s",
+				'business_listing'
+			)
+		);
 
 		foreach ( $business_listings as $business_listing ) {
 			$place_listing_data = [
@@ -344,15 +371,13 @@ class QCityMetroMigrator implements InterfaceCommand {
 						break;
 					case 'Number Employees':
 					case 'Business also':
-						if ( false !== @unserialize( $value[0] ) ) {
-							$parts = unserialize( $value[0] );
+						if ( false !== maybe_unserialize( $value[0] ) ) {
+							$parts = maybe_unserialize( $value[0] );
 							foreach ( $parts as $particle ) {
 								$tag_taxonomy_ids[] = intval( wp_create_tag( $particle )['term_taxonomy_id'] );
 							}
-						} else {
-							if ( ! empty( $value[0] ) ) {
+						} elseif ( ! empty( $value[0] ) ) {
 								$tag_taxonomy_ids[] = intval( wp_create_tag( $value[0] )['term_taxonomy_id'] );
-							}
 						}
 						break;
 				}
@@ -377,6 +402,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 				WP_CLI::log( 'Migrated business listing: ' . $business_listing->post_title );
 				$this->coauthorplus->assign_guest_authors_to_post( [ 217633 ], $place_listing_id );
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$old_related_categories = $wpdb->get_results(
 					$wpdb->prepare(
 						"SELECT
@@ -385,8 +411,9 @@ class QCityMetroMigrator implements InterfaceCommand {
 								INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 								INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id
 							WHERE tr.object_id = %d
-								AND tt.taxonomy = 'business_category'",
-						intval( $business_listing->ID )
+								AND tt.taxonomy = %s",
+						intval( $business_listing->ID ),
+						'business_category'
 					)
 				);
 
@@ -398,19 +425,21 @@ class QCityMetroMigrator implements InterfaceCommand {
 					}
 				}
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$wpdb->update(
 					$wpdb->postmeta,
 					[
-						'meta_key' => '_thumbnail_id',
+						'meta_key' => '_thumbnail_id', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
 					],
 					[
 						'post_id'  => $business_listing->ID,
-						'meta_key' => 'business_thumbnail',
+						'meta_key' => 'business_thumbnail', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
 					]
 				);
 
 				if ( ! empty( $tag_taxonomy_ids ) ) {
 					foreach ( $tag_taxonomy_ids as $tag_id ) {
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
 						$wpdb->insert(
 							$wpdb->term_relationships,
 							[
@@ -427,36 +456,43 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Command which handles the migration of job listings.
+	 *
+	 * @return void
+	 */
 	public function cmd_migrate_job_listings() {
 		$post_content_template = '<!-- wp:group {"backgroundColor":"light-gray","layout":{"type":"constrained"}} -->'
-		                         . '<div class="wp-block-group has-light-gray-background-color has-background">'
-		                         . '<!-- wp:paragraph -->'
-		                         . '<p>{company_name}</p>'
-		                         . '<!-- /wp:paragraph -->'
-		                         . '</div>'
-		                         . '<!-- /wp:group -->'
-		                         . '<!-- wp:paragraph -->'
-		                         . '<p>{job_title}</p>'
-		                         . '<!-- /wp:paragraph -->'
-		                         . ' <!-- wp:paragraph -->'
-		                         . '<p>{job_description}</p>'
-		                         . '<!-- /wp:paragraph -->'
-		                         . '<!-- wp:buttons -->'
-		                         . '<div class="wp-block-buttons">'
-		                         . '<!-- wp:button -->'
-		                         . '<div class="wp-block-button">'
-		                         . '{apply_link}'
-		                         . '</div>'
-		                         . '<!-- /wp:button -->'
-		                         . '</div>'
-		                         . '<!-- /wp:buttons -->';
+								. '<div class="wp-block-group has-light-gray-background-color has-background">'
+								. '<!-- wp:paragraph -->'
+								. '<p>{company_name}</p>'
+								. '<!-- /wp:paragraph -->'
+								. '</div>'
+								. '<!-- /wp:group -->'
+								. '<!-- wp:paragraph -->'
+								. '<p>{job_title}</p>'
+								. '<!-- /wp:paragraph -->'
+								. ' <!-- wp:paragraph -->'
+								. '<p>{job_description}</p>'
+								. '<!-- /wp:paragraph -->'
+								. '<!-- wp:buttons -->'
+								. '<div class="wp-block-buttons">'
+								. '<!-- wp:button -->'
+								. '<div class="wp-block-button">'
+								. '{apply_link}'
+								. '</div>'
+								. '<!-- /wp:button -->'
+								. '</div>'
+								. '<!-- /wp:buttons -->';
 
 		$this->update_job_taxonomies();
 
 		global $wpdb;
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$job_listings = $wpdb->get_results(
-			"SELECT 
+			$wpdb->prepare(
+				"SELECT 
 	   				ID, 
 	                post_author, 
 	                post_date, 
@@ -464,7 +500,9 @@ class QCityMetroMigrator implements InterfaceCommand {
 	                post_status, 
 	                post_modified 
 				FROM $wpdb->posts p 
-				WHERE p.post_type = 'job'"
+				WHERE p.post_type = %s",
+				'job'
+			)
 		);
 
 		foreach ( $job_listings as $job ) {
@@ -524,13 +562,15 @@ class QCityMetroMigrator implements InterfaceCommand {
 				WP_CLI::log( 'Migrated job listing: ' . $job->post_title );
 				$this->coauthorplus->assign_guest_authors_to_post( [ 217626 ], $generic_listing_id );
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$old_related_categories = $wpdb->get_results(
 					$wpdb->prepare(
 						"SELECT * FROM $wpdb->terms t 
 							INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
 							INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
-						WHERE tr.object_id = %d AND tt.taxonomy = 'job_cat'",
-						$job->ID
+						WHERE tr.object_id = %d AND tt.taxonomy = %s",
+						$job->ID,
+						'job_cat'
 					)
 				);
 
@@ -542,13 +582,15 @@ class QCityMetroMigrator implements InterfaceCommand {
 					}
 				}
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$old_related_job_level_categories = $wpdb->get_results(
 					$wpdb->prepare(
 						"SELECT * FROM $wpdb->terms t 
 							INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
 							INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
-						WHERE tr.object_id = %d AND tt.taxonomy = 'level'",
-						$job->ID
+						WHERE tr.object_id = %d AND tt.taxonomy = %s",
+						$job->ID,
+						'level'
 					)
 				);
 
@@ -560,15 +602,16 @@ class QCityMetroMigrator implements InterfaceCommand {
 					}
 				}
 
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$wpdb->update(
 					$wpdb->postmeta,
 					[
 						'post_id'  => $generic_listing_id,
-						'meta_key' => '_thumbnail_id',
+						'meta_key' => '_thumbnail_id', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
 					],
 					[
 						'post_id'  => $job->ID,
-						'meta_key' => 'image',
+						'meta_key' => 'image', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
 					]
 				);
 			} else {
@@ -577,9 +620,16 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This command handles a custom XML export and imports the data.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
 	public function cmd_migrate_xml_posts( $args, $assoc_args ) {
 		$file_path = $args[0];
-		$file      = file_get_contents( $file_path );
+		$file      = file_get_contents( $file_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 
 		$post_type = $assoc_args['post_type'];
 
@@ -590,8 +640,8 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 		$authors = [];
 
-		foreach ( $channel->childNodes as $child ) {
-			switch ( $child->nodeName ) {
+		foreach ( $channel->childNodes as $child ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			switch ( $child->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				case 'wp:author':
 					$author                      = $this->handle_xml_author( $child );
 					$authors[ $author['login'] ] = $author['id'];
@@ -603,11 +653,28 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will attempt to fix attachment data which is incorrect.
+	 *
+	 * @return void
+	 */
 	public function cmd_fix_attachment_data() {
 
 		global $wpdb;
 
-		$post_ids = $wpdb->get_results( "SELECT pm.post_id FROM $wpdb->postmeta pm INNER JOIN $wpdb->posts p ON p.ID = pm.post_id WHERE pm.meta_key = 'original_post_id' AND p.post_type = 'attachment'" );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$post_ids = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+				    pm.post_id 
+				FROM $wpdb->postmeta pm 
+				    INNER JOIN $wpdb->posts p ON p.ID = pm.post_id 
+				WHERE pm.meta_key = %s 
+				  AND p.post_type = %s",
+				'original_post_id',
+				'attachment'
+			)
+		);
 
 		$count_of_posts = count( $post_ids );
 
@@ -617,23 +684,24 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 			$meta = wp_get_attachment_metadata( $post_id->post_id );
 
-			WP_CLI::log( 'Meta: ' . print_r( $meta, true ) );
+			WP_CLI::log( 'Meta: ' . print_r( $meta, true ) ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_print_r
 
 			if ( is_array( $meta ) ) {
 				WP_CLI::log( 'Is already array.' );
 				continue;
 			}
 
-			if ( false !== @unserialize( $meta ) ) {
+			if ( false !== maybe_unserialize( $meta ) ) {
 				WP_CLI::log( 'Needs to be updated.' );
-				$meta = unserialize( $meta );
+				$meta = maybe_unserialize( $meta );
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$wpdb->update(
 					$wpdb->postmeta,
 					[
-						'meta_value' => serialize( $meta ),
+						'meta_value' => serialize( $meta ), // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value,WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize
 					],
 					[
-						'meta_key' => '_wp_attachment_metadata',
+						'meta_key' => '_wp_attachment_metadata', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
 						'post_id'  => $post_id->post_id,
 					]
 				);
@@ -641,12 +709,23 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will handle migration of galleries.
+	 *
+	 * @return void
+	 */
 	public function cmd_migrate_galleries() {
 		$gutenberg_block_generator = new GutenbergBlockGenerator();
 
 		global $wpdb;
 
-		$gallery_posts = $wpdb->get_results( "SELECT * FROM $wpdb->posts WHERE post_type = 'gallery'" );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$gallery_posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->posts WHERE post_type = %s",
+				'gallery'
+			)
+		);
 
 		foreach ( $gallery_posts as $gallery_post ) {
 			$post_data = [
@@ -664,10 +743,12 @@ class QCityMetroMigrator implements InterfaceCommand {
 				'post_type'         => 'post',
 			];
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$attachment_ids = $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key LIKE 'photos_%'",
-					$gallery_post->ID
+					"SELECT meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key LIKE %s",
+					$gallery_post->ID,
+					$wpdb->esc_like( 'photos_' ) . '%'
 				)
 			);
 
@@ -707,7 +788,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		$new_woo_data = [];
 
 		foreach ( $iterator as $row_number => $row ) {
-			WP_CLI::log( 'Row Number: ' . $row_number + 1 . ' - ' . $row['email'] );
+			WP_CLI::log( 'Row Number: ' . ( $row_number + 1 ) . ' - ' . $row['email'] );
 			$data = [];
 
 			$full_name_parts = explode( ' ', $row['full_name'] );
@@ -743,7 +824,8 @@ class QCityMetroMigrator implements InterfaceCommand {
 			}
 
 			if ( empty( $billing_period ) ) {
-				WP_CLI::error( 'Unabled to determine billing period. Row: ' . print_r( $row, true ) );
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_print_r
+				WP_CLI::error( 'Unable to determine billing period. Row: ' . print_r( $row, true ) );
 			}
 
 			$payment_method_post_meta_data = [
@@ -792,13 +874,22 @@ class QCityMetroMigrator implements InterfaceCommand {
 		$header = array_keys( $new_woo_data[0] );
 		array_unshift( $new_woo_data, $header );
 
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 		$fp = fopen( 'woo_data.csv', 'w' );
 		foreach ( $new_woo_data as $new_row ) {
 			fputcsv( $fp, $new_row );
 		}
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 		fclose( $fp );
 	}
 
+	/**
+	 * Convenience function to handle the procurement of author data.
+	 *
+	 * @param DOMElement $author The author element.
+	 * @return false|string[]
+	 * @throws WP_CLI\ExitException Exists if user creation fails.
+	 */
 	private function handle_xml_author( DOMElement $author ) {
 		$author_data = [
 			'login'        => '',
@@ -810,28 +901,29 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 		WP_CLI::log( 'Handing Author' );
 
-		foreach ( $author->childNodes as $child ) {
-			switch ( $child->nodeName ) {
+		foreach ( $author->childNodes as $child ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			switch ( $child->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				case 'wp:author_login':
-					$author_data['login'] = $child->nodeValue;
+					$author_data['login'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 				case 'wp:author_email':
-					$author_data['email'] = $child->nodeValue;
+					$author_data['email'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 				case 'wp:author_display_name':
-					$author_data['display_name'] = $child->nodeValue;
+					$author_data['display_name'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 				case 'wp:author_first_name':
-					$author_data['first_name'] = $child->nodeValue;
+					$author_data['first_name'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 				case 'wp:author_last_name':
-					$author_data['last_name'] = $child->nodeValue;
+					$author_data['last_name'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 			}
 		}
 
 		global $wpdb;
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$user_id = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT ID FROM $wpdb->users WHERE user_email = %s",
@@ -840,7 +932,8 @@ class QCityMetroMigrator implements InterfaceCommand {
 		);
 
 		if ( ! is_numeric( $user_id ) ) {
-			// Try using login
+			// Try using login.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$user_id = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT ID FROM $wpdb->users WHERE user_login = %s",
@@ -875,6 +968,14 @@ class QCityMetroMigrator implements InterfaceCommand {
 		return $author_data;
 	}
 
+	/**
+	 * Convenience function which handles the procurement of post data.
+	 *
+	 * @param DOMElement $post    The post element.
+	 * @param array      $authors The authors.
+	 * @param string     $post_type The post type.
+	 * @return void
+	 */
 	private function handle_xml_post( DOMElement $post, array $authors, string $post_type = 'post' ) {
 		$post_data = [
 			'post_title'     => '',
@@ -887,7 +988,6 @@ class QCityMetroMigrator implements InterfaceCommand {
 			'post_excerpt'   => '',
 			'comment_status' => '',
 			'post_modified'  => '',
-			// 'post_parent' => '',
 			'guid'           => '',
 			'post_category'  => [],
 			'tags_input'     => [],
@@ -895,48 +995,49 @@ class QCityMetroMigrator implements InterfaceCommand {
 			'meta_input'     => [],
 		];
 
-		foreach ( $post->childNodes as $child ) {
-			/* @var DOMElement $child */
-			switch ( $child->nodeName ) {
+		foreach ( $post->childNodes as $child ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			/* @var DOMElement $child */ // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+			switch ( $child->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				case 'wp:post_id':
+					// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					$post_data['meta_input']['original_post_id'] = $child->nodeValue;
-					break;
-				case 'title':
-					$post_data['post_title'] = $child->nodeValue;
-					break;
-				case 'dc:creator':
-					$post_data['post_author'] = $authors[ $child->nodeValue ] ?? 0;
-					break;
-				case 'content:encoded':
-					$post_data['post_content'] = $child->nodeValue;
-					break;
-				case 'wp:post_date':
-					$post_data['post_date'] = $child->nodeValue;
-					break;
-				case 'wp:status':
-					$post_data['post_status'] = $child->nodeValue;
-					break;
-				case 'wp:post_name':
-					$post_data['post_name'] = $child->nodeValue;
-					break;
-				case 'wp:post_type':
-					$post_data['post_type'] = $child->nodeValue;
-					break;
-				case 'wp:post_parent':
-					$post_data['post_parent'] = $child->nodeValue;
-					break;
-				case 'wp:post_id':
+					// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					$post_data['guid'] = $child->nodeValue;
 					break;
+				case 'title':
+					$post_data['post_title'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'dc:creator':
+					$post_data['post_author'] = $authors[ $child->nodeValue ] ?? 0; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'content:encoded':
+					$post_data['post_content'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'wp:post_date':
+					$post_data['post_date'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'wp:status':
+					$post_data['post_status'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'wp:post_name':
+					$post_data['post_name'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'wp:post_type':
+					$post_data['post_type'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
+				case 'wp:post_parent':
+					$post_data['post_parent'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					break;
 				case 'wp:postmeta':
-					$meta_key = $meta_value = '';
-					foreach ( $child->childNodes as $meta ) {
-						switch ( $meta->nodeName ) {
+					$meta_value = '';
+					$meta_key   = '';
+					foreach ( $child->childNodes as $meta ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						switch ( $meta->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 							case 'wp:meta_key':
-								$meta_key = $meta->nodeValue;
+								$meta_key = $meta->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 								break;
 							case 'wp:meta_value':
-								$meta_value = $meta->nodeValue;
+								$meta_value = $meta->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 								break;
 						}
 					}
@@ -944,6 +1045,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 					if ( '_thumbnail_id' === $meta_key ) {
 						global $wpdb;
 
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 						$attachment_id = $wpdb->get_var(
 							$wpdb->prepare(
 								"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'original_post_id' AND meta_value = %d",
@@ -966,6 +1068,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 						$category = get_term_by( 'slug', $nicename, 'category', ARRAY_A );
 
 						if ( false === $category ) {
+							// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 							$category = wp_insert_term( $child->nodeValue, 'category', [ 'slug' => $nicename ] );
 						}
 
@@ -975,6 +1078,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 						$tag = get_term_by( 'slug', $nicename, 'post_tag', ARRAY_A );
 
 						if ( false === $tag ) {
+							// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 							$tag = wp_insert_term( $child->nodeValue, 'post_tag', [ 'slug' => $nicename ] );
 						}
 
@@ -983,22 +1087,23 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 					break;
 				case 'wp:post_date_gmt':
-					$post_data['post_modified'] = $child->nodeValue;
+					$post_data['post_modified'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 				case 'excerpt:encoded':
-					$post_data['post_excerpt'] = $child->nodeValue;
+					$post_data['post_excerpt'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 				case 'wp:comment_status':
-					$post_data['comment_status'] = $child->nodeValue;
+					$post_data['comment_status'] = $child->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					break;
 			}
 		}
 
 		global $wpdb;
-		// Check if post is duplicate
+		// Check if post is duplicate.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$duplicate_post = $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT ID FROM $wpdb->posts WHERE post_type = '%s' AND post_title = %s AND post_date = %s",
+				"SELECT ID FROM $wpdb->posts WHERE post_type = %s AND post_title = %s AND post_date = %s",
 				$post_type,
 				$post_data['post_title'],
 				$post_data['post_date']
@@ -1009,10 +1114,11 @@ class QCityMetroMigrator implements InterfaceCommand {
 			$post_data['tags_input'][] = (int) wp_create_tag( 'Duplicate' )['term_id'];
 		}
 
-		// Check if possible duplicate
+		// Check if possible duplicate.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$possible_duplicate_post = $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT ID FROM $wpdb->posts WHERE post_type = '%s' AND post_title = %s",
+				"SELECT ID FROM $wpdb->posts WHERE post_type = %s AND post_title = %s",
 				$post_type,
 				$post_data['post_title']
 			)
@@ -1031,6 +1137,11 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will handle updating church taxonomies to tags.
+	 *
+	 * @return void
+	 */
 	private function update_church_taxonomies() {
 		global $wpdb;
 
@@ -1038,12 +1149,16 @@ class QCityMetroMigrator implements InterfaceCommand {
 		$size_parent_tag_id         = wp_create_tag( 'Size' );
 
 		// Get Deonominations.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$denomination_terms = $wpdb->get_results(
-			"SELECT 
+			$wpdb->prepare(
+				"SELECT 
        				* 
 				FROM $wpdb->terms t 
 				    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-				WHERE tt.taxonomy = 'denomination'"
+				WHERE tt.taxonomy = %s",
+				'denomination'
+			)
 		);
 
 		foreach ( $denomination_terms as $term ) {
@@ -1051,6 +1166,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->update(
 				$wpdb->terms,
 				[
@@ -1072,12 +1188,16 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 
 		// Get size.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$size_terms = $wpdb->get_results(
-			"SELECT 
+			$wpdb->prepare(
+				"SELECT 
 	   				* 
 				FROM $wpdb->terms t 
 				    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-				WHERE tt.taxonomy = 'size'"
+				WHERE tt.taxonomy = %s",
+				'size'
+			)
 		);
 
 		foreach ( $size_terms as $term ) {
@@ -1085,6 +1205,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->update(
 				$wpdb->terms,
 				[
@@ -1106,17 +1227,26 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Convert business and job taxonomies to categories and tags.
+	 *
+	 * @return void
+	 */
 	private function update_business_taxonomies() {
 		$business_listing_parent_category_id = wp_create_category( 'Business Listing' );
 
 		global $wpdb;
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$business_listing_terms = $wpdb->get_results(
-			"SELECT 
+			$wpdb->prepare(
+				"SELECT 
 	   				* 
 				FROM $wpdb->terms t 
 				    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-				WHERE tt.taxonomy = 'business_category'"
+				WHERE tt.taxonomy = %s",
+				'business_category'
+			)
 		);
 
 		foreach ( $business_listing_terms as $term ) {
@@ -1124,6 +1254,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->update(
 				$wpdb->terms,
 				[
@@ -1145,17 +1276,26 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Convert job_cat taxonomies to categories and level taxonomies to tags.
+	 *
+	 * @return void
+	 */
 	private function update_job_taxonomies() {
 		$job_listing_parent_category_id = wp_create_category( 'Jobs' );
 
 		global $wpdb;
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$job_listing_categories = $wpdb->get_results(
-			"SELECT 
+			$wpdb->prepare(
+				"SELECT 
 	   				* 
 				FROM $wpdb->terms t 
 				    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-				WHERE tt.taxonomy = 'job_cat'"
+				WHERE tt.taxonomy = %s",
+				'job_cat'
+			)
 		);
 
 		foreach ( $job_listing_categories as $category ) {
@@ -1163,6 +1303,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->update(
 				$wpdb->terms,
 				[
@@ -1185,12 +1326,16 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 		$job_listing_parent_tag_id = wp_create_tag( 'Job Level' );
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$job_listing_levels = $wpdb->get_results(
-			"SELECT 
+			$wpdb->prepare(
+				"SELECT 
 	   				* 
 				FROM $wpdb->terms t 
 				    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-				WHERE tt.taxonomy = 'level'"
+				WHERE tt.taxonomy = %s",
+				'level'
+			)
 		);
 
 		foreach ( $job_listing_levels as $level ) {
@@ -1198,6 +1343,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->update(
 				$wpdb->terms,
 				[
@@ -1219,6 +1365,13 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Get visit web page HTML for a URL.
+	 *
+	 * @param string $url The URL.
+	 *
+	 * @return string
+	 */
 	private function get_website_html( $url ) {
 		if ( empty( $url ) ) {
 			return '';
@@ -1227,6 +1380,12 @@ class QCityMetroMigrator implements InterfaceCommand {
 		return "<a href='$url' target='_blank' rel='noopener noreferrer'>Visit Web Site</a>";
 	}
 
+	/**
+	 * Get the phone HTML for a phone number.
+	 *
+	 * @param string $telephone The telephone number.
+	 * @return string
+	 */
 	private function get_telephone_html( $telephone ) {
 		if ( empty( $telephone ) ) {
 			return '';
@@ -1237,9 +1396,16 @@ class QCityMetroMigrator implements InterfaceCommand {
 		return '<a href="tel:' . $data_telephone . '">' . $telephone . '</a>';
 	}
 
+	/**
+	 * Get the address HTML for an address.
+	 *
+	 * @param string $address The address.
+	 *
+	 * @return string
+	 */
 	private function get_address_html( $address ) {
-		if ( false !== @unserialize( $address ) ) {
-			$address = unserialize( $address );
+		if ( false !== maybe_unserialize( $address ) ) {
+			$address = maybe_unserialize( $address );
 		}
 
 		if ( is_string( $address ) ) {
@@ -1247,7 +1413,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 		}
 
 		if ( is_array( $address ) ) {
-			$address_html = '<!-- wp:paragraph --><p><address>';
+			$address_html  = '<!-- wp:paragraph --><p><address>';
 			$address_html .= $address['address'] . '<br>';
 			$address_html .= '</address></p><!-- /wp:paragraph -->';
 
@@ -1257,26 +1423,47 @@ class QCityMetroMigrator implements InterfaceCommand {
 		return '';
 	}
 
+	/**
+	 * Returns formatted HTML for specific content for Church post type.
+	 *
+	 * @param string $church_special_content The special content.
+	 *
+	 * @return string
+	 */
 	private function get_church_special_html( $church_special_content ) {
 		if ( empty( $church_special_content ) ) {
 			return '';
 		}
 
 		return '<!-- wp:paragraph -->'
-		       . '<p>' . $church_special_content . '</p>'
-		       . '<!-- /wp:paragraph -->';
+				. '<p>' . $church_special_content . '</p>'
+				. '<!-- /wp:paragraph -->';
 	}
 
+	/**
+	 * Returns formatted HTML for a black-owned business.
+	 *
+	 * @param string $black_owned The black owned business.
+	 *
+	 * @return string
+	 */
 	private function get_black_owned_html( $black_owned ) {
 		if ( empty( $black_owned ) ) {
 			return '';
 		}
 
 		return '<!-- wp:paragraph -->'
-		       . "<p>Black Owned: <strong>$black_owned</strong></p>"
-		       . '<!-- /wp:paragraph -->';
+				. "<p>Black Owned: <strong>$black_owned</strong></p>"
+				. '<!-- /wp:paragraph -->';
 	}
 
+	/**
+	 * Gets formatted HTML that enables the user to apply for a job.
+	 *
+	 * @param string $apply The apply link.
+	 * @param string $type The form of application.
+	 * @return string
+	 */
 	private function get_apply_button_html( $apply, $type ) {
 		if ( 'direct' === $type ) {
 			return '<a class="wp-block-button__link wp-element-button" href="' . $apply . '">Apply</a>';
