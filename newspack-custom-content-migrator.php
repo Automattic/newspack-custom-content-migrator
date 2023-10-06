@@ -83,7 +83,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\LkldNowMigrator::class,
 		Command\PublisherSpecific\SentinelColoradoMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,
-		Command\PublisherSpecific\QCityMetroMigrator::class,
 		Command\PublisherSpecific\VTDiggerMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\MusicallyMigrator::class,
