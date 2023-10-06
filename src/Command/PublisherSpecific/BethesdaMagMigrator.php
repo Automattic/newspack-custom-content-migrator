@@ -735,7 +735,7 @@ class BethesdaMagMigrator implements InterfaceCommand {
 			}
 
 			WP_CLI::log( "EXISTING AUTHOR NAME: {$row['existing_name']}\t$original_guest_author->ID" );
-			$post_ids = $this->coauthorsplus_logic->get_all_posts_for_guest_author( $original_guest_author->ID );
+			$post_ids = $this->coauthorsplus_logic->get_all_posts_by_guest_author( $original_guest_author->ID );
 
 			$additional_guest_author_id = null;
 

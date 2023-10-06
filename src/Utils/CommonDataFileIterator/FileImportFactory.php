@@ -47,10 +47,10 @@ class FileImportFactory {
 	 *
 	 * @param string $file_path Full path to file.
 	 *
-	 * @return IterableFile
+	 * @return JSONFile
 	 * @throws Exception If file does not exist.
 	 */
 	protected function make_json( string $file_path ): IterableFile {
-		return new Json_File( $file_path );
+		return new JSONFile( $file_path );
 	}
 }
