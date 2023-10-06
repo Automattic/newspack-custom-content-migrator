@@ -17,7 +17,7 @@ class PHP {
 	 */
 	public static function readline( $question, $assoc_args = [] ) {
 		fwrite( STDOUT, $question );
-		$answer = strtolower( trim( fgets( STDIN ) ) );
+		$answer = rtrim( fgets( STDIN ), "\t\n\r\0\x0B" );
 
 		return $answer;
 	}

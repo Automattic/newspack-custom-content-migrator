@@ -94,6 +94,40 @@ class TownNewsMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator town-news-migrate-featured-tag',
+			array( $this, 'cmd_migrate_featured_tag' ),
+			[
+				'shortdesc' => 'Migrate TownNews post featured tag.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'export-dir-path',
+						'description' => 'Directory path of a TownNews export the holder should contains content in the format: export_dir/year/month/*.{xml,jpg}',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator town-news-fix-tags',
+			array( $this, 'cmd_fix_tags' ),
+			[
+				'shortdesc' => 'Fix tags.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'export-dir-path',
+						'description' => 'Directory path of a TownNews export the holder should contains content in the format: export_dir/year/month/*.{xml,jpg}',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -109,6 +143,9 @@ class TownNewsMigrator implements InterfaceCommand {
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
+
+		// Already imported posts original IDs.
+		$imported_original_ids = $this->get_imported_original_ids();
 
 		$export_dir_iterator = new DirectoryIterator( $export_dir_path );
 		foreach ( $export_dir_iterator as $year_dir ) {
@@ -134,7 +171,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
-						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $default_author_id );
+						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $imported_original_ids, $default_author_id );
 
 						if ( $post_id ) {
 							$this->logger->log( self::LOG_FILE, sprintf( 'Post %d is imported from %s', $post_id, $file->getFilename() ), Logger::SUCCESS );
@@ -146,15 +183,224 @@ class TownNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for newspack-content-migrator town-news-migrate-featured-tag.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_migrate_featured_tag( $args, $assoc_args ) {
+		global $wpdb;
+		$export_dir_path    = $assoc_args['export-dir-path'];
+		$fixed_ids_filepath = 'featured-fixed.log';
+		$fixed_ids          = is_file( $fixed_ids_filepath ) ? file( $fixed_ids_filepath, FILE_IGNORE_NEW_LINES ) : [];
+
+		$export_dir_iterator = new DirectoryIterator( $export_dir_path );
+		foreach ( $export_dir_iterator as $year_dir ) {
+			$year = intval( $year_dir->getFilename() );
+
+			if ( $year_dir->isDot() || ! checkdate( 1, 1, $year ) ) {
+				continue;
+			}
+
+			$year_dir_iterator = new DirectoryIterator( $year_dir->getPathname() );
+			foreach ( $year_dir_iterator as $month_dir ) {
+				$month = intval( $month_dir->getFilename() );
+
+				if ( $month_dir->isDot() || ! checkdate( $month, 1, $year ) ) {
+					continue;
+				}
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Importing content for month %d', $month ) );
+
+				$month_dir_iterator = new DirectoryIterator( $month_dir->getPathname() );
+
+				foreach ( $month_dir_iterator as $file ) {
+					if ( 'xml' === $file->getExtension() ) {
+						$xml_doc = new SimpleXMLElement( file_get_contents( $file->getPathname() ) );
+						$this->register_element_namespace( $xml_doc );
+
+						$file_type  = (string) $xml_doc->xpath( '//tn:identified-content/tn:classifier[@type="tncms:asset"]' )[0]->attributes()->value;
+						$tn_id      = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+						$post_title = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
+						$featured   = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:identified-content/tn:classifier[@type="tncms:flag"]', 'value' );
+
+						if ( in_array( $tn_id, $fixed_ids ) ) {
+							continue;
+						}
+
+						if ( ! in_array( $file_type, [ 'article', 'collection' ] ) ) {
+							// Save fixed IDs.
+							file_put_contents( $fixed_ids_filepath, $tn_id . "\n", FILE_APPEND );
+							continue;
+						}
+
+						if ( 'featured' === $featured ) {
+							// Get post by meta.
+							$post_id = $wpdb->get_var(
+								$wpdb->prepare(
+									"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+									self::TOWN_NEWS_ORIGINAL_ID_META_KEY,
+									$tn_id
+								)
+							);
+
+							if ( $post_id ) {
+								// Set featured tag.
+								WP_CLI::line( sprintf( 'Post with tn_id %s (%d) is fixed.', $tn_id, $post_id ) );
+								wp_set_post_tags( $post_id, 'Featured', true );
+								// Save fixed IDs.
+								file_put_contents( $fixed_ids_filepath, $tn_id . "\n", FILE_APPEND );
+								continue;
+							}
+
+							if ( ! $post_id ) {
+								WP_CLI::line( sprintf( 'Post with tn_id %s not found: %s', $tn_id, $post_title ) );
+								continue;
+							}
+						}
+
+						// Save fixed IDs.
+						file_put_contents( $fixed_ids_filepath, $tn_id . "\n", FILE_APPEND );
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Callable for newspack-content-migrator town-news-fix-tags.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_fix_tags( $args, $assoc_args ) {
+		global $wpdb;
+		$export_dir_path         = $assoc_args['export-dir-path'];
+		$fixed_ids_filepath      = 'fixed-tags.log';
+		$fixed_tags_log_filepath = 'fixed-tags-logs.log';
+		$fixed_ids               = is_file( $fixed_ids_filepath ) ? file( $fixed_ids_filepath, FILE_IGNORE_NEW_LINES ) : [];
+
+		// Delete all tags terms and relationships.
+		// $wpdb->query( "DELETE FROM $wpdb->terms WHERE term_id IN (SELECT term_id FROM $wpdb->term_taxonomy WHERE taxonomy = 'post_tag');" );
+		// $wpdb->query( "DELETE FROM $wpdb->term_taxonomy WHERE taxonomy = 'post_tag';" );
+		// $wpdb->query( "DELETE FROM $wpdb->term_relationships WHERE term_taxonomy_id NOT IN (SELECT term_taxonomy_id FROM $wpdb->term_taxonomy);" );
+		// wp_cache_flush();
+		// die();
+
+		$export_dir_iterator = new DirectoryIterator( $export_dir_path );
+		foreach ( $export_dir_iterator as $year_dir ) {
+			$year = intval( $year_dir->getFilename() );
+
+			if ( $year_dir->isDot() || ! checkdate( 1, 1, $year ) ) {
+				continue;
+			}
+
+			$year_dir_iterator = new DirectoryIterator( $year_dir->getPathname() );
+			foreach ( $year_dir_iterator as $month_dir ) {
+				$month = intval( $month_dir->getFilename() );
+
+				if ( $month_dir->isDot() || ! checkdate( $month, 1, $year ) ) {
+					continue;
+				}
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Importing content for month %d', $month ) );
+
+				$month_dir_iterator = new DirectoryIterator( $month_dir->getPathname() );
+
+				foreach ( $month_dir_iterator as $file ) {
+					if ( 'xml' === $file->getExtension() ) {
+						$xml_doc = new SimpleXMLElement( file_get_contents( $file->getPathname() ) );
+						$this->register_element_namespace( $xml_doc );
+
+						$file_type  = (string) $xml_doc->xpath( '//tn:identified-content/tn:classifier[@type="tncms:asset"]' )[0]->attributes()->value;
+						$tn_id      = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+						$post_title = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
+						$tags       = array_map(
+							function( $tag ) {
+								return ucwords( (string) $tag );
+							},
+							explode( ',', $this->get_element_by_xpath_attribute( $xml_doc, '//tn:meta[@name="tncms-flags"]', 'content' ) )
+						);
+						$keywords   = array_map(
+							function( $keyword ) {
+								return ucwords( (string) $keyword[0]->attributes()['key'] );
+							},
+							$xml_doc->xpath( '//tn:head/tn:docdata/tn:key-list/tn:keyword' )
+						);
+
+						if ( in_array( $tn_id, $fixed_ids ) ) {
+							continue;
+						}
+
+						if ( ! in_array( $file_type, [ 'article', 'collection' ] ) ) {
+							// Save fixed IDs.
+							file_put_contents( $fixed_ids_filepath, $tn_id . "\n", FILE_APPEND );
+							continue;
+						}
+
+						if ( ! empty( $tags ) ) {
+							// Get post by meta.
+							$post_id = $wpdb->get_var(
+								$wpdb->prepare(
+									"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+									self::TOWN_NEWS_ORIGINAL_ID_META_KEY,
+									$tn_id
+								)
+							);
+
+							if ( $post_id ) {
+								// Set tags.
+								$this->logger->log( $fixed_tags_log_filepath, sprintf( 'Post with tn_id %s (%d) is tagged: %s', $tn_id, $post_id, implode( ', ', $tags ) ), Logger::SUCCESS );
+								wp_set_post_tags( $post_id, $tags, true );
+								// Set YOAST Keywords.
+								update_post_meta( $post_id, '_yoast_wpseo_focuskw', implode( ' ', $keywords ) );
+								$this->logger->log( $fixed_tags_log_filepath, sprintf( 'Post with tn_id %s (%d) is set YOAST Keywords: %s', $tn_id, $post_id, implode( ' ', $keywords ) ), Logger::SUCCESS );
+								// Save fixed IDs.
+								file_put_contents( $fixed_ids_filepath, $tn_id . "\n", FILE_APPEND );
+								continue;
+							}
+
+							if ( ! $post_id ) {
+								$this->logger->log( $fixed_tags_log_filepath, sprintf( 'Post with tn_id %s not found: %s', $tn_id, $post_title ), Logger::WARNING );
+								continue;
+							}
+						}
+
+						// Save fixed IDs.
+						file_put_contents( $fixed_ids_filepath, $tn_id . "\n", FILE_APPEND );
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Get imported posts original IDs.
+	 *
+	 * @return array
+	 */
+	private function get_imported_original_ids() {
+		global $wpdb;
+
+		return $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s",
+				self::TOWN_NEWS_ORIGINAL_ID_META_KEY
+			)
+		);
+	}
+
+	/**
 	 * Import a TownNews post from the exported XML file.
 	 *
 	 * @param string $xml_path The post XML.
 	 * @param string $dir_path The post XML directory path.
+	 * @param array  $imported_original_ids Already imported posts original IDs.
 	 * @param ?int   $default_author_id Default author ID for posts without author in case it's set.
 	 *
 	 * @return int|false    The imported post ID, false otherwise.
 	 */
-	private function import_post_from_xml( $xml_path, $dir_path, $default_author_id ) {
+	private function import_post_from_xml( $xml_path, $dir_path, $imported_original_ids, $default_author_id ) {
 		if ( ! file_exists( $xml_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'not found ' . $xml_path );
 			return false;
@@ -169,7 +415,14 @@ class TownNewsMigrator implements InterfaceCommand {
 			return false;
 		}
 
-		$tn_id           = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+		$tn_id = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:doc-id', 'id-string' );
+
+		// Skip already imported posts.
+		if ( in_array( $tn_id, $imported_original_ids, true ) ) {
+			$this->logger->log( self::LOG_FILE, sprintf( "Skipping post '%s' as it already exists", $tn_id ) );
+			return false;
+		}
+
 		$status          = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:docdata', 'management-status' );
 		$featured_image  = $this->get_element_by_xpath_attribute( $xml_doc, '//tn:head/tn:meta[@name="tncms-view-preview"]', 'content' );
 		$title           = $this->get_element_by_xpath( $xml_doc, '//tn:body/tn:body.head/tn:hedline/tn:hl1' );
@@ -184,14 +437,20 @@ class TownNewsMigrator implements InterfaceCommand {
 			$xml_doc->xpath( '//tn:head/tn:pubdata' )
 		);
 		$tags            = array_map(
+			function( $tag ) {
+				return ucwords( (string) $tag );
+			},
+			explode( ',', $this->get_element_by_xpath_attribute( $xml_doc, '//tn:meta[@name="tncms-flags"]', 'content' ) )
+		);
+		$keywords        = array_map(
 			function( $keyword ) {
 				return ucwords( (string) $keyword[0]->attributes()['key'] );
 			},
 			$xml_doc->xpath( '//tn:head/tn:docdata/tn:key-list/tn:keyword' )
 		);
 
-		// Add article if it doesn't exists, else skip it.
-		$post_id = $this->create_post_if_new( $tn_id, $title, 'usable' === $status ? 'publish' : 'draft', $pubdate );
+		// Add article.
+		$post_id = $this->create_post( $tn_id, $title, 'usable' === $status ? 'publish' : 'draft', $pubdate );
 		if ( ! $post_id ) {
 			$this->logger->log( self::LOG_FILE, sprintf( "Skipping post '%s' as it already exists", $tn_id ) );
 			return;
@@ -201,7 +460,9 @@ class TownNewsMigrator implements InterfaceCommand {
 		$this->set_post_author( $post_id, $author_fullname, $author_meta, $default_author_id );
 
 		// Set post content.
-		$post_content = 'collection' === $file_type ? $this->get_collection_content( $xml_doc, $dir_path, $post_id ) : $this->get_article_content( $xml_doc, $dir_path, $post_id );
+		$post_content = 'collection' === $file_type
+		? $this->get_collection_content( $xml_doc, $dir_path, $post_id )
+		: $this->get_article_content( $xml_doc, $dir_path, $post_id );
 
 		wp_update_post(
 			[
@@ -212,6 +473,9 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		// Set post tags and categories.
 		wp_set_post_tags( $post_id, $tags );
+
+		// Set YOAST keywords.
+		update_post_meta( $post_id, '_yoast_wpseo_focuskw', implode( ' ', $keywords ) );
 
 		$categories_to_add = [];
 		foreach ( $categories as $raw_category ) {
@@ -255,7 +519,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Create empty post from the TownNews ID if it doesn't exists.
+	 * Create empty post from the TownNews ID.
 	 *
 	 * @param string $tn_id The post TownNews original ID.
 	 * @param string $title The post title.
@@ -263,14 +527,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @param string $pubdate The post publication date.
 	 * @return int|false The new Post ID, false if it already exists.
 	 */
-	private function create_post_if_new( $tn_id, $title, $status, $pubdate ) {
-		$post_id = $this->get_post_by_tn_id( $tn_id );
-
-		if ( $post_id ) {
-			return $post_id;
-			return false;
-		}
-
+	private function create_post( $tn_id, $title, $status, $pubdate ) {
 		$post_id = wp_insert_post(
 			[
 				'post_title'  => $title,
@@ -565,8 +822,6 @@ class TownNewsMigrator implements InterfaceCommand {
 				' . $caption_tag . '
 			  </figure>';
 			default:
-				$this->logger->log( self::LOG_FILE, sprintf( "Media type '%s' not processed, please add it to the code.", $media_type ), Logger::WARNING );
-				die();
 				return false;
 		}
 	}
@@ -776,6 +1031,6 @@ class TownNewsMigrator implements InterfaceCommand {
 	 * @return string
 	 */
 	private function get_category_name_from_tn_slug( $category_slug ) {
-		return ucfirst( str_replace( '_', ' ', $category_slug ) );
+		return ucfirst( str_replace( '_', ' ', trim( $category_slug ) ) );
 	}
 }
