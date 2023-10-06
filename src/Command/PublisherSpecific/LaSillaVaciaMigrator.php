@@ -7359,7 +7359,7 @@ BLOCK;
 		global $wpdb;
 
 		$after_post_id  = $assoc_args['after-post-id'] ?? 0;
-		$media_location = $assoc_args['media-location'];
+		$media_location = trailingslashit( $assoc_args['media-location'] );
 
 		$full_path = function ( $path ) use ( $media_location ) {
 			return $media_location . $path;
@@ -7368,12 +7368,13 @@ BLOCK;
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT 
-    				ID, 
-    				post_content 
-				FROM $wpdb->posts 
-				WHERE post_type = 'post' 
-				  AND post_content LIKE %s 
-				  AND ID > %d",
+    				sub.ID, 
+    				sub.post_content 
+				FROM (
+				    SELECT ID, post_content FROM $wpdb->posts 
+				    WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
+				) AS sub
+				WHERE sub.ID > %d",
 				'%' . $wpdb->esc_like( 'lasilla.com' ) . '%',
 				$after_post_id
 			)
@@ -7390,7 +7391,7 @@ BLOCK;
 			foreach ( $image_urls as $image_url ) {
 				$this->high_contrast_output( 'Original URL', $image_url );
 
-				if ( str_contains( $image_url, 'lasillavacia.com' ) && ! str_contains( $image_url, 'lasilla.com' ) ) {
+				if ( str_contains( $image_url, 'lasillavacia.com' ) && str_contains( $image_url, 'wp-content/uploads/' ) && ! str_contains( $image_url, 'lasilla.com' ) ) {
 					echo WP_CLI::colorize( "%mSkipping%n\n" );
 					continue;
 				}
@@ -7401,11 +7402,13 @@ BLOCK;
 					$new_image_url = $parsed_url['scheme'] . '://' . $parsed_url['host'] . $parsed_url['path'];
 					$this->high_contrast_output( 'Replaced URL', $new_image_url );
 
-					$attachment_id  = $this->attachments->import_external_file( $new_image_url, null, null, null, null, $post->ID );
-					$attachment_url = wp_get_attachment_url( $attachment_id );
+					if ( ! str_contains( $new_image_url, 'lasilla.com' ) ) {
+						$attachment_id  = $this->attachments->import_external_file( $new_image_url, null, null, null, null, $post->ID );
+						$attachment_url = wp_get_attachment_url( $attachment_id );
 
-					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
-					continue;
+						$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
+						continue;
+					}
 				}
 
 				$exploded = explode( '/', $image_url );
