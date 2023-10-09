@@ -68,6 +68,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY  = '_newspack_import_more_posts_image_id';
 	const EMBARCADERO_IMPORTED_COMMENT_META_KEY     = '_newspack_import_comment_id';
 	const EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY = '_newspack_import_print_issue_id';
+	const EMBARCADERO_MIGRATED_POST_SLUG_META_KEY   = '_newspack_migrated_post_slug_id';
 	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY    = '_newspack_media_import_id';
 	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
@@ -386,6 +387,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'print-cover-dir-path',
 						'description' => 'Path to the directory containing the print issues cover files to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-post-slugs',
+			array( $this, 'cmd_embarcadero_migrate_post_slugs' ),
+			[
+				'shortdesc' => 'Migrate Embarcadero\'s post slugs.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -1102,6 +1120,65 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Created post issue %d with the ID %d', $print_issue['issue_number'], $wp_issue_post_id ), Logger::SUCCESS );
 		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-post-slugs".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_post_slugs( $args, $assoc_args ) {
+		$story_csv_file_path   = $assoc_args['story-csv-file-path'];
+		$imported_original_ids = $this->get_comments_meta_values_by_key( self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY );
+
+		$stories = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+
+		// Skip already fixed stories.
+		$stories = array_values(
+			array_filter(
+				$stories,
+				function( $story ) use ( $imported_original_ids ) {
+					return ! in_array( $story['story_id'], $imported_original_ids );
+				}
+			)
+		);
+
+		foreach ( $stories as $story_index => $story ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d', $story_index + 1, count( $stories ), $story['story_id'] ), Logger::LINE );
+
+			$wp_issue_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $story['story_id'] );
+
+			if ( ! $wp_issue_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $story['story_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			// Update post slug.
+			$seo_link = explode( '/', $story['seo_link'] );
+			$slug     = trim( $seo_link[ count( $seo_link ) - 1 ], "-/\t\n\r\0\x0B" );
+
+			// Get current post slug.
+			$current_post = get_post( $wp_issue_post_id );
+
+			if ( $current_post->post_name === $slug ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Post %d with the ID %d already has the correct slug %s', $story['story_id'], $wp_issue_post_id, $slug ), Logger::LINE );
+				continue;
+			}
+
+			wp_update_post(
+				[
+					'ID'        => $wp_issue_post_id,
+					'post_name' => $slug,
+				]
+			);
+
+			update_post_meta( $wp_issue_post_id, self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY, $story['story_id'] );
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with the slug %s', $story['story_id'], $wp_issue_post_id, $slug ), Logger::SUCCESS );
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
