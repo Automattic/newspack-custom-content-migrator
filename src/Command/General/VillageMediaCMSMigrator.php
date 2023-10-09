@@ -393,7 +393,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	 * @return array|null
 	 * @throws Exception If the media file cannot be downloaded.
 	 */
-	protected function handle_media( DOMElement $media, int $post_id = 0, string $timezone = 'America/New_York' ): array|null {
+	protected function handle_media( DOMElement $media, int $post_id = 0, string $timezone = 'America/New_York' ) {
 		$name = $media->getAttribute( 'name' );
 		// $filename    = $media->getAttribute( 'filename' );
 		$url         = $media->getAttribute( 'url' );
