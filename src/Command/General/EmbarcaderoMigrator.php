@@ -1145,7 +1145,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $stories as $story_index => $story ) {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d', $story_index + 1, count( $stories ), $story['story_id'] ), Logger::LINE );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Fixing story slug %d/%d: %d', $story_index + 1, count( $stories ), $story['story_id'] ), Logger::LINE );
 
 			$wp_issue_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $story['story_id'] );
 
