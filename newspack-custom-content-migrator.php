@@ -79,7 +79,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\MassterlistMigrator::class,
 		Command\PublisherSpecific\MauiTimesMigrator::class,
 		Command\PublisherSpecific\ColoradoSunMigrator::class,
-		Command\PublisherSpecific\MustangNewsMigrator::class,
 		Command\PublisherSpecific\LkldNowMigrator::class,
 		Command\PublisherSpecific\SentinelColoradoMigrator::class,
 		Command\PublisherSpecific\RetroReportMigrator::class,

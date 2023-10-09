@@ -2,6 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use NewspackCustomContentMigrator\Logic\MigrationMeta;
+use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
@@ -22,10 +24,16 @@ class MustangNewsMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * @var Logger
+	 */
+	private $logger;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
+		$this->logger              = new Logger();
 	}
 
 	/**
@@ -61,6 +69,61 @@ class MustangNewsMigrator implements InterfaceCommand {
 				'shortdesc' => 'Migrate php-snippet shortcodes.',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator mustangnews-fix-featured-image-credits',
+			[ $this, 'cmd_fix_featured_image_credits' ],
+			[
+				'shortdesc' => 'Move image credits from posts to the attachment post.',
+			]
+		);
+	}
+
+	public function cmd_fix_featured_image_credits( array $args, array $assoc_args ): void {
+		$command_meta_key = 'fix_featured_image_credits';
+		$command_meta_version = 1;
+		$log_file = "{$command_meta_key}_{$command_meta_version}.log";
+
+		global $wpdb;
+		// Get all post ids that have 'standard-featured-credit' in postmeta.
+		$credits = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key='standard-featured-credit'"
+			)
+		);
+		$this->logger->log( $log_file,
+			sprintf( 'Moving image credits from the postmeta on post to attachment') );
+		foreach ( $credits as $credit ) {
+			list ( $post_id, $credit ) = array_values( (array) $credit );
+
+			if ( MigrationMeta::get( $post_id, $command_meta_key, 'post' ) === $command_meta_version ) {
+				// Already migrated.
+				continue;
+			}
+			// Find it's featured image and get the post id for that.
+			$thumbnail_id = get_post_thumbnail_id( $post_id );
+			if ( ! $thumbnail_id ) {
+				continue;
+			}
+
+			// Now put the credits on the featured image.
+			if ( ! update_post_meta( $thumbnail_id, '_media_credit', $credit ) ) {
+				$this->logger->log( $log_file,
+					sprintf( 'Could not update metadata on featured image with ID: %d', $thumbnail_id ),
+					Logger::ERROR );
+			}
+			// And remove it from the post.
+			if ( ! delete_post_meta( $post_id, 'standard-featured-credit' ) ) {
+				$this->logger->log( $log_file,
+					sprintf( 'Could not update metadata on post with ID: %d', $post_id ),
+					Logger::ERROR );
+			}
+
+			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
+
+			WP_CLI::success( sprintf( 'Moved featured image credits from post: %d to featured image post: %d ', $post_id, $thumbnail_id ) );
+		}
+
 	}
 
 	/**
