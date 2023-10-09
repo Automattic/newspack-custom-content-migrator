@@ -695,7 +695,7 @@ QUERY;
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = 'import_issues_as_pages';
-		$command_meta_version = 1;
+		$command_meta_version = 2;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 
 		$pdfurls_array = $this->get_pdf_urls_from_json( $assoc_args['articles-json'] );
@@ -717,7 +717,7 @@ QUERY;
 			WP_CLI::log( sprintf( 'Processing issue (%d of %d): %s', ++ $counter, $total_issues, $issue->{'@id'} ) );
 
 			$slug       = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
-			$post_date  = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
+			$post_date  = new DateTime( ( $issue->effective ?? $issue->created ), new DateTimeZone( 'America/Denver' ) );
 			$issue_name = $post_date->format( 'F j, Y' ) . ': ' . $issue->title;
 
 			$cat = get_category_by_slug( $slug );
