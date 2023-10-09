@@ -90,20 +90,39 @@ class Taxonomy {
 	 *
 	 * @return string|null Term ID or null if not found.
 	 */
-	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) : null|string {
+	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) {
 		global $wpdb;
 
+		$query_prepare = "select t.term_id 
+			from {$wpdb->terms} t
+			join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+			where tt.taxonomy = %s and t.name = %s and tt.parent = %d;";
+
+		// First try with converting name chars to HTML entities.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$existing_term_id = $wpdb->get_var(
 			$wpdb->prepare(
-				"select t.term_id 
-					from {$wpdb->terms} t
-					join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
-					where tt.taxonomy = %s and t.name = %s and tt.parent = %d;",
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+				$query_prepare,
 				$taxonomy,
 				htmlentities( $name ),
 				$parent_term_id
 			)
 		);
+
+		// Try without converting name chars to HTML entities.
+		if ( ! $existing_term_id ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$existing_term_id = $wpdb->get_var(
+				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+					$query_prepare,
+					$taxonomy,
+					$name,
+					$parent_term_id
+				)
+			);
+		}
 
 		return $existing_term_id;
 	}
@@ -116,9 +135,9 @@ class Taxonomy {
 	 *
 	 * @throws \RuntimeException If nonexisting $cat_parent_id is given.
 	 *
-	 * @return string Category term ID.
+	 * @return string|null Category term ID.
 	 */
-	public function get_or_create_category_by_name_and_parent_id( string $cat_name, int $cat_parent_id = 0 ) : string|null {
+	public function get_or_create_category_by_name_and_parent_id( string $cat_name, int $cat_parent_id = 0 ) {
 		global $wpdb;
 
 		// Get term_id if it exists.
@@ -206,8 +225,8 @@ class Taxonomy {
 
 		if ( ! empty( $taxonomies ) ) {
 			$query .= 'AND tt.taxonomy IN ( '
-			          . implode(',', array_fill( 0, count( $taxonomies ), '%s' ) )
-			          . ' )';
+					  . implode( ',', array_fill( 0, count( $taxonomies ), '%s' ) )
+					  . ' )';
 		}
 
 		$query .= ' ORDER BY t.term_id, tt.term_taxonomy_id ASC';

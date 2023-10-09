@@ -44,6 +44,46 @@ class Posts {
 	}
 
 	/**
+	 * This function conveniently returns all post IDs in a given range.
+	 *
+	 * @param int          $from_id From Post ID.
+	 * @param int          $to_id  To Post ID.
+	 * @param array        $post_types Target Post Types.
+	 * @param string|array $post_status Target Post Statuses.
+	 *
+	 * @return array
+	 */
+	public function get_post_ids_in_range( int $from_id, int $to_id, array $post_types, $post_status = '' ): array {
+		if ( empty( $post_status ) ) {
+			$post_status = [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ];
+		}
+		global $wpdb;
+
+		$post_type_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+
+		// Create $post_status statement placeholders.
+		$post_status_placeholders = implode( ',', array_fill( 0, count( $post_status ), '%s' ) );
+
+		// phpcs:disable -- used wpdb's prepare() and placeholders.
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID
+			FROM {$wpdb->posts}
+			WHERE ID BETWEEN %d AND %d
+			AND post_type IN ( $post_type_placeholders )
+			AND post_status IN ( $post_status_placeholders )",
+				$from_id,
+				$to_id,
+				...$post_types,
+				...$post_status
+			)
+		);
+		// phpcs:enable
+
+		return $ids;
+	}
+
+	/**
 	 * Returns all Post IDs in a given category.
 	 *
 	 * @param int          $category_term_id Category ID.
