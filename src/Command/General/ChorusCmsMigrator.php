@@ -321,11 +321,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$timezone_string = 'America/New_York';
 		// Updated/processed post IDs.
 		$post_ids = [];
-		// Get JSONs.
+		// Get JSONs from two data exports.
 		$entries_path_1 = '/tmp/setup/initial_export_archive/export_test/entry';
 		$entries_path_2 = '/tmp/second_content_migration/content-export/entry';
 		$entries_jsons = glob( $entries_path_1 . '/*.json' );
 		$entries_jsons = array_merge( $entries_jsons, glob( $entries_path_2 . '/*.json' ) );
+		// Logs.
 		$missing_uids = [];
 		$missing_jsons = [];
 		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
