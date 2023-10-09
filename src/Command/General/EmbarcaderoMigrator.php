@@ -40,6 +40,7 @@ use \WP_CLI;
  *     - wp newspack-content-migrator embarcadero-migrate-comments \
  *       --comments-csv-file-path=/path/to/comments.csv \
  *       --comments-zones-file-path=/path/to/comment_zones.csv
+ *       --users-file-path==/path/to/registrated_users.csv
  *
  *     - wp newspack-content-migrator embarcadero-migrate-print-issues \
  *       --publication-name="Danville San Ramon" \
@@ -48,6 +49,11 @@ use \WP_CLI;
  *       --print-sections-csv-file-path=/path/to/print_sections.csv \
  *       --print-pdf-dir-path=/path/to/morguepdf \
  *       --print-cover-dir-path=/path/to/covers
+ *
+ * *** How to fix CSVs if migrator reports that some rows can't be read (different count of header columns and found data columns for a row):
+ *  1. convert your CSV to TSV using OSX's Pages
+ *  2. feed the TSV to the helper command embarcadero-helper-fix-tsv-file and get a new fixed TSV file
+ *  3. feed the new fixed TSV file instead of the --csv-file= argument in the import command -- it will also accept TSVs, even though the argument name says CSV
  *
  * @package NewspackCustomContentMigrator
  */
@@ -66,11 +72,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
 
 	/**
+	 * Logger instance.
+	 *
 	 * @var Logger.
 	 */
 	private $logger;
@@ -83,11 +93,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
+	 * CoAuthorsPlus instance.
+	 *
 	 * @var CoAuthorPlus $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
 	/**
+	 * GutenbergBlockGenerator instance.
+	 *
 	 * @var GutenbergBlockGenerator.
 	 */
 	private $gutenberg_block_generator;
@@ -378,6 +392,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-helper-fix-tsv-file',
+			array( $this, 'cmd_embarcadero_helper_fix_tsv_file' ),
+			[
+				'shortdesc' => 'A helper command which takes a TSV file and tries to fix the ambiguous \"" and \" escaping.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'tsv-file-input',
+						'description' => 'Full path to TSV file which is having issues being read by filecsv( $file, null, "\t" ).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'tsv-file-output',
+						'description' => 'Where to save the new (hopefully fixed) content. Full file path.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -403,12 +441,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-		$posts                 = $this->get_data_from_csv( $story_csv_file_path );
-		$contributors          = $this->get_data_from_csv( $story_byline_emails_csv_file_path );
-		$sections              = $this->get_data_from_csv( $story_sections_csv_file_path );
-		$photos                = $this->get_data_from_csv( $story_photos_csv_file_path );
-		$media                 = $this->get_data_from_csv( $story_media_csv_file_path );
-		$carousel_items        = $this->get_data_from_csv( $story_carousel_items_dir_path );
+		$posts                 = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$contributors          = $this->get_data_from_csv_or_tsv( $story_byline_emails_csv_file_path );
+		$sections              = $this->get_data_from_csv_or_tsv( $story_sections_csv_file_path );
+		$photos                = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
+		$media                 = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
+		$carousel_items        = $this->get_data_from_csv_or_tsv( $story_carousel_items_dir_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_ORIGINAL_ID_META_KEY );
 
 		// Get selected posts.
@@ -509,6 +547,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			// Migrate post content shortcodes.
+			// phpcs:ignore
 			$post_content         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
 			$updated_post_content = $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items );
 
@@ -594,10 +633,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Imported post %d/%d: %d with the ID %d', $post_index + 1, count( $posts ), $post['story_id'], $wp_post_id ), Logger::SUCCESS );
-
-			if ( 2000 === $post_index ) {
-				break;
-			}
 		}
 	}
 
@@ -610,7 +645,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_migrate_post_tags( $args, $assoc_args ) {
 		$story_tags_csv_file_path = $assoc_args['story-tags-csv-file-path'];
 
-		$tags                  = $this->get_data_from_csv( $story_tags_csv_file_path );
+		$tags                  = $this->get_data_from_csv_or_tsv( $story_tags_csv_file_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_TAG_META_KEY );
 
 		$grouped_tags = [];
@@ -657,7 +692,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_csv_file_path = $assoc_args['story-photos-file-path'];
 		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
 
-		$photos                = $this->get_data_from_csv( $story_photos_csv_file_path );
+		$photos                = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_FEATURED_META_KEY );
 
 		$featured_photos = array_values(
@@ -723,8 +758,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
 		$story_media_csv_file_path = $assoc_args['story-media-file-path'];
 
-		$posts                 = $this->get_data_from_csv( $story_csv_file_path );
-		$media_list            = $this->get_data_from_csv( $story_media_csv_file_path );
+		$posts                 = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$media_list            = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
 
 		// Skip already imported posts.
@@ -757,7 +792,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				array_filter(
 					$media_list,
 					function( $media_item ) use ( $post ) {
-						return $media_item['story_id'] === $post['story_id'] && $media_item['media_type'] === 'more_stories';
+						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
 			);
@@ -802,8 +837,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_csv_file_path = $assoc_args['story-photos-file-path'];
 		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
 
-		$posts  = $this->get_data_from_csv( $story_csv_file_path );
-		$photos = $this->get_data_from_csv( $story_photos_csv_file_path );
+		$posts  = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$photos = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
 
 		foreach ( $posts as $post_index => $post ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating images for the post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
@@ -848,9 +883,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$users_file_path              = $assoc_args['users-file-path'];
 		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_COMMENT_META_KEY );
 
-		$comments = $this->get_data_from_csv( $comments_csv_file_path );
-		$zones    = $this->get_data_from_csv( $comments_zones_csv_file_path );
-		$users    = $this->get_data_from_csv( $users_file_path );
+		$comments = $this->get_data_from_csv_or_tsv( $comments_csv_file_path );
+		$zones    = $this->get_data_from_csv_or_tsv( $comments_zones_csv_file_path );
+		$users    = $this->get_data_from_csv_or_tsv( $users_file_path );
 
 		// Skip already imported comments.
 		$comments = array_values(
@@ -863,6 +898,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $comments as $comment_index => $comment ) {
+			if ( empty( $comment['comment'] ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Skipping empty comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ), Logger::LINE );
+				continue;
+			}
+
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ), Logger::LINE );
 
 			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $comment['topic_id'] );
@@ -875,30 +915,40 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Get or create subscriber user.
 			$user_index = array_search( $comment['user_id'], array_column( $users, 'user_id' ) );
 			if ( false === $user_index ) {
+				// Will skip providing user data.
+				$wp_user = null;
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find user %s for the comment %d', $comment['user_id'], $comment['comment_id'] ), Logger::WARNING );
-				continue;
+			} else {
+				// Get WP_User object.
+				$raw_user = $users[ $user_index ];
+
+				// Update default email.
+				if ( 'blank' == $raw_user['email'] ) {
+					// Using "@newspack.com" for security reasons (a valid domain not owned by us or the Publisher could emulate this email).
+					$raw_user['email'] = uniqid() . '@newspack.com';
+				}
+
+				$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
+
+				if ( is_wp_error( $wp_user_id ) ) {
+					$wp_user    = null;
+					$wp_user_id = null;
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', $wp_user_id->get_error_message() ), Logger::WARNING );
+				} else {
+					$wp_user = get_user_by( 'id', $wp_user_id );
+				}
 			}
 
-			$raw_user = $users[ $user_index ];
-
-			$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
-
-			if ( is_wp_error( $wp_user_id ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'], $wp_user_id->get_error_message() ), Logger::WARNING );
-				$wp_user_id = null;
-			}
-
-			$wp_user = get_user_by( 'id', $wp_user_id );
 
 			$comment_data = [
 				'comment_post_ID'      => $wp_post_id,
 				'comment_approved'     => 'no' === $comment['hide'],
-				'user_id'              => $wp_user->ID,
-				'comment_author'       => $wp_user->user_login,
-				'comment_author_email' => $wp_user->user_email,
-				'comment_author_url'   => $wp_user->user_url,
-				'comment_author_IP'    => $comment['ip_address'],
-				'comment_content'      => $comment['comment'],
+				'user_id'              => $wp_user ? $wp_user->ID : '',
+				'comment_author'       => $wp_user ? $wp_user->user_login : '',
+				'comment_author_email' => $wp_user ? $wp_user->user_email : '',
+				'comment_author_url'   => $wp_user ? $wp_user->user_url : '',
+				'comment_author_IP'    => $comment['ip_address'] ?? '',
+				'comment_content'      => $comment['comment'] ?? '',
 				'comment_date_gmt'     => gmdate( 'Y-m-d H:i:s', $comment['posted_epoch'] ),
 				'comment_meta'         => [],
 			];
@@ -938,8 +988,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
 		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY );
 
-		$print_issues   = $this->get_data_from_csv( $print_issues_csv_file_path );
-		$print_sections = $this->get_data_from_csv( $print_sections_csv_file_path );
+		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
+		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
 
 		// Skip already imported print issues.
 		$print_issues = array_values(
@@ -1055,13 +1105,114 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator embarcadero-helper-fix-tsv-file`.
+	 *
+	 * Takes a TSV file and tries to fix the ambiguous \"" and \" escaping and produces a new, fixed TSV file.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_helper_fix_tsv_file( $pos_args, $assoc_args ) {
+		$file_input  = $assoc_args['tsv-file-input'];
+		$file_output = $assoc_args['tsv-file-output'];
+
+		if ( ! file_exists( $file_input ) ) {
+			WP_CLI::error( 'File does not exist: ' . $file_input );
+		}
+		$tsv_file = fopen( $file_input, 'r' );
+		if ( false === $tsv_file ) {
+			WP_CLI::error( 'Could not open file: ' . $file_input );
+		}
+		$tsv_headers = fgetcsv( $tsv_file, null, "\t" );
+		if ( false === $tsv_headers ) {
+			WP_CLI::error( 'Could not read TSV headers from file: ' . $file_input );
+		}
+
+		// We'll work on a temp file until fixed, then we mv it to the output file.
+		$file_tmp = $file_output . '.tmp';
+		copy( $file_input, $file_tmp );
+
+		$fixes_made = false;
+		$faulty_row = null;
+		do {
+			$fixed = true;
+
+			$tsv_file    = fopen( $file_tmp, 'r' );
+			$tsv_array   = fgetcsv( $tsv_file, null, "\t" );
+			$tsv_headers = array_map( 'trim', $tsv_array );
+
+
+			// Read TSV until a faulty row is found, and then set $fixed to false and stop.
+			while (
+				( ( $tsv_row = fgetcsv( $tsv_file, null, "\t" ) ) !== false )
+				&& ( false !== $fixed )
+			) {
+				if ( count( $tsv_row ) !== count( $tsv_headers ) ) {
+					$faulty_row = current( $tsv_row );
+					WP_CLI::warning( 'Can not read TSV row ID ' . $faulty_row );
+					$fixed = false;
+					continue;
+				}
+			}
+
+			/**
+			 * It failed for the first time (), then try and replace the faulty row with a fixed one.
+			 */
+			if ( false === $fixed ) {
+
+				$next_row = $faulty_row + 1;
+
+				$from = "\n{$faulty_row}\t";
+				$to   = "\n{$next_row}\t";
+
+				// Get faulty row.
+				$full_file_contents = file_get_contents( $file_tmp );
+				$pos_from           = strpos( $full_file_contents, $from );
+				$pos_to             = strpos( $full_file_contents, $to );
+				if ( ! $pos_from ) {
+					// This shouldn't be, but check just in case.
+					WP_CLI::error( sprintf( 'Was not able to match \'%s\' string position in TSV file.', $from ) );
+				}
+				// And if $to is not found, do replacements in file until the end of content ($pos_to=null will be used as $length argument for substr down below).
+				if ( false === $pos_to ) {
+					$pos_to = null;
+				}
+
+				WP_CLI::line( sprintf( 'Fixing quotes from %d to %s ...', $faulty_row, $next_row ?? 'end' ) );
+				$offending_record          = substr( $full_file_contents, $pos_from, $pos_to - $pos_from + 1 );
+				$offending_record_replaced = str_replace( '\""', '\"', $offending_record );
+				$full_file_contents        = str_replace( $offending_record, $offending_record_replaced, $full_file_contents );
+				file_put_contents( $file_tmp, $full_file_contents );
+
+				$fixes_made = true;
+			}
+		} while ( true !== $fixed );
+
+		fclose( $tsv_file );
+
+		// Move file from $file_tmp to $file_output.
+		if ( true === $fixes_made ) {
+			rename( $file_tmp, $file_output );
+			WP_CLI::success( 'Fixed file saved to: ' . $file_output );
+		}
+	}
+
+	/**
 	 * Get data from CSV file.
 	 *
 	 * @param string $story_csv_file_path Path to the CSV file containing the stories to import.
 	 * @return array Array of data.
 	 */
-	private function get_data_from_csv( $story_csv_file_path ) {
+	private function get_data_from_csv_or_tsv( $story_csv_file_path ) {
 		$data = [];
+
+		// Reading CSV or TSV.
+		$separator = ',';
+		if ( '.tsv' == strtolower( substr( $story_csv_file_path, -4 ) ) ) {
+			$separator = "\t";
+		}
 
 		if ( ! file_exists( $story_csv_file_path ) ) {
 			$this->logger->log( self::LOG_FILE, 'File does not exist: ' . $story_csv_file_path, Logger::ERROR );
@@ -1072,14 +1223,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$this->logger->log( self::LOG_FILE, 'Could not open file: ' . $story_csv_file_path, Logger::ERROR );
 		}
 
-		$csv_headers = fgetcsv( $csv_file );
-		if ( false === $csv_headers ) {
+		$csv_row = fgetcsv( $csv_file, null, $separator );
+		if ( false === $csv_row ) {
 			$this->logger->log( self::LOG_FILE, 'Could not read CSV headers from file: ' . $story_csv_file_path, Logger::ERROR );
 		}
 
-		$csv_headers = array_map( 'trim', $csv_headers );
+		$csv_headers = array_map( 'trim', $csv_row );
 
-		while ( ( $csv_row = fgetcsv( $csv_file ) ) !== false ) {
+		while ( ( $csv_row = fgetcsv( $csv_file, null, $separator ) ) !== false ) {
 			if ( count( $csv_row ) !== count( $csv_headers ) ) {
 				$this->logger->log( self::LOG_FILE, 'Could not read CSV row (' . current( $csv_row ) . ') from file: ' . $story_csv_file_path, Logger::WARNING );
 				continue;
@@ -1151,21 +1302,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$wp_user_id = wp_create_user( $email_address, wp_generate_password(), $email_address );
 		if ( is_wp_error( $wp_user_id ) ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Could not create user %s: %s', $full_name, $wp_user_id->get_error_message() ), Logger::ERROR );
+		} else {
+
+			// Set the Contributor role.
+			$user = new \WP_User( $wp_user_id );
+			$user->set_role( $role );
+
+			// Set WP User display name.
+			wp_update_user(
+				[
+					'ID'           => $wp_user_id,
+					'display_name' => $full_name,
+					'first_name'   => current( explode( ' ', $full_name ) ),
+					'last_name'    => join( ' ', array_slice( explode( ' ', $full_name ), 1 ) ),
+				]
+			);
 		}
 
-		// Set the Contributor role.
-		$user = new \WP_User( $wp_user_id );
-		$user->set_role( $role );
-
-		// Set WP User display name.
-		wp_update_user(
-			[
-				'ID'           => $wp_user_id,
-				'display_name' => $full_name,
-				'first_name'   => current( explode( ' ', $full_name ) ),
-				'last_name'    => join( ' ', array_slice( explode( ' ', $full_name ), 1 ) ),
-			]
-		);
 
 		return $wp_user_id;
 	}

@@ -98,7 +98,7 @@ class CoAuthorPlus {
 	 *     @type int    $avatar       Attachment ID for the Avatar image.
 	 * }
 	 *
-	 * @return int|array Created Guest Author ID, or an array of created Guest Author IDs.
+	 * @return int|array|WP_Error Created Guest Author ID, or an array of created Guest Author IDs, or WP_Error.
 	 *
 	 * @throws \UnexpectedValueException In case mandatory argument values aren't provided.
 	 */
@@ -278,7 +278,7 @@ class CoAuthorPlus {
 	/**
 	 * Links a Guest Author to an existing WP User.
 	 *
-	 * @param int     $ga_id Guest Author ID.
+	 * @param int      $ga_id Guest Author ID.
 	 * @param \WP_User $user  WP User.
 	 */
 	public function link_guest_author_to_wp_user( $ga_id, $user ) {
@@ -311,6 +311,11 @@ class CoAuthorPlus {
 	 */
 	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser ) {
 		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser );
+
+		if ( false === $ga ) {
+			return null;
+		}
+
 		$ga = ( 'guest-author' == $ga->type ) ? $ga : null;
 
 		return $ga;
@@ -724,6 +729,11 @@ class CoAuthorPlus {
 	 * @return bool|WP_Error $success True on success, WP_Error on a failure.
 	 */
 	public function delete_ga( $id, $reassign_to = false ) {
+		if ( false !== filter_var( $reassign_to, FILTER_VALIDATE_EMAIL ) ) {
+			// This means $reasign_to is an email, so let's sanitize it.
+			$reassign_to = sanitize_title( $reassign_to );
+		}
+
 		return $this->coauthors_guest_authors->delete( $id, $reassign_to );
 	}
 
