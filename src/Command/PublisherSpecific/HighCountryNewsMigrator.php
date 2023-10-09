@@ -706,9 +706,9 @@ QUERY;
 		global $wpdb;
 		$blobs_folder               = rtrim( $assoc_args['blobs-folder-path'], '/' ) . '/';
 		$issues_category_id         = $this->get_or_create_category( 'Issues' );
-		$issues_parent_page_post_id = 180504;
-		$default_author = 223746;
-		$the_magazine_tag_id = 7640;
+		$issues_parent_page_post_id = 180504; // The page that all issues will have as parent.
+		$default_author             = 223746; // User ID of default author.
+		$the_magazine_tag_id        = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
 
 		$total_issues = $this->json_iterator->count_json_array_entries( $assoc_args['issues-json'] );
 		$counter      = 0;
@@ -743,7 +743,7 @@ QUERY;
 			}
 			$post_date_formatted = $post_date->format( 'Y-m-d H:i:s' );
 
-			$page_data          = [
+			$page_data = [
 				'post_title'    => $issue_name,
 				'post_name'     => $slug,
 				'post_status'   => 'publish',
@@ -775,8 +775,8 @@ QUERY;
 
 			$image_id = 0;
 			if ( ! empty( $issue->image ) ) {
-				$blob_file_path = trailingslashit( realpath( $blobs_folder ) ) . $issue->image->blob_path;
-				$image_attachment_id       = $this->attachments->import_attachment_for_post(
+				$blob_file_path      = trailingslashit( realpath( $blobs_folder ) ) . $issue->image->blob_path;
+				$image_attachment_id = $this->attachments->import_attachment_for_post(
 					$post_id,
 					$blob_file_path,
 					'Magazine cover: ' . $issue_name,
@@ -785,19 +785,20 @@ QUERY;
 				);
 
 				if ( ! is_wp_error( $image_attachment_id ) ) {
-					$image_id = $image_attachment_id;
-					$page_data['meta_input']['_thumbnail_id'] = $image_id;
+					$image_id                                                    = $image_attachment_id;
+					$page_data['meta_input']['_thumbnail_id']                    = $image_id;
 					$page_data['meta_input']['newspack_featured_image_position'] = 'hidden';
 				} else {
 					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
 				}
 			}
 
-			$page_data['ID'] = $post_id;
+			$page_data['ID']           = $post_id;
 			$page_data['post_content'] = $this->get_issue_page_content_for_category( $cat->term_id, $issue->description ?? '', $image_id, $pdf_id );
+			$page_data['post_excerpt'] = $issue->description ?? '';
 
 			wp_update_post( $page_data );
-			wp_set_post_tags( $post_id, [ $the_magazine_tag_id ], true  );
+			wp_set_post_tags( $post_id, [ $the_magazine_tag_id ], true );
 			update_post_meta( $page_data['ID'], 'plone_issue_page_UID', $issue->UID );
 			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page_data['ID'] ) ), Logger::SUCCESS );
 
