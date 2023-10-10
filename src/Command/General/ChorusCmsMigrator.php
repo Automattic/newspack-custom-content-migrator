@@ -20,8 +20,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Meta key for Chorus CMS' original ID.
 	 */
-	const CHORUS_ORIGINAL_ID_META_KEY            = 'newspack_chorus_entry_uid';
-	const CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY = 'newspack_original_image_url';
+	const CHORUS_META_KEY_ORIGINAL_ENTRY_UID      = 'newspack_chorus_entry_uid';
+	const CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL = 'newspack_original_image_url';
+	const CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID = 'newspack_chorus_asset_uid';
 
 	/**
 	 * Chorus components to Gutenberg blocks converters.
@@ -304,6 +305,38 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator chorus-cms-import-assets',
+			[ $this, 'cmd_import_assets' ],
+			[
+				'shortdesc' => 'Imports the entirety of assets JSONs, even if they re not used in posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'path-to-export',
+						'description' => "Path to where 'asset/' folder is located with asset JSONs.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'timezone-string',
+						'description' => "PHP timezone string (e.g. 'America/New_York', 'Europe/Berlin', 'UTC', ...). It is assumed that Chorus' timestamps are in UTC, so we need to specify Publisher's local timezone to convert them properly. For full list of available timezone strings (then click region for list of strings, e.g. https://www.php.net/manual/en/timezones.america.php).",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-assets',
+						'description' => 'If used, will refresh data from asset JSONs even for existing media library items.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator chorus-cms-temp-dev-helper-scripts',
 			[ $this, 'cmd_temp_dev_helper_scripts' ],
 		);
@@ -335,7 +368,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$entry = $this->get_entry_from_data_entry( $data_entry, $entry_json );
 			// Get imported post ID.
 			$uid = $entry['uid'];
-			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::CHORUS_ORIGINAL_ID_META_KEY, $uid ) );
+			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::CHORUS_META_KEY_ORIGINAL_ENTRY_UID, $uid ) );
 			if ( ! $post_id ) {
 				$missing_uids[] = $uid;
 				$missing_jsons[] = $entry_json;
@@ -385,6 +418,162 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// 	WP_CLI::success( "Updated ID $post_id." );
 		// }
 		// WP_CLI::line( "Done." );
+
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator chorus-cms-import-assets`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_import_assets( array $pos_args, array $assoc_args ) {
+		$path       = rtrim( $assoc_args['path-to-export'], '/' );
+		$asset_path = $path . '/asset';
+		if ( ! file_exists( $asset_path ) ) {
+			WP_CLI::error( 'Content not found in path.' );
+		}
+		$timezone_string = rtrim( $assoc_args['timezone-string'], '/' );
+		$refresh_assets = isset( $assoc_args['refresh-assets'] ) ? true : false;
+
+		WP_CLI::line( 'Importing assets...' );
+		$this->import_assets( $asset_path, $timezone_string, $refresh_assets );
+
+		WP_CLI::success( 'Done. Check *.log files.' );
+	}
+
+	/**
+	 * @param string $asset_path
+	 * @param string $timezone_string
+	 * @param bool   $refresh_assets
+	 *
+	 * @return void
+	 */
+	public function import_assets( string $asset_path, string $timezone_string, bool $refresh_assets ) {
+		global $wpdb;
+
+		// Get all existing attachment IDs.
+		$existing_attachment_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type = 'attachment';" );
+
+		// Loop through entries and import them.
+		// $assets_jsons = glob( $asset_path . '/*.json' );
+$assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_the-city_export_8-9-2023/asset/Asset:testmock.json' ];
+		foreach ( $assets_jsons as $key_asset_json => $asset_json ) {
+
+			WP_CLI::line( sprintf( '%d/%d', $key_asset_json + 1, count( $assets_jsons ) ) );
+
+			// Get asset data from JSON.
+			$data_asset   = json_decode( file_get_contents( $asset_json ), true );
+			$uid          = $data_asset['uid'];
+			$url          = $data_asset['url'];
+			$credit       = $data_asset['credit']['html'] ?? null;
+			$title        = $data_asset['title'] ?? null;
+			$caption      = $data_asset['sourceCaption'] ?? null;
+			$usage_rights = $data_asset['usageRights'] ?? null;
+			$created      = isset ( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
+				? $this->format_chorus_date( $data_asset['createdAt'], $timezone_string )
+				: null;
+			$type         = $data_asset['type'] ?? null;
+			// Not sure if we can use this one, can be: 'URL', 'MEMBER_UPLOAD', 'UPLOAD'.
+			$source       = $data_asset['source'] ?? null;
+
+			/**
+			 * Check if already imported. We'll have to make this complex and unperformant at this pint because of historical reasons how we've gradually been importing different data from a specific publisher :(
+			 *  1. check by uid
+			 *  2. check by original URL
+			 *  3. also check if `$this->attachments->import_external_file( $url );` returning an existing URL by:
+			 *      - fetching all attachment IDs
+			 *      - calling `$this->attachments->import_external_file( $url );`
+			 *      - checking if it returned one of the existing IDs
+			 */
+			$existing_att_id = null;
+			$att_id          = null;
+			// Check by uid.
+			$existing_att_id = $wpdb->get_var( $wpdb->prepare(
+				"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
+				self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID,
+				$uid
+			) );
+			// Check by original URL.
+			if ( ! $existing_att_id ) {
+				$existing_att_id = $wpdb->get_var( $wpdb->prepare(
+					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
+					self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL,
+					$url
+				) );
+			}
+			// Get existing or import new attachment ID.
+			if ( ! $existing_att_id ) {
+				$att_id = $this->attachments->import_external_file( $url );
+				if ( is_wp_error( $att_id ) ) {
+					$err_msg = $att_id->get_error_message() ?? '/na';
+					$this->logger->log( 'chorus_assets_errors.log', sprintf( 'Error importing URL: %s ErrMsg: %s', $url, $err_msg ) );
+
+					continue;
+				}
+
+				// Flag that the resulting $att_id is existing.
+				if ( in_array( $att_id, $existing_attachment_ids ) ) {
+					$existing_att_id = $att_id;
+				}
+			}
+
+			// Skip if already imported and not explicitly refreshing existing assets.
+			if ( $existing_att_id && ! $refresh_assets ) {
+				continue;
+			}
+
+			// Log newly imported attachment.
+			if ( ! $existing_att_id ) {
+				$this->logger->log( 'chorus_new_assets.log', sprintf( 'Imported attachment ID %d URL %s', $att_id, $url ) );
+			}
+
+			// Set the att ID variable (in the code above it was either fetched from import_external_file(), or uid, or URL).
+			$att_id = $att_id ?? $existing_att_id;
+
+			// Get wp_post data for updating.
+			$update_post = [];
+			$credit = $data_asset['credit']['html'] ?? null;
+			if ( $credit ) {
+				$update_postmeta[ '_media_credit' ] = $credit;
+			}
+			$usage_rights = $data_asset['usageRights'] ?? null;
+			if ( ! $usage_rights ) {
+				$update_postmeta['_navis_media_can_distribute'] = true;
+			}
+			$created = isset ( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
+				? $this->format_chorus_date( $data_asset['createdAt'], $timezone_string )
+				: null;
+			if ( $created ) {
+				$update_post['post_date']     = $created;
+				$update_post['post_date_gmt'] = $created;
+			}
+
+			// Get wp_postmeta data for updating.
+			$update_postmeta = [];
+			$title           = $data_asset['title'] ?? null;
+			if ( $title ) {
+				$update_post['post_title'] = $title;
+			}
+			$caption      = $data_asset['sourceCaption'] ?? null;
+			if ( $caption ) {
+				$update_post['post_excerpt'] = $title;
+			}
+			$update_postmeta[ self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID ] = $uid;
+			$update_postmeta[ self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL ] = $url;
+
+			// Update.
+			if ( ! empty( $update_post ) ) {
+				$wpdb->update( $wpdb->posts, $update_post, [ 'ID' => $att_id ] );
+			}
+			if ( ! empty( $update_postmeta ) ) {
+				$wpdb->update( $wpdb->postmeta, $update_postmeta, [ 'ID' => $att_id ] );
+			}
+		}
+
+$d=1;
 
 	}
 
@@ -490,7 +679,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Get already imported posts original IDs.
-		$imported_original_ids = $this->get_posts_meta_values_by_key( self::CHORUS_ORIGINAL_ID_META_KEY );
+		$imported_original_ids = $this->get_posts_meta_values_by_key( self::CHORUS_META_KEY_ORIGINAL_ENTRY_UID );
 
 		// Loop through entries and import them.
 		$entries_jsons = glob( $entries_path . '/*.json' );
@@ -566,7 +755,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			/**
 			 * Insert or fetch post.
 			 */
-			$post_id = $this->get_post_id_by_meta( self::CHORUS_ORIGINAL_ID_META_KEY, $entry['uid'] );
+			$post_id = $this->get_post_id_by_meta( self::CHORUS_META_KEY_ORIGINAL_ENTRY_UID, $entry['uid'] );
 			// If the post exists and we don't want to refresh it, skip it.
 			if ( ! $refresh_posts && $post_id ) {
 				$this->logger->log(
@@ -677,7 +866,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$caption = $this->get_caption_from_asset( $entry['leadImage'] );
 
 				// If the image is already imported return its ID.
-				$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+				$attachment_id = $this->get_post_id_by_meta( self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 				if ( ! $attachment_id ) {
 					// Download featured image.
@@ -691,7 +880,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				}
 
 				// Save the original URL in the meta.
-				update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+				update_post_meta( $attachment_id, self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 				// Set is as featured image.
 				set_post_thumbnail( $post_id, $attachment_id );
@@ -870,8 +1059,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 * Set post meta.
 			 */
 			$meta = [
-				self::CHORUS_ORIGINAL_ID_META_KEY => $entry['uid'],
-				'newspack_chorus_entry_url'       => $entry['url'],
+				self::CHORUS_META_KEY_ORIGINAL_ENTRY_UID => $entry['uid'],
+				'newspack_chorus_entry_url'              => $entry['url'],
 			];
 			if ( $entry['layoutTemplate'] ) {
 				$meta['newspack_chorus_entry_layout_template'] = $entry['layoutTemplate'];
@@ -915,7 +1104,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$caption = $this->get_caption_from_asset( $entry['seoImage'] );
 
 				// If the image is already imported return its ID.
-				$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+				$attachment_id = $this->get_post_id_by_meta( self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 				if ( ! $attachment_id ) {
 					// Download seo image.
@@ -929,7 +1118,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				}
 
 				// Save the original URL in the meta.
-				update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+				update_post_meta( $attachment_id, self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 				// Save credit as Newspack credit.
 				update_post_meta( $attachment_id, '_media_credit', $credit );
@@ -1430,7 +1619,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$caption = isset( $component['image']['caption']['plaintext'] ) && ! empty( $component['image']['caption']['plaintext'] ) ? $component['image']['caption']['plaintext'] : null;
 
 		// If the image is already imported return its ID.
-		$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+		$attachment_id = $this->get_post_id_by_meta( self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 		if ( ! $attachment_id ) {
 			// Import image.
@@ -1460,7 +1649,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$attachment_post = get_post( $attachment_id );
 
 		// Save the original URL in the meta.
-		update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+		update_post_meta( $attachment_id, self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 		// Save credit as Newspack credit.
 		update_post_meta( $attachment_id, '_media_credit', $credit );
@@ -1506,7 +1695,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			$url     = $image['url'];
 
 			// If the image is already imported return its ID.
-			$attachment_id = $this->get_post_id_by_meta( self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+			$attachment_id = $this->get_post_id_by_meta( self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 			if ( ! $attachment_id ) {
 				// Import image.
@@ -1520,7 +1709,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			}
 
 			// Save the original URL in the meta.
-			update_post_meta( $attachment_id, self::CHORUS_ATTACHMENT_ORIGINAL_ID_META_KEY, $url );
+			update_post_meta( $attachment_id, self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL, $url );
 
 			// Log errors.
 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {

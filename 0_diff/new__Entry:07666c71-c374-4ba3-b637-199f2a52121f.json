@@ -1,0 +1,553 @@
+{
+  "__typename": "Entry",
+  "id": 23609097,
+  "uid": "Entry:07666c71-c374-4ba3-b637-199f2a52121f",
+  "title": "Hochul to NYC: State Won’t Force Upstate to Shelter Migrants",
+  "type": "STORY",
+  "dek": {
+    "html": "City officials have been begging for a ‘statewide decompression’ strategy for months, but the governor rebuffed it Thursday. "
+  },
+  "community": {
+    "id": 785
+  },
+  "socialImage": null,
+  "socialHeadline": null,
+  "socialDescription": null,
+  "seoImage": null,
+  "seoHeadline": "Hochul Tells NYC State Wont Force Upstate to Shelter Migrants",
+  "seoDescription": null,
+  "leadImage": {
+    "asset": {
+      "id": 24826128,
+      "uid": "Asset:24826128",
+      "url": "https://cdn.vox-cdn.com/uploads/chorus_asset/file/24826128/080123_roosevelt_migrants_7.jpg",
+      "height": 2000,
+      "width": 3000,
+      "credit": {
+        "html": "Ben Fractenberg/THE CITY"
+      },
+      "title": "An NYPD officer hands out pizza to migrants waiting to get into the Roosevelt Hotel near Grand Central.",
+      "source": "UPLOAD",
+      "searchText": "Migrants, Shelter, Roosevelt Hotel, Midtown, Manhattan, Asylum Seekers, Food, Pizza",
+      "sourceCaption": "An NYPD officer hands out pizza to migrants waiting to get into the Roosevelt Hotel near Grand Central, Aug. 1, 2023.",
+      "usageRights": null,
+      "externalIds": [],
+      "createdAt": "2023-08-02T18:09:34.000Z",
+      "type": "IMAGE"
+    },
+    "url": "https://cdn.vox-cdn.com/thumbor/3DmSkKqyNNMw8JXTkn6YlXQgDlE=/0x0:3000x2000/3000x2000/filters:focal(1500x1000:1501x1001)/cdn.vox-cdn.com/uploads/chorus_asset/file/24826128/080123_roosevelt_migrants_7.jpg",
+    "caption": {
+      "html": "A police officer passed pizza to migrants waiting to get into the city’s ‘welcome center’ at Roosevelt Hotel in Midtown, Aug. 1, 2023."
+    },
+    "focus": {
+      "x": 1500,
+      "y": 1000
+    }
+  },
+  "createdAt": "2023-08-24T22:27:49.000Z",
+  "updatedAt": "2023-08-24T23:18:39.000Z",
+  "publishDate": "2023-08-24T23:18:37.726Z",
+  "publishStatus": "PUBLISHED",
+  "url": "https://www.thecity.nyc/2023/8/24/23845056/hochul-wont-force-upstate-shelter-migrants",
+  "additionalContributors": null,
+  "layoutTemplate": "STANDARD",
+  "author": {
+    "uid": "User:10651395",
+    "firstName": "Gwynne",
+    "lastName": "Hogan",
+    "username": "gwynne-hogan"
+  },
+  "authorProfile": {
+    "uid": "AuthorProfile:32779",
+    "id": 32779,
+    "user": {
+      "uid": "User:10651395",
+      "lastLoginAt": null,
+      "firstName": "Gwynne",
+      "lastName": "Hogan",
+      "username": "gwynne-hogan"
+    },
+    "name": "Gwynne Hogan",
+    "url": "https://www.thecity.nyc/authors/gwynne-hogan",
+    "slug": "gwynne-hogan",
+    "title": "",
+    "shortBio": null,
+    "socialLinks": [
+      {
+        "label": null,
+        "type": "PROFILE",
+        "url": "https://thecity.admin.usechorus.com/users/gwynne-hogan"
+      },
+      {
+        "label": null,
+        "type": "RSS",
+        "url": "https://www.thecity.nyc/authors/gwynne-hogan/rss"
+      }
+    ]
+  },
+  "contributors": [],
+  "primaryCommunityGroup": {
+    "uid": "EntryGroup:113715",
+    "name": "migrant crisis"
+  },
+  "communityGroups": [
+    {
+      "uid": "EntryGroup:95570",
+      "name": "Front Page"
+    },
+    {
+      "uid": "EntryGroup:113715",
+      "name": "migrant crisis"
+    },
+    {
+      "uid": "EntryGroup:96215",
+      "name": "City Government"
+    },
+    {
+      "uid": "EntryGroup:99788",
+      "name": "Law Department"
+    },
+    {
+      "uid": "EntryGroup:96288",
+      "name": "State Government"
+    },
+    {
+      "uid": "EntryGroup:96443",
+      "name": "Eric Adams"
+    },
+    {
+      "uid": "EntryGroup:105627",
+      "name": "Kathy Hochul"
+    }
+  ],
+  "body": {
+    "components": [
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "cDDU7x",
+          "alignment": null
+        },
+        "contents": {
+          "html": "With nearly 60,000 migrants already in the city’s care and hundreds more arriving daily, New York City has been begging state officials for a “statewide decompression” strategy, seeking additional locations outside the five boroughs to house new arrivals. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "ubnddy",
+          "alignment": null
+        },
+        "contents": {
+          "html": "But in an address on Thursday, Gov. Kathy Hochul <a href=\"https://www.governor.ny.gov/news/governor-hochul-calls-president-biden-direct-federal-government-provide-work-authorizations\">closed the door</a> on that request, assuring upstate New Yorkers that large-scale shelters won’t open in their towns."
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "0lvzBs",
+          "alignment": null
+        },
+        "contents": {
+          "html": "“We cannot and will not force other parts of our state to shelter migrants,” Hochul said. “Nor are we going to be asking these migrants to move to other parts of the state against their will.”"
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "mOBBim",
+          "alignment": null
+        },
+        "contents": {
+          "html": "City officials have argued the governor should use her executive power to override upstate counties that block the city from sending asylum-seekers."
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "FwqDLA",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Hochul’s remarks were met with a swift rebuke from Mayor Eric Adams, in an increasingly tense standoff between New York’s two most powerful Democrats over whether the state or city bears ultimate responsibility for housing the flow of migrants. It has played out in public remarks and dueling letters submitted as part of an ongoing court battle. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "4o81vu",
+          "alignment": null
+        },
+        "contents": {
+          "html": "“We’re disappointed that the state today appears to minimize the role that they can — and must — play in responding to this crisis,” Adams said in a statement. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "KchbWU",
+          "alignment": null
+        },
+        "contents": {
+          "html": "“Leaving New York City alone to manage this crisis — and abdicating the state’s responsibility to coordinate a statewide response — is unfair to New York City residents who also didn’t ask to be left almost entirely on their own in the middle of a national crisis.” "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyHeading",
+        "placement": {
+          "id": "XXMX9f",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Statewide Response"
+        },
+        "level": 2
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "FKs9j6",
+          "alignment": null
+        },
+        "contents": {
+          "html": "New York City officials — who’ve been racing to open ad hoc shelters in empty office buildings, gyms, vacant schools, church basements and sprawling tents — have been urging Hochul to force counties across the state to receive migrants and to identify sites outside New York City where they can seek shelter. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "FhYsHi",
+          "alignment": null
+        },
+        "contents": {
+          "html": "While Erie, Monroe and Albany counties are working with city officials and have taken in asylum-seekers, the city is <a href=\"https://www.nyc.gov/office-of-the-mayor/news/395-23/city-new-york-sue-30-new-york-counties-illegally-walling-off-their-borders-asylum\">suing 30 counties</a> for using executive orders to prevent migrants from arriving. The vast majority of the nearly 60,000 asylum-seekers in shelters remain within New York City, and beyond the five boroughs, the city is paying for shelter in most<strong> </strong>instances. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "P3wCy9",
+          "alignment": null
+        },
+        "contents": {
+          "html": "In a letter submitted to Manhattan Supreme Court Justice Erika Edwards on Tuesday, Daniel Perez, an attorney for the city’s Law Department, argued Hochul should preempt those counties by issuing a statewide executive order that would compel other jurisdictions to step up. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "2JIF3w",
+          "alignment": null
+        },
+        "contents": {
+          "html": "“The rapid influx of New Arrivals is a statewide issue that requires a statewide response,” Perez wrote in the letter, obtained by THE CITY. “Thus, the City contends that the State must make available sites for the establishment of congregate facilities throughout the State.”"
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "lMqdmt",
+          "alignment": null
+        },
+        "contents": {
+          "html": "The letter emerged as part of ongoing filings between state and city attorneys and advocates for homeless New Yorkers, over what the city’s obligations are to provide shelter <a href=\"https://www.coalitionforthehomeless.org/wp-content/uploads/2014/06/CallahanConsentDecree.pdf\">under a 1981 consent decree</a>, given the arrival of tens of thousands of migrants. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyImage",
+        "placement": {
+          "id": "av0EKK",
+          "alignment": null
+        },
+        "contentWarning": "",
+        "image": {
+          "asset": {
+            "title": "Hundreds of cots sat squeezed into a migrant humanitarian shelter tent at the former Creedmoor Psychiatric Center in Eastern Queens."
+          },
+          "caption": {
+            "html": "Hundreds of cots filled a new migrant shelter at the Creedmoor Psychiatric Center in eastern Queens, Aug. 15, 2023.",
+            "plaintext": "Hundreds of cots filled a new migrant shelter at the Creedmoor Psychiatric Center in eastern Queens, Aug. 15, 2023."
+          },
+          "hideCredit": false,
+          "height": 2000,
+          "width": 3000,
+          "url": "https://cdn.vox-cdn.com/thumbor/h1jemt_VR3cGTIxWGjGyx90rWX8=/0x0:3000x2000/3000x2000/filters:focal(1500x1000:1501x1001)/cdn.vox-cdn.com/uploads/chorus_asset/file/24852729/081523_creedmoor_migrants_4.jpg"
+        }
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "i8DbUZ",
+          "alignment": null
+        },
+        "contents": {
+          "html": "City attorneys have argued it shouldn’t have to provide shelter if it runs out of the <a href=\"https://www.thecity.nyc/2023/5/30/23743154/robert-hayes-right-shelter-adams-asylum\">“resources and capacity”</a> to do so. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "IMaqgn",
+          "alignment": null
+        },
+        "contents": {
+          "html": "As part of those negotiations, this week the state agreed to waive certain state requirements at city shelters, <a href=\"https://citylimits.org/2023/08/23/state-grants-reduced-shelter-standards-for-adult-migrants-when-necessary/\">City Limits reported,</a> including its duty to provide clean linens, towels, soap and toilet paper.  "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "aqxHFS",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Perez also urged the state to consider sites outside the city, like the Pilgrim Psychiatric Facility and Kings Park Psychiatric Center, both on Long Island, the Buffalo State Hospital, the Stewart Air National Guard Base in Orange County or the National Guard Camp Smith in Westchester. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "boomWt",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Instead state officials have only identified locations within New York City, including several that city officials deemed weren’t habitable due to fire safety protocol, or lack of enough exits or working bathrooms, among other concerns. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "BPJ5DV",
+          "alignment": null
+        },
+        "contents": {
+          "html": "State officials maintain they have committed $1.5 billion already, and point to three state properties currently being used as emergency migrant shelters: <a href=\"https://www.thecity.nyc/2023/7/26/23809062/migrant-crisis-tent-shelter-1000-creedmoor\">Creedmoor Psychiatric Center</a>, the abandoned <a href=\"https://www.thecity.nyc/2023/7/28/23811598/migrants-shelters-roosevelt-eric-adams\">Lincoln Correctional Facility</a> in Harlem and a warehouse on the <a href=\"https://www.thecity.nyc/2023/6/1/23745502/migrants-warehouse-jfk-airport-adams\">edge of JFK airport. </a>"
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "rKrKCq",
+          "alignment": null
+        },
+        "contents": {
+          "html": "The state has blamed the city for failing to help migrants start their asylum cases, which has meant the vast majority haven’t gotten their authorization to work legally, though some have been in shelters for more than six months. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "qDZqkX",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Hochul is also requesting additional help from the U.S. government to find federal land to use for temporary shelters. City and state representatives are currently <a href=\"https://www.thecity.nyc/2023/8/21/23840538/feds-approve-migrant-shelter-floyd-bennett\">negotiating</a> with the Biden administration over the potential use of Floyd Bennett Field in Brooklyn for the construction of another emergency shelter for upwards of 2,000 people. A tent shelter at Creedmoor is nearing its 1,000-person capacity just a week after opening, after 3,100 people requested shelter between Aug. 12 and Aug. 20. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyHeading",
+        "placement": {
+          "id": "fneXbn",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Locals Protest"
+        },
+        "level": 2
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "UHMrLo",
+          "alignment": null
+        },
+        "contents": {
+          "html": "The arrival of tens of thousands of asylum-seekers over the past year has yielded a humanitarian crisis, with <a href=\"https://www.thecity.nyc/2023/7/31/23814765/migrants-right-to-shelter-roosevelt-hotel\">people sleeping nights in a row</a> outside the migrant intake center at Roosevelt Hotel, some placed in <a href=\"https://bushwickdaily.com/news/myrtle-broadway-migrant-center-crisis-nyc/\">facilities without access to working showers</a>, or <a href=\"https://www.thecity.nyc/2023/7/19/23801008/migrants-shelter-food-poisoning-sick-kids\">food that’s sent them to the hospital</a>."
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "5ZlP3u",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Shelter location also has become a political hot potato and <a href=\"https://www.thecity.nyc/2023/8/14/23830661/migrants-backlash-city-council-elections\">a lightning rod</a> in areas across the political spectrum where new facilities crop up. This week multiple rallies were planned near Floyd Bennett Field in southeast Brooklyn against a potential emergency shelter there. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "9irnCV",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Hochul is facing increasing pressure from city officials, <a href=\"https://gothamist.com/news/judge-puts-onus-on-state-to-respond-to-nyc-migrant-crisis-after-right-to-shelter-violation\">and a court order</a>, compelling her to do more to address the situation. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyImage",
+        "placement": {
+          "id": "Mq7LCI",
+          "alignment": null
+        },
+        "contentWarning": "",
+        "image": {
+          "asset": {
+            "title": "Gov. Kathy Hochul speaks in the Capitol about the migrant crisis."
+          },
+          "caption": {
+            "html": "Hochul addresses New Yorkers on the migrant crisis from the Red Room at the State Capitol, Aug. 24, 2023.",
+            "plaintext": "Hochul addresses New Yorkers on the migrant crisis from the Red Room at the State Capitol, Aug. 24, 2023."
+          },
+          "hideCredit": false,
+          "height": 2000,
+          "width": 3000,
+          "url": "https://cdn.vox-cdn.com/thumbor/J_lJsjn6zmoqyB9u6zWw1NkYcdM=/0x0:3000x2000/3000x2000/filters:focal(1500x1000:1501x1001)/cdn.vox-cdn.com/uploads/chorus_asset/file/24871284/082423_hochul_asylum_address_1.jpg"
+        }
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "YQam9F",
+          "alignment": null
+        },
+        "contents": {
+          "html": "The thrust of Hochul’s Thursday address was aimed at President Joe Biden, calling for him to expedite work authorization for new arrivals and to increase federal funds for New York. A spokesperson for the White House didn’t immediately respond to a request for comment. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "qxVIMg",
+          "alignment": null
+        },
+        "contents": {
+          "html": "Instead of identifying additional places to shelter migrants outside the city, Hochul and officials in her administration said they will focus on helping migrants resettle permanently. That includes increased funding for case management so eligible migrants can submit asylum applications and are put on a path toward work authorization, as well as connecting people who have work papers to jobs across the state right away.  "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "VpBGDQ",
+          "alignment": null
+        },
+        "contents": {
+          "html": "The state also has agreed to fund resettlement efforts for 1,250 families beyond NYC’s borders, but the city so far has identified only 90 families who are eligible."
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "0zeHqw",
+          "alignment": null
+        },
+        "contents": {
+          "html": "“The governor has been really clear that what the state is going to do here is to assist with resettlement, not re-sheltering,” said Jackie Bray, the state commissioner of the Division of Homeland Security and Emergency Services, in a briefing that followed Hochul’s address. "
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyParagraph",
+        "placement": {
+          "id": "CqGr34",
+          "alignment": null
+        },
+        "contents": {
+          "html": "“What we want to do is … expand the back door out of shelter so we can help more people live independently instead of … [moving people] from one shelter in New York City, out of New York City to another shelter.”"
+        },
+        "dropcap": false,
+        "endmark": false,
+        "lead": false
+      },
+      {
+        "__typename": "EntryBodyNewsletter",
+        "placement": {
+          "id": "tp3Mqg",
+          "alignment": null
+        },
+        "newsletter": {
+          "name": "Get THE CITY Scoop",
+          "slug": "the_city"
+        }
+      }
+    ]
+  }
+}
