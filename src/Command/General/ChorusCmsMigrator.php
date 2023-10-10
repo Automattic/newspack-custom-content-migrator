@@ -457,8 +457,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		$existing_attachment_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type = 'attachment';" );
 
 		// Loop through entries and import them.
-		// $assets_jsons = glob( $asset_path . '/*.json' );
-		$assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_the-city_export_8-9-2023/asset/Asset:testmock.json' ];
+		$assets_jsons = glob( $asset_path . '/*.json' );
 		foreach ( $assets_jsons as $key_asset_json => $asset_json ) {
 
 			WP_CLI::line( sprintf( '%d/%d', $key_asset_json + 1, count( $assets_jsons ) ) );
@@ -495,7 +494,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
 					self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID,
 					$uid
-				) 
+				)
 			);
 			// Check by original URL.
 			if ( ! $existing_att_id ) {
@@ -504,7 +503,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
 						self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL,
 						$url
-					) 
+					)
 				);
 			}
 			// Get existing or import new attachment ID.
@@ -530,7 +529,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 			// Log newly imported attachment.
 			if ( ! $existing_att_id ) {
-				$this->logger->log( 'chorus_new_assets.log', sprintf( 'Imported attachment ID %d URL %s', $att_id, $url ) );
+				$this->logger->log( 'chorus_assets_new.log', sprintf( 'Imported attachment ID %d URL %s', $att_id, $url ) );
 			}
 
 			// Set the att ID variable (in the code above it was either fetched from import_external_file(), or uid, or URL).
@@ -575,9 +574,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$wpdb->update( $wpdb->postmeta, $update_postmeta, [ 'ID' => $att_id ] );
 			}
 		}
-
-		$d = 1;
-
 	}
 
 	/**
