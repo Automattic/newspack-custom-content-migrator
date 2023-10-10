@@ -713,7 +713,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				}
 
 				// Set distribution details.
-				if ( ! $entry['leadImage']['asset']['usageRights'] ) {
+				if ( ! isset( $entry['leadImage']['asset']['usageRights'] ) || ! $entry['leadImage']['asset']['usageRights'] ) {
 					update_post_meta( $post_id, '_navis_media_can_distribute', true );
 				}
 
@@ -1466,7 +1466,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		update_post_meta( $attachment_id, '_media_credit', $credit );
 
 		// Set distribution details.
-		if ( isset( $component['image']['asset']['usageRights'] ) && ! $component['image']['asset']['usageRights'] ) {
+		if ( ! isset( $component['image']['asset']['usageRights'] ) || ! $component['image']['asset']['usageRights'] ) {
 			update_post_meta( $post_id, '_navis_media_can_distribute', true );
 		}
 
@@ -1501,8 +1501,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 		$attachment_ids = [];
 		foreach ( $component['gallery']['images'] as $key_image => $image ) {
-			$title   = $image['asset']['title'];
-			$caption = $image['caption']['html'];
+			$title = $image['asset']['title'] ?? null;
+			$caption = $image['caption']['html'] ?? null;
 			$url     = $image['url'];
 
 			// If the image is already imported return its ID.
@@ -1514,7 +1514,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, $description = null, $alt = null, $post_id = 0, $args = [] );
 
 				// Set distribution details.
-				if ( ! $component['image']['asset']['usageRights'] ) {
+				if ( ! isset ( $component['image']['asset']['usageRights'] ) || ! $component['image']['asset']['usageRights'] ) {
 					update_post_meta( $post_id, '_navis_media_can_distribute', true );
 				}
 			}
