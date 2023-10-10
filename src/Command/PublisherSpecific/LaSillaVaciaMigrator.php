@@ -1419,6 +1419,30 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				),
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-upload-missing-publicaciones-images',
+			[ $this, 'cmd_upload_missing_publicaciones_images' ],
+			[
+				'shortdesc' => 'This command will upload a missing featured image for Publicaciones content',
+				'synopsis' => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'import-json',
+						'description' => 'The file that contains podcasts data.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-location',
+						'description' => 'Path to media directory',
+						'optional'    => false,
+						'repeating'   => false,
+					]
+				]
+			]
+		);
 	}
 
 	private function reset_db() {
@@ -7502,6 +7526,140 @@ BLOCK;
 					'ID'           => $post->ID,
 				)
 			);
+		}
+	}
+
+	public function cmd_upload_missing_publicaciones_images( $args, $assoc_args ) {
+		$media_location = $assoc_args['media-location'];
+
+		global $wpdb;
+
+		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $item ) {
+			echo "\n\n\n";
+			$this->high_contrast_output( 'Original Post ID', $item->id );
+
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'original_post_id' AND meta_value = %d",
+					$item->id
+				)
+			);
+
+			if ( ! $post_id ) {
+				echo WP_CLI::colorize( "%YOriginal Post ID wasn't imported: $item->id%n\n" );
+				continue;
+			}
+
+			$this->high_contrast_output( 'NEWSPACK POST ID', $post_id );
+
+			$filename = basename( $item->picture );
+
+			$post_content = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_content FROM $wpdb->posts WHERE ID = %d",
+					$post_id
+				)
+			);
+
+			$featured_image_id = get_post_thumbnail_id( $post_id );
+
+			if ( ! empty( $featured_image_id ) ) {
+				$url = wp_get_attachment_image_src( $featured_image_id, 'full' )[0];
+
+				if ( str_contains( $post_content, '{image_attachment_src}' ) ) {
+					$this->high_contrast_output( 'Post has featured image, but it is not in the post_content. Updating post_content.', '' );
+					$post_content = strtr(
+						$post_content,
+						[
+							'{image_attachment_id}'  => $featured_image_id,
+							'{image_attachment_src}' => $url,
+						]
+					);
+
+					$wpdb->update(
+						$wpdb->posts,
+						[
+							'post_content' => $post_content,
+						],
+						[
+							'ID' => $post_id,
+						]
+					);
+				}
+
+				$this->high_contrast_output( 'Post has featured image', "($featured_image_id) $url" );
+				continue;
+			}
+
+			if ( null === $item->picture ) {
+				echo WP_CLI::colorize( "%YOriginal Post ID doesn't have a 'picture' field%n\n" );
+				continue;
+			}
+
+			if ( ! str_contains( $post_content, '{image_attachment_id}' ) ) {
+				$potential_attachment_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT 
+	                        post_id 
+						FROM $wpdb->postmeta 
+						WHERE meta_key = '_wp_attached_file' 
+						  AND meta_value LIKE %s 
+						ORDER BY post_id 
+						LIMIT 1",
+						'%' . $wpdb->esc_like( $filename )
+					)
+				);
+
+				if ( $potential_attachment_id ) {
+					$this->high_contrast_output( 'Potential Attachment ID', $potential_attachment_id );
+					// If $post_content has URL, $post_id does not have a thumbnail_id, fill it in.
+					$potential_attachment_src = wp_get_attachment_image_src( $potential_attachment_id, 'full' )[0];
+					if ( str_contains( $post_content, $potential_attachment_src ) ) {
+						update_post_meta( $post_id, '_thumbnail_id', $potential_attachment_id );
+						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+						continue;
+					}
+				}
+
+				echo WP_CLI::colorize( "%MLooks like this contains featured image, but cannot find in DB.%n\n" );
+				continue;
+			}
+
+			$image = [
+				'FriendlyName' => $filename,
+			];
+
+			$featured_image_id = $this->handle_featured_image( $image, $item->id, 0, $media_location );
+
+			if ( ! $featured_image_id ) {
+				echo WP_CLI::colorize( "%MUnable to find image $item->picture%n\n" );
+				continue;
+			}
+
+			$post_content = strtr(
+				$post_content,
+				[
+					'{image_attachment_id}'  => $featured_image_id,
+					'{image_attachment_src}' => wp_get_attachment_image_src( $featured_image_id, 'full' )[0],
+				]
+			);
+
+			$update = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $post_content,
+				],
+				[
+					'ID' => $post_id
+				]
+			);
+
+			if ( $update ) {
+				echo WP_CLI::colorize( "%GFeatured image successfully updated.%n\n" );
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+			} else {
+				echo WP_CLI::colorize( "%RUnable to update featured image.%n\n" );
+			}
 		}
 	}
 
