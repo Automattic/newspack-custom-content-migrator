@@ -357,32 +357,32 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		// Get JSONs from two data exports.
 		$entries_path_1 = '/tmp/setup/initial_export_archive/export_test/entry';
 		$entries_path_2 = '/tmp/second_content_migration/content-export/entry';
-		$entries_jsons = glob( $entries_path_1 . '/*.json' );
-		$entries_jsons = array_merge( $entries_jsons, glob( $entries_path_2 . '/*.json' ) );
+		$entries_jsons  = glob( $entries_path_1 . '/*.json' );
+		$entries_jsons  = array_merge( $entries_jsons, glob( $entries_path_2 . '/*.json' ) );
 		// Logs.
-		$missing_uids = [];
+		$missing_uids  = [];
 		$missing_jsons = [];
 		foreach ( $entries_jsons as $key_entry_json => $entry_json ) {
 			// Load data.
 			$data_entry = json_decode( file_get_contents( $entry_json ), true );
-			$entry = $this->get_entry_from_data_entry( $data_entry, $entry_json );
+			$entry      = $this->get_entry_from_data_entry( $data_entry, $entry_json );
 			// Get imported post ID.
-			$uid = $entry['uid'];
+			$uid     = $entry['uid'];
 			$post_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::CHORUS_META_KEY_ORIGINAL_ENTRY_UID, $uid ) );
 			if ( ! $post_id ) {
-				$missing_uids[] = $uid;
+				$missing_uids[]  = $uid;
 				$missing_jsons[] = $entry_json;
 			}
 			WP_CLI::line( sprintf( '%d/%d ID %d UID %s', $key_entry_json + 1, count( $entries_jsons ), $post_id, $uid ) );
 			// Will update post data from this array.
 			$post_update = [];
 			// Get corrected dates.
-			$post_date = $this->format_chorus_date( $entry['publishDate'], $timezone_string );
-			$post_update['post_date'] = $post_date;
+			$post_date                    = $this->format_chorus_date( $entry['publishDate'], $timezone_string );
+			$post_update['post_date']     = $post_date;
 			$post_update['post_date_gmt'] = $post_date;
-			if ( $entry["updatedAt"] ) {
-				$post_modified = $this->format_chorus_date( $entry['updatedAt'], $timezone_string );
-				$post_update['post_modified'] = $post_modified;
+			if ( $entry['updatedAt'] ) {
+				$post_modified                    = $this->format_chorus_date( $entry['updatedAt'], $timezone_string );
+				$post_update['post_modified']     = $post_modified;
 				$post_update['post_modified_gmt'] = $post_modified;
 			}
 			// Save.
@@ -393,7 +393,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		}
 		// Log if UIDs not found in DB.
 		if ( count( $missing_jsons ) > 0 ) {
-			$file_uids = 'missing_uids.txt';
+			$file_uids  = 'missing_uids.txt';
 			$file_jsons = 'missing_jsons.txt';
 			file_put_contents( $file_uids, implode( "\n", $missing_uids ) );
 			file_put_contents( $file_jsons, implode( "\n", $missing_jsons ) );
@@ -408,17 +408,16 @@ class ChorusCmsMigrator implements InterfaceCommand {
 		 */
 		// $post_ids = $this->posts->get_all_posts_ids();
 		// foreach ( $post_ids as $key_post_id => $post_id ) {
-		// 	$excerpt = get_the_excerpt( $post_id );
-		// 	if ( ! $excerpt ) {
-		// 		continue;
-		// 	}
+		// $excerpt = get_the_excerpt( $post_id );
+		// if ( ! $excerpt ) {
+		// continue;
+		// }
 		//
-		// 	WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
-		// 	update_post_meta( $post_id, 'newspack_post_subtitle', $excerpt );
-		// 	WP_CLI::success( "Updated ID $post_id." );
+		// WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+		// update_post_meta( $post_id, 'newspack_post_subtitle', $excerpt );
+		// WP_CLI::success( "Updated ID $post_id." );
 		// }
 		// WP_CLI::line( "Done." );
-
 	}
 
 	/**
@@ -436,7 +435,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Content not found in path.' );
 		}
 		$timezone_string = rtrim( $assoc_args['timezone-string'], '/' );
-		$refresh_assets = isset( $assoc_args['refresh-assets'] ) ? true : false;
+		$refresh_assets  = isset( $assoc_args['refresh-assets'] ) ? true : false;
 
 		WP_CLI::line( 'Importing assets...' );
 		$this->import_assets( $asset_path, $timezone_string, $refresh_assets );
@@ -459,7 +458,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 		// Loop through entries and import them.
 		// $assets_jsons = glob( $asset_path . '/*.json' );
-$assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_the-city_export_8-9-2023/asset/Asset:testmock.json' ];
+		$assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_the-city_export_8-9-2023/asset/Asset:testmock.json' ];
 		foreach ( $assets_jsons as $key_asset_json => $asset_json ) {
 
 			WP_CLI::line( sprintf( '%d/%d', $key_asset_json + 1, count( $assets_jsons ) ) );
@@ -472,12 +471,12 @@ $assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_th
 			$title        = $data_asset['title'] ?? null;
 			$caption      = $data_asset['sourceCaption'] ?? null;
 			$usage_rights = $data_asset['usageRights'] ?? null;
-			$created      = isset ( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
+			$created      = isset( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
 				? $this->format_chorus_date( $data_asset['createdAt'], $timezone_string )
 				: null;
 			$type         = $data_asset['type'] ?? null;
 			// Not sure if we can use this one, can be: 'URL', 'MEMBER_UPLOAD', 'UPLOAD'.
-			$source       = $data_asset['source'] ?? null;
+			$source = $data_asset['source'] ?? null;
 
 			/**
 			 * Check if already imported. We'll have to make this complex and unperformant at this pint because of historical reasons how we've gradually been importing different data from a specific publisher :(
@@ -491,18 +490,22 @@ $assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_th
 			$existing_att_id = null;
 			$att_id          = null;
 			// Check by uid.
-			$existing_att_id = $wpdb->get_var( $wpdb->prepare(
-				"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
-				self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID,
-				$uid
-			) );
+			$existing_att_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
+					self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID,
+					$uid
+				) 
+			);
 			// Check by original URL.
 			if ( ! $existing_att_id ) {
-				$existing_att_id = $wpdb->get_var( $wpdb->prepare(
-					"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
-					self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL,
-					$url
-				) );
+				$existing_att_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;",
+						self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL,
+						$url
+					) 
+				);
 			}
 			// Get existing or import new attachment ID.
 			if ( ! $existing_att_id ) {
@@ -535,15 +538,15 @@ $assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_th
 
 			// Get wp_post data for updating.
 			$update_post = [];
-			$credit = $data_asset['credit']['html'] ?? null;
+			$credit      = $data_asset['credit']['html'] ?? null;
 			if ( $credit ) {
-				$update_postmeta[ '_media_credit' ] = $credit;
+				$update_postmeta['_media_credit'] = $credit;
 			}
 			$usage_rights = $data_asset['usageRights'] ?? null;
 			if ( ! $usage_rights ) {
 				$update_postmeta['_navis_media_can_distribute'] = true;
 			}
-			$created = isset ( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
+			$created = isset( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
 				? $this->format_chorus_date( $data_asset['createdAt'], $timezone_string )
 				: null;
 			if ( $created ) {
@@ -557,7 +560,7 @@ $assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_th
 			if ( $title ) {
 				$update_post['post_title'] = $title;
 			}
-			$caption      = $data_asset['sourceCaption'] ?? null;
+			$caption = $data_asset['sourceCaption'] ?? null;
 			if ( $caption ) {
 				$update_post['post_excerpt'] = $title;
 			}
@@ -573,7 +576,7 @@ $assets_jsons = [ '/Users/ivanuravic/www/thecity/app/setup3_launch/export_old_th
 			}
 		}
 
-$d=1;
+		$d = 1;
 
 	}
 
@@ -1690,7 +1693,7 @@ $d=1;
 
 		$attachment_ids = [];
 		foreach ( $component['gallery']['images'] as $key_image => $image ) {
-			$title = $image['asset']['title'] ?? null;
+			$title   = $image['asset']['title'] ?? null;
 			$caption = $image['caption']['html'] ?? null;
 			$url     = $image['url'];
 
@@ -1703,7 +1706,7 @@ $d=1;
 				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, $description = null, $alt = null, $post_id = 0, $args = [] );
 
 				// Set distribution details.
-				if ( ! isset ( $component['image']['asset']['usageRights'] ) || ! $component['image']['asset']['usageRights'] ) {
+				if ( ! isset( $component['image']['asset']['usageRights'] ) || ! $component['image']['asset']['usageRights'] ) {
 					update_post_meta( $post_id, '_navis_media_can_distribute', true );
 				}
 			}
