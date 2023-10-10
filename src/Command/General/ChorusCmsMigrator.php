@@ -528,7 +528,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			}
 
 			// Log newly imported attachment.
-			if ( ! $existing_att_id ) {
+			if ( $existing_att_id ) {
+				$this->logger->log( 'chorus_assets_existing.log', sprintf( 'Updating existing ID %d URL %s', $att_id, $url ) );
+			} else {
 				$this->logger->log( 'chorus_assets_new.log', sprintf( 'Imported attachment ID %d URL %s', $att_id, $url ) );
 			}
 
@@ -571,7 +573,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$wpdb->update( $wpdb->posts, $update_post, [ 'ID' => $att_id ] );
 			}
 			if ( ! empty( $update_postmeta ) ) {
-				$wpdb->update( $wpdb->postmeta, $update_postmeta, [ 'ID' => $att_id ] );
+				foreach ( $update_postmeta as $meta_key => $meta_value ) {
+					update_post_meta( $att_id, $meta_key, $meta_value );
+				}
 			}
 		}
 	}
