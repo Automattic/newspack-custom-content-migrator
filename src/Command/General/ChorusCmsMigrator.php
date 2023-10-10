@@ -539,17 +539,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 			// Get wp_post data for updating.
 			$update_post = [];
-			$credit      = $data_asset['credit']['html'] ?? null;
-			if ( $credit ) {
-				$update_postmeta['_media_credit'] = $credit;
-			}
-			$usage_rights = $data_asset['usageRights'] ?? null;
-			if ( ! $usage_rights ) {
-				$update_postmeta['_navis_media_can_distribute'] = true;
-			}
-			$created = isset( $data_asset['createdAt'] ) && ! is_null( $data_asset['createdAt'] )
-				? $this->format_chorus_date( $data_asset['createdAt'], $timezone_string )
-				: null;
 			if ( $created ) {
 				$update_post['post_date']     = $created;
 				$update_post['post_date_gmt'] = $created;
@@ -557,13 +546,17 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 			// Get wp_postmeta data for updating.
 			$update_postmeta = [];
-			$title           = $data_asset['title'] ?? null;
 			if ( $title ) {
 				$update_post['post_title'] = $title;
 			}
-			$caption = $data_asset['sourceCaption'] ?? null;
 			if ( $caption ) {
 				$update_post['post_excerpt'] = $title;
+			}
+			if ( $credit ) {
+				$update_postmeta['_media_credit'] = $credit;
+			}
+			if ( ! $usage_rights ) {
+				$update_postmeta['_navis_media_can_distribute'] = true;
 			}
 			$update_postmeta[ self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_UID ] = $uid;
 			$update_postmeta[ self::CHORUS_META_KEY_ATTACHMENT_ORIGINAL_URL ] = $url;
