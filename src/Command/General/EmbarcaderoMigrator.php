@@ -364,6 +364,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'pdf-section-suffix',
+						'description' => 'Suffix to add to the PDF section name to create the PDF file name. Example: if the file name is "2006_05_19.mvv.section1.pdf" the suffix would be "mvv".',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'print-issues-csv-file-path',
 						'description' => 'Path to the CSV file containing print issues to import.',
 						'optional'    => false,
@@ -951,7 +958,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				if ( is_wp_error( $wp_user_id ) ) {
 					$wp_user    = null;
 					$wp_user_id = null;
-					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', $wp_user_id->get_error_message() ), Logger::WARNING );
+					if ( $wp_user_id ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', $wp_user_id->get_error_message() ), Logger::WARNING );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', 'unknown error' ), Logger::WARNING );
+					}
 				} else {
 					$wp_user = get_user_by( 'id', $wp_user_id );
 				}
@@ -1000,6 +1011,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
 		$publication_name             = $assoc_args['publication-name'];
 		$publication_email            = $assoc_args['publication-email'];
+		$pdf_section_suffix           = $assoc_args['pdf-section-suffix'];
 		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
 		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
 		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
@@ -1020,13 +1032,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'] ), Logger::LINE );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d (%s)', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'], $print_issue['seo_link'] ), Logger::LINE );
 
 			// Get PDF file path from $print_issue['seo_link'].
 			// seo_link is in the format yyyy/mm/dd.
-			// The PDF file path is in the format $print_pdf_dir_path . '/' . $year . '/yyyy_mm_dd.dvw.section1.pdf'.
+			// The PDF file path is in the format $print_pdf_dir_path . '/' . $year . '/yyyy_mm_dd.' . $pdf_section_suffix. '.section' . $i . '.pdf'
 			$seo_link = explode( '/', $print_issue['seo_link'] );
 			$year     = $seo_link[0];
+			$month    = $seo_link[1];
+			$day      = $seo_link[2];
 
 			// Check if the year is correct.
 			if ( ! is_numeric( $year ) ) {
@@ -1034,10 +1048,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.dvw.section1.pdf';
+			$pdf_files_paths = [];
 
-			if ( ! file_exists( $pdf_file_path ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find PDF file %s', $pdf_file_path ), Logger::WARNING );
+			for ( $i = 1; $i <= 12; $i++ ) {
+				$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.' . $pdf_section_suffix . '.section' . $i . '.pdf';
+
+				if ( ! file_exists( $pdf_file_path ) ) {
+					break;
+				}
+
+				$pdf_files_paths[] = $pdf_file_path;
+			}
+
+			if ( empty( $pdf_files_paths ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find PDF files for issue %s', $print_issue['issue_number'] ), Logger::WARNING );
 				continue;
 			}
 
@@ -1051,6 +1075,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					'post_title'   => $print_issue['seo_link'],
 					'post_status'  => 'publish',
 					'post_author'  => $author_id,
+					'post_date'    => "$year-$month-$day",
 					'post_content' => '',
 				]
 			);
@@ -1064,25 +1089,27 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$section_name  = 'Section ' . $print_issue['sections'];
 			$section_index = array_search( $print_issue['sections'], array_column( $print_sections, 'section_id' ) );
 			if ( false === $section_index ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['section_id'], $print_issue['issue_number'] ), Logger::WARNING );
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['sections'], $print_issue['issue_number'] ), Logger::WARNING );
 			} else {
 				$section_name = $print_sections[ $section_index ]['section_title'];
 			}
 
-			// Upload file.
-			$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+			foreach ( $pdf_files_paths as $pdf_file_path ) {
+				// Upload file.
+				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
 
-			if ( is_wp_error( $file_post_id ) ) {
-				wp_delete_post( $wp_issue_post_id, true );
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload file %s: %s', $pdf_file_path, $file_post_id->get_error_message() ), Logger::WARNING );
-				continue;
+				if ( is_wp_error( $file_post_id ) ) {
+					wp_delete_post( $wp_issue_post_id, true );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload file %s: %s', $pdf_file_path, $file_post_id->get_error_message() ), Logger::WARNING );
+					continue;
+				}
+
+				$attachment_post = get_post( $file_post_id );
+
+				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
 			}
 
-			$attachment_post = get_post( $file_post_id );
 
-			$post_content_blocks = [
-				$this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name ),
-			];
 
 			$post_content = serialize_blocks( $post_content_blocks );
 
@@ -1114,9 +1141,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$print_edition_category_id = $this->get_or_create_category( 'Print Edition' );
 			$year_category_id          = $this->get_or_create_category( $year, $print_edition_category_id );
 
-			wp_set_post_categories( $wp_issue_post_id, [ $year_category_id ] );
+			wp_set_post_categories( $wp_issue_post_id, [ $print_edition_category_id, $year_category_id ] );
 
-			update_comment_meta( $wp_issue_post_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $print_issue['issue_number'] );
+			update_post_meta( $wp_issue_post_id, self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY, $print_issue['issue_number'] );
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Created post issue %d with the ID %d', $print_issue['issue_number'], $wp_issue_post_id ), Logger::SUCCESS );
 		}
