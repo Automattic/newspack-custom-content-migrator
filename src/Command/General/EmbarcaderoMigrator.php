@@ -68,6 +68,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY  = '_newspack_import_more_posts_image_id';
 	const EMBARCADERO_IMPORTED_COMMENT_META_KEY     = '_newspack_import_comment_id';
 	const EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY = '_newspack_import_print_issue_id';
+	const EMBARCADERO_MIGRATED_POST_SLUG_META_KEY   = '_newspack_migrated_post_slug_id';
 	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY    = '_newspack_media_import_id';
 	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
@@ -363,6 +364,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'pdf-section-suffix',
+						'description' => 'Suffix to add to the PDF section name to create the PDF file name. Example: if the file name is "2006_05_19.mvv.section1.pdf" the suffix would be "mvv".',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'print-issues-csv-file-path',
 						'description' => 'Path to the CSV file containing print issues to import.',
 						'optional'    => false,
@@ -386,6 +394,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'print-cover-dir-path',
 						'description' => 'Path to the directory containing the print issues cover files to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-post-slugs',
+			array( $this, 'cmd_embarcadero_migrate_post_slugs' ),
+			[
+				'shortdesc' => 'Migrate Embarcadero\'s post slugs.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -933,7 +958,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				if ( is_wp_error( $wp_user_id ) ) {
 					$wp_user    = null;
 					$wp_user_id = null;
-					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', $wp_user_id->get_error_message() ), Logger::WARNING );
+					if ( $wp_user_id ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', $wp_user_id->get_error_message() ), Logger::WARNING );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create contributor %s: %s', $contributor['full_name'] ?? 'na/', 'unknown error' ), Logger::WARNING );
+					}
 				} else {
 					$wp_user = get_user_by( 'id', $wp_user_id );
 				}
@@ -982,33 +1011,25 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
 		$publication_name             = $assoc_args['publication-name'];
 		$publication_email            = $assoc_args['publication-email'];
+		$pdf_section_suffix           = $assoc_args['pdf-section-suffix'];
 		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
 		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
 		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
 		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
-		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY );
 
 		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
 		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
 
-		// Skip already imported print issues.
-		$print_issues = array_values(
-			array_filter(
-				$print_issues,
-				function( $print_issue ) use ( $imported_original_ids ) {
-					return ! in_array( $print_issue['issue_number'], $imported_original_ids );
-				}
-			)
-		);
-
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'] ), Logger::LINE );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d (%s)', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'], $print_issue['seo_link'] ), Logger::LINE );
 
 			// Get PDF file path from $print_issue['seo_link'].
 			// seo_link is in the format yyyy/mm/dd.
-			// The PDF file path is in the format $print_pdf_dir_path . '/' . $year . '/yyyy_mm_dd.dvw.section1.pdf'.
+			// The PDF file path is in the format $print_pdf_dir_path . '/' . $year . '/yyyy_mm_dd.' . $pdf_section_suffix. '.section' . $i . '.pdf'
 			$seo_link = explode( '/', $print_issue['seo_link'] );
 			$year     = $seo_link[0];
+			$month    = $seo_link[1];
+			$day      = $seo_link[2];
 
 			// Check if the year is correct.
 			if ( ! is_numeric( $year ) ) {
@@ -1016,10 +1037,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.dvw.section1.pdf';
+			$pdf_files_paths = [];
 
-			if ( ! file_exists( $pdf_file_path ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find PDF file %s', $pdf_file_path ), Logger::WARNING );
+			for ( $i = 1; $i <= 12; $i++ ) {
+				$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.' . $pdf_section_suffix . '.section' . $i . '.pdf';
+
+				if ( ! file_exists( $pdf_file_path ) ) {
+					break;
+				}
+
+				$pdf_files_paths[] = $pdf_file_path;
+			}
+
+			if ( empty( $pdf_files_paths ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find PDF files for issue %s', $print_issue['issue_number'] ), Logger::WARNING );
 				continue;
 			}
 
@@ -1027,12 +1058,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
 
 			// Create a new issue post.
-			$wp_issue_post_id = wp_insert_post(
+			$wp_issue_post_id = $this->get_or_create_post(
+				$print_issue['issue_number'],
+				self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY,
 				[
 					'post_type'    => 'post',
 					'post_title'   => $print_issue['seo_link'],
 					'post_status'  => 'publish',
 					'post_author'  => $author_id,
+					'post_date'    => "$year-$month-$day",
 					'post_content' => '',
 				]
 			);
@@ -1046,25 +1080,28 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$section_name  = 'Section ' . $print_issue['sections'];
 			$section_index = array_search( $print_issue['sections'], array_column( $print_sections, 'section_id' ) );
 			if ( false === $section_index ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['section_id'], $print_issue['issue_number'] ), Logger::WARNING );
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['sections'], $print_issue['issue_number'] ), Logger::WARNING );
 			} else {
 				$section_name = $print_sections[ $section_index ]['section_title'];
 			}
 
-			// Upload file.
-			$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+			$post_content_blocks = [];
+			foreach ( $pdf_files_paths as $pdf_file_path ) {
+				// Upload file.
+				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
 
-			if ( is_wp_error( $file_post_id ) ) {
-				wp_delete_post( $wp_issue_post_id, true );
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload file %s: %s', $pdf_file_path, $file_post_id->get_error_message() ), Logger::WARNING );
-				continue;
+				if ( is_wp_error( $file_post_id ) ) {
+					wp_delete_post( $wp_issue_post_id, true );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload file %s: %s', $pdf_file_path, $file_post_id->get_error_message() ), Logger::WARNING );
+					continue;
+				}
+
+				$attachment_post = get_post( $file_post_id );
+
+				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
 			}
 
-			$attachment_post = get_post( $file_post_id );
 
-			$post_content_blocks = [
-				$this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name ),
-			];
 
 			$post_content = serialize_blocks( $post_content_blocks );
 
@@ -1096,12 +1133,71 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$print_edition_category_id = $this->get_or_create_category( 'Print Edition' );
 			$year_category_id          = $this->get_or_create_category( $year, $print_edition_category_id );
 
-			wp_set_post_categories( $wp_issue_post_id, [ $year_category_id ] );
+			wp_set_post_categories( $wp_issue_post_id, [ $print_edition_category_id, $year_category_id ] );
 
-			update_comment_meta( $wp_issue_post_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $print_issue['issue_number'] );
+			update_post_meta( $wp_issue_post_id, self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY, $print_issue['issue_number'] );
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Created post issue %d with the ID %d', $print_issue['issue_number'], $wp_issue_post_id ), Logger::SUCCESS );
 		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-post-slugs".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_post_slugs( $args, $assoc_args ) {
+		$story_csv_file_path   = $assoc_args['story-csv-file-path'];
+		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY );
+
+		$stories = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+
+		// Skip already fixed stories.
+		$stories = array_values(
+			array_filter(
+				$stories,
+				function( $story ) use ( $imported_original_ids ) {
+					return ! in_array( $story['story_id'], $imported_original_ids );
+				}
+			)
+		);
+
+		foreach ( $stories as $story_index => $story ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Fixing story slug %d/%d: %d', $story_index + 1, count( $stories ), $story['story_id'] ), Logger::LINE );
+
+			$wp_issue_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $story['story_id'] );
+
+			if ( ! $wp_issue_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $story['story_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			// Update post slug.
+			$seo_link = explode( '/', $story['seo_link'] );
+			$slug     = trim( $seo_link[ count( $seo_link ) - 1 ], "-/\t\n\r\0\x0B" );
+
+			// Get current post slug.
+			$current_post = get_post( $wp_issue_post_id );
+
+			if ( $current_post->post_name === $slug ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Post %d with the ID %d already has the correct slug %s', $story['story_id'], $wp_issue_post_id, $slug ), Logger::LINE );
+				continue;
+			}
+
+			wp_update_post(
+				[
+					'ID'        => $wp_issue_post_id,
+					'post_name' => $slug,
+				]
+			);
+
+			update_post_meta( $wp_issue_post_id, self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY, $story['story_id'] );
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with the slug %s', $story['story_id'], $wp_issue_post_id, $slug ), Logger::SUCCESS );
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -1322,6 +1418,28 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 
 		return $wp_user_id;
+	}
+
+	/**
+	 * Get or create a post.
+	 *
+	 * @param int    $original_id Original ID of the post.
+	 * @param string $meta_name Meta name to search for.
+	 * @param array  $post_data Post data.
+	 *
+	 * @return int|WP_Error WP post ID.
+	 */
+	private function get_or_create_post( $original_id, $meta_name, $post_data ) {
+		// Get post by meta.
+		$wp_post_id = $this->get_post_id_by_meta( $meta_name, $original_id );
+
+		if ( $wp_post_id ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Post %d already exists with the ID %d', $original_id, $wp_post_id ), Logger::LINE );
+			return intval( $wp_post_id );
+		}
+
+		// Create a WP post.
+		return wp_insert_post( $post_data, true );
 	}
 
 	/**
