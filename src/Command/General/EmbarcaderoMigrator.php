@@ -1016,20 +1016,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
 		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
 		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
-		$imported_original_ids        = $this->get_comments_meta_values_by_key( self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY );
 
 		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
 		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
-
-		// Skip already imported print issues.
-		$print_issues = array_values(
-			array_filter(
-				$print_issues,
-				function( $print_issue ) use ( $imported_original_ids ) {
-					return ! in_array( $print_issue['issue_number'], $imported_original_ids );
-				}
-			)
-		);
 
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d (%s)', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'], $print_issue['seo_link'] ), Logger::LINE );
@@ -1069,7 +1058,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
 
 			// Create a new issue post.
-			$wp_issue_post_id = wp_insert_post(
+			$wp_issue_post_id = $this->get_or_create_post(
+				$print_issue['issue_number'],
+				self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY,
 				[
 					'post_type'    => 'post',
 					'post_title'   => $print_issue['seo_link'],
@@ -1094,6 +1085,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$section_name = $print_sections[ $section_index ]['section_title'];
 			}
 
+			$post_content_blocks = [];
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
 				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
@@ -1157,7 +1149,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	public function cmd_embarcadero_migrate_post_slugs( $args, $assoc_args ) {
 		$story_csv_file_path   = $assoc_args['story-csv-file-path'];
-		$imported_original_ids = $this->get_comments_meta_values_by_key( self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY );
+		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY );
 
 		$stories = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
 
@@ -1425,6 +1417,28 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 
 		return $wp_user_id;
+	}
+
+	/**
+	 * Get or create a post.
+	 *
+	 * @param int    $original_id Original ID of the post.
+	 * @param string $meta_name Meta name to search for.
+	 * @param array  $post_data Post data.
+	 *
+	 * @return int|WP_Error WP post ID.
+	 */
+	private function get_or_create_post( $original_id, $meta_name, $post_data ) {
+		// Get post by meta.
+		$wp_post_id = $this->get_post_id_by_meta( $meta_name, $original_id );
+
+		if ( $wp_post_id ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Post %d already exists with the ID %d', $original_id, $wp_post_id ), Logger::LINE );
+			return intval( $wp_post_id );
+		}
+
+		// Create a WP post.
+		return wp_insert_post( $post_data, true );
 	}
 
 	/**
