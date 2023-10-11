@@ -1315,6 +1315,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					'display_name' => $full_name,
 					'first_name'   => current( explode( ' ', $full_name ) ),
 					'last_name'    => join( ' ', array_slice( explode( ' ', $full_name ), 1 ) ),
+					'user_nicename' => sanitize_title( $full_name ),
 				]
 			);
 		}
