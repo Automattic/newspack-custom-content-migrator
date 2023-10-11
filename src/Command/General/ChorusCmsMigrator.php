@@ -464,6 +464,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 			// Get asset data from JSON.
 			$data_asset   = json_decode( file_get_contents( $asset_json ), true );
+			$id           = $data_asset['id'];
 			$uid          = $data_asset['uid'];
 			$url          = $data_asset['url'];
 			$credit       = $data_asset['credit']['html'] ?? null;
