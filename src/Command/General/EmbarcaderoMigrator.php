@@ -1802,6 +1802,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$filenames[] = $media['photo_name'] . '_original.jpg';
 		$filenames[] = $media['photo_name'] . '_full.jpg';
 		$filenames[] = $media['photo_name'] . '_main.jpg';
+		$filenames[] = $media['photo_name'] . '_thumb.jpg';
 
 		foreach ( $filenames as $filename ) {
 			$media_path = $media_dir . '/' . $filename;
@@ -1821,6 +1822,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				}
 
 				update_post_meta( $attachment_id, self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $media['photo_id'] );
+
+				if ( str_ends_with( $filename, '_thumb.jpg' ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Only could find a thumbniail: %s for the post %d', $media_path, $wp_post_id ), Logger::WARNING );
+				}
 
 				return $attachment_id;
 			}
