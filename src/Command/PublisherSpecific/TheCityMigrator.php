@@ -80,6 +80,17 @@ class TheCityMigrator implements InterfaceCommand {
 			[ $this, 'cmd_wpciviliframe_to_newspackiframe' ],
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator thecity-attachments-all-check-can-distribute',
+			[ $this, 'cmd_attachments_all_check_can_distribute' ],
+		);
+	}
+
+	public function cmd_attachments_all_check_can_distribute( array $pos_args, array $assoc_args ): void {
+		$att_ids = $this->posts->get_all_posts_ids( 'attachment' );
+		foreach ( $att_ids as $key_att_id => $att_id ) {
+			update_post_meta( $att_id, '_navis_media_can_distribute', 1 );
+		}
 	}
 
 	public function cmd_wpciviliframe_to_newspackiframe( array $pos_args, array $assoc_args ): void {
