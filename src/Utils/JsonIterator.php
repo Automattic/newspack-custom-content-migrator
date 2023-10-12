@@ -54,6 +54,35 @@ class JsonIterator {
 	}
 
 	/**
+	 * Iterate over json data in batches.
+	 *
+	 * The start and end args to get items between start number and end number in the array of data in the json file.
+	 *
+	 * @param string $json_file Path to the json file
+	 * @param int $start Start number in the array of data in the json file.
+	 * @param int $end End number in the array of data in the json file.
+	 * @param array $options Optional. See items() in this class.
+	 *
+	 * @return iterable
+	 */
+	public function batched_items( string $json_file, int $start, int $end, array $options = [] ): iterable {
+		$item_no = 0;
+		foreach ( $this->items( $json_file, $options ) as $item ) {
+			$item_no++;
+			if ( 0 !== $start && $item_no < $start ) {
+				// Keep looping until we get to where we want to be in the file.
+				continue;
+			}
+
+			if ( $item_no < $end ) {
+				yield $item;
+			} else {
+				break;
+			}
+		}
+	}
+
+	/**
 	 * Will read a JSON file in chunks and return an iterable of objects from the JSON.
 	 *
 	 * If you want only parts of the json, or the structure is not straightforward,
@@ -78,9 +107,8 @@ class JsonIterator {
 			return Items::fromFile( $json_file, $options );
 		} catch ( Exception $o_0 ) {
 			$this->logger->log( self::LOG_NAME, "Could not read the JSON from {$json_file}", Logger::ERROR );
+			return new \EmptyIterator();
 		}
-
-		return new \EmptyIterator();
 	}
 
 	/**

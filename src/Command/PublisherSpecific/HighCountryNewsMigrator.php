@@ -66,6 +66,12 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
+	 * The site's timezone.
+	 * @var DateTimeZone
+	 */
+	private $site_timezone;
+
+	/**
 	 * Get Instance.
 	 *
 	 * @return HighCountryNewsMigrator
@@ -83,6 +89,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
 		}
+
+		self::$instance->site_timezone = new DateTimeZone( 'America/Denver' );
 
 		return self::$instance;
 	}
@@ -955,42 +963,49 @@ QUERY;
 	 *
 	 * @throws Exception
 	 */
-	public function cmd_migrate_users_from_json( $args, $assoc_args ) {
+	public function cmd_migrate_users_from_json( array $args, array $assoc_args ): void {
 		$file_path = $args[0];
 		$start     = $assoc_args['start'] ?? 0;
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
-		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-											   ->set_start( $start )
-											   ->set_end( $end )
-											   ->getIterator();
 
-		foreach ( $iterator as $row_number => $row ) {
-			WP_CLI::log( 'Row Number: ' . $row_number . ' - ' . $row['username'] );
+		$row_number = 1;
+		foreach ( $this->json_iterator->batched_items( $file_path, $start, $end ) as $row ) {
+			WP_CLI::log( 'Row Number: ' . $row_number ++ . ' - ' . $row->username );
+
+			if ( empty( $row->email ) ) {
+				continue; // Nope. No email, no user.
+			}
 
 			$date_created = new DateTime( 'now', new DateTimeZone( 'America/Denver' ) );
 
-			if ( ! empty( $row['date_created'] ) ) {
-				$date_created = DateTime::createFromFormat( 'm-d-Y_H:i', $row['date_created'], new DateTimeZone( 'America/Denver' ) );
+			if ( ! empty( $row->date_created ) ) {
+				$date_created = DateTime::createFromFormat( 'm-d-Y_H:i', $row->date_created, $this->site_timezone );
+			}
+
+			$nicename = $row->fullname ?? '';
+			if ( empty( $nicename ) ) {
+				$nicename = $row->first_name ?? '' . ' ' . $row->last_name ?? '';
 			}
 
 			$result = wp_insert_user(
 				[
-					'user_login'      => $row['username'],
+					'user_login'      => $row->username,
 					'user_pass'       => wp_generate_password(),
-					'user_email'      => $row['email'],
-					'display_name'    => $row['fullname'],
-					'first_name'      => $row['first_name'],
-					'last_name'       => $row['last_name'],
+					'user_email'      => $row->email,
+					'display_name'    => $row->fullname,
+					'first_name'      => $row->first_name,
+					'last_name'       => $row->last_name,
 					'user_registered' => $date_created->format( 'Y-m-d H:i:s' ),
-					'role'            => 'subscriber',
+					'role'            => 'subscriber', // Set this role on all users. We change it to author later if they have content.
+					'user_nicename'   => $nicename,
 				]
 			);
 
 			if ( is_wp_error( $result ) ) {
 				WP_CLI::log( $result->get_error_message() );
 			} else {
-				WP_CLI::success( "User {$row['email']} created." );
+				WP_CLI::success( "User {$row->email} created." );
 			}
 		}
 	}
@@ -2733,4 +2748,5 @@ QUERY;
 
 		return $attachment_id;
 	}
+
 }
