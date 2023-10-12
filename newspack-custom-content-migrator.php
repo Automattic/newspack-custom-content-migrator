@@ -96,5 +96,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 		Command\PublisherSpecific\BaristanetMigrator::class,
+		Command\PublisherSpecific\TheCityMigrator::class,
 	)
 );
