@@ -1051,7 +1051,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'comment_author_url'   => $wp_user ? $wp_user->user_url : '',
 				'comment_author_IP'    => $comment['ip_address'] ?? '',
 				'comment_content'      => $comment['comment'] ?? '',
-				'comment_date_gmt'     => $this->get_post_date_from_timestamp( $comment['posted_epoch'] ),
+				'comment_date'         => $this->get_post_date_from_timestamp( $comment['posted_epoch'] ),
 				'comment_meta'         => [],
 			];
 
