@@ -725,7 +725,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$photos,
 				function( $photo ) use ( $imported_original_ids ) {
 					return 'yes' === $photo['feature'] && ! in_array( $photo['photo_id'], $imported_original_ids );
-					return 'yes' === $photo['feature'] && ! in_array( $photo['photo_id'], $imported_original_ids );
 				}
 			)
 		);
@@ -1783,7 +1782,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * Get attachment from media.
 	 *
 	 * @param int    $wp_post_id WP post ID.
-	 * @param string $media Media data.
+	 * @param array $media Media data.
 	 * @param string $story_photos_dir_path Path to the directory containing the stories\'s photos files to import.
 	 * @return int|bool Attachment ID or false if not found.
 	 */
@@ -1794,22 +1793,41 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			return $attachment_id;
 		}
 
+		$media_year  = $media['photo_year'];
 		$media_month = strtolower( gmdate( 'F', mktime( 0, 0, 0, $media['photo_month'], 1 ) ) );
-		$media_path  = $story_photos_dir_path . '/' . $media['photo_year'] . '/' . $media_month . '/' . $media['photo_day'] . '/' . $media['photo_id'] . '_original.jpg';
+		$media_dir = $story_photos_dir_path . '/' . $media_year . '/' . $media_month . '/' . $media['photo_day'];
 
-		if ( file_exists( $media_path ) ) {
-			$attachment_id = $this->attachments->import_external_file( $media_path, null, $media['caption'], null, null, $wp_post_id );
-			if ( is_wp_error( $attachment_id ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not import photo %s for the post %d: %s', $media_path, $wp_post_id, $attachment_id->get_error_message() ), Logger::WARNING );
-				return false;
+		// Try various suffixes on the photo name. Some years lack originals, some lack fulls, etc.
+		// This list decreases in photo quality.
+		$filenames[] = $media['photo_name'] . '_original.jpg';
+		$filenames[] = $media['photo_name'] . '_full.jpg';
+		$filenames[] = $media['photo_name'] . '_main.jpg';
+
+		foreach ( $filenames as $filename ) {
+			$media_path = $media_dir . '/' . $filename;
+			if ( file_exists( $media_path ) ) {
+				$attachment_id = $this->attachments->import_attachment_for_post(
+					$wp_post_id,
+					$media_path,
+					$media['caption'],
+					[
+						'post_excerpt' => $media['caption'],
+					]
+				);
+				if ( is_wp_error( $attachment_id ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not import photo %s for the post %d: %s', $media_path, $wp_post_id, $attachment_id->get_error_message() ),
+						Logger::WARNING );
+					continue;
+				}
+
+				update_post_meta( $attachment_id, self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $media['photo_id'] );
+
+				return $attachment_id;
 			}
-
-			update_post_meta( $attachment_id, self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY, $media['photo_id'] );
-			return $attachment_id;
-		} else {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Could not find photo %s for the post %d', $media_path, $wp_post_id ), Logger::WARNING );
-			return false;
 		}
+		$this->logger->log( self::LOG_FILE, sprintf( 'Could not find photo %s for the post %d', $media_path, $wp_post_id ), Logger::WARNING );
+
+		return false;
 	}
 
 	/**
