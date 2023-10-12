@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use DateTimeZone;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
@@ -108,6 +109,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private $gutenberg_block_generator;
 
 	/**
+	 * @var DateTimeZone Embarcadero sites timezone.
+	 */
+	private $site_timezone;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -115,6 +121,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$this->attachments               = new Attachments();
 		$this->coauthorsplus_logic       = new CoAuthorPlus();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+
+		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
 	}
 
 	/**
@@ -441,6 +449,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-helper-fix-dates',
+			array( $this, 'cmd_fix_post_times' ),
+			[
+				'shortdesc' => 'Fix post dates to match timezone.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -516,7 +541,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'post_excerpt' => $post['front_paragraph'],
 				'post_status'  => 'Yes' === $post['approved'] ? 'publish' : 'draft',
 				'post_type'    => 'post',
-				'post_date'    => gmdate( 'Y-m-d H:i:s', $post['date_epoch'] ),
+				'post_date'    => $this->get_post_date_from_timestamp( $post['date_epoch'] ),
 				'post_author'  => $wp_contributor_id,
 			];
 
@@ -525,7 +550,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			if ( '0' !== $post['date_updated_epoch'] ) {
-				$post_data['post_modified'] = gmdate( 'Y-m-d H:i:s', $post['date_updated_epoch'] );
+				$post_data['post_modified'] = $this->get_post_date_from_timestamp( $post['date_updated_epoch'] );
 			}
 
 			// Create or get the post.
@@ -773,6 +798,55 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Get a date string with site timezone from a timestamp.
+	 *
+	 * @param int $timestamp
+	 *
+	 * @return string Date in format Y-m-d H:i:s in the site timezone.
+	 */
+	private function get_post_date_from_timestamp( int $timestamp ): string {
+		$date = \DateTime::createFromFormat( 'U', $timestamp );
+		$date->setTimezone( $this->site_timezone );
+
+		return $date->format( 'Y-m-d H:i:s' );
+	}
+
+	/**
+	 * Fixes dates on posts to match the site timezone.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_post_times( array $args, array $assoc_args ): void {
+		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
+
+		$posts       = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$log_file    = 'fix-post-times.log';
+		$total_posts = count( $posts );
+		foreach ( $posts as $post_index => $post ) {
+			$this->logger->log( $log_file, sprintf( 'Importing post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
+				continue;
+			}
+			$post_data = [
+				'ID'        => $wp_post_id,
+				'post_date' => $this->get_post_date_from_timestamp( $post['date_epoch'] ),
+			];
+			$result    = wp_update_post( $post_data );
+			if ( is_wp_error( $result ) ) {
+				$this->logger->log( $log_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
+			}
+			$this->logger->log( $log_file, sprintf( 'Fixed date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+		}
+	}
+
+	/**
 	 * Callable for "newspack-content-migrator embarcadero-migrate-more-posts-block".
 	 *
 	 * @param array $args array Command arguments.
@@ -977,7 +1051,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'comment_author_url'   => $wp_user ? $wp_user->user_url : '',
 				'comment_author_IP'    => $comment['ip_address'] ?? '',
 				'comment_content'      => $comment['comment'] ?? '',
-				'comment_date_gmt'     => gmdate( 'Y-m-d H:i:s', $comment['posted_epoch'] ),
+				'comment_date_gmt'     => $this->get_post_date_from_timestamp( $comment['posted_epoch'] ),
 				'comment_meta'         => [],
 			];
 
