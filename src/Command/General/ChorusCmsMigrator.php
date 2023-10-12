@@ -530,7 +530,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 			// Log newly imported attachment.
 			if ( $existing_att_id ) {
-				$this->logger->log( 'chorus_assets_existing.log', sprintf( 'Updating existing ID %d URL %s', $att_id, $url ) );
+				$this->logger->log( 'chorus_assets_existing.log', sprintf( 'Updating existing ID %d URL %s', $existing_att_id, $url ) );
 			} else {
 				$this->logger->log( 'chorus_assets_new.log', sprintf( 'Imported attachment ID %d URL %s', $att_id, $url ) );
 			}
@@ -551,7 +551,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$update_post['post_title'] = $title;
 			}
 			if ( $caption ) {
-				$update_post['post_excerpt'] = $title;
+				$update_post['post_excerpt'] = $caption;
 			}
 			if ( $credit ) {
 				$update_postmeta['_media_credit'] = $credit;
