@@ -649,16 +649,81 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 	}
 
-	public function fix_post_urls( array $args, array $assoc_args ): void {
+	/**
+	 * This one fixes the related links that were already changed to wp permalinks with paths that were not working.
+	 */
+	public function fix_wp_related_links( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
 		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 
-		$max_items =  $assoc_args['num-items'] ?? false;
+		global $wpdb;
+
+		$post_ids = $wpdb->get_col(
+			"SELECT ID FROM {$wpdb->posts} WHERE post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'"
+		);
+
+		$total_posts = count( $post_ids );
+		$counter     = 0;
+
+		foreach ( $post_ids as $post_id ) {
+			$counter ++;
+
+			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
+				continue;
+			}
+
+			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter, $total_posts, $post_id ) );
+
+			$post         = get_post( $post_id );
+			$update       = false;
+			$post_content = $post->post_content;
+			preg_match_all( '@<p><strong>RELATED:</strong>.*href=[\'"]([^ ]*)[\'"].*</p>@', $post_content, $matches, PREG_SET_ORDER );
+
+			if ( empty( $matches ) ) {
+				$this->logger->log( $log_file, sprintf( 'Post seems to have wrong format related link %s', get_permalink( $post_id ) ), Logger::ERROR );
+			}
+
+			foreach ( $matches as $match ) {
+				$linked_url_post_name = trim( basename( $match[1] ), '/' );
+				$post_linked_to       = get_page_by_path( $linked_url_post_name, OBJECT, 'post' );
+				if ( ! $post_linked_to ) {
+					$this->logger->log( $log_file, sprintf( 'Could not find post for %s', $match[1] ), Logger::WARNING );
+					continue;
+				}
+
+				$update      = true;
+				$replacement = $this->get_related_link_markup( $post_linked_to->ID );
+
+				$post_content = str_replace( $match[0], $replacement, $post_content );
+			}
+
+			if ( $update ) {
+				$result = wp_update_post( [
+					'ID'           => $post_id,
+					'post_content' => $post_content,
+				] );
+
+				if ( $result ) {
+					$this->logger->log( $log_file, sprintf( 'Updated wp links in "RELATED" on %s', get_permalink( $post_id ) ), Logger::SUCCESS );
+				}
+			}
+
+			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
+		}
+	}
+
+	public function fix_post_urls( array $args, array $assoc_args ): void {
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
+		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
+
 		$total_posts = $assoc_args['num-items'] ?? $this->json_iterator->count_json_array_entries( $assoc_args['articles-json'] );
 		$counter     = 0;
 
-		foreach ( $this->json_iterator->items( $assoc_args['articles-json'] ) as $article ) {
+		foreach ( $this->json_iterator->items( $articles_json_file ) as $article ) {
 			$post_id = $this->get_post_id_from_uid( $article->UID );
 			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
 				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
@@ -666,15 +731,12 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			}
 
 			$counter ++;
-			if ( false !== $max_items && $counter > $max_items ) {
-				break;
-			}
 
 			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter, $total_posts ) );
 
 			$post = get_post( $post_id );
 			if ( ! $post ) {
-				WP_CLI::log( sprintf( "Didn't find a post for: %s", $article->{'@id'} ) );
+				$this->logger->log( sprintf( "Didn't find a post for: %s", $article->{'@id'} ), Logger::WARNING );
 				continue;
 			} elseif ( $post->post_status !== 'publish' ) {
 				MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
@@ -699,7 +761,8 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
 
 			$original_path = trim( parse_url( $article->{'@id'}, PHP_URL_PATH ), '/' );
-			$wp_path       = trim( parse_url( get_permalink( $post_id ), PHP_URL_PATH ), '/' );
+			$post_permalink = get_permalink( $post_id );
+			$wp_path       = trim( parse_url( $post_permalink, PHP_URL_PATH ), '/' );
 			if ( $wp_path !== mb_strtolower( $original_path ) ) {
 				$this->logger->log(
 					$log_file,
@@ -707,10 +770,12 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 						"Changed post path from:\n %s \n %s\n on %s ",
 						$current_path,
 						$wp_path,
-						wp_get_shortlink( $post_id, 'post', false ) // Use the shortlink.
+						wp_get_shortlink( $post_id, 'post', false ),
 					),
 					Logger::SUCCESS
 				);
+			} else {
+				$this->logger->log( $log_file, sprintf( 'Postname was fine on: %s, not updating it', $post_permalink ) );
 			}
 		}
 	}
@@ -1106,42 +1171,49 @@ QUERY;
 	 *
 	 * @throws Exception
 	 */
-	public function cmd_migrate_users_from_json( $args, $assoc_args ) {
+	public function cmd_migrate_users_from_json( array $args, array $assoc_args ): void {
 		$file_path = $args[0];
 		$start     = $assoc_args['start'] ?? 0;
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
-		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
 
-		foreach ( $iterator as $row_number => $row ) {
-			WP_CLI::log( 'Row Number: ' . $row_number . ' - ' . $row['username'] );
+		$row_number = 1;
+		foreach ( $this->json_iterator->batched_items( $file_path, $start, $end ) as $row ) {
+			WP_CLI::log( 'Row Number: ' . $row_number ++ . ' - ' . $row->username );
+
+			if ( empty( $row->email ) ) {
+				continue; // Nope. No email, no user.
+			}
 
 			$date_created = new DateTime( 'now', new DateTimeZone( 'America/Denver' ) );
 
-			if ( ! empty( $row['date_created'] ) ) {
-				$date_created = DateTime::createFromFormat( 'm-d-Y_H:i', $row['date_created'], new DateTimeZone( 'America/Denver' ) );
+			if ( ! empty( $row->date_created ) ) {
+				$date_created = DateTime::createFromFormat( 'm-d-Y_H:i', $row->date_created, $this->site_timezone );
+			}
+
+			$nicename = $row->fullname ?? '';
+			if ( empty( $nicename ) ) {
+				$nicename = $row->first_name ?? '' . ' ' . $row->last_name ?? '';
 			}
 
 			$result = wp_insert_user(
 				[
-					'user_login'      => $row['username'],
+					'user_login'      => $row->username,
 					'user_pass'       => wp_generate_password(),
-					'user_email'      => $row['email'],
-					'display_name'    => $row['fullname'],
-					'first_name'      => $row['first_name'],
-					'last_name'       => $row['last_name'],
+					'user_email'      => $row->email,
+					'display_name'    => $row->fullname,
+					'first_name'      => $row->first_name,
+					'last_name'       => $row->last_name,
 					'user_registered' => $date_created->format( 'Y-m-d H:i:s' ),
-					'role'            => 'subscriber',
+					'role'            => 'subscriber', // Set this role on all users. We change it to author later if they have content.
+					'user_nicename'   => $nicename,
 				]
 			);
 
 			if ( is_wp_error( $result ) ) {
 				WP_CLI::log( $result->get_error_message() );
 			} else {
-				WP_CLI::success( "User {$row['email']} created." );
+				WP_CLI::success( "User {$row->email} created." );
 			}
 		}
 	}
@@ -2615,72 +2687,6 @@ QUERY;
 			fclose( $fp );
 
 			WP_CLI::success( "Redirects CSV file generated: $output_file_path" );
-		}
-	}
-
-	/**
-	 * This one fixes the related links that were already changed to wp permalinks with paths that were not working.
-	 * TODO: explain.
-	 */
-	public function fix_wp_related_links( array $args, array $assoc_args ): void {
-		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
-
-		global $wpdb;
-
-		$post_ids = $wpdb->get_col(
-			"SELECT ID FROM {$wpdb->posts} WHERE post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'"
-		);
-
-		$total_posts = count( $post_ids );
-		$counter     = 0;
-
-		foreach ( $post_ids as $post_id ) {
-			$counter ++;
-
-			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
-				continue;
-			}
-
-			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter, $total_posts, $post_id ) );
-
-			$post         = get_post( $post_id );
-			$update       = false;
-			$post_content = $post->post_content;
-			preg_match_all( '@<p><strong>RELATED:</strong>.*href=[\'"]([^ ]*)[\'"].*</p>@', $post_content, $matches, PREG_SET_ORDER );
-
-			if ( empty( $matches ) ) {
-				$this->logger->log( $log_file, sprintf( 'Post seems to have wrong format related link %s', get_permalink( $post_id ) ), Logger::ERROR );
-			}
-
-			foreach ( $matches as $match ) {
-				$linked_url_post_name = trim( basename( $match[1] ), '/' );
-				$post_linked_to       = get_page_by_path( $linked_url_post_name, OBJECT, 'post' );
-				if ( ! $post_linked_to ) {
-					$this->logger->log( $log_file, sprintf( 'Could not find post for %s', $match[1] ), Logger::WARNING );
-					continue;
-				}
-
-				$update      = true;
-				$replacement = $this->get_related_link_markup( $post_linked_to->ID );
-
-				$post_content = str_replace( $match[0], $replacement, $post_content );
-			}
-
-			if ( $update ) {
-				$result = wp_update_post( [
-					'ID'           => $post_id,
-					'post_content' => $post_content,
-				] );
-
-				if ( $result ) {
-					$this->logger->log( $log_file, sprintf( 'Updated wp links in "RELATED" on %s', get_permalink( $post_id ) ), Logger::SUCCESS );
-				}
-			}
-
-			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
 		}
 	}
 
