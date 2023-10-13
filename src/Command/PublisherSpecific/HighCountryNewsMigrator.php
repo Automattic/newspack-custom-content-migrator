@@ -65,12 +65,23 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	 */
 	private $attachments;
 
+	private $site_timezone;
+
 	private $articles_json_arg = [
 		'type'        => 'assoc',
 		'name'        => 'articles-json',
 		'description' => 'Path to the articles JSON file.',
 		'optional'    => false,
 	];
+
+	private $images_json_arg = [
+		'type'        => 'assoc',
+		'name'        => 'images-json',
+		'description' => 'Path to the images JSON file.',
+		'optional'    => false,
+	];
+
+	const DEFAULT_AUTHOR_ID = 223746;
 
 	/**
 	 * Get Instance.
@@ -89,6 +100,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
+			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
 		}
 
 		return self::$instance;
@@ -188,7 +200,6 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		);
 
 
-
 		// Then images
 		WP_CLI::add_command(
 			'newspack-content-migrator highcountrynews-migrate-images-from-json',
@@ -196,12 +207,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			[
 				'shortdesc' => 'Migrate images from JSON data.',
 				'synopsis'  => [
-					[
-						'type'        => 'positional',
-						'name'        => 'file',
-						'description' => 'Path to the JSON file.',
-						'optional'    => false,
-					],
+					$this->images_json_arg,
 					[
 						'type'        => 'assoc',
 						'name'        => 'start',
@@ -760,9 +766,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
 
-			$original_path = trim( parse_url( $article->{'@id'}, PHP_URL_PATH ), '/' );
+			$original_path  = trim( parse_url( $article->{'@id'}, PHP_URL_PATH ), '/' );
 			$post_permalink = get_permalink( $post_id );
-			$wp_path       = trim( parse_url( $post_permalink, PHP_URL_PATH ), '/' );
+			$wp_path        = trim( parse_url( $post_permalink, PHP_URL_PATH ), '/' );
 			if ( $wp_path !== mb_strtolower( $original_path ) ) {
 				$this->logger->log(
 					$log_file,
@@ -781,8 +787,9 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	}
 
 	private function get_post_name( string $url ): string {
-		$path_parts = explode('/', trim( parse_url( $url, PHP_URL_PATH ), '/' ));
-		$post_name = array_pop($path_parts);
+		$path_parts = explode( '/', trim( parse_url( $url, PHP_URL_PATH ), '/' ) );
+		$post_name  = array_pop( $path_parts );
+
 		return sanitize_title( $post_name );
 	}
 
@@ -831,7 +838,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 		}
 		if ( count( $categories_from_path ) > 1 ) {
 			// Set the last item in the path as primary to keep the url structure.
-			update_post_meta( $post->ID, '_yoast_wpseo_primary_category', end($categories_from_path) );
+			update_post_meta( $post->ID, '_yoast_wpseo_primary_category', end( $categories_from_path ) );
 		}
 	}
 
@@ -1218,6 +1225,13 @@ QUERY;
 		}
 	}
 
+	private function upgrade_user_to_author( $user_id ): bool {
+		$user = get_userdata( $user_id );
+		$user->set_role( 'author' );
+
+		return ! is_wp_error( wp_update_user( $user ) );
+	}
+
 	/**
 	 * Function to process images from a Plone JSON image file.
 	 *
@@ -1226,61 +1240,43 @@ QUERY;
 	 *
 	 * @throws Exception
 	 */
-	public function cmd_migrate_images_from_json( $args, $assoc_args ) {
-		$file_path = $args[0];
+	public function cmd_migrate_images_from_json( array $args, array $assoc_args ): void {
+		$file_path = $assoc_args[ $this->images_json_arg['name'] ];
 		$start     = $assoc_args['start'] ?? 0;
 		$end       = $assoc_args['end'] ?? PHP_INT_MAX;
 
-		$iterator = ( new FileImportFactory() )->get_file( $file_path )
-		                                       ->set_start( $start )
-		                                       ->set_end( $end )
-		                                       ->getIterator();
+		$creators   = [];
+		$row_number = 0;
+		/**
+		 * TODO. REmove this
+		 * @var \stdClass $row
+		 */
+		foreach ( $this->json_iterator->batched_items( $file_path, $start, $end ) as $row ) {
+			$row_number ++;
 
-		$creators = [];
+			$post_author = self::DEFAULT_AUTHOR_ID;
 
-		foreach ( $iterator as $row_number => $row ) {
-			echo WP_CLI::colorize( 'Handling Row Number: ' . "%b$row_number%n" . ' - ' . $row['@id'] ) . "\n";
+			if ( ! empty( $row->creators[0] ) ) {
+				$user = get_user_by( 'login', $row->creators[0] );
 
-			$post_author = 0;
-
-			WP_CLI::log( 'Looking for user: ' . $row['creators'][0] );
-			if ( array_key_exists( $row['creators'][0], $creators ) ) {
-				$post_author = $creators[ $row['creators'][0] ];
-				echo WP_CLI::colorize( '%yFound user in array... ' . $post_author . '%n' ) . "\n";
-			} else {
-				$user = get_user_by( 'login', $row['creators'][0] );
-
-				if ( ! $user ) {
-					echo WP_CLI::colorize( '%rUser not found in DB...' ) . "\n";
-				} else {
-					echo WP_CLI::colorize( '%YUser found in DB, updating role... ' . $row['creators'][0] . ' => ' . $user->ID . '%n' ) . "\n";
-					$user->set_role( 'author' );
-					$creators[ $row['creators'][0] ] = $user->ID;
-					$post_author                     = $user->ID;
+				if ( $user ) {
+					$this->upgrade_user_to_author( $user->ID );
 				}
 			}
 
-			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['created'], new DateTimeZone( 'America/Denver' ) );
-			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row['modified'], new DateTimeZone( 'America/Denver' ) );
+			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row->created, $this->site_timezone );
+			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row->modified, $this->site_timezone );
 
-			$caption = '';
+			$caption = $row->description ?? '';
+			// TODO. Set credits
 
-			if ( ! empty( $row['description'] ) ) {
-				$caption = $row['description'];
+			if (empty( $row->image->filename )) {
+				// TODO. WHat now?
+				continue;
 			}
-
-			if ( ! empty( $row['credit'] ) ) {
-				if ( ! empty( $caption ) ) {
-					$caption .= '<br />';
-				}
-
-				$caption .= 'Credit: ' . $row['credit'];
-			}
-
 			// check image param, if not empty, it is a blob
-			if ( ! empty( $row['image'] ) ) {
-				echo WP_CLI::colorize( '%wHandling blob...' ) . "\n";
-				$filename              = $row['image']['filename'];
+			if ( ! empty( $row->image->filename ) ) {
+				$filename              = $row->image->filename;
 				$destination_file_path = WP_CONTENT_DIR . '/uploads/' . $filename;
 				$file_blob_path        = WP_CONTENT_DIR . '/high_country_news/blobs/' . $row['image']['blob_path'];
 				file_put_contents( $destination_file_path, file_get_contents( $file_blob_path ) );
@@ -2698,7 +2694,7 @@ QUERY;
 
 
 		$article_url_and_uid = [];
-		foreach (  json_decode( file_get_contents($articles_json_file), true ) as $article ) {
+		foreach ( json_decode( file_get_contents( $articles_json_file ), true ) as $article ) {
 			$article_url_and_uid[ parse_url( $article['@id'], PHP_URL_PATH ) ] = $article['UID'];
 		}
 
