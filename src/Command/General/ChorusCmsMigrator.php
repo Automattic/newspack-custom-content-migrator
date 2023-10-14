@@ -168,6 +168,8 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	];
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|CLASS Instance.
 	 */
 	private static $instance = null;
@@ -340,9 +342,120 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			'newspack-content-migrator chorus-cms-temp-dev-helper-scripts',
 			[ $this, 'cmd_temp_dev_helper_scripts' ],
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator chorus-output-additional-contributors-prepend-to-post-content',
+			[ $this, 'cmd_additional_contributors_to_post_content' ],
+			[
+				'shortdesc' => 'Prepends a paragraph with additional contributors to post_content and removes those GAs as CoAuthors.',
+			]
+		);
 	}
 
-	public function cmd_temp_dev_helper_scripts( $pos_args, $assoc_args ) {
+	/**
+	 * Prepends a paragraph with additional contributors to post_content and removes those GAs as CoAuthors.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_additional_contributors_to_post_content( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+
+		// Get all additional contributors GA IDs via postmeta.
+		$results = $wpdb->get_results( "select post_id, meta_value from {$wpdb->postmeta} where meta_key = 'newspack_chorus_additional_contributor_ga_id';", ARRAY_A );
+		if ( empty( $results ) ) {
+			WP_CLI::line( 'No additional contributors found.' );
+			return;
+		}
+
+		// Group GA IDs by post_id.
+		$post_id_to_additional_contributors = [];
+		foreach ( $results as $result ) {
+			$post_id = $result['post_id'];
+			$ga_id   = $result['meta_value'];
+			// Weed out duplicates.
+			if ( ! isset( $post_id_to_additional_contributors[ $post_id ] ) || ! in_array( $ga_id, $post_id_to_additional_contributors[ $post_id ] ) ) {
+				$post_id_to_additional_contributors[ $post_id ][] = $ga_id;
+			}
+		}
+		unset( $results );
+
+		// Loop through these posts and update.
+		foreach ( $post_id_to_additional_contributors as $post_id => $additional_contributor_ga_ids ) {
+
+			// Get this post's additional contributor GA IDs.
+			$additional_contributor_ids = $post_id_to_additional_contributors[ $post_id ] ?? null;
+			if ( is_null( $additional_contributor_ids ) ) {
+				continue;
+			}
+
+			// Get post_content.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+
+			// Skip if post already has a paragraph with class p-additional-reporters.
+			if ( false !== strpos( $post_content, '<!-- wp:paragraph {"className":"p-additional-reporters"} -->' ) ) {
+				WP_CLI::line( 'Skipping ' . $post_id );
+				continue;
+			}
+
+			// Get this post's all currently assigned GAs.
+			$current_gas    = $this->coauthors_plus->get_guest_authors_for_post( $post_id );
+			$current_ga_ids = [];
+			foreach ( $current_gas as $current_ga ) {
+				$current_ga_ids[] = $current_ga->ID;
+			}
+
+			// Get additional contributors byline.
+			// - first get additional contributors GA names.
+			// - get GA names.
+			$additional_contributor_ga_names = [];
+			foreach ( $additional_contributor_ids as $additional_contributor_id ) {
+				$additional_contributor_ga = $this->coauthors_plus->get_guest_author_by_id( $additional_contributor_id );
+				if ( $additional_contributor_ga ) {
+					$additional_contributor_ga_names[] = trim( $additional_contributor_ga->display_name );
+				}
+			}
+			// - compose the byline
+			$additional_contributors_byline = 'Additional reporting by ';
+			$separators                     = [];
+			if ( 1 === count( $additional_contributor_ga_names ) ) {
+				$additional_contributors_byline .= $additional_contributor_ga_names[0];
+			} else {
+				// - separators are ", ", except the last one which is " and ".
+				$separators                             = array_fill( 0, count( $additional_contributor_ga_names ) - 1, ', ' );
+				$separators[ count( $separators ) - 1 ] = ' and ';
+				foreach ( $additional_contributor_ga_names as $key_ac_ga_name => $additional_contributor_ga_name ) {
+					$additional_contributors_byline .= $additional_contributor_ga_name . ( isset( $separators[ $key_ac_ga_name ] ) ? $separators[ $key_ac_ga_name ] : '' );
+				}
+			}
+
+			// Prepend byline as paragraph to post_content.
+			$paragraph_block      = $this->gutenberg_blocks->get_paragraph( $additional_contributors_byline, '', '', '', [ 'p-additional-reporters' ] );
+			$paragraph_block_html = serialize_blocks( [ $paragraph_block ] );
+			$post_content_updated = $paragraph_block_html . "\n\n" . $post_content;
+			$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+			WP_CLI::success( 'Updated ' . $post_id );
+
+			// Remove these additional contributors as CoAuthors.
+			$current_gas_wo_additional_contributors = $current_ga_ids;
+			$current_gas_wo_additional_contributors = array_diff( $current_gas_wo_additional_contributors, $additional_contributor_ids );
+			$this->coauthors_plus->assign_guest_authors_to_post( $current_gas_wo_additional_contributors, $post_id, false );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Collection of one-time dev scripts. Helper method.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_temp_dev_helper_scripts( array $pos_args, array $assoc_args ) {
 
 		global $wpdb;
 
@@ -444,9 +557,11 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * @param string $asset_path
-	 * @param string $timezone_string
-	 * @param bool   $refresh_assets
+	 * Imports assets.
+	 *
+	 * @param string $asset_path      Absolute path to where 'asset/' folder is located with asset JSONs.
+	 * @param string $timezone_string Timezone string (e.g. 'America/New_York', 'Europe/Berlin', 'UTC', ...). It is assumed that Chorus' timestamps are in UTC, so we need to specify Publisher's local timezone to convert them properly.
+	 * @param bool   $refresh_assets  Warning, not implemented. If true, will refresh data from asset JSONs even for existing media library items.
 	 *
 	 * @return void
 	 */
@@ -614,7 +729,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Loops through entries JSONs and just checks if all of those are known by this command.
 	 *
-	 * @param $entries_path Path to "entries/" folder (path should include the "entries" folder ;) ).
+	 * @param string $entries_path Path to "entries/" folder (path should include the "entries" folder ;) ).
 	 *
 	 * @return void
 	 */
@@ -638,7 +753,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Parses string with additional reporters and returns array of author names.
 	 *
-	 * @param string $contributor_field
+	 * @param string $contributor_field Contributor.
 	 *
 	 * @return string[]
 	 */
@@ -737,6 +852,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 			 */
 			$publish_date = $this->format_chorus_date( $entry['publishDate'], $timezone_string );
 			if ( ! $publish_date ) {
+				// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date
 				$publish_date = date( 'Y-m-d H:i:s' );
 			}
 			$post_create_args['post_date'] = $publish_date;
@@ -960,11 +1076,13 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						if ( ! is_wp_error( $ga_id ) ) {
 							$ga_ids[] = $ga_id;
 						} else {
+							// phpcs:disable -- It is OK to log without escaping.
 							$this->logger->log(
 								'chorus-cms-import-authors-and-posts__err__assign_author.log',
 								sprintf( 'Could not assign Contributor to post ID %d, url %s, firstName: %s lastName: %s display_name: %s uid: %s username: %s short_bio: %s social_links: %s', $post_id, $entry['url'], $contributor['authorProfile']['user']['firstName'], $contributor['authorProfile']['user']['lastName'], $contributor['authorProfile']['name'], $contributor['authorProfile']['user']['uid'], $contributor['authorProfile']['user']['username'], $contributor['authorProfile']['shortBio'], printf( $contributor['authorProfile']['socialLinks'], true ) ),
 								$this->logger::WARNING
 							);
+							// phpcs:enable
 						}
 					}
 				}
@@ -1133,11 +1251,11 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * Format date from Chorus CMS to WordPress.
 	 * It is assumed that Chorus' timestamps are in UTC timezone.
 	 *
-	 * @param string  $chorus_date     Date in Chorus format, e.g. '2023-06-13T21:05:36.000Z'.
-	 * @param ?string $timezone_string Optional, default is "UTC". Chorus uses the following format for timestamps, e.g. "2022-03-24T15:43:10.364Z".
-	 *                                 Expected timezone of this timestamp is UTC. Provide a specific PHP timezone string to convert to that one.
-	 *                                 See https://www.php.net/manual/en/timezones.php for list of timezone strings (then click
-	 *                                 region for list of strings, e.g. https://www.php.net/manual/en/timezones.america.php).
+	 * @param string  $chorus_timestamp Date in Chorus format, e.g. '2023-06-13T21:05:36.000Z'.
+	 * @param ?string $timezone_string  Optional, default is "UTC". Chorus uses the following format for timestamps, e.g. "2022-03-24T15:43:10.364Z".
+	 *                                  Expected timezone of this timestamp is UTC. Provide a specific PHP timezone string to convert to that one.
+	 *                                  See https://www.php.net/manual/en/timezones.php for list of timezone strings (then click
+	 *                                  region for list of strings, e.g. https://www.php.net/manual/en/timezones.america.php).
 	 *
 	 * @return array|string|string[]|null
 	 */
@@ -1186,6 +1304,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 *
 	 * Chorus JSONs with data have author data in multiple places, and different author data is found in different places.
 	 * This works with all those places and gets or creates a GA like this:
 	 *      - first tries to get existing GA by its $uid,
@@ -1193,14 +1312,14 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 *      - then tries to get existing GA by its full name (first + last),
 	 *      - and finally if no author si found, it creates one using available info.
 	 *
-	 * @param bool   $refresh_author If set, will update existing GA with user data provided here by these arguments (names, bio, social links, ...), won't just return the existing GA.
-	 * @param string $uid
-	 * @param string $display_name
-	 * @param string $username
-	 * @param string $first_name
-	 * @param string $last_name
-	 * @param string $short_bio
-	 * @param array  $author_profile__social_links
+	 * @param string $first_name First name.
+	 * @param string $last_name Last name.
+	 * @param string $display_name Display name.
+	 * @param string $uid UID.
+	 * @param string $username Username.
+	 * @param string $short_bio Short bio.
+	 * @param array  $author_profile__social_links Author profile social links.
+	 * @param bool   $refresh_author               Warning, not implemented -- refresh author.
 	 *
 	 * @return int GA ID.
 	 */
@@ -1247,6 +1366,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				if ( $social_link['type'] ) {
 					if ( 'PROFILE' === $social_link['type'] ) {
 						// Local site author page URL.
+						$let_blank = true;
 					} elseif ( 'TWITTER' === $social_link['type'] ) {
 						// If doesn't end with dot, add dot.
 						$links_bio .= ( ! empty( $links_bio ) && '.' != substr( $links_bio, -1 ) ) ? '.' : '';
@@ -1259,6 +1379,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 						$links_bio .= sprintf( '<a href="%s" target="_blank">Follow @%s on Twitter</a>.', $social_link['url'], $handle );
 					} elseif ( 'RSS' === $social_link['type'] ) {
 						// RSS feed URL.
+						$let_blank = true;
 					} elseif ( 'EMAIL' === $social_link['type'] ) {
 						$ga_args['user_email'] = $social_link['url'];
 					} elseif ( 'INSTAGRAM' === $social_link['type'] ) {
@@ -1481,6 +1602,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$src = null;
 				// Find src which has "twitter.com" and "/status/".
 				foreach ( $src_crawler as $src_crawler_node ) {
+					// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- A 3rd party library.
 					$src_this_node = trim( $src_crawler_node->textContent );
 					if ( false !== strpos( $src_this_node, 'twitter.com' ) && false !== strpos( $src_this_node, '/status/' ) ) {
 						$src = $src_this_node;
@@ -1510,6 +1632,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 				$src = null;
 				// Find src which has "facebook.com".
 				foreach ( $src_crawler as $src_crawler_node ) {
+					// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- A 3rd party library.
 					$src_this_node = trim( $src_crawler_node->textContent );
 					if ( false !== strpos( $src_this_node, 'facebook.com' ) ) {
 						$src = $src_this_node;
@@ -1603,7 +1726,9 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * Converts Chorus content component to Gutenberg block(s).
 	 *
-	 * @param array $component Component data.
+	 * @param array $component               Component data.
+	 * @param int   $post_id                 Post ID.
+	 * @param bool  $refresh_attachment_data Warning -- presently not implemented.
 	 *
 	 * @return array Array of resulting blocks to be rendered with serialize_blocks(). Returns one image block.
 	 */
