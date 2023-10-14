@@ -89,6 +89,7 @@ class TheCityMigrator implements InterfaceCommand {
 	public function cmd_attachments_all_check_can_distribute( array $pos_args, array $assoc_args ): void {
 		$att_ids = $this->posts->get_all_posts_ids( 'attachment' );
 		foreach ( $att_ids as $key_att_id => $att_id ) {
+			WP_CLI::line( sprintf( "%d/%d %d", $key_att_id + 1, count( $att_ids ), $att_id ) );
 			update_post_meta( $att_id, '_navis_media_can_distribute', 1 );
 		}
 	}
