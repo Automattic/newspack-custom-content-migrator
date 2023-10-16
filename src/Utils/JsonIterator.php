@@ -133,4 +133,24 @@ class JsonIterator {
 		throw new Exception( "Could not count entries in JSON file: {$json_file_path}" );
 	}
 
+	/**
+	 * @param string $json_path Path to JSON file.
+	 * @param array $assoc_args Args from WP CLI command.
+	 *
+	 * @return array
+	 * @throws \WP_CLI\ExitException
+	 */
+	public function validate_and_get_batch_args_for_json_file( string $json_path, array $assoc_args ): array {
+		$batch_args = BatchLogic::validate_and_get_batch_args( $assoc_args );
+
+		if ( $batch_args['end'] === PHP_INT_MAX ) {
+			$batch_args['total'] = $this->count_json_array_entries( $json_path );
+			if ( $batch_args['start'] !== 0 ) {
+				$batch_args['total'] = $batch_args['total'] - $batch_args['start'];
+			}
+		}
+
+		return $batch_args;
+	}
+
 }

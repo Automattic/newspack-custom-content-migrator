@@ -19,7 +19,7 @@ class BatchLogic {
 	 *
 	 * @var array
 	 */
-	private array $batch_args = [
+	private static array $batch_args = [
 		[
 			'type'        => 'assoc',
 			'name'        => 'start',
@@ -43,8 +43,8 @@ class BatchLogic {
 	 *
 	 * @return array[]
 	 */
-	public function get_batch_args(): array {
-		return $this->batch_args;
+	public static function get_batch_args(): array {
+		return self::$batch_args;
 	}
 
 	/**
@@ -55,9 +55,9 @@ class BatchLogic {
 	 * @return array Array keyed with: start, end, total.
 	 * @throws ExitException If the args were not acceptable.
 	 */
-	public function validate_and_get_batch_args( array $assoc_args ): array {
-		$start = $assoc_args[ $this->batch_args[0]['name'] ] ?? 0;
-		$end   = $assoc_args[ $this->batch_args[1]['name'] ] ?? PHP_INT_MAX;
+	public static function validate_and_get_batch_args( array $assoc_args ): array {
+		$start = $assoc_args[ self::$batch_args[0]['name'] ] ?? 0;
+		$end   = $assoc_args[ self::$batch_args[1]['name'] ] ?? PHP_INT_MAX;
 
 		if ( ! is_numeric( $start ) || ! is_numeric( $end ) ) {
 			WP_CLI::error( 'Start and end args must be numeric.' );

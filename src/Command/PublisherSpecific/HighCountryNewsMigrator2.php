@@ -63,8 +63,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	private $attachments;
 
-	private BatchLogic $batch_logic;
-
 	private $articles_json_arg = [
 		'type'        => 'assoc',
 		'name'        => 'articles-json',
@@ -129,7 +127,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
-			self::$instance->batch_logic               = new BatchLogic();
 			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
 		}
 
@@ -196,7 +193,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'shortdesc' => 'Migrate users from JSON data.',
 				'synopsis'  => [
 					$this->users_json_arg,
-					...$this->batch_logic->get_batch_args(),
+					...BatchLogic::get_batch_args(),
 				],
 			]
 		);
@@ -209,7 +206,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => [
 					$this->images_json_arg,
 					$this->blobs_path,
-					...$this->batch_logic->get_batch_args(),
+					...BatchLogic::get_batch_args(),
 				],
 			]
 		);
@@ -295,7 +292,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function fix_post_urls( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
 		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
 
 		$total_posts = $assoc_args['num-items'] ?? $this->json_iterator->count_json_array_entries( $assoc_args['articles-json'] );
@@ -367,7 +364,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function fix_related_links_from_json( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
 		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
 
 
@@ -433,12 +430,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function fix_wp_related_links( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
 		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 
 		global $wpdb;
 
 		$post_ids = $wpdb->get_col(
-			$wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID <= %d AND post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'",
+			$wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE ID <= %d AND post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'",
 				self::MAX_POST_ID_FROM_STAGING
 			)
 		);
@@ -499,7 +496,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	public function import_users_from_json( array $args, array $assoc_args ): void {
 		$file_path  = $assoc_args[ $this->users_json_arg['name'] ];
-		$batch_args = $this->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
 		$row_number = 1;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
@@ -535,23 +532,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( is_wp_error( $result ) ) {
 				WP_CLI::log( $result->get_error_message() );
 			} else {
-				WP_CLI::success( "User {$row->email} created." );
+				WP_CLI::success( "User $row->email created." );
 			}
 		}
 	}
-
 	public function migrate_images_from_json( array $args, array $assoc_args ): void {
 		$log_file   = __FUNCTION__ . '.log';
 		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
-		$batch_args = $this->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
-		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
 		global $wpdb;
+		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
 		$row_number = 0;
-		/**
-		 * TODO. REmove this
-		 * @var \stdClass $row
-		 */
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 
@@ -619,18 +611,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
-	private function validate_and_get_batch_args_for_json_file( string $json_path, array $assoc_args ): array {
-		$batch_args = $this->batch_logic->validate_and_get_batch_args( $assoc_args );
-
-		if ( $batch_args['end'] === PHP_INT_MAX ) {
-			$batch_args['total'] = $this->json_iterator->count_json_array_entries( $json_path );
-			if ( $batch_args['start'] !== 0 ) {
-				$batch_args['total'] = $batch_args['total'] - $batch_args['start'];
-			}
-		}
-
-		return $batch_args;
-	}
 
 	private function get_post_name( string $url ): string {
 		$path_parts = explode( '/', trim( parse_url( $url, PHP_URL_PATH ), '/' ) );
