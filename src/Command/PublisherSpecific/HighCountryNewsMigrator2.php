@@ -11,6 +11,7 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
+use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
@@ -62,6 +63,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	private $attachments;
 
+	private BatchLogic $batch_logic;
+
 	private $articles_json_arg = [
 		'type'        => 'assoc',
 		'name'        => 'articles-json',
@@ -76,21 +79,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		'optional'    => false,
 	];
 
-	private array $batch_args = [
-		[
-			'type'        => 'assoc',
-			'name'        => 'start',
-			'description' => 'Start row (default: 0)',
-			'optional'    => true,
-			'repeating'   => false,
-		],
-		[
-			'type'        => 'assoc',
-			'name'        => 'end',
-			'description' => 'End row (default: PHP_INT_MAX)',
-			'optional'    => true,
-			'repeating'   => false,
-		],
+	private array $blobs_path = [
+		'type'        => 'assoc',
+		'name'        => 'blobs-path',
+		'description' => 'Path to the blobs directory.',
+		'optional'    => false,
+	];
+
+	private array $users_json_arg = [
+		'type'        => 'assoc',
+		'name'        => 'users-json',
+		'description' => 'Path to the users JSON file.',
+		'optional'    => false,
 	];
 
 	private array $num_items_arg = [
@@ -103,7 +103,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
 
 	const PARENT_PAGE_FOR_ISSUES = 180504; // The page that all issues will have as parent.
-	const DEFAULT_AUTHOR = 223746; // User ID of default author.
+	const DEFAULT_AUTHOR_ID = 223746; // User ID of default author.
 	const TAG_ID_THE_MAGAZINE = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
 	const CATEGORY_ID_ISSUES = 385;
 
@@ -129,6 +129,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
+			self::$instance->batch_logic               = new BatchLogic();
 			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
 		}
 
@@ -188,7 +189,30 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * Import new data.
 	 */
 	private function set_importer_commands(): void {
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-migrate-users-from-json',
+			[ $this, 'import_users_from_json' ],
+			[
+				'shortdesc' => 'Migrate users from JSON data.',
+				'synopsis'  => [
+					$this->users_json_arg,
+					...$this->batch_logic->get_batch_args(),
+				],
+			]
+		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-migrate-images-from-json',
+			[ $this, 'migrate_images_from_json' ],
+			[
+				'shortdesc' => 'Migrate images from JSON data.',
+				'synopsis'  => [
+					$this->images_json_arg,
+					$this->blobs_path,
+					...$this->batch_logic->get_batch_args(),
+				],
+			]
+		);
 	}
 
 	/**
@@ -288,7 +312,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter, $total_posts ) );
 
-			if ($post_id > self::MAX_POST_ID_FROM_STAGING) {
+			if ( $post_id > self::MAX_POST_ID_FROM_STAGING ) {
 				$this->logger->log( sprintf( "Post ID %d is greater MAX ID (%d), skipping", $post_id, self::MAX_POST_ID_FROM_STAGING ), Logger::WARNING );
 				continue;
 			}
@@ -470,23 +494,142 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
-	private function validate_and_get_batch_args( array $assoc_args ): array {
-		$start = $assoc_args[ $this->batch_args[0]['name'] ] ?? 0;
-		$end   = $assoc_args[ $this->batch_args[0]['end'] ] ?? PHP_INT_MAX;
+	/**
+	 * Import users
+	 */
+	public function import_users_from_json( array $args, array $assoc_args ): void {
+		$file_path  = $assoc_args[ $this->users_json_arg['name'] ];
+		$batch_args = $this->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
-		if ( ! is_numeric( $start ) || ! is_numeric( $end ) ) {
-			WP_CLI::error( 'Start and end args must be numeric.' );
-		}
-		if ( $end < $start ) {
-			WP_CLI::error( 'End arg must be greater than to start arg.' );
-		}
-		$difference = ( $end + 1 ) - $start;
+		$row_number = 1;
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			$row_number ++;
+			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number, $batch_args['total'], $row->username ) );
 
-		return [
-			'start' => $start,
-			'end'   => $end,
-			'total' => $difference,
-		];
+			if ( empty( $row->email ) ) {
+				continue; // Nope. No email, no user.
+			}
+
+			$date_created = new DateTime( 'now', $this->site_timezone );
+
+			if ( ! empty( $row->date_created ) ) {
+				$date_created = DateTime::createFromFormat( 'm-d-Y_H:i', $row->date_created, $this->site_timezone );
+			}
+
+			$nicename = $row->fullname ?? ( $row->first_name ?? '' . ' ' . $row->last_name ?? '' );
+
+			$result = wp_insert_user(
+				[
+					'user_login'      => $row->username,
+					'user_pass'       => wp_generate_password(),
+					'user_email'      => $row->email,
+					'display_name'    => $row->fullname,
+					'first_name'      => $row->first_name,
+					'last_name'       => $row->last_name,
+					'user_registered' => $date_created->format( 'Y-m-d H:i:s' ),
+					'role'            => 'subscriber', // Set this role on all users. We change it to author later if they have content.
+					'user_nicename'   => $nicename,
+				]
+			);
+
+			if ( is_wp_error( $result ) ) {
+				WP_CLI::log( $result->get_error_message() );
+			} else {
+				WP_CLI::success( "User {$row->email} created." );
+			}
+		}
+	}
+
+	public function migrate_images_from_json( array $args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
+		$batch_args = $this->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
+		global $wpdb;
+		$row_number = 0;
+		/**
+		 * TODO. REmove this
+		 * @var \stdClass $row
+		 */
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
+
+			if ( empty( $row->image->filename ) ) {
+				// TODO. There are some "legacyPath" images. They seem to point at empty urls, but let's get back to this.
+				continue;
+			}
+			$existing_file = $wpdb->get_var(
+				$wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE post_type = 'attachment' AND meta_key = 'plone_image_UID' AND meta_value = %s", $row->UID )
+			);
+			if ( $existing_file ) {
+				$this->logger->log( $log_file, sprintf( 'Image %s already imported to %s', $row->{'@id'}, get_permalink( $existing_file ) ), Logger::WARNING );
+				continue;
+			}
+
+			$post_author = self::DEFAULT_AUTHOR_ID;
+
+			if ( ! empty( $row->creators[0] ) ) {
+				$user = get_user_by( 'login', $row->creators[0] );
+
+				if ( $user ) {
+					$this->upgrade_user_to_author( $user->ID );
+					$post_author = $user->ID;
+				}
+			}
+
+			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row->created, $this->site_timezone );
+			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row->modified, $this->site_timezone );
+
+			$blob_file     = $assoc_args[ $this->blobs_path['name'] ] . '/' . $row->image->blob_path;
+			$img_post_data = [
+				'post_author'   => $post_author,
+				'post_date'     => $created_at->format( 'Y-m-d H:i:s' ),
+				'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
+				'meta_input'    => [
+					'plone_image_UID'   => $row->UID,
+					'_media_credit'     => $row->credit ?? '',
+					'_media_credit_url' => $row->creditUrl ?? '',
+				],
+			];
+
+			$attachment_id = $this->attachments->import_external_file(
+				$blob_file,
+				$row->image->filename,
+				$row->description ?? '',
+				$row->description ?? '',
+				$row->description ?? '',
+				0,
+				$img_post_data,
+				$row->image->filename,
+			);
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log( $log_file, $attachment_id->get_error_message(), Logger::ERROR );
+			} else {
+				$media_lib_url = sprintf(
+					$media_lib_search_url,
+					$row->image->filename
+				);
+				$this->logger->log(
+					$log_file,
+					sprintf( 'Image imported to %s (%s)', $media_lib_url, $row->{'@id'} ),
+					Logger::SUCCESS );
+			}
+		}
+	}
+
+	private function validate_and_get_batch_args_for_json_file( string $json_path, array $assoc_args ): array {
+		$batch_args = $this->batch_logic->validate_and_get_batch_args( $assoc_args );
+
+		if ( $batch_args['end'] === PHP_INT_MAX ) {
+			$batch_args['total'] = $this->json_iterator->count_json_array_entries( $json_path );
+			if ( $batch_args['start'] !== 0 ) {
+				$batch_args['total'] = $batch_args['total'] - $batch_args['start'];
+			}
+		}
+
+		return $batch_args;
 	}
 
 	private function get_post_name( string $url ): string {
