@@ -1,4 +1,9 @@
 <?php
+/**
+ * Wrapper class for json file iteration using JsonMachine.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Utils;
 
@@ -13,14 +18,18 @@ use JsonMachine\Items;
 class JsonIterator {
 
 	/**
+	 * Logger instance.
+	 *
 	 * @var Logger.
 	 */
 	private Logger $logger;
 
 	/**
+	 * Log file name.
+	 *
 	 * @var string Log name.
 	 */
-	const LOG_NAME = 'json_iterator';
+	const LOG_NAME = 'json_iterator.log';
 
 	/**
 	 * Constructor.
@@ -37,20 +46,9 @@ class JsonIterator {
 	 * @return bool True if the url responds with a 200 OK.
 	 */
 	private function url_responds( string $url ): bool {
-		$ch = curl_init( $url );
+		$req = wp_remote_head( $url );
 
-		curl_setopt( $ch, CURLOPT_NOBODY, true ); // Exclude the body (don't download).
-		curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true ); // Follow redirects
-		curl_setopt( $ch, CURLOPT_HEADER, true ); // Include the headers in the output
-		curl_setopt( $ch, CURLOPT_TIMEOUT, 5 ); // Set a timeout
-
-		curl_exec( $ch );
-
-		$http_code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
-
-		curl_close( $ch );
-
-		return $http_code === 200;
+		return ! empty( $req['response']['code'] ) && 200 === $req['response']['code'];
 	}
 
 	/**
@@ -58,17 +56,17 @@ class JsonIterator {
 	 *
 	 * The start and end args to get items between start number and end number in the array of data in the json file.
 	 *
-	 * @param string $json_file Path to the json file
-	 * @param int $start Start number in the array of data in the json file.
-	 * @param int $end End number in the array of data in the json file.
-	 * @param array $options Optional. See items() in this class.
+	 * @param string $json_file Path to the json file.
+	 * @param int    $start Start number in the array of data in the json file.
+	 * @param int    $end End number in the array of data in the json file.
+	 * @param array  $options Optional. See items() in this class.
 	 *
 	 * @return iterable
 	 */
 	public function batched_items( string $json_file, int $start, int $end, array $options = [] ): iterable {
 		$item_no = 0;
 		foreach ( $this->items( $json_file, $options ) as $item ) {
-			$item_no++;
+			$item_no ++;
 			if ( 0 !== $start && $item_no < $start ) {
 				// Keep looping until we get to where we want to be in the file.
 				continue;
@@ -90,7 +88,7 @@ class JsonIterator {
 	 * https://github.com/halaxa/json-machine#json-pointer
 	 *
 	 * @param string $json_file Path to the JSON file – can be a URL too.
-	 * @param array $options Options to pass to JsonMachine.
+	 * @param array  $options Options to pass to JsonMachine.
 	 *
 	 * @return iterable
 	 */
@@ -98,7 +96,7 @@ class JsonIterator {
 		$file_exists = str_starts_with( $json_file, 'http' ) ? $this->url_responds( $json_file ) : file_exists( $json_file );
 
 		if ( ! $file_exists ) {
-			$this->logger->log( self::LOG_NAME, "Doesn't exist: {$json_file}", Logger::ERROR );
+			$this->logger->log( self::LOG_NAME, "Doesn't exist: {$json_file}", Logger::ERROR, true );
 
 			return new \EmptyIterator();
 		}
@@ -106,7 +104,8 @@ class JsonIterator {
 		try {
 			return Items::fromFile( $json_file, $options );
 		} catch ( Exception $o_0 ) {
-			$this->logger->log( self::LOG_NAME, "Could not read the JSON from {$json_file}", Logger::ERROR );
+			$this->logger->log( self::LOG_NAME, "Could not read the JSON from {$json_file}", Logger::ERROR, true );
+
 			return new \EmptyIterator();
 		}
 	}
@@ -120,10 +119,11 @@ class JsonIterator {
 	 *
 	 * @return int Number of entries in the array in the JSON file.
 	 *
-	 * @throws Exception if the jq command fails or the JSON file does not exist.
+	 * @throws Exception If the jq command fails or the JSON file does not exist.
 	 */
 	public function count_json_array_entries( string $json_file_path ): int {
 		if ( file_exists( $json_file_path ) ) {
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_exec
 			exec( 'cat ' . escapeshellarg( $json_file_path ) . " | jq 'length'", $count );
 			if ( ! empty( $count[0] ) ) {
 				return (int) $count[0];
@@ -134,18 +134,20 @@ class JsonIterator {
 	}
 
 	/**
+	 * Will validate and get batch args for a JSON file.
+	 *
 	 * @param string $json_path Path to JSON file.
-	 * @param array $assoc_args Args from WP CLI command.
+	 * @param array  $assoc_args Args from WP CLI command.
 	 *
 	 * @return array
-	 * @throws \WP_CLI\ExitException
+	 * @throws \WP_CLI\ExitException If the args were not acceptable or the json file not countable.
 	 */
 	public function validate_and_get_batch_args_for_json_file( string $json_path, array $assoc_args ): array {
 		$batch_args = BatchLogic::validate_and_get_batch_args( $assoc_args );
 
-		if ( $batch_args['end'] === PHP_INT_MAX ) {
+		if ( PHP_INT_MAX === $batch_args['end'] ) {
 			$batch_args['total'] = $this->count_json_array_entries( $json_path );
-			if ( $batch_args['start'] !== 0 ) {
+			if ( 0 !== $batch_args['start'] ) {
 				$batch_args['total'] = $batch_args['total'] - $batch_args['start'];
 			}
 		}
