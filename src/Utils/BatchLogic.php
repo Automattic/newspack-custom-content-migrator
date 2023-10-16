@@ -34,6 +34,13 @@ class BatchLogic {
 			'optional'    => true,
 			'repeating'   => false,
 		],
+		[
+			'type'        => 'assoc',
+			'name'        => 'num-items',
+			'description' => 'Number of items to process. Will be ignored if end is provided.',
+			'optional'    => true,
+			'repeating'   => false,
+		]
 	];
 
 	/**
@@ -56,8 +63,13 @@ class BatchLogic {
 	 * @throws ExitException If the args were not acceptable.
 	 */
 	public static function validate_and_get_batch_args( array $assoc_args ): array {
-		$start = $assoc_args[ self::$batch_args[0]['name'] ] ?? 0;
-		$end   = $assoc_args[ self::$batch_args[1]['name'] ] ?? PHP_INT_MAX;
+		$start     = $assoc_args[ self::$batch_args[0]['name'] ] ?? 0;
+		$end       = $assoc_args[ self::$batch_args[1]['name'] ] ?? PHP_INT_MAX;
+		$num_items = $assoc_args[ self::$batch_args[2]['name'] ] ?? false;
+
+		if ( $num_items && PHP_INT_MAX === $end ) {
+			$end = $start + $num_items;
+		}
 
 		if ( ! is_numeric( $start ) || ! is_numeric( $end ) ) {
 			WP_CLI::error( 'Start and end args must be numeric.' );

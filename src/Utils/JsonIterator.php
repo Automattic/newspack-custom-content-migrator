@@ -57,8 +57,8 @@ class JsonIterator {
 	 * The start and end args to get items between start number and end number in the array of data in the json file.
 	 *
 	 * @param string $json_file Path to the json file.
-	 * @param int    $start Start number in the array of data in the json file.
-	 * @param int    $end End number in the array of data in the json file.
+	 * @param int    $start Start number (inclusive) in the array of data in the json file.
+	 * @param int    $end End number (exclusive) in the array of data in the json file.
 	 * @param array  $options Optional. See items() in this class.
 	 *
 	 * @return iterable
