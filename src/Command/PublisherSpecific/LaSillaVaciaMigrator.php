@@ -1,4 +1,10 @@
 <?php
+/**
+ * This is a migrator class to undertake the migration of La Silla Vacia's data content from their
+ * previous CMS into Newspack.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
@@ -14,7 +20,6 @@ use Generator;
 use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
@@ -24,13 +29,21 @@ use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
+use WP_Filesystem_Direct;
 use WP_Term;
 use WP_User;
 
+/**
+ * LaSillaVaciaMigrator class.
+ */
 class LaSillaVaciaMigrator implements InterfaceCommand {
 
-
-	private $category_tree = array(
+	/**
+	 * Original category tree established by the LSV team.
+	 *
+	 * @var array[] $category_tree
+	 */
+	private array $category_tree = array(
 		array(
 			'name'     => 'La Silla Nacional',
 			'children' => array(
@@ -465,7 +478,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		),
 	);
 
-	private $tags = array(
+	/**
+	 * Original tags to be migrated, provided by the LSV team.
+	 *
+	 * @var string[] $tags
+	 */
+	private array $tags = array(
 		'Drogas',
 		'Posconflicto',
 		'Superpoderosos',
@@ -577,70 +595,81 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		'Comunidades étnicas',
 	);
 
-	private $log_file_path = '';
+	/**
+	 * The path to the Log file for this migrator.
+	 *
+	 * @var string $log_file_path
+	 */
+	private string $log_file_path = '';
 
 	/**
 	 * LaSillaVaciaMigrator Instance.
 	 *
 	 * @var LaSillaVaciaMigrator
 	 */
-	private static $instance;
+	private static LaSillaVaciaMigrator $instance;
 
 	/**
+	 * Custom CoAuthorPlus logic established by the Newspack LE team to facilitate migrations.
+	 *
 	 * @var CoAuthorPlus $coauthorsplus_logic
 	 */
-	private $coauthorsplus_logic;
+	private CoAuthorPlus $coauthorsplus_logic;
 
 	/**
+	 * Custom Simple Local Avatars logic established by the Newspack LE team to facilitate migrations.
+	 *
 	 * @var SimpleLocalAvatars $simple_local_avatars
 	 */
-	private $simple_local_avatars;
+	private SimpleLocalAvatars $simple_local_avatars;
 
 	/**
+	 * Custom Redirections logic established the Newspack LE team to facilitate setting up redirections..
+	 *
 	 * @var Redirection $redirection
 	 */
-	private $redirection;
+	private Redirection $redirection;
 
 	/**
 	 * Logger.
 	 *
 	 * @var Logger $logger
 	 */
-	private $logger;
+	private Logger $logger;
 
 	/**
 	 * JSON Iterator.
 	 *
 	 * @var null|JsonIterator
 	 */
-	private $json_iterator;
+	private JsonIterator $json_iterator;
 
 	/**
 	 * Attachments.
 	 *
 	 * @var Attachments $attachments
 	 */
-	private $attachments;
+	private Attachments $attachments;
 
 	/**
 	 * Taxonomy logic.
 	 *
 	 * @var Taxonomy $taxonomy.
 	 */
-	private $taxonomy;
+	private Taxonomy $taxonomy;
 
 	/**
 	 * Images logic.
 	 *
 	 * @var Images $images Images logic.
 	 */
-	private $images;
+	private Images $images;
 
 	/**
 	 * Singleton constructor.
 	 */
 	private function __construct() {
-		$this->log_file_path        = date( 'YmdHis', time() ) . 'LSV_import.log';
+		$this->log_file_path        = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
 		$this->coauthorsplus_logic  = new CoAuthorPlus();
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 		$this->redirection          = new Redirection();
@@ -1142,14 +1171,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator la-silla-devhelper-ivans-helper',
-			array( $this, 'cmd_ivan_helper_cmd' ),
-			array(
-				'shortdesc' => "Ivan U's helper command with various dev snippets.",
-			)
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-devhelper-get-all-children-cats-of-a-cat',
 			array( $this, 'cmd_helper_get_all_children_cats_of_a_cat' ),
 			array(
@@ -1425,7 +1446,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			[ $this, 'cmd_upload_missing_publicaciones_images' ],
 			[
 				'shortdesc' => 'This command will upload a missing featured image for Publicaciones content',
-				'synopsis' => [
+				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'import-json',
@@ -1439,8 +1460,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						'description' => 'Path to media directory',
 						'optional'    => false,
 						'repeating'   => false,
-					]
-				]
+					],
+				],
 			]
 		);
 
@@ -1449,7 +1470,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			[ $this, 'cmd_fix_featured_images_for_publicaciones_directly' ],
 			[
 				'shortdesc' => 'This command will upload a missing featured image for Publicaciones content',
-				'synopsis' => [
+				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'post-ids',
@@ -1457,33 +1478,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
-				]
+				],
 			]
 		);
 	}
 
-	private function reset_db() {
-		WP_CLI::runcommand(
-			'db reset --yes --defaults',
-			array(
-				'return'     => true,
-				'parse'      => 'json',
-				'launch'     => false,
-				'exit_error' => true,
-			)
-		);
-
-		$output = shell_exec(
-			'wp core install --url=http://localhost:10013 --title="La Silla Vacia" --admin_user=edc598 --admin_email=edc598@gmail.com'
-		);
-		echo $output;
-
-		shell_exec( 'wp user update edc598 --user_pass=ilovenews' );
-
-		shell_exec( 'wp plugin activate newspack-custom-content-migrator' );
-	}
-
 	/**
+	 * Driver function which proceeds to create categories and tags outlined in
+	 * $this->category_tree and $this->tags.
+	 *
 	 * @void
 	 */
 	public function establish_taxonomy() {
@@ -1495,8 +1498,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * @param array $categories
-	 * @param int   $parent_id
+	 * This function will recursively create the provided category tree.
+	 *
+	 * @param array $categories The categories to be created along with their children.
+	 * @param int   $parent_id The category's Parent ID.
 	 */
 	public function create_categories( array $categories, int $parent_id = 0 ) {
 		foreach ( $categories as $category ) {
@@ -1511,12 +1516,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	/**
 	 * Generator for Author JSON.
 	 *
-	 * @param string $file
-	 * @param string $json_path
+	 * @param string $file The full path to the JSON migration file.
+	 * @param string $json_path The desired JSON path to step to.
 	 * @return Generator
 	 */
 	private function json_generator( string $file, string $json_path = '' ) {
-		$file = file_get_contents( $file );
+		// file_get_contents for specific migration files which were provided to us by the LSV team.
+		$file = file_get_contents( $file );// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		$json = json_decode( $file, true );
 
 		if ( ! empty( $json_path ) ) {
@@ -1534,8 +1540,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	/**
 	 * Migrates the author data from LSV.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associate arguments.
 	 */
 	public function migrate_authors( $args, $assoc_args ) {
 		$specific_emails = isset( $assoc_args['emails-csv'] ) ? explode( ',', $assoc_args['emails-csv'] ) : null;
@@ -1544,7 +1550,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		foreach ( $this->json_generator( $assoc_args['import-json'] ) as $author ) {
 
 			// If given, will migrate only authors with these emails.
-			if ( ! is_null( $specific_emails ) && ! in_array( $author['user_email'], $specific_emails ) ) {
+			if ( null !== $specific_emails && ! in_array( $author['user_email'], $specific_emails, true ) ) {
 				continue;
 			}
 
@@ -1597,20 +1603,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				case 'Silla Llena':
 				case 'SillaLlena':
 					$this->file_logger( "Creating Guest Author {$author['user_email']}." );
-					// CAP
+					// CAP.
 					$guest_author_data = array(
 						'user_login'  => $author['user_login'],
 						'user_email'  => $author['user_email'],
 						'first_name'  => $author['user_name'] ?? $author['name'] ?? '',
 						'last_name'   => $author['user_lastname'] ?? $author['lastname'] ?? '',
-						'description' => strip_tags( $author['bio'] ?? '' ),
-						// TODO handle avatar for guest author
-
-						/*
-						if ( is_array( $author['image'] ) ) {
-							$author['image'] = $author['image'][0];
-						}*/
-						// 'avatar' => $this->handle_profile_photo( $author['image'] );
+						'description' => wp_strip_all_tags( $author['bio'] ?? '' ),
 					);
 
 					if ( empty( $guest_author_data['display_name'] ) ) {
@@ -1618,7 +1617,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						$author['display_name']            = $guest_author_data['display_name'];
 					}
 
-					$this->file_logger( json_encode( $guest_author_data ), false );
+					$this->file_logger( wp_json_encode( $guest_author_data ), false );
 
 					$post_id = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
 					if ( is_wp_error( $post_id ) ) {
@@ -1667,7 +1666,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				'whatsapp'               => $author['whatsApp'],
 			);
 
-			$this->file_logger( json_encode( $author_data ), false );
+			$this->file_logger( wp_json_encode( $author_data ), false );
 			$user_id = wp_insert_user( $author_data );
 			if ( is_wp_error( $user_id ) ) {
 				$field = 'login';
@@ -1679,7 +1678,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				if ( $user_id->get_error_code() === 'existing_user_login' || $user_id->get_error_code() === 'existing_user_email' ) {
-					echo WP_CLI::colorize( "%YUser already exists. Attempting to link existing user to guest author.%n\n" );
+					$this->color_output( "%YUser already exists. Attempting to link existing user to guest author.%n\n", true );
 					$user = get_user_by( $field, $value );
 					$this->insert_user_meta( $user->ID, $meta );
 					$linked_guest_author = $this->coauthorsplus_logic->get_guest_author_by_linked_wpusers_user_login( $user->user_login );
@@ -1774,6 +1773,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Convenience function to handle the insertion of user meta data which is in an array of key => value pairs.
+	 *
+	 * @param int   $user_id WP_User ID.
+	 * @param array $meta Array of key => value pairs.
+	 * @return void
+	 */
 	private function insert_user_meta( int $user_id, array $meta ) {
 		foreach ( $meta as $meta_key => $meta_value ) {
 			if ( ! empty( $meta_value ) ) {
@@ -1782,10 +1788,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
-	private function insert_guest_author_meta( int $guest_author_id, array $meta ) {
+	/**
+	 * Convenience function handle inserting custom meta data for Guest Authors.
+	 *
+	 * @param int   $guest_author_id WP_Post ID (GA ID).
+	 * @param array $meta Array of key => value pairs.
+	 * @param bool  $unique Whether metadata should be unique, or can be added to what may already exist for a key.
+	 * @return void
+	 */
+	private function insert_guest_author_meta( int $guest_author_id, array $meta, bool $unique = false ) {
 		foreach ( $meta as $meta_key => $meta_value ) {
 			if ( ! empty( $meta_value ) ) {
-				add_post_meta( $guest_author_id, $meta_key, $meta_value );
+				add_post_meta( $guest_author_id, $meta_key, $meta_value, $unique );
 			}
 		}
 	}
@@ -1793,10 +1807,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	/**
 	 * Goes through all users JSON files, and if their avatars are not set, imports them from file expected to be found in media folder path.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
+	 * @throws WP_CLI\ExitException If path to folder with images is not found.
 	 */
 	public function cmd_update_all_author_avatars( $args, $assoc_args ) {
 		// Path with images.
@@ -1839,7 +1854,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		// Loop through all JSON files and import avatars if needed.
 		foreach ( $json_files as $key_json_file => $json_file ) {
 
-			$users = json_decode( file_get_contents( $json_file['file'] ), true );
+			$users = wp_json_file_decode( $json_file['file'], [ 'associative' => true ] );
 			foreach ( $users as $key_user => $user ) {
 
 				// Progress.
@@ -1942,9 +1957,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 * @return ?string Image filename from user JSON.
 	 */
 	private function get_avatar_image_from_user_json( $data, $key_used_for_image ) {
-		$image_file = null;
+		$image_file         = null;
+		$key_used_for_image = strtolower( $key_used_for_image );
 
-		if ( 'image' == $key_used_for_image ) {
+		if ( 'image' === $key_used_for_image ) {
 
 			// Some validation.
 			if ( ! isset( $data['image'][0] ) || is_null( $data['image'][0] ) ) {
@@ -1955,14 +1971,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 			$image_file = $data['image'][0];
 
-		} elseif ( 'picture' == $key_used_for_image ) {
+		} elseif ( 'picture' === $key_used_for_image ) {
 
 			// Some validation.
 			if ( ! isset( $data['picture'] ) || is_null( $data['picture'] ) || empty( $data['picture'] ) ) {
 				return null;
 			}
 			if ( ! is_string( $data['picture'] ) ) {
-				WP_CLI::warning( sprintf( 'Unexpected value for picture: ', json_encode( $data['picture'] ) ) );
+				WP_CLI::warning( sprintf( 'Unexpected value for picture: ', wp_json_encode( $data['picture'] ) ) );
 			}
 
 			$image_file = $data['picture'];
@@ -1972,7 +1988,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$image_file = substr( $image_file, 7 );
 			}
 		} else {
-			WP_CLI::error( sprintf( "Key $key_used_for_image not supported, user data: %s", json_encode( $data ) ) );
+			WP_CLI::error( sprintf( "Key $key_used_for_image not supported, user data: %s", wp_json_encode( $data ) ) );
 		}
 
 		return $image_file;
@@ -1981,8 +1997,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	/**
 	 * Imports Guest Authors from JSON file.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
 	public function migrate_expertos_as_guest_authors( $args, $assoc_args ) {
 		$media_location = $assoc_args['media-location'];
@@ -1992,7 +2008,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		foreach ( $this->json_generator( $assoc_args['import-json'] ) as $user ) {
 
 			// If given, will migrate only authors with these display names.
-			if ( ! is_null( $specific_fullnames ) && ! in_array( $user['fullname'], $specific_fullnames ) ) {
+			if ( null !== $specific_fullnames && ! in_array( $user['fullname'], $specific_fullnames, true ) ) {
 				continue;
 			}
 
@@ -2029,7 +2045,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			if ( ! $guest_author_exists ) {
 				if ( empty( $user['email'] ) ) {
-					$guest_author_data['user_email'] = $user['slug'] . '@no-site.com';
+					$guest_author_data['user_email'] = $user['slug'] . '@newspack.com';
 				}
 
 				$guest_author_data['user_pass'] = wp_generate_password( 24 );
@@ -2067,7 +2083,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 			} else {
 				$guest_author_id = $guest_author_exists->ID;
-				$this->file_logger( "Exists GA ID {$guest_author_exists->ID}" );
+				$this->file_logger( "Exists GA ID $guest_author_exists->ID" );
 				if ( $guest_author_exists->linked_account ) {
 					$user_id = get_user_by( 'login', $guest_author_exists->linked_account );
 				} else {
@@ -2085,15 +2101,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 
 			// GA fields.
-			update_post_meta( $guest_author_id, 'cap-display_name', $guest_author_data['display_name'] );
-			update_post_meta( $guest_author_id, 'cap-first_name', $guest_author_data['first_name'] );
-			update_post_meta( $guest_author_id, 'cap-last_name', $guest_author_data['last_name'] );
-			update_post_meta( $guest_author_id, 'cap-user_email', $guest_author_data['user_email'] );
-			update_post_meta( $guest_author_id, 'cap-description', $guest_author_data['description'] );
-			update_post_meta( $guest_author_id, 'cap-newspack_job_title', $user['lineasInvestigacion'] );
-			update_post_meta( $guest_author_id, 'cap-newspack_phone_number', $user['phone'] );
-			update_post_meta( $guest_author_id, 'cap-website', $user['url'] );
-			update_post_meta( $guest_author_id, 'cap-newspack_role', $user['lineasInvestigacion'] );
+			$guest_author_metadata = [
+				'cap-display_name'          => $guest_author_data['display_name'],
+				'cap-first_name'            => $guest_author_data['first_name'],
+				'cap-last_name'             => $guest_author_data['last_name'],
+				'cap-user_email'            => $guest_author_data['user_email'],
+				'cap-description'           => $guest_author_data['description'],
+				'cap-newspack_job_title'    => $user['lineasInvestigacion'],
+				'cap-newspack_phone_number' => $user['phone'],
+				'cap-website'               => $user['url'],
+				'cap-newspack_role'         => $user['lineasInvestigacion'],
+			];
+			$this->insert_guest_author_meta( $guest_author_id, $guest_author_metadata, true );
 			if ( ! empty( $user['categories'] ) ) {
 				foreach ( $user['categories'] as $index => $category ) {
 					$term_ids = get_terms(
@@ -2121,9 +2140,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 
 			// Extra postmeta.
-			update_post_meta( $guest_author_id, 'original_user_id', $user['id'] );
-			update_post_meta( $guest_author_id, 'publicaciones', $user['publicaciones'] );
-			update_post_meta( $guest_author_id, 'lineasInvestigacion', $user['lineasInvestigacion'] );
+			$additional_guest_author_metadata = [
+				'original_user_id'    => $user['id'],
+				'publicaciones'       => $user['publicaciones'],
+				'lineasInvestigacion' => $user['lineasInvestigacion'],
+			];
+			$this->insert_guest_author_meta( $guest_author_id, $additional_guest_author_metadata );
 
 			foreach ( $user['publicaciones'] as $publicacion ) {
 				$post_exists = get_post( $publicacion['id'] );
@@ -2135,6 +2157,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This is a separate attempt at migration expertos data.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 * @throws WP_CLI\ExitException Terminates execution if the WP_User can not be created.
+	 */
 	public function migrate_expertos_2( $args, $assoc_args ) {
 		$media_location = $assoc_args['media-location'];
 
@@ -2147,34 +2177,33 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$last_name      = array_pop( $exploded_name );
 			$first_name     = implode( ' ', $exploded_name );
 
-			echo WP_CLI::colorize( "%wID%n: %W$contributor_id%n | %wFull Name%n: %W$full_name%n\n" );
+			$this->color_output( "%wID%n: %W$contributor_id%n | %wFull Name%n: %W$full_name%n\n" );
 
 			$email = $contributor->email;
 
 			if ( empty( $email ) ) {
-				echo WP_CLI::colorize( '%YNo email found.%n' );
-				$email = $contributor->slug . '@no-site.com';
-				echo WP_CLI::colorize( " %wUsing%n %Y{$email}%n %was email.%n\n" );
+				$this->color_output( '%YNo email found.%n' );
+				$email = $contributor->slug . '@newspack.com';
+				$this->color_output( " %wUsing%n %Y{$email}%n %was email.%n\n" );
 			}
 
 			$guest_author = $this->get_guest_author_by_original_user_id( $contributor_id );
 
 			if ( null === $guest_author ) {
 				// Does a Guest Author with the same user_login already exist?
-				echo WP_CLI::colorize( "%wChecking if Guest Author exists with user_login: {$contributor->slug}%n " );
+				$this->color_output( "%wChecking if Guest Author exists with user_login: {$contributor->slug}%n " );
 				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_linked_wpusers_user_login( $contributor->slug );
 
 				if ( $guest_author ) {
-					echo WP_CLI::colorize( "%YYes%n\n" );
+					$this->color_output( "%YYes%n\n" );
 				} else {
-					echo WP_CLI::colorize( "%BNo%n\n" );
+					$this->color_output( "%BNo%n\n" );
 				}
 			}
-			$user_id = 0;
 
 			if ( null === $guest_author ) {
-				// No Guest Author Exists
-				// Create as WP_User, then create as Guest Author
+				// No Guest Author Exists.
+				// Create as WP_User, then create as Guest Author.
 				$user = get_user_by( 'email', $email );
 
 				if ( ! $user ) {
@@ -2183,7 +2212,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 				if ( ! $user ) {
 
-					echo WP_CLI::colorize( "%cCreating WP_User%n\n" );
+					$this->color_output( "%cCreating WP_User%n\n" );
 
 					$user_id = wp_insert_user(
 						array(
@@ -2204,11 +2233,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				if ( is_wp_error( $user_id ) ) {
-					echo WP_CLI::colorize( "%rError creating WP_User: {$user_id->get_error_message()}%n\n" );
+					$this->color_output( "%rError creating WP_User: {$user_id->get_error_message()}%n\n" );
 					continue;
 				}
 
-				echo WP_CLI::colorize( "%cCreating Guest Author%n\n" );
+				$this->color_output( "%cCreating Guest Author%n\n" );
 				$guest_author_id = $this->coauthorsplus_logic->create_guest_author_from_wp_user( $user_id );
 
 				if ( is_wp_error( $guest_author_id ) ) {
@@ -2217,21 +2246,21 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 						$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $user );
 					} else {
-						echo WP_CLI::colorize( "%rError creating Guest Author {$guest_author_id->get_error_code()}: {$guest_author_id->get_error_message()}%n\n" );
+						$this->color_output( "%rError creating Guest Author {$guest_author_id->get_error_code()}: {$guest_author_id->get_error_message()}%n\n" );
 						continue;
 					}
 				} else {
 					$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id );
 				}
 			} else {
-				// Create WP_User from Guest Author
-				echo WP_CLI::colorize( "%mGuest Author exists, creating WP_user from Guest Author%n\n" );
+				// Create WP_User from Guest Author.
+				$this->color_output( "%mGuest Author exists, creating WP_user from Guest Author%n\n" );
 				$user = $this->coauthorsplus_logic->create_wp_user_from_guest_author( $guest_author->ID );
 
 				if ( $user ) {
 					$user_id = $user->ID;
 				} else {
-					echo WP_CLI::colorize( "%rError creating WP_User from Guest Author%n\n" );
+					$this->color_output( "%rError creating WP_User from Guest Author%n\n" );
 					continue;
 				}
 			}
@@ -2240,15 +2269,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				WP_CLI::error( 'Could not create user.' );
 			}
 
-			// Handle Meta
+			// Handle Meta.
 			$meta = array(
 				'original_user_id'          => $contributor_id,
 				'cap-website'               => $contributor->url,
 				'cap-newspack_phone_number' => $contributor->phone,
 				'publicaciones'             => $contributor->publicaciones,
-				'cap-newspack_role'         => $contributor->lineasInvestigacion,
-				'lineasInvestigacion'       => $contributor->lineasInvestigacion,
-				'cap-newspack_job_title'    => $contributor->lineasInvestigacion,
+				'cap-newspack_role'         => $contributor->lineasInvestigacion, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'lineasInvestigacion'       => $contributor->lineasInvestigacion, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'cap-newspack_job_title'    => $contributor->lineasInvestigacion, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 			);
 
 			$this->insert_user_meta(
@@ -2262,16 +2291,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$this->insert_guest_author_meta( $guest_author->ID, $meta );
 
-			// Handle Profile Picture
+			// Handle Profile Picture.
 			if ( ! empty( $contributor->image ) || ! empty( $contributor->picture ) ) {
 				$filename = basename( $contributor->image ?? $contributor->picture );
-				echo WP_CLI::colorize( "%wCreating User's avatar.%n File: $filename\n" );
+				$this->color_output( "%wCreating User's avatar.%n File: $filename\n" );
 				$avatar_attachment_id = $this->handle_profile_photo( $filename, $media_location );
 
 				$this->simple_local_avatars->assign_avatar( $user_id, $avatar_attachment_id );
 			}
 
-			// Handle Categories and Category Restrictions
+			// Handle Categories and Category Restrictions.
 			if ( ! empty( $contributor->categories ) ) {
 				foreach ( $contributor->categories as $index => $category ) {
 					$term_ids = get_terms(
@@ -2295,11 +2324,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 			}
 
-			// Handle Publicaciones
+			// Handle Publicaciones.
 			$this->handle_publicaciones( $contributor->publicaciones, $guest_author );
 		}
 	}
 
+	/**
+	 * Migration command to handle LSV authors without emails.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
 	public function cmd_import_expertos_without_email( $args, $assoc_args ) {
 		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $contributor ) {
 			echo "\n";
@@ -2309,22 +2345,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$last_name      = array_pop( $exploded_name );
 			$first_name     = implode( ' ', $exploded_name );
 
-			echo WP_CLI::colorize( "%wID%n: %W$contributor_id%n | %wFull Name%n: %W$full_name%n\n" );
+			$this->color_output( "%wID%n: %W$contributor_id%n | %wFull Name%n: %W$full_name%n\n" );
 
-			$email = $contributor->slug . '@no-site.com';
-			echo WP_CLI::colorize( " %wUsing%n %Y{$email}%n %was email.%n\n" );
+			$email = $contributor->slug . '@newspack.com';
+			$this->color_output( "%wUsing%n %Y{$email}%n %was email.%n\n" );
 
 			$guest_author = $this->get_guest_author_by_original_user_id( $contributor_id );
 
 			if ( null === $guest_author ) {
 				// Does a Guest Author with the same user_login already exist?
-				echo WP_CLI::colorize( "%wChecking if Guest Author exists with user_login: {$contributor->slug}%n " );
+				$this->color_output( "%wChecking if Guest Author exists with user_login: {$contributor->slug}%n " );
 				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_linked_wpusers_user_login( $contributor->slug );
 
 				if ( $guest_author ) {
-					echo WP_CLI::colorize( "%YYes%n\n" );
+					$this->color_output( "%YYes%n\n" );
 				} else {
-					echo WP_CLI::colorize( "%BNo%n\n" );
+					$this->color_output( "%BNo%n\n" );
 
 					$guest_author_id = $this->coauthorsplus_logic->create_guest_author(
 						array(
@@ -2364,9 +2400,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	/**
 	 * Migrates users from JSON file.
 	 *
-	 * @param $args
-	 * @param $assoc_args
-	 * @throws Exception
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @throws Exception Might be thrown if time format is indiscernible.
 	 */
 	public function migrate_users( $args, $assoc_args ) {
 		$start_at_id = $assoc_args['start-at-id'] ?? null;
@@ -2428,31 +2464,43 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		if ( ! empty( $unmigrated_users ) ) {
 			$this->file_logger( 'Writing unmigrated users to file.' );
-			file_put_contents( $unmigrated_users_file_path, json_encode( $unmigrated_users ) );
+
+			WP_Filesystem();
+			/* @var WP_Filesystem_Direct $wp_filesystem */ // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+			global $wp_filesystem;
+
+			$wp_filesystem->put_contents( $unmigrated_users_file_path, wp_json_encode( $unmigrated_users ) );
 		}
 	}
 
+	/**
+	 * Custom command to handle the import of customers provided via JSON by the LSV team.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
 	public function cmd_import_customers( $args, $assoc_args ) {
 		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $index => $customer ) {
 			echo "\n";
 
-			$original_user_id = $customer->Id;
+			$original_user_id = $customer->Id; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 
 			$user = $this->get_wp_user_by_original_user_id( $original_user_id );
 
-			$email = $customer->Correo;
+			$email = $customer->Correo; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 
 			$this->file_logger( $email );
 
 			$meta = array(
-				'Curso'              => $customer->Curso,
+				'Curso'              => $customer->Curso, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				'original_user_id'   => $original_user_id,
-				'OrderId'            => $customer->OrderId,
-				'FechaInicio'        => $customer->FechaInicio,
-				'ModulosVistos'      => $customer->ModulosVistos,
-				'PorcentajeVisto'    => $customer->PorcentajeVisto,
-				'LeccionesVistas'    => $customer->LeccionesVistas,
-				'PorcentajeFaltante' => $customer->PorcentajeFaltante,
+				'OrderId'            => $customer->OrderId, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'FechaInicio'        => $customer->FechaInicio, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'ModulosVistos'      => $customer->ModulosVistos, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'PorcentajeVisto'    => $customer->PorcentajeVisto, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'LeccionesVistas'    => $customer->LeccionesVistas, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				'PorcentajeFaltante' => $customer->PorcentajeFaltante, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 			);
 
 			if ( ! $user ) {
@@ -2464,8 +2512,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$this->insert_user_meta( $user->ID, $meta );
 				continue;
 			}
-
-			$display_name = $customer->Nombre ?? 'Sin Nombre ' . rand( $index, 10000 );
+			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			$display_name = $customer->Nombre ?? 'Sin Nombre ' . wp_rand( $index, 10000 );
 			$explode_name = explode( ' ', $display_name );
 			$last_name    = array_pop( $explode_name );
 			$first_name   = implode( ' ', $explode_name );
@@ -2491,6 +2539,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Finds specific posts, or posts within a specific category, and searches for a specified string in <img> URL's,
+	 * then replaces it with a specified replacement.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 * @throws WP_CLI\ExitException Terminates execution if neither or both a category term ID and Post ID is supplied.
+	 */
 	public function cmd_update_img_paths_in_category_or_posts( $args, $assoc_args ) {
 		$search           = $assoc_args['search'];
 		$replace          = $assoc_args['replace'];
@@ -2504,6 +2561,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		// Get all post IDs from category.
 		if ( ! is_null( $category_term_id ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_ids = $wpdb->get_col(
 				$wpdb->prepare(
 					"select object_id from {$wpdb->term_relationships} tr
@@ -2524,7 +2582,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$updated_post_ids = array();
 		foreach ( $post_ids as $post_id ) {
 			$updated = $this->images->str_replace_in_img_elements_in_post( $post_id, $search, $replace );
-			if ( 0 != $updated ) {
+			if ( 0 !== $updated ) {
 				$updated_post_ids[] = $post_id;
 			}
 		}
@@ -2534,13 +2592,25 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$log = date( 'Y-m-d_H-i-s' ) . '__catid_' . $category_term_id . '_updatedpostids.log';
-		file_put_contents( $log, implode( "\n", $updated_post_ids ) );
+		$log = gmdate( 'Y-m-d_H-i-s' ) . '__catid_' . $category_term_id . '_updatedpostids.log';
+
+		WP_Filesystem();
+		/* @var WP_Filesystem_Direct $wp_filesystem */ // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+		global $wp_filesystem;
+
+		$wp_filesystem->put_contents( $log, implode( "\n", $updated_post_ids ) );
 
 		WP_CLI::success( sprintf( 'Done. List of updated posts saved to %s.', $log ) );
 		wp_cache_flush();
 	}
 
+	/**
+	 * Gets all child categories of a specific term ID.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
 	public function cmd_helper_get_all_children_cats_of_a_cat( $args, $assoc_args ) {
 
 		/**
@@ -2563,6 +2633,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		WP_CLI::success( 'Done.' );
 	}
 
+	/**
+	 * Convenience function to delete all posts under a specific category.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 * @throws WP_CLI\ExitException Terminates execution if a particular tag (memes de la semana) is not found.
+	 */
 	public function cmd_helper_delete_all_posts_in_select_categories( $args, $assoc_args ) {
 
 		global $wpdb;
@@ -2573,7 +2651,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		// Get posts with 'Memes de la semana' tag.
 		$memes_de_la_semana_tag_name = 'Memes de la semana';
-		$memes_de_la_semana_tag_id   = $wpdb->get_var( $wpdb->prepare( "SELECT term_id FROM $wpdb->terms WHERE name = %s", $memes_de_la_semana_tag_name ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$memes_de_la_semana_tag_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT term_id FROM $wpdb->terms WHERE name = %s",
+				$memes_de_la_semana_tag_name
+			)
+		);
 		if ( ! $memes_de_la_semana_tag_id ) {
 			WP_CLI::error( "Tag '$memes_de_la_semana_tag_name' not found." );
 		}
@@ -2584,6 +2668,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				'tag_id'         => $memes_de_la_semana_tag_id,
 				'fields'         => 'ids',
 			)
+		);
+		$memes_de_la_semana_post_ids = array_map(
+			function ( $post_id ) {
+				return intval( $post_id );
+			},
+			$memes_de_la_semana_post_ids
 		);
 
 		// Will delete posts from these categories.
@@ -2619,7 +2709,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 		foreach ( $cats as $cat ) {
 			$term = get_term_by( 'id', $cat['term_id'], 'category' );
-			if ( ! $term || ( $cat['name'] != $term->name ) ) {
+			if ( ! $term || ( $cat['name'] !== $term->name ) ) {
 				WP_CLI::error( "Category {$cat['name']} not found." );
 			}
 
@@ -2655,7 +2745,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					'posts_per_page' => -1,
 				)
 			);
-			WP_CLI::line( sprintf( "\n" . "Total %d posts in category '%s'", count( $postslist ), $cat['name'] ) );
+			WP_CLI::line( sprintf( "\nTotal %d posts in category '%s'", count( $postslist ), $cat['name'] ) );
 			foreach ( $postslist as $post ) {
 
 				// Check if post belongs to other cats.
@@ -2671,7 +2761,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				// Skip deleting if $belongs_to_different_cats_too.
-				if ( true == $belongs_to_different_cats_too ) {
+				if ( true === $belongs_to_different_cats_too ) {
 					foreach ( $other_cats_ids as $other_cat_id ) {
 						$other_term = get_term_by( 'id', $other_cat_id, 'category' );
 						WP_CLI::warning( sprintf( "Post %d has other cat ID %d '%s'", $post->ID, $other_term->term_id, $other_term->name ) );
@@ -2680,12 +2770,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				// Skip deleting if post has tag.
-				if ( in_array( $post->ID, $memes_de_la_semana_post_ids ) ) {
+				if ( in_array( $post->ID, $memes_de_la_semana_post_ids, true ) ) {
 					WP_CLI::warning( sprintf( "Post %d has 'Memes de la semana' tag", $post->ID ) );
 					continue;
 				}
 
-				// wp_delete_post( $post->ID, true );
+				wp_delete_post( $post->ID, true );
 				WP_CLI::success( 'Deleted post ' . $post->ID );
 			}
 		}
@@ -2693,182 +2783,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		WP_CLI::line( 'Done.' );
 	}
 
-	public function cmd_ivan_helper_cmd( $args, $assoc_args ) {
-
-		/**
-		 * Refactor categories.
-		 */
-
-		$categories_that_should_be_migrated_as_tags = array(
-			'Drogas'                              => 58,
-			'Posconflicto'                        => 59,
-			'Superpoderosos'                      => 60,
-			'Plebiscito'                          => 61,
-			'Renegociación'                       => 62,
-			'Alejandro Ordoñez'                   => 63,
-			'Álvaro Uribe'                        => 64,
-			'Camelladores'                        => 67,
-			'Ciudadanos de a pie'                 => 69,
-			'Conflicto Armado'                    => 70,
-			'Congreso'                            => 71,
-			'Coronavirus'                         => 72,
-			'Corrupción'                          => 73,
-			'Desarrollo Rural'                    => 75,
-			'Detector al chat de la familia'      => 76,
-			'Detector en Facebook'                => 78,
-			'Dónde está la Plata'                 => 79,
-			'Economía'                            => 80,
-			'Educación'                           => 81,
-			'El factor Vargas Lleras'             => 83,
-			'Elecciones'                          => 84,
-			'Elecciones 2019'                     => 85,
-			'Encuestas'                           => 86,
-			'Étnico'                              => 87,
-			'Fuerza pública'                      => 88,
-			'Gobierno de Claudia López'           => 89,
-			'Gobierno de Peñalosa'                => 90,
-			'Gobierno de Santos'                  => 91,
-			'Gobierno de Uribe'                   => 92,
-			'Gobierno Duque'                      => 93,
-			'Gobiernos anteriores'                => 94,
-			'Grandes casos judiciales'            => 95,
-			'Gustavo Petro'                       => 96,
-			'Justicia'                            => 97,
-			'Justicia transicional'               => 98,
-			'La elección del fiscal'              => 99,
-			'La Silla Vacía'                      => 100,
-			'Las ías'                             => 101,
-			'Las vacas flacas'                    => 102,
-			'Medio Ambiente'                      => 103,
-			'Medios'                              => 104,
-			'Minería'                             => 105,
-			'Movimientos Sociales'                => 106,
-			'Mujeres'                             => 107,
-			'Odebrecht'                           => 108,
-			'Otras Regiones'                      => 109,
-			'Otros países'                        => 110,
-			'Otros personajes'                    => 111,
-			'Otros temas'                         => 112,
-			'Polarización'                        => 114,
-			'Política menuda'                     => 115,
-			'Presidenciales 2018'                 => 116,
-			'Proceso con el ELN'                  => 117,
-			'Proceso con las FARC'                => 118,
-			'Salud'                               => 120,
-			'Seguridad'                           => 122,
-			'Testigos falsos y Uribe'             => 123,
-			'Urbanismo'                           => 124,
-			'Venezuela'                           => 125,
-			'Víctimas'                            => 126,
-			'Conversaciones'                      => 129,
-			'Cubrimiento Especial'                => 130,
-			'Hágame el cruce'                     => 131,
-			'Coronavirus + 177	Coronavirus'      => 172,
-			'Coronavirus + 177 Coronavirus'       => 172,
-			'Proceso de paz'                      => 173,
-			'Jep'                                 => 174,
-			'Arte'                                => 386,
-			'Posconflicto + 59 Posconflicto'      => 389,
-			'Elecciones 2023'                     => 429,
-			'Sala de Redacción Ciudadana'         => 378,
-			'Gobierno'                            => 176,
-			'Crisis'                              => 178,
-			'Elecciones 2022'                     => 360,
-			'La Dimensión Desconocida'            => 388,
-			'Econimia'                            => 48,
-			'Entrevista'                          => 381,
-			'Redes Silla llena'                   => 175,
-			'Papers'                              => 326,
-			'Libros'                              => 327,
-			'Publicaciones seriadas'              => 328,
-			'Estudios patrocinados'               => 329,
-			'Política + 46	Politica'             => 392,
-			'Política + 46 Politica'              => 392,
-			'Medio Ambiente + 103 Medio ambiente' => 399,
-			'Género'                              => 400,
-			'Religión'                            => 401,
-			'Corrupción + 73 Corrupcion'          => 402,
-			'Cultura + 47	Cultura'              => 403,
-			'Cultura + 47 Cultura'                => 403,
-			'Educación'                           => 404,
-			'Economía'                            => 405,
-			'Migraciones'                         => 406,
-			'Relaciones Internacionales'          => 407,
-			'Ciencia'                             => 408,
-			'Política social'                     => 409,
-			'Elecciones'                          => 410,
-			'Posconflicto'                        => 411,
-			'Acuerdo de Paz'                      => 412,
-			'Seguridad'                           => 413,
-			'Desarrollo rural'                    => 414,
-			'Salud'                               => 415,
-			'Coronavirus'                         => 416,
-			'Congreso'                            => 417,
-			'Gobierno'                            => 418,
-			'Justicia'                            => 419,
-			'Movimientos sociales'                => 420,
-			'Sector privado'                      => 421,
-			'Medios'                              => 422,
-			'Tecnología e innovación'             => 423,
-			'Ciudades'                            => 424,
-			'Comunidades étnicas'                 => 425,
-		);
-		$categories_that_should_not_be_migrated     = array(
-			'Store'                           => 17,
-			'Module'                          => 18,
-			'suscripciones pasadas'           => 40,
-			'Beneficios'                      => 41,
-			'Items1'                          => 42,
-			'Items2'                          => 43,
-			'Destacado'                       => 49,
-			'Destacados silla vacia'          => 369,
-			'Destacados silla llena'          => 371,
-			'Destacado home'                  => 374,
-			'Destacado historia'              => 375,
-			'Destacado Episodio Landing'      => 376,
-			'Recomendados Episodio Landing'   => 377,
-			'Entrevistado'                    => 382,
-			'Texto Citado'                    => 383,
-			'Fin de semana'                   => 384,
-			'Eventos Article'                 => 144,
-			'Polemico'                        => 145,
-			'Boletines'                       => 379,
-			'Mailing'                         => 380,
-			'Opinión'                         => 181,
-			'Entidades'                       => 143,
-			'Publicaciones'                   => 142,
-			'Relacion Quien es Quien'         => 50,
-			'Rivalidad'                       => 51,
-			'Laboral'                         => 52,
-			'Quien es quien'                  => 44,
-			'tematicas'                       => 45,
-			'Temas'                           => 53,
-			'Escala Detector'                 => 127,
-			'Producto'                        => 128,
-			'Sí o no'                         => 133,
-			'Columnas de la silla'            => 148,
-			'Podcast'                         => 146,
-			'Modulo Videos'                   => 147,
-			'Temas silla llena'               => 171,
-			'Delitos'                         => 180,
-			'Temas Experto'                   => 201,
-			'Tipo de Publicación Patrocinada' => 325,
-			'Lecciones'                       => 362,
-			'Especiales'                      => 363,
-			'categoryFileds'                  => 426,
-			'SillaCursos'                     => 200,
-			'cursos asincronicos'             => 373,
-			'Periodismo'                      => 364,
-			'cursos productos'                => 356,
-			'Escritura'                       => 365,
-			'Diseño'                          => 366,
-			'Audiovisual'                     => 367,
-			'Curso de Desinformación'         => 430,
-		);
-	}
-
 	/**
-	 * @throws Exception
+	 * This commands handles the import of custom JSON files provided by the LSV team containing article data
+	 * to be imported into the site.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 *
+	 * @throws Exception,WP_CLI\ExitException Throws exception if category name is not found, or if parent category is not found.
 	 */
 	public function migrate_articles( $args, $assoc_args ) {
 		global $wpdb;
@@ -2892,7 +2816,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			'Publicaciones',
 			'Red de Expertos',
 		);
-		if ( ! in_array( $assoc_args['category-name'], $category_names ) ) {
+		if ( ! in_array( $assoc_args['category-name'], $category_names, true ) ) {
 			WP_CLI::error( sprintf( "Category name '%s' not found.", $assoc_args['category-name'] ) );
 		}
 		// Get the main category term ID.
@@ -2901,26 +2825,21 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( "Parent category not found by name '%s'.", $assoc_args['category-name'] ) );
 		}
 
-		$authors_sql = "SELECT um.meta_value, u.ID, um.meta_key
-            FROM wp_users u LEFT JOIN wp_usermeta um ON um.user_id = u.ID
-            WHERE um.meta_key = 'original_user_id'";
-		$authors     = $wpdb->get_results( $authors_sql, OBJECT_K );
-		$authors     = array_map( fn( $value ) => (int) $value->ID, $authors );
-
-		/*
-		$imported_hashed_ids_sql = "SELECT meta_value, post_id
-			FROM wp_postmeta
-			WHERE meta_key IN ('hashed_import_id')";
-		$imported_hashed_ids = $wpdb->get_results( $imported_hashed_ids_sql, OBJECT_K );
-		$imported_hashed_ids = array_map( fn( $value ) => (int) $value->post_id, $imported_hashed_ids );*/
-		$original_article_ids = $wpdb->get_results( "SELECT meta_value, post_id FROM wp_postmeta WHERE meta_key = 'newspack_original_article_id'", OBJECT_K );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$original_article_ids = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT meta_value, post_id FROM wp_postmeta WHERE meta_key = %s',
+				'newspack_original_article_id'
+			),
+			OBJECT_K
+		);
 		$original_article_ids = array_map( fn( $value ) => (int) $value->post_id, $original_article_ids );
 
 		// Count total articles, but don't do it for very large files because of memory consumption -- a rough count is good enough for just approx. progress.
-		if ( 'Silla Académica' == $assoc_args['category-name'] ) {
+		if ( 'Silla Académica' === $assoc_args['category-name'] ) {
 			$total_count = '?';
 		} else {
-			$total_count = count( json_decode( file_get_contents( $assoc_args['import-json'] ), true ) );
+			$total_count = count( wp_json_file_decode( $assoc_args['import-json'], [ 'associative' => true ] ) );
 		}
 		$i = 0;
 		foreach ( $this->json_generator( $assoc_args['import-json'] ) as $article ) {
@@ -2932,7 +2851,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			 * Get post data from JSON.
 			 */
 
-			if ( 'Detector de mentiras' == $assoc_args['category-name'] ) {
+			if ( 'Detector de mentiras' === $assoc_args['category-name'] ) {
 				$original_article_id = $article['head_id'] ?? 0;
 			} else {
 				$original_article_id = $article['id'] ?? 0;
@@ -2942,24 +2861,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				WP_CLI::line( sprintf( 'Article was imported as Post ID %d, skipping.', $original_article_ids[ $original_article_id ] ) );
 				continue;
 			}
-
-			/*
-			// No longer want this function to handle articles if they've already been imported.
-			$original_article_id_exists = $wpdb->get_row(
-				$wpdb->prepare(
-					"SELECT post_id, meta_value
-					FROM $wpdb->postmeta
-					WHERE meta_key = 'newspack_original_article_id'
-						AND meta_value = %d",
-					$original_article_id
-				)
-			);
-			$original_article_id_exists = ! is_null( $original_article_id_exists );
-
-			if ( $original_article_id_exists ) {
-				WP_CLI::warning( sprintf( "Article ID %d already exists. Skipping.", $original_article_id ) );
-				continue;
-			}*/
 
 			$additional_meta              = array();
 			$featured_image_attachment_id = null;
@@ -2971,19 +2872,19 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$post_name       = '';
 			$article_authors = array();
 			$article_tags    = array();
-			if ( 'Opinión' == $assoc_args['category-name'] ) {
+			if ( 'Opinión' === $assoc_args['category-name'] ) {
 				$post_title = trim( $article['post_title'] );
 				$post_date  = $article['post_date'];
-				if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+				if ( empty( $article['post_date'] ) || 'none' === strtolower( $article['post_date'] ) ) {
 					$post_date = $article['publishedAt'];
 				}
 				$post_modified = $article['post_modified'] ?? $post_date;
-				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
-					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				if ( empty( $article['post_modified'] ) || 'none' === strtolower( $article['post_modified'] ) ) {
+					$post_modified = gmdate( 'Y-m-d H:i:s', strtotime( 'now' ) );
 				}
 				$post_name       = $article['post_name'];
 				$article_authors = $article['post_author'];
-			} elseif ( 'Podcasts' == $assoc_args['category-name'] ) {
+			} elseif ( 'Podcasts' === $assoc_args['category-name'] ) {
 				if ( is_null( $article['audio'] ) ) {
 					WP_CLI::warning( sprintf( 'Article ID %d has no audio. Skipping.', $original_article_id ) );
 					$skip_base64_html_ids[] = $article['id'];
@@ -2991,28 +2892,25 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 				$post_title = trim( $article['title'] );
 				$post_date  = $article['createdAt'];
-				if ( empty( $article['createdAt'] ) || 'none' == strtolower( $article['createdAt'] ) ) {
+				if ( empty( $article['createdAt'] ) || 'none' === strtolower( $article['createdAt'] ) ) {
 					$post_date = $article['publishedAt'];
 				}
 				$post_modified = $article['post_modified'] ?? $post_date;
-				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
-					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				if ( empty( $article['post_modified'] ) || 'none' === strtolower( $article['post_modified'] ) ) {
+					$post_modified = gmdate( 'Y-m-d H:i:s', strtotime( 'now' ) );
 				}
 				$post_name       = $article['slug'];
 				$article_authors = ! is_null( $article['author'] ) ? $article['author'] : array();
-			} elseif ( 'Quién es quién' == $assoc_args['category-name'] ) {
-
-				// Stop re-importing Quien es quen posts for now. We need an incremental check first otherwise we'll end up with dupe avatar images.
-				// WP_CLI::error( "Re-importing Quien es quen posts will create duplicate featured images. This command is not ready for that yet, make necessary adjustments to it first." );
+			} elseif ( 'Quién es quién' === $assoc_args['category-name'] ) {
 
 				$post_title = trim( $article['title'] );
 				$post_date  = $article['createdAt'];
-				if ( empty( $article['createdAt'] ) || 'none' == strtolower( $article['createdAt'] ) ) {
+				if ( empty( $article['createdAt'] ) || 'none' === strtolower( $article['createdAt'] ) ) {
 					$post_date = $article['publishedAt'];
 				}
 				$post_modified = $article['post_modified'] ?? $post_date;
-				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
-					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				if ( empty( $article['post_modified'] ) || 'none' === strtolower( $article['post_modified'] ) ) {
+					$post_modified = gmdate( 'Y-m-d H:i:s', strtotime( 'now' ) );
 				}
 				$post_name             = $article['slug'];
 				$article['categories'] = array_map(
@@ -3038,15 +2936,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				if ( isset( $article['picture'] ) ) {
 					$additional_meta['newspack_picture'] = $article['picture'];
 				}
-			} elseif ( 'Silla Académica' == $assoc_args['category-name'] ) {
+			} elseif ( 'Silla Académica' === $assoc_args['category-name'] ) {
 				$post_title = trim( $article['post_title'] );
 				$post_date  = $article['post_date'];
-				if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+				if ( empty( $article['post_date'] ) || 'none' === strtolower( $article['post_date'] ) ) {
 					$post_date = $article['publishedAt'];
 				}
 				$post_modified = $article['post_modified'] ?? $post_date;
-				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
-					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				if ( empty( $article['post_modified'] ) || 'none' === strtolower( $article['post_modified'] ) ) {
+					$post_modified = gmdate( 'Y-m-d H:i:s', strtotime( 'now' ) );
 				}
 				$post_name       = $article['post_name'];
 				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : array();
@@ -3059,16 +2957,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				if ( isset( $article['url'] ) ) {
 					$additional_meta['newspack_url'] = $article['url'];
 				}
-			} elseif ( in_array( $assoc_args['category-name'], array( 'Silla Nacional', 'Silla Llena', 'Red de Expertos' ) ) ) {
+			} elseif ( in_array( $assoc_args['category-name'], array( 'Silla Nacional', 'Silla Llena', 'Red de Expertos' ), true ) ) {
 				$post_title   = trim( $article['post_title'] );
 				$post_excerpt = $article['post_excerpt'] ?? '';
 				$post_date    = $article['post_date'];
-				if ( empty( $article['post_date'] ) || 'none' == strtolower( $article['post_date'] ) ) {
+				if ( empty( $article['post_date'] ) || 'none' === strtolower( $article['post_date'] ) ) {
 					$post_date = $article['publishedAt'];
 				}
 				$post_modified = $article['post_modified'] ?? $post_date;
-				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
-					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				if ( empty( $article['post_modified'] ) || 'none' === strtolower( $article['post_modified'] ) ) {
+					$post_modified = gmdate( 'Y-m-d H:i:s', strtotime( 'now' ) );
 				}
 				$post_name       = $article['post_name'];
 				$article_authors = ! is_null( $article['post_author'] ) ? $article['post_author'] : array();
@@ -3089,17 +2987,17 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				if ( isset( $article['tags'] ) ) {
 					$additional_meta['newspack_tags'] = $article['tags'];
 				}
-			} elseif ( 'Detector de mentiras' == $assoc_args['category-name'] ) {
+			} elseif ( 'Detector de mentiras' === $assoc_args['category-name'] ) {
 				$post_title   = trim( $article['title'] );
 				$post_excerpt = $article['description'] ?? '';
 				$post_name    = $article['slug'];
 				$post_date    = $article['createdAt'];
-				if ( empty( $article['createdAt'] ) || 'none' == strtolower( $article['createdAt'] ) ) {
+				if ( empty( $article['createdAt'] ) || 'none' === strtolower( $article['createdAt'] ) ) {
 					$post_date = $article['publishedAt'];
 				}
 				$post_modified = $article['post_modified'] ?? $post_date;
-				if ( empty( $article['post_modified'] ) || 'none' == strtolower( $article['post_modified'] ) ) {
-					$post_modified = date( 'Y-m-d H:i:s', strtotime( 'now' ) );
+				if ( empty( $article['post_modified'] ) || 'none' === strtolower( $article['post_modified'] ) ) {
+					$post_modified = gmdate( 'Y-m-d H:i:s', strtotime( 'now' ) );
 				}
 				$article_authors = ! is_null( $article['authors'] ) ? $article['authors'] : array();
 				if ( isset( $article['tags'] ) && ! is_null( $article['tags'] ) && ! empty( $article['tags'] ) ) {
@@ -3119,22 +3017,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				if ( isset( $article['tags'] ) ) {
 					$additional_meta['newspack_tags'] = $article['tags'];
 				}
-			} elseif ( 'En Vivo' == $assoc_args['category-name'] ) {
+			} elseif ( 'En Vivo' === $assoc_args['category-name'] ) {
 				$post_title = trim( $article['title'] );
 				$post_name  = $article['slug'];
 
-				$date_part = date( 'Y-m-d' );
+				$date_part = gmdate( 'Y-m-d' );
 				// Date may be faulty.
 				if ( ! is_null( $article['StartDate'] ) && $this->is_date_valid( $article['StartDate'] ) ) {
 					$date_part = $article['StartDate'];
 				}
 
 				// Very faulty time, contains many formats and some pure errors.
-				$time_part = ( $article['time'] != 'None' ? $article['time'] : '00:00:00' );
+				$time_part = ( 'None' !== $article['time'] ? $article['time'] : '00:00:00' );
 				$time_part = str_replace( ' pm', '', $time_part );
 				$time_part = str_replace( ' am', '', $time_part );
 				$time_part = str_replace( ' ', '', $time_part );
-				if ( 1 != preg_match( '|^\d{1,2}:\d{1,2}$|', $time_part ) ) {
+				if ( 1 !== preg_match( '|^\d{1,2}:\d{1,2}$|', $time_part ) ) {
 					$time_part = '00:00:00';
 				}
 
@@ -3158,25 +3056,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			// Using hash instead of just using original Id in case Id is 0. This would make it seem like the article is a duplicate.
 			$original_article_slug = sanitize_title( $post_name ) ?? '';
-			// $hashed_import_id = md5( $post_title . $original_article_slug );
 			$this->file_logger( "Original Article ID: $original_article_id | Original Article Title: $post_title | Original Article Slug: $original_article_slug" );
-
-			// Skip importing post if $incremental_import is true and post already exists.
-			/*
-			if ( true === $incremental_import ) {
-				$existing_postid_by_original_article_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_original_article_id' and meta_value = %s", $original_article_id ) );
-				//$existing_postid_by_hashed_import_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'newspack_hashed_import_id' and meta_value = %s", $hashed_import_id ) );
-				if ( $existing_postid_by_original_article_id && $existing_postid_by_hashed_import_id && $existing_postid_by_original_article_id == $existing_postid_by_hashed_import_id ) {
-					WP_CLI::line( sprintf( "Article was imported as Post ID %d, skipping.", $existing_postid_by_original_article_id ) );
-					continue;
-				}
-			}*/
 
 			// Get content.
 			$html = '';
 			if ( ! empty( $article['html'] ) ) {
-				// handle_extracting_html_content() encapsulates post_content in <html> tag.
-				// $html = $this->handle_extracting_html_content( $article['html'] );
 				$html = $article['html'];
 			} elseif ( ! empty( $article['post_html'] ) ) {
 				$html = $article['post_html'];
@@ -3187,8 +3071,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 
 			if (
-				( false != strpos( $html, 'data:image/' ) )
-				&& ( false != strpos( $html, ';base64' ) )
+				( false !== strpos( $html, 'data:image/' ) )
+				&& ( false !== strpos( $html, ';base64' ) )
 			) {
 				$skip_base64_html_ids[] = $original_article_id;
 				$html                   = '__';
@@ -3198,12 +3082,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			// This is a one and single article out of all others for which wp_insert_post() fails to insert post_content because it contains BASE64 encoded images.
 			// This post has been manually imported and should be skipped because data is not supported and already in the database.
 			$failed_inserts_post_names = array( 'los-10-imperdibles-del-ano-para-procrastinar-en-vacaciones' );
-			if ( in_array( $post_name, $failed_inserts_post_names ) ) {
+			if ( in_array( $post_name, $failed_inserts_post_names, true ) ) {
 				WP_CLI::warning( sprintf( 'Post name %s contains invalid data which makes wp_insert_post() crash and will be skipped.', $post_name ) );
 				continue;
 			}
 
-			if ( 'Podcasts' == $assoc_args['category-name'] ) {
+			if ( 'Podcasts' === $assoc_args['category-name'] ) {
 				$audio_result = $this->handle_podcast_audio( $article['audio'], $media_location );
 
 				if ( ! is_null( $audio_result ) ) {
@@ -3219,35 +3103,33 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$datetime_format = 'Y-m-d H:i:s';
-			$createdOnDT     = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
-			$createdOn       = $createdOnDT->format( $datetime_format );
-			$createdOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
-			$createdOnGmt = $createdOnDT->format( $datetime_format );
+			$datetime_format     = 'Y-m-d H:i:s';
+			$created_on_datetime = new DateTime( $post_date, new DateTimeZone( 'America/Bogota' ) );
+			$created_on          = $created_on_datetime->format( $datetime_format );
+			$created_on_datetime->setTimezone( new DateTimeZone( 'GMT' ) );
+			$created_on_gmt = $created_on_datetime->format( $datetime_format );
 
 			if ( empty( $post_modified ) ) {
 				$post_modified = $post_date;
 			}
 
-			$modifiedOnDT = new DateTime( $post_modified, new DateTimeZone( 'America/Bogota' ) );
-			$modifiedOn   = $modifiedOnDT->format( $datetime_format );
-			$modifiedOnDT->setTimezone( new DateTimeZone( 'GMT' ) );
-			$modifiedOnGmt = $modifiedOnDT->format( $datetime_format );
+			$modified_on_datetime = new DateTime( $post_modified, new DateTimeZone( 'America/Bogota' ) );
+			$modified_on          = $modified_on_datetime->format( $datetime_format );
+			$modified_on_datetime->setTimezone( new DateTimeZone( 'GMT' ) );
+			$modified_on_gmt = $modified_on_datetime->format( $datetime_format );
 
 			$meta_input = array(
-				'newspack_original_article_id'             => $original_article_id,
-				// 'canonical_url' => $article['CanonicalUrl'],
-				// 'newspack_hashed_import_id' => $hashed_import_id,
-					'newspack_original_article_categories' => $article['categories'],
-				'newspack_original_post_author'            => $article_authors,
+				'newspack_original_article_id'         => $original_article_id,
+				'newspack_original_article_categories' => $article['categories'],
+				'newspack_original_post_author'        => $article_authors,
 			);
 			if ( ! empty( $additional_meta ) ) {
 				$meta_input = array_merge( $meta_input, $additional_meta );
 			}
 			$article_data = array(
 				'post_author'           => 0,
-				'post_date'             => $createdOn,
-				'post_date_gmt'         => $createdOnGmt,
+				'post_date'             => $created_on,
+				'post_date_gmt'         => $created_on_gmt,
 				'post_content'          => $html,
 				'post_title'            => $post_title,
 				'post_excerpt'          => $post_excerpt,
@@ -3258,8 +3140,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				'post_name'             => $post_name,
 				'to_ping'               => '',
 				'pinged'                => '',
-				'post_modified'         => $modifiedOn,
-				'post_modified_gmt'     => $modifiedOnGmt,
+				'post_modified'         => $modified_on,
+				'post_modified_gmt'     => $modified_on_gmt,
 				'post_content_filtered' => '',
 				'post_parent'           => 0,
 				'menu_order'            => 0,
@@ -3269,32 +3151,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				'meta_input'            => $meta_input,
 			);
 
-			/*
-			if ( 1 === count( $article_authors ) ) {
-				$article_data['post_author'] = $authors[ $article_authors[0] ] ?? 0;
-			}*/
-
 			if ( isset( $article['customfields'] ) ) {
 				foreach ( $article['customfields'] as $customfield ) {
 					$article_data['meta_input'][ $customfield['name'] ] = $customfield['value'];
 				}
 			}
-
-			// $new_post_id = $imported_hashed_ids[ $hashed_import_id ] ?? null;
-
-			/*
-			if ( ! is_null( $new_post_id ) ) {
-				$this->file_logger( "Found existing post with ID: $new_post_id. Updating..." );
-				// Setting the ID to the existing post ID will update the existing post.
-				$article_data['ID'] = $new_post_id;
-				// Delete the existing post's categories and guest authors.
-				$wpdb->delete(
-					$wpdb->term_relationships,
-					[
-						'object_id' => $new_post_id,
-					]
-				);
-			}*/
 
 			$post_id = wp_insert_post( $article_data );
 
@@ -3311,65 +3172,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 					if ( $assigned_to_post ) {
 						foreach ( $migration_post_authors->get_authors() as $migration_author ) {
-							echo WP_CLI::colorize( "%WAssigned {$migration_author->get_output_description()} to post ID {$post_id}%n\n" );
+							$this->color_output( "%WAssigned {$migration_author->get_output_description()} to post ID $post_id%n\n" );
 						}
 					}
 				} catch ( Exception $e ) {
 					$message = strtoupper( $e->getMessage() );
-					echo WP_CLI::colorize( "%Y$message%n\n" );
+					$this->color_output( "%Y$message%n\n" );
 				}
-				/**
-				 * This existing code below doesn't work -- it's not finding the $term_taxonomy_ids.
-				 * Plus we have a one-liner for this 👆.
-				 */
-				// if ( ! empty( $guest_author_ids ) ) {
-				// $term_taxonomy_ids_query = $wpdb->prepare(
-				// "SELECT
-				// tt.term_taxonomy_id
-				// FROM $wpdb->term_taxonomy tt
-				// INNER JOIN $wpdb->term_relationships tr
-				// ON tt.term_taxonomy_id = tr.term_taxonomy_id
-				// WHERE tt.taxonomy = 'author'
-				// AND tr.object_id IN (" . implode( ',', $guest_author_ids ) . ')'
-				// );
-				// $term_taxonomy_ids = $wpdb->get_col( $term_taxonomy_ids_query );
-				//
-				// foreach ( $term_taxonomy_ids as $term_taxonomy_id ) {
-				// $wpdb->insert(
-				// $wpdb->term_relationships,
-				// [
-				// 'object_id'        => $post_id,
-				// 'term_taxonomy_id' => $term_taxonomy_id,
-				// ]
-				// );
-				// }
-				// }
 			}
 
-			// Set categories.
-			/*
-			$some_categories_were_set = false;
-			foreach ( $article['categories'] as $category ) {
-				// Get category name.
-				$category_name = null;
-				if ( isset( $category['title'] ) && ! is_null( $category['title'] ) ) {
-					$category_name = $category['title'];
-				} elseif ( isset( $category['name'] ) && ! is_null( $category['name'] ) ) {
-					$category_name = $category['name'];
-				}
-				// Assign cat.
-				if ( ! is_null( $category_name ) ) {
-					$term_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, $top_category_term_id );
-					wp_set_post_terms( $post_id, $term_id, 'category', true );
-					$some_categories_were_set = true;
-				} else {
-					$this->file_logger( sprintf( "ERROR: ID %d, Category does not have a title: %s", $original_article_id, json_encode( $category ) ) );
-				}
-			}
-			// And if no cats were assigned, at least assign the top level category.
-			if ( false === $some_categories_were_set ) {
-				wp_set_post_terms( $post_id, $top_category_term_id, 'category', true );
-			}*/
 			if ( ! empty( $article['categories'] ) ) {
 				$category_ids = $this->handle_article_terms( $article['categories'], $this->get_current_term_taxonomies() );
 				wp_set_post_terms( $post_id, $category_ids, 'category' );
@@ -3379,14 +3190,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			if ( ! empty( $article_tags ) ) {
 				wp_set_post_terms( $post_id, $article_tags );
 			}
-
-			// It's not recommended to modify the guid
-			// wp_update_post(
-			// [
-			// 'ID' => $post_id,
-			// 'guid' => "http://lasillavacia-staging.newspackstaging.com/?page_id={$post_id}"
-			// ]
-			// );
 
 			$this->file_logger( "Article Imported: $post_id" );
 		}
@@ -7452,8 +7255,8 @@ BLOCK;
 					}
 				}
 
-				$exploded = explode( '/', $image_url );
-				$filename = array_pop( $exploded );
+				$exploded            = explode( '/', $image_url );
+				$filename            = array_pop( $exploded );
 				$question_mark_index = strpos( $filename, '?' );
 
 				if ( $question_mark_index !== false ) {
@@ -7668,7 +7471,7 @@ BLOCK;
 					'post_content' => $post_content,
 				],
 				[
-					'ID' => $post_id
+					'ID' => $post_id,
 				]
 			);
 
@@ -7698,7 +7501,7 @@ BLOCK;
 		if ( $key_exists ) {
 			$number = explode( '_', $key_exists );
 			$number = (int) array_pop( $number );
-			$number++;
+			++$number;
 			$key .= $number;
 		} else {
 			$key .= '1';
@@ -7867,11 +7670,33 @@ BLOCK;
 	}
 
 	/**
-	 * @param string $message
-	 * @param bool   $output
+	 * Handles escaping string for terminal output and logging if necessary.
+	 *
+	 * @param string $message The string to output.
+	 * @param bool   $log Whether to log in the log file.
+	 * @return void
+	 */
+	private function color_output( string $message, bool $log = false ) {
+		$message_escaped = wp_kses_post( $message );
+		echo WP_CLI::colorize( $message_escaped ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+
+		if ( $log ) {
+			$this->file_logger( $message_escaped, false );
+		}
+	}
+
+	/**
+	 * Handles logging any user defined output.
+	 *
+	 * @param string $message The string to log.
+	 * @param bool   $output Whether this should be displayed in the terminal.
 	 */
 	private function file_logger( string $message, bool $output = true ) {
-		file_put_contents( $this->log_file_path, "$message\n", FILE_APPEND );
+		WP_Filesystem();
+		/* @var WP_Filesystem_Direct $wp_filesystem */ // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+		global $wp_filesystem;
+
+		$wp_filesystem->put_contents( $this->log_file_path, "$message\n", FILE_APPEND );
 
 		if ( $output ) {
 			WP_CLI::log( $message );
