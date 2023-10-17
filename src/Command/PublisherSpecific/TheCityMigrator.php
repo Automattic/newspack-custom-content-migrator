@@ -214,7 +214,9 @@ class TheCityMigrator implements InterfaceCommand {
 			'https://cdn.vox-cdn.com/uploads/chorus_asset/file/24847864/230717_Yang_FAQ___Street_Drugs_2.jpg',
 			'https://cdn.vox-cdn.com/uploads/chorus_asset/file/24847865/230717_Yang_FAQ___Street_Drugs_1.jpg',
 		];
-		$i_updated = 0;
+		$i_updated_credits = 0;
+		$i_updated_captions = 0;
+		$i_updated_titles = 0;
 		$assets_to_attachment_ids_jsons = glob( $path_to_assets_to_attachment_ids_jsons . '/*.json' );
 		foreach ( $assets_to_attachment_ids_jsons as $json ) {
 			$data = json_decode( file_get_contents( $json ), true );
@@ -225,30 +227,53 @@ class TheCityMigrator implements InterfaceCommand {
 					continue;
 				}
 				foreach ( $post_ids as $post_id ) {
-					// For debugging purposes. Throw continue for obvious reasons first, then we debug other possible issues next in code.
-					if ( is_null( $asset_data['credit'] ) ) {
-						continue;
-					}
-					$credit = $asset_data['credit']['html'] ?? null;
-					if ( ! $credit ) {
-						continue;
-					}
+					// Credit.
+					if (
+						isset( $asset_data['credit'] ) && ! is_null( $asset_data['credit'] )
+						&& isset( $asset_data['credit']['html'] ) && ! is_null( $asset_data['credit']['html'] )
+					) {
+						$credit = $asset_data['credit']['html'];
+						$current_credit = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_media_credit'", $post_id ) );
+						if ( $current_credit && ( $credit != $current_credit ) ) {
+							$dbg=1;
+						}
 
-					$current_credit = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_media_credit'", $post_id ) );
-					if ( $current_credit && ( $credit != $current_credit ) ) {
-						$d=1;
-					}
-
-					if ( $credit ) {
 						update_post_meta( $post_id, '_media_credit', $credit );
-						WP_CLI::success( sprintf( 'Updated %d %s', $post_id, $credit ) );
-						$i_updated++;
+						WP_CLI::success( sprintf( 'Updated credit %d %s', $post_id, $credit ) );
+						$i_updated_credits++;
 						$d=1;
 					}
+
+					// Caption.
+					if (
+						isset( $asset_data['sourceCaption'] ) && ! is_null( $asset_data['sourceCaption'] && ! empty( $asset_data['sourceCaption'] ) )
+					) {
+						$caption  = $asset_data['sourceCaption'];
+						$wpdb->update( $wpdb->posts, [ 'post_excerpt' => $caption ], [ 'ID' => $post_id ] );
+						WP_CLI::success( sprintf( 'Updated caption %d %s', $post_id, $caption ) );
+						$i_updated_captions++;
+					} else {
+						$d=1;
+					}
+
+					// Title.
+					if (
+						isset( $asset_data['title'] ) && ! is_null( $asset_data['title'] && ! empty( $asset_data['title'] ) )
+					) {
+						$title = $asset_data['title'];
+						$wpdb->update( $wpdb->posts, [ 'post_title' => $title ], [ 'ID' => $post_id ] );
+						WP_CLI::success( sprintf( 'Updated title %d %s', $post_id, $title ) );
+						$i_updated_titles++;
+					} else {
+						$d=1;
+					}
+
 				}
 			}
 		}
-		WP_CLI::success( sprintf( 'Updated %d attachments.', $i_updated ) );
+		WP_CLI::success( sprintf( 'Updated %d credits.', $i_updated_credits ) );
+		WP_CLI::success( sprintf( 'Updated %d captions.', $i_updated_captions ) );
+		WP_CLI::success( sprintf( 'Updated %d titles.', $i_updated_titles ) );
 	}
 
 	public function cmd_match_assets_to_attachments( array $pos_args, array $assoc_args ): void {
