@@ -239,8 +239,8 @@ class TheCityMigrator implements InterfaceCommand {
 						$d=1;
 					}
 
-					// update_post_meta( $post_id, '_media_credit', $credit );
 					if ( $credit ) {
+						update_post_meta( $post_id, '_media_credit', $credit );
 						WP_CLI::success( sprintf( 'Updated %d %s', $post_id, $credit ) );
 						$i_updated++;
 						$d=1;
