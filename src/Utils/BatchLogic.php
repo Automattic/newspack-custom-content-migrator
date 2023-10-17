@@ -40,7 +40,7 @@ class BatchLogic {
 			'description' => 'Number of items to process. Will be ignored if end is provided.',
 			'optional'    => true,
 			'repeating'   => false,
-		]
+		],
 	];
 
 	/**

@@ -5,17 +5,21 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTime;
 use DateTimeZone;
+use DOMDocument;
+use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
+use WP_User;
 
 class HighCountryNewsMigrator2 implements InterfaceCommand {
 
@@ -55,6 +59,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @var RedirectionLogic
 	 */
 	private RedirectionLogic $redirection_logic;
+
+	/**
+	 * @var Taxonomy
+	 */
+	private Taxonomy $taxonomy_logic;
 
 	/**
 	 * Instance of Attachments Login
@@ -127,6 +136,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
+			self::$instance->taxonomy_logic            = new Taxonomy();
 			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
 		}
 
@@ -172,6 +182,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => array(
 					[
 						$this->articles_json_arg,
+						// TODO. Use the batcher for this.
 					],
 				),
 			)
@@ -206,6 +217,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => [
 					$this->images_json_arg,
 					$this->blobs_path,
+					...BatchLogic::get_batch_args(),
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-migrate-articles-from-json',
+			[ $this, 'migrate_articles_from_json' ],
+			[
+				'shortdesc' => 'Migrate articles from JSON data.',
+				'synopsis'  => [
+					$this->articles_json_arg,
 					...BatchLogic::get_batch_args(),
 				],
 			]
@@ -498,7 +521,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$file_path  = $assoc_args[ $this->users_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
-		$row_number = 1;
+		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			$row_number ++;
 			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number, $batch_args['total'], $row->username ) );
@@ -543,10 +566,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		global $wpdb;
 		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
-		$row_number = 0;
+		$row_number           = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 
+			// TODO. We can maybe exclude images ending in '-thumb.jpg' if we have the original. No need to import scaled images.
 			if ( empty( $row->image->filename ) ) {
 				// TODO. There are some "legacyPath" images. They seem to point at empty urls, but let's get back to this.
 				continue;
@@ -611,6 +635,122 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Migrate articles from JSON.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @throws Exception
+	 */
+	public function migrate_articles_from_json( array $args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		$row_number = 0;
+		/**
+		 * @var object $row
+		 */
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			WP_CLI::log( sprintf( 'Article %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
+			if ( empty( $row->text ) ) {
+				$this->logger->log( $log_file, sprintf( 'Article %s has no text. Skipping', $row->{'@id'} ), Logger::WARNING );
+			}
+
+			$post_date_string     = $row->effective ?? $row->created;
+			$post_modified_string = $row->modified ?? $post_date_string;
+			$post_date            = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_date_string, $this->site_timezone );
+			$post_modified        = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_modified_string, $this->site_timezone );
+
+			$post_data = [
+				'post_title'    => $row->title,
+				'post_status'   => ( 'public' === $row->review_state ) ? 'publish' : 'draft',
+				'post_date'     => $post_date->format( 'Y-m-d H:i:s' ),
+				'post_modified' => $post_modified->format( 'Y-m-d H:i:s' ),
+				'meta_input'    => [
+					'plone_article_UID'      => $row->UID,
+					'newspack_post_subtitle' => $row->subheadline ?? '',
+				],
+			];
+
+			// TODO. Set categories when we have the post id.
+			// TODO. Don't import the "Download entire issue articles".
+			// TODO. Hardcode some stuff: see hcn_migrate_headlines()
+			$path = parse_url( $row->{'@id'}, PHP_URL_PATH );
+			// Author Section.
+			$author_id = self::DEFAULT_AUTHOR_ID;
+
+			if ( ! empty( $row->creators ) ) {
+				$author_by_login = get_user_by( 'login', $row->creators[0] );
+
+				if ( $author_by_login instanceof WP_User ) {
+					$author_id = $author_by_login->ID;
+				}
+			}
+			$post_data['post_author'] = $author_id;
+
+			$content = $row->text;
+			$article_layout = $row->layout ?? '';
+
+			// Featured image.
+			if ( ! empty( $row->image ) ) {
+				$filename  = $row->image->filename;
+				$path_info = pathinfo( $filename );
+				if ( str_ends_with( $path_info['filename'], '-thumb' ) ) {
+					$filename_without_extension = str_replace( '-thumb', '', $path_info['filename'] );
+					$filename                   = $filename_without_extension . '.' . $path_info['extension'];
+				}
+				$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
+
+				if ( $attachment_id ) {
+					$post_data['meta_input']['_thumbnail_id'] = $attachment_id;
+				} else {
+					// TODO: Maybe just grab the image provided
+				}
+
+				$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
+				$post_data['meta_input']['newspack_featured_image_position'] = $featured_image_position;
+			}
+			// Gallery: Test with https://www.hcn.org/issues/52.2/military-only-in-death-do-some-deported-veterans-return-home
+
+			$content = $this->replace_img_tags_with_img_blocks( $content );
+			$content = wp_kses_post( $row->intro ) . $content;
+		}
+	}
+
+	private function inject_slideshow( string $content, object $row ): string {
+
+	}
+
+	private function replace_img_tags_with_img_blocks( string $content ): string {
+		$dom = new DOMDocument( null, 'utf-8' );
+		@$dom->loadHTML( $content );
+
+		$img_tags = $dom->getElementsByTagName( 'img' );
+
+		foreach ( $img_tags as $img_tag ) {
+			$src = trim( $img_tag->getAttribute( 'src' ) );
+			// src looks something like this: resolveuid/0d12bbf8d16acc061685083060b81610/@@images/image/mini
+			if ( ! preg_match( '@^resolveuid/([0-9a-z]+)/?@', $src, $matches ) ) {
+				continue;
+			}
+			$attachment_id = $this->get_attachment_id_by_uid( $matches[1] );
+			if ( ! $attachment_id ) {
+				continue;
+			}
+
+			$img_post = get_post( $attachment_id );
+			if ( ! $img_post ) {
+				continue;
+			}
+			$original_img_html = $dom->saveHTML( $img_tag );
+			$img_block         = serialize_block( $this->gutenberg_block_generator->get_image( $img_post ) );
+			$content           = str_replace( $original_img_html, $img_block, $content );
+		}
+
+		return $content;
+	}
 
 	private function get_post_name( string $url ): string {
 		$path_parts = explode( '/', trim( parse_url( $url, PHP_URL_PATH ), '/' ) );
@@ -694,9 +834,9 @@ QUERY;
 	/**
 	 * Tries various tricks to get the PDF attachment ID for an issue.
 	 *
-	 * @param int $post_id The post ID to attach the PDF to.
+	 * @param int    $post_id The post ID to attach the PDF to.
 	 * @param object $issue The issue object.
-	 * @param array $pdfurls array of UID => pdfurl. See get_pdf_urls_from_json().
+	 * @param array  $pdfurls array of UID => pdfurl. See get_pdf_urls_from_json().
 	 *
 	 * @return int The attachment ID or 0 if not found.
 	 * @throws \Exception
@@ -765,6 +905,18 @@ QUERY;
 		return 0;
 	}
 
+	private function get_attachment_id_by_uid( string $uid ): int {
+		global $wpdb;
+		$attachment_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_image_UID' AND meta_value = %s",
+				$uid
+			)
+		);
+
+		return empty( $attachment_id ) ? 0 : (int) $attachment_id;
+	}
+
 	private function get_related_link_markup( int $post_id ): string {
 		$permalink  = wp_get_shortlink( $post_id, 'post', false );
 		$post_title = get_the_title( $post_id );
@@ -772,5 +924,39 @@ QUERY;
 		return <<<HTML
 <p class="hcn-related"><span class="hcn-related__label">Related:</span> <a href="$permalink" class="hcn-related__link" target="_blank">$post_title</a></p>
 HTML;
+	}
+
+	/**
+	 * Quick lo-tech author parser.
+	 *
+	 * @return array
+	 */
+	private function parse_author_string( string $authors ) {
+		$bad     = [
+			'MD'
+		];
+		$strip   = [
+			'with additional reporting by',
+			'based on information provided by High Country News',
+			'Updated by'
+		];
+		$authors = str_replace( '\n', '', $authors );
+
+		$good = [];
+		// Split by , and &.
+		foreach ( preg_split( '/(,|&|(and))/', $authors ) as $candidate ) {
+			$candidate = trim( $candidate );
+			if ( empty( $candidate ) || is_numeric( $candidate ) || in_array( $candidate, $bad ) ) {
+				continue;
+			}
+			foreach ( $strip as $strip_candidate ) {
+				$candidate = str_replace( $strip_candidate, '', $candidate );
+			}
+			if ( ! empty( $candidate ) ) {
+				$good[] = trim( trim( $candidate, '.' ) );
+			}
+		}
+
+		return $good;
 	}
 }
