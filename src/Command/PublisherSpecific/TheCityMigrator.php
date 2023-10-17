@@ -219,7 +219,7 @@ class TheCityMigrator implements InterfaceCommand {
 		foreach ( $assets_to_attachment_ids_jsons as $json ) {
 			$data = json_decode( file_get_contents( $json ), true );
 			foreach ( $data as $asset_json => $post_ids ) {
-				$asset_data = json_decode( file_get_contents( $asset_json ), true );
+				$asset_data = json_decode( file_get_contents( $path . '/asset/' . $asset_json ), true );
 				$asset_url = $asset_data['url'];
 				if ( in_array( $asset_url, $issues_skip ) ) {
 					continue;
