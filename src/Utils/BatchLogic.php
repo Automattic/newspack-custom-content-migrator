@@ -57,15 +57,22 @@ class BatchLogic {
 	/**
 	 * Validate assoc args for batch and return start, end, and total.
 	 *
+	 * Note that end is exclusive, so --start=1 --end=2 will only process 1 item. Start is inclusive.
+	 *
 	 * @param array $assoc_args Assoc args from a command run.
 	 *
 	 * @return array Array keyed with: start, end, total.
 	 * @throws ExitException If the args were not acceptable.
 	 */
 	public static function validate_and_get_batch_args( array $assoc_args ): array {
-		$start     = $assoc_args[ self::$batch_args[0]['name'] ] ?? 0;
+		$start     = $assoc_args[ self::$batch_args[0]['name'] ] ?? 1;
 		$end       = $assoc_args[ self::$batch_args[1]['name'] ] ?? PHP_INT_MAX;
 		$num_items = $assoc_args[ self::$batch_args[2]['name'] ] ?? false;
+
+		if ( 0 === $start ) {
+			// We don't count from zero here, so if zero is passed, fix it.
+			$start = 1;
+		}
 
 		if ( $num_items && PHP_INT_MAX === $end ) {
 			$end = $start + $num_items;

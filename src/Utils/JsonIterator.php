@@ -147,7 +147,7 @@ class JsonIterator {
 
 		if ( PHP_INT_MAX === $batch_args['end'] ) {
 			$batch_args['total'] = $this->count_json_array_entries( $json_path );
-			if ( 0 !== $batch_args['start'] ) {
+			if ( 1 !== $batch_args['start'] ) {
 				$batch_args['total'] = $batch_args['total'] - $batch_args['start'];
 			}
 		}

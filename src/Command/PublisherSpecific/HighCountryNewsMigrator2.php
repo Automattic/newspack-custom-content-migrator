@@ -575,11 +575,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				// TODO. There are some "legacyPath" images. They seem to point at empty urls, but let's get back to this.
 				continue;
 			}
-			$existing_file = $wpdb->get_var(
-				$wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE post_type = 'attachment' AND meta_key = 'plone_image_UID' AND meta_value = %s", $row->UID )
-			);
-			if ( $existing_file ) {
-				$this->logger->log( $log_file, sprintf( 'Image %s already imported to %s', $row->{'@id'}, get_permalink( $existing_file ) ), Logger::WARNING );
+
+			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
+			if ( $existing_id ) {
+				$this->logger->log( $log_file, sprintf( 'Image already imported to %s)', get_permalink( $existing_id ) ), Logger::WARNING );
 				continue;
 			}
 
@@ -724,7 +723,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function replace_img_tags_with_img_blocks( string $content ): string {
-		$dom = new DOMDocument( null, 'utf-8' );
+		$dom = new DOMDocument( '1.0', 'utf-8' );
 		@$dom->loadHTML( $content );
 
 		$img_tags = $dom->getElementsByTagName( 'img' );
