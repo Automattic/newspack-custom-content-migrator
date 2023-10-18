@@ -2,7 +2,6 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-
 use DateTime;
 use DateTimeZone;
 use DOMDocument;
@@ -117,9 +116,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
 
 	const PARENT_PAGE_FOR_ISSUES = 180504; // The page that all issues will have as parent.
-	const DEFAULT_AUTHOR_ID = 223746; // User ID of default author.
-	const TAG_ID_THE_MAGAZINE = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
-	const CATEGORY_ID_ISSUES = 385;
+	const DEFAULT_AUTHOR_ID      = 223746; // User ID of default author.
+	const TAG_ID_THE_MAGAZINE    = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
+	const CATEGORY_ID_ISSUES     = 385;
 
 	private DateTimeZone $site_timezone;
 
@@ -275,21 +274,23 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * Callback for the command hcn-generate-redirects.
 	 */
 	public function fix_redirects( array $args, array $assoc_args ): void {
-		$log_file = __FUNCTION__ . '.log';
-		$home_url = home_url();
-		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
+		$log_file           = __FUNCTION__ . '.log';
+		$home_url           = home_url();
+		$articles_json_file = $assoc_args[ $this->articles_json_arg['name'] ];
 
-		$categories = get_categories( [
-			'fields' => 'slugs',
-		] );
+		$categories = get_categories(
+			[
+				'fields' => 'slugs',
+			] 
+		);
 
 		global $wpdb;
 
 
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
-		$counter     = 0;
+		$counter    = 0;
 		foreach ( $this->json_iterator->batched_items( $articles_json_file, $batch_args['start'], $batch_args['end'] ) as $article ) {
-			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter++, $batch_args['total'] ) );
+			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter ++, $batch_args['total'] ) );
 
 			if ( empty( $article->aliases ) ) {
 				continue;
@@ -345,9 +346,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
 
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
-		$counter     = 0;
+		$counter    = 0;
 		foreach ( $this->json_iterator->batched_items( $articles_json_file, $batch_args['start'], $batch_args['end'] ) as $article ) {
-			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter++, $batch_args['total'] ) );
+			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter ++, $batch_args['total'] ) );
 
 			$post_id = $this->get_post_id_from_uid( $article->UID );
 			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
@@ -356,7 +357,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			if ( $post_id > self::MAX_POST_ID_FROM_STAGING ) {
-				$this->logger->log( sprintf( "Post ID %d is greater MAX ID (%d), skipping", $post_id, self::MAX_POST_ID_FROM_STAGING ), Logger::WARNING );
+				$this->logger->log( sprintf( 'Post ID %d is greater MAX ID (%d), skipping', $post_id, self::MAX_POST_ID_FROM_STAGING ), Logger::WARNING );
 				continue;
 			}
 
@@ -379,10 +380,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$correct_post_name = $this->get_post_name( $article->{'@id'} );
 			if ( $correct_post_name !== $post->post_name ) {
-				wp_update_post( [
-					'ID'        => $post_id,
-					'post_name' => $correct_post_name
-				] );
+				wp_update_post(
+					[
+						'ID'        => $post_id,
+						'post_name' => $correct_post_name,
+					] 
+				);
 			}
 
 			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
@@ -456,10 +459,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			}
 			if ( $update ) {
-				$result = wp_update_post( [
-					'ID'           => $post->ID,
-					'post_content' => $post_content,
-				] );
+				$result = wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $post_content,
+					] 
+				);
 
 				if ( $result ) {
 					$this->logger->log( $log_file, sprintf( 'Updated wp links in "RELATED" on %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
@@ -481,7 +486,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		global $wpdb;
 
 		$post_ids = $wpdb->get_col(
-			$wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE ID <= %d AND post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'",
+			$wpdb->prepare(
+				"SELECT ID FROM $wpdb->posts WHERE ID <= %d AND post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'",
 				self::MAX_POST_ID_FROM_STAGING
 			)
 		);
@@ -490,7 +496,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$counter     = 0;
 
 		foreach ( $post_ids as $post_id ) {
-			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter++, $total_posts, $post_id ) );
+			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter ++, $total_posts, $post_id ) );
 
 			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
 				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
@@ -521,10 +527,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			if ( $update ) {
-				$result = wp_update_post( [
-					'ID'           => $post_id,
-					'post_content' => $post_content,
-				] );
+				$result = wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => $post_content,
+					] 
+				);
 
 				if ( $result ) {
 					$this->logger->log( $log_file, sprintf( 'Updated wp links in "RELATED" on %s', get_permalink( $post_id ) ), Logger::SUCCESS );
@@ -621,11 +629,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$cat = get_category_by_slug( $slug );
 			if ( ! $cat ) {
-				$id = wp_insert_category( [
-					'cat_name'          => $slug,
-					'category_nicename' => $issue_name,
-					'category_parent'   => self::CATEGORY_ID_ISSUES
-				] );
+				$id = wp_insert_category(
+					[
+						'cat_name'          => $slug,
+						'category_nicename' => $issue_name,
+						'category_parent'   => self::CATEGORY_ID_ISSUES,
+					] 
+				);
 
 				$cat = get_term( $id, 'category' );
 			}
@@ -641,7 +651,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			$post_date_formatted = $post_date->format( 'Y-m-d H:i:s' );
-			$page_data = [
+			$page_data           = [
 				'post_title'    => $issue_name,
 				'post_name'     => $slug,
 				'post_status'   => 'publish',
@@ -652,7 +662,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_date'     => $post_date_formatted,
 				'meta_input'    => [
 					'plone_issue_page_UID' => $issue->UID,
-				]
+				],
 			];
 
 			$post_id = $wpdb->get_var(
@@ -683,8 +693,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				);
 
 				if ( ! is_wp_error( $image_attachment_id ) ) {
-					$image_id                                                    = $image_attachment_id;
-					$page_data['meta_input']['_thumbnail_id']                    = $image_id;
+					$image_id                                 = $image_attachment_id;
+					$page_data['meta_input']['_thumbnail_id'] = $image_id;
 					$page_data['meta_input']['newspack_featured_image_position'] = 'hidden';
 				} else {
 					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
@@ -706,8 +716,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				[
 					'name'        => $issue_name,
 					'slug'        => $slug,
-					'description' => '' // Remove the HTML if it was already added earlier on issues.
-				] );
+					'description' => '', // Remove the HTML if it was already added earlier on issues.
+				] 
+			);
 			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
 			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
 			$this->logger->log( $log_file, sprintf( 'Updated issue category: %s', get_term_link( $cat->term_id ) ), Logger::SUCCESS );
@@ -719,7 +730,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$log_file   = __FUNCTION__ . '.log';
 		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
-		$blobs_path = untrailingslashit( $assoc_args[ $this->blobs_path_arg['name'] ]);
+		$blobs_path = untrailingslashit( $assoc_args[ $this->blobs_path_arg['name'] ] );
 
 		global $wpdb;
 		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
@@ -785,7 +796,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$this->logger->log(
 					$log_file,
 					sprintf( 'Image imported to %s (%s)', $media_lib_url, $row->{'@id'} ),
-					Logger::SUCCESS );
+					Logger::SUCCESS 
+				);
 			}
 		}
 	}
@@ -1136,12 +1148,12 @@ HTML;
 	 */
 	private function parse_author_string( string $authors ) {
 		$bad     = [
-			'MD'
+			'MD',
 		];
 		$strip   = [
 			'with additional reporting by',
 			'based on information provided by High Country News',
-			'Updated by'
+			'Updated by',
 		];
 		$authors = str_replace( '\n', '', $authors );
 
