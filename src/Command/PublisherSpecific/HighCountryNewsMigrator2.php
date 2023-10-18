@@ -177,6 +177,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => [
 					$this->articles_json_arg,
 					$this->num_items_arg,
+					...BatchLogic::get_batch_args(),
 				],
 			]
 		);
@@ -189,7 +190,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => array(
 					[
 						$this->articles_json_arg,
-						// TODO. Use the batcher for this.
+						...BatchLogic::get_batch_args(),
 					],
 				),
 			)
@@ -276,13 +277,20 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function fix_redirects( array $args, array $assoc_args ): void {
 		$log_file = __FUNCTION__ . '.log';
 		$home_url = home_url();
+		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
 
 		$categories = get_categories( [
 			'fields' => 'slugs',
 		] );
 
 		global $wpdb;
-		foreach ( $this->json_iterator->items( $assoc_args['articles-json'] ) as $article ) {
+
+
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
+		$counter     = 0;
+		foreach ( $this->json_iterator->batched_items( $articles_json_file, $batch_args['start'], $batch_args['end'] ) as $article ) {
+			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter++, $batch_args['total'] ) );
+
 			if ( empty( $article->aliases ) ) {
 				continue;
 			}
@@ -336,19 +344,16 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
 
-		$total_posts = $assoc_args['num-items'] ?? $this->json_iterator->count_json_array_entries( $assoc_args['articles-json'] );
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
 		$counter     = 0;
+		foreach ( $this->json_iterator->batched_items( $articles_json_file, $batch_args['start'], $batch_args['end'] ) as $article ) {
+			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter++, $batch_args['total'] ) );
 
-		foreach ( $this->json_iterator->items( $articles_json_file ) as $article ) {
 			$post_id = $this->get_post_id_from_uid( $article->UID );
 			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
 				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
 				continue;
 			}
-
-			$counter ++;
-
-			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter, $total_posts ) );
 
 			if ( $post_id > self::MAX_POST_ID_FROM_STAGING ) {
 				$this->logger->log( sprintf( "Post ID %d is greater MAX ID (%d), skipping", $post_id, self::MAX_POST_ID_FROM_STAGING ), Logger::WARNING );
@@ -485,14 +490,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$counter     = 0;
 
 		foreach ( $post_ids as $post_id ) {
-			$counter ++;
+			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter++, $total_posts, $post_id ) );
 
 			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
 				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
 				continue;
 			}
-
-			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter, $total_posts, $post_id ) );
 
 			$post         = get_post( $post_id );
 			$update       = false;
@@ -589,8 +592,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @param array $assoc_args
 	 *
 	 * @return void
-	 * @throws WP_CLI\ExitException
-	 * @throws \stringEncode\Exception
+	 * @throws Exception
 	 */
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
