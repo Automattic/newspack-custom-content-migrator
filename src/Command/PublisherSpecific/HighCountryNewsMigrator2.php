@@ -86,7 +86,14 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		'optional'    => false,
 	];
 
-	private array $blobs_path = [
+	private array $issues_json_arg = [
+		'type'        => 'assoc',
+		'name'        => 'issues-json',
+		'description' => 'Path to the issues JSON file.',
+		'optional'    => false,
+	];
+
+	private array $blobs_path_arg = [
 		'type'        => 'assoc',
 		'name'        => 'blobs-path',
 		'description' => 'Path to the blobs directory.',
@@ -187,16 +194,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				),
 			)
 		);
-
-		// TODO: Command to fix "Credit". See 1200980714215013/1205663257649868-as
-		// TODO: Command to fix Characters in stories not displaying correctly. See 1200980714215013/1205663257649880-as
-		// TODO: Command to fix  Images appearing when they shouldn't. See 1200980714215013/1205663257649874-as
 	}
 
 	/**
 	 * Import new data.
 	 */
 	private function set_importer_commands(): void {
+
 		WP_CLI::add_command(
 			'newspack-content-migrator hcn-migrate-users-from-json',
 			[ $this, 'import_users_from_json' ],
@@ -216,9 +220,23 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'shortdesc' => 'Migrate images from JSON data.',
 				'synopsis'  => [
 					$this->images_json_arg,
-					$this->blobs_path,
+					$this->blobs_path_arg,
 					...BatchLogic::get_batch_args(),
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-import-issues-as-pages',
+			[ $this, 'import_issues_as_pages' ],
+			[
+				'synopsis'  => [
+					$this->issues_json_arg,
+					$this->articles_json_arg,
+					$this->blobs_path_arg,
+					...BatchLogic::get_batch_args(),
+				],
+				'shortdesc' => 'Import issues as pages and clean up issue categories.',
 			]
 		);
 
@@ -559,10 +577,147 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 		}
 	}
+
+
+	/**
+	 * Import issues into pages and update issue categories.
+	 *
+	 * Note that this command can be run over and over. Will only process issues not yet processed. It
+	 * can also be run again from scratch with no duplicates – just update the $command_meta_version number.
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException
+	 * @throws \stringEncode\Exception
+	 */
+	public function import_issues_as_pages( array $args, array $assoc_args ): void {
+
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 2;
+		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
+		$articles_json        = $assoc_args[ $this->articles_json_arg['name'] ];
+		$issues_json          = $assoc_args[ $this->issues_json_arg['name'] ];
+		$blobs_folder         = trailingslashit( realpath( $assoc_args[ $this->blobs_path_arg['name'] ] ) );
+
+		$pdfurls_array = $this->get_pdf_urls_from_json( $articles_json );
+		if ( empty( $pdfurls_array ) ) {
+			WP_CLI::error( sprintf( 'Could not find any PDF urls in %s', $articles_json ) );
+		}
+
+		global $wpdb;
+
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $issues_json, $assoc_args );
+		$row_number = 0;
+		foreach ( $this->json_iterator->batched_items( $issues_json, $batch_args['start'], $batch_args['end'] ) as $issue ) {
+			WP_CLI::log( sprintf( 'Processing issue (%d of %d): %s', ++ $row_number, $batch_args['total'], $issue->{'@id'} ) );
+
+			$slug       = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
+			$post_date  = new DateTime( ( $issue->effective ?? $issue->created ), $this->site_timezone );
+			$issue_name = $post_date->format( 'F j, Y' ) . ': ' . $issue->title;
+
+			$cat = get_category_by_slug( $slug );
+			if ( ! $cat ) {
+				$id = wp_insert_category( [
+					'cat_name'          => $slug,
+					'category_nicename' => $issue_name,
+					'category_parent'   => self::CATEGORY_ID_ISSUES
+				] );
+
+				$cat = get_term( $id, 'category' );
+			}
+			if ( ! $cat instanceof \WP_Term ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find or create category for %s', $issue->{'@id'} ), Logger::ERROR );
+				continue;
+			}
+			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
+
+			if ( MigrationMeta::get( $cat->term_id, $command_meta_key, 'term' ) >= $command_meta_version ) {
+				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_term_link( $cat->term_id ), $command_meta_version ) );
+				continue;
+			}
+
+			$post_date_formatted = $post_date->format( 'Y-m-d H:i:s' );
+			$page_data = [
+				'post_title'    => $issue_name,
+				'post_name'     => $slug,
+				'post_status'   => 'publish',
+				'post_author'   => self::DEFAULT_AUTHOR_ID, // We don't bother finding an author – it's not displayed on the current live site either.
+				'post_type'     => 'page',
+				'post_parent'   => self::PARENT_PAGE_FOR_ISSUES,
+				'post_category' => [ $cat->term_id, self::CATEGORY_ID_ISSUES ],
+				'post_date'     => $post_date_formatted,
+				'meta_input'    => [
+					'plone_issue_page_UID' => $issue->UID,
+				]
+			];
+
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_issue_page_UID' AND meta_value = %s",
+					$issue->UID,
+				)
+			);
+			if ( ! $post_id ) {
+				$post_id = wp_insert_post( $page_data );
+				$this->logger->log( $log_file, sprintf( 'Created page for issue %s', $issue->{'@id'} ), Logger::SUCCESS );
+			}
+
+			$pdf_id = $this->get_issue_pdf_attachment_id( $post_id, $issue, $pdfurls_array );
+			if ( ! $pdf_id ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find a PDF for %s', $issue->{'@id'} ), Logger::WARNING );
+			}
+
+			$image_id = 0;
+			if ( ! empty( $issue->image ) ) {
+				$blob_file_path      = $blobs_folder . $issue->image->blob_path;
+				$image_attachment_id = $this->attachments->import_attachment_for_post(
+					$post_id,
+					$blob_file_path,
+					'Magazine cover: ' . $issue_name,
+					[],
+					$issue->image->filename
+				);
+
+				if ( ! is_wp_error( $image_attachment_id ) ) {
+					$image_id                                                    = $image_attachment_id;
+					$page_data['meta_input']['_thumbnail_id']                    = $image_id;
+					$page_data['meta_input']['newspack_featured_image_position'] = 'hidden';
+				} else {
+					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
+				}
+			}
+
+			$page_data['ID']           = $post_id;
+			$page_data['post_content'] = $this->get_issue_page_content_for_category( $cat->term_id, $issue->description ?? '', $image_id, $pdf_id );
+			$page_data['post_excerpt'] = $issue->description ?? '';
+
+			wp_update_post( $page_data );
+			wp_set_post_tags( $post_id, [ self::TAG_ID_THE_MAGAZINE ], true );
+			update_post_meta( $page_data['ID'], 'plone_issue_page_UID', $issue->UID );
+			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page_data['ID'] ) ), Logger::SUCCESS );
+
+			wp_update_term(
+				$cat->term_id,
+				'category',
+				[
+					'name'        => $issue_name,
+					'slug'        => $slug,
+					'description' => '' // Remove the HTML if it was already added earlier on issues.
+				] );
+			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
+			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
+			$this->logger->log( $log_file, sprintf( 'Updated issue category: %s', get_term_link( $cat->term_id ) ), Logger::SUCCESS );
+		}
+
+	}
+
 	public function migrate_images_from_json( array $args, array $assoc_args ): void {
 		$log_file   = __FUNCTION__ . '.log';
 		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+		$blobs_path = untrailingslashit( $assoc_args[ $this->blobs_path_arg['name'] ]);
 
 		global $wpdb;
 		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
@@ -596,7 +751,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$created_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row->created, $this->site_timezone );
 			$updated_at = DateTime::createFromFormat( 'Y-m-d\TH:m:sP', $row->modified, $this->site_timezone );
 
-			$blob_file     = $assoc_args[ $this->blobs_path['name'] ] . '/' . $row->image->blob_path;
 			$img_post_data = [
 				'post_author'   => $post_author,
 				'post_date'     => $created_at->format( 'Y-m-d H:i:s' ),
@@ -609,7 +763,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			];
 
 			$attachment_id = $this->attachments->import_external_file(
-				$blob_file,
+				$blobs_path . '/' . $row->image->blob_path,
 				$row->image->filename,
 				$row->description ?? '',
 				$row->description ?? '',
@@ -815,6 +969,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @return array Array with UID as key and pdf url as value.
 	 */
 	private function get_pdf_urls_from_json( string $articles_json_file_path ): array {
+		if ( ! file_exists( $articles_json_file_path ) ) {
+			throw new Exception( sprintf( 'The file supplied is either not a file or does not exist: %s', $articles_json_file_path ) );
+		}
+
 		$pdfurls_array = [];
 		$jq_query      = <<<QUERY
 cat $articles_json_file_path | jq '. [] | select(."pdfurl"|test("pdf$")) | {UID: .parent.UID, pdfurl}' | jq -s 
@@ -873,6 +1031,50 @@ QUERY;
 		}
 
 		return 0;
+	}
+
+	/**
+	 * Builds block content for an issue page.
+	 *
+	 * @param int    $category_id
+	 * @param string $description
+	 * @param int    $image_attachment_id
+	 * @param int    $pdf_id
+	 *
+	 * @return string
+	 */
+	private function get_issue_page_content_for_category( int $category_id, string $description, int $image_attachment_id, int $pdf_id ): string {
+		$left_column_blocks  = [ $this->gutenberg_block_generator->get_paragraph( $description, '', '', 'small' ) ];
+		$right_column_blocks = [];
+		if ( 0 !== $image_attachment_id ) {
+			$img_post              = get_post( $image_attachment_id );
+			$right_column_blocks[] = $this->gutenberg_block_generator->get_image( $img_post, 'full', false );
+		}
+		if ( 0 !== $pdf_id ) {
+			$link                  = wp_get_attachment_url( $pdf_id );
+			$right_column_blocks[] = $this->gutenberg_block_generator->get_paragraph( '<a href="' . $link . '">Download the Digital Issue</a>' );
+		}
+		$left_column      = $this->gutenberg_block_generator->get_column( $left_column_blocks );
+		$right_column     = $this->gutenberg_block_generator->get_column( $right_column_blocks );
+		$content_blocks[] = $this->gutenberg_block_generator->get_columns( [ $left_column, $right_column ] );
+		$content_blocks[] = $this->gutenberg_block_generator->get_separator( 'is-style-wide' );
+
+		$content_blocks[] = $this->gutenberg_block_generator->get_homepage_articles_for_category(
+			[ $category_id ],
+			[
+				'moreButton'     => true,
+				'moreButtonText' => 'More from this issue',
+				'showAvatar'     => false,
+				'postsToShow'    => 60,
+				'mediaPosition'  => 'left',
+			]
+		);
+
+		return array_reduce(
+			$content_blocks,
+			fn( string $carry, array $item ): string => $carry . serialize_block( $item ),
+			''
+		);
 	}
 
 	private function upgrade_user_to_author( $user_id ): bool {
