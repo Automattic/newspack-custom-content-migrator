@@ -13,6 +13,7 @@ use \Newspack_Scraper_Migrator_Util;
 use \Newspack_Scraper_Migrator_HTML_Parser;
 use \WP_CLI;
 use Symfony\Component\DomCrawler\Crawler as Crawler;
+use DOMElement;
 
 /**
  * Custom migration scripts for Lookout Local.
@@ -242,6 +243,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			[ $this, 'cmd_after_import2__content_transform_and_cleanup' ],
 			[
 				'shortdesc' => 'Run after `import1` command. Transforms and cleans up imported content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids-csv',
+						'description' => 'Transform/clean up these post IDs only. If not provided will transform all of them.',
+						'optional'    => true,
+					],
+				],
 			]
 		);
 
@@ -847,368 +856,459 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->crawler->add( $post_content );
 
 		/**
-		 * Get the outer content div.rich-text-body in which the body HTML is nested.
+		 * CONTENT TYPE 1. STORY STACK
+		 *   - content is stored in: div.story-stack-story
+		 *   - e.g. https://lookout.co/santacruz/coast-life/story/2023-05-19/pescadero-day-trip-sea-lions-ano-nuevo-award-winning-tavern-baby-goats
+		 *
+		 * Need to traverse through all div.story-stack-story and:
+		 *      - find .story-stack-story-title if exists, encapsulate it in div.rich-text-body and feed it to rich-text-body crawler
+		 *      - find div.rich-text-body (also has .story-stack-story-body), and also feed it to crawler
 		 */
-		$div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
-		/**
-		 * If div.rich-text-body was already removed, just temporarily surround the HTML with a new <div> so that nodes can be traversed the same way as children.
-		 */
-		if ( ! $div_content_crawler ) {
+		$story_stack_formatted_rich_text_body = '';
+		$div_content_crawlers = $this->filter_selector_element( 'div.story-stack-story', $this->crawler, $single = false );
+		$content_is_story_stack = (bool) $div_content_crawlers;
+		if ( $content_is_story_stack ) {
+
+			// Traverse through all div.story-stack-story.
+			$story_crawler = $this->filter_selector_element( 'div.story-stack-story', $this->crawler, $single = false );
+			// foreach ( $story_crawler->childNodes->getIterator() as $key_domelement => $story_domelement ) {
+			foreach ( $story_crawler->getIterator() as $key_domelement => $story_stack_story_domelement ) {
+
+				// Traverse through div.story-stack-story's child nodes.
+				foreach ( $story_stack_story_domelement->childNodes->getIterator() as $key_domelement => $story_stack_story_child_domelement ) {
+
+$sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
+
+					if ( 'DOMElement' !== $story_stack_story_child_domelement::class ) {
+
+						// If it's something other than the DOMElements we're searching for, just feed it to crawler.
+						$story_stack_formatted_rich_text_body .= '<div class="rich-text-body">';
+						$story_stack_formatted_rich_text_body .= $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
+						$story_stack_formatted_rich_text_body .= '</div>';
+
+					} else {
+
+						// If .story-stack-story-title if exists, encapsulate it in div.rich-text-body and feed it to rich-text-body crawler.
+						$is_story_stack_story_title = false !== strpos( $story_stack_story_child_domelement->getAttribute( 'class' ), 'story-stack-story-title' );
+						if ( $is_story_stack_story_title ) {
+							$story_stack_formatted_rich_text_body .= '<div class="rich-text-body">';
+							$story_stack_formatted_rich_text_body .= $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
+							$story_stack_formatted_rich_text_body .= '</div>';
+						}
+
+						// Find div.rich-text-body (also has .story-stack-story-body), and also feed it to crawler.
+						$is_rich_text_body = ( isset( $story_stack_story_child_domelement->tagName ) && 'div' == $story_stack_story_child_domelement->tagName )
+							&& ( false !== strpos( $story_stack_story_child_domelement->getAttribute( 'class' ), 'rich-text-body' ) );
+						if ( $is_rich_text_body ) {
+							$story_stack_formatted_rich_text_body .= $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
+						}
+
+					}
+
+				}
+
+			}
+
+			// Feed formatted HTML to rich-text-body crawler.
 			$this->crawler->clear();
-			$this->crawler->add( '<div>' . $post_content . '</div>' );
-			$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
+			$this->crawler->add( $story_stack_formatted_rich_text_body );
+
+			// Reset $div_content_crawlers.
+			$div_content_crawlers = null;
 		}
 
 		/**
-		 * OK, now traverse through all child nodes. We will just keept the content inside the <div>, getting rid of the <div> itself.
+		 * CONTENT TYPE 2.
+		 *   - content is located in: div.rich-text-body
+		 *   - e.g.
+		 *
+		 * Get all the outer content div.rich-text-body in which the body HTML is nested.
+		 * There can also be multiple such divs so we loop through them and concatenate.
+		 * This was back when I thought there can be only one such div:
+		 *      $div_content_crawler = $this->filter_selector_element( 'div.rich-text-body', $this->crawler );
 		 */
-		foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
-
-			$custom_html = null;
-
-			$html_domelement_helper = $domelement->ownerDocument->saveHTML( $domelement );
-
-			/**
-			 * Skip or transform specific "div.enhancement"s.
-			 */
-			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
-			if ( $is_div_class_enhancement ) {
-
-				$enhancement_crawler = new Crawler( $domelement );
-
-				/**
-				 * Skip ( with `continue;` ) or transform 'div.enchancement's ( by setting $custom_html ).
-				 */
-				if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'div.promo-action' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="BFCU Home Loans Ad"]' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Community Voices election 2022"]' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
-					// Skip this 'div.enchancement'.
-					continue;
-
-				} elseif ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
-
-					/**
-					 * Transform to quote block.
-					 */
-
-					$quote_text = null;
-					$quote_cite = null;
-
-					$helper_crawler = $enhancement_crawler->filter( 'div.enhancement > div.quote > div.quote-text > blockquote > p.quote-body' );
-					if ( $helper_crawler && $helper_crawler->getNode(0) ) {
-						$helper_node = $helper_crawler->getNode(0);
-						$quote_text = $helper_node->textContent;
-					}
-
-					$helper_crawler = $enhancement_crawler->filter( 'div.enhancement > div.quote > div.quote-text > p.quote-attribution' );
-					if ( $helper_crawler && $helper_crawler->getNode(0) ) {
-						$helper_node = $helper_crawler->getNode(0);
-						$quote_cite = $helper_node->textContent;
-					}
-
-					// Get block if $quote_text is found, or else keep inner HTML.
-					if ( $quote_text ) {
-						// Get quote block.
-						$quote_block = $this->gutenberg->get_quote( $quote_text, $quote_cite );
-						$custom_html = serialize_blocks( [ $quote_block ] );
-					} else {
-						// Keep HTML inside 'div.enhancement'.
-						$helper_node = $enhancement_crawler->filter( 'div.quote-text' )->getNode( 0 );
-						$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-					}
-
-
-				} elseif ( $enhancement_crawler->filter( 'div.infobox' )->count() ) {
-					// Keep HTML inside 'div.enhancement'.
-					$helper_node = $enhancement_crawler->filter( 'div.infobox' )->getNode( 0 );
-					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-
-				} elseif ( $enhancement_crawler->filter( 'figure > a[href="mailto:elections@lookoutlocal.com"]' )->count() ) {
-					// Keep HTML inside 'div.enhancement'.
-					$helper_node = $enhancement_crawler->filter( 'figure' )->getNode( 0 );
-					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-
-				} elseif ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
-					// Keep HTML inside 'div.enhancement'.
-					$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
-					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-
-				} elseif ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
-					// Keep HTML inside 'div.enhancement'.
-					$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
-					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-
-				} elseif ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
-					// Keep HTML inside 'div.enhancement'.
-					$helper_node = $enhancement_crawler->filter( 'figure.figure' )->getNode( 0 );
-					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-
-				} elseif ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
-					/**
-					 * If 'div.enhancement' has > ps-interactive-project > iframe with src containing "//joinsubtext.com/lilyonfood", keep it.
-					 */
-					$iframe_crawler = $enhancement_crawler->filter( 'ps-interactive-project > iframe' );
-					if ( $iframe_crawler && $iframe_crawler->getNode(0) ) {
-					$src = $iframe_crawler->getNode(0)->getAttribute('src');
-						if ( false !== strpos( $src, '//joinsubtext.com/lilyonfood' ) ) {
-							// Keep HTML inside 'div.enhancement'.
-							$helper_node = $enhancement_crawler->filter( 'ps-interactive-project' )->getNode( 0 );
-							$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
-						}
-					}
-
-				} elseif ( $enhancement_crawler->filter( 'figure.figure > a.link > img' )->count() ) {
-
-					/**
-					 * An image within an <a> link: 'div.enhancement' has > figure.figure > a.link > img.image with src containing "//lookout.brightspotcdn.com/".
-					 */
-
-					// If an <a> is surrounding the image, get it
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link' );
-					$href = $helper_crawler->getNode(0) ? $helper_crawler->getNode(0)->getAttribute('href') : null;
-
-					// Get all image data -- src, alt, caption, credit.
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > img' );
-					$src = $helper_crawler->getNode(0)->getAttribute('src');
-					$alt = $helper_crawler->getNode(0)->getAttribute('alt');
-
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > div.figure-content > div.figure-caption' );
-					$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
-
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > div.figure-content > div.figure-credit' );
-					// Not sure why this returns only the first character...
-					//      $credit = $helper_crawler->innerText();
-					$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
-
-					// Download image.
-					WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
-					$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
-
-					// Get Gutenberg image block.
-					$attachment_post = get_post( $attachment_id );
-					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, null, null, $href );
-					$custom_html = serialize_blocks( [ $image_block ] );
-
-				} elseif ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
-
-					/**
-					 * An image: 'div.enhancement' has > figure.figure > img.image with src containing "//lookout.brightspotcdn.com/".
-					 */
-
-					// Get all image data -- src, alt, caption, credit.
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > img' );
-					$src = $helper_crawler->getNode(0)->getAttribute('src');
-					$alt = $helper_crawler->getNode(0)->getAttribute('alt');
-
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-caption' );
-					$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
-
-					$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-credit' );
-					// Not sure why this returns only the first character...
-					//      $credit = $helper_crawler->innerText();
-					$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
-
-					// Download image.
-					WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
-					$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
-
-					// Get Gutenberg image block.
-					$attachment_post = get_post( $attachment_id );
-					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false );
-					$custom_html = serialize_blocks( [ $image_block ] );
-
-				} elseif ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
-
-					/**
-					 * YT player to Gutenberg YT block.
-					 */
-
-					// Get YT video ID.
-					$helper_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
-					$yt_video_id    = $helper_crawler->getNode(0)->getAttribute('data-video-id');
-					if ( ! $yt_video_id ) {
-						// TODO -- log missing TY link
-					}
-
-					// Get Gutenberg YT block.
-					$yt_link     = "https://www.youtube.com/watch?v=$yt_video_id";
-					$yt_block    = $this->gutenberg->get_youtube( $yt_link );
-					$custom_html = serialize_blocks( [ $yt_block ] );
-
-					// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
-					$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
-
-				} elseif ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
-
-					/**
-					 * Tweet embed to Twitter block.
-					 */
-
-					// Get Twitter link.
-					$helper_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
-					$twitter_link = '';
-					foreach ( $helper_crawler->getIterator() as $twitter_a_domelement ) {
-						$href = $twitter_a_domelement->getAttribute( 'href' );
-						if ( false !== strpos( $href, 'twitter.com' ) ) {
-							$twitter_link = $href;
-							break;
-						}
-					}
-
-					if ( ! empty( $twitter_link ) ) {
-						// Get Gutenberg Twitter block.
-						$twitter_block = $this->gutenberg->get_twitter( $twitter_link );
-						$custom_html   = serialize_blocks( [ $twitter_block ] );
-
-						// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
-						$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d Twitter", $post_id ), $this->logger::WARNING );
-					} else {
-						if ( ! $yt_video_id ) {
-							// TODO -- log missing TY link
-						}
-					}
-
-				} elseif ( $enhancement_crawler->filter( 'ps-carousel' )->count() ) {
-
-					/**
-					 * ps-carousel slides to Gutenberg gallery block.
-					 */
-
-					// First scrape all images data.
-					/**
-					 * @var array $images_data {
-					 *      @type string $src           Image URL.
-					 *      @type string $alt           Image alt text.
-					 *      @type string $credit        Image credit.
-					 *      @type string $attachment_id Image credit.
-					 * }
-					 */
-					$images_data = [];
-					$helper_crawler = $enhancement_crawler->filter( 'ps-carousel > div.carousel-slides > div.carousel-slide' );
-					$img_index = 0;
-					foreach ( $helper_crawler->getIterator() as $div_slide_domelement ) {
-
-						$images_data[ $img_index ] = [
-							'src' => null,
-							'alt' => null,
-							'credit' => null,
-							'attachment_id' => null,
-                       ];
-
-						// New crawler for each slide.
-						$slides_info_crawler = new Crawler( $div_slide_domelement );
-
-						// Get Credit from > div class=carousel-slide-inner ::: data-info-attribution="Cabrillo Robotics"
-						$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner' );
-						$attribution = $slide_inner_crawler->count() > 0 ? $slide_inner_crawler->getNode(0)->getAttribute('data-info-attribution') : null;
-						$images_data [ $img_index ][ 'credit' ] = $attribution;
-
-						// Get Src and Alt from > div class=carousel-slide-inner > div.carousel-slide-media > img ::: alt src
-						$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner > div.carousel-slide-media > img' );
-						if ( $slide_inner_crawler->count() ) {
-							$src = $slide_inner_crawler->getNode(0)->getAttribute('src');
-							if ( ! $src ) {
-								$src = $slide_inner_crawler->getNode(0)->getAttribute('data-flickity-lazyload');
-							}
-							if ( $src ) {
-								$images_data[ $img_index ][ 'src' ] = $src;
-							}
-							$alt = $slide_inner_crawler->getNode(0)->getAttribute('alt');
-							if ( $alt ) {
-								$images_data[ $img_index ][ 'alt' ] = $alt;
-							}
-						}
-
-						$img_index++;
-					}
-
-					// Import images and get attachment IDs.
-					$attachment_ids = [];
-					foreach ( $images_data as $image_data ) {
-
-						if ( ! $image_data['src'] ) {
-							// TODO -- log
-							continue;
-						}
-
-						WP_CLI::line( sprintf( 'Downloading image: %s', $image_data['src'] ) );
-						$attachment_id    = $this->get_or_download_image( $log_err_img_download, $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
-						$attachment_ids[] = $attachment_id;
-					}
-
-					// Get Gutenberg gallery block.
-					if ( ! empty( $attachment_ids ) ) {
-						$slideshow_block = $this->gutenberg->get_jetpack_slideshow( $attachment_ids );
-						$custom_html     = serialize_blocks( [ $slideshow_block ] );
-
-						// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
-						$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d JPSlideshow", $post_id ), $this->logger::WARNING );
-					} else {
-						// TODO -- log failed attachment import <-- i.e. failed gallery, but put to same log
-					}
-				}
-				/**
-				 * Skip ( with `continue;` ) or transform 'div.enchancement's ( by setting $custom_html ).
-				 */
-
-
-
-			}
-
-
-			/**
-			 * Done skipping or transforming 'div.enchancement's.
-			 * At this point, if $custom_html is set, it will be used, or else the original HTML will.
-			 */
-			if ( $custom_html ) {
-				// Use custom composed HTML.
-				$domelement_html = $custom_html;
-			} else {
-				// Keep this $domelement's HTML.
-				$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
-				$domelement_html = trim( $domelement_html );
-				if ( empty( $domelement_html ) ) {
+		if ( ! $div_content_crawlers ) {
+			$div_content_crawlers = $this->filter_selector_element( 'div.rich-text-body', $this->crawler, $single = false );
+		}
+
+// /**
+//  * In case div.rich-text-body was already removed (if this command was already run and needs to be run again),
+//  * let's use a simple trick to enable traversing through all the nodes of the content -- let's just temporarily
+//  * surround the HTML with a new <div> so that nodes can be traversed the same way as if <div> was here and its nodes
+//  * were actual children.
+//  */
+// // if ( ! $div_content_crawler ) {
+// if ( ! $div_content_crawlers ) {
+// 	$this->crawler->clear();
+// 	$this->crawler->add( '<div>' . $post_content . '</div>' );
+// 	$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
+// }
+
+		foreach ( $div_content_crawlers as $div_content_crawler ) {
+
+			// Traverse through all the child nodes.
+			foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
+
+				// Skip if blank.
+				$html_domelement = $domelement->ownerDocument->saveHTML( $domelement );
+				if ( empty( trim( $html_domelement ) ) ) {
 					continue;
 				}
-			}
 
-			// Append HTML.
-			$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
-			$post_content_updated .= $domelement_html;
+				// Transform or skip specific "div.enhancement"s into $custom_html.
+				$custom_html = null;
+				$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
+				if ( $is_div_class_enhancement ) {
+					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $log_need_oembed_resave, $log_err_img_download );
+				}
+
+				// If $custom_html is a string other than null, it will be used as HTML; and if it's null, the original HTML will be used.
+				if ( ! is_null( $custom_html ) ) {
+					// Use custom HTML.
+					$domelement_html = $custom_html;
+				} else {
+					// Keep this $domelement's original HTML.
+					$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
+					$domelement_html = trim( $domelement_html );
+					if ( empty( $domelement_html ) ) {
+						continue;
+					}
+				}
+
+				// Append HTML.
+				$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
+				$post_content_updated .= $domelement_html;
+			}
 		}
 
 		return $post_content_updated;
 	}
+
+	/**
+	 * @param DOMElement $domelement
+	 * @param int        $post_id
+	 * @param string     $log_need_oembed_resave
+	 * @param string     $log_err_img_download
+	 *
+	 * @return ?string $custom_html Resulting HTML to use instead of the original HTML.
+	 *                              If it's an empty string, the original HTML will be skipped (replaced with empty).
+	 *                              If it's null, the original HTML will be used (null means a literal null).
+	 */
+	public function transform_div_enchancement(
+		DOMElement $domelement,
+		int $post_id,
+		string $log_need_oembed_resave,
+		string $log_err_img_download
+	) : ?string {
+
+		$enhancement_crawler = new Crawler( $domelement );
+
+		$custom_html = null;
+
+		/**
+		 * Skip ( by setting `$custom_html = '';` ) or transform 'div.enchancement's ( by setting a HTML value to $custom_html ).
+		 */
+		if ( $enhancement_crawler->filter( 'div > div#newsletter_signup' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'div > div > script[src="https://cdn.broadstreetads.com/init-2.min.js"]' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Student signup banner"]' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'div.promo-action' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="BFCU Home Loans Ad"]' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="Community Voices election 2022"]' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
+
+			/**
+			 * Transform to quote block.
+			 */
+
+			$quote_text = null;
+			$quote_cite = null;
+
+			$helper_crawler = $enhancement_crawler->filter( 'div.enhancement > div.quote > div.quote-text > blockquote > p.quote-body' );
+			if ( $helper_crawler && $helper_crawler->getNode(0) ) {
+				$helper_node = $helper_crawler->getNode(0);
+				$quote_text = $helper_node->textContent;
+			}
+
+			$helper_crawler = $enhancement_crawler->filter( 'div.enhancement > div.quote > div.quote-text > p.quote-attribution' );
+			if ( $helper_crawler && $helper_crawler->getNode(0) ) {
+				$helper_node = $helper_crawler->getNode(0);
+				$quote_cite = $helper_node->textContent;
+			}
+
+			// Get block if $quote_text is found, or else keep inner HTML.
+			if ( $quote_text ) {
+				// Get quote block.
+				$quote_block = $this->gutenberg->get_quote( $quote_text, $quote_cite );
+				$custom_html = serialize_blocks( [ $quote_block ] );
+			} else {
+				// Keep HTML inside 'div.enhancement'.
+				$helper_node = $enhancement_crawler->filter( 'div.quote-text' )->getNode( 0 );
+				$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+			}
+
+
+		} elseif ( $enhancement_crawler->filter( 'div.infobox' )->count() ) {
+			// Keep HTML inside 'div.enhancement'.
+			$helper_node = $enhancement_crawler->filter( 'div.infobox' )->getNode( 0 );
+			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+		} elseif ( $enhancement_crawler->filter( 'figure > a[href="mailto:elections@lookoutlocal.com"]' )->count() ) {
+			// Keep HTML inside 'div.enhancement'.
+			$helper_node = $enhancement_crawler->filter( 'figure' )->getNode( 0 );
+			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+		} elseif ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
+			// Keep HTML inside 'div.enhancement'.
+			$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
+			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+		} elseif ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
+			// Keep HTML inside 'div.enhancement'.
+			$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
+			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+		} elseif ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
+			// Keep HTML inside 'div.enhancement'.
+			$helper_node = $enhancement_crawler->filter( 'figure.figure' )->getNode( 0 );
+			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+		} elseif ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
+			/**
+			 * If 'div.enhancement' has > ps-interactive-project > iframe with src containing "//joinsubtext.com/lilyonfood", keep it.
+			 */
+			$iframe_crawler = $enhancement_crawler->filter( 'ps-interactive-project > iframe' );
+			if ( $iframe_crawler && $iframe_crawler->getNode(0) ) {
+				$src = $iframe_crawler->getNode(0)->getAttribute('src');
+				if ( false !== strpos( $src, '//joinsubtext.com/lilyonfood' ) ) {
+					// Keep HTML inside 'div.enhancement'.
+					$helper_node = $enhancement_crawler->filter( 'ps-interactive-project' )->getNode( 0 );
+					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+				}
+			}
+
+		} elseif ( $enhancement_crawler->filter( 'figure.figure > a.link > img' )->count() ) {
+
+			/**
+			 * An image within an <a> link: 'div.enhancement' has > figure.figure > a.link > img.image with src containing "//lookout.brightspotcdn.com/".
+			 */
+
+			// If an <a> is surrounding the image, get it
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link' );
+			$href = $helper_crawler->getNode(0) ? $helper_crawler->getNode(0)->getAttribute('href') : null;
+
+			// Get all image data -- src, alt, caption, credit.
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > img' );
+			$src = $helper_crawler->getNode(0)->getAttribute('src');
+			$alt = $helper_crawler->getNode(0)->getAttribute('alt');
+
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > div.figure-content > div.figure-caption' );
+			$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
+
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > a.link > div.figure-content > div.figure-credit' );
+			// Not sure why this returns only the first character...
+			//      $credit = $helper_crawler->innerText();
+			$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
+
+			// Download image.
+			WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
+			$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
+
+			// Get Gutenberg image block.
+			$attachment_post = get_post( $attachment_id );
+			$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, null, null, $href );
+			$custom_html = serialize_blocks( [ $image_block ] );
+
+		} elseif ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
+
+			/**
+			 * An image: 'div.enhancement' has > figure.figure > img.image with src containing "//lookout.brightspotcdn.com/".
+			 */
+
+			// Get all image data -- src, alt, caption, credit.
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > img' );
+			$src = $helper_crawler->getNode(0)->getAttribute('src');
+			$alt = $helper_crawler->getNode(0)->getAttribute('alt');
+
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-caption' );
+			$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
+
+			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-credit' );
+			// Not sure why this returns only the first character...
+			//      $credit = $helper_crawler->innerText();
+			$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
+
+			// Download image.
+			WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
+			$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
+
+			// Get Gutenberg image block.
+			$attachment_post = get_post( $attachment_id );
+			$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false );
+			$custom_html = serialize_blocks( [ $image_block ] );
+
+		} elseif ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
+
+			/**
+			 * YT player to Gutenberg YT block.
+			 */
+
+			// Get YT video ID.
+			$helper_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
+			$yt_video_id    = $helper_crawler->getNode(0)->getAttribute('data-video-id');
+			if ( ! $yt_video_id ) {
+				// TODO -- log missing TY link
+			}
+
+			// Get Gutenberg YT block.
+			$yt_link     = "https://www.youtube.com/watch?v=$yt_video_id";
+			$yt_block    = $this->gutenberg->get_youtube( $yt_link );
+			$custom_html = serialize_blocks( [ $yt_block ] );
+
+			// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+			$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
+
+		} elseif ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
+
+			/**
+			 * Tweet embed to Twitter block.
+			 */
+
+			// Get Twitter link.
+			$helper_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
+			$twitter_link = '';
+			foreach ( $helper_crawler->getIterator() as $twitter_a_domelement ) {
+				$href = $twitter_a_domelement->getAttribute( 'href' );
+				if ( false !== strpos( $href, 'twitter.com' ) ) {
+					$twitter_link = $href;
+					break;
+				}
+			}
+			if ( ! $twitter_link ) {
+				// TODO -- log missing Twitter link
+			}
+
+			if ( ! empty( $twitter_link ) ) {
+				// Get Gutenberg Twitter block.
+				$twitter_block = $this->gutenberg->get_twitter( $twitter_link );
+				$custom_html   = serialize_blocks( [ $twitter_block ] );
+
+				// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+				$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d Twitter", $post_id ), $this->logger::WARNING );
+			}
+
+		} elseif ( $enhancement_crawler->filter( 'ps-carousel' )->count() ) {
+
+			/**
+			 * ps-carousel slides to Gutenberg gallery block.
+			 */
+
+			// First scrape all images data.
+			/**
+			 * @var array $images_data {
+			 *      @type string $src           Image URL.
+			 *      @type string $alt           Image alt text.
+			 *      @type string $credit        Image credit.
+			 *      @type string $attachment_id Image credit.
+			 * }
+			 */
+			$images_data = [];
+			$helper_crawler = $enhancement_crawler->filter( 'ps-carousel > div.carousel-slides > div.carousel-slide' );
+			$img_index = 0;
+			foreach ( $helper_crawler->getIterator() as $div_slide_domelement ) {
+
+				$images_data[ $img_index ] = [
+					'src' => null,
+					'alt' => null,
+					'credit' => null,
+					'attachment_id' => null,
+				];
+
+				// New crawler for each slide.
+				$slides_info_crawler = new Crawler( $div_slide_domelement );
+
+				// Get Credit from > div class=carousel-slide-inner ::: data-info-attribution="Cabrillo Robotics"
+				$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner' );
+				$attribution = $slide_inner_crawler->count() > 0 ? $slide_inner_crawler->getNode(0)->getAttribute('data-info-attribution') : null;
+				$images_data [ $img_index ][ 'credit' ] = $attribution;
+
+				// Get Src and Alt from > div class=carousel-slide-inner > div.carousel-slide-media > img ::: alt src
+				$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner > div.carousel-slide-media > img' );
+				if ( $slide_inner_crawler->count() ) {
+					$src = $slide_inner_crawler->getNode(0)->getAttribute('src');
+					if ( ! $src ) {
+						$src = $slide_inner_crawler->getNode(0)->getAttribute('data-flickity-lazyload');
+					}
+					if ( $src ) {
+						$images_data[ $img_index ][ 'src' ] = $src;
+					}
+					$alt = $slide_inner_crawler->getNode(0)->getAttribute('alt');
+					if ( $alt ) {
+						$images_data[ $img_index ][ 'alt' ] = $alt;
+					}
+				}
+
+				$img_index++;
+			}
+
+			// Import images and get attachment IDs.
+			$attachment_ids = [];
+			foreach ( $images_data as $image_data ) {
+
+				if ( ! $image_data['src'] ) {
+					// TODO -- log
+					continue;
+				}
+
+				WP_CLI::line( sprintf( 'Downloading image: %s', $image_data['src'] ) );
+				$attachment_id    = $this->get_or_download_image( $log_err_img_download, $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
+				$attachment_ids[] = $attachment_id;
+			}
+
+			// Get Gutenberg gallery block.
+			if ( ! empty( $attachment_ids ) ) {
+				$slideshow_block = $this->gutenberg->get_jetpack_slideshow( $attachment_ids );
+				$custom_html     = serialize_blocks( [ $slideshow_block ] );
+
+				// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+				$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d JPSlideshow", $post_id ), $this->logger::WARNING );
+			} else {
+				// TODO -- log failed attachment import <-- i.e. failed gallery, but put to same log
+			}
+		}
+
+		return $custom_html;
+	}
+
 	/**
 	 * @param string $post_content HTML.
 	 */
@@ -1360,12 +1460,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		/**
 		 * Logs.
 		 */
-		$log_wrong_urls                   = '/ll2_debug__wrong_urls.log';
-		$log_all_author_names             = '/ll2_debug__all_author_names.log';
-		$log_all_tags                     = '/ll2_debug__all_tags.log';
-		$log_all_tags_promoted_content    = '/ll2_debug__all_tags_promoted_content.log';
-		$log_err_importing_featured_image = '/ll2_err__featured_image.log';
-		$log_err_img_download             = '/ll2_err__img_download.log';
+		$log_wrong_urls                   = 'll2_debug__wrong_urls.log';
+		$log_all_author_names             = 'll2_debug__all_author_names.log';
+		$log_all_tags                     = 'll2_debug__all_tags.log';
+		$log_all_tags_promoted_content    = 'll2_debug__all_tags_promoted_content.log';
+		$log_err_importing_featured_image = 'll2_err__featured_image.log';
+		$log_err_img_download             = 'll2_err__img_download.log';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_wrong_urls, $ts, false );
@@ -1572,7 +1672,7 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		// Author names.
 		if ( ! empty( $debug_all_author_names ) ) {
 			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-			WP_CLI::warning( "⚠️️ QC $log_all_author_names " );
+			WP_CLI::warning( "⚠️️  QC $log_all_author_names" );
 		}
 		// Tags.
 		if ( ! empty( $debug_all_tags ) ) {
@@ -1586,12 +1686,12 @@ if ( $crawled_data['tags_promoted_content'] ) {
 			);
 			// Log.
 			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
-			WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
+			WP_CLI::warning( "⚠️️  QC $log_all_tags" );
 		}
 		// Promoted content.
 		if ( ! empty( $debug_all_tags_promoted_content ) ) {
 			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
-			WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
+			WP_CLI::warning( "⚠️️  QC $log_all_tags_promoted_content" );
 		}
 
 		WP_CLI::line( 'Done 👍' );
@@ -1600,8 +1700,13 @@ if ( $crawled_data['tags_promoted_content'] ) {
 	public function cmd_after_import2__content_transform_and_cleanup( $pos_args, $assoc_args ) {
 		global $wpdb;
 
+		/**
+		 * Args.
+		 */
+		$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+
 		// Folder to store scraped author pages HTMLs.
-		$scrape_author_htmls_path = $this->temp_dir . '/scrape_author_htmls';
+		$scrape_author_htmls_path = 'scrape_author_htmls';
 		if ( ! file_exists( $scrape_author_htmls_path ) ) {
 			mkdir( $scrape_author_htmls_path, 0777, true );
 		}
@@ -1609,12 +1714,12 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		/**
 		 * Logs.
 		 */
-		$log_post_ids_updated   = '/ll2_updated_post_ids.log';
-		$log_gas_urls_updated   = '/ll2_gas_urls_updated.log';
-		$log_err_gas_updated    = '/ll2_err__updated_gas.log';
-		$log_enhancements       = '/ll2_qa__enhancements.log';
-		$log_need_oembed_resave = '/ll2__need_oembed_resave.log';
-		$log_err_img_download   = '/ll2_err__img_download.log';
+		$log_post_ids_updated   = 'll2_updated_post_ids.log';
+		$log_gas_urls_updated   = 'll2_gas_urls_updated.log';
+		$log_err_gas_updated    = 'll2_err__updated_gas.log';
+		$log_enhancements       = 'll2_qa__enhancements.log';
+		$log_need_oembed_resave = 'll2__need_oembed_resave.log';
+		$log_err_img_download   = 'll2_err__img_download.log';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_post_ids_updated, $ts, false );
@@ -1625,7 +1730,9 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		$this->logger->log( $log_err_img_download, $ts, false );
 
 		// Get post IDs.
-		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		if ( ! $post_ids ) {
+			$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		}
 
 		/**
 		 * Clean up post_content -- remove inserted promo or user engagement content.
@@ -2104,7 +2211,42 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		$subtitle              = $this->filter_selector( 'div.subheadline > h2', $this->crawler ) ?? null;
 		$data['post_subtitle'] = $subtitle ?? null;
 
-		$post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+		$post_content = '';
+
+		/**
+		 * CONTENT TYPE 1. STORY STACK
+		 *      - content is located in: article.story > div.story-stack and these have multiple div.story-stack-item > div.story-stack-story
+		 *          => we will save all div.story-stack-story as post_content
+		 *      - e.g. https://lookout.co/santacruz/coast-life/story/2023-05-19/pescadero-day-trip-sea-lions-ano-nuevo-award-winning-tavern-baby-goats
+		 */
+		$div_content_crawler = $this->filter_selector_element( 'article.story>div.story-stack>div.story-stack-item>div.story-stack-story', $this->crawler, $single = false );
+		if ( $div_content_crawler ) {
+			foreach ( $div_content_crawler->getIterator() as $div_content_crawler_story_stack_story ) {
+				$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+				$post_content .= $div_content_crawler_story_stack_story->ownerDocument->saveHTML( $div_content_crawler_story_stack_story );
+			}
+		}
+
+		/**
+		 * CONTENT TYPE 2.
+		 *      - div#pico
+		 */
+		if ( ! $div_content_crawler ) {
+			/**
+			 * There can be multiple div#pico elements.
+			 * This here was for when I thought there was just a single div#pico element:
+			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+			 */
+			$post_content_crawler = $this->filter_selector_element( 'div#pico', $this->crawler, $single = false );
+			if ( $post_content_crawler ) {
+				foreach ( $post_content_crawler->getIterator() as $post_content_node ) {
+					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+					$post_content .= $post_content_node->ownerDocument->saveHTML( $post_content_node );
+				}
+			}
+		}
+
+
 		if ( empty( $post_content ) ) {
 			$post_content = $this->filter_selector( 'div.rich-text-article-body-content', $this->crawler, false, false );
 		}
