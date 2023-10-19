@@ -41,9 +41,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/recreation-sports">Recreation &amp; Sports</a>
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/election-2022">Election 2022 </a>
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/santa-cruz-county-obituaries">Obituaries</a>
+	 *
+     * -- no content found in SITE MAP:
+	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/lookout-educator-page">For Educators</a>
+	 *
+	 * -- not importing these programmatically, as agreed with the Publisher:
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/partners/civic-groups">Civic Groups</a>
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/partners">Partners</a>
-	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/lookout-educator-page">For Educators</a>
 	 */
 	const SECTIONS = [
 		'city-life'                    => 'City Life',
@@ -63,156 +67,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		'civic-groups'                 => 'Civic Groups',
 		'partners'                     => 'Partners',
 		'lookout-educator-page'        => 'For Educators',
-	];
-
-	/**
-	 * Fetched from lookout.co manually. Used to populate --urls-file for demo import.
-	 */
-	const INITIAL_DEMO_URLS = [
-		// City Life
-		'https://lookout.co/santacruz/wallace-baine/story/2023-08-06/performing-arts-as-old-guard-passes-baton-on-santa-cruz-scene-how-will-new-leaders-weather-generational-shift',
-		'https://lookout.co/santacruz/city-life/story/2023-08-03/sleepy-john-sandidge-retirement-kpig-radio-show-please-stand-by',
-		'https://lookout.co/santacruz/city-life/story/2023-08-01/sts9-sound-tribe-sector-9-uc-santa-cruz-quarry-amphitheater-after-playing-all-over-country-sts9-comes-back-to-new-home-venue',
-		'https://lookout.co/santacruz/civic-life/story/2023-07-31/county-supervisors-housing-plans-mental-health-care-courts-pajaro-river-levee-czu-fire-recovery',
-		'https://lookout.co/santacruz/news/story/2023-07-31/santa-cruz-police-black-lives-matter-mural-sc-equity-collab',
-		'https://lookout.co/santacruz/wallace-baine/the-here-now/story/2023-07-30/how-lara-love-hardin-survived-addiction-incarceration-and-shame-to-rebuild-her-life',
-		'https://lookout.co/santacruz/news/story/2023-07-28/how-ellen-primack-built-cabrillo-festival-internationally-celebrated-showcase-new-music',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-28/five-star-dive-bars-max-turigliatto-is-breathing-new-life-into-santa-cruzs-watering-holes',
-		'https://lookout.co/santacruz/city-life/story/2023-07-27/wallace-baine-weekender-arts-culture-entertainment-hunchback-cabrillo-stage',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-26/santa-cruz-icon-mariannes-ice-cream-opens-new-westside-location',
-
-		// Food & Drink
-		'https://lookout.co/santacruz/food-drink/story/2023-08-08/humble-sea-tavern-in-felton-abruptly-closes-its-doors',
-		'https://lookout.co/santacruz/food-drink/newsletter/2023-08-01/greater-purpose-brewing-closes-grove-cafe-felton-fire-humble-sea-brewing-alameda-location-otter-841-inspired-beer-pesto-lily-belli-on-food',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-31/felton-fire-grove-cafe-to-cause-short-closure',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-28/eaters-digest-birichinos-2022-petillant-malvasia-bianca-in-a-can',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-28/five-star-dive-bars-max-turigliatto-is-breathing-new-life-into-santa-cruzs-watering-holes',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-26/santa-cruz-icon-mariannes-ice-cream-opens-new-westside-location',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-25/trestles-pop-up-offers-sneak-peek-of-nick-sherman-upcoming-aptos-restaurant',
-		'https://lookout.co/santacruz/food-drink/newsletter/2023-07-25/lily-belli-on-food-poet-patriot-max-turigliatto-tran-vu-vietnamese-pop-up-mariposa-trestles-cavalletta-nick-sherman-lily-belli-on-food',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-21/eaters-digest-woodhouse-brewing-collaboration-sts9-wilder-session-ipa-california-craft-beer-week',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-21/cabrillo-college-wedding-cakes-class-inside-final-exam',
-		// Housing
-		'https://lookout.co/santacruz/places/story/2023-08-10/home-sales-santa-cruz-county-real-estate-interest-rates',
-		'https://lookout.co/santacruz/business-technology/hiring/story/2023-08-07/how-i-got-my-job-case-manager-andres-galvan-on-confronting-housing-addiction-and-mental-health-crises',
-		'https://lookout.co/santacruz/news/story/2023-07-26/santa-cruz-auburn-avenue-ferrari-250gt-lusso-west-cliff-real-estate',
-		'https://lookout.co/santacruz/news/story/2023-07-24/whats-in-illegal-drugs-a-ucla-team-takes-testing-to-the-streets-to-find-out',
-		'https://lookout.co/santacruz/education/higher-ed/story/2023-07-12/cabrillo-college-ucsc-joint-student-housing-project-in-limbo-after-changes-to-state-budget',
-		'https://lookout.co/santacruz/santa-cruz/story/2023-07-10/downtown-santa-cruz-vintage-clothing-shops-retail-renaissance',
-		'https://lookout.co/santacruz/news/story/2023-07-07/l-a-hotel-workers-are-back-on-the-job-but-say-more-strikes-are-to-come',
-		'https://lookout.co/santacruz/news/story/2023-07-03/a-california-city-was-making-a-difference-on-homelessness-then-the-money-ran-out',
-		'https://lookout.co/santacruz/news/story/2023-06-30/visiting-u-s-official-matches-citys-climate-friendly-infrastructure-progress-with-message-of-plenty',
-		'https://lookout.co/santacruz/education/story/2023-06-29/live-oak-school-district-extends-meals-on-wheels-senior-network-services-eviction-to-aug-30',
-		// Civic Life
-		'https://lookout.co/santacruz/ucsc-cabrillo/story/2023-08-10/native-american-indigenous-madelyne-broome-uc-santa-cruz-astrophysics-grad-student-didnt-feel-native-enough-until-ucsc',
-		'https://lookout.co/santacruz/civic-life/story/2023-08-09/california-prescription-could-pay-for-your-fresh-fruits-and-veggies',
-		'https://lookout.co/santacruz/partners/marketing/story/2023-08-01/cabrillo-festival-of-contemporary-music-announces-61st-season',
-		'https://lookout.co/santacruz/civic-life/story/2023-08-09/michael-cheek-convicted-rapist-civil-rights-transient-release-state-santa-cruz-county-continue-search',
-		'https://lookout.co/santacruz/news/story/2023-08-09/capitola-village-lumen-gallery-pride-flags-stolen-hate-crime-capitola-police',
-		'https://lookout.co/santacruz/partners/marketing/story/2023-07-06/federal-grant-funds-santa-cruz-county-wic-outreach-to-immigrants-and-farmworkers',
-		'https://lookout.co/santacruz/education/higher-ed/story/2023-08-08/university-of-california-admits-record-number-of-california-first-year-students-for-fall-2023-uc-santa-cruz-acceptance-up-45-percent',
-		'https://lookout.co/santacruz/civic-life/story/2023-08-08/california-has-made-voting-much-easier-but-regular-voters-still-skew-white-and-old-poll-finds',
-		'https://lookout.co/santacruz/civic-life/story/2023-08-08/michael-cheek-convicted-rapist-transient-release-santa-cruz-county-bonny-doon-syda-cogliati#nt=00000175-a0bb-ddb0-a57f-e7ff35ec0000-liF0promoSmall-7030col1',
-		'https://lookout.co/santacruz/education/higher-ed/cabrillo-college/story/2023-08-08/cabrillo-college-governing-board-delays-name-change-until-november-amid-deep-divisions',
-		// Higher Ed
-		'https://lookout.co/santacruz/education/higher-ed/cabrillo-college/story/2023-08-08/cabrillo-college-governing-board-delays-name-change-until-november-amid-deep-divisions',
-		'https://lookout.co/santacruz/partners/marketing/story/2023-07-07/for-the-second-consecutive-year-cabrillo-college-robotics-club-wins-first-place-in-world-competition',
-		'https://lookout.co/santacruz/education/higher-ed/cabrillo-college/story/2023-08-07/cabrillo-college-name-change-what-to-know-about-governing-board-monday-meeting',
-		'https://lookout.co/santacruz/community-voices/opinion-from-community-voices/story/2023-08-06/santa-cruz-county-asian-americans-support-cabrillo-college-name-change-lets-empower-the-next-generation',
-		'https://lookout.co/santacruz/education/higher-ed/story/2023-08-04/csu-likely-to-miss-2025-graduation-goals-with-unacceptably-high-equity-gaps-report-says',
-		'https://lookout.co/santacruz/education/higher-ed/story/2023-08-03/cabrillo-college-governing-board-set-to-vote-monday-on-delaying-name-change',
-		'https://lookout.co/santacruz/education/higher-ed/cabrillo-college/story/2023-08-03/cabrillo-college-renaming-vote-supporters-press-for-change-monument-to-racism-in-santa-cruz-county',
-		'https://lookout.co/santacruz/education/higher-ed/cabrillo-college/story/2023-08-02/cabrillo-college-rising-scholars-program-gives-formerly-incarcerated-students-a-pathway-to-higher-education',
-		'https://lookout.co/santacruz/city-life/story/2023-08-01/sts9-sound-tribe-sector-9-uc-santa-cruz-quarry-amphitheater-after-playing-all-over-country-sts9-comes-back-to-new-home-venue',
-		'https://lookout.co/santacruz/news/story/2023-07-28/how-ellen-primack-built-cabrillo-festival-internationally-celebrated-showcase-new-music',
-		// K-12 Education
-		'https://lookout.co/santacruz/education/story/2023-08-09/capitola-police-give-all-clear-after-new-brighton-middle-school-receives-bomb-threat',
-		'https://lookout.co/santacruz/education/story/2023-07-19/santa-cruz-gateway-school-fourth-grade-inventor-wins-first-place-in-national-competition-with-backpack-designed-for-forgetful-students',
-		'https://lookout.co/santacruz/education/story/2023-07-18/california-transitional-kindergarten-day-care-competing-for-4-year-olds',
-		'https://lookout.co/santacruz/education/story/2023-07-13/pajaro-valley-unified-appoints-former-teacher-and-administrator-murry-schekman-interim-superintendent',
-		'https://lookout.co/santacruz/education/story/2023-07-12/california-math-overhaul-aims-to-help-struggling-students-but-will-it-hurt-whiz-kids#nt=00000175-b083-de97-ab7d-f2d7351c0000-liF0promoSmall-7030col1',
-		'https://lookout.co/santacruz/education/story/2023-06-29/live-oak-school-district-extends-meals-on-wheels-senior-network-services-eviction-to-aug-30',
-		'https://lookout.co/santacruz/education/story/2023-06-22/california-doubles-down-on-inclusive-education-as-red-states-ban-books-in-classrooms',
-		'https://lookout.co/santacruz/education/story/2023-06-22/reyna-maharaj-st-francis-high-school-watsonville-graduate-foster-care-system-uc-san-diego-cybersecurity',
-		'https://lookout.co/santacruz/education/story/2023-06-02/pvusd-superintendent-michelle-rodriguez-leaving-position-to-head-stockton-unified-school-district',
-		'https://lookout.co/santacruz/food-drink/story/2023-05-30/summer-food-wine-gardening-courses',
-		// Coast Life
-		'https://lookout.co/santacruz/wallace-baine/story/2023-08-06/performing-arts-as-old-guard-passes-baton-on-santa-cruz-scene-how-will-new-leaders-weather-generational-shift',
-		'https://lookout.co/santacruz/city-life/story/2023-08-03/santa-cruz-shakespeare-book-of-will-lauren-gunderson',
-		'https://lookout.co/santacruz/partners/marketing/story/2023-07-07/for-the-second-consecutive-year-cabrillo-college-robotics-club-wins-first-place-in-world-competition',
-		'https://lookout.co/santacruz/city-life/story/2023-08-03/sleepy-john-sandidge-retirement-kpig-radio-show-please-stand-by',
-		'https://lookout.co/santacruz/environment/story/2023-08-01/global-warming-bigger-waves-off-california-coast-scientists-say',
-		'https://lookout.co/santacruz/city-life/story/2022-08-22/staying-safe-on-a-budget-how-to-protect-your-home-from-california-wildfires',
-		'https://lookout.co/santacruz/weather/story/2023-07-29/california-has-new-weapons-to-battle-summer-blackouts-battery-storage-power-from-record-rain',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-28/eaters-digest-birichinos-2022-petillant-malvasia-bianca-in-a-can',
-		'https://lookout.co/santacruz/coast-life/story/2023-07-28/human-behavior-otter-841-santa-cruz-steamer-lane-fish-and-wildlife',
-		'https://lookout.co/santacruz/city-life/story/2023-07-27/wallace-baine-weekender-arts-culture-entertainment-hunchback-cabrillo-stage',
-		// Wallace Baine
-		'https://lookout.co/santacruz/wallace-baine/story/2023-08-06/performing-arts-as-old-guard-passes-baton-on-santa-cruz-scene-how-will-new-leaders-weather-generational-shift',
-		'https://lookout.co/santacruz/city-life/story/2023-08-03/sleepy-john-sandidge-retirement-kpig-radio-show-please-stand-by',
-		'https://lookout.co/santacruz/city-life/story/2023-08-01/sts9-sound-tribe-sector-9-uc-santa-cruz-quarry-amphitheater-after-playing-all-over-country-sts9-comes-back-to-new-home-venue',
-		'https://lookout.co/santacruz/wallace-baine/the-here-now/story/2023-07-30/how-lara-love-hardin-survived-addiction-incarceration-and-shame-to-rebuild-her-life',
-		'https://lookout.co/santacruz/news/story/2023-07-28/how-ellen-primack-built-cabrillo-festival-internationally-celebrated-showcase-new-music',
-		'https://lookout.co/santacruz/wallace-baine/newsletter/2023-07-27/weekender-hunchback-free-cabrillo-festival-rehearsals-book-of-will-playwright-visit-more-best-bets-osmosys-app-work-around',
-		'https://lookout.co/santacruz/city-life/story/2023-07-27/wallace-baine-weekender-arts-culture-entertainment-hunchback-cabrillo-stage',
-		'https://lookout.co/santacruz/wallace-baine/the-here-now/story/2023-07-25/a-brave-new-world-sandy-skees-shares-how-businesses-can-succeed-with-a-new-generation-of-consumers',
-		'https://lookout.co/santacruz/city-life/story/2023-07-23/barbie-movie-many-perspectives-on-barbie-an-older-guy-and-two-teens-discuss-pop-culture-phenomenon',
-		'https://lookout.co/santacruz/civic-life/story/2023-07-21/rfk-robert-f-kennedy-jr-presidential-run-will-santa-cruz-county-be-open-to-what-rfk-jr-is-selling',
-		// Environment
-		'https://lookout.co/santacruz/environment/wildfires/story/2023-08-02/york-fire-as-joshua-trees-burn-massive-wildfire-threatens-to-forever-alter-mojave-desert',
-		'https://lookout.co/santacruz/weather/story/2023-07-29/california-has-new-weapons-to-battle-summer-blackouts-battery-storage-power-from-record-rain',
-		'https://lookout.co/santacruz/coast-life/story/2023-07-28/human-behavior-otter-841-santa-cruz-steamer-lane-fish-and-wildlife',
-		'https://lookout.co/santacruz/news/story/2023-07-27/swiss-cheese-no-please-a-rodent-hole-debacle-rocks-the-san-lorenzo-river-levee',
-		'https://lookout.co/santacruz/news/story/2023-07-27/swiss-cheese-no-please-a-rodent-hole-debacle-rocks-the-san-lorenzo-river-levee',
-		'https://lookout.co/santacruz/environment/story/2023-07-20/alifornia-electric-cars-feed-grid-help-avoid-brownouts',
-		'https://lookout.co/santacruz/coast-life/story/2023-07-20/otter-841-fish-wildlife-randall-davis-captivity-monterey-bay-steamer-lane-cowell-beach',
-		'https://lookout.co/santacruz/news/story/2023-07-19/california-will-cap-hundreds-of-orphaned-oil-wells-some-long-suspected-of-causing-illness',
-		'https://lookout.co/santacruz/environment/climate/story/2023-07-19/death-valleys-extreme-heat-goes-off-the-charts-from-climate-change',
-		'https://lookout.co/santacruz/coast-life/story/2023-07-18/otter-841-santa-cruz-fish-wildlife-cowell-beach-steamer-lane',
-		// Health & Wellness
-		'https://lookout.co/santacruz/health-wellness/story/2023-08-10/new-coronavirus-subvariant-eris-is-gaining-dominance-is-it-fueling-an-increase-in-cases',
-		'https://lookout.co/santacruz/civic-life/story/2023-08-07/as-speedy-hefty-e-bikes-become-ubiquitous-around-santa-cruz-can-regulation-be-far-behind',
-		'https://lookout.co/santacruz/business-technology/hiring/story/2023-08-07/how-i-got-my-job-case-manager-andres-galvan-on-confronting-housing-addiction-and-mental-health-crises',
-		'https://lookout.co/santacruz/health-wellness/story/2023-08-02/valley-fever-could-hit-california-hard-the-drought-to-downpour-cycle-is-to-blame',
-		'https://lookout.co/santacruz/health-wellness/story/2023-07-31/summer-covid-surge-santa-cruz-county-boosters-paxlovid',
-		'https://lookout.co/santacruz/wallace-baine/the-here-now/story/2023-07-30/how-lara-love-hardin-survived-addiction-incarceration-and-shame-to-rebuild-her-life',
-		'https://lookout.co/santacruz/health-wellness/story/2023-07-27/watsonville-community-hospitals-board-takes-another-step-toward-pursuing-bond-measure',
-		'https://lookout.co/santacruz/community-voices/opinion-from-community-voices/story/2023-07-25/i-think-my-mother-in-law-has-discovered-the-fountain-of-youth',
-		'https://lookout.co/santacruz/civic-life/story/2023-07-24/aging-population-as-santa-cruz-county-grays-impending-silver-tsunami-has-service-providers-worried',
-		'https://lookout.co/santacruz/civic-life/story/2023-07-21/rfk-robert-f-kennedy-jr-presidential-run-will-santa-cruz-county-be-open-to-what-rfk-jr-is-selling',
-		// Business & Technology
-		'https://lookout.co/santacruz/food-drink/story/2023-08-08/humble-sea-tavern-in-felton-abruptly-closes-its-doors',
-		'https://lookout.co/santacruz/coast-life/story/2023-08-04/santa-cruz-beach-boardwalk-planning-commission-ferris-wheel-chance-rides-seaside-company',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-31/felton-fire-grove-cafe-to-cause-short-closure',
-		'https://lookout.co/santacruz/weather/story/2023-07-29/california-has-new-weapons-to-battle-summer-blackouts-battery-storage-power-from-record-rain',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-28/five-star-dive-bars-max-turigliatto-is-breathing-new-life-into-santa-cruzs-watering-holes',
-		'https://lookout.co/santacruz/news/story/2023-07-26/santa-cruz-auburn-avenue-ferrari-250gt-lusso-west-cliff-real-estate',
-		'https://lookout.co/santacruz/education/story/2023-07-25/santa-cruz-county-public-school-staffing-woes-ease-ahead-of-start-of-the-academic-year',
-		'https://lookout.co/santacruz/wallace-baine/the-here-now/story/2023-07-25/a-brave-new-world-sandy-skees-shares-how-businesses-can-succeed-with-a-new-generation-of-consumers',
-		'https://lookout.co/santacruz/food-drink/story/2023-07-21/cabrillo-college-wedding-cakes-class-inside-final-exam',
-		'https://lookout.co/santacruz/environment/story/2023-07-20/alifornia-electric-cars-feed-grid-help-avoid-brownouts',
-		// Recreation & Sports
-		'https://lookout.co/santacruz/coast-life/story/2023-07-28/human-behavior-otter-841-santa-cruz-steamer-lane-fish-and-wildlife',
-		'https://lookout.co/santacruz/news/story/2023-07-07/l-a-hotel-workers-are-back-on-the-job-but-say-more-strikes-are-to-come',
-		'https://lookout.co/santacruz/news/story/2023-06-01/steve-garvey-senate-former-los-angeles-dodger-weighs-u-s-senate-bid',
-		'https://lookout.co/santacruz/civic-life/story/2023-05-30/cotoni-coast-dairies-national-monument-parking-battle-leaves-santa-cruz-countys-lone-national-monument-gated-from-public',
-		'https://lookout.co/santacruz/recreation-sports/story/2023-05-26/german-plaza-santa-cruz-youth-soccer-club-sharks-07-team-western-regionals',
-		'https://lookout.co/santacruz/news/story/2023-05-19/jim-brown-football-great-actor-civil-rights-activist-dies',
-		'https://lookout.co/santacruz/coast-life/story/2023-05-19/pescadero-day-trip-sea-lions-ano-nuevo-award-winning-tavern-baby-goats',
-		'https://lookout.co/santacruz/recreation-sports/story/2023-05-17/scotts-valley-high-school-signing-day-siena-wong-ellie-raffo-sam-freeman-amber-boothby-elana-mcgrew',
-		'https://lookout.co/santacruz/recreation-sports/story/2023-04-20/oakland-as-las-vegas-athletics-plan-to-buy-land-for-new-stadium-move-2027',
-		'https://lookout.co/santacruz/recreation-sports/story/2023-04-14/whitewater-rafting-california-epic-snowpack-promises-season-for-the-ages',
-		// Election 2022
-		'https://lookout.co/santacruz/election-2022/story/2022-11-11/santa-cruz-election-2022-latest-results',
-		'https://lookout.co/santacruz/election-2022/local-elections-section/story/2022-11-08/soquel-creek-water-district-board-carla-christensen-bruce-jaffe-corrie-kates-kris-kirby-rachel-lather',
-		'https://lookout.co/santacruz/election-2022/story/2022-11-08/santa-cruz-mayors-race-fred-keeley-joy-schendledecker',
-		'https://lookout.co/santacruz/election-2022/story/2022-11-07/santa-cruz-county-election-2022-weekly-update-november-7',
-		'https://lookout.co/santacruz/election-2022/story/2022-11-07/santa-cruz-county-election-2022-weekly-update-november-7',
-		'https://lookout.co/santacruz/community-voices/opinion-from-community-voices/story/2022-11-04/downtown-businesspeople-oppose-measure-o-with-unanimous-vote-of-downtown-association-board',
-		'https://lookout.co/santacruz/education/story/2022-11-03/soquel-union-elementary-school-district-candidates-on-teacher-pay-mental-health-declining-enrollment-and-pandemic-learning-loss',
-		'https://lookout.co/santacruz/education/story/2022-11-02/pajaro-valley-unified-school-district-candidates-diversity-pandemic-learning-loss-teacher-housing',
-		'https://lookout.co/santacruz/election-2022/local-elections-section/story/2022-11-02/affordable-housing-downtown-santa-cruz-ballot-measure-o',
-		'https://lookout.co/santacruz/community-voices/opinion-from-community-voices/story/2022-11-01/watsonville-city-council-district-7-race-only-challenger-nancy-bilicich-responds-to-lookout-questions-ari-parker-no-response',
 	];
 
 	/**
@@ -240,13 +94,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * @var Crawler Crawler instance.
 	 */
 	private $crawler;
-
-	/**
-	 * Current working directory.
-	 *
-	 * @var false|string Current working directory.
-	 */
-	private $temp_dir;
 
 	/**
 	 * Scraper instance.
@@ -291,11 +138,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// If on Atomic.
 		if ( '/srv/htdocs/__wp__/' == ABSPATH ) {
 			$public_path    = '/srv/htdocs';
-			$this->temp_dir = '/tmp/scraper_data';
 			$plugin_dir     = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
 		} else {
 			$public_path    = rtrim( ABSPATH, '/' );
-			$this->temp_dir = $public_path . '/scraper_data';
 			$plugin_dir     = $public_path . '/wp-content/plugins/newspack-custom-content-migrator';
 		}
 
@@ -332,33 +177,69 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function register_commands() {
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-get-all-urls-from-sitemap',
-			[ $this, 'cmd_get_urls_from_sitemap' ],
-		);
-		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-scrape-posts',
-			[ $this, 'cmd_scrape_posts' ],
+			'newspack-content-migrator lookoutlocal-scrape1-get-all-urls-from-sitemap',
+			[ $this, 'cmd_scrape1_get_urls_from_sitemap' ],
 			[
-				'shortdesc' => 'Main command. Scrape posts from live and imports them. Make sure to run lookoutlocal-create-custom-table first.',
+				'shortdesc' => 'Gets list of URLs from sitemap to be scraped.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'urls-file',
-						'description' => 'File with URLs to scrape and import, one URL per line.',
+						'name'        => 'path-to-save-list-of-urls',
+						'description' => 'Path where to save list of URLs -- 0__all_urls.txt file.',
+						'optional'    => false,
+					],
+				],
+			]
+
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-scrape2-scrape-htmls',
+			[ $this, 'cmd_scrape2_scrape_htmls' ],
+			[
+				'shortdesc' => 'Scrapes HTMLs from live and saves them to html files.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'file-list-of-urls',
+						'description' => 'Path to the 0__all_urls.txt file produced by previous command lookoutlocal-scrape1-get-all-urls-from-sitemap.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'path-to-save-htmls',
+						'description' => 'Path where scraped HTML files will be saved to.',
 						'optional'    => true,
 					],
 				],
 			]
 		);
+
+		// WP_CLI::add_command(
+		// 	'newspack-content-migrator lookoutlocal-scrape-posts',
+		// 	[ $this, 'cmd_scrape_posts' ],
+		// 	[
+		// 		'shortdesc' => 'Main command. Scrape posts from live and imports them. Make sure to run lookoutlocal-create-custom-table first.',
+		// 		'synopsis'  => [
+		// 			[
+		// 				'type'        => 'assoc',
+		// 				'name'        => 'urls-file',
+		// 				'description' => 'File with URLs to scrape and import, one URL per line.',
+		// 				'optional'    => true,
+		// 			],
+		// 		],
+		// 	]
+		// );
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-postscrape-posts',
-			[ $this, 'cmd_postscrape_posts' ],
+			'newspack-content-migrator lookoutlocal-after-import-posts',
+			[ $this, 'cmd_after_import_posts' ],
 			[
 				'shortdesc' => 'Second main command. Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
 			]
 		);
+
+
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-create-custom-table',
+			'newspack-content-migrator lookoutlocal-deprecated-create-custom-table',
 			[ $this, 'cmd_create_custom_table' ],
 			[
 				'shortdesc' => 'Extracts all posts JSONs from the huge `Record` table into a new custom table called self::CUSTOM_ENTRIES_TABLE.',
@@ -366,7 +247,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-get-urls-from-record-table',
+			'newspack-content-migrator lookoutlocal-deprecated-get-urls-from-record-table',
 			[ $this, 'cmd_get_urls_from_record_table' ],
 			[
 				'shortdesc' => 'This tries to extract live post URLs from Record and custom Newspack table. Make sure to run lookoutlocal-create-custom-table first.',
@@ -404,21 +285,29 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function cmd_get_urls_from_sitemap( $pos_args, $assoc_args ) {
+	public function cmd_scrape1_get_urls_from_sitemap( $pos_args, $assoc_args ) {
 
-		// Hardcoded sitemap index URL.
+		$path = $assoc_args['path-to-save-list-of-urls'];
+		if ( ! file_exists( $path ) ) {
+			mkdir( $path, 0777, true );
+		}
+
+		// Save list of URLs here.
+		$log = '0__all_urls.txt';
+		$log_path = $path . '/' . $log;
+
+		// Hardcoded here is their sitemap index URL.
 		$sitemap_index_url = 'https://lookout.co/santacruz/sitemap.xml';
-		$log = 'll__all_urls.txt';
 
 		WP_CLI::line( "Fetching URLs from sitemap index $sitemap_index_url , please hold ..." );
 		$urls = $this->fetch_and_parse_sitemap_index($sitemap_index_url);
 
 		if ( ! empty( $urls ) ) {
-			@unlink( $log );
+			@unlink( $log_path );
 			foreach ( $urls as $url_data ) {
-				file_put_contents( $log, $url_data['loc'] . "\n", FILE_APPEND );
+				file_put_contents( $log_path, $url_data['loc'] . "\n", FILE_APPEND );
 			}
-			WP_CLI::success( 'Done. URLs saved to ' . $log );
+			WP_CLI::success( 'Done. URLs saved to ' . $log_path );
 		} else {
 			WP_CLI::error( 'Failed to retrieve sitemap index or URLs.' );
 		}
@@ -557,7 +446,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 	}
 
-	public function cmd_postscrape_posts( $pos_args, $assoc_args ) {
+	public function cmd_after_import_posts( $pos_args, $assoc_args ) {
 		global $wpdb;
 
 		// Log files.
@@ -1463,10 +1352,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 	}
 
-	public function cmd_scrape_posts( $pos_args, $assoc_args ) {
+	public function cmd_scrape2_scrape_htmls( $pos_args, $assoc_args ) {
 		global $wpdb;
 
-		$urls_file = $assoc_args['urls-file'];
+		/**
+		 * Arguments.
+		 */
+		$urls_file = $assoc_args['file-list-of-urls'];
 		if ( ! file_exists( $urls_file ) ) {
 			WP_CLI::error( "File $urls_file does not exist." );
 		}
@@ -1474,245 +1366,326 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( empty( $urls ) ) {
 			WP_CLI::error( "File $urls_file is empty." );
 		}
+		$path = $assoc_args['path-to-save-htmls'];
+		if ( ! file_exists( $path ) ) {
+			mkdir( $path, 0777, true );
+		}
 
 		/**
-		 * Prepare logs and caching.
+		 * Path where scrapings will be saved.
 		 */
+		WP_CLI::warning( sprintf( "Saving URLs to %s", $this->temp_dir ) );
 
-		// Log files.
-		if ( ! file_exists( $this->temp_dir ) ) {
-			mkdir( $this->temp_dir, 0777, true );
-		}
-		$log_wrong_urls                   = $this->temp_dir . '/ll_debug__wrong_urls.log';
-		$log_all_author_names             = $this->temp_dir . '/ll_debug__all_author_names.log';
-		$log_all_tags                     = $this->temp_dir . '/ll_debug__all_tags.log';
-		$log_all_tags_promoted_content    = $this->temp_dir . '/ll_debug__all_tags_promoted_content.log';
-		$log_err_importing_featured_image = $this->temp_dir . '/ll_err__featured_image.log';
-		$log_err_img_download             = $this->temp_dir . '/ll_err__img_download.log';
-
+		/**
+		 * Logs. "2".
+		 */
+		$log_wrong_urls = 'll2_debug__wrong_urls.log';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_wrong_urls, $ts, false );
-		$this->logger->log( $log_all_author_names, $ts, false );
-		$this->logger->log( $log_all_tags, $ts, false );
-		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
-		$this->logger->log( $log_err_importing_featured_image, $ts, false );
-		$this->logger->log( $log_err_img_download, $ts, false );
-
-		// Create folders for caching stuff.
-		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
-		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
-			mkdir( $scraped_htmls_cache_path, 0777, true );
-		}
-
-
-		/**
-		 * Scrape and import URLs.
-		 */
-		$debug_all_author_names          = [];
-		$debug_wrong_posts_urls          = [];
-		$debug_all_tags                  = [];
-		$debug_all_tags_promoted_content = [];
 
 		foreach ( $urls as $key_url_data => $url ) {
-
 			if ( empty( $url ) ) {
 				continue;
 			}
 
 			WP_CLI::line( sprintf( "\n" . '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
 
-			// If a "publish"-ed post with same URL exists, skip it.
-			$post_id = $wpdb->get_var(
-				$wpdb->prepare(
-					"select wpm.post_id
-					from {$wpdb->postmeta} wpm
-					join wp_posts wp on wp.ID = wpm.post_id 
-					where wpm.meta_key = %s
-					and wpm.meta_value = %s
-					and wp.post_status = 'publish' ; ",
-					'newspackmigration_url',
-					$url
-				)
-			);
-			if ( $post_id ) {
-				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
-				continue;
-			}
-
-			// HTML cache filename and path.
+			// File name and path.
 			$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
-			$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
+			$html_cached_file_path = $path . '/' . $html_cached_filename;
 
 			// Get HTML from cache or fetch from HTTP.
 			$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
 			if ( is_null( $html ) ) {
-				$get_result = $this->wp_remote_get_with_retry( $url );
+
+				// Scrape with retries.
+				$max_retries = 3;
+				$sleep_retry = 3;
+				$retry_count = 0;
+				$get_result = false;
+				while ($retry_count < $max_retries && ! $get_result) {
+					// Scrape.
+					$get_result = $this->wp_remote_get_with_retry( $url );
+					$has_scrape_failed = is_wp_error( $get_result ) || is_array( $get_result );
+					if ( $has_scrape_failed ) {
+						WP_CLI::warning( sprintf( 'Failed, retrying %d/%d ...', $retry_count + 1, $max_retries ) );
+						sleep( $sleep_retry );
+						$retry_count++;
+					}
+				}
+
+				// Not OK.
 				if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
-					// Not OK.
-					$debug_wrong_posts_urls[] = $url;
-					$msg                      = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
+					$msg = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
 					$this->logger->log( $log_wrong_urls, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
 					continue;
 				}
 
+				// Save HTML to file.
 				$html = $get_result;
 
-				// Cache HTML to file.
-				file_put_contents( $html_cached_file_path, $html );
-			}
-
-			// Crawl and extract all useful data from HTML
-			$crawled_data = $this->crawl_post_data_from_html( $html, $url );
-
-			// Get slug from URL.
-			$slug = $this->get_slug_from_url( $url );
-
-			// Create post.
-			$post_args = [
-				'post_title'   => $crawled_data['post_title'],
-				'post_content' => $crawled_data['post_content'],
-				'post_status'  => 'publish',
-				'post_type'    => 'post',
-				'post_name'    => $slug,
-				'post_date'    => $crawled_data['post_date'],
-			];
-			$post_id   = wp_insert_post( $post_args );
-			WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
-
-			// Collect postmeta in this array.
-			$postmeta = [
-				// Newspack Subtitle postmeta
-				'newspack_post_subtitle'                  => $crawled_data['post_subtitle'] ?? '',
-				// Basic data
-				'newspackmigration_url'                   => $url,
-				'newspackmigration_slug'                  => $slug,
-				// E.g. "lo-sc".
-				'newspackmigration_script_source'         => $crawled_data['script_data']['source'] ?? '',
-				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
-				'newspackmigration_script_sectionName'    => $crawled_data['script_data']['sectionName'],
-				// E.g. "Promoted Content".
-				'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? '',
-				'newspackmigration_presentedBy'           => $crawled_data['presented_by'] ?? '',
-				'newspackmigration_tags_promoted_content' => $crawled_data['tags_promoted_content'] ?? '',
-				// Author links, to be processed after import.
-				'newspackmigration_author_links'          => $crawled_data['author_links'] ?? '',
-				// Featured img info.
-				'featured_image_src'                      => $crawled_data['featured_image_src'] ?? '',
-				'featured_image_caption'                  => $crawled_data['featured_image_caption'] ?? '',
-				'featured_image_alt'                      => $crawled_data['featured_image_alt'] ?? '',
-				'featured_image_credit'                   => $crawled_data['featured_image_credit'] ?? '',
-			];
-
-			// Collect all tags_promoted_content for QA.
-			if ( $crawled_data['tags_promoted_content'] ) {
-				$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
-			}
-
-			// Import featured image.
-			if ( isset( $crawled_data['featured_image_src'] ) ) {
-				WP_CLI::line( 'Downloading featured image ...' );
-				$attachment_id = $this->get_or_download_image(
-					$log_err_img_download,
-					$crawled_data['featured_image_src'],
-					$title = null,
-					$crawled_data['featured_image_caption'],
-					$description = null,
-					$crawled_data['featured_image_alt'],
-					$post_id,
-					$crawled_data['featured_image_credit']
-				);
-				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
-					// TODO -- handle
-				} else {
-					// Set featured image.
-					set_post_thumbnail( $post_id, $attachment_id );
-				}
-			}
-
-			// Authors.
-			$ga_ids = [];
-			// Get/create GAs.
-			foreach ( $crawled_data['post_authors'] as $author_name ) {
-				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
-				if ( $ga ) {
-					$ga_id = $ga->ID;
-				} else {
-					$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
-				}
-				$ga_ids[] = $ga_id;
-			}
-			if ( empty( $ga_ids ) ) {
-				throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
-			}
-			// Assign GAs to post.
-			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
-			// Also collect all author names for easier debugging/QA-ing.
-			$debug_all_author_names = array_merge( $debug_all_author_names, $crawled_data['post_authors'] );
-
-			// Categories.
-			$category_parent_id = 0;
-			if ( $crawled_data['category_parent_name'] ) {
-				// Get or create parent category.
-				$category_parent_id = wp_create_category( $crawled_data['category_parent_name'], 0 );
-				if ( is_wp_error( $category_parent_id ) ) {
-					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_parent_name'], $url, $category_parent_id->get_error_message() ) );
-				}
-			}
-			// Get or create primary category.
-			$category_id = wp_create_category( $crawled_data['category_name'], $category_parent_id );
-			if ( is_wp_error( $category_id ) ) {
-				throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_name'], $url, $category_id->get_error_message() ) );
-			}
-			// Set category.
-			wp_set_post_categories( $post_id, [ $category_id ] );
-
-			// Assign tags.
-			$tags = $crawled_data['tags'];
-			if ( $tags ) {
-				// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
-				wp_set_post_tags( $post_id, $tags );
-				// Collect all tags for QA.
-				$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
-			}
-
-			// Save the postmeta.
-			foreach ( $postmeta as $meta_key => $meta_value ) {
-				if ( ! empty( $meta_value ) ) {
-					update_post_meta( $post_id, $meta_key, $meta_value );
-				}
+				$file_content = json_encode( [
+					'url' => $url,
+					'html' => $html,
+				] );
+				file_put_contents( $html_cached_file_path, $file_content );
 			}
 		}
 
-		// Debug and QA info.
-		if ( ! empty( $debug_wrong_posts_urls ) ) {
-			WP_CLI::warning( "❗️ Check $log_wrong_urls for invalid URLs." );
-		}
-		if ( ! empty( $debug_all_author_names ) ) {
-			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-			WP_CLI::warning( "⚠️️ QA the following $log_all_author_names " );
-		}
-		if ( ! empty( $debug_all_tags ) ) {
-			// Flatten multidimensional array to single.
-			$debug_all_tags_flattened = [];
-			array_walk_recursive(
-				$debug_all_tags,
-				function( $e ) use ( &$debug_all_tags_flattened ) {
-					$debug_all_tags_flattened[] = $e;
-				}
-			);
-			// Log.
-			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
-			WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
-		}
-		if ( ! empty( $debug_all_tags_promoted_content ) ) {
-			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
-			WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
-		}
-
-		WP_CLI::line( 'Done 👍' );
+		WP_CLI::line( sprintf( 'Saved to %s 👍', $path ) );
 	}
+
+	// public function cmd_scrape_posts( $pos_args, $assoc_args ) {
+	// 	global $wpdb;
+	//
+	// 	$urls_file = $assoc_args['urls-file'];
+	// 	if ( ! file_exists( $urls_file ) ) {
+	// 		WP_CLI::error( "File $urls_file does not exist." );
+	// 	}
+	// 	$urls = explode( "\n", trim( file_get_contents( $urls_file ), "\n" ) );
+	// 	if ( empty( $urls ) ) {
+	// 		WP_CLI::error( "File $urls_file is empty." );
+	// 	}
+	//
+	// 	/**
+	// 	 * Prepare logs and caching.
+	// 	 */
+	//
+	// 	// Log files.
+	// 	if ( ! file_exists( $this->temp_dir ) ) {
+	// 		mkdir( $this->temp_dir, 0777, true );
+	// 	}
+	// 	$log_wrong_urls                   = $this->temp_dir . '/ll_debug__wrong_urls.log';
+	// 	$log_all_author_names             = $this->temp_dir . '/ll_debug__all_author_names.log';
+	// 	$log_all_tags                     = $this->temp_dir . '/ll_debug__all_tags.log';
+	// 	$log_all_tags_promoted_content    = $this->temp_dir . '/ll_debug__all_tags_promoted_content.log';
+	// 	$log_err_importing_featured_image = $this->temp_dir . '/ll_err__featured_image.log';
+	// 	$log_err_img_download             = $this->temp_dir . '/ll_err__img_download.log';
+	//
+	// 	// Hit timestamps on all logs.
+	// 	$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+	// 	$this->logger->log( $log_wrong_urls, $ts, false );
+	// 	$this->logger->log( $log_all_author_names, $ts, false );
+	// 	$this->logger->log( $log_all_tags, $ts, false );
+	// 	$this->logger->log( $log_all_tags_promoted_content, $ts, false );
+	// 	$this->logger->log( $log_err_importing_featured_image, $ts, false );
+	// 	$this->logger->log( $log_err_img_download, $ts, false );
+	//
+	// 	// Create folders for caching stuff.
+	// 	// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+	// 	$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+	// 	if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+	// 		mkdir( $scraped_htmls_cache_path, 0777, true );
+	// 	}
+	//
+	//
+	// 	/**
+	// 	 * Scrape and import URLs.
+	// 	 */
+	// 	$debug_all_author_names          = [];
+	// 	$debug_wrong_posts_urls          = [];
+	// 	$debug_all_tags                  = [];
+	// 	$debug_all_tags_promoted_content = [];
+	//
+	// 	foreach ( $urls as $key_url_data => $url ) {
+	//
+	// 		if ( empty( $url ) ) {
+	// 			continue;
+	// 		}
+	//
+	// 		WP_CLI::line( sprintf( "\n" . '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
+	//
+	// 		// If a "publish"-ed post with same URL exists, skip it.
+	// 		$post_id = $wpdb->get_var(
+	// 			$wpdb->prepare(
+	// 				"select wpm.post_id
+	// 				from {$wpdb->postmeta} wpm
+	// 				join wp_posts wp on wp.ID = wpm.post_id
+	// 				where wpm.meta_key = %s
+	// 				and wpm.meta_value = %s
+	// 				and wp.post_status = 'publish' ; ",
+	// 				'newspackmigration_url',
+	// 				$url
+	// 			)
+	// 		);
+	// 		if ( $post_id ) {
+	// 			WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
+	// 			continue;
+	// 		}
+	//
+	// 		// HTML cache filename and path.
+	// 		$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
+	// 		$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
+	//
+	// 		// Get HTML from cache or fetch from HTTP.
+	// 		$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
+	// 		if ( is_null( $html ) ) {
+	// 			$get_result = $this->wp_remote_get_with_retry( $url );
+	// 			if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
+	// 				// Not OK.
+	// 				$debug_wrong_posts_urls[] = $url;
+	// 				$msg                      = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
+	// 				$this->logger->log( $log_wrong_urls, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
+	// 				continue;
+	// 			}
+	//
+	// 			$html = $get_result;
+	//
+	// 			// Cache HTML to file.
+	// 			file_put_contents( $html_cached_file_path, $html );
+	// 		}
+	//
+	// 		// Crawl and extract all useful data from HTML
+	// 		$crawled_data = $this->crawl_post_data_from_html( $html, $url );
+	//
+	// 		// Get slug from URL.
+	// 		$slug = $this->get_slug_from_url( $url );
+	//
+	// 		// Create post.
+	// 		$post_args = [
+	// 			'post_title'   => $crawled_data['post_title'],
+	// 			'post_content' => $crawled_data['post_content'],
+	// 			'post_status'  => 'publish',
+	// 			'post_type'    => 'post',
+	// 			'post_name'    => $slug,
+	// 			'post_date'    => $crawled_data['post_date'],
+	// 		];
+	// 		$post_id   = wp_insert_post( $post_args );
+	// 		WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
+	//
+	// 		// Collect postmeta in this array.
+	// 		$postmeta = [
+	// 			// Newspack Subtitle postmeta
+	// 			'newspack_post_subtitle'                  => $crawled_data['post_subtitle'] ?? '',
+	// 			// Basic data
+	// 			'newspackmigration_url'                   => $url,
+	// 			'newspackmigration_slug'                  => $slug,
+	// 			// E.g. "lo-sc".
+	// 			'newspackmigration_script_source'         => $crawled_data['script_data']['source'] ?? '',
+	// 			// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
+	// 			'newspackmigration_script_sectionName'    => $crawled_data['script_data']['sectionName'],
+	// 			// E.g. "Promoted Content".
+	// 			'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? '',
+	// 			'newspackmigration_presentedBy'           => $crawled_data['presented_by'] ?? '',
+	// 			'newspackmigration_tags_promoted_content' => $crawled_data['tags_promoted_content'] ?? '',
+	// 			// Author links, to be processed after import.
+	// 			'newspackmigration_author_links'          => $crawled_data['author_links'] ?? '',
+	// 			// Featured img info.
+	// 			'featured_image_src'                      => $crawled_data['featured_image_src'] ?? '',
+	// 			'featured_image_caption'                  => $crawled_data['featured_image_caption'] ?? '',
+	// 			'featured_image_alt'                      => $crawled_data['featured_image_alt'] ?? '',
+	// 			'featured_image_credit'                   => $crawled_data['featured_image_credit'] ?? '',
+	// 		];
+	//
+	// 		// Collect all tags_promoted_content for QA.
+	// 		if ( $crawled_data['tags_promoted_content'] ) {
+	// 			$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
+	// 		}
+	//
+	// 		// Import featured image.
+	// 		if ( isset( $crawled_data['featured_image_src'] ) ) {
+	// 			WP_CLI::line( 'Downloading featured image ...' );
+	// 			$attachment_id = $this->get_or_download_image(
+	// 				$log_err_img_download,
+	// 				$crawled_data['featured_image_src'],
+	// 				$title = null,
+	// 				$crawled_data['featured_image_caption'],
+	// 				$description = null,
+	// 				$crawled_data['featured_image_alt'],
+	// 				$post_id,
+	// 				$crawled_data['featured_image_credit']
+	// 			);
+	// 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+	// 				// TODO -- handle
+	// 			} else {
+	// 				// Set featured image.
+	// 				set_post_thumbnail( $post_id, $attachment_id );
+	// 			}
+	// 		}
+	//
+	// 		// Authors.
+	// 		$ga_ids = [];
+	// 		// Get/create GAs.
+	// 		foreach ( $crawled_data['post_authors'] as $author_name ) {
+	// 			$ga = $this->cap->get_guest_author_by_display_name( $author_name );
+	// 			if ( $ga ) {
+	// 				$ga_id = $ga->ID;
+	// 			} else {
+	// 				$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
+	// 			}
+	// 			$ga_ids[] = $ga_id;
+	// 		}
+	// 		if ( empty( $ga_ids ) ) {
+	// 			throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
+	// 		}
+	// 		// Assign GAs to post.
+	// 		$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+	// 		// Also collect all author names for easier debugging/QA-ing.
+	// 		$debug_all_author_names = array_merge( $debug_all_author_names, $crawled_data['post_authors'] );
+	//
+	// 		// Categories.
+	// 		$category_parent_id = 0;
+	// 		if ( $crawled_data['category_parent_name'] ) {
+	// 			// Get or create parent category.
+	// 			$category_parent_id = wp_create_category( $crawled_data['category_parent_name'], 0 );
+	// 			if ( is_wp_error( $category_parent_id ) ) {
+	// 				throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_parent_name'], $url, $category_parent_id->get_error_message() ) );
+	// 			}
+	// 		}
+	// 		// Get or create primary category.
+	// 		$category_id = wp_create_category( $crawled_data['category_name'], $category_parent_id );
+	// 		if ( is_wp_error( $category_id ) ) {
+	// 			throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_name'], $url, $category_id->get_error_message() ) );
+	// 		}
+	// 		// Set category.
+	// 		wp_set_post_categories( $post_id, [ $category_id ] );
+	//
+	// 		// Assign tags.
+	// 		$tags = $crawled_data['tags'];
+	// 		if ( $tags ) {
+	// 			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
+	// 			wp_set_post_tags( $post_id, $tags );
+	// 			// Collect all tags for QA.
+	// 			$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
+	// 		}
+	//
+	// 		// Save the postmeta.
+	// 		foreach ( $postmeta as $meta_key => $meta_value ) {
+	// 			if ( ! empty( $meta_value ) ) {
+	// 				update_post_meta( $post_id, $meta_key, $meta_value );
+	// 			}
+	// 		}
+	// 	}
+	//
+	// 	// Debug and QA info.
+	// 	if ( ! empty( $debug_wrong_posts_urls ) ) {
+	// 		WP_CLI::warning( "❗️ Check $log_wrong_urls for invalid URLs." );
+	// 	}
+	// 	if ( ! empty( $debug_all_author_names ) ) {
+	// 		$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
+	// 		WP_CLI::warning( "⚠️️ QA the following $log_all_author_names " );
+	// 	}
+	// 	if ( ! empty( $debug_all_tags ) ) {
+	// 		// Flatten multidimensional array to single.
+	// 		$debug_all_tags_flattened = [];
+	// 		array_walk_recursive(
+	// 			$debug_all_tags,
+	// 			function( $e ) use ( &$debug_all_tags_flattened ) {
+	// 				$debug_all_tags_flattened[] = $e;
+	// 			}
+	// 		);
+	// 		// Log.
+	// 		$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
+	// 		WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
+	// 	}
+	// 	if ( ! empty( $debug_all_tags_promoted_content ) ) {
+	// 		$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
+	// 		WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
+	// 	}
+	//
+	// 	WP_CLI::line( 'Done 👍' );
+	// }
 
 	public function get_slug_from_url( $url ) {
 		$url_path          = trim( wp_parse_url( $url, PHP_URL_PATH ), '/' );
@@ -1927,6 +1900,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// E.g. "higher-ed"
 		$section_parent_slug          = $script_data['sectionParentPath'] ?? null;
 		$category_parent_name         = self::SECTIONS[ $section_parent_slug ] ?? null;
+		if ( $category_parent_name ) {
+			// TODO
+			$dbg = 1;
+		}
 		$data['category_parent_name'] = $category_parent_name;
 
 		// Tags.
@@ -2448,5 +2425,535 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( true === $truncate ) {
 			$wpdb->get_results( "TRUNCATE TABLE {$table_name};" );
 		}
+	}
+
+	public function should_url_be_skipped( $url ) {
+		$skip_urls = [
+			'https://lookout.co/santacruz/about',
+			'https://lookout.co/santacruz/access-democracy',
+			'https://lookout.co/santacruz/advertise-with-us',
+			'https://lookout.co/santacruz/aptos',
+			'https://lookout.co/santacruz/best-of-lookout',
+			'https://lookout.co/santacruz/business-technology',
+			'https://lookout.co/santacruz/business-technology/hiring',
+			'https://lookout.co/santacruz/business-technology/local-business',
+			'https://lookout.co/santacruz/business-technology/recovery',
+			'https://lookout.co/santacruz/business-technology/tech',
+			'https://lookout.co/santacruz/capitola-and-soquel',
+			'https://lookout.co/santacruz/city-life',
+			'https://lookout.co/santacruz/civic-life',
+			'https://lookout.co/santacruz/civic-life/development',
+			'https://lookout.co/santacruz/civic-life/government',
+			'https://lookout.co/santacruz/civic-life/politics',
+			'https://lookout.co/santacruz/coast-life',
+			'https://lookout.co/santacruz/community-voices',
+			'https://lookout.co/santacruz/company-q-a',
+			'https://lookout.co/santacruz/coronavirus',
+			'https://lookout.co/santacruz/coronavirus/covid-economy',
+			'https://lookout.co/santacruz/coronavirus/covid-en-espanol',
+			'https://lookout.co/santacruz/coronavirus/covid-k-12',
+			'https://lookout.co/santacruz/coronavirus/covid-pm',
+			'https://lookout.co/santacruz/coronavirus/covid-south-county',
+			'https://lookout.co/santacruz/coronavirus/covid-today',
+			'https://lookout.co/santacruz/coronavirus/pandemic-life',
+			'https://lookout.co/santacruz/coronavirus/vaccine-watch',
+			'https://lookout.co/santacruz/editorials',
+			'https://lookout.co/santacruz/education',
+			'https://lookout.co/santacruz/education/higher-ed',
+			'https://lookout.co/santacruz/education/higher-ed/cabrillo-college',
+			'https://lookout.co/santacruz/election-2022',
+			'https://lookout.co/santacruz/election-2022/statewatch',
+			'https://lookout.co/santacruz/endorsements',
+			'https://lookout.co/santacruz/environment',
+			'https://lookout.co/santacruz/environment/climate',
+			'https://lookout.co/santacruz/environment/wildfires',
+			'https://lookout.co/santacruz/faq-membership',
+			'https://lookout.co/santacruz/food-drink',
+			'https://lookout.co/santacruz/food-drink/restaurants-dining',
+			'https://lookout.co/santacruz/footer-nav-partners',
+			'https://lookout.co/santacruz/guides',
+			'https://lookout.co/santacruz/guides/santa-cruz-food-insecurity',
+			'https://lookout.co/santacruz/health-wellness',
+			'https://lookout.co/santacruz/health-wellness/fitness',
+			'https://lookout.co/santacruz/high-school-student-access',
+			'https://lookout.co/santacruz/in-the-news1',
+			'https://lookout.co/santacruz/j1z4nvffccq-123',
+			'https://lookout.co/santacruz/job-board',
+			'https://lookout.co/santacruz/jobs',
+			'https://lookout.co/santacruz/jobs-climate-environment',
+			'https://lookout.co/santacruz/lookout-educator-page',
+			'https://lookout.co/santacruz/lookout-pm-friday',
+			'https://lookout.co/santacruz/lookout-pm/',
+			'https://lookout.co/santacruz/meet-the-team',
+			'https://lookout.co/santacruz/membership',
+			'https://lookout.co/santacruz/my-account',
+			'https://lookout.co/santacruz/news',
+			'https://lookout.co/santacruz/news/lookout-pm-archive',
+			'https://lookout.co/santacruz/news/student-access-engagement',
+			'https://lookout.co/santacruz/news/sunday-reads-archive',
+			'https://lookout.co/santacruz/news/weekender-archive',
+			'https://lookout.co/santacruz/newsletter-text-center',
+			'https://lookout.co/santacruz/notice-of-right-to-opt-out',
+			'https://lookout.co/santacruz/partners',
+			'https://lookout.co/santacruz/partners/civic',
+			'https://lookout.co/santacruz/partners/civic-groups',
+			'https://lookout.co/santacruz/partners/marketing',
+			'https://lookout.co/santacruz/people/aidan-warzecha-watson',
+			'https://lookout.co/santacruz/people/alex-sibille',
+			'https://lookout.co/santacruz/people/amber-turpin',
+			'https://lookout.co/santacruz/people/ameen-taheri',
+			'https://lookout.co/santacruz/people/anna-hamai',
+			'https://lookout.co/santacruz/people/arianna-fabian',
+			'https://lookout.co/santacruz/people/arshnoor-bhatia',
+			'https://lookout.co/santacruz/people/ashley-holmes',
+			'https://lookout.co/santacruz/people/ayan-morshed',
+			'https://lookout.co/santacruz/people/beki-san-martin',
+			'https://lookout.co/santacruz/people/blaire-hobbs',
+			'https://lookout.co/santacruz/people/brittany-ramirez',
+			'https://lookout.co/santacruz/people/chris-neely',
+			'https://lookout.co/santacruz/people/christian-abraham',
+			'https://lookout.co/santacruz/people/dan-evans',
+			'https://lookout.co/santacruz/people/dieter-holger',
+			'https://lookout.co/santacruz/people/dylan-reisig',
+			'https://lookout.co/santacruz/people/emily-choo',
+			'https://lookout.co/santacruz/people/franny-trinidad',
+			'https://lookout.co/santacruz/people/gabriel-castilla',
+			'https://lookout.co/santacruz/people/gabrielle-gillette',
+			'https://lookout.co/santacruz/people/giovanni-moujaes',
+			'https://lookout.co/santacruz/people/grace-stetson',
+			'https://lookout.co/santacruz/people/haneen-zain',
+			'https://lookout.co/santacruz/people/hanna-merzbach',
+			'https://lookout.co/santacruz/people/henry-bellevin',
+			'https://lookout.co/santacruz/people/hillary-ojeda',
+			'https://lookout.co/santacruz/people/ilana-packer',
+			'https://lookout.co/santacruz/people/isabel-swafford',
+			'https://lookout.co/santacruz/people/isabella-cueto',
+			'https://lookout.co/santacruz/people/izzy-krause',
+			'https://lookout.co/santacruz/people/jamie-keil',
+			'https://lookout.co/santacruz/people/jean-yi',
+			'https://lookout.co/santacruz/people/jed-williams',
+			'https://lookout.co/santacruz/people/jessica-m-pasko',
+			'https://lookout.co/santacruz/people/jody-biehl',
+			'https://lookout.co/santacruz/people/kate-hull',
+			'https://lookout.co/santacruz/people/kaya-henkes-power',
+			'https://lookout.co/santacruz/people/ken-doctor',
+			'https://lookout.co/santacruz/people/kevin-painchaud',
+			'https://lookout.co/santacruz/people/lara-aguirre-medina',
+			'https://lookout.co/santacruz/people/laura-sutherland',
+			'https://lookout.co/santacruz/people/laurie-love',
+			'https://lookout.co/santacruz/people/lily-belli',
+			'https://lookout.co/santacruz/people/liza-monroy',
+			'https://lookout.co/santacruz/people/lookout-santa-cruz-staff',
+			'https://lookout.co/santacruz/people/mallory-pickett',
+			'https://lookout.co/santacruz/people/maren-detlefs',
+			'https://lookout.co/santacruz/people/mark-conley',
+			'https://lookout.co/santacruz/people/max-chun',
+			'https://lookout.co/santacruz/people/neil-strebig',
+			'https://lookout.co/santacruz/people/nick-ibarra',
+			'https://lookout.co/santacruz/people/nik-altenberg',
+			'https://lookout.co/santacruz/people/patrick-riley',
+			'https://lookout.co/santacruz/people/riley-engel',
+			'https://lookout.co/santacruz/people/sherene-tagharobi',
+			'https://lookout.co/santacruz/people/tamsin-mcmahon',
+			'https://lookout.co/santacruz/people/thomas-frey',
+			'https://lookout.co/santacruz/people/thomas-sawano',
+			'https://lookout.co/santacruz/people/tulsi-kamath',
+			'https://lookout.co/santacruz/people/wallace-baine',
+			'https://lookout.co/santacruz/people/will-mccahill',
+			'https://lookout.co/santacruz/people/xingyu-lai',
+			'https://lookout.co/santacruz/places',
+			'https://lookout.co/santacruz/places/681132629-123',
+			'https://lookout.co/santacruz/places/705586772-123',
+			'https://lookout.co/santacruz/places/750591046-123',
+			'https://lookout.co/santacruz/places/atxrza5d5re-123',
+			'https://lookout.co/santacruz/places/gallery/cruz-hotel-renderings',
+			'https://lookout.co/santacruz/places/igxkpnfsi8g-123',
+			'https://lookout.co/santacruz/places/vdpnlm4c1je-123',
+			'https://lookout.co/santacruz/pleasure-point-live-oak',
+			'https://lookout.co/santacruz/privacy-policy',
+			'https://lookout.co/santacruz/recreation-sports',
+			'https://lookout.co/santacruz/reset-password',
+			'https://lookout.co/santacruz/s7ggddsforg-123',
+			'https://lookout.co/santacruz/s7ggddsforg-123',
+			'https://lookout.co/santacruz/san-lorenzo-valley',
+			'https://lookout.co/santacruz/santa-cruz',
+			'https://lookout.co/santacruz/santa-cruz-county-obituaries',
+			'https://lookout.co/santacruz/santa-cruz-county-obituaries',
+			'https://lookout.co/santacruz/santa-cruz-puzzle-center',
+			'https://lookout.co/santacruz/santa-cruz-puzzle-center/news-quiz',
+			'https://lookout.co/santacruz/santa-cruz-puzzle-center/wordrow-puzzles',
+			'https://lookout.co/santacruz/santa-cruz-puzzles',
+			'https://lookout.co/santacruz/scholarship',
+			'https://lookout.co/santacruz/scotts-valley',
+			'https://lookout.co/santacruz/storm-2023-and-recovery',
+			'https://lookout.co/santacruz/storm-2023-and-recovery/mid-county',
+			'https://lookout.co/santacruz/storm-2023-and-recovery/santa-cruz',
+			'https://lookout.co/santacruz/storm-2023-and-recovery/santa-cruz-mountains',
+			'https://lookout.co/santacruz/storm-2023-and-recovery/south-county',
+			'https://lookout.co/santacruz/storm-2023-and-recovery/storm-recovery-updates',
+			'https://lookout.co/santacruz/student-access',
+			'https://lookout.co/santacruz/student-stories',
+			'https://lookout.co/santacruz/sudoku',
+			'https://lookout.co/santacruz/test-404',
+			'https://lookout.co/santacruz/things-to-do',
+			'https://lookout.co/santacruz/topic/2024-u-s-senate-candidates-in-santa-cruz',
+			'https://lookout.co/santacruz/topic/aging-in-santa-cruz',
+			'https://lookout.co/santacruz/topic/aptos',
+			'https://lookout.co/santacruz/topic/aptos-property-dispute',
+			'https://lookout.co/santacruz/topic/best-of-lookout-2022',
+			'https://lookout.co/santacruz/topic/best-of-lookout-santa-cruz',
+			'https://lookout.co/santacruz/topic/black-lives-matter-mural-coverage',
+			'https://lookout.co/santacruz/topic/cabrillo-college-renaming',
+			'https://lookout.co/santacruz/topic/capitola-soquel',
+			'https://lookout.co/santacruz/topic/community-voices',
+			'https://lookout.co/santacruz/topic/conversations-with-jody',
+			'https://lookout.co/santacruz/topic/conversations-with-jody-crystal-ross',
+			'https://lookout.co/santacruz/topic/coverage-of-the-2023-santa-cruz-county-fair',
+			'https://lookout.co/santacruz/topic/covid-dashboard',
+			'https://lookout.co/santacruz/topic/election-2022',
+			'https://lookout.co/santacruz/topic/election-2022-california-attorney-general',
+			'https://lookout.co/santacruz/topic/election-2022-california-controller',
+			'https://lookout.co/santacruz/topic/election-2022-california-governor',
+			'https://lookout.co/santacruz/topic/election-2022-santa-cruz-county-ballot-measures-explained',
+			'https://lookout.co/santacruz/topic/election-2022-santa-cruz-county-supervisors-races',
+			'https://lookout.co/santacruz/topic/election-2022-santa-cruz-mayors-race',
+			'https://lookout.co/santacruz/topic/election-2022-state-assembly-district-races',
+			'https://lookout.co/santacruz/topic/election-reaction-what-santa-cruz-county-residents-are-saying-about-election-2022',
+			'https://lookout.co/santacruz/topic/evan-quarnstrom-op-eds',
+			'https://lookout.co/santacruz/topic/farmers-market-coverage',
+			'https://lookout.co/santacruz/topic/farmers-market-fridays',
+			'https://lookout.co/santacruz/topic/how-i-got-my-job',
+			'https://lookout.co/santacruz/topic/in-the-public-interest-archive',
+			'https://lookout.co/santacruz/topic/instagram',
+			'https://lookout.co/santacruz/topic/instagram',
+			'https://lookout.co/santacruz/topic/job-board-listings',
+			'https://lookout.co/santacruz/topic/joby',
+			'https://lookout.co/santacruz/topic/ken-doctor-newsletter',
+			'https://lookout.co/santacruz/topic/laurie-love-on-wine',
+			'https://lookout.co/santacruz/topic/letter-from-the-editor',
+			'https://lookout.co/santacruz/topic/letters-to-the-editor',
+			'https://lookout.co/santacruz/topic/lily-belli-on-food',
+			'https://lookout.co/santacruz/topic/local-elections',
+			'https://lookout.co/santacruz/topic/lookout-athlete-of-the-month',
+			'https://lookout.co/santacruz/topic/lookout-candidate-forum-fred-keeley-and-joy-schendledecker',
+			'https://lookout.co/santacruz/topic/lookout-candidate-forum-justin-cummings-and-shebreh-kalantari-johnson',
+			'https://lookout.co/santacruz/topic/lookout-pm-archive',
+			'https://lookout.co/santacruz/topic/measure-d-coverage',
+			'https://lookout.co/santacruz/topic/measure-n-coverage',
+			'https://lookout.co/santacruz/topic/measure-o-coverage',
+			'https://lookout.co/santacruz/topic/meet-your-local-farmers-market-managers',
+			'https://lookout.co/santacruz/topic/more-from-claudia-sternbach',
+			'https://lookout.co/santacruz/topic/more-from-daniel-delong',
+			'https://lookout.co/santacruz/topic/more-from-doug-erickson',
+			'https://lookout.co/santacruz/topic/more-from-jeri-ross',
+			'https://lookout.co/santacruz/topic/more-from-laura-leroy',
+			'https://lookout.co/santacruz/topic/more-from-marissa-messina',
+			'https://lookout.co/santacruz/topic/more-from-mike-rotkin',
+			'https://lookout.co/santacruz/topic/more-from-rick-longinotti',
+			'https://lookout.co/santacruz/topic/more-from-tenzin-chogkyi',
+			'https://lookout.co/santacruz/topic/morning-lookout-archive',
+			'https://lookout.co/santacruz/topic/obituaries',
+			'https://lookout.co/santacruz/topic/opinion-from-rosemary-menard',
+			'https://lookout.co/santacruz/topic/otter-841-coverage',
+			'https://lookout.co/santacruz/topic/oversized-vehicle-ordinance-coverage',
+			'https://lookout.co/santacruz/topic/partner-content',
+			'https://lookout.co/santacruz/topic/partner-content-calmatters',
+			'https://lookout.co/santacruz/topic/partner-content-chalkbeat',
+			'https://lookout.co/santacruz/topic/partner-content-civil-eats',
+			'https://lookout.co/santacruz/topic/partner-content-edsource',
+			'https://lookout.co/santacruz/topic/partner-content-inside-climate-news',
+			'https://lookout.co/santacruz/topic/partner-content-kaiser-health-news',
+			'https://lookout.co/santacruz/topic/partner-content-los-angeles-times',
+			'https://lookout.co/santacruz/topic/partner-content-open-campus',
+			'https://lookout.co/santacruz/topic/partner-content-propublica',
+			'https://lookout.co/santacruz/topic/partner-content-reveal',
+			'https://lookout.co/santacruz/topic/partner-content-the-marshall-project',
+			'https://lookout.co/santacruz/topic/pesticides-in-the-pajaro-valley',
+			'https://lookout.co/santacruz/topic/places-housing',
+			'https://lookout.co/santacruz/topic/pleasure-point-live-oak',
+			'https://lookout.co/santacruz/topic/prep-sports-roundups',
+			'https://lookout.co/santacruz/topic/president-joe-biden-visits-santa-cruz-county',
+			'https://lookout.co/santacruz/topic/promoted-content',
+			'https://lookout.co/santacruz/topic/promoted-content',
+			'https://lookout.co/santacruz/topic/recovery-and-equity-in-schools',
+			'https://lookout.co/santacruz/topic/remembrance-2022',
+			'https://lookout.co/santacruz/topic/resources-how-to-help',
+			'https://lookout.co/santacruz/topic/roe-v-wade-coverage',
+			'https://lookout.co/santacruz/topic/san-lorenzo-valley',
+			'https://lookout.co/santacruz/topic/santa-cruz-county-business-roundup',
+			'https://lookout.co/santacruz/topic/scotts-valley',
+			'https://lookout.co/santacruz/topic/seeds-of-change',
+			'https://lookout.co/santacruz/topic/six-blocks-a-lookout-series-at-development-happening-around-front-street-in-downtown-santa-cruz',
+			'https://lookout.co/santacruz/topic/sponsored-content',
+			'https://lookout.co/santacruz/topic/sponsored-content',
+			'https://lookout.co/santacruz/topic/statewatch',
+			'https://lookout.co/santacruz/topic/stories-from-diamond-technology-institute-students',
+			'https://lookout.co/santacruz/topic/student-lookout',
+			'https://lookout.co/santacruz/topic/sunday-reads-archive',
+			'https://lookout.co/santacruz/topic/the-21-community-builders-who-will-inspire-and-shape-santa-cruz-county-in-2021',
+			'https://lookout.co/santacruz/topic/uc-academic-workers-strike-2022',
+			'https://lookout.co/santacruz/topic/unsung-santa-cruz-2022',
+			'https://lookout.co/santacruz/topic/watsonville',
+			'https://lookout.co/santacruz/topic/weekenderhttps://lookout.co/santacruz/',
+			'https://lookout.co/santacruz/topic/welcome-to-lookout',
+			'https://lookout.co/santacruz/topic/welcome-to-lookout',
+			'https://lookout.co/santacruz/topic/westside-santa-cruz',
+			'https://lookout.co/santacruz/ucsc-cabrillo',
+			'https://lookout.co/santacruz/wallace-baine',
+			'https://lookout.co/santacruz/wallace-baine/the-here-now',
+			'https://lookout.co/santacruz/watsonville',
+			'https://lookout.co/santacruz/weather',
+			'https://lookout.co/santacruz/welcome-to-lookouts-member-center',
+			'https://lookout.co/santacruz/word-search',
+			'https://lookout.co/santacruz/community-voices/forums',
+			'https://lookout.co/santacruz/job-board/story/2022-02-08/chief-program-officer-digital-nest',
+			'https://lookout.co/santacruz/job-board/story/2022-02-09/new-local-hub-for-job-seekers-lookout-launches-job-board',
+			'https://lookout.co/santacruz/job-board/story/2022-03-14/hire-local-10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-03-20/10-hot-jobs-hiring-santa-cruz-county-job-board',
+			'https://lookout.co/santacruz/job-board/story/2022-03-28/hot-jobs-10-open-roles-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-04-01/correspondent-lookout-santa-cruz-hiring-job',
+			'https://lookout.co/santacruz/job-board/story/2022-04-01/multimedia-correspondent-lookout-hiring-jobs',
+			'https://lookout.co/santacruz/job-board/story/2022-04-04/10-hot-jobs-in-santa-cruz-county-this-week',
+			'https://lookout.co/santacruz/job-board/story/2022-04-11/10-hot-jobs-in-santa-cruz-county-hiring-open-positions',
+			'https://lookout.co/santacruz/job-board/story/2022-04-18/10-hot-jobs-in-santa-cruz-county-hiring-open-positions',
+			'https://lookout.co/santacruz/job-board/story/2022-04-25/10-hot-jobs-in-santa-cruz-county-hiring-open-positions-april-25',
+			'https://lookout.co/santacruz/job-board/story/2022-05-02/10-hot-jobs-in-santa-cruz-county-hiring-open-positions',
+			'https://lookout.co/santacruz/job-board/story/2022-05-09/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-05-16/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-05-20/business-development-residency',
+			'https://lookout.co/santacruz/job-board/story/2022-05-23/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-05-31/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-06-06/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-06-13/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-06-13/admissions-and-records-analyst',
+			'https://lookout.co/santacruz/job-board/story/2022-06-16/10-top-jobs-at-the-county-of-santa-cruz-health-services-agency',
+			'https://lookout.co/santacruz/job-board/story/2022-06-16/education-events-manager-job-hiring-lookout-santa-cruz',
+			'https://lookout.co/santacruz/job-board/story/2022-06-20/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-06-27/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-07-05/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-07-11/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-07-13/santa-cruz-metro-launches-new-recruitment-incentives-addressing-unprecedented-crisis',
+			'https://lookout.co/santacruz/job-board/story/2022-07-17/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-07-24/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-07-31/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-08-07/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-08-14/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-08-17/internships-news-job-hiring-lookout-santa-cruz-business',
+			'https://lookout.co/santacruz/job-board/story/2022-08-17/internships-news-job-hiring-lookout-santa-cruz-education',
+			'https://lookout.co/santacruz/job-board/story/2022-08-17/internships-news-job-hiring-lookout-santa-cruz-social-media',
+			'https://lookout.co/santacruz/job-board/story/2022-08-19/10-top-jobs-at-the-county-of-santa-cruz-health-services-agency-august-2022',
+			'https://lookout.co/santacruz/job-board/story/2022-08-21/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-08-26/10-top-jobs-at-santa-cruz-county-bank',
+			'https://lookout.co/santacruz/job-board/story/2022-08-27/10-hot-jobs-in-santa-cruz-county',
+			'https://lookout.co/santacruz/job-board/story/2022-09-03/10-hot-jobs-in-santa-cruz-county-september-4',
+			'https://lookout.co/santacruz/job-board/story/2022-09-11/10-hot-jobs-in-santa-cruz-county-september-11',
+			'https://lookout.co/santacruz/job-board/story/2022-09-17/10-hot-jobs-in-santa-cruz-county-september-18',
+			'https://lookout.co/santacruz/job-board/story/2022-09-25/10-hot-jobs-in-santa-cruz-county-september-25',
+			'https://lookout.co/santacruz/job-board/story/2022-10-02/10-hot-jobs-in-santa-cruz-county-october-2',
+			'https://lookout.co/santacruz/job-board/story/2022-10-09/10-hot-jobs-in-santa-cruz-county-october-9',
+			'https://lookout.co/santacruz/job-board/story/2022-10-16/10-hot-jobs-in-santa-cruz-county-october-16',
+			'https://lookout.co/santacruz/job-board/story/2022-10-23/10-hot-jobs-in-santa-cruz-county-october-23',
+			'https://lookout.co/santacruz/job-board/story/2022-10-30/10-hot-jobs-in-santa-cruz-county-october-30',
+			'https://lookout.co/santacruz/job-board/story/2022-11-06/10-hot-jobs-in-santa-cruz-county-november-6',
+			'https://lookout.co/santacruz/job-board/story/2022-11-11/membership-audience-growth-manager',
+			'https://lookout.co/santacruz/job-board/story/2022-11-13/10-hot-jobs-in-santa-cruz-county-november-13',
+			'https://lookout.co/santacruz/job-board/story/2022-11-20/10-hot-jobs-in-santa-cruz-county-november-20',
+			'https://lookout.co/santacruz/job-board/story/2022-11-27/10-hot-jobs-in-santa-cruz-county-november-27',
+			'https://lookout.co/santacruz/job-board/story/2023-01-01/10-hot-jobs-in-santa-cruz-county-january-1',
+			'https://lookout.co/santacruz/job-board/story/2023-01-08/10-hot-jobs-in-santa-cruz-county-january-8',
+			'https://lookout.co/santacruz/job-board/story/2023-01-15/10-hot-jobs-in-santa-cruz-county-january-15',
+			'https://lookout.co/santacruz/job-board/story/2023-01-22/10-hot-jobs-in-santa-cruz-county-january-22',
+			'https://lookout.co/santacruz/job-board/story/2023-01-29/10-hot-jobs-in-santa-cruz-county-january-29',
+			'https://lookout.co/santacruz/job-board/story/2023-02-05/10-hot-jobs-in-santa-cruz-county-february-3',
+			'https://lookout.co/santacruz/job-board/story/2023-02-12/10-hot-jobs-in-santa-cruz-county-february-12',
+			'https://lookout.co/santacruz/job-board/story/2023-02-19/10-hot-jobs-in-santa-cruz-county-february-19',
+			'https://lookout.co/santacruz/job-board/story/2023-02-26/10-hot-jobs-in-santa-cruz-county-february-26',
+			'https://lookout.co/santacruz/job-board/story/2023-03-05/10-hot-jobs-in-santa-cruz-county-march-5',
+			'https://lookout.co/santacruz/job-board/story/2023-03-12/10-hot-jobs-in-santa-cruz-county-march-12',
+			'https://lookout.co/santacruz/job-board/story/2023-03-19/10-hot-jobs-in-santa-cruz-county-march-12',
+			'https://lookout.co/santacruz/job-board/story/2023-03-26/10-hot-jobs-in-santa-cruz-county-march-26',
+			'https://lookout.co/santacruz/job-board/story/2023-04-02/10-hot-jobs-in-santa-cruz-county-april-2',
+			'https://lookout.co/santacruz/job-board/story/2023-04-09/10-hot-jobs-in-santa-cruz-county-april-9',
+			'https://lookout.co/santacruz/job-board/story/2023-04-16/10-hot-jobs-in-santa-cruz-county-april-16',
+			'https://lookout.co/santacruz/job-board/story/2023-04-23/10-hot-jobs-in-santa-cruz-county-april-23',
+			'https://lookout.co/santacruz/job-board/story/2023-04-30/10-hot-jobs-in-santa-cruz-county-april-30',
+			'https://lookout.co/santacruz/job-board/story/2023-05-07/10-hot-jobs-in-santa-cruz-county-may-7',
+			'https://lookout.co/santacruz/job-board/story/2023-05-14/10-hot-jobs-in-santa-cruz-county-may-14',
+			'https://lookout.co/santacruz/job-board/story/2023-05-21/10-hot-jobs-in-santa-cruz-county-may-21',
+			'https://lookout.co/santacruz/job-board/story/2023-05-28/10-hot-jobs-in-santa-cruz-county-may-28',
+			'https://lookout.co/santacruz/job-board/story/2023-06-04/10-hot-jobs-in-santa-cruz-county-june-4',
+			'https://lookout.co/santacruz/job-board/story/2023-06-11/10-hot-jobs-in-santa-cruz-county-june-11',
+			'https://lookout.co/santacruz/job-board/story/2023-06-18/10-hot-jobs-in-santa-cruz-county-june-18',
+			'https://lookout.co/santacruz/job-board/story/2023-06-25/10-hot-jobs-in-santa-cruz-county-june-25',
+			'https://lookout.co/santacruz/job-board/story/2023-07-02/10-hot-jobs-in-santa-cruz-county-july-2',
+			'https://lookout.co/santacruz/job-board/story/2023-07-07/insurance-agency-representative',
+			'https://lookout.co/santacruz/job-board/story/2023-07-07/insurance-sales-agency-manager',
+			'https://lookout.co/santacruz/job-board/story/2023-07-09/10-hot-jobs-in-santa-cruz-county-july-9',
+			'https://lookout.co/santacruz/job-board/story/2023-07-16/10-hot-jobs-in-santa-cruz-county-july-16',
+			'https://lookout.co/santacruz/job-board/story/2023-07-23/10-hot-jobs-in-santa-cruz-county-july-23',
+			'https://lookout.co/santacruz/job-board/story/2023-07-30/10-hot-jobs-in-santa-cruz-county-july-30',
+			'https://lookout.co/santacruz/job-board/story/2023-08-01/medical-care-service-worker',
+			'https://lookout.co/santacruz/job-board/story/2023-08-02/assistant-food-beverage-manager',
+			'https://lookout.co/santacruz/job-board/story/2023-08-02/event-manager',
+			'https://lookout.co/santacruz/job-board/story/2023-08-02/front-desk-manager-hospitality',
+			'https://lookout.co/santacruz/job-board/story/2023-08-02/guest-experience-associate',
+			'https://lookout.co/santacruz/job-board/story/2023-08-02/guest-experience-supervisor-hospitality',
+			'https://lookout.co/santacruz/job-board/story/2023-08-03/directing-attorney',
+			'https://lookout.co/santacruz/job-board/story/2023-08-06/10-hot-jobs-in-santa-cruz-county-august-6',
+			'https://lookout.co/santacruz/job-board/story/2023-08-09/health-equity-officer-county-santa-cruz',
+			'https://lookout.co/santacruz/job-board/story/2023-08-09/medical-assistant-county-santa-cruz',
+			'https://lookout.co/santacruz/job-board/story/2023-08-15/dining-baker',
+			'https://lookout.co/santacruz/job-board/story/2023-08-15/facilities-senior-building-maintenance-worker',
+			'https://lookout.co/santacruz/job-board/story/2023-08-20/10-hot-jobs-in-santa-cruz-county-august-20',
+			'https://lookout.co/santacruz/job-board/story/2023-08-22/resource-planner-ii-iii',
+			'https://lookout.co/santacruz/job-board/story/2023-08-23/brand-ambassador',
+			'https://lookout.co/santacruz/job-board/story/2023-08-25/physical-therapist',
+			'https://lookout.co/santacruz/job-board/story/2023-08-27/10-hot-jobs-in-santa-cruz-county-august-27',
+			'https://lookout.co/santacruz/job-board/story/2023-08-28/patient-care-coordinator',
+			'https://lookout.co/santacruz/job-board/story/2023-08-28/physical-therapist',
+			'https://lookout.co/santacruz/job-board/story/2023-08-29/college-programs-coordinator',
+			'https://lookout.co/santacruz/job-board/story/2023-09-03/10-hot-jobs-in-santa-cruz-county-september-3',
+			'https://lookout.co/santacruz/job-board/story/2023-09-07/program-manager',
+			'https://lookout.co/santacruz/job-board/story/2023-09-10/10-hot-jobs-in-santa-cruz-county-september-10',
+			'https://lookout.co/santacruz/job-board/story/2023-09-11/safe-routes-to-school-educator-program-coordinator',
+			'https://lookout.co/santacruz/job-board/story/2023-09-11/temp-advanced-accounts-payable-coordinator',
+			'https://lookout.co/santacruz/job-board/story/2023-09-15/facilities-asset-coordinator',
+			'https://lookout.co/santacruz/job-board/story/2023-09-17/10-hot-jobs-in-santa-cruz-county-september-17',
+			'https://lookout.co/santacruz/job-board/story/2023-09-18/dining-storekeeper',
+			'https://lookout.co/santacruz/job-board/story/2023-09-19/housekeeper',
+			'https://lookout.co/santacruz/job-board/story/2023-09-22/criminal-justice-investigative-correspondent-lookout-santa-cruz-hiring-job',
+			'https://lookout.co/santacruz/job-board/story/2023-09-24/10-hot-jobs-in-santa-cruz-county-september-24',
+			'https://lookout.co/santacruz/job-board/story/2023-09-26/associate-director-residential-community-service-program',
+			'https://lookout.co/santacruz/job-board/story/2023-10-01/10-hot-jobs-in-santa-cruz-county-october-1',
+			'https://lookout.co/santacruz/job-board/story/2023-10-02/dining-associate-director',
+			'https://lookout.co/santacruz/job-board/story/2023-10-03/chief-building-official-chief-building-inspector',
+			'https://lookout.co/santacruz/job-board/story/2023-10-03/information-technology-system-administration-analyst-ii',
+			'https://lookout.co/santacruz/job-board/story/2023-10-05/job-fair',
+			'https://lookout.co/santacruz/job-board/story/2023-10-06/elementary-school-teacher-assistant',
+			'https://lookout.co/santacruz/job-board/story/2023-10-06/trick-or-treating-associate',
+			'https://lookout.co/santacruz/job-board/story/2023-10-08/10-hot-jobs-in-santa-cruz-county-october-8',
+			'https://lookout.co/santacruz/job-board/story/2023-10-11/financial-planning-and-analysis-director',
+			'https://lookout.co/santacruz/job-board/story/2023-10-12/senior-medical-billing-technician',
+			'https://lookout.co/santacruz/job-board/story/2023-10-15/10-hot-jobs-in-santa-cruz-county-october-15',
+			'https://lookout.co/santacruz/job-board/story/2023-10-17/assistant-director-residential-education',
+			'https://lookout.co/santacruz/job-board/story/2023-10-17/insurance-agency-representative',
+			'https://lookout.co/santacruz/job-board/story/2023-10-17/insurance-sales-agency-manager',
+			'https://lookout.co/santacruz/job-board/story/2023-10-17/member-services-representative-teller-part-time',
+			'https://lookout.co/santacruz/partners/civic-groups/county-park-friends-building-our-shared-dreams-in-santa-cruz-subtitulos-en-espanol-123',
+			'https://lookout.co/santacruz/partners/civic-groups/story/2022-01-28/whats-railbanking-and-why-are-santa-cruz-transit-experts-discussing-it',
+			'https://lookout.co/santacruz/partners/civic-groups/story/2022-10-21/gray-whale-survival-predatory-orcas-spotted-in-baja-calfing-lagoon',
+			'https://lookout.co/santacruz/partners/civic-groups/story/2023-01-03/unsung-santa-cruz-pauline-seales-climate-activism-youth-justice',
+			'https://lookout.co/santacruz/partners/marketing/2023-01-19/expert-santa-cruz-county-property-management-with-a-locals-touch',
+			'https://lookout.co/santacruz/partners/marketing/2023-03-15/the-iconic-catalyst-club-a-must-visit-for-music-aficionados-in-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/2023-03-15/we-march-because-we-believe-join-the-march-to-end-homelessness-in-santa-cruz-on-april-1',
+			'https://lookout.co/santacruz/partners/marketing/2023-nexties-event-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/779740564-123',
+			'https://lookout.co/santacruz/partners/marketing/d0xqnl8e2yk-123',
+			'https://lookout.co/santacruz/partners/marketing/launchpad-2023-returns-for-its-sixth-year-in-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/sereno-1-percent-for-good-123',
+			'https://lookout.co/santacruz/partners/marketing/story/2021-11-03/bay-federal-raises-nearly-11-000-for-monterey-bay-national-marine-sanctuary-foundation',
+			'https://lookout.co/santacruz/partners/marketing/story/2022-06-15/7-close-to-home-rv-getaways-around-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2022-07-18/money-talks-5-steps-to-strengthen-your-financial-relationship',
+			'https://lookout.co/santacruz/partners/marketing/story/2022-07-29/sts9-brings-their-psychedelic-noise-pop-show-to-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-01-02/tribute-table-program-honors-loved-ones-improves-key-state-parks-infrastructure',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-01-18/get-down-at-downtown-fridays-now-through-april-14-in-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-02-02/a-medicinal-league-of-its-own-exploring-the-health-benefits-of-kava',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-02-07/honorees-for-2023-nexties-announced-featuring-mak-nova-cruz-foam-jessica-yarr-and-more',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-02-14/how-to-spot-a-sextortion-or-romance-scam-and-what-to-do-about-it',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-02-15/protecting-monterey-bay-one-wrapped-bus-and-ride-at-a-time',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-01/inside-the-shoppers-corner-team-6-cant-miss-grocery-recommendations',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-02/sockshop-donates-30-000-worth-of-shoes-to-santa-cruz-womens-center',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-09/uc-santa-cruz-arts-division-to-break-ground-on-new-state-of-the-art-social-documentation-lab',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-10/through-the-rising-scholars-network-cabrillo-expands-opportunities-for-justice-impacted-students',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-13/santa-cruz-community-builder-of-the-year-isabel-contreras-founder-of-mi-gente-ca',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-14/santa-cruz-health-wellness-leader-of-the-year-campesina-womb-justice',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-15/nexties-winner-spotlight-mariaelena-de-la-garza-lifetime-achievement',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-15/nexts-winner-spotlight-jessica-yarr-foodie',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-16/calling-all-artists-apply-today-for-the-2023-santa-cruz-county-open-studios-art-tour',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-20/santa-cruz-musician-of-the-year-mak-nova',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-23/santa-cruz-best-new-business-of-the-year-collective-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-23/santa-cruz-giveback-person-of-the-year-oscar-corcoles',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-29/kevin-weatherwaxs-unconventional-educational-path-leads-to-ucsc-ph-d-and-piatt-fellowship-win',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-30/resolving-homelessness-the-need-for-both-temporary-shelter-and-affordable-housing-in-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-31/protecting-the-monterey-bay-one-ride-at-a-time-how-to-get-involved',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-31/santa-cruz-band-of-the-year-superblume',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-03-31/the-no-boring-socks-legacy-sockshop-celebrates-35-years-in-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-06/a-charming-and-beautiful-well-maintained-manufactured-home-in-the-heart-of-the-pleasure-point-area-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-10/santa-cruz-county-celebrates-youth-success-at-the-your-future-is-our-business-2023-luncheon',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-13/tannery-arts-center-to-host-free-public-art-talk-tour-event-featuring-new-sculpture-installations-and-mural',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-14/bringing-self-love-and-self-care-to-santa-cruz-skin-care-with-terra-self',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-17/santa-cruz-symphony-season-finale-features-pulitzer-prize-winning-composer-caroline-shaw-and-cabrillo-chorus',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-17/shoppers-corner-customer-spotlight-emily-matheson',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-17/women-build-day-brings-new-homes-to-santa-cruzs-live-oak-neighborhood',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-21/branciforte-branch-library-set-for-grand-reopening-after-two-years',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-04-26/local-artisans-and-community-come-together-for-tannery-arts-center-spring-art-market',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-02/shoppers-corner-customer-spotlight',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-02/top-10-volunteer-opportunities-in-santa-cruz-county-may-2023',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-04/ending-the-stigma-an-appeal-to-support-namis-mental-health-resources-support-and-services',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-04/housing-santa-cruz-county-hosts-community-conversations-and-celebrations-for-affordable-housing-month',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-05/85-years-old-and-leading-the-charge-in-sustainable-grocery-store-practices-in-california',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-05/watsonville-farmers-market-el-mercado-tackles-food-insecurity-promotes-healthy-living',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-09/celebrate-the-volunteers-who-make-santa-cruz-county-great-get-tickets-now-for-the-be-the-difference-awards',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-09/stunning-single-level-home-for-sale-in-beautiful-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-05-22/santa-cruz-introduces-new-santa-cruzer-shuttle-service-for-easy-access-to-beach-and-wharf-events',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-06-05/top-10-volunteer-opportunities-in-santa-cruz-county-june-2023',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-06-09/5-steps-to-budgeting-your-dream-vacation-with-santa-cruz-bay-federal-credit-union',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-06-22/cabrillo-stages-the-hunchback-of-notre-dame-kicks-off-july-6-under-new-artistic-director-andrea-hart',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-06-26/coveted-prospect-heights-home-hits-the-santa-cruz-market-for-the-first-time-in-over-50-years',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-06-30/top-10-volunteer-opportunities-in-santa-cruz-county-july-2023',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-07-06/federal-grant-funds-santa-cruz-county-wic-outreach-to-immigrants-and-farmworkers',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-07-07/for-the-second-consecutive-year-cabrillo-college-robotics-club-wins-first-place-in-world-competition',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-07-10/soquel-vineyards-a-glimpse-into-the-history-and-exquisite-tasting-experience-at-their-santa-cruz-mountains-winery',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-07-13/santa-cruz-metro-to-hold-virtual-public-meeting-for-previewing-possible-network-changes',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-07-20/three-ucsc-alumni-spearhead-equitable-dental-care-access-to-santa-cruz-county-seniors',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-07-31/interns-shine-at-santa-cruz-shakespeares-fringe-production',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-01/cabrillo-festival-of-contemporary-music-announces-61st-season',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-03/shoppers-corner-customer-spotlight-britney-and-scott-williams',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-04/top-10-volunteer-opportunities-in-santa-cruz-county-august-2023',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-08/a-childhood-cancer-survivor-becomes-a-cancer-researcher-at-uc-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-11/resilience-in-action-czu-fire-victims-rebuild-with-the-support-of-financial-guidance-from-santa-cruz-county-bank',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-15/santa-cruz-county-family-resource-collective-distributes-nearly-2m-in-aid-to-storm-impacted-residents',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-17/being-proactive7-steps-to-preparing-your-home-for-winter',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-21/community-bridges-offers-ongoing-emergency-assistance-to-the-town-of-pajaro-after-flooding-disaster',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-22/shoppers-corner-customer-spotlight-akiko-minami',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-08-29/shoppers-corner-customer-spotlight-aaron-and-romah-hinde',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-06/10-volunteer-education-opportunities-top-10-get-involved-september-2023',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-06/santa-cruz-symphony-announces-2023-24-season-with-musical-prodigy-and-stellar-repertoire',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-06/your-modern-oasis-awaits-rent-this-immaculate-scotts-valley-townhome',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-08/santa-cruz-metro-offers-free-fares-to-santa-cruz-county-fair',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-12/shoppers-corner-customer-spotlight-tendo-kironde',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-13/uc-santa-cruz-professor-contributes-to-unveiling-the-first-complete-sequence-of-the-human-y-chromosome',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-18/10-must-see-santa-cruz-county-open-studios-art-tour',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-18/decades-of-dedication-lisa-berkowitzs-lifelong-commitment-to-meals-on-wheels',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-18/santa-cruz-metro-unveils-striking-new-wildlife-buses-as-one-ride-at-a-time-campaign-expands',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-19/construction-skills-sustainability-and-local-demand-in-cabrillo-colleges-cem-program',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-22/coastal-charmer-santa-cruz-home-offers-beachside-bliss-and-modern-comforts',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-27/groundbreaking-indian-rapper-to-play-at-uc-santa-cruz-quarry-amphitheater',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-27/riding-the-electric-wave-navigating-the-road-to-e-bike-safety-in-santa-cruz',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-09-28/new-townhomes-for-sale-in-soquel-california',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-04/top-ten-ways-to-volunteer-and-help-seniors-in-santa-cruz-county-this-ocotober-2023',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-11/five-uc-santa-cruz-projects-awarded-grant-funding-to-tackle-climate-change-challenges',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-11/santa-cruz-symphony-welcomes-nancy-zhou-as-the-newest-artist-in-residence',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-16/where-to-next-plan-for-the-future-at-cabrillos-college-and-career-family-night',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-16/where-to-next-plan-for-the-future-at-cabrillos-college-and-career-family-night',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-17/celebrating-40-years-of-santa-cruz-county-generosity-wine-roses-returns-on-november-4',
+			'https://lookout.co/santacruz/partners/marketing/story/2023-10-17/shoppers-corner-customer-spotlight',
+		];
+		$skip_url_paths = [
+			'https://lookout.co/santacruz/partners/civic-groups',
+			'https://lookout.co/santacruz/partners/',
+		];
+
+		// Is $url in list of specific URLs to be skipped?
+		$in_specific_urls = in_array( $url, $skip_urls );
+
+		// Is $url in list of specific URLs paths to be skipped?
+		$in_list_of_url_paths = false;
+		foreach ( $skip_url_paths as $skip_url_path ) {
+			$in_list_of_url_paths = $in_list_of_url_paths || false !== strpos( $url, $skip_url_path );
+		}
+
+		// Should $url be skipped from scraping/importing?
+		return $in_specific_urls || $in_list_of_url_paths;
 	}
 }
