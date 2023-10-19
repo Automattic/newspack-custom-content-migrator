@@ -6,6 +6,8 @@ use DateTime;
 use DateTimeZone;
 use DOMDocument;
 use Exception;
+use HTMLPurifier;
+use HTMLPurifier_HTML5Config;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
@@ -732,7 +734,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 		$blobs_path = untrailingslashit( $assoc_args[ $this->blobs_path_arg['name'] ] );
 
-		global $wpdb;
 		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
 		$row_number           = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
@@ -865,11 +866,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			];
 
-			if ( ! empty( $row->subjects ) ) {
-				$post_data['tags_input'] = $row->subjects;
-//				$post_data['meta_input']['_yoast_wpseo_primary_post_tag'] = $row->subjects[0];
-			}
-
 			if ( ! empty( $row->creators ) ) {
 				$author_by_login = get_user_by( 'login', $row->creators[0] );
 
@@ -878,8 +874,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 			}
 
-			$intro = $row->intro ?? '';
-			$text                   = $this->replace_img_tags_with_img_blocks( $row->text );
+			$intro                   = $row->intro ?? '';
+			$text                    = $this->cleanup_text( $row->text );
+//			$text                    = $this->replace_video_tags_with_video_blocks( $text, $tree_path );
+			$text                    = $this->replace_img_tags_with_img_blocks( $text );
 			$article_layout          = $row->layout ?? '';
 			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 
@@ -905,7 +903,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$gallery = '';
 			if ( $row->gallery_enabled ) {
 				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path );
-				$gallery = serialize_block($this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ));
+				$gallery        = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
 			}
 
 			$post_data['post_content'] = wp_kses_post( $intro . $gallery . $text );
@@ -924,7 +922,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			if ( ! empty( $row->subjects ) ) {
 				wp_set_object_terms( $created_post_id, $row->subjects, 'post_tag' );
-				$primary_tag = get_term_by('name', $row->subjects[0], 'post_tag');
+				$primary_tag = get_term_by( 'name', $row->subjects[0], 'post_tag' );
 				update_post_meta( $created_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
 			}
 			$this->set_categories_on_post_from_path( get_post( $created_post_id ), $tree_path );
@@ -936,11 +934,25 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		// TODO. Hardcode some stuff: see hcn_migrate_headlines()
 	}
 
-	private function inject_slideshow( string $content, object $row ): string {
+	private function cleanup_text( string $text ): string {
+		static $purifier = null;
+		if ( null === $purifier ) {
+			$config = HTMLPurifier_HTML5Config::createDefault();
+			$config->set( 'AutoFormat.RemoveEmpty.RemoveNbsp', true );
+			$config->set( 'AutoFormat.RemoveEmpty', true );
+			$config->set( 'Attr.AllowedFrameTargets', [ '_blank' ] );
+			$purifier = new HTMLPurifier( $config );
+		}
 
+		return $purifier->purify( $text );
 	}
 
 	private function replace_img_tags_with_img_blocks( string $content ): string {
+		if ( false === strpos( $content, 'resolveuid/' ) ) {
+			// No images to look for in this article.
+			return $content;
+		}
+
 		$dom = new DOMDocument( '1.0', 'utf-8' );
 		@$dom->loadHTML( $content );
 
@@ -949,7 +961,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		foreach ( $img_tags as $img_tag ) {
 			$src = trim( $img_tag->getAttribute( 'src' ) );
 			// src looks something like this: resolveuid/0d12bbf8d16acc061685083060b81610/@@images/image/mini
-			if ( ! preg_match( '@^resolveuid/([0-9a-z]+)/?@', $src, $matches ) ) {
+			if ( ! preg_match( '@^resolveuid/([0-9a-z]+)/?(.*)@', $src, $matches ) ) {
 				continue;
 			}
 			$attachment_id = $this->get_attachment_id_by_uid( $matches[1] );
@@ -961,12 +973,90 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( ! $img_post ) {
 				continue;
 			}
+
+			$align = null;
+			if ( $this->search_for_class_in_parent_tags( $img_tag, 'full-bleed' ) ) {
+				$align = 'full';
+			}
+
 			$original_img_html = $dom->saveHTML( $img_tag );
-			$img_block         = serialize_block( $this->gutenberg_block_generator->get_image( $img_post ) );
-			$content           = str_replace( $original_img_html, $img_block, $content );
+			$img_block         = serialize_block(
+				$this->gutenberg_block_generator->get_image(
+					$img_post,
+					'full',
+					false,
+					null,
+					$align
+				)
+			);
+
+			$content = str_replace( $original_img_html, $img_block, $content );
 		}
 
 		return $content;
+	}
+
+	private function replace_video_tags_with_video_blocks( string $content, string $tree_path ) {
+		$dom = new DOMDocument( '1.0', 'utf-8' );
+		@$dom->loadHTML( $content );
+
+		if ( false === str_contains( $content, '<video' ) ) {
+			// No videos to look for in this article.
+			return $content;
+		}
+
+		global $wpdb;
+		$new_node = $dom->createElement( 'div' );
+		$new_node->setAttribute( 'class', 'will-be-replaced' );
+
+		$vid_tags = $dom->getElementsByTagName( 'video' );
+		foreach ( $vid_tags as $vid_tag ) {
+			$source_tag = $vid_tag->firstChild;
+			if ( ( $source_tag->tagName ?? '' ) !== 'source' ) {
+				continue;
+			}
+			$src               = $source_tag->getAttribute( 'src' );
+			$attachment_id     = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
+					'%' . $wpdb->esc_like( $src )
+				)
+			);
+			$video_post        = get_post( $attachment_id );
+			$video_block       = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
+			// TODO. Not working because DomDocument is oppionated about how it wants to format the HTML.
+			$original_vid_html = $dom->saveHTML( $vid_tag );
+
+			$content           = str_replace( $original_vid_html, $video_block, $content );
+			$dom->saveHTML($new_node);
+		}
+
+		return $content;
+	}
+
+	private function replace_node_with_string( $node, $str ) {
+		$dom = new DOMDocument( '1.0', 'utf-8' );
+		@$dom->loadHTML($str, LIBXML_HTML_NOIMPLIED);
+		$repl = $dom->importNode($dom->documentElement, true);
+		$node->parentNode->replaceChild($repl, $node);
+		$hest = $dom->saveHTML($node);
+		$dut = '';
+	}
+
+	//TODO.Could be attribute
+	private function search_for_class_in_parent_tags( $domElement, $class ): bool {
+		$parent = $domElement->parentNode;
+		while ( $parent ) {
+			if ( $parent->nodeType !== XML_ELEMENT_NODE ) {
+				break;
+			}
+			if ( str_contains( $parent->getAttribute( 'class' ), $class ) ) {
+				return true;
+			}
+			$parent = $parent->parentNode;
+		}
+
+		return false;
 	}
 
 	private function get_post_name( string $url ): string {
@@ -1188,7 +1278,7 @@ QUERY;
 		$attachment_ids = $wpdb->get_col(
 			$wpdb->prepare(
 				"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
-				$wpdb->esc_like($tree_path) .'%'
+				$wpdb->esc_like( $tree_path ) . '%'
 			)
 		);
 
