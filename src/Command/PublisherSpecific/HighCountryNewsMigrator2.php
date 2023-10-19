@@ -747,11 +747,28 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
 			if ( $existing_id ) {
 				$this->logger->log( $log_file, sprintf( 'Image already imported to %s', get_permalink( $existing_id ) ), Logger::WARNING );
+				// Gallery.
 				if ( $has_gallery ) {
 					update_post_meta( $existing_id, 'plone_gallery_id', $row->gallery );
-					$this->logger->log( $log_file, sprintf( 'Updated gallery id on %s', get_permalink( $existing_id ) ) );
+					$this->logger->log( $log_file, sprintf( 'Updated gallery id on %s', get_permalink( $existing_id ) ), Logger::SUCCESS );
 				}
+				// Tree path.
 				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+				// Caption.
+				if ( ! empty( $row->description ) ) {
+					wp_update_post(
+						[
+							'ID'           => $existing_id,
+							'post_excerpt' => $row->description,
+						]
+					);
+					$this->logger->log( $log_file, sprintf( 'Updated caption on %s to: %s', get_permalink( $existing_id ), $row->description ), Logger::SUCCESS );
+				}
+				// Credit.
+				if ( ! empty( $row->credit ) ) {
+					update_post_meta( $existing_id, '_media_credit', $row->credit );
+					$this->logger->log( $log_file, sprintf( 'Updated credit on %s to: %s', get_permalink( $existing_id ), $row->credit ), Logger::SUCCESS );
+				}
 				continue;
 			}
 
