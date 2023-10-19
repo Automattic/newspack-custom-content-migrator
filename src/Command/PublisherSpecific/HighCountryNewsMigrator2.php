@@ -116,9 +116,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
 
 	const PARENT_PAGE_FOR_ISSUES = 180504; // The page that all issues will have as parent.
-	const DEFAULT_AUTHOR_ID      = 223746; // User ID of default author.
-	const TAG_ID_THE_MAGAZINE    = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
-	const CATEGORY_ID_ISSUES     = 385;
+	const DEFAULT_AUTHOR_ID = 223746; // User ID of default author.
+	const TAG_ID_THE_MAGAZINE = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
+	const CATEGORY_ID_ISSUES = 385;
 
 	private DateTimeZone $site_timezone;
 
@@ -281,7 +281,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$categories = get_categories(
 			[
 				'fields' => 'slugs',
-			] 
+			]
 		);
 
 		global $wpdb;
@@ -384,7 +384,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					[
 						'ID'        => $post_id,
 						'post_name' => $correct_post_name,
-					] 
+					]
 				);
 			}
 
@@ -463,7 +463,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					[
 						'ID'           => $post->ID,
 						'post_content' => $post_content,
-					] 
+					]
 				);
 
 				if ( $result ) {
@@ -531,7 +531,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					[
 						'ID'           => $post_id,
 						'post_content' => $post_content,
-					] 
+					]
 				);
 
 				if ( $result ) {
@@ -634,7 +634,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						'cat_name'          => $slug,
 						'category_nicename' => $issue_name,
 						'category_parent'   => self::CATEGORY_ID_ISSUES,
-					] 
+					]
 				);
 
 				$cat = get_term( $id, 'category' );
@@ -693,8 +693,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				);
 
 				if ( ! is_wp_error( $image_attachment_id ) ) {
-					$image_id                                 = $image_attachment_id;
-					$page_data['meta_input']['_thumbnail_id'] = $image_id;
+					$image_id                                                    = $image_attachment_id;
+					$page_data['meta_input']['_thumbnail_id']                    = $image_id;
 					$page_data['meta_input']['newspack_featured_image_position'] = 'hidden';
 				} else {
 					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
@@ -717,7 +717,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					'name'        => $issue_name,
 					'slug'        => $slug,
 					'description' => '', // Remove the HTML if it was already added earlier on issues.
-				] 
+				]
 			);
 			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
 			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
@@ -738,15 +738,20 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 
-			// TODO. We can maybe exclude images ending in '-thumb.jpg' if we have the original. No need to import scaled images.
 			if ( empty( $row->image->filename ) ) {
 				// TODO. There are some "legacyPath" images. They seem to point at empty urls, but let's get back to this.
 				continue;
 			}
-
+			$has_gallery = ! empty( $row->gallery ) && 'inline' !== $row->gallery; // TODO. Figure out what an inline gallery is.
+			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
 			if ( $existing_id ) {
-				$this->logger->log( $log_file, sprintf( 'Image already imported to %s)', get_permalink( $existing_id ) ), Logger::WARNING );
+				$this->logger->log( $log_file, sprintf( 'Image already imported to %s', get_permalink( $existing_id ) ), Logger::WARNING );
+				if ( $has_gallery ) {
+					update_post_meta( $existing_id, 'plone_gallery_id', $row->gallery );
+					$this->logger->log( $log_file, sprintf( 'Updated gallery id on %s', get_permalink( $existing_id ) ) );
+				}
+				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
 				continue;
 			}
 
@@ -772,8 +777,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					'plone_image_UID'   => $row->UID,
 					'_media_credit'     => $row->credit ?? '',
 					'_media_credit_url' => $row->creditUrl ?? '',
+					'plone_tree_path'   => $tree_path,
 				],
 			];
+			if ( $has_gallery ) {
+				$img_post_data['meta_input']['plone_gallery_id'] = $row->gallery;
+			}
 
 			$attachment_id = $this->attachments->import_external_file(
 				$blobs_path . '/' . $row->image->blob_path,
@@ -796,7 +805,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$this->logger->log(
 					$log_file,
 					sprintf( 'Image imported to %s (%s)', $media_lib_url, $row->{'@id'} ),
-					Logger::SUCCESS 
+					Logger::SUCCESS
 				);
 			}
 		}
@@ -825,6 +834,19 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$this->logger->log( $log_file, sprintf( 'Article %s has no text. Skipping', $row->{'@id'} ), Logger::WARNING );
 			}
 
+			if ( 'download-entire-issue' === $row->id ) {
+				$this->logger->log( $log_file, sprintf( 'Article is a download-entire-issue. Skipping: %s', $row->{'@id'} ) );
+				continue;
+			}
+
+			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
+			$existing_id = $this->get_post_id_from_uid( $row->UID );
+//			if ( $existing_id ) {
+//				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
+//				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+//				continue;
+//			}
+
 			$post_date_string     = $row->effective ?? $row->created;
 			$post_modified_string = $row->modified ?? $post_date_string;
 			$post_date            = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_date_string, $this->site_timezone );
@@ -835,30 +857,31 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_status'   => ( 'public' === $row->review_state ) ? 'publish' : 'draft',
 				'post_date'     => $post_date->format( 'Y-m-d H:i:s' ),
 				'post_modified' => $post_modified->format( 'Y-m-d H:i:s' ),
+				'post_author'   => self::DEFAULT_AUTHOR_ID,
 				'meta_input'    => [
 					'plone_article_UID'      => $row->UID,
 					'newspack_post_subtitle' => $row->subheadline ?? '',
+					'plone_tree_path'        => $tree_path,
 				],
 			];
 
-			// TODO. Set categories when we have the post id.
-			// TODO. Don't import the "Download entire issue articles".
-			// TODO. Hardcode some stuff: see hcn_migrate_headlines()
-			$path = parse_url( $row->{'@id'}, PHP_URL_PATH );
-			// Author Section.
-			$author_id = self::DEFAULT_AUTHOR_ID;
+			if ( ! empty( $row->subjects ) ) {
+				$post_data['tags_input'] = $row->subjects;
+//				$post_data['meta_input']['_yoast_wpseo_primary_post_tag'] = $row->subjects[0];
+			}
 
 			if ( ! empty( $row->creators ) ) {
 				$author_by_login = get_user_by( 'login', $row->creators[0] );
 
 				if ( $author_by_login instanceof WP_User ) {
-					$author_id = $author_by_login->ID;
+					$post_data['post_author'] = $author_by_login->ID;
 				}
 			}
-			$post_data['post_author'] = $author_id;
 
-			$content = $row->text;
-			$article_layout = $row->layout ?? '';
+			$intro = $row->intro ?? '';
+			$text                   = $this->replace_img_tags_with_img_blocks( $row->text );
+			$article_layout          = $row->layout ?? '';
+			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 
 			// Featured image.
 			if ( ! empty( $row->image ) ) {
@@ -875,15 +898,42 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				} else {
 					// TODO: Maybe just grab the image provided
 				}
-
-				$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 				$post_data['meta_input']['newspack_featured_image_position'] = $featured_image_position;
 			}
-			// Gallery: Test with https://www.hcn.org/issues/52.2/military-only-in-death-do-some-deported-veterans-return-home
 
-			$content = $this->replace_img_tags_with_img_blocks( $content );
-			$content = wp_kses_post( $row->intro ) . $content;
+
+			$gallery = '';
+			if ( $row->gallery_enabled ) {
+				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path );
+				$gallery = serialize_block($this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ));
+			}
+
+			$post_data['post_content'] = wp_kses_post( $intro . $gallery . $text );
+
+			$created_post_id = wp_insert_post( $post_data );
+			if ( is_wp_error( $created_post_id ) ) {
+				$this->logger->log( $log_file, sprintf( "Failed creating post: %s \n\t%s ", $row->{'@id'}, $created_post_id->get_error_message() ), Logger::ERROR );
+			}
+			// Now we have the ID of the created post, do a few more things:
+			$co_authors = array_map(
+				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
+				$this->parse_author_string( $row->author ?? '' )
+			);
+			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $created_post_id );
+
+
+			if ( ! empty( $row->subjects ) ) {
+				wp_set_object_terms( $created_post_id, $row->subjects, 'post_tag' );
+				$primary_tag = get_term_by('name', $row->subjects[0], 'post_tag');
+				update_post_meta( $created_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
+			}
+			$this->set_categories_on_post_from_path( get_post( $created_post_id ), $tree_path );
+
+			echo get_permalink( $created_post_id ) . "\n";
+
 		}
+
+		// TODO. Hardcode some stuff: see hcn_migrate_headlines()
 	}
 
 	private function inject_slideshow( string $content, object $row ): string {
@@ -927,7 +977,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function set_categories_on_post_from_path( \WP_Post $post, string $original_path ): void {
-		$path_parts = explode( '/', $original_path );
+		$trimmed_path = trim( $original_path, '/' );
+		$path_parts   = explode( '/', $trimmed_path );
 		// Pop the last part, which is the post name, so the path is only categories.
 		array_pop( $path_parts );
 		if ( empty( $path_parts ) ) {
@@ -1132,6 +1183,18 @@ QUERY;
 		return empty( $attachment_id ) ? 0 : (int) $attachment_id;
 	}
 
+	private function get_attachment_ids_by_tree_path( string $tree_path ): array {
+		global $wpdb;
+		$attachment_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
+				$wpdb->esc_like($tree_path) .'%'
+			)
+		);
+
+		return $attachment_ids;
+	}
+
 	private function get_related_link_markup( int $post_id ): string {
 		$permalink  = wp_get_shortlink( $post_id, 'post', false );
 		$post_title = get_the_title( $post_id );
@@ -1146,7 +1209,7 @@ HTML;
 	 *
 	 * @return array
 	 */
-	private function parse_author_string( string $authors ) {
+	private function parse_author_string( string $authors ): array {
 		$bad     = [
 			'MD',
 		];
