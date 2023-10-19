@@ -1944,7 +1944,7 @@ if ( $crawled_data['tags_promoted_content'] ) {
 
 		// Extract some data from this <script> element which contains useful data.
 		$script_json = $this->filter_selector( 'script#head-dl', $this->crawler );
-		$script_json = ltrim( $script_json, 'var dataLayer = ' );
+		$script_json = preg_replace( '/^var dataLayer = /', '', $script_json );
 		$script_json = rtrim( $script_json, ';' );
 		$script_data = json_decode( $script_json, true );
 		$script_data = $script_data[0] ?? null;
@@ -2103,10 +2103,10 @@ if ( $crawled_data['tags_promoted_content'] ) {
 	public function filter_author_names( $authors_text ) {
 
 		$authors_text = trim( $authors_text );
-		$authors_text = ltrim( $authors_text, 'By: ' );
-		$authors_text = ltrim( $authors_text, 'By ' );
-		$authors_text = ltrim( $authors_text, 'Written by: ' );
-		$authors_text = ltrim( $authors_text, 'Written by ' );
+		$authors_text = preg_replace( '/^By: /', '', $authors_text );
+		$authors_text = preg_replace( '/^By /', '', $authors_text );
+		$authors_text = preg_replace( '/^Written by: /', '', $authors_text );
+		$authors_text = preg_replace( '/^Written by /', '', $authors_text );
 
 		// Explode names by comma.
 		$authors_text = str_replace( ', ', ',', $authors_text );
