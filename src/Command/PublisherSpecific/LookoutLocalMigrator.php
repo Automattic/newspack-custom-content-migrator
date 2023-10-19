@@ -27,6 +27,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	const CUSTOM_ENTRIES_TABLE           = 'newspack_entries';
 	const LOOKOUT_S3_SCHEMA_AND_HOSTNAME = 'https://lookout-local-brightspot.s3.amazonaws.com';
 
+	const META_POST_LAYOUT_REGULAR     = 'newspackmigration_layout_regular';
+	const META_POST_LAYOUT_STORY_STACK = 'newspackmigration_layout_story_stack';
+
 	/**
 	 * Extracted from nav menu:
 	 * <a class="navigation-item-link" href="https://lookout.co/santacruz/city-life">City Life</a>
@@ -860,35 +863,32 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 *   - content is stored in: div.story-stack-story
 		 *   - e.g. https://lookout.co/santacruz/coast-life/story/2023-05-19/pescadero-day-trip-sea-lions-ano-nuevo-award-winning-tavern-baby-goats
 		 *
-		 * Need to traverse through all div.story-stack-story and:
-		 *      - find .story-stack-story-title if exists, encapsulate it in div.rich-text-body and feed it to rich-text-body crawler
-		 *      - find div.rich-text-body (also has .story-stack-story-body), and also feed it to crawler
+		 * To locate the content in story stack, it's needed to traverse through all div.story-stack-story and find two elements:
+		 *      - find .story-stack-story-title, and if exists we will encapsulate it in a div.rich-text-body so that it can be fed to the rich-text-body crawler
+		 *      - find div.rich-text-body (which contains the .story-stack-story-body), and also simply feed it to crawler
 		 */
 		$story_stack_formatted_rich_text_body = '';
 		$div_content_crawlers = $this->filter_selector_element( 'div.story-stack-story', $this->crawler, $single = false );
 		$content_is_story_stack = (bool) $div_content_crawlers;
 		if ( $content_is_story_stack ) {
 
-			// Traverse through all div.story-stack-story.
+			// Traverse through all div.story-stack-story elements.
 			$story_crawler = $this->filter_selector_element( 'div.story-stack-story', $this->crawler, $single = false );
-			// foreach ( $story_crawler->childNodes->getIterator() as $key_domelement => $story_domelement ) {
 			foreach ( $story_crawler->getIterator() as $key_domelement => $story_stack_story_domelement ) {
 
 				// Traverse through div.story-stack-story's child nodes.
 				foreach ( $story_stack_story_domelement->childNodes->getIterator() as $key_domelement => $story_stack_story_child_domelement ) {
 
-$sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
-
 					if ( 'DOMElement' !== $story_stack_story_child_domelement::class ) {
 
-						// If it's something other than the DOMElements we're searching for, just feed it to crawler.
+						// If it's something other than the DOMElements we're searching for, encapsulate it in div.rich-text-body so that it can be fed to the crawler.
 						$story_stack_formatted_rich_text_body .= '<div class="rich-text-body">';
 						$story_stack_formatted_rich_text_body .= $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
 						$story_stack_formatted_rich_text_body .= '</div>';
 
 					} else {
 
-						// If .story-stack-story-title if exists, encapsulate it in div.rich-text-body and feed it to rich-text-body crawler.
+						// If it's .story-stack-story-title, encapsulate it in div.rich-text-body.
 						$is_story_stack_story_title = false !== strpos( $story_stack_story_child_domelement->getAttribute( 'class' ), 'story-stack-story-title' );
 						if ( $is_story_stack_story_title ) {
 							$story_stack_formatted_rich_text_body .= '<div class="rich-text-body">';
@@ -896,17 +896,14 @@ $sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack
 							$story_stack_formatted_rich_text_body .= '</div>';
 						}
 
-						// Find div.rich-text-body (also has .story-stack-story-body), and also feed it to crawler.
+						// Find div.rich-text-body (also has .story-stack-story-body), and feed it to the crawler.
 						$is_rich_text_body = ( isset( $story_stack_story_child_domelement->tagName ) && 'div' == $story_stack_story_child_domelement->tagName )
 							&& ( false !== strpos( $story_stack_story_child_domelement->getAttribute( 'class' ), 'rich-text-body' ) );
 						if ( $is_rich_text_body ) {
 							$story_stack_formatted_rich_text_body .= $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack_story_child_domelement );
 						}
-
 					}
-
 				}
-
 			}
 
 			// Feed formatted HTML to rich-text-body crawler.
@@ -931,22 +928,23 @@ $sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack
 			$div_content_crawlers = $this->filter_selector_element( 'div.rich-text-body', $this->crawler, $single = false );
 		}
 
-// /**
-//  * In case div.rich-text-body was already removed (if this command was already run and needs to be run again),
-//  * let's use a simple trick to enable traversing through all the nodes of the content -- let's just temporarily
-//  * surround the HTML with a new <div> so that nodes can be traversed the same way as if <div> was here and its nodes
-//  * were actual children.
-//  */
-// // if ( ! $div_content_crawler ) {
-// if ( ! $div_content_crawlers ) {
-// 	$this->crawler->clear();
-// 	$this->crawler->add( '<div>' . $post_content . '</div>' );
-// 	$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
-// }
+		// /**
+		//  * In case div.rich-text-body was already removed (if this command was already run and needs to be run again),
+		//  * let's use a simple trick to enable traversing through all the nodes of the content -- let's just temporarily
+		//  * surround the HTML with a new <div> so that nodes can be traversed the same way as if <div> was here and its nodes
+		//  * were actual children.
+		//  */
+		// // if ( ! $div_content_crawler ) {
+		// if ( ! $div_content_crawlers ) {
+		// 	$this->crawler->clear();
+		// 	$this->crawler->add( '<div>' . $post_content . '</div>' );
+		// 	$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
+		// }
 
+		// The main crawler.
 		foreach ( $div_content_crawlers as $div_content_crawler ) {
 
-			// Traverse through all the child nodes.
+			// Traverse all the child nodes.
 			foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
 
 				// Skip if blank.
@@ -955,16 +953,17 @@ $sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack
 					continue;
 				}
 
-				// Transform or skip specific "div.enhancement"s into $custom_html.
+				// div.enhancement elements can get transformed or skipped.
 				$custom_html = null;
 				$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 				if ( $is_div_class_enhancement ) {
 					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $log_need_oembed_resave, $log_err_img_download );
 				}
 
-				// If $custom_html is a string other than null, it will be used as HTML; and if it's null, the original HTML will be used.
+				// If $custom_html is null, the element's original HTML will be used.
+				// If $custom_html is a string other than null (empty or transformed), element's HTML will be substituted/transformed.
 				if ( ! is_null( $custom_html ) ) {
-					// Use custom HTML.
+					// Use the custom HTML.
 					$domelement_html = $custom_html;
 				} else {
 					// Keep this $domelement's original HTML.
@@ -975,7 +974,7 @@ $sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack
 					}
 				}
 
-				// Append HTML.
+				// Append HTML to post_content updated variable.
 				$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
 				$post_content_updated .= $domelement_html;
 			}
@@ -985,6 +984,8 @@ $sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack
 	}
 
 	/**
+	 * This function transforms or skips (importing to post_content) a DOMElement and returns the resulting HTML.
+	 *
 	 * @param DOMElement $domelement
 	 * @param int        $post_id
 	 * @param string     $log_need_oembed_resave
@@ -1566,6 +1567,8 @@ $sh = $story_stack_story_child_domelement->ownerDocument->saveHTML( $story_stack
 				'featured_image_caption'                  => $crawled_data['featured_image_caption'] ?? '',
 				'featured_image_alt'                      => $crawled_data['featured_image_alt'] ?? '',
 				'featured_image_credit'                   => $crawled_data['featured_image_credit'] ?? '',
+				// Layout type.
+				'newspackmigration_layouttype'            => $crawled_data['_layout_type'] ?? '',
 			];
 
 // QA.
@@ -1808,257 +1811,6 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		wp_cache_flush();
 	}
 
-	// public function cmd_scrape_posts( $pos_args, $assoc_args ) {
-	// 	global $wpdb;
-	//
-	// 	$urls_file = $assoc_args['urls-file'];
-	// 	if ( ! file_exists( $urls_file ) ) {
-	// 		WP_CLI::error( "File $urls_file does not exist." );
-	// 	}
-	// 	$urls = explode( "\n", trim( file_get_contents( $urls_file ), "\n" ) );
-	// 	if ( empty( $urls ) ) {
-	// 		WP_CLI::error( "File $urls_file is empty." );
-	// 	}
-	//
-	// 	/**
-	// 	 * Prepare logs and caching.
-	// 	 */
-	//
-	// 	// Log files.
-	// 	if ( ! file_exists( $this->temp_dir ) ) {
-	// 		mkdir( $this->temp_dir, 0777, true );
-	// 	}
-	// 	$log_wrong_urls                   = $this->temp_dir . '/ll_debug__wrong_urls.log';
-	// 	$log_all_author_names             = $this->temp_dir . '/ll_debug__all_author_names.log';
-	// 	$log_all_tags                     = $this->temp_dir . '/ll_debug__all_tags.log';
-	// 	$log_all_tags_promoted_content    = $this->temp_dir . '/ll_debug__all_tags_promoted_content.log';
-	// 	$log_err_importing_featured_image = $this->temp_dir . '/ll_err__featured_image.log';
-	// 	$log_err_img_download             = $this->temp_dir . '/ll_err__img_download.log';
-	//
-	// 	// Hit timestamps on all logs.
-	// 	$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
-	// 	$this->logger->log( $log_wrong_urls, $ts, false );
-	// 	$this->logger->log( $log_all_author_names, $ts, false );
-	// 	$this->logger->log( $log_all_tags, $ts, false );
-	// 	$this->logger->log( $log_all_tags_promoted_content, $ts, false );
-	// 	$this->logger->log( $log_err_importing_featured_image, $ts, false );
-	// 	$this->logger->log( $log_err_img_download, $ts, false );
-	//
-	// 	// Create folders for caching stuff.
-	// 	// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-	// 	$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
-	// 	if ( ! file_exists( $scraped_htmls_cache_path ) ) {
-	// 		mkdir( $scraped_htmls_cache_path, 0777, true );
-	// 	}
-	//
-	//
-	// 	/**
-	// 	 * Scrape and import URLs.
-	// 	 */
-	// 	$debug_all_author_names          = [];
-	// 	$debug_wrong_posts_urls          = [];
-	// 	$debug_all_tags                  = [];
-	// 	$debug_all_tags_promoted_content = [];
-	//
-	// 	foreach ( $urls as $key_url_data => $url ) {
-	//
-	// 		if ( empty( $url ) ) {
-	// 			continue;
-	// 		}
-	//
-	// 		WP_CLI::line( sprintf( "\n" . '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
-	//
-	// 		// If a "publish"-ed post with same URL exists, skip it.
-	// 		$post_id = $wpdb->get_var(
-	// 			$wpdb->prepare(
-	// 				"select wpm.post_id
-	// 				from {$wpdb->postmeta} wpm
-	// 				join wp_posts wp on wp.ID = wpm.post_id
-	// 				where wpm.meta_key = %s
-	// 				and wpm.meta_value = %s
-	// 				and wp.post_status = 'publish' ; ",
-	// 				'newspackmigration_url',
-	// 				$url
-	// 			)
-	// 		);
-	// 		if ( $post_id ) {
-	// 			WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
-	// 			continue;
-	// 		}
-	//
-	// 		// HTML cache filename and path.
-	// 		$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
-	// 		$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
-	//
-	// 		// Get HTML from cache or fetch from HTTP.
-	// 		$html = file_exists( $html_cached_file_path ) ? file_get_contents( $html_cached_file_path ) : null;
-	// 		if ( is_null( $html ) ) {
-	// 			$get_result = $this->wp_remote_get_with_retry( $url );
-	// 			if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
-	// 				// Not OK.
-	// 				$debug_wrong_posts_urls[] = $url;
-	// 				$msg                      = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
-	// 				$this->logger->log( $log_wrong_urls, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
-	// 				continue;
-	// 			}
-	//
-	// 			$html = $get_result;
-	//
-	// 			// Cache HTML to file.
-	// 			file_put_contents( $html_cached_file_path, $html );
-	// 		}
-	//
-	// 		// Crawl and extract all useful data from HTML
-	// 		$crawled_data = $this->crawl_post_data_from_html( $html, $url );
-	//
-	// 		// Get slug from URL.
-	// 		$slug = $this->get_slug_from_url( $url );
-	//
-	// 		// Create post.
-	// 		$post_args = [
-	// 			'post_title'   => $crawled_data['post_title'],
-	// 			'post_content' => $crawled_data['post_content'],
-	// 			'post_status'  => 'publish',
-	// 			'post_type'    => 'post',
-	// 			'post_name'    => $slug,
-	// 			'post_date'    => $crawled_data['post_date'],
-	// 		];
-	// 		$post_id   = wp_insert_post( $post_args );
-	// 		WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
-	//
-	// 		// Collect postmeta in this array.
-	// 		$postmeta = [
-	// 			// Newspack Subtitle postmeta
-	// 			'newspack_post_subtitle'                  => $crawled_data['post_subtitle'] ?? '',
-	// 			// Basic data
-	// 			'newspackmigration_url'                   => $url,
-	// 			'newspackmigration_slug'                  => $slug,
-	// 			// E.g. "lo-sc".
-	// 			'newspackmigration_script_source'         => $crawled_data['script_data']['source'] ?? '',
-	// 			// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
-	// 			'newspackmigration_script_sectionName'    => $crawled_data['script_data']['sectionName'],
-	// 			// E.g. "Promoted Content".
-	// 			'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? '',
-	// 			'newspackmigration_presentedBy'           => $crawled_data['presented_by'] ?? '',
-	// 			'newspackmigration_tags_promoted_content' => $crawled_data['tags_promoted_content'] ?? '',
-	// 			// Author links, to be processed after import.
-	// 			'newspackmigration_author_links'          => $crawled_data['author_links'] ?? '',
-	// 			// Featured img info.
-	// 			'featured_image_src'                      => $crawled_data['featured_image_src'] ?? '',
-	// 			'featured_image_caption'                  => $crawled_data['featured_image_caption'] ?? '',
-	// 			'featured_image_alt'                      => $crawled_data['featured_image_alt'] ?? '',
-	// 			'featured_image_credit'                   => $crawled_data['featured_image_credit'] ?? '',
-	// 		];
-	//
-	// 		// Collect all tags_promoted_content for QA.
-	// 		if ( $crawled_data['tags_promoted_content'] ) {
-	// 			$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
-	// 		}
-	//
-	// 		// Import featured image.
-	// 		if ( isset( $crawled_data['featured_image_src'] ) ) {
-	// 			WP_CLI::line( 'Downloading featured image ...' );
-	// 			$attachment_id = $this->get_or_download_image(
-	// 				$log_err_img_download,
-	// 				$crawled_data['featured_image_src'],
-	// 				$title = null,
-	// 				$crawled_data['featured_image_caption'],
-	// 				$description = null,
-	// 				$crawled_data['featured_image_alt'],
-	// 				$post_id,
-	// 				$crawled_data['featured_image_credit']
-	// 			);
-	// 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
-	// 				// TODO -- handle
-	// 			} else {
-	// 				// Set featured image.
-	// 				set_post_thumbnail( $post_id, $attachment_id );
-	// 			}
-	// 		}
-	//
-	// 		// Authors.
-	// 		$ga_ids = [];
-	// 		// Get/create GAs.
-	// 		foreach ( $crawled_data['post_authors'] as $author_name ) {
-	// 			$ga = $this->cap->get_guest_author_by_display_name( $author_name );
-	// 			if ( $ga ) {
-	// 				$ga_id = $ga->ID;
-	// 			} else {
-	// 				$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
-	// 			}
-	// 			$ga_ids[] = $ga_id;
-	// 		}
-	// 		if ( empty( $ga_ids ) ) {
-	// 			throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
-	// 		}
-	// 		// Assign GAs to post.
-	// 		$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
-	// 		// Also collect all author names for easier debugging/QA-ing.
-	// 		$debug_all_author_names = array_merge( $debug_all_author_names, $crawled_data['post_authors'] );
-	//
-	// 		// Categories.
-	// 		$category_parent_id = 0;
-	// 		if ( $crawled_data['category_parent_name'] ) {
-	// 			// Get or create parent category.
-	// 			$category_parent_id = wp_create_category( $crawled_data['category_parent_name'], 0 );
-	// 			if ( is_wp_error( $category_parent_id ) ) {
-	// 				throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_parent_name'], $url, $category_parent_id->get_error_message() ) );
-	// 			}
-	// 		}
-	// 		// Get or create primary category.
-	// 		$category_id = wp_create_category( $crawled_data['category_name'], $category_parent_id );
-	// 		if ( is_wp_error( $category_id ) ) {
-	// 			throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_name'], $url, $category_id->get_error_message() ) );
-	// 		}
-	// 		// Set category.
-	// 		wp_set_post_categories( $post_id, [ $category_id ] );
-	//
-	// 		// Assign tags.
-	// 		$tags = $crawled_data['tags'];
-	// 		if ( $tags ) {
-	// 			// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
-	// 			wp_set_post_tags( $post_id, $tags );
-	// 			// Collect all tags for QA.
-	// 			$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
-	// 		}
-	//
-	// 		// Save the postmeta.
-	// 		foreach ( $postmeta as $meta_key => $meta_value ) {
-	// 			if ( ! empty( $meta_value ) ) {
-	// 				update_post_meta( $post_id, $meta_key, $meta_value );
-	// 			}
-	// 		}
-	// 	}
-	//
-	// 	// Debug and QA info.
-	// 	if ( ! empty( $debug_wrong_posts_urls ) ) {
-	// 		WP_CLI::warning( "❗️ Check $log_wrong_urls for invalid URLs." );
-	// 	}
-	// 	if ( ! empty( $debug_all_author_names ) ) {
-	// 		$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-	// 		WP_CLI::warning( "⚠️️ QA the following $log_all_author_names " );
-	// 	}
-	// 	if ( ! empty( $debug_all_tags ) ) {
-	// 		// Flatten multidimensional array to single.
-	// 		$debug_all_tags_flattened = [];
-	// 		array_walk_recursive(
-	// 			$debug_all_tags,
-	// 			function( $e ) use ( &$debug_all_tags_flattened ) {
-	// 				$debug_all_tags_flattened[] = $e;
-	// 			}
-	// 		);
-	// 		// Log.
-	// 		$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
-	// 		WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
-	// 	}
-	// 	if ( ! empty( $debug_all_tags_promoted_content ) ) {
-	// 		$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
-	// 		WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
-	// 	}
-	//
-	// 	WP_CLI::line( 'Done 👍' );
-	// }
-
 	public function get_slug_from_url( $url ) {
 		$url_path          = trim( wp_parse_url( $url, PHP_URL_PATH ), '/' );
 		$url_path_exploded = explode( '/', $url_path );
@@ -2177,6 +1929,7 @@ if ( $crawled_data['tags_promoted_content'] ) {
 	 *      @type ?string category_parent_name
 	 *      @type ?string tags
 	 *      @type ?string presented_by
+	 *      @type ?string _layout_type		      One of self::META_POST_LAYOUT_* constants.
 	 * }
 	 */
 	public function crawl_post_data_from_html( $html, $url ) {
@@ -2225,6 +1978,8 @@ if ( $crawled_data['tags_promoted_content'] ) {
 				$post_content .= ! empty( $post_content ) ? "\n\n" : '';
 				$post_content .= $div_content_crawler_story_stack_story->ownerDocument->saveHTML( $div_content_crawler_story_stack_story );
 			}
+
+			$data['_layout_type'] = self::META_POST_LAYOUT_STORY_STACK;
 		}
 
 		/**
@@ -2244,6 +1999,8 @@ if ( $crawled_data['tags_promoted_content'] ) {
 					$post_content .= $post_content_node->ownerDocument->saveHTML( $post_content_node );
 				}
 			}
+
+			$data['_layout_type'] = self::META_POST_LAYOUT_REGULAR;
 		}
 
 
