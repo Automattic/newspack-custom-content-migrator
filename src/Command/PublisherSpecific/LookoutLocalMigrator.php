@@ -21,6 +21,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 	const META_MEDIA_CREDIT              = '_media_credit';
 	const META_IMAGE_ORIGINAL_URL        = 'newspackmigration_image_original_url';
+	const META_POST_ORIGINAL_URL         = 'newspackmigration_url';
 	const DATA_EXPORT_TABLE              = 'Record';
 	const CUSTOM_ENTRIES_TABLE           = 'newspack_entries';
 	const LOOKOUT_S3_SCHEMA_AND_HOSTNAME = 'https://lookout-local-brightspot.s3.amazonaws.com';
@@ -214,6 +215,27 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-import-posts',
+			[ $this, 'cmd_import_posts' ],
+			[
+				'shortdesc' => 'Imports scraped HTMLs.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'path-to-htmls',
+						'description' => 'Path to scraped .html files.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'reimport-posts',
+						'description' => 'If this flag is set, will reimport all HTML -> post data. Otherwise posts that were already imported will be skipped.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 		// WP_CLI::add_command(
 		// 	'newspack-content-migrator lookoutlocal-scrape-posts',
 		// 	[ $this, 'cmd_scrape_posts' ],
@@ -229,13 +251,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// 		],
 		// 	]
 		// );
-		WP_CLI::add_command(
-			'newspack-content-migrator lookoutlocal-after-import-posts',
-			[ $this, 'cmd_after_import_posts' ],
-			[
-				'shortdesc' => 'Second main command. Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
-			]
-		);
+		// WP_CLI::add_command(
+		// 	'newspack-content-migrator lookoutlocal-after-import-posts',
+		// 	[ $this, 'cmd_after_import_posts' ],
+		// 	[
+		// 		'shortdesc' => 'Second main command. Run this one after `lookoutlocal-scrape-posts` to clean up imported content, and also expand it (like update GA avatars, bios, etc).',
+		// 	]
+		// );
 
 
 		WP_CLI::add_command(
@@ -446,120 +468,120 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 	}
 
-	public function cmd_after_import_posts( $pos_args, $assoc_args ) {
-		global $wpdb;
-
-		// Log files.
-		if ( ! file_exists( $this->temp_dir ) ) {
-			mkdir( $this->temp_dir, 0777, true );
-		}
-		$log_post_ids_updated   = $this->temp_dir . '/ll_updated_post_ids.log';
-		$log_gas_urls_updated   = $this->temp_dir . '/ll_gas_urls_updated.log';
-		$log_err_gas_updated    = $this->temp_dir . '/ll_err__updated_gas.log';
-		$log_enhancements       = $this->temp_dir . '/ll_qa__enhancements.log';
-		$log_need_oembed_resave = $this->temp_dir . '/ll__need_oembed_resave.log';
-		$log_err_img_download   = $this->temp_dir . '/ll_err__img_download.log';
-
-		// Create folders for caching stuff.
-		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
-		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
-			mkdir( $scraped_htmls_cache_path, 0777, true );
-		}
-
-		// Create folders for caching stuff.
-		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
-		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
-		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
-			mkdir( $scraped_htmls_cache_path, 0777, true );
-		}
-
-
-		// Hit timestamps on all logs.
-		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
-		$this->logger->log( $log_post_ids_updated, $ts, false );
-		$this->logger->log( $log_gas_urls_updated, $ts, false );
-		$this->logger->log( $log_err_gas_updated, $ts, false );
-		$this->logger->log( $log_enhancements, $ts, false );
-		$this->logger->log( $log_need_oembed_resave, $ts, false );
-		$this->logger->log( $log_err_img_download, $ts, false );
-
-		// Get post IDs.
-		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
-
-		/**
-		 * Clean up post_content, remove inserted promo or user engagement content.
-		 */
-		WP_CLI::line( 'Cleaning up post_content ...' );
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-
-			$original_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from wp_postmeta where meta_key = 'newspackmigration_url' and post_id = %d;", $post_id ) );
-			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d %s', $key_post_id + 1, count( $post_ids ), $post_id, $original_url ) );
-
-			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
-
-			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download );
-
-			// If post_content was updated.
-			if ( ! empty( $post_content_updated ) ) {
-				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
-				$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
-			}
-
-			// QA remaining 'div.enhancement's.
-			$this->qa_remaining_div_enhancements( $log_enhancements, $post_id, ! empty( $post_content_updated ) ? $post_content_updated : $post_content );
-		}
-
-
-		/**
-		 * Next update GA info by scraping and fetching their author pages from live.
-		 */
-		WP_CLI::line( 'Updating GA author data ...' );
-
-		// First get all author pages URLs which were originally stored as Posts' postmeta.
-		$author_pages_urls = [];
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-
-			WP_CLI::line( sprintf( "\n" . "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
-
-			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
-			if ( empty( $links_meta ) ) {
-				continue;
-			}
-
-			// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
-			foreach ( $links_meta as $urls ) {
-				foreach ( $urls as $url ) {
-					if ( in_array( $url, $author_pages_urls ) ) {
-						continue;
-					}
-
-					$author_pages_urls[] = $url;
-				}
-			}
-		}
-
-		// Now actually scrape individual author pages and update GAs with that data.
-		foreach ( $author_pages_urls as $author_page_url ) {
-			$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
-			if ( empty( $errs_updating_gas ) ) {
-				$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
-			} else {
-				$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
-			}
-		}
-
-
-		WP_CLI::line(
-			'Done. QA the following logs:'
-			. "\n  - ❗  ERRORS: $log_err_gas_updated"
-			. "\n  - ♻️️  $log_need_oembed_resave"
-			. "\n  - ⚠️  $log_enhancements"
-			. "\n  - 👍  $log_post_ids_updated"
-			. "\n  - 👍  $log_gas_urls_updated"
-		);
-		wp_cache_flush();
-	}
+	// public function cmd_after_import_posts( $pos_args, $assoc_args ) {
+	// 	global $wpdb;
+	//
+	// 	// Log files.
+	// 	if ( ! file_exists( $this->temp_dir ) ) {
+	// 		mkdir( $this->temp_dir, 0777, true );
+	// 	}
+	// 	$log_post_ids_updated   = $this->temp_dir . '/ll_updated_post_ids.log';
+	// 	$log_gas_urls_updated   = $this->temp_dir . '/ll_gas_urls_updated.log';
+	// 	$log_err_gas_updated    = $this->temp_dir . '/ll_err__updated_gas.log';
+	// 	$log_enhancements       = $this->temp_dir . '/ll_qa__enhancements.log';
+	// 	$log_need_oembed_resave = $this->temp_dir . '/ll__need_oembed_resave.log';
+	// 	$log_err_img_download   = $this->temp_dir . '/ll_err__img_download.log';
+	//
+	// 	// Create folders for caching stuff.
+	// 	// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+	// 	$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+	// 	if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+	// 		mkdir( $scraped_htmls_cache_path, 0777, true );
+	// 	}
+	//
+	// 	// Create folders for caching stuff.
+	// 	// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+	// 	$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+	// 	if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+	// 		mkdir( $scraped_htmls_cache_path, 0777, true );
+	// 	}
+	//
+	//
+	// 	// Hit timestamps on all logs.
+	// 	$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+	// 	$this->logger->log( $log_post_ids_updated, $ts, false );
+	// 	$this->logger->log( $log_gas_urls_updated, $ts, false );
+	// 	$this->logger->log( $log_err_gas_updated, $ts, false );
+	// 	$this->logger->log( $log_enhancements, $ts, false );
+	// 	$this->logger->log( $log_need_oembed_resave, $ts, false );
+	// 	$this->logger->log( $log_err_img_download, $ts, false );
+	//
+	// 	// Get post IDs.
+	// 	$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+	//
+	// 	/**
+	// 	 * Clean up post_content, remove inserted promo or user engagement content.
+	// 	 */
+	// 	WP_CLI::line( 'Cleaning up post_content ...' );
+	// 	foreach ( $post_ids as $key_post_id => $post_id ) {
+	//
+	// 		$original_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from wp_postmeta where meta_key = 'newspackmigration_url' and post_id = %d;", $post_id ) );
+	// 		WP_CLI::line( sprintf( "\n" . '%d/%d ID %d %s', $key_post_id + 1, count( $post_ids ), $post_id, $original_url ) );
+	//
+	// 		$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+	//
+	// 		$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download );
+	//
+	// 		// If post_content was updated.
+	// 		if ( ! empty( $post_content_updated ) ) {
+	// 			$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+	// 			$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
+	// 		}
+	//
+	// 		// QA remaining 'div.enhancement's.
+	// 		$this->qa_remaining_div_enhancements( $log_enhancements, $post_id, ! empty( $post_content_updated ) ? $post_content_updated : $post_content );
+	// 	}
+	//
+	//
+	// 	/**
+	// 	 * Next update GA info by scraping and fetching their author pages from live.
+	// 	 */
+	// 	WP_CLI::line( 'Updating GA author data ...' );
+	//
+	// 	// First get all author pages URLs which were originally stored as Posts' postmeta.
+	// 	$author_pages_urls = [];
+	// 	foreach ( $post_ids as $key_post_id => $post_id ) {
+	//
+	// 		WP_CLI::line( sprintf( "\n" . "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+	//
+	// 		$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
+	// 		if ( empty( $links_meta ) ) {
+	// 			continue;
+	// 		}
+	//
+	// 		// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
+	// 		foreach ( $links_meta as $urls ) {
+	// 			foreach ( $urls as $url ) {
+	// 				if ( in_array( $url, $author_pages_urls ) ) {
+	// 					continue;
+	// 				}
+	//
+	// 				$author_pages_urls[] = $url;
+	// 			}
+	// 		}
+	// 	}
+	//
+	// 	// Now actually scrape individual author pages and update GAs with that data.
+	// 	foreach ( $author_pages_urls as $author_page_url ) {
+	// 		$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+	// 		if ( empty( $errs_updating_gas ) ) {
+	// 			$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
+	// 		} else {
+	// 			$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
+	// 		}
+	// 	}
+	//
+	//
+	// 	WP_CLI::line(
+	// 		'Done. QA the following logs:'
+	// 		. "\n  - ❗  ERRORS: $log_err_gas_updated"
+	// 		. "\n  - ♻️️  $log_need_oembed_resave"
+	// 		. "\n  - ⚠️  $log_enhancements"
+	// 		. "\n  - 👍  $log_post_ids_updated"
+	// 		. "\n  - 👍  $log_gas_urls_updated"
+	// 	);
+	// 	wp_cache_flush();
+	// }
 
 	/**
 	 * @param $url
@@ -1108,7 +1130,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 					// Get Gutenberg image block.
 					$attachment_post = get_post( $attachment_id );
-					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, $href );
+					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, null, null, $href );
 					$custom_html = serialize_blocks( [ $image_block ] );
 
 				} elseif ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
@@ -1136,7 +1158,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 					// Get Gutenberg image block.
 					$attachment_post = get_post( $attachment_id );
-					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, null );
+					$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false );
 					$custom_html = serialize_blocks( [ $image_block ] );
 
 				} elseif ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
@@ -1435,6 +1457,361 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Saved to %s 👍', $path ) );
 	}
+
+	public function cmd_import_posts( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		/**
+		 * Args.
+		 */
+		$path_to_htmls = $assoc_args['path-to-htmls'];
+		$html_files = glob( $path_to_htmls . '/*.html' );
+		if ( empty( $html_files ) ) {
+			WP_CLI::error( 'No .html files found in path.' );
+		}
+		$reimport_posts = isset( $assoc_args['reimport-posts'] ) ? true : false;
+
+		/**
+		 * Logs.
+		 */
+		$log_wrong_urls                   = '/ll2_debug__wrong_urls.log';
+		$log_all_author_names             = '/ll2_debug__all_author_names.log';
+		$log_all_tags                     = '/ll2_debug__all_tags.log';
+		$log_all_tags_promoted_content    = '/ll2_debug__all_tags_promoted_content.log';
+		$log_err_importing_featured_image = '/ll2_err__featured_image.log';
+		$log_err_img_download             = '/ll2_err__img_download.log';
+		// Hit timestamps on all logs.
+		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+		$this->logger->log( $log_wrong_urls, $ts, false );
+		$this->logger->log( $log_all_author_names, $ts, false );
+		$this->logger->log( $log_all_tags, $ts, false );
+		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
+		$this->logger->log( $log_err_importing_featured_image, $ts, false );
+		$this->logger->log( $log_err_img_download, $ts, false );
+
+		/**
+		 * Import posts.
+		 */
+		$debug_all_author_names          = [];
+		$debug_wrong_posts_urls          = [];
+		$debug_all_tags                  = [];
+		$debug_all_tags_promoted_content = [];
+
+		foreach ( $html_files as $key_html_file => $html_file ) {
+
+			$file_content = json_decode( file_get_contents( $html_file ), true );
+			$url = $file_content['url'];
+			$html = $file_content['html'];
+
+
+			/**
+			 * Skip post ID if already imported and --reimport-posts not set.
+			 */
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"select wpm.post_id
+					from {$wpdb->postmeta} wpm
+					join wp_posts wp on wp.ID = wpm.post_id
+					where wpm.meta_key = %s
+					and wpm.meta_value = %s
+					and wp.post_status = 'publish' ; ",
+					self::META_POST_ORIGINAL_URL,
+					$url
+				)
+			);
+			if ( ! $reimport_posts && $post_id ) {
+				WP_CLI::line( sprintf( 'Already imported ID %d URL %s, skipping.', $post_id, $url ) );
+				continue;
+			}
+
+
+			/**
+			 * Create or update post.
+			 */
+
+			WP_CLI::line( sprintf( "\n" . '%d/%d Importing %s ...', $key_html_file + 1, count( $html_files ), $url ) );
+
+			// Crawl and extract all useful data from HTML
+			$crawled_data = $this->crawl_post_data_from_html( $html, $url );
+
+			// Get slug from URL.
+			$slug = $this->get_slug_from_url( $url );
+
+			$post_args = [
+				'post_title'   => $crawled_data['post_title'],
+				'post_content' => $crawled_data['post_content'],
+				'post_status'  => 'publish',
+				'post_type'    => 'post',
+				'post_name'    => $slug,
+				'post_date'    => $crawled_data['post_date'],
+			];
+			if ( ! $post_id ) {
+				$post_id = wp_insert_post( $post_args );
+				WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
+			} else {
+				$wpdb->update(
+					$wpdb->posts,
+					$post_args,
+					[ 'ID' => $post_id ]
+				);
+				WP_CLI::success( sprintf( 'Updated post ID %d', $post_id ) );
+			}
+
+			/**
+			 * Collect postmeta.
+			 */
+			$postmeta = [
+				// Newspack Subtitle postmeta
+				'newspack_post_subtitle'                  => $crawled_data['post_subtitle'] ?? '',
+				// Basic data
+				self::META_POST_ORIGINAL_URL              => $url,
+				'newspackmigration_slug'                  => $slug,
+				// E.g. "lo-sc".
+				'newspackmigration_script_source'         => $crawled_data['script_data']['source'] ?? '',
+				// E.g. "uc-santa-cruz". This is a backup value to help debug categories, if needed.
+				'newspackmigration_script_sectionName'    => $crawled_data['script_data']['sectionName'],
+				// E.g. "Promoted Content".
+				'newspackmigration_script_tags'           => $crawled_data['script_data']['tags'] ?? '',
+				'newspackmigration_presentedBy'           => $crawled_data['presented_by'] ?? '',
+				'newspackmigration_tags_promoted_content' => $crawled_data['tags_promoted_content'] ?? '',
+				// Author links, to be processed after import.
+				'newspackmigration_author_links'          => $crawled_data['author_links'] ?? '',
+				// Featured img info.
+				'featured_image_src'                      => $crawled_data['featured_image_src'] ?? '',
+				'featured_image_caption'                  => $crawled_data['featured_image_caption'] ?? '',
+				'featured_image_alt'                      => $crawled_data['featured_image_alt'] ?? '',
+				'featured_image_credit'                   => $crawled_data['featured_image_credit'] ?? '',
+			];
+
+// QA.
+if ( $crawled_data['tags_promoted_content'] ) {
+	$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
+}
+
+			// Import featured image.
+			if ( isset( $crawled_data['featured_image_src'] ) ) {
+				WP_CLI::line( 'Downloading featured image ...' );
+				$attachment_id = $this->get_or_download_image(
+					$log_err_img_download,
+					$crawled_data['featured_image_src'],
+					$title = null,
+					$crawled_data['featured_image_caption'],
+					$description = null,
+					$crawled_data['featured_image_alt'],
+					$post_id,
+					$crawled_data['featured_image_credit']
+				);
+				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+					// TODO -- handle
+				} else {
+					// Set featured image.
+					set_post_thumbnail( $post_id, $attachment_id );
+				}
+			}
+
+			// Authors.
+			$ga_ids = [];
+			// Get/create GAs.
+			foreach ( $crawled_data['post_authors'] as $author_name ) {
+				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
+				if ( $ga ) {
+					$ga_id = $ga->ID;
+				} else {
+					$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
+				}
+				$ga_ids[] = $ga_id;
+			}
+			if ( empty( $ga_ids ) ) {
+				throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
+			}
+			// Assign GAs to post.
+			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+			// Also collect all author names for easier debugging/QA-ing.
+			$debug_all_author_names = array_merge( $debug_all_author_names, $crawled_data['post_authors'] );
+
+			// Categories.
+			$category_parent_id = 0;
+			if ( $crawled_data['category_parent_name'] ) {
+				// Get or create parent category.
+				$category_parent_id = wp_create_category( $crawled_data['category_parent_name'], 0 );
+				if ( is_wp_error( $category_parent_id ) ) {
+					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_parent_name'], $url, $category_parent_id->get_error_message() ) );
+				}
+			}
+			// Get or create primary category.
+			$category_id = wp_create_category( $crawled_data['category_name'], $category_parent_id );
+			if ( is_wp_error( $category_id ) ) {
+				throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_name'], $url, $category_id->get_error_message() ) );
+			}
+			// Set category.
+			wp_set_post_categories( $post_id, [ $category_id ] );
+
+			// Assign tags.
+			$tags = $crawled_data['tags'];
+			if ( $tags ) {
+				// wp_set_post_tags() also takes a CSV of tags, so this might work out of the box. But we're saving
+				wp_set_post_tags( $post_id, $tags );
+				// Collect all tags for QA.
+				$debug_all_tags = array_merge( $debug_all_tags, [ $tags ] );
+			}
+
+			// Save the postmeta.
+			foreach ( $postmeta as $meta_key => $meta_value ) {
+				if ( ! empty( $meta_value ) ) {
+					update_post_meta( $post_id, $meta_key, $meta_value );
+				}
+			}
+		}
+
+		// Debug and QA info.
+		if ( ! empty( $debug_wrong_posts_urls ) ) {
+			WP_CLI::warning( "❗️ Check $log_wrong_urls for invalid URLs." );
+		}
+		if ( ! empty( $debug_all_author_names ) ) {
+			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
+			WP_CLI::warning( "⚠️️ QA the following $log_all_author_names " );
+		}
+		if ( ! empty( $debug_all_tags ) ) {
+			// Flatten multidimensional array to single.
+			$debug_all_tags_flattened = [];
+			array_walk_recursive(
+				$debug_all_tags,
+				function( $e ) use ( &$debug_all_tags_flattened ) {
+					$debug_all_tags_flattened[] = $e;
+				}
+			);
+			// Log.
+			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
+			WP_CLI::warning( "⚠️️ QA the following $log_all_tags ." );
+		}
+		if ( ! empty( $debug_all_tags_promoted_content ) ) {
+			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
+			WP_CLI::warning( "⚠️️ QA the following $log_all_tags_promoted_content ." );
+		}
+
+		WP_CLI::line( 'Done 👍' );
+
+
+return;
+
+	// }
+	//
+	// public function cmd_after_import_posts( $pos_args, $assoc_args ) {
+	// 	global $wpdb;
+
+		// Log files.
+		if ( ! file_exists( $this->temp_dir ) ) {
+			mkdir( $this->temp_dir, 0777, true );
+		}
+		$log_post_ids_updated   = $this->temp_dir . '/ll_updated_post_ids.log';
+		$log_gas_urls_updated   = $this->temp_dir . '/ll_gas_urls_updated.log';
+		$log_err_gas_updated    = $this->temp_dir . '/ll_err__updated_gas.log';
+		$log_enhancements       = $this->temp_dir . '/ll_qa__enhancements.log';
+		$log_need_oembed_resave = $this->temp_dir . '/ll__need_oembed_resave.log';
+		$log_err_img_download   = $this->temp_dir . '/ll_err__img_download.log';
+
+		// Create folders for caching stuff.
+		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+			mkdir( $scraped_htmls_cache_path, 0777, true );
+		}
+
+		// Create folders for caching stuff.
+		// Cache scraped HTMLs (in case we need to repeat scraping/identifying data from HTMLs).
+		$scraped_htmls_cache_path = $this->temp_dir . '/scraped_htmls';
+		if ( ! file_exists( $scraped_htmls_cache_path ) ) {
+			mkdir( $scraped_htmls_cache_path, 0777, true );
+		}
+
+
+		// Hit timestamps on all logs.
+		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+		$this->logger->log( $log_post_ids_updated, $ts, false );
+		$this->logger->log( $log_gas_urls_updated, $ts, false );
+		$this->logger->log( $log_err_gas_updated, $ts, false );
+		$this->logger->log( $log_enhancements, $ts, false );
+		$this->logger->log( $log_need_oembed_resave, $ts, false );
+		$this->logger->log( $log_err_img_download, $ts, false );
+
+		// Get post IDs.
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+
+		/**
+		 * Clean up post_content, remove inserted promo or user engagement content.
+		 */
+		WP_CLI::line( 'Cleaning up post_content ...' );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			$original_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from wp_postmeta where meta_key = %s and post_id = %d;", self::META_POST_ORIGINAL_URL, $post_id ) );
+			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d %s', $key_post_id + 1, count( $post_ids ), $post_id, $original_url ) );
+
+			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download );
+
+			// If post_content was updated.
+			if ( ! empty( $post_content_updated ) ) {
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post_id ] );
+				$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
+			}
+
+			// QA remaining 'div.enhancement's.
+			$this->qa_remaining_div_enhancements( $log_enhancements, $post_id, ! empty( $post_content_updated ) ? $post_content_updated : $post_content );
+		}
+
+
+		/**
+		 * Next update GA info by scraping and fetching their author pages from live.
+		 */
+		WP_CLI::line( 'Updating GA author data ...' );
+
+		// First get all author pages URLs which were originally stored as Posts' postmeta.
+		$author_pages_urls = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			WP_CLI::line( sprintf( "\n" . "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			$links_meta = get_post_meta( $post_id, 'newspackmigration_author_links' );
+			if ( empty( $links_meta ) ) {
+				continue;
+			}
+
+			// Flatten these multidimensional meta and add them to $author_pages_links as unique values.
+			foreach ( $links_meta as $urls ) {
+				foreach ( $urls as $url ) {
+					if ( in_array( $url, $author_pages_urls ) ) {
+						continue;
+					}
+
+					$author_pages_urls[] = $url;
+				}
+			}
+		}
+
+		// Now actually scrape individual author pages and update GAs with that data.
+		foreach ( $author_pages_urls as $author_page_url ) {
+			$errs_updating_gas = $this->update_author_info( $author_page_url, $scraped_htmls_cache_path, $log_err_gas_updated );
+			if ( empty( $errs_updating_gas ) ) {
+				$this->logger->log( $log_gas_urls_updated, $author_page_url, false );
+			} else {
+				$this->logger->log( $log_err_gas_updated, implode( "\n", $errs_updating_gas ), false );
+			}
+		}
+
+
+		WP_CLI::line(
+			'Done. QA the following logs:'
+			. "\n  - ❗  ERRORS: $log_err_gas_updated"
+			. "\n  - ♻️️  $log_need_oembed_resave"
+			. "\n  - ⚠️  $log_enhancements"
+			. "\n  - 👍  $log_post_ids_updated"
+			. "\n  - 👍  $log_gas_urls_updated"
+		);
+		wp_cache_flush();
+	}
+
+
 
 	// public function cmd_scrape_posts( $pos_args, $assoc_args ) {
 	// 	global $wpdb;
