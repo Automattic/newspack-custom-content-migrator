@@ -1,0 +1,354 @@
+<?php
+
+namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
+
+use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use \NewspackCustomContentMigrator\Logic\Posts;
+use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use \WP_CLI;
+
+/**
+ * Custom migration scripts for Block Club Chicago.
+ */
+class BlockClubChicagoMigrator implements InterfaceCommand {
+
+	/**
+	 * @var null|InterfaceCommand Instance.
+	 */
+	private static $instance = null;
+
+	/**
+	 * Posts instance.
+	 *
+	 * @var Posts Posts instance.
+	 */
+	private $posts;
+
+	/**
+	 * WpBlockManipulator instance.
+	 *
+	 * @var WpBlockManipulator WpBlockManipulator instance.
+	 */
+	private $blocks_manipulator;
+
+	/**
+	 * GutenbergBlockGenerator instance.
+	 *
+	 * @var GutenbergBlockGenerator GutenbergBlockGenerator instance.
+	 */
+	private $blocks;
+
+	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+		$this->posts              = new Posts();
+		$this->blocks_manipulator = new WpBlockManipulator();
+		$this->blocks             = new GutenbergBlockGenerator();
+	}
+
+	/**
+	 * Singleton get_instance().
+	 *
+	 * @return InterfaceCommand|null
+	 */
+	public static function get_instance() {
+		$class = get_called_class();
+		if ( null === self::$instance ) {
+			self::$instance = new $class;
+		}
+
+		return self::$instance;
+	}
+
+	/**
+	 * See InterfaceCommand::register_commands.
+	 */
+	public function register_commands() {
+		WP_CLI::add_command(
+			'newspack-content-migrator blockclubchicago-migrate-subtitles',
+			[ $this, 'cmd_migrate_subtitles' ],
+			[
+				'shortdesc' => 'Populate Newspack subtitles.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator blockclubchicago-migrate-flourish-embeds',
+			[ $this, 'cmd_migrate_flourish' ],
+			[
+				'shortdesc' => 'Refactors Flourish usage to a corresponding Gutenberg block.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator blockclubchicago-migrate-lede-iframes',
+			[ $this, 'cmd_migrate_lede_iframes' ],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator blockclubchicago-migrate-image-credits',
+			[ $this, 'cmd_migrate_image_credits' ],
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator blockclubchicago-dev-helper-scripts',
+			[ $this, 'cmd_dev_helper_scripts' ],
+			[
+				'shortdesc' => 'Various dev snippets. Do not run randomly.',
+				'synopsis'  => [],
+			]
+		);
+	}
+
+	public function cmd_dev_helper_scripts( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		/**
+		 * Replace URL segments -- multisite and S3 hostname ones.
+		 */
+		// $path_before_after = 'searchreplace_beforeAfter';
+		// if ( ! file_exists( $path_before_after ) ) {
+		// 	mkdir( $path_before_after, 0777, true );
+		// }
+		//
+		// $replacements = [
+		// 	'//blockclub-newspack.newspackstaging.com/wp-content/uploads/sites/5/' => '//bcc-newspack.s3.amazonaws.com/uploads/',
+		// 	'//blockclub-newspack.newspackstaging.com/wp-content/uploads/' => '//bcc-newspack.s3.amazonaws.com/uploads/',
+ 		// ];
+		//
+		// $post_ids = $this->posts->get_all_posts_ids();
+		// foreach ( $post_ids as $post_id ) {
+		// 	$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+		// 	$post_content_updated = $post_content;
+		//
+		// 	$post_content_updated = str_replace( $from, $to, $post_content_updated );
+		//
+		// 	if ( $post_content_updated != $post_content ) {
+		// 		$wpdb->update(
+		// 			$wpdb->posts,
+		// 			[ 'post_content' => $post_content_updated ],
+		// 			[ 'ID' => $post_id ]
+		// 		);
+		//
+		// 		file_put_contents( $path_before_after . '/' . $post_id . '.before.html', $post_content );
+		// 		file_put_contents( $path_before_after . '/' . $post_id . '.after.html', $post_content_updated );
+		//
+		// 		WP_CLI::success( "Updated $post_id" );
+		// 	}
+		// }
+		// return;
+
+
+		// Post IDs imported during the pre-launch cdiff.
+		$post_ids = [653233,653234,643890,643891,653235,653236,653237,653238,653242,653240,653239,653241,653243,653244,653245,653246,653247,653248,653249,653250,653251,653252,653253,653254,653255,653256,653257,653229,653258,653259,653260,653261,653262,653263,653264,653265,653266,653267,653268,653269,653271,653270,653272,653273,653274,653275,653276,653277,653278,653279,653280,653281,653283,653282,653284,653285,653286,653287,653288,653289,653290,653291,653293,653292,653294,653296,653295,653300,653302,653298,653297,653299,653301,653303,653305,653304,653306,653307,653308,653309,653230,643892,653231,653310,653311,653313,653312,653316,653314,653315,653317,653318,653322,653319,653320,653321,653323,653324,653325,653327,653326,653330,653328,653329,653331,653345,653332,653333,653344,653334,653335,653339,653336,653337,653338,653340,653342,653346,653341,653343,653347,653348,653360,653349,653350,653351,653353,653352,653354,653355,653356,653358,653357,653359,653361,653362,653363,653364,653365,653367,653366,653370,644063,653368,653369,643901,653372,653371,653373,653374,643859,644056,643898,653375,643916,643934,643956,653376,643896,653377,653378,643903,653379,653380,643899,644111,643971,643935,643895,643893,644187,643932,643894,643900,643902,643897,643909,643957,643860,643910,643918,643907,643905,643911,643904,643912,643906,643913,643917,643914,643915,643919,643928,643908,643945,643929,643920,643930,643922,643977,643936,643924,643927,643921,643925,644126,644385,643926,643969,643923,643962,643933,643931,643952,643950,643941,643997,643938,643953,643946,643944,643937,643961,643942,643951,644115,643947,643949,643940,643939,643943,643948,643959,643955,643954,643967,643972,643958,643960,643973,643981,643965,643968,643964,643966,644006,643970,643963,644161,644045,644046,644062,643975,643986,643976,643985,643861,644052,643974,643980,643982,643994,643984,644025,643988,643978,643979,643992,643983,644015,644010,643999,643987,643989,644000,643996,643995,643990,644051,644001,643991,643993,644227,644002,643998,644014,644012,644026,644005,644003,644009,644055,644011,644004,644017,644047,644007,644024,644008,644022,644240,644035,644013,644038,644020,644067,644016,644033,644021,644039,644073,644023,644018,644019,644097,644027,644028,644031,644061,644032,644057,644138,644030,644036,644029,644037,643863,644043,644034,644098,644044,644040,644049,644048,644042,644050,644041,644058,644059,644053,644054,644066,644071,644068,644060,644070,644088,644072,643862,644064,644069,644075,644078,644125,644077,644065,644074,644087,644076,644082,644089,644079,644080,644084,644081,644096,644085,644083,644086,644099,644102,644090,644117,644091,644094,644095,644093,644092,644101,644113,644131,644100,644104,644109,644155,644160,644105,644103,644147,644136,644106,644130,644107,644108,644112,644110,644421,644116,644127,644114,644119,644118,644132,644124,644122,644123,644129,644120,644121,644134,644128,644162,644211,644137,644148,644140,644145,644175,644135,644139,644133,644150,644156,644146,644191,644143,644152,644144,644141,644174,644142,644165,644149,644151,644153,644157,644168,644164,644154,644216,644213,644158,644163,644189,644159,644166,644170,644167,644171,644177,644172,644173,644176,644181,644199,644225,644169,644180,644178,644358,644179,644184,644186,644182,644393,644193,644183,644185,644230,644257,644190,644198,644188,644192,644200,644202,644303,644201,644195,644197,644194,644196,644204,644205,644203,644251,644212,644215,644214,644209,644206,644207,644208,644248,644210,644218,644222,644217,644219,644320,644221,644288,644243,644224,644223,644226,644228,644229,644231,644238,644232,644220,644246,644236,644234,644235,644233,644237,644242,644239,644241,644244,644262,644245,644247,644252,644256,644255,644254,644249,644260,644250,644253,644325,644258,644259,644261,644282,644264,644263,644265,644314,644268,644266,644270,644267,644269,644271,644272,644277,644332,644279,644284,644333,644273,644274,644339,644275,644287,644283,644281,644278,644293,644276,644286,644280,644285,644301,644324,644315,644291,644292,644296,644295,644298,644289,644290,644316,644302,644294,644300,644297,644299,644438,644304,644305,644321,644323,644317,644312,644307,644309,644318,644334,644308,644313,644327,644306,644322,644386,644326,644319,644511,644310,644311,644387,644329,644337,644535,644357,644374,644335,644338,644362,644330,644364,644331,644328,644336,644342,644363,644381,644355,644340,644359,644341,644343,644350,644365,644348,644344,644349,644345,644346,644347,644351,644352,643864,644354,644360,644367,644368,644373,644353,644361,644356,644375,644384,644366,644382,644369,644447,644380,644370,644383,644379,644377,644378,644376,644372,644394,644409,644451,644371,644395,644388,644389,644413,644400,644437,644396,644390,644408,644415,644403,644399,644416,644391,644397,644401,644392,644398,644410,644402,644420,644412,644406,644404,644479,644405,644407,644411,644439,644491,644414,644417,644418,644424,644423,643865,644425,644473,644422,644534,644442,644454,644419,644426,644427,644428,644440,644433,644430,644429,644432,644434,644435,644436,644431,644449,644450,644445,644622,644443,644453,644458,644444,644455,644448,644452,644441,644446,644506,644465,644464,644466,644476,644456,644467,644462,644460,643866,644459,644463,644457,644478,644461,644471,644468,644510,644472,644477,644470,644469,643867,644481,644475,644480,644474,644482,644487,644495,644484,644485,644483,644494,644489,644496,644488,644492,644524,644493,644490,644497,644509,644500,644507,644486,644503,644498,644499,644544,644505,644508,644556,644587,644525,644518,644501,644504,644502,644512,644545,644523,644516,644514,644513,644657,644520,644519,644515,644527,644530,644526,644531,644522,644552,644517,644521,644528,644557,644529,644532,644596,644536,644542,644541,644537,644540,644533,644551,644546,644564,644538,644543,644539,644568,644570,644824,644553,644549,644559,644554,644547,644548,644550,644560,644555,644558,644569,644563,644573,644566,644572,644574,644565,644562,644576,644561,644593,644575,644578,644577,644567,644571,644595,644592,644585,644579,644590,644594,644581,644588,644580,644673,644591,644589,644586,644584,644616,644583,644582,644597,644611,644603,644634,643868,644648,644602,644605,644598,644610,644612,644606,644613,644600,644609,644638,644604,644601,644666,644607,644599,644628,644608,644615,644626,644659,643869,644623,644618,644614,644619,644633,644646,644627,644620,644621,644624,644617,644660,644625,644630,644629,644642,644632,644641,644643,644722,644684,644723,644656,644635,644836,644631,644850,644636,644705,644639,644637,644651,644644,644690,644640,644645,644654,643870,644653,644647,644675,644661,644652,644668,644650,644655,644662,644649,644658,644671,645002,644709,644688,644672,644667,644703,644665,644674,644669,644724,644670,644664,644676,644701,644712,644663,644678,644696,644677,644687,644700,644737,644683,644740,644689,644686,644711,644691,644694,644679,644681,644693,644682,644692,644685,644699,644680,644695,644706,644704,644707,644728,644697,644698,644719,644720,644702,644733,643874,644708,644710,644758,644736,644800,643871,644721,644734,644725,644752,644748,644735,644717,644715,644713,644714,644716,644764,644726,644718,644727,644731,644792,644730,644741,644729,644739,644755,644749,644732,644776,644738,644742,644750,644743,644756,644744,644745,644763,644751,644746,644753,644765,644757,644759,644754,644747,644768,643872,644766,644815,644781,644916,644769,645256,644816,644772,644767,644760,644762,644771,644787,644761,644785,644770,644797,644773,644798,644782,644777,644775,644805,644779,644780,644864,644786,644783,644996,644817,643873,644774,644791,644778,644795,644784,644788,644789,645104,644818,644809,644793,644932,644806,645011,644799,644790,644794,644796,644801,644841,644812,644802,644828,644823,644808,644811,644804,644803,644814,644840,645118,644826,644810,644807,644813,644822,644830,644839,644819,644825,644863,644856,644820,644821,644928,644827,644829,644845,644837,644831,644835,644832,644847,644843,644838,644833,644857,644895,644842,644834,644853,644852,644848,644844,644846,644855,644854,644851,644886,644859,644862,644849,644866,644869,644870,644858,644884,644865,644867,644860,644868,644861,644871,644877,644879,644900,644882,644880,644875,644907,644876,644976,644883,644898,644878,644881,644885,644872,644873,644874,644945,644888,644896,644897,644889,644890,644887,644893,644891,644968,644892,644894,644899,644927,644944,644903,644946,644905,644954,644901,644920,644902,644937,644908,644904,644912,644913,644909,644910,644906,644911,644915,644914,644918,644939,644921,644917,644919,644930,644933,644934,644922,644931,644923,644938,644935,645027,644924,644936,644925,644929,644926,644949,644940,644941,644948,644947,645012,644950,644952,643875,644953,644978,644980,644942,644943,644982,644951,644983,645007,644955,643876,644962,644963,644966,644969,644957,644956,644965,644961,644958,644959,644964,644960,644967,645029,644970,644973,644995,644971,644972,645013,644981,644974,644979,644977,644975,644994,644984,645020,645037,644997,645038,644992,644990,644991,644985,644986,644989,644988,644993,644987,645031,645060,644998,644999,645000,645004,645021,645001,645015,645008,645025,645028,645039,645022,645003,645014,645043,645006,645009,645010,645005,645017,645042,645016,645023,645062,645018,645026,645077,645019,645056,645024,645030,645034,645032,645044,645033,645093,645045,645036,643877,645035,645054,645040,645076,645088,645041,645059,645053,645050,645046,643878,645052,645047,645066,645051,645103,645071,645078,645073,645055,645061,645049,645057,645058,645048,645074,645064,645065,645068,645072,645138,645063,645069,645101,645070,645116,645075,645091,645067,645084,645081,645079,645206,645080,645107,645083,645082,645087,645092,645086,645085,645108,645128,645129,645095,645094,645090,645089,645100,645096,645098,645097,645105,645120,645102,645099,645106,645173,645115,645114,645119,645109,645110,645111,643879,645112,645122,645117,645141,645134,645113,645142,645121,645124,645123,645133,645125,645164,645139,645126,645130,645137,645136,645158,645159,645132,645174,645131,645127,645135,645143,645140,645144,645149,645223,645147,645171,645162,645146,645145,645150,645163,645151,645160,645226,645157,645153,645161,645155,645148,645152,645154,645175,645156,645176,645165,645169,645172,645188,645181,645166,645167,645168,645193,645170,645178,645182,645177,645180,645179,645189,645184,645185,645186,643880,645377,645190,645183,645192,645191,645194,645195,645218,645187,645201,645222,645198,645196,645197,645234,645200,645202,645204,645199,645215,645246,643881,645213,645203,645205,645207,645210,645250,645209,645243,645214,645212,645208,645217,645248,645211,645230,645220,645219,645216,645221,645233,645231,645224,645228,645227,645236,645225,645235,645229,645232,645241,645238,645239,645258,645247,645237,645254,645242,645240,645317,645245,645249,645306,645244,645264,645261,645257,645255,645270,645251,645260,645402,645253,645252,645259,645263,645262,645268,645315,645269,645308,645339,645290,645286,645274,645266,645267,645273,645271,645265,645272,645275,645279,645383,645276,645338,645289,645285,645277,645278,645292,645288,645280,645281,645284,645282,645287,645283,645312,645291,645303,645297,645302,645293,645295,645298,645307,643882,645294,645299,645296,645309,645301,645300,645304,645305,645352,645348,645311,645404,645313,645322,645310,645320,645365,645314,645318,645316,645319,645323,645321,645333,645349,645336,645350,645324,645335,645330,645325,645331,645332,645328,645329,645326,645327,645340,645341,645343,645342,645378,645345,645351,643883,645388,645344,645337,645346,645354,645356,645347,645363,645334,645353,645359,645355,645360,645371,645367,643884,645385,645358,645368,645357,645393,645381,645361,645382,645362,645375,645364,645366,645370,645369,645373,645399,645372,645374,645390,645394,645401,645395,645380,645384,645379,645376,645387,645403,645386,645389,645391,645392,643886,645396,645398,645397,643885,645400,645405,645407,645406,643889,643887,643888,653232];
+
+		/**
+		 * Replace reusable blocks IDs updates.
+		 */
+		// $path_before_after = 'reusable_block_updates_beforeAfter';
+		// if ( ! file_exists( $path_before_after ) ) {
+		// 	mkdir( $path_before_after, 0777, true );
+		// }
+		//
+		// $replacements = [
+		// 	'<!-- wp:block {"ref":606641} /-->' => '<!-- wp:block {"ref":643627} /-->',
+		// 	'<!-- wp:block {"ref":606638} /-->' => '<!-- wp:block {"ref":643628} /-->',
+		// 	'<!-- wp:block {"ref":647616} /-->' => '<!-- wp:block {"ref":643623} /-->',
+		// ];
+		// foreach ( $post_ids as $post_id ) {
+		// 	$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+		// 	$post_content_updated = $post_content;
+		//
+		// 	foreach ( $replacements as $from => $to ) {
+		// 		$post_content_updated = str_replace( $from, $to, $post_content_updated );
+		// 	}
+		//
+		// 	if ( $post_content_updated != $post_content ) {
+		// 		$wpdb->update(
+		// 			$wpdb->posts,
+		// 			[ 'post_content' => $post_content_updated ],
+		// 			[ 'ID' => $post_id ]
+		// 		);
+		//
+		// 		file_put_contents( $path_before_after . '/' . $post_id . '.before.html', $post_content );
+		// 		file_put_contents( $path_before_after . '/' . $post_id . '.after.html', $post_content_updated );
+		//
+		// 		WP_CLI::success( "Updated $post_id" );
+		// 	}
+		// }
+		// return;
+
+
+		/**
+		 * Detect all reusable block IDs used in posts which came in during the pre-launch cdiff.
+		 */
+		// $all_used_block_ids = [];
+		// foreach ( $post_ids as $key_post_id => $post_id ) {
+		//
+		// 	$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+		// 	$matches      = $this->blocks_manipulator->match_wp_block_selfclosing( 'wp:block', $post_content );
+		// 	if ( ! $matches || empty( $matches ) ) {
+		// 		continue;
+		// 	}
+		//
+		// 	WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+		//
+		// 	$post_content_updated = $post_content;
+		// 	foreach ( $matches[0] as $match ) {
+		// 		$reusable_block_html = $match[0];
+		//
+		// 		$block_id = $this->blocks_manipulator->get_attribute( $reusable_block_html, 'ref' );
+		// 		$all_used_block_ids[ $block_id ] = true;
+		// 	}
+		//
+		// }
+		// $all_used_block_ids = array_keys( $all_used_block_ids );
+		// return;
+
+	}
+
+	public function cmd_migrate_lede_iframes( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		$log = 'ledeIframes_post_ids.log';
+
+		$path_before_after = 'reusable_block_updates_beforeAfter';
+		if ( ! file_exists( $path_before_after ) ) {
+			mkdir( $path_before_after, 0777, true );
+		}
+
+		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'post' and post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' ) and post_content LIKE '%wp:lede-common/iframe%'; " );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			// Get post_content.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+
+			$matches = $this->blocks_manipulator->match_wp_block_selfclosing( 'wp:lede-common/iframe', $post_content );
+			if ( ! $matches || empty( $matches ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post_content;
+			foreach ( $matches[0] as $match ) {
+				$ledeiframe_html = $match[0];
+				$url = $this->blocks_manipulator->get_attribute( $ledeiframe_html, 'src' );
+
+				$iframe_block = $this->blocks->get_iframe( $url );
+				$iframe_html = serialize_block( $iframe_block );
+
+				$post_content_updated = str_replace( $ledeiframe_html, $iframe_html, $post_content_updated );
+			}
+
+			if ( $post_content != $post_content_updated ) {
+				WP_CLI::line( $post_id );
+
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+
+				file_put_contents( $path_before_after . '/' . $post_id . '.before.html', $post_content );
+				file_put_contents( $path_before_after . '/' . $post_id . '.after.html', $post_content_updated );
+
+				file_put_contents( $log, $post_id . "\n", FILE_APPEND );
+			}
+		}
+
+		WP_CLI::line( "Done. See log " . $log );
+		wp_cache_flush();
+
+	}
+
+	/**
+	 * @param $pos_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_migrate_flourish( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		$log = 'flourishes_post_ids.log';
+
+		$post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			// Get post_content.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+
+			$matches = $this->blocks_manipulator->match_wp_block_selfclosing( 'wp:lede-common/flourish', $post_content );
+			if ( ! $matches || empty( $matches ) ) {
+				continue;
+			}
+
+			WP_CLI::line( $post_id );
+
+			$post_content_updated = $post_content;
+			foreach ( $matches[0] as $match ) {
+				$flourish_html = $match[0];
+				$url = $this->blocks_manipulator->get_attribute( $flourish_html, 'url' );
+
+				$iframe_block = $this->blocks->get_iframe( $url );
+				$iframe_html = serialize_block( $iframe_block );
+
+				$post_content_updated = str_replace( $flourish_html, $iframe_html, $post_content_updated );
+
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $post_content_updated ],
+					[ 'ID' => $post_id ]
+				);
+
+				file_put_contents( $log, $post_id . "\n", FILE_APPEND );
+			}
+		}
+
+		WP_CLI::line( "Done. See log " . $log );
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator blockclubchicago-migrate-subtitles'.
+	 *
+	 * @param $pos_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_migrate_subtitles( $pos_args, $assoc_args ) {
+		$post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '%d/%d %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			$subtitle = get_post_meta( $post_id, 'dek', true );
+			if ( ! empty( $subtitle ) ) {
+				update_post_meta( $post_id, 'newspack_post_subtitle', $subtitle );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::line( "Done." );
+	}
+
+	public function cmd_migrate_image_credits( $pos_args, $assoc_args ) {
+		$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
+		foreach ( $attachment_ids as $key_post_id => $att_id ) {
+
+			$credit = get_post_meta( $att_id, 'credit', true );
+			$credit_url = get_post_meta( $att_id, 'credit_url', true );
+
+			$credit_string = null;
+			if ( $credit ) {
+				$credit_string = $credit;
+			} elseif ( $credit_url ) {
+				$credit_string = $credit_url;
+			}
+
+			if ( ! empty( $credit_string ) ) {
+				update_post_meta( $att_id, '_media_credit', $credit_string );
+				WP_CLI::line( sprintf( "%d/%d -- ID %d %s", $key_post_id + 1, count( $attachment_ids ), $att_id, $credit_string) );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::line( "Done." );
+	}
+}

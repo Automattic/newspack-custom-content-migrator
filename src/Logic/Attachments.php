@@ -2,8 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use NewspackCustomContentMigrator\Command\PublisherSpecific\Exceptions\Onthewight_No_Wpshortode_Blocks_Found_In_Post;
 use \WP_CLI;
+use WP_Error;
 
 class Attachments {
 	/**
@@ -23,6 +23,24 @@ class Attachments {
 	}
 
 	/**
+	 * Wrapper for import_external_file() with fewer args and enforced post_id.
+	 *
+	 * @param int $post_id              Post ID of the post the media should be attached to.
+	 * @param string $path              Media file full URL or full local path, or URL to the media file.
+	 * @param string $alt_text          Optional. Image Attachment `alt` attribute.
+	 * @param array $attachment_args    Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
+	 *                                      internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
+	 * @param string $desired_filename  Optional. If the file you are importing has a different (or no) file extension than the one
+	 *                                      you want the resulting attachment to have, you can specify it here. Make sure that it
+	 *                                      actually matches the file mime type.
+	 *
+	 * @return int|WP_Error
+	 */
+	public function import_attachment_for_post( int $post_id, string $path, string $alt_text = '', array $attachment_args = [], string $desired_filename = '' ): int|WP_Error {
+		return $this->import_external_file( $path, null, null, null, $alt_text, $post_id, $attachment_args, $desired_filename );
+	}
+
+	/**
 	 * Imports/downloads external media file to the Media Library, either from a URL or from a local path.
 	 *
 	 * To untangle the terminology, the optional params Title, Caption, Description and Alt are the params we see in the
@@ -37,10 +55,13 @@ class Attachments {
 	 *                            `yyyy/mm` folder.
 	 * @param array  $args        Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
 	 *                            internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
+	 * @param string $desired_filename Optional. If the file you are importing has a different (or no) file extension than the one
+	 * you want the resulting attachment to have, you can specify it here. Make sure that it
+	 * actually matches the file mime type.
 	 *
 	 * @return int|WP_Error Attachment ID.
 	 */
-	public function import_external_file( $path, $title = null, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [] ) {
+	public function import_external_file( $path, $title = null, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [], $desired_filename = '' ) {
 		// Fetch remote or local file.
 		$is_http = 'http' == substr( $path, 0, 4 );
 		if ( $is_http ) {
@@ -52,12 +73,38 @@ class Attachments {
 			// The `media_handle_sideload()` function deletes the local file after import, so to preserve the local path, we're
 			// first saving it to a temp location, in exactly the same way the WP's own `\download_url()` function above does.
 			$tmpfname = wp_tempnam( $path );
+			if ( ! file_exists( $path ) ) {
+				return new WP_Error( sprintf( 'File %s was not found', $path ) );
+			}
 			copy( $path, $tmpfname );
 		}
+
+		if ( filesize( $tmpfname ) < 1 ) {
+			return new WP_Error( sprintf( 'File %s was empty', $path ) );
+		}
+
 		$file_array = [
 			'name'     => wp_basename( $path ),
 			'tmp_name' => $tmpfname,
 		];
+
+		if ( ! empty( $desired_filename ) ) {
+			$file_array['name'] = $desired_filename;
+		} elseif ( ! pathinfo( $path, PATHINFO_EXTENSION ) ) {
+			// If the path does not have a file extension, let's try to find one for it.
+			// Without the extension, the upload will fail because WP will not allow that "file type".
+			$mimetype           = mime_content_type( $tmpfname );
+			$probably_extension = array_search( $mimetype, wp_get_mime_types() );
+			if ( ! empty( $probably_extension ) ) {
+				$file_array['name'] .= '.' . $probably_extension;
+			}
+		}
+
+		$maybe_exising_attachment_id = $this->maybe_get_existing_attachment_id( $file_array['tmp_name'], $file_array['name'] );
+		if ( null !== $maybe_exising_attachment_id ) {
+			@unlink( $file_array['tmp_name'] );
+			return $maybe_exising_attachment_id;
+		}
 
 		if ( $title ) {
 			$args['post_title'] = $title;
@@ -69,18 +116,6 @@ class Attachments {
 			$args['post_content'] = $description;
 		}
 		$att_id = media_handle_sideload( $file_array, $post_id, $title, $args );
-
-		// phpcs:disable WordPress.PHP.NoSilencedErrors.Discouraged
-		/**
-		 * TODO -- if image fails because of a wrong filetype, try and convert to JPG of max quality and then import.
-		 */
-		if (
-			is_wp_error( $att_id )
-			&& ( false != strpos( $att_id->get_error_message(), 'not allowed to upload this file type' ) )
-		) {
-			// $this->convert_image();
-		}
-		// phpcs:enable
 
 		// If this was a download and there was an error then clean up the temp file.
 		if ( is_wp_error( $att_id ) ) {
@@ -97,65 +132,54 @@ class Attachments {
 	}
 
 	/**
-	 * Converts an image to JPG, or if it's an SVG to a PNG.
+	 * Try to get the attachment ID for a file if one just like it has already been uploaded.
 	 *
-	 * @param string $input_image  Input image file path.
-	 * @param string $output_image Output image file path.
-	 * @param int    $quality      0 worst to 100 best.
+	 * @param string $filepath The path on the file system of the file to check if we have already uploaded.
+	 * @param string $filename (Optional) The file name including file extension – exclude if it is on the file path.
 	 *
-	 * @return boolean
+	 * @return int|null Attachment ID if found, null otherwise.
 	 */
-	public function convert_image( $input_image, $output_image, $quality = 100 ) {
-
-		// Get image format from signature.
-		$format = exif_imagetype( $input_image );
-
-		/**
-		 * Convert formats to JPG.
-		 */
-		switch ( $format ) {
-			case IMAGETYPE_JPEG:
-				$image_tmp = imagecreatefromjpeg( $input_image );
-				break;
-			case IMAGETYPE_GIF:
-				$image_tmp = imagecreatefromgif( $input_image );
-				break;
-			case IMAGETYPE_PNG:
-				$image_tmp = imagecreatefrompng( $input_image );
-				break;
-			case IMAGETYPE_BMP:
-				$image_tmp = imagecreatefrombmp( $input_image );
-				break;
-			default:
-				$image_tmp = null;
+	public function maybe_get_existing_attachment_id( string $filepath, string $filename = '' ) {
+		if ( ! file_exists( $filepath ) ) {
+			return null;
 		}
 
-		// Untested...
-		imagejpeg( $image_tmp, $output_image, $quality );
-		imagedestroy( $image_tmp );
+		if ( empty( $filename ) ) {
+			$filename = basename( $filepath );
+		}
 
-		// Extension from file name.
-		$exploded  = explode( '.', $input_image );
-		$extension = $exploded[ count( $exploded ) - 1 ];
+		global $wpdb;
+		$like = '%' . $wpdb->esc_like( $filename );
+		$sql  = $wpdb->prepare(
+			"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
+			$like
+		);
 
-		/**
-		 * Also convert SVGs to PNGs.
-		 */
+		foreach ( $wpdb->get_col( $sql ) as $attachment_id ) {
 
-		// ...
+			$candidate_path = get_attached_file( $attachment_id );
+			// Check the file sizes first. It's a fast operation and will save us from having to do the md5 check.
+			if ( ! file_exists( $candidate_path ) || ( filesize( $candidate_path ) !== filesize( $filepath ) ) ) {
+				continue;
+			}
 
-		return true;
+			if ( md5_file( $candidate_path ) === md5_file( $filepath ) ) {
+				return $attachment_id;
+			}       
+		}
+
+		return null;
 	}
 
 	/**
 	 * Return broken attachment URLs from posts.
 	 *
-	 * @param int[]     $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
-	 * @param boolean   $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
-	 * @param integer   $posts_per_batch Total of posts tohandle per batch.
-	 * @param integer   $batch Current batch in the loop.
-	 * @param integer   $start_index Index from where to start the loop.
-	 * @param func|null $logger Method to log results.
+	 * @param int[]         $post_ids The post IDs we need to check the images in their content, if not set, the function looks for all the posts in the database.
+	 * @param boolean       $is_hosted_on_s3 Flag to be set to true if we're using S3_uploads plugin or other to host the images on S3 instead of locally.
+	 * @param integer       $posts_per_batch Total of posts tohandle per batch.
+	 * @param integer       $batch Current batch in the loop.
+	 * @param integer       $start_index Index from where to start the loop.
+	 * @param callable|null $logger Method to log results.
 	 *
 	 * @return mixed[] Array of the broken URLs indexed by the post IDs.
 	 */
@@ -295,7 +319,7 @@ class Attachments {
 
 	/**
 	 * Find an attachment by its filename.
-	 *
+	 * 
 	 * @param string $filename The filename.
 	 * @return int The attachment ID.
 	 */
@@ -305,7 +329,7 @@ class Attachments {
 		$attachment_id = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
-				'%' . $filename . '%',
+				'%' . $filename,
 			),
 		);
 

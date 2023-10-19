@@ -3,14 +3,13 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\JsonIterator;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \NewspackCustomContentMigrator\Logic\Sponsors;
-use stdClass;
-use WP_CLI;
-use WP_Query;
+use \WP_CLI;
 
 /**
  * Custom migration scripts for Retro Report.
@@ -19,7 +18,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 	public const META_PREFIX = 'newspack_rr_';
 
-	public const BASE_URL = 'https://data.retroreport-org.pages.dev';
+	public const JSON_API_BASE_URL = 'https://data.retroreport-org.pages.dev';
 
 	public const CF_TOKEN_OPTION = 'newspack_rr_cf_token';
 
@@ -54,9 +53,16 @@ class RetroReportMigrator implements InterfaceCommand {
 	/**
 	 * Simple Local Avatars.
 	 *
-	 * @var null|Simple_Local_Avatars
+	 * @var null|SimpleLocalAvatars
 	 */
 	private $simple_local_avatars;
+
+	/**
+	 * JSON Iterator.
+	 *
+	 * @var null|JsonIterator
+	 */
+	private $json_iterator;
 
 	/**
 	 * CAP logic.
@@ -134,9 +140,11 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 
+		$this->json_iterator = new JsonIterator();
+
 		$this->sponsors = new Sponsors();
 
-		$this->core_fields = [
+		$this->core_fields = array_flip( [
 			'post_author',
 			'post_date_gmt',
 			'post_content',
@@ -147,16 +155,12 @@ class RetroReportMigrator implements InterfaceCommand {
 			'post_modified_gmt',
 			'tags_input',
 			'post_category',
-		];
+		] );
 
-		$this->core_fields = array_flip( $this->core_fields );
-
-		$this->core_meta = [
+		$this->core_meta = array_flip( [
 			'_thumbnail_id',
 			'_wp_page_template'
-		];
-
-		$this->core_meta = array_flip( $this->core_meta );
+		] );
 
 		$this->set_common_arguments();
 		$this->set_fields_mappings();
@@ -841,7 +845,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @param array  $post_fields An array containing the mapping of each field.
 	 * @param string $category The name of the post's category.
 	 *
-	 * @return int|WP_Error The post ID on success, WP_Error otherwise.
+	 * @return int|\WP_Error The post ID on success, WP_Error otherwise.
 	 */
 	public function import_post( $object, $post_type, $post_fields, $category ) {
 		$post_args = [
@@ -1470,6 +1474,9 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @return array The modified args.
 	 */
 	public function add_cf_token_to_requests( $args, $url ) {
+		// It looks like the API has changed and no longer requires the CF token, so returning.
+		return $args;
+
 		if ( strpos( $url, 'pages.dev' ) === false ) {
 			return $args;
 		}
@@ -2500,25 +2507,23 @@ https://www.youtube.com/watch?v=%1$s
 	 * Validate the JSON file and return it's decoded contents.
 	 *
 	 * @param array $assoc_args The array of associate arguments passed to the CLI command.
-	 * @return mixed The decoded JSON, if possible.
+	 * @return iterable An iterable with each item in the json as an object.
 	 */
-	private function validate_json_file( $assoc_args ) {
+	private function validate_json_file( $assoc_args ): iterable {
 
 		if ( ! array_key_exists( 'json-file', $assoc_args ) ) {
 			$this->logger->log( $this->log_name, 'No JSON file provided. Please feed me JSON.' );
 		}
 
-		$json_file = $assoc_args['json-file'];
-		if ( ! file_exists( $json_file ) ) {
-			$this->logger->log( $this->log_name, 'The provided JSON file doesn\'t exist.' );
+		$json_file = $assoc_args['json-file'] ?? null;
+		if ( str_starts_with( $json_file, 'json/' ) ) {
+			// The API changed and paths changed so the "json" part is no longer there.
+			// The migrate commands use a path and this will ensure that the old commands work too.
+			$json_file = substr( $json_file, 5 );
 		}
+		$json_url = self::JSON_API_BASE_URL . '/' . $json_file;
 
-		$data = json_decode( file_get_contents( $json_file ) );
-		if ( null === $data ) {
-			$this->logger->log( $this->log_name, 'Could not decode the JSON data. Exiting...' );
-		}
-
-		return $data;
+		return $this->json_iterator->items( $json_url );
 	}
 
 	/**
