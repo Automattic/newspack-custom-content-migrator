@@ -893,8 +893,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$intro                   = $row->intro ?? '';
 			$text                    = $this->cleanup_text( $row->text );
-//			$text                    = $this->replace_video_tags_with_video_blocks( $text, $tree_path );
 			$text                    = $this->replace_img_tags_with_img_blocks( $text );
+			$text                    = $this->replace_video_tags_with_video_blocks( $text, $tree_path );
 			$article_layout          = $row->layout ?? '';
 			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 
@@ -911,7 +911,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				if ( $attachment_id ) {
 					$post_data['meta_input']['_thumbnail_id'] = $attachment_id;
 				} else {
-					// TODO: Maybe just grab the image provided
+					$attachment_id = $this->grab_featured_image( $row->{'@id'} );
+					if ( $attachment_id ) {
+						$post_data['meta_input']['_thumbnail_id'] = $attachment_id;
+					}
 				}
 				$post_data['meta_input']['newspack_featured_image_position'] = $featured_image_position;
 			}
@@ -964,6 +967,44 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return $purifier->purify( $text );
 	}
 
+	private function grab_featured_image( $url ) {
+		$response = wp_remote_get( $url );
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) || empty( $response['body'] ) ) {
+			return 0;
+		}
+
+		$dom = new DOMDocument( '1.0', 'utf-8' );
+		@$dom->loadHTML( $response['body'] );
+
+		$headers = $dom->getElementsByTagName( 'header' );
+		if ( $headers->count() === 0 ) {
+			return 0;
+		}
+		global $wpdb;
+		$nodes = $headers->item( 0 )->childNodes;
+		/* @var \DOMElement $node */
+		foreach ( $nodes as $node ) {
+			$tag_name = $node->tagName ?? '';
+			if ( 'img' === $tag_name ) {
+				$src = $node->getAttribute( 'src' );
+				if ( str_ends_with( $src, '/image' ) ) {
+					$src = substr( $src, 0, - 6 );
+				}
+				$path          = trim( parse_url( $src, PHP_URL_PATH ), '/' );
+				$attachment_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value = %s;",
+						$path
+					)
+				);
+
+				return empty( $attachment_id ) ? 0 : (int) $attachment_id;
+			}
+		}
+
+		return 0;
+	}
+
 	private function replace_img_tags_with_img_blocks( string $content ): string {
 		if ( false === strpos( $content, 'resolveuid/' ) ) {
 			// No images to look for in this article.
@@ -992,7 +1033,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			$align = null;
-			if ( $this->search_for_class_in_parent_tags( $img_tag, 'full-bleed' ) ) {
+			if ( $this->parent_element_has_class( $img_tag, 'full-bleed' ) ) {
 				$align = 'full';
 			}
 
@@ -1032,36 +1073,31 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( ( $source_tag->tagName ?? '' ) !== 'source' ) {
 				continue;
 			}
-			$src               = $source_tag->getAttribute( 'src' );
-			$attachment_id     = $wpdb->get_var(
+			$src           = $source_tag->getAttribute( 'src' );
+			$attachment_id = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
 					'%' . $wpdb->esc_like( $src )
 				)
 			);
-			$video_post        = get_post( $attachment_id );
-			$video_block       = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
-			// TODO. Not working because DomDocument is oppionated about how it wants to format the HTML.
-			$original_vid_html = $dom->saveHTML( $vid_tag );
+			if ( ! $attachment_id ) {
+				continue;
+			}
+			// We can't use DomDoc's saveHTML because it is buggy and doesn't include the closing tag, so use this awful regex instead.
+			if ( ! preg_match( '@<video .*</video>@', $content, $matches ) ) {
+				continue;
+			}
+			$video_post  = get_post( $attachment_id );
+			$video_block = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
 
-			$content           = str_replace( $original_vid_html, $video_block, $content );
-			$dom->saveHTML($new_node);
+			$content = str_replace( $matches[0], $video_block, $content );
+			$dom->saveHTML( $new_node );
 		}
 
 		return $content;
 	}
 
-	private function replace_node_with_string( $node, $str ) {
-		$dom = new DOMDocument( '1.0', 'utf-8' );
-		@$dom->loadHTML($str, LIBXML_HTML_NOIMPLIED);
-		$repl = $dom->importNode($dom->documentElement, true);
-		$node->parentNode->replaceChild($repl, $node);
-		$hest = $dom->saveHTML($node);
-		$dut = '';
-	}
-
-	//TODO.Could be attribute
-	private function search_for_class_in_parent_tags( $domElement, $class ): bool {
+	private function parent_element_has_class( \DOMElement $domElement, string $class ): bool {
 		$parent = $domElement->parentNode;
 		while ( $parent ) {
 			if ( $parent->nodeType !== XML_ELEMENT_NODE ) {
