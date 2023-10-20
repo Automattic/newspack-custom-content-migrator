@@ -87,6 +87,15 @@ class CommonwealthBeaconMigrator implements InterfaceMigrator {
 				],
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator commonwealth-beacon-convert-podcast-cpt-to-posts',
+			array( $this, 'cmd_convert_episodes_cpt_to_posts' ),
+			array(
+				'shortdesc' => 'Convert podcast CPT to posts.',
+				'synopsis'  => array(),
+			)
+		);
 	}
 
 	/**
@@ -205,6 +214,72 @@ class CommonwealthBeaconMigrator implements InterfaceMigrator {
 
 			// Next <item> when done reading this one.
 			$is_item = $reader->next( 'item' );
+		}
+	}
+
+	/**
+	 * This command will find posts with post_type = 'episodes' and convert them to posts.
+	 * It will then add the 'podcast' category to the post.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_convert_episodes_cpt_to_posts( $args, $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT p.ID, p.post_content, p.post_type, pm.meta_value
+				FROM $wpdb->posts p 
+				    LEFT JOIN (
+				    	SELECT post_id, meta_value 
+				    	FROM $wpdb->postmeta 
+				    	WHERE meta_key = 'newspack_podcasts_podcast_file'
+		               ) pm ON p.ID = pm.post_id 
+				WHERE p.post_type = %s",
+				'episodes'
+			)
+		);
+
+		$podcast_category = get_category_by_slug( 'podcast' );
+
+		foreach ( $posts as $post ) {
+			WP_CLI::log( sprintf( 'Handling %d', $post->ID ) );
+
+			$post_content = $post->post_content;
+
+			if ( $post->meta_value ) {
+				$attachment_id = attachment_url_to_postid( $post->meta_value );
+				$audio_player  = sprintf(
+					'<!-- wp:audio {"id":%d} -->
+					<figure class="wp-block-audio"><audio controls src="%s"></audio></figure>
+					<!-- /wp:audio --><br>',
+					$attachment_id,
+					$post->meta_value
+				);
+				$post_content  = $audio_player . $post_content;
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$update = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_type'    => 'post',
+					'post_content' => $post_content,
+				],
+				[
+					'ID' => $post->ID,
+				]
+			);
+
+			if ( $update ) {
+				WP_CLI::success( sprintf( 'Updated %d', $post->ID ) );
+				wp_set_post_categories( $post->ID, [ $podcast_category->term_id ], true );
+			} else {
+				WP_CLI::warning( sprintf( 'Could not update %d', $post->ID ) );
+			}
 		}
 	}
 }
