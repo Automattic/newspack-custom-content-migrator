@@ -892,7 +892,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function clean_up_scraped_html( $post_id, $url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs ) {
 
-		$post_content_updated = '';
+		$post_content_updated = null;
 
 		$this->crawler->clear();
 		$this->crawler->add( $post_content );
@@ -967,55 +967,44 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$div_content_crawlers = $this->filter_selector_element( 'div.rich-text-body', $this->crawler, $single = false );
 		}
 
-		// /**
-		//  * In case div.rich-text-body was already removed (if this command was already run and needs to be run again),
-		//  * let's use a simple trick to enable traversing through all the nodes of the content -- let's just temporarily
-		//  * surround the HTML with a new <div> so that nodes can be traversed the same way as if <div> was here and its nodes
-		//  * were actual children.
-		//  */
-		// // if ( ! $div_content_crawler ) {
-		// if ( ! $div_content_crawlers ) {
-		// 	$this->crawler->clear();
-		// 	$this->crawler->add( '<div>' . $post_content . '</div>' );
-		// 	$div_content_crawler = $this->filter_selector_element( 'div', $this->crawler );
-		// }
-
 		// The main crawler.
-		foreach ( $div_content_crawlers as $div_content_crawler ) {
+		if ( $div_content_crawlers ) {
 
-			// Traverse all the child nodes.
-			foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
+			foreach ( $div_content_crawlers as $div_content_crawler ) {
 
-				// Skip if blank.
-				$html_domelement = $domelement->ownerDocument->saveHTML( $domelement );
-				if ( empty( trim( $html_domelement ) ) ) {
-					continue;
-				}
+				// Traverse all the child nodes.
+				foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
 
-				// div.enhancement elements can get transformed or skipped.
-				$custom_html = null;
-				$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
-				if ( $is_div_class_enhancement ) {
-					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
-				}
-
-				// If $custom_html is null, the element's original HTML will be used.
-				// If $custom_html is a string other than null (empty or transformed), element's HTML will be substituted/transformed.
-				if ( ! is_null( $custom_html ) ) {
-					// Use the custom HTML.
-					$domelement_html = $custom_html;
-				} else {
-					// Keep this $domelement's original HTML.
-					$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
-					$domelement_html = trim( $domelement_html );
-					if ( empty( $domelement_html ) ) {
+					// Skip if blank.
+					$html_domelement = $domelement->ownerDocument->saveHTML( $domelement );
+					if ( empty( trim( $html_domelement ) ) ) {
 						continue;
 					}
-				}
 
-				// Append HTML to post_content updated variable.
-				$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
-				$post_content_updated .= $domelement_html;
+					// div.enhancement elements can get transformed or skipped.
+					$custom_html = null;
+					$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
+					if ( $is_div_class_enhancement ) {
+						$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
+					}
+
+					// If $custom_html is null, the element's original HTML will be used. If it's a string other than null (empty or transformed), element's HTML will be substituted/transformed.
+					if ( ! is_null( $custom_html ) ) {
+						// Use the custom HTML.
+						$domelement_html = $custom_html;
+					} else {
+						// Keep this $domelement's original HTML.
+						$domelement_html = $domelement->ownerDocument->saveHTML( $domelement );
+						$domelement_html = trim( $domelement_html );
+						if ( empty( $domelement_html ) ) {
+							continue;
+						}
+					}
+
+					// Append HTML to post_content updated variable.
+					$post_content_updated .= ! empty( $post_content_updated ) ? "\n" : '';
+					$post_content_updated .= $domelement_html;
+				}
 			}
 		}
 
@@ -1583,6 +1572,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Saved to %s 👍', $path ) );
+		WP_CLI::line( sprintf( '❗️  %s', $log_wrong_urls ) );
 	}
 
 	public function cmd_import1__create_posts( $pos_args, $assoc_args ) {
@@ -1601,6 +1591,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		/**
 		 * Logs.
 		 */
+		$log_failed_imports               = 'll2_err__failed_imports.log';
 		$log_wrong_urls                   = 'll2_debug__wrong_urls.log';
 		$log_all_author_names             = 'll2_debug__all_author_names.log';
 		$log_all_tags                     = 'll2_debug__all_tags.log';
@@ -1609,6 +1600,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$log_err_img_download             = 'll2_err__img_download.log';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
+		$this->logger->log( $log_failed_imports, $ts, false );
 		$this->logger->log( $log_wrong_urls, $ts, false );
 		$this->logger->log( $log_all_author_names, $ts, false );
 		$this->logger->log( $log_all_tags, $ts, false );
@@ -1660,7 +1652,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( "\n" . '%d/%d Importing %s ...', $key_html_file + 1, count( $html_files ), $url ) );
 
 			// Crawl and extract all useful data from HTML
-			$crawled_data = $this->crawl_post_data_from_html( $html, $url );
+			try {
+				$crawled_data = $this->crawl_post_data_from_html( $html, $url );
+			} catch ( \UnexpectedValueException $e ) {
+				$this->logger->log( $log_failed_imports, sprintf( 'URL:%s MESSAGE:%s', $url, $e->getMessage() ), $this->logger::WARNING );
+				continue;
+			}
 
 			// Get slug from URL.
 			$slug = $this->get_slug_from_url( $url );
@@ -1772,6 +1769,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$ga_id = $ga->ID;
 				} else {
 					$ga_id = $this->cap->create_guest_author( [ 'display_name' => $author_name ] );
+					if ( is_wp_error( $ga_id ) ) {
+						throw new \RuntimeException( sprintf( 'Could not create author %s for post %d URL %s error message: %s', $author_name, $post_id, $url, $ga_id->get_error_message() ) );
+					}
 				}
 				$ga_ids[] = $ga_id;
 			}
@@ -1899,6 +1899,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 */
 		WP_CLI::line( 'Cleaning up post_content ...' );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
+			if ( empty( $post_id ) ) {
+				continue;
+			}
 
 			$original_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from wp_postmeta where meta_key = 'newspackmigration_url' and post_id = %d;", $post_id ) );
 			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d %s', $key_post_id + 1, count( $post_ids ), $post_id, $original_url ) );
@@ -1906,6 +1909,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
 			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
+			if ( is_null( $post_content_updated ) ) {
+				throw new \UnexpectedValueException( 'Check post_content_updated is null -- due to unknown template.' );
+			}
 
 			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
@@ -2119,7 +2125,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$script_data = json_decode( $script_json, true );
 		$script_data = $script_data[0] ?? null;
 		if ( is_null( $script_data ) ) {
-			throw new \UnexpectedValueException( sprintf( 'Could not get <script> element data for post %s', $url ) );
+			throw new \UnexpectedValueException( 'NOT FOUND <script> element data' );
 		}
 
 		$data['script_data'] = $script_data;
@@ -2127,7 +2133,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// Title, subtitle, content.
 		$title = $this->filter_selector( 'h1.headline', $this->crawler );
 		if ( empty( $title ) ) {
-			throw new \UnexpectedValueException( sprintf( 'Could not get title for post %s', $url ) );
+			throw new \UnexpectedValueException( 'NOT FOUND title' );
 		}
 		$data['post_title'] = $title;
 
@@ -2178,14 +2184,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$post_content = $this->filter_selector( 'div.rich-text-article-body-content', $this->crawler, false, false );
 		}
 		if ( empty( $post_content ) ) {
-			throw new \UnexpectedValueException( sprintf( 'Could not get post content for post %s', $url ) );
+			throw new \UnexpectedValueException( 'NOT FOUND post_content' );
 		}
 		$data['post_content'] = $post_content;
 
 		// Date. <script> element has both date and time of publishing.
 		$matched = preg_match( '/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/', $script_data['publishDate'], $matches_date );
 		if ( false === $matched ) {
-			throw new \UnexpectedValueException( sprintf( 'Could not get date for post %s', $url ) );
+			throw new \UnexpectedValueException( 'NOT FOUND publishDate' );
 		}
 		$post_date         = sprintf( '%s-%s-%s %s:%s:00', $matches_date[3], $matches_date[1], $matches_date[2], $matches_date[4], $matches_date[5] );
 		$data['post_date'] = $post_date;
@@ -2193,6 +2199,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// Authors.
 		// div.author-name might or might not have <a>s with links to author page.
 		$authors_text         = $this->filter_selector( 'div.author-name', $this->crawler );
+		if ( is_null( $authors_text ) ) {
+			$authors_text = 'NO_AUTHOR_FOUND';
+		}
 		$data['post_authors'] = $this->filter_author_names( $authors_text );
 		$data['author_links'] = [];
 		// If there is one or more links to author pages, save them to be processed after import.
@@ -2220,15 +2229,20 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$data['featured_image_credit'] = $featured_image_credit;
 		}
 
-		// Category.
-		// Section name is located both in <meta> element:
-		// <meta property="article:section" content="UC Santa Cruz">
-		// and in <script> element data:
-		// $script_data['sectionName]
-		// but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
+		/**
+		 * Category i.e. "Section".
+		 * Section name is located both in <meta> element:
+		 *      <meta property="article:section" content="UC Santa Cruz">
+		 * and in <script> element data:
+		 *      $script_data['sectionName]
+		 * but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
+		 */
 		$section_meta_crawler  = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
 		$category_name         = $section_meta_crawler->getAttribute( 'content' );
 		$data['category_name'] = $category_name;
+		if ( ! $category_name ) {
+			throw new \UnexpectedValueException( sprintf( 'NOT FOUND category_name %s', $url ) );
+		}
 
 		// Parent category.
 		// E.g. "higher-ed"
@@ -2266,6 +2280,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		return $featured_image_credit;
 	}
+
+	/**
+	 * @param $authors_text
+	 *
+	 * @return array
+	 */
 	public function filter_author_names( $authors_text ) {
 
 		// Replace   with regular spaces.
@@ -2514,7 +2534,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			}
 		}
 
-		foreach ( $urls as $url ) {
+		foreach ( $urls as $key_url => $url ) {
 			if ( empty( $url ) ) {
 				continue;
 			}
@@ -2526,7 +2546,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Copy HTML file to $destination_path.
 			if ( is_file( $file_path ) ) {
 				copy( $file_path, $destination_path . '/' . $filename );
-				WP_CLI::line( $filename . ' ' . $url . "\n" );
+				WP_CLI::line( sprintf( "%d/%d %s %s \n", $key_url + 1, count( $urls ), $filename, $url ) );
 			} else {
 				WP_CLI::error( sprintf( 'Can not find file %s for URL %s', $filename, $url ) );
 			}
