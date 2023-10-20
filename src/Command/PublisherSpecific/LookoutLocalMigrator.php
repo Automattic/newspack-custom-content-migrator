@@ -1035,7 +1035,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * This function transforms or skips (importing to post_content) a DOMElement and returns the resulting HTML.
+	 * This function transforms, skips or whitelists a DOMElement and returns the resulting HTML:
+	 *      - if null is returned, the HTML will be used as is
+	 *      - if empty string is returned, the HTML will be skipped
+	 *      - if custom HTML string is returned, the HTML will be replaced with it
 	 *
 	 * @param DOMElement $domelement
 	 * @param int        $post_id
@@ -1102,7 +1105,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			&& false !== strpos( $enhancement_crawler->filter( 'script' )->text(), '3rd Party Click Tracking' )
 		) {
 			// Skip this 'div.enchancement'.
-			// Tracking script
+			// Tracking script.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'script' )->count() > 0
+			&& false !== strpos( $enhancement_crawler->filter( 'script' )->text(), '//ads.empowerlocal.co/adserve' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Ads.
 			$custom_html = '';
 
 		} elseif ( $enhancement_crawler->children()->count() === 0
@@ -1111,7 +1121,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Skip this 'div.enchancement'.
 			// Totally empty div.enchancement.
 			$custom_html = '';
-
 
 
 
@@ -1341,14 +1350,36 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Get YT video ID.
 			$helper_crawler = $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' );
 			$yt_video_id    = $helper_crawler->getNode(0)->getAttribute('data-video-id');
-			if ( ! $yt_video_id ) {
-				// TODO -- log missing TY link
-			}
 
 			// Get Gutenberg YT block.
-			$yt_link     = "https://www.youtube.com/watch?v=$yt_video_id";
-			$yt_block    = $this->gutenberg->get_youtube( $yt_link );
-			$custom_html = serialize_blocks( [ $yt_block ] );
+			if ( $yt_video_id ) {
+				$yt_link     = "https://www.youtube.com/watch?v=$yt_video_id";
+				$yt_block    = $this->gutenberg->get_youtube( $yt_link );
+				$custom_html = serialize_blocks( [ $yt_block ] );
+			}
+
+			// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
+			$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > center > iframe' )->count()
+			&& false !== strpos( $enhancement_crawler->filter( 'div.html-module > center > iframe' )->getNode(0)->getAttribute( 'src' ), '://www.youtube.com/' )
+		) {
+
+			/**
+			 * YT video in iframe to Gutenberg YT block.
+			 */
+
+			// Get YT video ID.
+			$yt_link = $enhancement_crawler->filter( 'div.html-module > center > iframe' )->getNode(0)->getAttribute( 'src' );
+			// Get Gutenberg YT block.
+			if ( $yt_link ) {
+				$yt_block    = $this->gutenberg->get_youtube( $yt_link );
+				$custom_html = serialize_blocks( [ $yt_block ] );
+			}
 
 			// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
 			$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
@@ -1555,6 +1586,16 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( empty( $custom_html ) ) {
 				$debug = 1;
 			}
+
+
+
+
+		} elseif ( $enhancement_crawler->filter( 'div.spotlight > div.spotlight-module-container' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			$custom_html = null;
+
+
+
 
 		} else {
 
