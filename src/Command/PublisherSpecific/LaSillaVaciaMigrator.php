@@ -1460,6 +1460,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				]
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-remove-duplicate-article-import-meta-data',
+			[ $this, 'cmd_remove_duplicate_article_import_meta_data' ],
+			[
+				'shortdesc' => 'This command will address a set of data which has been duplicated from various imports',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	private function reset_db() {
@@ -7678,6 +7687,161 @@ BLOCK;
 				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 			} else {
 				echo WP_CLI::colorize( "%RUnable to update featured image.%n\n" );
+			}
+		}
+	}
+
+	/**
+	 * During our various article import exercises it seems we created a small batch of duplicate articles and
+	 * duplicate metadata. It's important to clean this up so that if we need to do future imports or updates,
+	 * we can clearly track which articles should be affected and which should not.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_remove_duplicate_article_import_meta_data( $args, $assoc_args ) {
+		/*
+		 * wp_postmeta.meta_value (key) => [ ...duplicate wp_posts.ID ]
+		 */
+		$target_data = [
+			8367 => [ 12543, 26680 ],
+			8411 => [ 12631, 26706 ],
+			8435 => [ 12679, 26724 ],
+			8437 => [ 12683, 162753 ],
+			8457 => [ 12723, 26738 ],
+			8479 => [ 12767, 162757 ],
+			8515 => [ 12839, 26788 ],
+			8601 => [ 13011, 26860 ],
+			8605 => [ 13019, 26864 ],
+			8607 => [ 13023, 26866 ],
+			8623 => [ 13055, 26882 ],
+			8631 => [ 13071, 26889 ],
+			8637 => [ 13083, 26895 ],
+			8699 => [ 13207, 26944 ],
+			8707 => [ 13223, 26950 ],
+			8739 => [ 13287, 26977 ],
+			8783 => [ 13375, 27012 ],
+			8841 => [ 13491, 27058 ],
+			8881 => [ 13571, 27093 ],
+			8885 => [ 13579, 27096 ],
+			8899 => [ 13607, 27108 ],
+			8915 => [ 13639, 27121 ],
+		];
+
+		global $wpdb;
+		foreach ( $target_data as $meta_value => $post_ids ) {
+			WP_CLI::log( sprintf( 'Processing meta_value (LSV Article ID): %d', $meta_value ) );
+			$first_post_id = $post_ids[0];
+			$dupe_post_id  = $post_ids[1];
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$first_post = $wpdb->get_row(
+				$wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE ID = %d", $first_post_id ),
+				ARRAY_A
+			);
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$dupe_post = $wpdb->get_row(
+				$wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE ID = %d", $dupe_post_id ),
+				ARRAY_A
+			);
+
+			$comparison = $this->output_value_comparison_table( [], $first_post, $dupe_post );
+
+			$target_column_names = [ 'post_date', 'post_date_gmt', 'post_content' ];
+			$update_columns      = [];
+			if ( ! empty( $comparison['different'] ) ) {
+				foreach ( $comparison['different'] as $column_name => $value ) {
+					if ( in_array( $column_name, $target_column_names, true ) ) {
+						$update_columns[ $column_name ] = $value;
+					}
+				}
+			}
+
+			if ( ! empty( $update_columns ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$update_first_post = $wpdb->update(
+					$wpdb->posts,
+					$update_columns,
+					[
+						'ID' => $first_post_id,
+					]
+				);
+
+				if ( $update_first_post ) {
+					WP_CLI::success( sprintf( 'Updated Post ID: %d', $first_post_id ) );
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$delete_dupe_meta = $wpdb->query(
+						$wpdb->prepare(
+							"DELETE FROM $wpdb->postmeta WHERE post_id = %d AND meta_value = %d AND meta_key LIKE %s",
+							$dupe_post_id,
+							$meta_value,
+							'%' . $wpdb->esc_like( 'original_article_id' )
+						)
+					);
+
+					if ( $delete_dupe_meta ) {
+						WP_CLI::success(
+							sprintf(
+								'Deleted duplicate meta data for Post ID: %d',
+								$dupe_post_id
+							)
+						);
+					} else {
+						WP_CLI::warning(
+							sprintf(
+								'Failed to delete duplicate meta data for Post ID: %d',
+								$dupe_post_id
+							)
+						);
+					}
+
+					$correct_meta_exists = get_post_meta( $first_post_id, 'newspack_original_article_id', true );
+
+					if ( ! $correct_meta_exists ) {
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$update_remaining_meta_key = $wpdb->query(
+							$wpdb->prepare(
+								"UPDATE $wpdb->postmeta SET meta_key = 'newspack_original_article_id' 
+             				WHERE post_id = %d AND meta_value = %d AND meta_key LIKE %s",
+								$first_post_id,
+								$meta_value,
+								'%' . $wpdb->esc_like( 'original_article_id' )
+							)
+						);
+
+						if ( $update_remaining_meta_key ) {
+							WP_CLI::success(
+								sprintf(
+									'Updated remaining meta key for Post ID: %d',
+									$first_post_id
+								)
+							);
+						} else {
+							WP_CLI::warning(
+								sprintf(
+									'Failed to update remaining meta key for Post ID: %d',
+									$first_post_id
+								)
+							);
+						}
+					}
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$delete_dupe_post = $wpdb->delete(
+						$wpdb->posts,
+						[
+							'ID' => $dupe_post_id,
+						]
+					);
+
+					if ( $delete_dupe_post ) {
+						WP_CLI::success( sprintf( 'Deleted duplicate Post ID: %d', $dupe_post_id ) );
+					} else {
+						WP_CLI::warning( sprintf( 'Failed to delete duplicate Post ID: %d', $dupe_post_id ) );
+					}
+				}
 			}
 		}
 	}
