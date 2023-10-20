@@ -882,7 +882,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
 	 */
-	public function clean_up_scraped_html( $post_id, $url, $post_content, $log_need_oembed_resave, $log_err_img_download ) {
+	public function clean_up_scraped_html( $post_id, $url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs ) {
 
 		$post_content_updated = '';
 
@@ -988,7 +988,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$custom_html = null;
 				$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 				if ( $is_div_class_enhancement ) {
-					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download );
+					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
 				}
 
 				// If $custom_html is null, the element's original HTML will be used.
@@ -1031,7 +1031,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		int $post_id,
 		string $url,
 		string $log_need_oembed_resave,
-		string $log_err_img_download
+		string $log_err_img_download,
+		string $log_unknown_enchancement_divs,
 	) : ?string {
 
 		$enhancement_crawler = new Crawler( $domelement );
@@ -1422,7 +1423,19 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		} else {
 
+			/**
+			 * Debug all other types of div.enchancement.
+			 */
 			$dbg_enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
+			$this->logger->log(
+				$log_unknown_enchancement_divs,
+				json_encode( [
+					'url'               => $url,
+					'post_id'           => $post_id,
+					'enchancement_html' => $dbg_enchancement_html
+				] ),
+				false
+			);
 			$debug = 1;
 
 		}
@@ -1853,12 +1866,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		/**
 		 * Logs.
 		 */
-		$log_post_ids_updated   = 'll2_updated_post_ids.log';
-		$log_gas_urls_updated   = 'll2_gas_urls_updated.log';
-		$log_err_gas_updated    = 'll2_err__updated_gas.log';
-		$log_enhancements       = 'll2_qa__enhancements.log';
-		$log_need_oembed_resave = 'll2__need_oembed_resave.log';
-		$log_err_img_download   = 'll2_err__img_download.log';
+		$log_post_ids_updated          = 'll2_updated_post_ids.log';
+		$log_gas_urls_updated          = 'll2_gas_urls_updated.log';
+		$log_err_gas_updated           = 'll2_err__updated_gas.log';
+		$log_enhancements              = 'll2_qa__enhancements.log';
+		$log_need_oembed_resave        = 'll2__need_oembed_resave.log';
+		$log_err_img_download          = 'll2_err__img_download.log';
+		$log_unknown_enchancement_divs = 'll2_err__unknown_enchancement_divs.json';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_post_ids_updated, $ts, false );
@@ -1943,6 +1957,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			. "\n  - ⚠️  $log_enhancements"
 			. "\n  - 👍  $log_post_ids_updated"
 			. "\n  - 👍  $log_gas_urls_updated"
+			. "\n  - 👍  $log_unknown_enchancement_divs"
 		);
 		wp_cache_flush();
 	}
