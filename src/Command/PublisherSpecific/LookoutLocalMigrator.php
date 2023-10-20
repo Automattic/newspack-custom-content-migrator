@@ -320,6 +320,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-dev-delete-all-posts',
+			[ $this, 'cmd_dev_delete_all_posts' ],
+			[
+				'shortdesc' => 'Careful. Deletes all posts.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator lookoutlocal-dev-prepare-html-files-for-import',
 			[ $this, 'cmd_dev_prepare_html_files_for_import' ],
 			[
@@ -368,7 +376,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$sitemap_index_url = 'https://lookout.co/santacruz/sitemap.xml';
 
 		WP_CLI::line( "Fetching URLs from sitemap index $sitemap_index_url , please hold ..." );
-		$urls = $this->fetch_and_parse_sitemap_index($sitemap_index_url);
+		$urls = $this->fetch_and_parse_sitemap_index( $sitemap_index_url );
 
 		if ( ! empty( $urls ) ) {
 			@unlink( $log_path );
@@ -526,7 +534,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$errs_updating_gas = [];
 
 		// HTML cache filename and path.
-		$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
+		$html_cached_filename  = $this->sanitize_filename( $url, '.html' );
 		$html_cached_file_path = $scraped_htmls_cache_path . '/' . $html_cached_filename;
 
 		// Get author page from cache if exists.
@@ -1533,8 +1541,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			WP_CLI::line( sprintf( "\n" . '%d/%d Scraping and importing URL %s ...', $key_url_data + 1, count( $urls ), $url ) );
 
-			// File name and path.
-			$html_cached_filename  = $this->sanitize_filename( $url ) . '.html';
+			$html_cached_filename = $this->sanitize_filename( $url, 'html' );
 			$html_cached_file_path = $path . '/' . $html_cached_filename;
 
 			// Get HTML from cache or fetch from HTTP.
@@ -1898,7 +1905,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
-			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download );
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
 
 			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
@@ -1970,10 +1977,23 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		return $slug;
 	}
 
-	public function sanitize_filename( $string ) {
-		$string_sanitized = preg_replace( '/[^a-z0-9]+/', '-', strtolower( $string ) );
+	/**
+	 * Creates a unique filename for a URL string, of safe length to be a file name on OSX.
+	 *
+	 * @param $string
+	 *
+	 * @return string
+	 */
+	public function sanitize_filename( $string, $extension ) {
 
-		return $string_sanitized;
+		// Calculate a hash of the input string.
+		$hash = md5( $string );
+		// Encode the hash using base64 encoding.
+		$compressed = base64_encode( $hash );
+		// Trim the encoded string to max filename length.
+		$compressed = substr( $compressed, 0, 200 );
+
+		return $compressed . '.' . $extension;
 	}
 
 	/**
@@ -2469,14 +2489,26 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 	}
 
+	public function cmd_dev_delete_all_posts( $pos_args, $assoc_args ) {
+		WP_CLI::confirm( 'Delete all posts?' );
+
+		$post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
+			wp_delete_post( $post_id, true );
+		}
+
+		WP_CLI::success( 'All posts permanently deleted.' );
+	}
+
 	public function cmd_dev_prepare_html_files_for_import( $pos_args, $assoc_args ) {
 		$urls = explode( "\n", file_get_contents( $assoc_args['file-with-urls'] ) );
 		$source_path = $assoc_args['source-html-folder'];
 		$destination_path = $assoc_args['destination-html-folder'];
 
 		// Delete all files from $destination_path.
-		$slug_files = glob( $destination_path . '/*' );
-		foreach ( $slug_files as $file ) {
+		$destination_files = glob( $destination_path . '/*' );
+		foreach ( $destination_files as $file ) {
 			if ( is_file( $file ) ) {
 				unlink( $file );
 			}
@@ -2486,17 +2518,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( empty( $url ) ) {
 				continue;
 			}
-			$slug = $this->get_slug_from_url( $url );
-			// cp $source_path/*$slug* $destination_path
-			$slug_files = glob( $source_path . '/*' . $slug . '*' );
-			if ( count( $slug_files ) !== 1 ) {
-				WP_CLI::error( sprintf( 'Could not find exactly one file for slug %s -- count = %d', $slug, count( $slug_files ) ) );
-			}
-			foreach ( $slug_files as $slug_file ) {
-				if ( is_file( $slug_file ) ) {
-					copy( $slug_file, $destination_path . '/' . basename( $slug_file ) );
-					WP_CLI::line( $slug_file );
-				}
+
+			// Get this URL's HTML scraping filename.
+			$filename = $this->sanitize_filename( $url, 'html' );
+			$file_path = $source_path . '/' . $filename;
+
+			// Copy HTML file to $destination_path.
+			if ( is_file( $file_path ) ) {
+				copy( $file_path, $destination_path . '/' . $filename );
+				WP_CLI::line( $filename . ' ' . $url . "\n" );
+			} else {
+				WP_CLI::error( sprintf( 'Can not find file %s for URL %s', $filename, $url ) );
 			}
 		}
 	}
