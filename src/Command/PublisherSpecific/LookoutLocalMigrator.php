@@ -1357,24 +1357,37 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$debug = 1;
 			}
 
-		} elseif ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
+		} elseif ( $enhancement_crawler->filter( 'div.tweet-embed' )->count()
+			|| $enhancement_crawler->filter( 'blockquote.twitter-tweet' )->count()
+		) {
 
 			/**
 			 * Tweet embed to Twitter block.
 			 */
 
 			// Get Twitter link.
-			$helper_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
 			$twitter_link = '';
-			foreach ( $helper_crawler->getIterator() as $twitter_a_domelement ) {
-				$href = $twitter_a_domelement->getAttribute( 'href' );
-				if ( false !== strpos( $href, 'twitter.com' ) ) {
-					$twitter_link = $href;
-					break;
+
+			$helper_crawler = $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' );
+			if ( $enhancement_crawler->filter( 'div.tweet-embed > blockquote > a' )->count() ) {
+				foreach ( $helper_crawler->getIterator() as $twitter_a_domelement ) {
+					$href = $twitter_a_domelement->getAttribute( 'href' );
+					if ( false !== strpos( $href, 'twitter.com' ) ) {
+						$twitter_link = $href;
+						break;
+					}
 				}
 			}
-			if ( ! $twitter_link ) {
-				// TODO -- log missing Twitter link
+
+			if ( empty( $twitter_link ) && $enhancement_crawler->filter( 'blockquote.twitter-tweet' )->count() ) {
+				$helper_crawler = $enhancement_crawler->filter( 'blockquote.twitter-tweet > a' );
+				foreach ( $helper_crawler->getIterator() as $twitter_a_domelement ) {
+					$href = $twitter_a_domelement->getAttribute( 'href' );
+					if ( false !== strpos( $href, 'twitter.com' ) ) {
+						$twitter_link = $href;
+						break;
+					}
+				}
 			}
 
 			if ( ! empty( $twitter_link ) ) {
@@ -1504,6 +1517,40 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$embed_block = $this->gutenberg->get_core_embed( $link );
 				$custom_html = serialize_blocks( [ $embed_block ] );
 			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
+		} elseif ( $enhancement_crawler->filter( 'ps-vimeoplayer' )->count() ) {
+
+			/**
+			 * Vimeo vids.
+			 */
+
+			$vimeo_video_id = $enhancement_crawler->filter( 'ps-vimeoplayer' )->getNode(0)->getAttribute( 'data-video-id' );
+			$link = sprintf( "https://vimeo.com/%s", $vimeo_video_id );
+
+			if ( $link ) {
+				$embed_block = $this->gutenberg->get_core_embed( $link );
+				$custom_html = serialize_blocks( [ $embed_block ] );
+			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
+
+		} elseif ( $enhancement_crawler->filter( 'div.banner-module-media' )->count() ) {
+
+			/**
+			 * Banner module media.
+			 */
+
+			foreach ( $enhancement_crawler->filter( 'div.banner-module-media' )->getIterator() as $banner_module_media_node ) {
+				$custom_html .= $banner_module_media_node->ownerDocument->saveHTML( $banner_module_media_node );
+			}
+
 
 			if ( empty( $custom_html ) ) {
 				$debug = 1;
