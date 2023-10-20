@@ -5,6 +5,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DateTime;
 use DateTimeZone;
 use DOMDocument;
+use DOMElement;
+use DOMException;
 use Exception;
 use HTMLPurifier;
 use HTMLPurifier_HTML5Config;
@@ -14,20 +16,20 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
+use WP_Post;
 use WP_User;
 
 class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	/**
-	 * HighCountryNewsMigrator Instance.
+	 * Singleton.
 	 *
-	 * @var HighCountryNewsMigrator
+	 * @var self
 	 */
 	private static $instance;
 
@@ -44,7 +46,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	/**
 	 * @var Logger.
 	 */
-	private $logger;
+	private Logger $logger;
 
 	/**
 	 * @var GutenbergBlockGenerator.
@@ -62,18 +64,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	private RedirectionLogic $redirection_logic;
 
 	/**
-	 * @var Taxonomy
-	 */
-	private Taxonomy $taxonomy_logic;
-
-	/**
 	 * Instance of Attachments Login
 	 *
-	 * @var null|Attachments
+	 * @var Attachments
 	 */
-	private $attachments;
+	private Attachments $attachments;
 
-	private $articles_json_arg = [
+	private array $articles_json_arg = [
 		'type'        => 'assoc',
 		'name'        => 'articles-json',
 		'description' => 'Path to the articles JSON file.',
@@ -118,9 +115,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
 
 	const PARENT_PAGE_FOR_ISSUES = 180504; // The page that all issues will have as parent.
-	const DEFAULT_AUTHOR_ID = 223746; // User ID of default author.
-	const TAG_ID_THE_MAGAZINE = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
-	const CATEGORY_ID_ISSUES = 385;
+	const DEFAULT_AUTHOR_ID      = 223746; // User ID of default author.
+	const TAG_ID_THE_MAGAZINE    = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
+	const CATEGORY_ID_ISSUES     = 385;
 
 	private DateTimeZone $site_timezone;
 
@@ -144,13 +141,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
-			self::$instance->taxonomy_logic            = new Taxonomy();
 			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
 		}
 
 		return self::$instance;
 	}
 
+	/**
+	 * @throws Exception
+	 */
 	public function register_commands(): void {
 		$this->set_fixes_on_existing_command();
 		$this->set_importer_commands();
@@ -159,6 +158,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	/**
 	 * Commands here need to be run on the already migrated content on staging.
+	 *
+	 * @throws Exception
 	 */
 	private function set_fixes_on_existing_command(): void {
 
@@ -200,6 +201,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	/**
 	 * Import new data.
+	 *
+	 * @throws Exception
 	 */
 	private function set_importer_commands(): void {
 
@@ -257,9 +260,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	/**
 	 * These need to be run after a new import.
+	 *
+	 * @throws Exception
 	 */
 	private function set_fixes_command(): void {
 
+		// TODO. This one might not be necessary.
 		WP_CLI::add_command(
 			'newspack-content-migrator hcn-fix-related-links-from-json',
 			[ $this, 'fix_related_links_from_json' ],
@@ -270,10 +276,39 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-referenced-articles-from-json',
+			[ $this, 'fix_referenced_articles_from_json' ],
+			[
+				'shortdesc' => 'Adds a block to articles with referenced links.',
+				'synopsis'  => [
+					$this->articles_json_arg,
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-wp-related-links-in-posts',
+			[ $this, 'fix_wp_related_links_in_posts' ],
+			[
+				'shortdesc' => 'Makes related links blocks.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'Specific post id to process',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
 	 * Callback for the command hcn-generate-redirects.
+	 *
+	 * @throws Exception
 	 */
 	public function fix_redirects( array $args, array $assoc_args ): void {
 		$log_file           = __FUNCTION__ . '.log';
@@ -300,7 +335,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$post_id = $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT post_id FROM {$wpdb->postmeta} WHERE ID <= %d AND meta_key = 'plone_article_UID' and meta_value = %s",
+					"SELECT post_id FROM $wpdb->postmeta WHERE ID <= %d AND meta_key = 'plone_article_UID' and meta_value = %s",
 					self::MAX_POST_ID_FROM_STAGING,
 					$article->UID
 				)
@@ -341,6 +376,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * Fix existing slugs and urls.
+	 *
+	 * @param array $args Params.
+	 * @param array $assoc_args Params.
+	 *
+	 * @return void
+	 * @throws Exception
+	 */
 	public function fix_post_urls( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
 		$command_meta_version = 1;
@@ -436,7 +480,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				continue;
 			}
 
-			preg_match_all( '/\[RELATED:(.*?)\]/', $post->post_content, $matches, PREG_SET_ORDER );
+			preg_match_all( '/\[RELATED:(.*?)]/', $post->post_content, $matches, PREG_SET_ORDER );
 
 			$update       = false;
 			$post_content = $post->post_content;
@@ -476,6 +520,85 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
+	public function fix_referenced_articles_from_json( array $args, array $assoc_args ): void {
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
+		$log_file             = "{$command_meta_key}_$command_meta_version.log";
+
+		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		$row_number = 0;
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $article ) {
+			$row_number ++;
+			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number, $batch_args['total'], $article->{'@id'} ) );
+			$post_id = $this->get_post_id_from_uid( $article->UID );
+			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				$this->logger->log( $log_file, sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
+				continue;
+			}
+			if ( empty( $article->references->relatesTo ) ) {
+				continue;
+			}
+			$related_links = [];
+			foreach ( $article->references->relatesTo as $uid ) {
+				$related_post_id = $this->get_post_id_from_uid( $uid );
+				if ( $related_post_id ) {
+					$related_links[] = [
+						'title'     => get_the_title( $related_post_id ),
+						'permalink' => wp_get_shortlink( $post_id, 'post', false ),
+					];
+				}
+			}
+			if ( empty( $related_post_id ) ) {
+				continue;
+			}
+			$post    = get_post( $post_id );
+			$content = $post->post_content;
+			$content .= serialize_block(
+				$this->gutenberg_block_generator->get_paragraph( 'Read More:' )
+			);
+
+			$content .= serialize_block(
+				$this->gutenberg_block_generator->get_list(
+					array_map(
+						fn( $related_post ) => '<a href="' . $related_post['permalink'] . '">' . $related_post['title'] . '</a>',
+						$related_links
+					)
+				)
+			);
+			wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => $content,
+				]
+			);
+			$this->logger->log( $log_file, sprintf( 'Added related links block to %s', get_permalink( $post ) ), Logger::SUCCESS );
+			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
+		}
+
+		$end = ( PHP_INT_MAX === $batch_args['end'] ) ? 'end' : $batch_args['end'];
+		$this->logger->log( $log_file, sprintf( 'Finished processing batch from %d to %s', $batch_args['start'], $end ) );
+	}
+
+	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
+		$post_id = $assoc_args['post-id'] ?? false;
+		if ( ! $post_id ) {
+			// TODO.
+		}
+		$post = get_post( $post_id );
+		if ( ! str_contains( $post->post_content, '[RELATED:' ) ) {
+			return;
+		}
+		$content = $post->post_content;
+		$content = $this->replace_related_placeholders_with_homepage_blocks( $content );
+		wp_update_post(
+			[
+				'ID'           => $post_id,
+				'post_content' => $content,
+			]
+		);
+	}
 
 	/**
 	 * This one fixes the related links that were already changed to wp permalinks with paths that were not working.
@@ -728,6 +851,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Migrate new images and update the old ones if they need to be.
+	 *
+	 * @throws Exception
+	 */
 	public function migrate_images_from_json( array $args, array $assoc_args ): void {
 		$log_file   = __FUNCTION__ . '.log';
 		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
@@ -857,13 +985,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				continue;
 			}
 
-			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
-			$existing_id = $this->get_post_id_from_uid( $row->UID );
-//			if ( $existing_id ) {
-//				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
-//				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
-//				continue;
-//			}
+			$tree_path = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
+			// $existing_id = $this->get_post_id_from_uid( $row->UID );
+			// if ( $existing_id ) {
+			// $this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
+			// update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+			// continue;
+			// }
 
 			$post_date_string     = $row->effective ?? $row->created;
 			$post_modified_string = $row->modified ?? $post_date_string;
@@ -894,7 +1022,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$intro                   = $row->intro ?? '';
 			$text                    = $this->cleanup_text( $row->text );
 			$text                    = $this->replace_img_tags_with_img_blocks( $text );
-			$text                    = $this->replace_video_tags_with_video_blocks( $text, $tree_path );
+			$text                    = $this->replace_video_tags_with_video_blocks( $text );
 			$article_layout          = $row->layout ?? '';
 			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 
@@ -918,7 +1046,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 				$post_data['meta_input']['newspack_featured_image_position'] = $featured_image_position;
 			}
-
 
 			$gallery = '';
 			if ( $row->gallery_enabled ) {
@@ -982,7 +1109,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 		global $wpdb;
 		$nodes = $headers->item( 0 )->childNodes;
-		/* @var \DOMElement $node */
+		/* @var DOMElement $node */
 		foreach ( $nodes as $node ) {
 			$tag_name = $node->tagName ?? '';
 			if ( 'img' === $tag_name ) {
@@ -1005,8 +1132,90 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return 0;
 	}
 
+	private function replace_related_placeholders_with_homepage_blocks( string $content ): string {
+		if ( ! str_contains( $content, '[RELATED:' ) || ! preg_match_all( '@<p>\[RELATED:(.*?)]</p>@', $content, $matches, PREG_SET_ORDER ) ) {
+			return $content;
+		}
+		global $wpdb;
+		foreach ( $matches as $match ) {
+			$path         = trim( parse_url( $match[1], PHP_URL_PATH ), '/' );
+			$related_post = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_tree_path' AND meta_value = %s;",
+					$path
+				)
+			);
+
+			$args  = [
+				'showReadMore'  => true,
+				'showDate'      => false,
+				'showAuthor'    => false,
+				'specificMode'  => true,
+				'typeScale'     => 3,
+				'sectionHeader' => 'Related',
+				'postsToShow'   => 1,
+				'showExcerpt'   => false,
+			];
+			$block = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( [ $related_post ], $args, );
+			$group = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border' ], [ 'align' => 'left' ] ) );
+
+			$content = str_replace( $match[0], $group, $content );
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Uses an unholy mix of DOM and regex to replace video tags with video blocks.
+	 *
+	 * @param string $content The post content.
+	 *
+	 * @throws DOMException
+	 */
+	private function replace_video_tags_with_video_blocks( string $content ): string {
+		$dom = new DOMDocument( '1.0', 'utf-8' );
+		@$dom->loadHTML( $content );
+
+		if ( false === str_contains( $content, '<video' ) ) {
+			// No videos to look for in this article.
+			return $content;
+		}
+
+		global $wpdb;
+		$new_node = $dom->createElement( 'div' );
+		$new_node->setAttribute( 'class', 'will-be-replaced' );
+
+		$vid_tags = $dom->getElementsByTagName( 'video' );
+		foreach ( $vid_tags as $vid_tag ) {
+			$source_tag = $vid_tag->firstChild;
+			if ( ( $source_tag->tagName ?? '' ) !== 'source' ) {
+				continue;
+			}
+			$src           = $source_tag->getAttribute( 'src' );
+			$attachment_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
+					'%' . $wpdb->esc_like( $src )
+				)
+			);
+			if ( ! $attachment_id ) {
+				continue;
+			}
+			// We can't use DomDoc's saveHTML because it is buggy and doesn't include the closing tag, so use this awful regex instead.
+			if ( ! preg_match( '@<video .*</video>@', $content, $matches ) ) {
+				continue;
+			}
+			$video_post  = get_post( $attachment_id );
+			$video_block = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
+
+			$content = str_replace( $matches[0], $video_block, $content );
+		}
+
+		return $content;
+	}
+
 	private function replace_img_tags_with_img_blocks( string $content ): string {
-		if ( false === strpos( $content, 'resolveuid/' ) ) {
+		if ( ! str_contains( $content, 'resolveuid/' ) ) {
 			// No images to look for in this article.
 			return $content;
 		}
@@ -1054,50 +1263,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return $content;
 	}
 
-	private function replace_video_tags_with_video_blocks( string $content, string $tree_path ) {
-		$dom = new DOMDocument( '1.0', 'utf-8' );
-		@$dom->loadHTML( $content );
-
-		if ( false === str_contains( $content, '<video' ) ) {
-			// No videos to look for in this article.
-			return $content;
-		}
-
-		global $wpdb;
-		$new_node = $dom->createElement( 'div' );
-		$new_node->setAttribute( 'class', 'will-be-replaced' );
-
-		$vid_tags = $dom->getElementsByTagName( 'video' );
-		foreach ( $vid_tags as $vid_tag ) {
-			$source_tag = $vid_tag->firstChild;
-			if ( ( $source_tag->tagName ?? '' ) !== 'source' ) {
-				continue;
-			}
-			$src           = $source_tag->getAttribute( 'src' );
-			$attachment_id = $wpdb->get_var(
-				$wpdb->prepare(
-					"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
-					'%' . $wpdb->esc_like( $src )
-				)
-			);
-			if ( ! $attachment_id ) {
-				continue;
-			}
-			// We can't use DomDoc's saveHTML because it is buggy and doesn't include the closing tag, so use this awful regex instead.
-			if ( ! preg_match( '@<video .*</video>@', $content, $matches ) ) {
-				continue;
-			}
-			$video_post  = get_post( $attachment_id );
-			$video_block = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
-
-			$content = str_replace( $matches[0], $video_block, $content );
-			$dom->saveHTML( $new_node );
-		}
-
-		return $content;
-	}
-
-	private function parent_element_has_class( \DOMElement $domElement, string $class ): bool {
+	private function parent_element_has_class( DOMElement $domElement, string $class ): bool {
 		$parent = $domElement->parentNode;
 		while ( $parent ) {
 			if ( $parent->nodeType !== XML_ELEMENT_NODE ) {
@@ -1119,7 +1285,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return sanitize_title( $post_name );
 	}
 
-	private function set_categories_on_post_from_path( \WP_Post $post, string $original_path ): void {
+	private function set_categories_on_post_from_path( WP_Post $post, string $original_path ): void {
 		$trimmed_path = trim( $original_path, '/' );
 		$path_parts   = explode( '/', $trimmed_path );
 		// Pop the last part, which is the post name, so the path is only categories.
@@ -1129,7 +1295,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			return;
 		}
 
-		if ( $path_parts[0] === 'articles' ) {
+		if ( 'articles' === $path_parts[0] ) {
 			$path_parts = array_slice( $path_parts, 0, 1 );
 		} elseif ( count( $path_parts ) > 2 ) {
 			// We pop a part off if there are more than 2 parts to the path (after having popped of the post name). For example:
@@ -1175,6 +1341,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @param string $articles_json_file_path Path to the articles JSON file.
 	 *
 	 * @return array Array with UID as key and pdf url as value.
+	 * @throws Exception
 	 */
 	private function get_pdf_urls_from_json( string $articles_json_file_path ): array {
 		if ( ! file_exists( $articles_json_file_path ) ) {
@@ -1204,7 +1371,7 @@ QUERY;
 	 * @param array  $pdfurls array of UID => pdfurl. See get_pdf_urls_from_json().
 	 *
 	 * @return int The attachment ID or 0 if not found.
-	 * @throws \Exception
+	 * @throws Exception
 	 */
 	private function get_issue_pdf_attachment_id( int $post_id, object $issue, array $pdfurls ): int {
 		if ( array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
@@ -1348,7 +1515,9 @@ HTML;
 	}
 
 	/**
-	 * Quick lo-tech author parser.
+	 * Quick lo-tech author parser. Weeds out some very site specific things and probably misses a lot of stuff.
+	 *
+	 * @param string $authors A comma, and, or & and separated byline.
 	 *
 	 * @return array
 	 */
