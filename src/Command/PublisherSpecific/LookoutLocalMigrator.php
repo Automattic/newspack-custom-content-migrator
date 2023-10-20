@@ -249,8 +249,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
+						'name'        => 'post-ids-csv-file',
+						'description' => 'Optional list of post IDs to transform only. Preceeds --post-ids-csv.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'post-ids-csv',
-						'description' => 'Transform/clean up these post IDs only. If not provided will transform all of them.',
+						'description' => 'Optional list of post IDs to transform only.',
 						'optional'    => true,
 					],
 				],
@@ -312,6 +318,32 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'shortdesc' => 'Temp dev command for various snippets.',
 				'synopsis'  => [],
 			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-dev-prepare-html-files-for-import',
+			[ $this, 'cmd_dev_prepare_html_files_for_import' ],
+			[
+				'shortdesc' => 'Temp dev command.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'file-with-urls',
+						'description' => 'List of post URLs to scrape and import.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'source-html-folder',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'destination-html-folder',
+						'optional'    => false,
+					],
+				],
+			]
+
 		);
 	}
 
@@ -762,9 +794,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	/**
 	 * Crawls all useful post data from HTML.
 	 *
-	 * @param string $html                    HTML.
-	 * @param array  &$debug_all_author_names Stores all author names for easier QA/debugging.
-	 * @param array  &$debug_all_tags         Stores all tags for easier QA/debugging.
+	 * @param string $html HTML.
+	 * @param string $url  URL.
 	 *
 	 * @return array $data All posts data crawled from HTML. {
 	 *      @type array   script_data            Decoded data from that one <script> element with useful post info.
@@ -851,7 +882,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
 	 */
-	public function clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download ) {
+	public function clean_up_scraped_html( $post_id, $url, $post_content, $log_need_oembed_resave, $log_err_img_download ) {
 
 		$post_content_updated = '';
 
@@ -957,7 +988,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$custom_html = null;
 				$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 				if ( $is_div_class_enhancement ) {
-					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $log_need_oembed_resave, $log_err_img_download );
+					$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download );
 				}
 
 				// If $custom_html is null, the element's original HTML will be used.
@@ -998,6 +1029,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public function transform_div_enchancement(
 		DOMElement $domelement,
 		int $post_id,
+		string $url,
 		string $log_need_oembed_resave,
 		string $log_err_img_download
 	) : ?string {
@@ -1021,10 +1053,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Skip this 'div.enchancement'.
 			$custom_html = '';
 
-		} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
-			// Skip this 'div.enchancement'.
-			$custom_html = '';
-
 		} elseif ( $enhancement_crawler->filter( 'broadstreet-zone' )->count() ) {
 			// Skip this 'div.enchancement'.
 			$custom_html = '';
@@ -1044,6 +1072,46 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		} elseif ( $enhancement_crawler->filter( 'figure > a > img[alt="click here to become a Lookout member"]' )->count() ) {
 			// Skip this 'div.enchancement'.
 			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'span > img[alt="Shopper\'s Spotlight Lily Belli"]' )->count() ) {
+			// Skip this 'div.enchancement'.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
+
+			/**
+			 * Transform "related posts" to a div.related-link.
+			 *
+			 * These come in different formats.
+			 */
+
+			// First format -- e.g. https://lookout.co/santacruz/coast-life/story/2023-08-04/santa-cruz-beach-boardwalk-planning-commission-ferris-wheel-chance-rides-seaside-company
+			$helper_node = $enhancement_crawler->filter( 'ps-promo > div.promo-wrapper > div.promo-content > div.promo-title-container > p.promo-title > a' )->getNode( 0 );
+			if ( $helper_node ) {
+				$stripped_html = str_replace( "\n", '', $helper_node->ownerDocument->saveHTML( $helper_node ) );
+				$custom_html = '<div class="related-link-1">' . $stripped_html . '</div>';
+			}
+
+			// Second format -- e.g. https://lookout.co/santacruz/election-2022/story/2022-11-07/santa-cruz-county-election-2022-weekly-update-november-7
+			if ( ! $helper_node ) {
+				$promo_wrappers = [];
+				// $helper_node = $enhancement_crawler->filter( 'ps-list-loadmore > div > ul > li > ps-promo > div > div.promo-wrapper' );
+				$helper_node = $enhancement_crawler->filter( 'ps-list-loadmore > div > ul > li > ps-promo > div > div.promo-wrapper > div.promo-content > div.promo-title-container > p.promo-title > a' );
+				if ( $helper_node && $helper_node->count() > 0 ) {
+					foreach ( $helper_node->getIterator() as $div_promo_wrapper ) {
+						$stripped_html = str_replace( "\n", '', $div_promo_wrapper->ownerDocument->saveHTML( $div_promo_wrapper ) );
+						$promo_wrappers[] = $stripped_html;
+					}
+				}
+
+				if ( ! empty( $promo_wrappers ) ) {
+					$custom_html = '<div class="related-link-2">' . implode( "\n", $promo_wrappers ) . '</div>';
+				}
+			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
 
 		} elseif ( $enhancement_crawler->filter( 'div.quote-text > blockquote' )->count() ) {
 
@@ -1077,31 +1145,55 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
 			}
 
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
 
 		} elseif ( $enhancement_crawler->filter( 'div.infobox' )->count() ) {
 			// Keep HTML inside 'div.enhancement'.
 			$helper_node = $enhancement_crawler->filter( 'div.infobox' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
 
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
 		} elseif ( $enhancement_crawler->filter( 'figure > a[href="mailto:elections@lookoutlocal.com"]' )->count() ) {
 			// Keep HTML inside 'div.enhancement'.
 			$helper_node = $enhancement_crawler->filter( 'figure' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
 
 		} elseif ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
 			// Keep HTML inside 'div.enhancement'.
 			$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
 
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
 		} elseif ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
 			// Keep HTML inside 'div.enhancement'.
 			$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
 
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
 		} elseif ( $enhancement_crawler->filter( 'figure.figure > p > img' )->count() ) {
 			// Keep HTML inside 'div.enhancement'.
 			$helper_node = $enhancement_crawler->filter( 'figure.figure' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
 
 		} elseif ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
 			/**
@@ -1115,6 +1207,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$helper_node = $enhancement_crawler->filter( 'ps-interactive-project' )->getNode( 0 );
 					$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
 				}
+			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
 			}
 
 		} elseif ( $enhancement_crawler->filter( 'figure.figure > a.link > img' )->count() ) {
@@ -1149,6 +1245,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false, null, null, $href );
 			$custom_html = serialize_blocks( [ $image_block ] );
 
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
 		} elseif ( $enhancement_crawler->filter( 'figure.figure > img' )->count() ) {
 
 			/**
@@ -1164,8 +1264,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$caption = $helper_crawler->count() > 0 ? $helper_crawler->innerText() : null;
 
 			$helper_crawler = $enhancement_crawler->filter( 'figure.figure > div.figure-content > div.figure-credit' );
-			// Not sure why this returns only the first character...
-			//      $credit = $helper_crawler->innerText();
 			$credit = $helper_crawler->count() > 0 ? $helper_crawler->getIterator()->current()->textContent : null;
 
 			// Download image.
@@ -1176,6 +1274,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$attachment_post = get_post( $attachment_id );
 			$image_block = $this->gutenberg->get_image( $attachment_post, 'full', false );
 			$custom_html = serialize_blocks( [ $image_block ] );
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
 
 		} elseif ( $enhancement_crawler->filter( 'div > div > ps-youtubeplayer' )->count() ) {
 
@@ -1197,6 +1299,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
 			$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d YouTube", $post_id ), $this->logger::WARNING );
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
 
 		} elseif ( $enhancement_crawler->filter( 'div.tweet-embed' )->count() ) {
 
@@ -1225,6 +1331,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 				// Log that this post needs manual resaving (until we figure out programmatic oembed in postmeta).
 				$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d Twitter", $post_id ), $this->logger::WARNING );
+			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
 			}
 
 		} elseif ( $enhancement_crawler->filter( 'ps-carousel' )->count() ) {
@@ -1305,6 +1415,16 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			} else {
 				// TODO -- log failed attachment import <-- i.e. failed gallery, but put to same log
 			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
+		} else {
+
+			$dbg_enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
+			$debug = 1;
+
 		}
 
 		return $custom_html;
@@ -1476,12 +1596,15 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->logger->log( $log_err_importing_featured_image, $ts, false );
 		$this->logger->log( $log_err_img_download, $ts, false );
 
+		// Debugging and QA.
+		$debug_all_author_names          = [];
+		$debug_all_tags                  = [];
+
 		/**
 		 * Import posts.
 		 */
-		$debug_all_author_names          = [];
-		$debug_all_tags                  = [];
-		$debug_all_tags_promoted_content = [];
+
+		$all_imported_post_ids = [];
 
 		foreach ( $html_files as $key_html_file => $html_file ) {
 
@@ -1522,9 +1645,24 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Get slug from URL.
 			$slug = $this->get_slug_from_url( $url );
 
+			// QA.
+			if ( empty( $crawled_data['post_title'] ) ) {
+				throw new \UnexpectedValueException( sprintf( 'post_title not found for ID %d URL %s', $post_id, $url ) );
+			} elseif ( empty( $crawled_data['post_content'] ) ) {
+				throw new \UnexpectedValueException( sprintf( 'post_content not found for ID %d URL %s', $post_id, $url ) );
+			} elseif ( empty( $slug ) ) {
+				throw new \UnexpectedValueException( sprintf( 'slug not found for ID %d URL %s', $post_id, $url ) );
+			} elseif ( empty( $crawled_data['post_date'] ) ) {
+				throw new \UnexpectedValueException( sprintf( 'post_date not found for ID %d URL %s', $post_id, $url ) );
+			} elseif ( empty( $crawled_data['category_name'] ) ) {
+				throw new \UnexpectedValueException( sprintf( 'category_name not found for ID %d URL %s', $post_id, $url ) );
+			}
+
 			$post_args = [
 				'post_title'   => $crawled_data['post_title'],
 				'post_content' => $crawled_data['post_content'],
+				// The Publisher explicitly wanted to save theing the subtitle as the excerpt.
+				'post_excerpt' => $crawled_data['post_subtitle'] ?? '',
 				'post_status'  => 'publish',
 				'post_type'    => 'post',
 				'post_name'    => $slug,
@@ -1533,6 +1671,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( ! $post_id ) {
 				$post_id = wp_insert_post( $post_args );
 				WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
+
+				$all_imported_post_ids[] = $post_id;
 			} else {
 				$wpdb->update(
 					$wpdb->posts,
@@ -1540,6 +1680,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					[ 'ID' => $post_id ]
 				);
 				WP_CLI::success( sprintf( 'Updated post ID %d', $post_id ) );
+
+				$all_imported_post_ids[] = $post_id;
 			}
 
 
@@ -1547,8 +1689,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 * Collect postmeta.
 			 */
 			$postmeta = [
-				// Newspack Subtitle postmeta
-				'newspack_post_subtitle'                  => $crawled_data['post_subtitle'] ?? '',
+				// Newspack Subtitle postmeta. The Publisher explicitly asked that the subtitle be saved as the excerpt. We should wipe it here for backwards compatibility when doing --reimport-posts.
+				'newspack_post_subtitle'                  => '',
 				// Basic data
 				self::META_POST_ORIGINAL_URL              => $url,
 				'newspackmigration_slug'                  => $slug,
@@ -1571,17 +1713,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'newspackmigration_layouttype'            => $crawled_data['_layout_type'] ?? '',
 			];
 
-// QA.
-if ( $crawled_data['tags_promoted_content'] ) {
-	$debug_all_tags_promoted_content = array_merge( $debug_all_tags_promoted_content, [ $crawled_data['tags_promoted_content'] ] );
-}
-
 			/**
 			 * Import featured image.
 			 */
 			if ( isset( $crawled_data['featured_image_src'] ) ) {
 				WP_CLI::line( 'Downloading featured image ...' );
-				$attachment_id = $this->get_or_download_image(
+				$featimg_id = $this->get_or_download_image(
 					$log_err_img_download,
 					$crawled_data['featured_image_src'],
 					$title = null,
@@ -1591,16 +1728,16 @@ if ( $crawled_data['tags_promoted_content'] ) {
 					$post_id,
 					$crawled_data['featured_image_credit']
 				);
-				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
+				if ( ! $featimg_id || is_wp_error( $featimg_id ) ) {
 					$this->logger->log( $log_err_importing_featured_image, sprintf(
 						'PostID %s URL %s Error %s',
 						$post_id,
 						$crawled_data['featured_image_src'],
-						is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '/'
+						is_wp_error( $featimg_id ) ? $featimg_id->get_error_message() : '/'
 					) );
 				} else {
 					// Set featured image.
-					set_post_thumbnail( $post_id, $attachment_id );
+					set_post_thumbnail( $post_id, $featimg_id );
 				}
 			}
 
@@ -1619,7 +1756,7 @@ if ( $crawled_data['tags_promoted_content'] ) {
 				$ga_ids[] = $ga_id;
 			}
 			if ( empty( $ga_ids ) ) {
-				throw new \UnexpectedValueException( sprintf( 'Could not get any authors for post %s', $url ) );
+				throw new \UnexpectedValueException( sprintf( 'Authors not found for ID %d URL %s', $post_id, $url ) );
 			}
 			// Assign GAs to post.
 			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
@@ -1635,13 +1772,13 @@ if ( $crawled_data['tags_promoted_content'] ) {
 				// Get or create parent category.
 				$category_parent_id = wp_create_category( $crawled_data['category_parent_name'], 0 );
 				if ( is_wp_error( $category_parent_id ) ) {
-					throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_parent_name'], $url, $category_parent_id->get_error_message() ) );
+					throw new \UnexpectedValueException( sprintf( 'Could not get or create category_parent_name %s for ID %d URL %s error: %s', $crawled_data['category_parent_name'], $post_id, $url, $category_parent_id->get_error_message() ) );
 				}
 			}
 			// Get or create primary category.
 			$category_id = wp_create_category( $crawled_data['category_name'], $category_parent_id );
 			if ( is_wp_error( $category_id ) ) {
-				throw new \UnexpectedValueException( sprintf( 'Could not get or create parent category %s for post %s error message: %s', $crawled_data['category_name'], $url, $category_id->get_error_message() ) );
+				throw new \UnexpectedValueException( sprintf( 'Could not get or create category_name %s for ID %d URL %s error message: %s', $crawled_data['category_name'], $post_id, $url, $category_id->get_error_message() ) );
 			}
 			// Set category.
 			wp_set_post_categories( $post_id, [ $category_id ] );
@@ -1663,19 +1800,17 @@ if ( $crawled_data['tags_promoted_content'] ) {
 			 * Save postmeta.
 			 */
 			foreach ( $postmeta as $meta_key => $meta_value ) {
-				if ( ! empty( $meta_value ) ) {
-					update_post_meta( $post_id, $meta_key, $meta_value );
-				}
+				update_post_meta( $post_id, $meta_key, $meta_value );
 			}
 		}
 
 		/**
-		 * Debug and QC.
+		 * Debug and QA.
 		 */
 		// Author names.
 		if ( ! empty( $debug_all_author_names ) ) {
 			$this->logger->log( $log_all_author_names, implode( "\n", $debug_all_author_names ), false );
-			WP_CLI::warning( "⚠️️  QC $log_all_author_names" );
+			WP_CLI::warning( "⚠️️  QA $log_all_author_names" );
 		}
 		// Tags.
 		if ( ! empty( $debug_all_tags ) ) {
@@ -1689,13 +1824,11 @@ if ( $crawled_data['tags_promoted_content'] ) {
 			);
 			// Log.
 			$this->logger->log( $log_all_tags, implode( "\n", $debug_all_tags_flattened ), false );
-			WP_CLI::warning( "⚠️️  QC $log_all_tags" );
+			WP_CLI::warning( "⚠️️  QA $log_all_tags" );
 		}
-		// Promoted content.
-		if ( ! empty( $debug_all_tags_promoted_content ) ) {
-			$this->logger->log( $log_all_tags_promoted_content, implode( "\n", $debug_all_tags_promoted_content ), false );
-			WP_CLI::warning( "⚠️️  QC $log_all_tags_promoted_content" );
-		}
+		file_put_contents( 'll2__all_imported_post_ids.log', implode( ",", $all_imported_post_ids ) );
+		WP_CLI::warning( "⚠️️  QA 'll2__all_imported_post_ids.log'" );
+
 
 		WP_CLI::line( 'Done 👍' );
 	}
@@ -1706,7 +1839,10 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		/**
 		 * Args.
 		 */
-		$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+		$post_ids = isset( $assoc_args['post-ids-csv-file'] ) ? explode( ',', file_get_contents( $assoc_args['post-ids-csv-file'] ) ) : null;
+		if ( ! $post_ids ) {
+			$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+		}
 
 		// Folder to store scraped author pages HTMLs.
 		$scrape_author_htmls_path = 'scrape_author_htmls';
@@ -1748,7 +1884,7 @@ if ( $crawled_data['tags_promoted_content'] ) {
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
-			$post_content_updated = $this->clean_up_scraped_html( $post_id, $post_content, $log_need_oembed_resave, $log_err_img_download );
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download );
 
 			// If post_content was updated.
 			if ( ! empty( $post_content_updated ) ) {
@@ -1910,9 +2046,8 @@ if ( $crawled_data['tags_promoted_content'] ) {
 	/**
 	 * Crawls all useful post data from HTML.
 	 *
-	 * @param string $html                    HTML.
-	 * @param array  &$debug_all_author_names Stores all author names for easier QA/debugging.
-	 * @param array  &$debug_all_tags         Stores all tags for easier QA/debugging.
+	 * @param string $html HTML.
+	 * @param string $url  URL.
 	 *
 	 * @return array $data All posts data crawled from HTML. {
 	 *      @type array   script_data            Decoded data from that one <script> element with useful post info.
@@ -2064,10 +2199,6 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		// E.g. "higher-ed"
 		$section_parent_slug          = $script_data['sectionParentPath'] ?? null;
 		$category_parent_name         = self::SECTIONS[ $section_parent_slug ] ?? null;
-		if ( $category_parent_name ) {
-			// TODO
-			$dbg = 1;
-		}
 		$data['category_parent_name'] = $category_parent_name;
 
 		// Tags.
@@ -2101,6 +2232,9 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		return $featured_image_credit;
 	}
 	public function filter_author_names( $authors_text ) {
+
+		// Replace   with regular spaces.
+		$authors_text = str_replace( ' ', ' ', $authors_text );
 
 		$authors_text = trim( $authors_text );
 		$authors_text = preg_replace( '/^By: /', '', $authors_text );
@@ -2318,6 +2452,38 @@ if ( $crawled_data['tags_promoted_content'] ) {
 		$jsons_long = json_encode( $jsons );
 		return;
 
+	}
+
+	public function cmd_dev_prepare_html_files_for_import( $pos_args, $assoc_args ) {
+		$urls = explode( "\n", file_get_contents( $assoc_args['file-with-urls'] ) );
+		$source_path = $assoc_args['source-html-folder'];
+		$destination_path = $assoc_args['destination-html-folder'];
+
+		// Delete all files from $destination_path.
+		$slug_files = glob( $destination_path . '/*' );
+		foreach ( $slug_files as $file ) {
+			if ( is_file( $file ) ) {
+				unlink( $file );
+			}
+		}
+
+		foreach ( $urls as $url ) {
+			if ( empty( $url ) ) {
+				continue;
+			}
+			$slug = $this->get_slug_from_url( $url );
+			// cp $source_path/*$slug* $destination_path
+			$slug_files = glob( $source_path . '/*' . $slug . '*' );
+			if ( count( $slug_files ) !== 1 ) {
+				WP_CLI::error( sprintf( 'Could not find exactly one file for slug %s -- count = %d', $slug, count( $slug_files ) ) );
+			}
+			foreach ( $slug_files as $slug_file ) {
+				if ( is_file( $slug_file ) ) {
+					copy( $slug_file, $destination_path . '/' . basename( $slug_file ) );
+					WP_CLI::line( $slug_file );
+				}
+			}
+		}
 	}
 
 	/**
