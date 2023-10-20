@@ -116,9 +116,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
 
 	const PARENT_PAGE_FOR_ISSUES = 180504; // The page that all issues will have as parent.
-	const DEFAULT_AUTHOR_ID      = 223746; // User ID of default author.
-	const TAG_ID_THE_MAGAZINE    = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
-	const CATEGORY_ID_ISSUES     = 385;
+	const DEFAULT_AUTHOR_ID = 223746; // User ID of default author.
+	const TAG_ID_THE_MAGAZINE = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
+	const CATEGORY_ID_ISSUES = 385;
 
 	private DateTimeZone $site_timezone;
 
@@ -693,8 +693,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				);
 
 				if ( ! is_wp_error( $image_attachment_id ) ) {
-					$image_id                                 = $image_attachment_id;
-					$page_data['meta_input']['_thumbnail_id'] = $image_id;
+					$image_id                                                    = $image_attachment_id;
+					$page_data['meta_input']['_thumbnail_id']                    = $image_id;
 					$page_data['meta_input']['newspack_featured_image_position'] = 'hidden';
 				} else {
 					$this->logger->log( $log_file, sprintf( 'Could not find an image for %s', $issue->{'@id'} ), Logger::WARNING );
@@ -858,11 +858,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			$existing_id = $this->get_post_id_from_uid( $row->UID );
-			// if ( $existing_id ) {
-			// $this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
-			// update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
-			// continue;
-			// }
+//			if ( $existing_id ) {
+//				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
+//				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+//				continue;
+//			}
 
 			$post_date_string     = $row->effective ?? $row->created;
 			$post_modified_string = $row->modified ?? $post_date_string;
@@ -884,7 +884,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			if ( ! empty( $row->subjects ) ) {
 				$post_data['tags_input'] = $row->subjects;
-				// $post_data['meta_input']['_yoast_wpseo_primary_post_tag'] = $row->subjects[0];
+//				$post_data['meta_input']['_yoast_wpseo_primary_post_tag'] = $row->subjects[0];
 			}
 
 			if ( ! empty( $row->creators ) ) {
@@ -895,8 +895,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 			}
 
-			$intro                   = $row->intro ?? '';
-			$text                    = $this->replace_img_tags_with_img_blocks( $row->text );
+			$intro = $row->intro ?? '';
+			$text                   = $this->replace_img_tags_with_img_blocks( $row->text );
 			$article_layout          = $row->layout ?? '';
 			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 
@@ -922,7 +922,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$gallery = '';
 			if ( $row->gallery_enabled ) {
 				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path );
-				$gallery        = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
+				$gallery = serialize_block($this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ));
 			}
 
 			$post_data['post_content'] = wp_kses_post( $intro . $gallery . $text );
@@ -941,7 +941,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			if ( ! empty( $row->subjects ) ) {
 				wp_set_object_terms( $created_post_id, $row->subjects, 'post_tag' );
-				$primary_tag = get_term_by( 'name', $row->subjects[0], 'post_tag' );
+				$primary_tag = get_term_by('name', $row->subjects[0], 'post_tag');
 				update_post_meta( $created_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
 			}
 			$this->set_categories_on_post_from_path( get_post( $created_post_id ), $tree_path );
@@ -1057,7 +1057,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$pdfurls_array = [];
 		$jq_query      = <<<QUERY
-cat $articles_json_file_path | jq '. [] | select(."pdfurl"|test("pdf$")) | {UID: .parent.UID, pdfurl}' | jq -s
+cat $articles_json_file_path | jq '. [] | select(."pdfurl"|test("pdf$")) | {UID: .parent.UID, pdfurl}' | jq -s 
 QUERY;
 		exec( $jq_query, $output_array );
 		if ( ! empty( $output_array[0] ) ) {
@@ -1205,7 +1205,7 @@ QUERY;
 		$attachment_ids = $wpdb->get_col(
 			$wpdb->prepare(
 				"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
-				$wpdb->esc_like( $tree_path ) . '%'
+				$wpdb->esc_like($tree_path) .'%'
 			)
 		);
 
