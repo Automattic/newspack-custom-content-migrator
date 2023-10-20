@@ -136,6 +136,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $gutenberg;
 
 	/**
+	 * Used as a development QA helper.
+	 * If set, no images will actually be downloaded from live, and this image will be used instead. This will prevent all image downloads and speed up dev and QA.
+	 *
+	 * @var string Path to a demo image.
+	 */
+	private $dev_fake_image_override;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -237,6 +245,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						'description' => 'If this flag is set, will reimport all HTML -> post data. Otherwise posts that were already imported will be skipped.',
 						'optional'    => true,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'dev-override-fake-image-path',
+						'description' => 'Development helper. Path to a demo image. If set, will not actually download live image, but simply reuse this image for all downloads, and speed up dev and QA imports.',
+						'optional'    => true,
+					],
 				],
 			]
 		);
@@ -257,6 +271,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'post-ids-csv',
 						'description' => 'Optional list of post IDs to transform only.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'dev-override-fake-image-path',
+						'description' => 'Development helper. Path to a demo image. If set, will not actually download live image, but simply reuse this image for all downloads, and speed up dev and QA imports.',
 						'optional'    => true,
 					],
 				],
@@ -546,7 +566,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
 				// Not OK.
 				$msg = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
-				$errs_updating_gas[] = sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg );
+				$errs_updating_gas[] = sprintf( 'URL: %s CODE: %s MESSAGE: %s', $url, $get_result['response']['code'], $msg );
 				return;
 			}
 
@@ -691,6 +711,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		// Download and import attachment.
+		if ( $this->dev_fake_image_override ) {
+			$src = $this->dev_fake_image_override;
+		}
 		WP_CLI::line( sprintf( "Downloading image '%s' ...", $src ) );
 		$attachment_id = $this->attachments->import_external_file(
 			$src,
@@ -1075,6 +1098,24 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Skip this 'div.enchancement'.
 			$custom_html = '';
 
+		} elseif ( $enhancement_crawler->filter( 'script' )->count() > 0
+			&& false !== strpos( $enhancement_crawler->filter( 'script' )->text(), '3rd Party Click Tracking' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Tracking script
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->children()->count() === 0
+			&& empty( trim( $enhancement_crawler->getNode(0)->nodeValue ) )
+		) {
+			// Skip this 'div.enchancement'.
+			// Totally empty div.enchancement.
+			$custom_html = '';
+
+
+
+
+
 		} elseif ( $enhancement_crawler->filter( 'ps-promo' )->count() ) {
 
 			/**
@@ -1166,8 +1207,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$debug = 1;
 			}
 
-		} elseif ( $enhancement_crawler->filter( 'div > iframe' )->count() ) {
-			// Keep HTML inside 'div.enhancement'.
+		} elseif ( $enhancement_crawler->filter( 'div > iframe' )->count()
+			|| $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count()
+		) {
+			// Keep iframes.
 			$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
 
@@ -1175,7 +1218,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$debug = 1;
 			}
 
-		} elseif ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count() ) {
+		} elseif ( $enhancement_crawler->filter( 'div > div > div.infogram-embed' )->count()
+			|| $enhancement_crawler->filter( 'div > div.infogram-embed' )->count()
+		) {
 			// Keep HTML inside 'div.enhancement'.
 			$helper_node = $enhancement_crawler->filter( 'div' )->getNode( 0 );
 			$custom_html = $helper_node->ownerDocument->saveHTML( $helper_node );
@@ -1193,7 +1238,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$debug = 1;
 			}
 
-		} elseif ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count() ) {
+		} elseif ( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->count()
+			&& false !== strpos( $enhancement_crawler->filter( 'ps-interactive-project > iframe' )->getNode(0)->getAttribute('src'), '//joinsubtext.com/lilyonfood' )
+		) {
 			/**
 			 * If 'div.enhancement' has > ps-interactive-project > iframe with src containing "//joinsubtext.com/lilyonfood", keep it.
 			 */
@@ -1236,6 +1283,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Download image.
 			WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
+			// Dev.
+			if ( $this->dev_fake_image_override ) {
+				$src = $this->dev_fake_image_override;
+			}
 			$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
 
 			// Get Gutenberg image block.
@@ -1266,6 +1317,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			// Download image.
 			WP_CLI::line( sprintf( 'Downloading image: %s', $src ) );
+			// Dev.
+			if ( $this->dev_fake_image_override ) {
+				$src = $this->dev_fake_image_override;
+			}
 			$attachment_id = $this->get_or_download_image( $log_err_img_download, $src, $title = null, $caption, $description = null, $alt, $post_id, $credit );
 
 			// Get Gutenberg image block.
@@ -1399,6 +1454,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				}
 
 				WP_CLI::line( sprintf( 'Downloading image: %s', $image_data['src'] ) );
+				// Dev.
+				if ( $this->dev_fake_image_override ) {
+					$image_data[ 'src' ] = $this->dev_fake_image_override;
+				}
 				$attachment_id    = $this->get_or_download_image( $log_err_img_download, $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
 				$attachment_ids[] = $attachment_id;
 			}
@@ -1412,6 +1471,38 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$this->logger->log( $log_need_oembed_resave, sprintf( "PostID: %d JPSlideshow", $post_id ), $this->logger::WARNING );
 			} else {
 				// TODO -- log failed attachment import <-- i.e. failed gallery, but put to same log
+			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
+		} elseif ( $enhancement_crawler->filter( 'blockquote.instagram-media' )->count() ) {
+
+			/**
+			 * Instagram embeds.
+			 */
+
+			$link = $enhancement_crawler->filter( 'blockquote.instagram-media' )->attr( 'data-instgrm-permalink' );
+			if ( $link ) {
+				$embed_block = $this->gutenberg->get_core_embed( $link );
+				$custom_html = serialize_blocks( [ $embed_block ] );
+			}
+
+			if ( empty( $custom_html ) ) {
+				$debug = 1;
+			}
+
+		} elseif ( $enhancement_crawler->filter( 'div.facebook-embed > div.fb-post' )->count() ) {
+
+			/**
+			 * Facebook embeds.
+			 */
+
+			$link = $enhancement_crawler->filter( 'div.facebook-embed > div.fb-post' )->attr( 'data-href' );
+			if ( $link ) {
+				$embed_block = $this->gutenberg->get_core_embed( $link );
+				$custom_html = serialize_blocks( [ $embed_block ] );
 			}
 
 			if ( empty( $custom_html ) ) {
@@ -1556,7 +1647,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				// Not OK.
 				if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
 					$msg = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
-					$this->logger->log( $log_wrong_urls, sprintf( 'URL:%s CODE:%s MESSAGE:%s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
+					$this->logger->log( $log_wrong_urls, sprintf( 'URL: %s CODE: %s MESSAGE: %s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
 					continue;
 				}
 
@@ -1587,6 +1678,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::error( 'No .html files found in path.' );
 		}
 		$reimport_posts = isset( $assoc_args['reimport-posts'] ) ? true : false;
+		$this->dev_fake_image_override = $assoc_args['dev-override-fake-image-path'] ?? null;
 
 		/**
 		 * Logs.
@@ -1655,7 +1747,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			try {
 				$crawled_data = $this->crawl_post_data_from_html( $html, $url );
 			} catch ( \UnexpectedValueException $e ) {
-				$this->logger->log( $log_failed_imports, sprintf( 'URL:%s MESSAGE:%s', $url, $e->getMessage() ), $this->logger::WARNING );
+				$this->logger->log( $log_failed_imports, sprintf( 'URL: %s MESSAGE: %s', $url, $e->getMessage() ), $this->logger::WARNING );
 				continue;
 			}
 
@@ -1735,6 +1827,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 */
 			if ( isset( $crawled_data['featured_image_src'] ) ) {
 				WP_CLI::line( 'Downloading featured image ...' );
+				// Dev.
+				if ( $this->dev_fake_image_override ) {
+					$crawled_data['featured_image_src'] = $this->dev_fake_image_override;
+				}
 				$featimg_id = $this->get_or_download_image(
 					$log_err_img_download,
 					$crawled_data['featured_image_src'],
@@ -1863,6 +1959,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		if ( ! $post_ids ) {
 			$post_ids = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
 		}
+		$this->dev_fake_image_override = $assoc_args['dev-override-fake-image-path'] ?? null;
 
 		// Folder to store scraped author pages HTMLs.
 		$scrape_author_htmls_path = 'scrape_author_htmls';
