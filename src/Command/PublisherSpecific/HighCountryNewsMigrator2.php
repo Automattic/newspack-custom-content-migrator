@@ -726,14 +726,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	}
 
-	/**
-	 * Migrate images from JSON data.
-	 *
-	 * @param array $args    Command args.
-	 * @param array $assoc_args Command assoc args.
-	 *
-	 * @return void
-	 */
 	public function migrate_images_from_json( array $args, array $assoc_args ): void {
 		$log_file   = __FUNCTION__ . '.log';
 		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
