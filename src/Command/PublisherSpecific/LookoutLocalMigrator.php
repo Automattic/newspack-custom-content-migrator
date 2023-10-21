@@ -913,7 +913,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 *
 	 * @return string|null Cleaned HTML or null if this shouldn't be cleaned.
 	 */
-	public function clean_up_scraped_html( $post_id, $url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs ) {
+	public function clean_up_scraped_html( $post_id, $url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_div_enchancements ) {
 
 		$post_content_updated = null;
 
@@ -925,9 +925,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 *   - content is stored in: div.story-stack-story
 		 *   - e.g. https://lookout.co/santacruz/coast-life/story/2023-05-19/pescadero-day-trip-sea-lions-ano-nuevo-award-winning-tavern-baby-goats
 		 *
-		 * To locate the content in story stack, it's needed to traverse through all div.story-stack-story and find two elements:
-		 *      - find .story-stack-story-title, and if exists we will encapsulate it in a div.rich-text-body so that it can be fed to the rich-text-body crawler
-		 *      - find div.rich-text-body (which contains the .story-stack-story-body), and also simply feed it to crawler
+		 * This content gets "flattened"/properly encapsulated in div.rich-text-body and then crawled by "main crawler" below.
+		 *
+		 * To locate the content in the story stack HTML struvture, traverse through all div.story-stack-story and find two content elements:
+		 *      - find .story-stack-story-title -- if exists, encapsulate it in a div.rich-text-body (so that it can be fed to the "main crawler")
+		 *      - find div.rich-text-body (which contains the .story-stack-story-body) -- simply feed it to the crawler
 		 */
 		$story_stack_formatted_rich_text_body = '';
 		$div_content_crawlers = $this->filter_selector_element( 'div.story-stack-story', $this->crawler, $single = false );
@@ -990,28 +992,28 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$div_content_crawlers = $this->filter_selector_element( 'div.rich-text-body', $this->crawler, $single = false );
 		}
 
-		// The main crawler.
+
+		// The "main crawler" $div_content_crawlers.
 		if ( $div_content_crawlers ) {
 
 			foreach ( $div_content_crawlers as $div_content_crawler ) {
 
 				// Traverse all the child nodes.
 				foreach ( $div_content_crawler->childNodes->getIterator() as $key_domelement => $domelement ) {
-
 					// Skip if blank.
 					$html_domelement = $domelement->ownerDocument->saveHTML( $domelement );
 					if ( empty( trim( $html_domelement ) ) ) {
 						continue;
 					}
 
-					// div.enhancement elements can get transformed or skipped.
+					// Transform or skip div.enhancement elements.
 					$custom_html = null;
 					$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
 					if ( $is_div_class_enhancement ) {
-						$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
+						$custom_html = $this->transform_div_enchancement( $domelement, $post_id, $url, $log_need_oembed_resave, $log_err_img_download, $log_unknown_div_enchancements );
 					}
 
-					// If $custom_html is null, the element's original HTML will be used. If it's a string other than null (empty or transformed), element's HTML will be substituted/transformed.
+					// Value of $custom_html determines if the element's original HTML or the custom HTML will be used.
 					if ( ! is_null( $custom_html ) ) {
 						// Use the custom HTML.
 						$domelement_html = $custom_html;
@@ -1035,10 +1037,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * This function transforms, skips or whitelists a DOMElement and returns the resulting HTML:
-	 *      - if null is returned, the HTML will be used as is
-	 *      - if empty string is returned, the HTML will be skipped
-	 *      - if custom HTML string is returned, the HTML will be replaced with it
+	 * This function transforms, skips or whitelists a DOMElement and returns the resulting HTML.
+	 * The value of return $custom_html determines if the element's original HTML or the custom HTML will be used:
+	 *      - if null is returned, the $domelement's HTML will be used as is
+	 *      - if a string is used (either an empty string or a string with value), that will be used instead of $domelement's HTML:
+	 *          - by returning an HTML string, the $domelement's HTML will be replaced with it
+	 *          - by returning an empty string, the whole $domelement's HTML is skipped
 	 *
 	 * @param DOMElement $domelement
 	 * @param int        $post_id
@@ -1055,7 +1059,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		string $url,
 		string $log_need_oembed_resave,
 		string $log_err_img_download,
-		string $log_unknown_enchancement_divs,
+		string $log_unknown_div_enchancements,
 	) : ?string {
 
 		$enhancement_crawler = new Crawler( $domelement );
@@ -1604,7 +1608,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 */
 			$dbg_enchancement_html = $domelement->ownerDocument->saveHTML( $domelement );
 			$this->logger->log(
-				$log_unknown_enchancement_divs,
+				$log_unknown_div_enchancements,
 				json_encode( [
 					'url'               => $url,
 					'post_id'           => $post_id,
@@ -1622,7 +1626,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	/**
 	 * @param string $post_content HTML.
 	 */
-	public function qa_remaining_div_enhancements( $log, $post_id, $post_content ) {
+	public function log_used_div_enhancements( $log, $post_id, $post_content ) {
 
 		$this->crawler->clear();
 		$this->crawler->add( $post_content );
@@ -1649,7 +1653,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			/**
 			 * Examine 'div.enhancement's. If they are not one of the vetted ones, log them.
 			 */
-			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( 'enhancement' == $domelement->getAttribute( 'class' ) );
+			$is_div_class_enhancement = ( isset( $domelement->tagName ) && 'div' == $domelement->tagName ) && ( false !== strpos( $domelement->getAttribute( 'class' ), 'enhancement' ) );
 			if ( $is_div_class_enhancement ) {
 
 				/**
@@ -1697,10 +1701,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		/**
 		 * Logs. "2".
 		 */
-		$log_wrong_urls = 'll2_debug__wrong_urls.log';
+		$log_remote_get_err = 'll2_debug__err_remote_get.log';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
-		$this->logger->log( $log_wrong_urls, $ts, false );
+		$this->logger->log( $log_remote_get_err, $ts, false );
 
 		foreach ( $urls as $key_url_data => $url ) {
 			if ( empty( $url ) ) {
@@ -1735,7 +1739,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				// Not OK.
 				if ( is_wp_error( $get_result ) || is_array( $get_result ) ) {
 					$msg = is_wp_error( $get_result ) ? $get_result->get_error_message() : $get_result['response']['message'];
-					$this->logger->log( $log_wrong_urls, sprintf( 'URL: %s CODE: %s MESSAGE: %s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
+					$this->logger->log( $log_remote_get_err, sprintf( 'URL: %s CODE: %s MESSAGE: %s', $url, $get_result['response']['code'], $msg ), $this->logger::WARNING );
 					continue;
 				}
 
@@ -1751,7 +1755,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Saved to %s 👍', $path ) );
-		WP_CLI::line( sprintf( '❗️  %s', $log_wrong_urls ) );
+		WP_CLI::line( sprintf( '❗️  %s', $log_remote_get_err ) );
 	}
 
 	public function cmd_import1__create_posts( $pos_args, $assoc_args ) {
@@ -1772,7 +1776,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 * Logs.
 		 */
 		$log_failed_imports               = 'll2_err__failed_imports.log';
-		$log_wrong_urls                   = 'll2_debug__wrong_urls.log';
 		$log_all_author_names             = 'll2_debug__all_author_names.log';
 		$log_all_tags                     = 'll2_debug__all_tags.log';
 		$log_all_tags_promoted_content    = 'll2_debug__all_tags_promoted_content.log';
@@ -1781,7 +1784,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_failed_imports, $ts, false );
-		$this->logger->log( $log_wrong_urls, $ts, false );
 		$this->logger->log( $log_all_author_names, $ts, false );
 		$this->logger->log( $log_all_tags, $ts, false );
 		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
@@ -1827,11 +1829,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 
 			/**
-			 * Create or update post.
+			 * Crawl and extract all useful data from HTML.
 			 */
 			WP_CLI::line( sprintf( "\n" . '%d/%d Importing %s ...', $key_html_file + 1, count( $html_files ), $url ) );
-
-			// Crawl and extract all useful data from HTML
 			try {
 				$crawled_data = $this->crawl_post_data_from_html( $html, $url );
 			} catch ( \UnexpectedValueException $e ) {
@@ -1855,6 +1855,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				throw new \UnexpectedValueException( sprintf( 'category_name not found for ID %d URL %s', $post_id, $url ) );
 			}
 
+			/**
+			 * Create or update post.
+			 */
 			$post_args = [
 				'post_title'   => $crawled_data['post_title'],
 				'post_content' => $crawled_data['post_content'],
@@ -1945,8 +1948,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			/**
 			 * Authors.
 			 */
-			$ga_ids = [];
+			// Allow no authors found because some of the posts are not authored, like sponsored content.
+			if ( ! isset( $crawled_data['post_authors'] ) || is_null( $crawled_data['post_authors'] ) ) {
+				$crawled_data['post_authors'][] = 'NO_AUTHOR_FOUND';
+			}
 			// Get/create GAs.
+			$ga_ids = [];
 			foreach ( $crawled_data['post_authors'] as $author_name ) {
 				$ga = $this->cap->get_guest_author_by_display_name( $author_name );
 				if ( $ga ) {
@@ -2061,16 +2068,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$log_post_ids_updated          = 'll2_updated_post_ids.log';
 		$log_gas_urls_updated          = 'll2_gas_urls_updated.log';
 		$log_err_gas_updated           = 'll2_err__updated_gas.log';
-		$log_enhancements              = 'll2_qa__enhancements.log';
 		$log_need_oembed_resave        = 'll2__need_oembed_resave.log';
 		$log_err_img_download          = 'll2_err__img_download.log';
-		$log_unknown_enchancement_divs = 'll2_err__unknown_enchancement_divs.json';
+		$log_unknown_div_enchancements = 'll2_err__unknown_enchancements_divs.json';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_post_ids_updated, $ts, false );
 		$this->logger->log( $log_gas_urls_updated, $ts, false );
 		$this->logger->log( $log_err_gas_updated, $ts, false );
-		$this->logger->log( $log_enhancements, $ts, false );
 		$this->logger->log( $log_need_oembed_resave, $ts, false );
 		$this->logger->log( $log_err_img_download, $ts, false );
 
@@ -2093,9 +2098,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
 
-			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_enchancement_divs );
+			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_div_enchancements );
 			if ( is_null( $post_content_updated ) ) {
-				throw new \UnexpectedValueException( 'Check post_content_updated is null -- due to unknown template.' );
+				throw new \UnexpectedValueException( 'post_content_updated is null -- due to unknown template.' );
 			}
 
 			// If post_content was updated.
@@ -2104,8 +2109,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$this->logger->log( $log_post_ids_updated, sprintf( 'Updated %d', $post_id ), $this->logger::SUCCESS );
 			}
 
-			// QA remaining 'div.enhancement's.
-			$this->qa_remaining_div_enhancements( $log_enhancements, $post_id, ! empty( $post_content_updated ) ? $post_content_updated : $post_content );
+			// We could look into the resulting post_content and log all used 'div.enhancement's. Commenting and skipping for now.
+			// $this->log_used_div_enhancements( $log_used_enhancements, $post_id, ! empty( $post_content_updated ) ? $post_content_updated : $post_content );
 		}
 
 
@@ -2152,10 +2157,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			'Done. QA the following logs:'
 			. "\n  - ❗  ERRORS: $log_err_gas_updated"
 			. "\n  - ♻️️  $log_need_oembed_resave"
-			. "\n  - ⚠️  $log_enhancements"
 			. "\n  - 👍  $log_post_ids_updated"
 			. "\n  - 👍  $log_gas_urls_updated"
-			. "\n  - 👍  $log_unknown_enchancement_divs"
+			. "\n  - 👍  $log_unknown_div_enchancements"
 		);
 		wp_cache_flush();
 	}
@@ -2384,10 +2388,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		// Authors.
 		// div.author-name might or might not have <a>s with links to author page.
 		$authors_text         = $this->filter_selector( 'div.author-name', $this->crawler );
-		if ( is_null( $authors_text ) ) {
-			$authors_text = 'NO_AUTHOR_FOUND';
+		if ( $authors_text ) {
+			$data['post_authors'] = $this->filter_author_names( $authors_text );
 		}
-		$data['post_authors'] = $this->filter_author_names( $authors_text );
 		$data['author_links'] = [];
 		// If there is one or more links to author pages, save them to be processed after import.
 		$author_link_crawler = $this->filter_selector_element( 'div.author-name > a', $this->crawler, $single = false );
@@ -2461,7 +2464,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	}
 
 	public function format_featured_image_credit( $featured_image_credit ) {
-		$featured_image_credit = trim( $featured_image_credit, ' ()' );
+		if ( $featured_image_credit ) {
+			$featured_image_credit = trim( $featured_image_credit, ' ()' );
+		}
 
 		return $featured_image_credit;
 	}
@@ -2695,9 +2700,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_dev_delete_all_posts( $pos_args, $assoc_args ) {
-		WP_CLI::confirm( 'Delete all posts?' );
+		global $wpdb;
 
-		$post_ids = $this->posts->get_all_posts_ids();
+		WP_CLI::confirm( 'Delete all posts created by scraper ?' );
+
+		$post_ids = $wpdb->get_col( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'newspackmigration_url' and meta_value <> ''" );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( "%d/%d %d", $key_post_id + 1, count( $post_ids ), $post_id ) );
 			wp_delete_post( $post_id, true );
