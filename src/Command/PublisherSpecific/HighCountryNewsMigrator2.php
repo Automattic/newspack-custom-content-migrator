@@ -4,9 +4,6 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTime;
 use DateTimeZone;
-use DOMDocument;
-use DOMElement;
-use DOMException;
 use Exception;
 use HTMLPurifier;
 use HTMLPurifier_HTML5Config;
@@ -20,6 +17,7 @@ use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
+use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_Post;
 use WP_User;
@@ -971,9 +969,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
 		$row_number = 0;
-		/**
-		 * @var object $row
-		 */
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			WP_CLI::log( sprintf( 'Article %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 			if ( empty( $row->text ) ) {
@@ -985,13 +980,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				continue;
 			}
 
-			$tree_path = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
-			// $existing_id = $this->get_post_id_from_uid( $row->UID );
-			// if ( $existing_id ) {
-			// $this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
-			// update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
-			// continue;
-			// }
+			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
+			$existing_id = $this->get_post_id_from_uid( $row->UID );
+			if ( $existing_id ) {
+				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
+				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+				continue;
+			}
 
 			$post_date_string     = $row->effective ?? $row->created;
 			$post_modified_string = $row->modified ?? $post_date_string;
@@ -1019,10 +1014,25 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 			}
 
-			$intro                   = $row->intro ?? '';
-			$text                    = $this->cleanup_text( $row->text );
-			$text                    = $this->replace_img_tags_with_img_blocks( $text );
-			$text                    = $this->replace_video_tags_with_video_blocks( $text );
+			$text      = $this->cleanup_text( $row->text ?? '' );
+			$replacers = [];
+			if ( str_contains( $text, 'twitter-tweet' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->replace_twitter_embeds( $html_doc );
+			}
+			if ( str_contains( $text, 'resolveuid/' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->replace_img_tags( $html_doc );
+			}
+			if ( str_contains( $text, '<video' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->replace_videos( $html_doc );
+			}
+			if ( ! empty( $replacers ) ) {
+				$html_doc = new HtmlDocument( $text );
+				foreach ( $replacers as $replacer ) {
+					$replacer( $html_doc );
+				}
+				$text = $html_doc->save();
+			}
+
 			$article_layout          = $row->layout ?? '';
 			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
 
@@ -1053,6 +1063,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$gallery        = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
 			}
 
+			$intro                     = $row->intro ?? '';
 			$post_data['post_content'] = wp_kses_post( $intro . $gallery . $text );
 
 			$created_post_id = wp_insert_post( $post_data );
@@ -1088,48 +1099,38 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$config->set( 'AutoFormat.RemoveEmpty.RemoveNbsp', true );
 			$config->set( 'AutoFormat.RemoveEmpty', true );
 			$config->set( 'Attr.AllowedFrameTargets', [ '_blank' ] );
+			$config->set( 'AutoFormat.RemoveSpansWithoutAttributes', true );
 			$purifier = new HTMLPurifier( $config );
 		}
 
 		return $purifier->purify( $text );
 	}
 
-	private function grab_featured_image( $url ) {
+	private function grab_featured_image( $url ): int {
 		$response = wp_remote_get( $url );
-		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) || empty( $response['body'] ) ) {
-			return 0;
-		}
-
-		$dom = new DOMDocument( '1.0', 'utf-8' );
-		@$dom->loadHTML( $response['body'] );
-
-		$headers = $dom->getElementsByTagName( 'header' );
-		if ( $headers->count() === 0 ) {
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) || empty( $response['body'] ) ) {
 			return 0;
 		}
 		global $wpdb;
-		$nodes = $headers->item( 0 )->childNodes;
-		/* @var DOMElement $node */
-		foreach ( $nodes as $node ) {
-			$tag_name = $node->tagName ?? '';
-			if ( 'img' === $tag_name ) {
-				$src = $node->getAttribute( 'src' );
-				if ( str_ends_with( $src, '/image' ) ) {
-					$src = substr( $src, 0, - 6 );
-				}
-				$path          = trim( parse_url( $src, PHP_URL_PATH ), '/' );
-				$attachment_id = $wpdb->get_var(
-					$wpdb->prepare(
-						"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value = %s;",
-						$path
-					)
-				);
+		$html_doc = new HtmlDocument( $response['body'] );
 
-				return empty( $attachment_id ) ? 0 : (int) $attachment_id;
-			}
+		$img = $html_doc->find( 'header img', 0 );
+		$src = $img?->getAttribute( 'src' );
+		if ( ! $src ) {
+			return 0;
 		}
+		if ( str_ends_with( $src, '/image' ) ) {
+			$src = substr( $src, 0, - 6 );
+		}
+		$path          = trim( parse_url( $src, PHP_URL_PATH ), '/' );
+		$attachment_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value = %s;",
+				$path
+			)
+		);
 
-		return 0;
+		return empty( $attachment_id ) ? 0 : (int) $attachment_id;
 	}
 
 	private function replace_related_placeholders_with_homepage_blocks( string $content ): string {
@@ -1165,33 +1166,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return $content;
 	}
 
-	/**
-	 * Uses an unholy mix of DOM and regex to replace video tags with video blocks.
-	 *
-	 * @param string $content The post content.
-	 *
-	 * @throws DOMException
-	 */
-	private function replace_video_tags_with_video_blocks( string $content ): string {
-		$dom = new DOMDocument( '1.0', 'utf-8' );
-		@$dom->loadHTML( $content );
-
-		if ( false === str_contains( $content, '<video' ) ) {
-			// No videos to look for in this article.
-			return $content;
-		}
-
+	private function replace_videos( HtmlDocument $html_doc ): void {
 		global $wpdb;
-		$new_node = $dom->createElement( 'div' );
-		$new_node->setAttribute( 'class', 'will-be-replaced' );
 
-		$vid_tags = $dom->getElementsByTagName( 'video' );
-		foreach ( $vid_tags as $vid_tag ) {
-			$source_tag = $vid_tag->firstChild;
-			if ( ( $source_tag->tagName ?? '' ) !== 'source' ) {
+		$vids = $html_doc->find( 'video' );
+		foreach ( $vids as $vid ) {
+			$src = $vid->find( 'source', 0 )?->getAttribute( 'src' );
+			if ( empty( $src ) ) {
 				continue;
 			}
-			$src           = $source_tag->getAttribute( 'src' );
 			$attachment_id = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
@@ -1201,36 +1184,34 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( ! $attachment_id ) {
 				continue;
 			}
-			// We can't use DomDoc's saveHTML because it is buggy and doesn't include the closing tag, so use this awful regex instead.
-			if ( ! preg_match( '@<video .*</video>@', $content, $matches ) ) {
-				continue;
-			}
-			$video_post  = get_post( $attachment_id );
-			$video_block = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
-
-			$content = str_replace( $matches[0], $video_block, $content );
+			$video_post     = get_post( $attachment_id );
+			$vid->outertext = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
 		}
-
-		return $content;
 	}
 
-	private function replace_img_tags_with_img_blocks( string $content ): string {
-		if ( ! str_contains( $content, 'resolveuid/' ) ) {
-			// No images to look for in this article.
-			return $content;
-		}
+	private function replace_twitter_embeds( HtmlDocument $html_doc ): void {
+		$html_doc = new HtmlDocument( $text );
 
-		$dom = new DOMDocument( '1.0', 'utf-8' );
-		@$dom->loadHTML( $content );
-
-		$img_tags = $dom->getElementsByTagName( 'img' );
-
-		foreach ( $img_tags as $img_tag ) {
-			$src = trim( $img_tag->getAttribute( 'src' ) );
-			// src looks something like this: resolveuid/0d12bbf8d16acc061685083060b81610/@@images/image/mini
-			if ( ! preg_match( '@^resolveuid/([0-9a-z]+)/?(.*)@', $src, $matches ) ) {
+		$twitter_blockquoutes = $html_doc->find( 'blockquote.twitter-tweet' );
+		foreach ( $twitter_blockquoutes as $tb ) {
+			$link = $tb->find( 'a', - 1 );
+			if ( empty( $link ) ) {
 				continue;
 			}
+			$url = $link->getAttribute( 'href' );
+			if ( $url ) {
+				$tb->outertext = serialize_block( $this->gutenberg_block_generator->get_twitter( $url ) );
+			}
+		}
+	}
+
+	private function replace_img_tags( HtmlDocument $html_doc ): void {
+		$imgs_to_resolve = $html_doc->find( 'img' );
+		foreach ( $imgs_to_resolve as $img ) {
+			if ( ! preg_match( '@^resolveuid/([0-9a-z]+)/?(.*)@', $img->getAttribute( 'src' ), $matches ) ) {
+				continue;
+			}
+
 			$attachment_id = $this->get_attachment_id_by_uid( $matches[1] );
 			if ( ! $attachment_id ) {
 				continue;
@@ -1240,14 +1221,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( ! $img_post ) {
 				continue;
 			}
-
 			$align = null;
-			if ( $this->parent_element_has_class( $img_tag, 'full-bleed' ) ) {
+
+			$container_class = $img->find_ancestor_tag( 'div' )?->getAttribute( 'class' ) ?? '';
+			if ( str_contains( $container_class, 'full-bleed' ) ) {
 				$align = 'full';
 			}
-
-			$original_img_html = $dom->saveHTML( $img_tag );
-			$img_block         = serialize_block(
+			$img->outertext = serialize_block(
 				$this->gutenberg_block_generator->get_image(
 					$img_post,
 					'full',
@@ -1256,26 +1236,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$align
 				)
 			);
-
-			$content = str_replace( $original_img_html, $img_block, $content );
 		}
-
-		return $content;
-	}
-
-	private function parent_element_has_class( DOMElement $domElement, string $class ): bool {
-		$parent = $domElement->parentNode;
-		while ( $parent ) {
-			if ( $parent->nodeType !== XML_ELEMENT_NODE ) {
-				break;
-			}
-			if ( str_contains( $parent->getAttribute( 'class' ), $class ) ) {
-				return true;
-			}
-			$parent = $parent->parentNode;
-		}
-
-		return false;
 	}
 
 	private function get_post_name( string $url ): string {

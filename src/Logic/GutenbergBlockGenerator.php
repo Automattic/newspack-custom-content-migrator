@@ -300,9 +300,7 @@ class GutenbergBlockGenerator {
 	public function get_video( $attachment_post ) {
 		$video_url   = wp_get_attachment_url( $attachment_post->ID);
 		$content = <<<VIDEO
-<!-- wp:video {"id":90742} -->
 <figure class="wp-block-video"><video controls src="$video_url"></video></figure>
-<!-- /wp:video -->
 VIDEO;
 		return [
 			'blockName'    => 'core/video',
