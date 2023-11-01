@@ -11,8 +11,8 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
-use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -37,11 +37,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	private CoAuthorPlus $coauthorsplus_logic;
 
 	/**
-	 * @var Redirection $redirection
-	 */
-	private RedirectionLogic $redirection;
-
-	/**
 	 * @var Logger.
 	 */
 	private Logger $logger;
@@ -57,13 +52,16 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	private JsonIterator $json_iterator;
 
 	/**
-	 * @var RedirectionLogic
+	 * @var Redirection
 	 */
-	private RedirectionLogic $redirection_logic;
+	private Redirection $redirection;
 
 	/**
-	 * Instance of Attachments Login
-	 *
+	 * @var Posts
+	 */
+	private Posts $posts_logic;
+
+	/**
 	 * @var Attachments
 	 */
 	private Attachments $attachments;
@@ -138,8 +136,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			self::$instance->gutenberg_block_generator = new GutenbergBlockGenerator();
 			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
-			self::$instance->redirection_logic         = new RedirectionLogic();
 			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
+			self::$instance->posts_logic               = new Posts();
 		}
 
 		return self::$instance;
@@ -149,9 +147,105 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @throws Exception
 	 */
 	public function register_commands(): void {
+		$this->delete_content_commands();
 		$this->set_fixes_on_existing_command();
 		$this->set_importer_commands();
 		$this->set_fixes_command();
+	}
+
+	public function delete_content_commands(): void {
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-delete-caps',
+			[ $this, 'cmd_delete_caps' ],
+			[
+				'shortdesc' => 'Delete ALL existing CAP users.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-delete-posts',
+			[ $this, 'cmd_delete_posts' ],
+			[
+				'shortdesc' => 'Delete posts of type post.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-delete-issues',
+			[ $this, 'cmd_delete_issues' ],
+			[
+				'shortdesc' => 'Delete issues.',
+			]
+		);
+	}
+
+	public function cmd_delete_issues( array $args, array $assoc_args ): void {
+		$post_args = [
+			'post_type'   => 'page',
+			'post_status' => get_post_stati(),
+			'numberposts' => - 1,
+			'category'    => self::CATEGORY_ID_ISSUES,
+			'exclude'     => self::PARENT_PAGE_FOR_ISSUES,
+		];
+
+		// Terms:
+		$terms_args = [
+			'taxonomy'   => 'category',
+			'hide_empty' => false,
+			'parent'     => self::CATEGORY_ID_ISSUES,
+		];
+
+		foreach ( get_posts( $post_args ) as $post ) {
+			WP_CLI::log( sprintf( 'Deleting post with title %s', $post->post_title ) );
+			wp_delete_post( $post->ID, true );
+		}
+
+		foreach ( get_terms( $terms_args ) as $term ) {
+			WP_CLI::log( sprintf( 'Deleting term with slug %s', $term->slug ) );
+			wp_delete_term( $term->term_id, 'category' );
+		}
+	}
+
+	public function cmd_delete_caps( array $args, array $assoc_args ): void {
+
+		// Posts
+		$post_args = [
+			'post_type'   => 'guest-author',
+			'post_status' => get_post_stati(),
+			'numberposts' => - 1,
+		];
+
+		// Terms:
+		$terms_args = [
+			'taxonomy'   => 'author',
+			'hide_empty' => false,
+			'number'     => - 1,
+		];
+
+		foreach ( get_posts( $post_args ) as $post ) {
+			WP_CLI::log( sprintf( 'Deleting post with title %s', $post->post_title ) );
+			wp_delete_post( $post->ID, true );
+		}
+
+		foreach ( get_terms( $terms_args ) as $term ) {
+			WP_CLI::log( sprintf( 'Deleting term with slug %s', $term->slug ) );
+			wp_delete_term( $term->term_id, 'author' );
+		}
+	}
+
+	public function cmd_delete_posts( array $args, array $assoc_args ): void {
+		$num_to_delete = $assoc_args['num-items'] ?? PHP_INT_MAX;
+		$counter       = 0;
+		foreach ( $this->posts_logic->get_all_posts_ids( 'post', get_post_stati() ) as $post_id ) {
+			$counter ++;
+			wp_delete_post( $post_id, true );
+			WP_CLI::log( sprintf( '%d – Deleted post with id: %d', $counter, $post_id ) );
+			if ( $counter > $num_to_delete ) {
+				break;
+			}
+		}
 	}
 
 	/**
@@ -204,6 +298,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	private function set_importer_commands(): void {
 
+		/*
+		 * To generate the creators file:
+		 * cat HCNNewsArticle.json| jq -r '. [] | .creators | join(",") ' | sort -u > creators.txt
+		 * cat HCNImage.json| jq -r '. [] | .creators | join(",") ' | sort -u  >> creators.txt
+		 * cat creators.txt| sort -u > sorted-creators.txt
+		 * cat sorted-creators.txt|  tr ',' '\n' > final-creators.txt
+		 */
 		WP_CLI::add_command(
 			'newspack-content-migrator hcn-migrate-users-from-json',
 			[ $this, 'import_users_from_json' ],
@@ -212,6 +313,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => [
 					$this->users_json_arg,
 					...BatchLogic::get_batch_args(),
+					[
+						'type'        => 'assoc',
+						'name'        => 'creators-file',
+						'description' => 'Creators file – if passed only users in this file get created',
+						'optional'    => true,
+					],
 				],
 			]
 		);
@@ -344,7 +451,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			foreach ( $article->aliases as $alias ) {
-				$existing_redirects = $this->redirection_logic->get_redirects_by_exact_from_url( $alias );
+				$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $alias );
 				if ( ! empty( $existing_redirects ) ) {
 					foreach ( $existing_redirects as $existing_redirect ) {
 						$existing_redirect->delete();
@@ -352,7 +459,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 				// We will use a regex redirect for the /hcn/hcn/ prefix, so remove that.
 				$no_prefix          = str_replace( '/hcn/hcn', '', $alias );
-				$existing_redirects = $this->redirection_logic->get_redirects_by_exact_from_url( $no_prefix );
+				$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $no_prefix );
 				if ( ! empty( $existing_redirects ) ) {
 					foreach ( $existing_redirects as $existing_redirect ) {
 						$existing_redirect->delete();
@@ -363,10 +470,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				// If the alias is the category we would already have that because of " wp option get permalink_structure %category%/%postname%/".
 				// If there are more than 2 parts, e.g. /issues/123/post-name, then it's OK to create the alias.
 				if ( ! in_array( $alias_parts[0], $categories, true ) || count( $alias_parts ) > 2 ) {
-					$this->redirection_logic->create_redirection_rule(
+					$this->redirection->create_redirection_rule(
 						'Plone ID ' . $article->UID,
 						$no_prefix,
-						wp_get_shortlink( $post_id, 'post', false ),
+						"/?p={$post_id}",
 					);
 					$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
 				}
@@ -444,7 +551,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						"Changed post path from:\n %s \n %s\n on %s ",
 						$current_path,
 						$wp_path,
-						wp_get_shortlink( $post_id, 'post', false ),
+						"/?p={$post_id}"
 					),
 					Logger::SUCCESS
 				);
@@ -544,7 +651,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				if ( $related_post_id ) {
 					$related_links[] = [
 						'title'     => get_the_title( $related_post_id ),
-						'permalink' => wp_get_shortlink( $post_id, 'post', false ),
+						'permalink' => "/?p={$post_id}"
 					];
 				}
 			}
@@ -673,6 +780,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$file_path  = $assoc_args[ $this->users_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
+		$creators = [];
+		if ( file_exists( $assoc_args['creators-file'] ?? '' ) ) {
+			$creators = array_map( 'trim', file( $assoc_args['creators-file'] ) );
+		}
+
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			$row_number ++;
@@ -680,6 +792,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			if ( empty( $row->email ) ) {
 				continue; // Nope. No email, no user.
+			}
+			if ( ! empty( $creators ) && ! in_array( $row->username, $creators ) ) {
+				continue;
 			}
 
 			$date_created = new DateTime( 'now', $this->site_timezone );
@@ -728,7 +843,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 2;
+		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 		$articles_json        = $assoc_args[ $this->articles_json_arg['name'] ];
 		$issues_json          = $assoc_args[ $this->issues_json_arg['name'] ];
@@ -745,8 +860,14 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $issues_json, $batch_args['start'], $batch_args['end'] ) as $issue ) {
 			WP_CLI::log( sprintf( 'Processing issue (%d of %d): %s', ++ $row_number, $batch_args['total'], $issue->{'@id'} ) );
+			$alias = false;
 
-			$slug       = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
+			$slug = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
+			if ( preg_match( '/^[0-9]+$/', $slug ) ) {
+				$alias = "/issues/$slug";
+				$slug  = 'issue-' . $slug;
+			}
+
 			$post_date  = new DateTime( ( $issue->effective ?? $issue->created ), $this->site_timezone );
 			$issue_name = $post_date->format( 'F j, Y' ) . ': ' . $issue->title;
 
@@ -832,6 +953,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			wp_set_post_tags( $post_id, [ self::TAG_ID_THE_MAGAZINE ], true );
 			update_post_meta( $page_data['ID'], 'plone_issue_page_UID', $issue->UID );
 			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page_data['ID'] ) ), Logger::SUCCESS );
+
+			if ( $alias ) {
+				$this->redirection->create_redirection_rule(
+					'Pagename redirect: ' . $alias,
+					$alias,
+					"/?p={$post_id}"
+				);
+				$this->logger->log( $log_file, sprintf( 'Added alias for numeric issue page slug: %s', home_url( $alias ) ), Logger::SUCCESS );
+			}
 
 			wp_update_term(
 				$cat->term_id,
@@ -999,6 +1129,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_date'     => $post_date->format( 'Y-m-d H:i:s' ),
 				'post_modified' => $post_modified->format( 'Y-m-d H:i:s' ),
 				'post_author'   => self::DEFAULT_AUTHOR_ID,
+				'post_excerpt'  => $row->subheadline ?? '',
 				'meta_input'    => [
 					'plone_article_UID'      => $row->UID,
 					'newspack_post_subtitle' => $row->subheadline ?? '',
@@ -1006,11 +1137,19 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			];
 
-			if ( ! empty( $row->creators ) ) {
+			$post_name = $this->get_post_name( $row->{'@id'} );
+			// Some articles have a numeric post name. WP does not like that, so only add it if
+			// not numeric. We'll have to rely on a redirect for those.
+			if ( ! is_numeric( $post_name ) ) {
+				$post_data['post_name'] = $post_name;
+			}
+
+			if ( ! empty( $row->creators[0] ) ) {
 				$author_by_login = get_user_by( 'login', $row->creators[0] );
 
 				if ( $author_by_login instanceof WP_User ) {
 					$post_data['post_author'] = $author_by_login->ID;
+					$this->upgrade_user_to_author( $author_by_login->ID );
 				}
 			}
 
@@ -1069,7 +1208,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$created_post_id = wp_insert_post( $post_data );
 			if ( is_wp_error( $created_post_id ) ) {
 				$this->logger->log( $log_file, sprintf( "Failed creating post: %s \n\t%s ", $row->{'@id'}, $created_post_id->get_error_message() ), Logger::ERROR );
+				continue;
 			}
+
 			// Now we have the ID of the created post, do a few more things:
 			$co_authors = array_map(
 				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
@@ -1077,21 +1218,63 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			);
 			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $created_post_id );
 
-
 			if ( ! empty( $row->subjects ) ) {
 				wp_set_object_terms( $created_post_id, $row->subjects, 'post_tag' );
 				$primary_tag = get_term_by( 'name', $row->subjects[0], 'post_tag' );
 				update_post_meta( $created_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
 			}
 			$this->set_categories_on_post_from_path( get_post( $created_post_id ), $tree_path );
+			$this->add_post_redirects( get_post( $created_post_id ), $row, $tree_path );
 
-			echo get_permalink( $created_post_id ) . "\n";
-
+			$this->logger->log( $log_file, sprintf( 'Created post: %s', get_permalink( $created_post_id ) ), Logger::SUCCESS );
 		}
 
-		// TODO. Hardcode some stuff: see hcn_migrate_headlines()
 	}
 
+	private function add_post_redirects( WP_Post $post, object $article, string $tree_path ): void {
+
+		$wp_path = trim( parse_url( get_permalink( $post ), PHP_URL_PATH ), '/' );
+		if ( mb_strtolower( $wp_path ) !== mb_strtolower( $tree_path ) && ! $this->redirection->redirect_from_exists( '/' . $tree_path ) ) {
+			$this->redirection->create_redirection_rule(
+				'Postname redirect: ' . $tree_path,
+				$tree_path,
+				"/?p={$post->ID}"
+			);
+		}
+
+		if ( empty( $article->aliases ) ) {
+			return;
+		}
+
+		foreach ( $article->aliases as $alias ) {
+			// We will use a regex redirect for the /hcn/hcn/ prefix, so remove that.
+			$no_prefix = str_replace( '/hcn/hcn', '', $alias );
+
+			// If we have existing ones, get rid of them.
+			$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $no_prefix );
+			if ( ! empty( $existing_redirects ) ) {
+				foreach ( $existing_redirects as $existing_redirect ) {
+					$existing_redirect->delete();
+				}
+			}
+
+			$this->redirection->create_redirection_rule(
+				'Plone ID ' . $article->UID,
+				$no_prefix,
+				"/?p={$post->ID}"
+			);
+		}
+	}
+
+	/**
+	 * Fix the HTML and remove stuff we don't like.
+	 *
+	 * See http://htmlpurifier.org/live/configdoc/plain.html
+	 *
+	 * @param string $text The text to clean up.
+	 *
+	 * @return string
+	 */
 	private function cleanup_text( string $text ): string {
 		static $purifier = null;
 		if ( null === $purifier ) {
@@ -1190,7 +1373,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function replace_twitter_embeds( HtmlDocument $html_doc ): void {
-		$html_doc = new HtmlDocument( $text );
 
 		$twitter_blockquoutes = $html_doc->find( 'blockquote.twitter-tweet' );
 		foreach ( $twitter_blockquoutes as $tb ) {
@@ -1467,7 +1649,7 @@ QUERY;
 	}
 
 	private function get_related_link_markup( int $post_id ): string {
-		$permalink  = wp_get_shortlink( $post_id, 'post', false );
+		$permalink  = "/?p={$post_id}";
 		$post_title = get_the_title( $post_id );
 
 		return <<<HTML
@@ -1495,7 +1677,7 @@ HTML;
 
 		$good = [];
 		// Split by , and &.
-		foreach ( preg_split( '/(,|&|(and))/', $authors ) as $candidate ) {
+		foreach ( preg_split( '/(,\s|\s&\s|(\sand\s))/', $authors ) as $candidate ) {
 			$candidate = trim( $candidate );
 			if ( empty( $candidate ) || is_numeric( $candidate ) || in_array( $candidate, $bad ) ) {
 				continue;

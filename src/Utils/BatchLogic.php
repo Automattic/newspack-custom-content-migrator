@@ -14,34 +14,36 @@ use WP_CLI\ExitException;
  * BatchLogic helper to consistently handle start and end for commands.
  */
 class BatchLogic {
+	public static array $start = [
+		'type'        => 'assoc',
+		'name'        => 'start',
+		'description' => 'Start row (default: 0)',
+		'optional'    => true,
+		'repeating'   => false,
+	];
+
+	public static array $end = [
+		'type'        => 'assoc',
+		'name'        => 'end',
+		'description' => 'End row (default: PHP_INT_MAX)',
+		'optional'    => true,
+		'repeating'   => false,
+	];
+
+	public static array $num_items = [
+		'type'        => 'assoc',
+		'name'        => 'num-items',
+		'description' => 'Number of items to process. Will be ignored if end is provided.',
+		'optional'    => true,
+		'repeating'   => false,
+	];
+
 	/**
 	 * Args to use in a command.
 	 *
 	 * @var array
 	 */
-	private static array $batch_args = [
-		[
-			'type'        => 'assoc',
-			'name'        => 'start',
-			'description' => 'Start row (default: 0)',
-			'optional'    => true,
-			'repeating'   => false,
-		],
-		[
-			'type'        => 'assoc',
-			'name'        => 'end',
-			'description' => 'End row (default: PHP_INT_MAX)',
-			'optional'    => true,
-			'repeating'   => false,
-		],
-		[
-			'type'        => 'assoc',
-			'name'        => 'num-items',
-			'description' => 'Number of items to process. Will be ignored if end is provided.',
-			'optional'    => true,
-			'repeating'   => false,
-		],
-	];
+	private static array $batch_args;
 
 	/**
 	 * Get batch args.
@@ -51,6 +53,9 @@ class BatchLogic {
 	 * @return array[]
 	 */
 	public static function get_batch_args(): array {
+		if ( empty( self::$batch_args ) ) {
+			self::$batch_args = [ self::$start, self::$end, self::$num_items ];
+		}
 		return self::$batch_args;
 	}
 
