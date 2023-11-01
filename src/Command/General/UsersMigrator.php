@@ -80,6 +80,30 @@ class UsersMigrator implements InterfaceCommand {
 				],
 			)
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator users-fix-unsafe-nicenames',
+			[ $this, 'users_fix_unsafe_nicenames' ],
+			[
+				'shortdesc' => 'Updates user nicenames if they are created from emails.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Bath to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'users-per-batch',
+						'description' => 'users to process per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -118,4 +142,49 @@ class UsersMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 	}
+
+	/**
+	 * Update the user nice name (slug) – please note that this can mess with co-author relations, so test and make sure!
+	 *
+	 * It simply takes the display name of the user and makes that the nicename. If there is no display name, then
+	 * a random string is used.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function users_fix_unsafe_nicenames( array $args, array $assoc_args ): void {
+		$log_file        = __FUNCTION__ . '.log';
+		$users_per_batch = isset( $assoc_args['users-per-batch'] ) ? intval( $assoc_args['users-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$query_args      = [
+			'number' => $users_per_batch,
+			'offset' => ( $batch - 1 ) * $users_per_batch,
+		];
+
+		/** @var \WP_User $user */
+		foreach ( get_users( $query_args ) as $user ) {
+			$old_nicename = $user->user_nicename;
+			if ( empty( $user->display_name ) ) {
+				$new_nicename = wp_generate_password( 12, false, false );
+			} else {
+				$new_nicename = sanitize_title( mb_substr( $user->display_name, 0, 50 ) );
+			}
+			$res = wp_update_user(
+				[
+					'ID'            => $user->ID,
+					'user_nicename' => $new_nicename,
+				]
+			);
+			if ( ! is_wp_error( $res ) ) {
+				$this->logger->log( $log_file, sprintf( 'Changed nicename on user %d from %s to %s', $user->ID, $old_nicename, $new_nicename ), Logger::SUCCESS );
+			} else {
+				$this->logger->log( $log_file, sprintf( 'Problem updating user %d nicename from %s to %s', $user->ID, $old_nicename, $new_nicename, ), Logger::ERROR );
+			}
+		}
+
+		wp_cache_flush();
+	}
+
 }
