@@ -1112,6 +1112,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Tracking script.
 			$custom_html = '';
 
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > script' )->count() > 0
+			&& false !== strpos( $enhancement_crawler->filter( 'div.html-module > script' )->getNode(0)->getAttribute( 'src' ), '//analytics.stacker.com' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Tracking script.
+			$custom_html = '';
+
 		} elseif ( $enhancement_crawler->filter( 'script' )->count() > 0
 			&& false !== strpos( $enhancement_crawler->filter( 'script' )->text(), '//ads.empowerlocal.co/adserve' )
 		) {
@@ -1124,6 +1131,73 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		) {
 			// Skip this 'div.enchancement'.
 			// Totally empty div.enchancement.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count() > 0
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , '//lookout.brightspotcdn.com' )
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , 'support-local-journalism-2.png' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Button CTA to become a Lookout member.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count() > 0
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , '//lookout.brightspotcdn.com' )
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , 'support-lookout-banner-2.png' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Lookout membership CTA.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count() > 0
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , '//lookout.brightspotcdn.com' )
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , 'piano-change-banner-1.png' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Lookout membership CTA.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count() > 0
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , '//lookout.brightspotcdn.com' )
+		           && false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ) , 'gift-a-membership-banner-1.png' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Lookout membership CTA.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count() > 0
+		           && false !== strpos( strtolower( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'alt' ) ), 'shoppers corner spotlight' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Shoppers corner spotlight.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count() > 0
+		           && false !== strpos( strtolower( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'alt' ) ), 'shopper’s corner customer spotlight' )
+		) {
+			// Skip this 'div.enchancement'.
+			// Shoppers corner spotlight.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module' )->count()
+		           && ( '<div class="html-module"> </div>' == str_replace( ['<br>', "\n", '  ' ], '', $enhancement_crawler->filter( 'div.html-module' )->getNode(0)->ownerDocument->saveHTML( $enhancement_crawler->filter( 'div.html-module' )->getNode(0) ) ) )
+		) {
+			// Skip this 'div.enchancement'.
+			// Empty div.html-module.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > script' )->count()
+		           && ( false !== strpos( $enhancement_crawler->filter( 'div.html-module > script' )->getNode(0)->getAttribute( 'src' ), '//lookoutlocal.activehosted.com' ) )
+		) {
+			// Skip this 'div.enchancement'.
+			// Ad AC.
+			$custom_html = '';
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > script' )->count()
+		           && ( false !== strpos( $enhancement_crawler->filter( 'div.html-module > script' )->getNode(0)->getAttribute( 'src' ), '//pixel.propublica.org/pixel.js' ) )
+		) {
+			// Skip this 'div.enchancement'.
+			// Tracking pixel.
 			$custom_html = '';
 
 
@@ -1596,6 +1670,119 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		} elseif ( $enhancement_crawler->filter( 'div.spotlight > div.spotlight-module-container' )->count() ) {
 			// Use this 'div.enchancement' HTML fully.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > script' )->count()
+			&& ( 'https://platform.twitter.com/widgets.js' == $enhancement_crawler->filter( 'div.html-module > script' )->getNode( 0 )->getAttribute( 'src' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count()
+			&& ( false !== strpos( strtolower( $enhancement_crawler->filter( 'figure > span > img' )->getNode( 0 )->getAttribute( 'alt' ) ), 'promoted content' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Promoted content banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.sponsor-block-module' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			// Sponsored content banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > div.tableauPlaceholder' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			// Sponsored content banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > script' )->count()
+			&& ( false !== strpos( $enhancement_crawler->filter( 'div.html-module > script' )->getNode( 0 )->getAttribute( 'src' ), '//embed.typeform.com/next/embed.js' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Embed JS.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > div.flourish-embed' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			// Flourish embed JS.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.announcement-module' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			// Announcement module.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count()
+			&& ( false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ), '//lookout.brightspotcdn.com' ) )
+			&& ( false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'src' ), 'lookoutstaff.png' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// LL staff image.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count()
+			&& ( false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'alt' ), 'Shoppers Spotlight' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Shoppers Spotlight banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count()
+			&& ( false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'alt' ), 'Shoppers customer of the week' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Shoppers Spotlight banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count()
+			&& ( false !== strpos( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'alt' ), 'shoppers corner' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Shoppers Spotlight banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'figure > span > img' )->count()
+			&& ( false !== strpos( strtolower( $enhancement_crawler->filter( 'figure > span > img' )->getNode(0)->getAttribute( 'alt' ) ), 'shopper\'s spotlight' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Shoppers Spotlight banner.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.rich-text-module > div.rich-text-body' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > center > iframe' )->count()
+				&& ( false !== strpos( $enhancement_crawler->filter( 'div.html-module > center > iframe' )->getNode(0)->getAttribute( 'src' ), '//www.facebook.com' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Facebook iframe, different.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'script' )->count()
+				&& ( false !== strpos( $enhancement_crawler->filter( 'script' )->getNode(0)->ownerDocument->saveHTML( $enhancement_crawler->filter( 'script' )->getNode(0) ), '//connect.facebook.net' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Facebook script injected directly.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > script' )->count()
+				&& ( false !== strpos( $enhancement_crawler->filter( 'script' )->getNode(0)->getAttribute( 'src' ), '//embed.redditmedia.com' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Reddit script.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > div > script' )->count()
+				&& ( false !== strpos( $enhancement_crawler->filter( 'div.html-module > div > script' )->getNode(0)->getAttribute( 'src' ), '//datawrapper.dwcdn.net' ) )
+		) {
+			// Use this 'div.enchancement' HTML fully.
+			// Datawrapper script.
+			$custom_html = null;
+
+		} elseif ( $enhancement_crawler->filter( 'div.promo-image' )->count() ) {
+			// Use this 'div.enchancement' HTML fully.
+			// Promo images.
 			$custom_html = null;
 
 
@@ -2601,6 +2788,21 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	public function cmd_dev( $pos_args, $assoc_args ) {
 		global $wpdb;
 
+		$urls = [];
+		$lines = explode( "\n", file_get_contents( '/Users/ivanuravic/www/lookoutlocalx/app/public/0_run_scrapeimport/ll2_err__unknown_enchancements_divs.json' ) );
+		foreach ( $lines as $line ) {
+			$data = json_decode( $line, true );
+			if ( ! $data ) {
+				continue;
+			}
+
+			$urls[ $data['url'] ] = true;
+		}
+
+		$urls = array_keys( $urls );
+
+
+		return;
 
 		/**
 		 * Prepare out list of URLs.
