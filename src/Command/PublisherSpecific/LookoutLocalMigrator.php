@@ -2114,6 +2114,21 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 
+		WP_CLI::line(
+			'Done. QA the following logs:'
+			. "\n  - ❗  ERRORS: $log_err_gas_updated"
+			. "\n  - ♻️️  $log_need_oembed_resave"
+			. "\n  - 👍  $log_post_ids_updated"
+			. "\n  - 👍  $log_gas_urls_updated"
+			. "\n  - 👍  $log_unknown_div_enchancements"
+		);
+		wp_cache_flush();
+
+
+		WP_CLI::warning( 'Skipping programmatic updating GA author data -- should be done manually' );
+		return;
+
+
 		/**
 		 * Next update GA info by scraping and fetching their author pages from live.
 		 */
@@ -2152,16 +2167,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			}
 		}
 
-
-		WP_CLI::line(
-			'Done. QA the following logs:'
-			. "\n  - ❗  ERRORS: $log_err_gas_updated"
-			. "\n  - ♻️️  $log_need_oembed_resave"
-			. "\n  - 👍  $log_post_ids_updated"
-			. "\n  - 👍  $log_gas_urls_updated"
-			. "\n  - 👍  $log_unknown_div_enchancements"
-		);
-		wp_cache_flush();
 	}
 
 	public function get_slug_from_url( $url ) {
@@ -2595,6 +2600,79 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 */
 	public function cmd_dev( $pos_args, $assoc_args ) {
 		global $wpdb;
+
+
+		/**
+		 * Prepare out list of URLs.
+		 * - GET SUCCESSFULLY IMPORTED URLS "2nd_import_after_demo_full_round.txt"
+		 * == ALL URLS /Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape/0__all_urls.txt
+		 * - MINUS NOT FOUND HTML FILES (probably 404)
+		 * - MINUS ll2_err__failed_imports.log (import1, template)
+		 * - MINUS ll2_err__unknown_enchancements_divs.json
+		 */
+		$path = '/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape/0_STAGING_IMPORT/files';
+		/**
+		 * List of all URLs obtained from their sitemap roughly around Oct 15th.
+		 */
+		$all_urls_file = '0__all_urls.txt';
+		$all_urls = array_diff( explode( "\n", file_get_contents( $path . '/' . $all_urls_file ) ) , [ '' ] );
+
+		/**
+		 * List of URLs which were not successfully scraped from their live (most probably 404s) and therefore HTML files aren't availab.e
+		 */
+		$not_found_html_files_file = 'not_found_url_files.txt';
+		$not_found_html_files = array_diff( explode( "\n", file_get_contents( $path . '/' . $not_found_html_files_file ) ) , [ '' ] );
+
+		/**
+		 * List of URLs which were successfully imported by import1-* command, due to a different template.
+		 */
+		$ll2_err__failed_imports = 'll2_err__failed_imports.log';
+		$ll2_err__failed_imports_urls = [];
+		$file_stream = fopen( $path . '/' . $ll2_err__failed_imports, 'r' );
+		while ( ( $line = fgets( $file_stream ) ) !== false ) {
+			if ( false !== strpos($line, 'URL:' ) ) {
+				// Extract the URL from the line.
+				$url = preg_match('/https:\/\/[^\s]+/', $line, $matches);
+				if ( $url ) {
+					$ll2_err__failed_imports_urls[] = $matches[0];
+				}
+			}
+		}
+		fclose( $file_stream );
+
+		/**
+		 * List of URLs which still have undetected/unvetted div.enchancements.
+		 */
+		$ll2_err__unknown_enchancements_divs_json = 'll2_err__unknown_enchancements_divs.json';
+		$ll2_err__unknown_enchancements_divs_lines = explode( "\n", file_get_contents( $path . '/' . $ll2_err__unknown_enchancements_divs_json ) );
+		$urls_w_unknown_enchancements = [];
+		foreach ( $ll2_err__unknown_enchancements_divs_lines as $json ) {
+			$data = json_decode( $json, true );
+			if ( $data ) {
+				$urls_w_unknown_enchancements[] = $data['url'];
+			}
+		}
+
+		/**
+		 * Combine URLs into selected.
+		 */
+		$selected_urls = $all_urls;
+		$selected_urls = array_diff( $selected_urls, $not_found_html_files );
+		$selected_urls = array_diff( $selected_urls, $ll2_err__failed_imports_urls );
+		$selected_urls = array_diff( $selected_urls, $urls_w_unknown_enchancements );
+
+		/**
+		 * Get diff of non selected.
+		 */
+		$nonselected_urls = array_diff( $all_urls, $selected_urls );
+
+		/**
+		 * Save results to files.
+		 */
+		file_put_contents( $path . '/0__selected_urls.txt', implode( "\n", $selected_urls ) );
+		file_put_contents( $path . '/0__nonselected_urls.txt', implode( "\n", $nonselected_urls ) );
+
+		return;
 
 		/**
 		 * Locate "authorable.authors".
