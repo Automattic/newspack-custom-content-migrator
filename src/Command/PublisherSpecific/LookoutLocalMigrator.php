@@ -31,6 +31,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	const META_POST_LAYOUT_STORY_STACK = 'newspackmigration_layout_story_stack';
 	const META_POST_LAYOUT_YOUTUBE     = 'newspackmigration_layout_youtube_video';
 	const META_POST_LAYOUT_VIMEO       = 'newspackmigration_layout_vimeo_video';
+	const META_POST_LAYOUT_SLIDESHOW   = 'newspackmigration_layout_slideshow';
 
 	/**
 	 * Extracted from nav menu:
@@ -1976,6 +1977,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$log_all_tags_promoted_content    = 'll2_debug__all_tags_promoted_content.log';
 		$log_err_importing_featured_image = 'll2_err__featured_image.log';
 		$log_err_img_download             = 'll2_err__img_download.log';
+		$log_err_slideshow_img_download   = 'll2_err__slideshow_img_download.log';
 		// Hit timestamps on all logs.
 		$ts = sprintf( 'Started: %s', date( 'Y-m-d H:i:s' ) );
 		$this->logger->log( $log_failed_imports, $ts, false );
@@ -1984,6 +1986,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->logger->log( $log_all_tags_promoted_content, $ts, false );
 		$this->logger->log( $log_err_importing_featured_image, $ts, false );
 		$this->logger->log( $log_err_img_download, $ts, false );
+		$this->logger->log( $log_err_slideshow_img_download, $ts, false );
 
 		// Debugging and QA.
 		$debug_all_author_names          = [];
@@ -2037,10 +2040,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Get slug from URL.
 			$slug = $this->get_slug_from_url( $url );
 
+			$is_slideshow = self::META_POST_LAYOUT_SLIDESHOW == $crawled_data['_layout_type'];
+
 			// QA.
 			if ( empty( $crawled_data['post_title'] ) ) {
 				throw new \UnexpectedValueException( sprintf( 'post_title not found for ID %d URL %s', $post_id, $url ) );
-			} elseif ( empty( $crawled_data['post_content'] ) ) {
+			} elseif ( empty( $crawled_data['post_content'] ) && ! $is_slideshow ) {
 				throw new \UnexpectedValueException( sprintf( 'post_content not found for ID %d URL %s', $post_id, $url ) );
 			} elseif ( empty( $slug ) ) {
 				throw new \UnexpectedValueException( sprintf( 'slug not found for ID %d URL %s', $post_id, $url ) );
@@ -2063,6 +2068,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				'post_name'    => $slug,
 				'post_date'    => $crawled_data['post_date'],
 			];
+			// Allow initial empty post_content string for slideshow (null would throw exception).
+			if ( $is_slideshow ) {
+				$post_args['post_content'] = '';
+			}
 			if ( ! $post_id ) {
 				$post_id = wp_insert_post( $post_args );
 				WP_CLI::success( sprintf( 'Created post ID %d', $post_id ) );
@@ -2077,6 +2086,54 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				WP_CLI::success( sprintf( 'Updated post ID %d', $post_id ) );
 
 				$all_imported_post_ids[] = $post_id;
+			}
+
+
+			// If slideshow, import images and create gallery.
+			if ( $is_slideshow ) {
+
+				// Import images.
+				$image_ids = [];
+				foreach ( $crawled_data['slideshow'] as $key_slide => $slide ) {
+					WP_CLI::line( sprintf( 'Importing slideshow slide %d/%d %s ...', $key_slide + 1, count( $crawled_data['slideshow']  ), $slide['src'] ) );
+
+					$img_id = $this->get_or_download_image(
+						$log_err_slideshow_img_download,
+						$slide['src'],
+						$title = null,
+						$caption = $slide['caption'],
+						$description = null,
+						$alt = $slide['alt'],
+						$post_id,
+						$credit = $slide['credit'],
+						$args = []
+					);
+					if ( ! $img_id || is_wp_error( $img_id ) ) {
+						$this->logger->log(
+							$log_err_slideshow_img_download,
+							sprintf(
+								'PostID %s slideshow image URL %s Error %s',
+								$post_id,
+								$slide['src'],
+								is_wp_error( $img_id ) ? $img_id->get_error_message() : '/'
+							),
+							$this->logger::WARNING
+						);
+						continue;
+					}
+					$image_ids[] = $img_id;
+				}
+
+				// Get JP slideshow block.
+				$slideshow_block = $this->gutenberg->get_jetpack_slideshow( $image_ids );
+				$slideshow_html  = serialize_blocks( [ $slideshow_block ] );
+
+				// Update post_content by replacing it with the slideshow block.
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $slideshow_html ],
+					[ 'ID' => $post_id ]
+				);
 			}
 
 
@@ -2107,6 +2164,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				// Layout type.
 				'newspackmigration_layouttype'            => $crawled_data['_layout_type'] ?? '',
 			];
+			if ( $is_slideshow ) {
+				$postmeta['slideshow'] = $crawled_data['slideshow'];
+			}
 
 			/**
 			 * Import featured image.
@@ -2604,9 +2664,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$post_content .= $description_html;
 				}
 
+				$data['_layout_type'] = self::META_POST_LAYOUT_YOUTUBE;
 			}
-
-			$data['_layout_type'] = self::META_POST_LAYOUT_YOUTUBE;
 		}
 
 
@@ -2646,16 +2705,95 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$post_content .= $description_html;
 				}
 
+				$data['_layout_type'] = self::META_POST_LAYOUT_YOUTUBE;
 			}
-
-			$data['_layout_type'] = self::META_POST_LAYOUT_YOUTUBE;
 		}
 
+
+		/**
+		 * CONTENT TYPE 5. Slideshow
+		 */
+		if ( ! $div_content_crawler ) {
+			/**
+			 * There can be multiple div#pico elements.
+			 * This here was for when I thought there was just a single div#pico element:
+			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+			 */
+			$slides = [];
+			$post_content_crawler = $this->filter_selector_element( 'div.gallery-page-slides > div.gallery-page-slide > div.gallery-slide', $this->crawler, $single = false );
+			if ( $post_content_crawler ) {
+
+				foreach ( $post_content_crawler->getIterator() as $key_slide => $slide_crawler ) {
+					// First slide is the "featured image".
+					if ( 0 == $key_slide ) {
+						continue;
+					}
+
+					$slide_element_html = $slide_crawler->ownerDocument->saveHTML( $slide_crawler );
+					$slide_helper_crawler = new Crawler( $slide_element_html );
+
+					$img_element = $this->filter_selector_element( 'div.gallery-slide > div.gallery-slide-media > img', $slide_helper_crawler, $single = true );
+					$img_alt = $img_element->getAttribute( 'alt' );
+					$img_src = $img_element->getAttribute( 'src' );
+					if ( 0 === strpos( $img_src, 'data:image') ) {
+						$img_src = $img_element->getAttribute( 'data-src' );
+					}
+					if ( ! $img_src ) {
+						throw new \UnexpectedValueException( 'NOT FOUND img_src' );
+					}
+
+					$description_element = $this->filter_selector_element( 'div.gallery-slide > div.gallery-slide-meta > p.gallery-slide-description', $slide_helper_crawler, $single = true );
+					if ( ! $description_element ) {
+						throw new \UnexpectedValueException( 'NOT FOUND description_element' );
+					}
+					$img_caption = '';
+					$img_credit  = '';
+					foreach ( $description_element->childNodes as $child ) {
+						// Clean up HTML.
+						$child_html = trim( $description_element->ownerDocument->saveHTML( $child ), "  \t\n\r\0\x0B" );
+
+						// Get credit.
+						if ( false !== strpos( $child_html, '<span class="gallery-slide-credit">' ) ) {
+							$img_credit = trim( str_replace( [ '<span class="gallery-slide-credit">', '</span>' ], '', $child_html ) );
+							if ( ! $img_credit ) {
+								throw new \UnexpectedValueException( 'NOT FOUND img_credit' );
+							}
+							$img_credit = $this->format_featured_image_credit( $img_credit );
+						}
+
+						// Get caption/description.
+						if ( $child_html ) {
+							$img_caption .= $child_html;
+						}
+					}
+
+					$slides[] = [
+						'post_url' => $url,
+						'src'      => $img_src,
+						'alt'      => $img_alt ?? null,
+						'credit'   => $img_credit ?? null,
+						'caption'  => $img_caption ?? null,
+					];
+				}
+
+				$data['_layout_type'] = self::META_POST_LAYOUT_SLIDESHOW;
+			}
+
+			if ( empty( $slides ) ) {
+				throw new \UnexpectedValueException( 'NOT FOUND slides' );
+			}
+		}
+		$is_slideshow = self::META_POST_LAYOUT_SLIDESHOW == $data['_layout_type'] ?? null;
+
+		if ( ! empty( $slides ) ) {
+			$data['slideshow'] = $slides;
+		}
 
 		if ( empty( $post_content ) ) {
 			$post_content = $this->filter_selector( 'div.rich-text-article-body-content', $this->crawler, false, false );
 		}
-		if ( empty( $post_content ) ) {
+		// Allow empty post content only for slideshow.
+		if ( empty( $post_content ) && ! $is_slideshow ) {
 			throw new \UnexpectedValueException( 'NOT FOUND post_content' );
 		}
 		$data['post_content'] = $post_content;
