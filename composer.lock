@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "85a54b2a1db243f2f8817c25ff09ac50",
+    "content-hash": "fe1554c8f9a4ee432bd8c9eac2022189",
     "packages": [
         {
             "name": "automattic/newspack-cms-importers",
