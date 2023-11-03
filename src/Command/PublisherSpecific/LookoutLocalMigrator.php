@@ -30,6 +30,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	const META_POST_LAYOUT_REGULAR     = 'newspackmigration_layout_regular';
 	const META_POST_LAYOUT_STORY_STACK = 'newspackmigration_layout_story_stack';
 	const META_POST_LAYOUT_YOUTUBE     = 'newspackmigration_layout_youtube_video';
+	const META_POST_LAYOUT_VIMEO       = 'newspackmigration_layout_vimeo_video';
 
 	/**
 	 * Extracted from nav menu:
@@ -1035,7 +1036,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		$is_yt_video = self::META_POST_LAYOUT_YOUTUBE == get_post_meta( $post_id, 'newspackmigration_layouttype', true );
-		if ( $is_yt_video ) {
+		$is_vimeo_video = self::META_POST_LAYOUT_VIMEO == get_post_meta( $post_id, 'newspackmigration_layouttype', true );
+		if ( $is_yt_video || $is_vimeo_video ) {
 			$post_content_updated = $post_content;
 		}
 
@@ -2568,7 +2570,48 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 
 		/**
-		 * CONTENT TYPE 3. Video in header
+		 * CONTENT TYPE 3. YouTube video in header
+		 */
+		if ( ! $div_content_crawler ) {
+			/**
+			 * There can be multiple div#pico elements.
+			 * This here was for when I thought there was just a single div#pico element:
+			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+			 */
+			$post_content_crawler = $this->filter_selector_element( 'div.page-lead > div.video-page-player > ps-vimeoplayer', $this->crawler, $single = true );
+			if ( $post_content_crawler ) {
+				$video_id = $post_content_crawler->getAttribute( 'data-video-id' );
+				if ( ! $video_id ) {
+					throw new \UnexpectedValueException( 'NOT FOUND YT video_id' );
+				}
+				$vimeo_url = sprintf( 'https://vimeo.com/%s', $video_id );
+
+				// Get block HTML.
+				$block = $this->gutenberg->get_vimeo( $vimeo_url );
+				$block_html = serialize_blocks( [ $block ] );
+
+				// Append video block to content.
+				$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+				$post_content .= $block_html;
+
+				// Search more post_content if available.
+				$post_content_crawler = $this->filter_selector_element( 'div.page-description-body', $this->crawler, $single = true );
+				if ( $post_content_crawler ) {
+					$description_html = $post_content_crawler->ownerDocument->saveHtml( $post_content_crawler );
+
+					// Append.
+					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+					$post_content .= $description_html;
+				}
+
+			}
+
+			$data['_layout_type'] = self::META_POST_LAYOUT_YOUTUBE;
+		}
+
+
+		/**
+		 * CONTENT TYPE 4. Vimeo video in header
 		 *      - div#pico
 		 */
 		if ( ! $div_content_crawler ) {
