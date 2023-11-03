@@ -28,9 +28,7 @@
     "automattic/newspack-post-image-downloader": "dev-master",
     "automattic/newspack-content-converter": "dev-master",
     "halaxa/json-machine": "^1.1",
-    "mustache/mustache": "^2.14",
-    "xemlock/htmlpurifier-html5": "^0.1.11",
-    "simplehtmldom/simplehtmldom": "2.0-RC2"
+    "mustache/mustache": "^2.14"
   },
   "require-dev": {
     "automattic/vipwpcs": "^2.0",
