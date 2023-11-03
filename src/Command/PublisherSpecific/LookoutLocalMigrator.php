@@ -29,6 +29,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 	const META_POST_LAYOUT_REGULAR     = 'newspackmigration_layout_regular';
 	const META_POST_LAYOUT_STORY_STACK = 'newspackmigration_layout_story_stack';
+	const META_POST_LAYOUT_YOUTUBE     = 'newspackmigration_layout_youtube_video';
 
 	/**
 	 * Extracted from nav menu:
@@ -1031,6 +1032,11 @@ class LookoutLocalMigrator implements InterfaceCommand {
 					$post_content_updated .= $domelement_html;
 				}
 			}
+		}
+
+		$is_yt_video = self::META_POST_LAYOUT_YOUTUBE == get_post_meta( $post_id, 'newspackmigration_layouttype', true );
+		if ( $is_yt_video ) {
+			$post_content_updated = $post_content;
 		}
 
 		return $post_content_updated;
@@ -2561,6 +2567,48 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 
+		/**
+		 * CONTENT TYPE 3. Video in header
+		 *      - div#pico
+		 */
+		if ( ! $div_content_crawler ) {
+			/**
+			 * There can be multiple div#pico elements.
+			 * This here was for when I thought there was just a single div#pico element:
+			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
+			 */
+			$post_content_crawler = $this->filter_selector_element( 'div.page-lead > div.video-page-player > ps-youtubeplayer', $this->crawler, $single = true );
+			if ( $post_content_crawler ) {
+				$video_id = $post_content_crawler->getAttribute( 'data-video-id' );
+				if ( ! $video_id ) {
+					throw new \UnexpectedValueException( 'NOT FOUND YT video_id' );
+				}
+				$yt_url = sprintf( 'https://www.youtube.com/watch?v=%s', $video_id );
+
+				// Get block HTML.
+				$block = $this->gutenberg->get_youtube( $yt_url );
+				$block_html = serialize_blocks( [ $block ] );
+
+				// Append video block to content.
+				$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+				$post_content .= $block_html;
+
+				// Search more post_content if available.
+				$post_content_crawler = $this->filter_selector_element( 'div.page-description-body', $this->crawler, $single = true );
+				if ( $post_content_crawler ) {
+					$description_html = $post_content_crawler->ownerDocument->saveHtml( $post_content_crawler );
+
+					// Append.
+					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+					$post_content .= $description_html;
+				}
+
+			}
+
+			$data['_layout_type'] = self::META_POST_LAYOUT_YOUTUBE;
+		}
+
+
 		if ( empty( $post_content ) ) {
 			$post_content = $this->filter_selector( 'div.rich-text-article-body-content', $this->crawler, false, false );
 		}
@@ -2617,12 +2665,20 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		 *      $script_data['sectionName]
 		 * but in <script> it's in a slug form, e.g. "uc-santa-cruz", so we'll use <meta> for convenience.
 		 */
+		$category_name = null;
 		$section_meta_crawler  = $this->filter_selector_element( 'meta[property="article:section"]', $this->crawler );
-		$category_name         = $section_meta_crawler->getAttribute( 'content' );
-		$data['category_name'] = $category_name;
+		if ( $section_meta_crawler ) {
+			$category_name         = $section_meta_crawler->getAttribute( 'content' );
+		} else {
+			if ( ! isset( $script_data['sectionName'] ) || empty( $script_data['sectionName'] ) ) {
+				throw new \UnexpectedValueException( sprintf( 'NOT FOUND category_name %s', $url ) );
+			}
+			$category_name = ucfirst( $script_data['sectionName'] );
+		}
 		if ( ! $category_name ) {
 			throw new \UnexpectedValueException( sprintf( 'NOT FOUND category_name %s', $url ) );
 		}
+		$data['category_name'] = $category_name;
 
 		// Parent category.
 		// E.g. "higher-ed"
