@@ -16,6 +16,7 @@
 namespace NewspackCustomContentMigrator\Logic;
 
 use \NewspackCustomContentMigrator\Utils\Logger;
+use WP_Post;
 
 /**
  * Class ContentDiffMigrator and main logic.
@@ -297,7 +298,14 @@ class GutenbergBlockGenerator {
 		];
 	}
 
-	public function get_video( $attachment_post ) {
+	/**
+	 * Get a video block.
+	 *
+	 * @param WP_Post $attachment_post
+	 *
+	 * @return array
+	 */
+	public function get_video( WP_Post $attachment_post ): array {
 		$video_url   = wp_get_attachment_url( $attachment_post->ID);
 		$content = <<<VIDEO
 <figure class="wp-block-video"><video controls src="$video_url"></video></figure>
