@@ -649,7 +649,6 @@ class TownNewsMigrator implements InterfaceCommand {
 		$last_name                  = '';
 		$email                      = '';
 		$avatar                     = '';
-		$using_email_as_displayname = false;
 
 		if ( ! empty( $author_meta ) ) {
 			$author_meta = current( $author_meta );
@@ -664,12 +663,15 @@ class TownNewsMigrator implements InterfaceCommand {
 		$display_name = str_starts_with( strtolower( $display_name ), 'by ' ) ? substr( $display_name, 3 ) : $display_name;
 		// if no display_name use email address.
 		if ( empty( $display_name ) ) {
-			$display_name               = $email;
-			$using_email_as_displayname = true;
+			$display_name = $first_name . ' ' . $last_name;
+			if ( empty( trim( $display_name ) ) ) {
+				// Let's do our very best to get a display name that is NOT the email.
+				$display_name = sanitize_user( strstr( $email, '@', true ) );
+			}
 		}
 
 		// Setting default author/co-author in case the article doesn't have any.
-		if ( empty( $display_name ) ) {
+		if ( empty( trim( $display_name ) ) ) {
 			if ( $default_author_id ) {
 				wp_update_post(
 					[
@@ -696,7 +698,7 @@ class TownNewsMigrator implements InterfaceCommand {
 			);
 		} else {
 			// Set as a co-author.
-			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $email );
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $display_name );
 			if ( $guest_author ) {
 				$author_id = $guest_author->ID;
 			} else {
@@ -711,20 +713,16 @@ class TownNewsMigrator implements InterfaceCommand {
 				}
 				$author_id = $this->coauthorsplus_logic->create_guest_author(
 					[
-						'display_name' => $display_name,
-						'first_name'   => $first_name,
-						'last_name'    => $last_name,
-						'user_email'   => $email,
-						'avatar'       => $avatar_id,
+						'display_name'  => $display_name,
+						'first_name'    => $first_name,
+						'last_name'     => $last_name,
+						'user_email'    => $email,
+						'avatar'        => $avatar_id,
 					]
 				);
 			}
 
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $author_id ], $post_id );
-
-			if ( $using_email_as_displayname ) {
-				update_post_meta( $author_id, 'author_email_as_display_name', true );
-			}
 		}
 	}
 
