@@ -483,7 +483,6 @@ class TownNewsMigrator implements InterfaceCommand {
 
 			// Create the categories hierarchy.
 			foreach ( $category_hierarchy as $category_index => $category ) {
-				$category_id   = 0;
 				$category_name = $this->get_category_name_from_tn_slug( $category );
 				if ( 0 !== $category_index ) {
 					$parent_category_id = get_cat_ID( $this->get_category_name_from_tn_slug( $category_hierarchy[ $category_index - 1 ] ) );
@@ -499,6 +498,10 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 
 		wp_set_post_categories( $post_id, $categories_to_add );
+		if ( count( $categories_to_add ) > 1 ) {
+			// Set the last item in the path as primary to keep the url structure.
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', end( $categories_to_add ) );
+		}
 
 		// Set post subtitle.
 		if ( ! empty( $subtitle ) ) {
