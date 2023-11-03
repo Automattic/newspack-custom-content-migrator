@@ -87,6 +87,10 @@ class BlockClubChicagoMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_lede_iframes' ],
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator blockclubchicago-migrate-image-credits',
+			[ $this, 'cmd_migrate_image_credits' ],
+		);
+		WP_CLI::add_command(
 			'newspack-content-migrator blockclubchicago-dev-helper-scripts',
 			[ $this, 'cmd_dev_helper_scripts' ],
 			[
@@ -317,6 +321,30 @@ class BlockClubChicagoMigrator implements InterfaceCommand {
 			$subtitle = get_post_meta( $post_id, 'dek', true );
 			if ( ! empty( $subtitle ) ) {
 				update_post_meta( $post_id, 'newspack_post_subtitle', $subtitle );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::line( "Done." );
+	}
+
+	public function cmd_migrate_image_credits( $pos_args, $assoc_args ) {
+		$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
+		foreach ( $attachment_ids as $key_post_id => $att_id ) {
+
+			$credit = get_post_meta( $att_id, 'credit', true );
+			$credit_url = get_post_meta( $att_id, 'credit_url', true );
+
+			$credit_string = null;
+			if ( $credit ) {
+				$credit_string = $credit;
+			} elseif ( $credit_url ) {
+				$credit_string = $credit_url;
+			}
+
+			if ( ! empty( $credit_string ) ) {
+				update_post_meta( $att_id, '_media_credit', $credit_string );
+				WP_CLI::line( sprintf( "%d/%d -- ID %d %s", $key_post_id + 1, count( $attachment_ids ), $att_id, $credit_string) );
 			}
 		}
 
