@@ -7418,14 +7418,19 @@ BLOCK;
 
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
-    				sub.ID, 
-    				sub.post_content 
+				"
+				SELECT 
+				* 
 				FROM (
-				    SELECT ID, post_content FROM $wpdb->posts 
-				    WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
-				) AS sub
-				WHERE sub.ID > %d",
+					SELECT 
+    					*
+					FROM (
+				    	SELECT ID, post_content FROM $wpdb->posts 
+				    	WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
+					) AS sub
+					ORDER BY sub.ID
+				) AS subber
+				WHERE subber.ID > %d",
 				'%' . $wpdb->esc_like( 'lasilla.com' ) . '%',
 				$after_post_id
 			)
