@@ -7469,9 +7469,9 @@ BLOCK;
 					}
 				}
 
-				$exploded = explode( '/', $image_url );
-				$filename = array_pop( $exploded );
-				$filename = urldecode( $filename ) ;
+				$exploded            = explode( '/', $image_url );
+				$filename            = array_pop( $exploded );
+				$filename            = urldecode( $filename );
 				$question_mark_index = strpos( $filename, '?' );
 
 				if ( false !== $question_mark_index ) {
@@ -7489,6 +7489,12 @@ BLOCK;
 
 				if ( $possible_attachment_id ) {
 					$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
+					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
+				} elseif ( $file_exists ) {
+					echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
+					$attachment_id  = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+					$attachment_url = wp_get_attachment_url( $attachment_id );
+
 					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
 				}
 			}
