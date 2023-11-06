@@ -12,7 +12,7 @@ use DateTimeZone;
 use Exception;
 
 /**
- * Dates class.
+ * DateTimeConverter class.
  */
 class DateTimeConverter {
 	const MYSQL_DATE_FORMAT = 'Y-m-d H:i:s';
