@@ -405,6 +405,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						'description' => 'Specific post id to process',
 						'optional'    => true,
 					],
+					BatchLogic::$num_items,
 				],
 			]
 		);
@@ -687,22 +688,33 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
-		$post_id = $assoc_args['post-id'] ?? false;
-		if ( ! $post_id ) {
-			// TODO.
+		$log_file = __FUNCTION__ . 'log';
+
+		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
+		$post_ids  = $assoc_args['post-id'] ?? false;
+		if ( ! $post_ids ) {
+			global $wpdb;
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[RELATED:%' ORDER BY ID DESC LIMIT %d",
+					[ $num_items ]
+				)
+			);
 		}
-		$post = get_post( $post_id );
-		if ( ! str_contains( $post->post_content, '[RELATED:' ) ) {
-			return;
+		foreach ( $post_ids as $post_id ) {
+			$post   = get_post( $post_id );
+			$result = wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => $this->replace_related_placeholders_with_homepage_blocks( $post->post_content ),
+				]
+			);
+			if ( ! is_wp_error( $result ) ) {
+				$this->logger->log( $log_file, sprintf( 'Updated related links in  %s', get_permalink( $post_id ) ), Logger::SUCCESS );
+			} else {
+				$this->logger->log( $log_file, sprintf( 'Failed to update related links in %s', get_permalink( $post_id ) ), Logger::ERROR );
+			}
 		}
-		$content = $post->post_content;
-		$content = $this->replace_related_placeholders_with_homepage_blocks( $content );
-		wp_update_post(
-			[
-				'ID'           => $post_id,
-				'post_content' => $content,
-			]
-		);
 	}
 
 	/**
@@ -1331,7 +1343,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			);
 
 			$args  = [
-				'showReadMore'  => true,
+				'showReadMore'  => false,
 				'showDate'      => false,
 				'showAuthor'    => false,
 				'specificMode'  => true,
@@ -1341,7 +1353,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'showExcerpt'   => false,
 			];
 			$block = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( [ $related_post ], $args, );
-			$group = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border' ], [ 'align' => 'left' ] ) );
+			$group = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border', 'alignright' ] ) );
 
 			$content = str_replace( $match[0], $group, $content );
 		}
