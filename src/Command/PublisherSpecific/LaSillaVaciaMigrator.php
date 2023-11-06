@@ -7619,7 +7619,7 @@ BLOCK;
 	 * @return string|null
 	 */
 	private function attempt_to_get_correct_url( $original_url, $post_id ) {
-		$http                     = new WP_Http();
+		$http        = new WP_Http();
 		$moved_codes = [ $http::MOVED_PERMANENTLY, $http::FOUND ];
 
 		$modified_url = str_replace( 'https://lasilla.com', '/media', $original_url );
