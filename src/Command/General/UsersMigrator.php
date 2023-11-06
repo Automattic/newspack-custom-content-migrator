@@ -155,6 +155,8 @@ class UsersMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function users_fix_unsafe_nicenames( array $args, array $assoc_args ): void {
+		WP_CLI::confirm( "PLEASE NOTE!! \nThis does _NOT_ fix the problems with slugs we have with co-authors-plus. \nIn fact - it might make things worse. Use this function only if you are cleaning up users – not co-authors. 
+			Do you want to continue?" );
 		$log_file        = __FUNCTION__ . '.log';
 		$users_per_batch = isset( $assoc_args['users-per-batch'] ) ? intval( $assoc_args['users-per-batch'] ) : 10000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
