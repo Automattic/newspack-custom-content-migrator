@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
+use Exception;
 use JsonMachine\Items;
 
 /**
@@ -75,11 +76,33 @@ class JsonIterator {
 
 		try {
 			return Items::fromFile( $json_file, $options );
-		} catch ( \Exception $o_0 ) {
+		} catch ( Exception $o_0 ) {
 			$this->logger->log( self::LOG_NAME, "Could not read the JSON from {$json_file}", Logger::ERROR );
 		}
 
 		return new \EmptyIterator();
+	}
+
+	/**
+	 * Will count number of entries in a JSON file where the root is an array.
+	 *
+	 * Handy for getting a "total" number for progress bars and such.
+	 *
+	 * @param string $json_file_path Path to the JSON file.
+	 *
+	 * @return int Number of entries in the array in the JSON file.
+	 *
+	 * @throws Exception if the jq command fails or the JSON file does not exist.
+	 */
+	public function count_json_array_entries( string $json_file_path ): int {
+		if ( file_exists( $json_file_path ) ) {
+			exec( 'cat ' . escapeshellarg( $json_file_path ) . " | jq 'length'", $count );
+			if ( ! empty( $count[0] ) ) {
+				return (int) $count[0];
+			}
+		}
+
+		throw new Exception( "Could not count entries in JSON file: {$json_file_path}" );
 	}
 
 }

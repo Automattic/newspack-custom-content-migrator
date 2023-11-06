@@ -1,6 +1,6 @@
 <?php
 
-namespace NewspackCustomContentMigrator\Logic;
+namespace NewspackCustomContentMigrator\Utils;
 
 use InvalidArgumentException;
 
@@ -14,7 +14,7 @@ use InvalidArgumentException;
 class MigrationMeta {
 
 	/**
-	 * The meta key used to store the serialized migration meta.
+	 * The meta key used to store the migration meta.
 	 */
 	public const META_KEY = 'newspack_migration_meta';
 

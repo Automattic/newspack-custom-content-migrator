@@ -84,6 +84,37 @@ class LedeMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lede-migrate-dek-postmeta-to-subtitle',
+			[ $this, 'cmd_migrate_dek_postmeta_to_subtitle' ],
+			[
+				'shortdesc' => 'Migrates postmeta dek to Newspack Subtitle.',
+			]
+		);
+	}
+
+	/**
+	 * Migrates postmeta dek to Newspack Subtitle.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_migrate_dek_postmeta_to_subtitle( array $pos_args, array $assoc_args ) {
+		global $wpdb;
+
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			// Get postmeta with meta_key 'dek'.
+			$dek_subtitle = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where meta_key = 'dek' and post_id = %d ;", $post_id ) );
+			if ( $dek_subtitle ) {
+				update_post_meta( $post_id, 'newspack_post_subtitle', $dek_subtitle );
+				WP_CLI::success( 'Updated ' . $post_id );
+			} else {
+				$d = 1;
+			}
+		}
 	}
 
 	/**
