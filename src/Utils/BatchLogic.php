@@ -17,7 +17,7 @@ class BatchLogic {
 	public static array $start = [
 		'type'        => 'assoc',
 		'name'        => 'start',
-		'description' => 'Start row (default: 0)',
+		'description' => 'Start row (default: 1)',
 		'optional'    => true,
 		'repeating'   => false,
 	];
