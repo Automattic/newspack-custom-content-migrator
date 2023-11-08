@@ -781,7 +781,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$catarr = array(
 				'cat_name'             => $term->name,
 				'category_nicename'    => $term->slug,
-				'category_description' => $term->description,
+				'category_description' => wp_strip_all_tags( strip_shortcodes( $term->description ) ),
 			);
 			if ( $parent_category ) {
 				$catarr['category_parent'] = $parent_category->term_id;
