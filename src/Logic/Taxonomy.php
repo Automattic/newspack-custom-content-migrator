@@ -37,60 +37,47 @@ class Taxonomy {
 	}
 
 	/**
-	 * Reassigns all content from one category to a different category.
+	 * Reassigns all content from one taxonomy to a different taxonomy.
 	 *
-	 * @param int $source_term_id      Source term_id.
-	 * @param int $destination_term_id Destination term_id.
+	 * @param string $taxonomy     Source taxonomy, e.g. 'category'.
+	 * @param int    $source_term_id      Source term_id.
+	 * @param int    $destination_term_id Destination term_id.
 	 *
 	 * @return void
 	 */
-	public function reassign_all_content_from_one_category_to_another( int $source_term_id, int $destination_term_id ): void {
-		$source_term_taxonomy_id      = $this->get_term_taxonomy_id_by_term_id( $source_term_id );
-		$destination_term_taxonomy_id = $this->get_term_taxonomy_id_by_term_id( $destination_term_id );
-
-		// Get post IDs with both categories.
-		$posts_with_both_categories = get_posts(
+	public function reassign_all_content_from_one_taxonomy_to_another( string $taxonomy, int $source_term_id, int $destination_term_id ): void {
+		// Get post IDs with both terms.
+		$posts_with_both_terms = get_posts(
 			[
-				'fields'         => 'ids',
-				'posts_per_page' => -1,
-				'post_type'      => 'post',
-				'tax_query'      => [
+				'fields'           => 'ids',
+				'posts_per_page'   => -1,
+				'post_type'        => 'any',
+				'post_status'      => 'any',
+				'suppress_filters' => true,
+				'tax_query'        => [
 					'relation' => 'AND',
 					[
-						'taxonomy' => 'category',
+						'taxonomy' => $taxonomy,
 						'field'    => 'term_taxonomy_id',
-						'terms'    => [ $source_term_taxonomy_id ],
+						'terms'    => [ $source_term_id ],
 					],
 					[
-						'taxonomy' => 'category',
+						'taxonomy' => $taxonomy,
 						'field'    => 'term_taxonomy_id',
-						'terms'    => [ $destination_term_taxonomy_id ],
+						'terms'    => [ $destination_term_id ],
 					],
 				],
 			]
 		);
 
-		// Delete the source category from those posts.
-		if ( ! empty( $posts_with_both_categories ) ) {
-			$this->delete_object_relational_mapping_term_taxonomy_id( $source_term_taxonomy_id, $posts_with_both_categories );
+		// Delete the source term from these posts.
+		if ( ! empty( $posts_with_both_terms ) ) {
+			$this->delete_object_relational_mapping_term_taxonomy_id( $source_term_id, $posts_with_both_terms );
 		}
 
-		$this->update_object_relational_mapping_term_taxonomy_id( $source_term_taxonomy_id, $destination_term_taxonomy_id );
+		$this->update_object_relational_mapping_term_taxonomy_id( $source_term_id, $destination_term_id );
 
-		$this->fix_taxonomy_term_counts( 'category' );
-	}
-
-	/**
-	 * Gets term_taxonomy_id of a term_id.
-	 *
-	 * @param int $term_id Term_id.
-	 *
-	 * @return string|null Return from $wpdb::get_var().
-	 */
-	public function get_term_taxonomy_id_by_term_id( $term_id ) {
-		global $wpdb;
-
-		return $wpdb->get_var( $wpdb->prepare( "SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy} WHERE term_id = %d;", $term_id ) );
+		$this->fix_taxonomy_term_counts( $taxonomy );
 	}
 
 	/**

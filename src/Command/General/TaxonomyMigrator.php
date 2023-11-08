@@ -265,11 +265,18 @@ class TaxonomyMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator move-content-from-one-category-to-another',
-			[ $this, 'cmd_move_content_from_one_category_to_another' ],
+			'newspack-content-migrator move-content-from-one-term-to-another',
+			[ $this, 'cmd_move_content_from_one_term_to_another' ],
 			[
-				'shortdesc' => 'Moves all content from one category to a different one.',
+				'shortdesc' => 'Moves all content from one term to a different one on the same taxonomy.',
 				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'taxonomy',
+						'description' => 'Taxonomy.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'source-term-id',
@@ -357,38 +364,38 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator move-content-from-one-category-to-another`.
+	 * Callable for `newspack-content-migrator move-content-from-one-term-to-another`.
 	 *
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
-	public function cmd_move_content_from_one_category_to_another( $pos_args, $assoc_args ) {
+	public function cmd_move_content_from_one_term_to_another( $pos_args, $assoc_args ) {
 		$source_term_id      = $assoc_args['source-term-id'];
 		$destination_term_id = $assoc_args['destination-term-id'];
+		$taxonomy            = $assoc_args['taxonomy'] ?? 'category';
 
 		// Check IDs.
-		$source_category      = get_category( $source_term_id );
-		$destination_category = get_category( $destination_term_id );
-		if ( is_null( $source_category ) ) {
-			WP_CLI::error( 'Wrong source category ID.' );
+		$source_term      = get_term( $source_term_id, $taxonomy );
+		$destination_term = get_term( $destination_term_id, $taxonomy );
+		if ( is_null( $source_term ) ) {
+			WP_CLI::error( 'Wrong source term ID.' );
 		}
-		if ( is_null( $destination_category ) ) {
-			WP_CLI::error( 'Wrong destination category ID.' );
+		if ( is_null( $destination_term ) ) {
+			WP_CLI::error( 'Wrong destination term ID.' );
 		}
 		if ( $source_term_id == $destination_term_id ) {
 			WP_CLI::error( 'Source and destination categories are the same. No changes made.' );
 		}
 
-
-		$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
+		$this->taxonomy_logic->reassign_all_content_from_one_taxonomy_to_another( $taxonomy, $source_term_id, $destination_term_id );
 
 		// Update category count.
 		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
 
 		wp_cache_flush();
-		WP_CLI::success( 'Done.' );
+		WP_CLI::success( "Successfully moved posts from $taxonomy $source_term_id to $destination_term_id" );
 	}
 
 	/**
