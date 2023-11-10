@@ -703,7 +703,7 @@ class TownNewsMigrator implements InterfaceCommand {
 			);
 		} else {
 			// Set as a co-author.
-			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_user( $display_name ) );
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login(  $display_name );
 			if ( $guest_author ) {
 				$author_id = $guest_author->ID;
 			} else {

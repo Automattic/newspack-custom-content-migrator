@@ -109,7 +109,7 @@ class CoAuthorPlus {
 
 		// If not provided, automatically set `user_login` from display_name.
 		if ( ! isset( $args['user_login'] ) ) {
-			$args['user_login'] = sanitize_title( $args['display_name'] );
+			$args['user_login'] = sanitize_user( $args['display_name'] );
 		} else {
 			/**
 			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
@@ -340,7 +340,7 @@ class CoAuthorPlus {
 	 * @return false|object Guest Author object.
 	 */
 	public function get_guest_author_by_user_login( $ga_user_login ) {
-		return $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $ga_user_login );
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_login', sanitize_user( $ga_user_login ) );
 	}
 
 	/**
