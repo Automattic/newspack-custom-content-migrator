@@ -24,6 +24,7 @@ use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
+use WP_Http;
 use WP_Term;
 use WP_User;
 
@@ -7417,14 +7418,19 @@ BLOCK;
 
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
-    				sub.ID, 
-    				sub.post_content 
+				"
+				SELECT 
+				* 
 				FROM (
-				    SELECT ID, post_content FROM $wpdb->posts 
-				    WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
-				) AS sub
-				WHERE sub.ID > %d",
+					SELECT 
+    					*
+					FROM (
+				    	SELECT ID, post_content FROM $wpdb->posts 
+				    	WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
+					) AS sub
+					ORDER BY sub.ID
+				) AS subber
+				WHERE subber.ID > %d",
 				'%' . $wpdb->esc_like( 'lasilla.com' ) . '%',
 				$after_post_id
 			)
@@ -7437,6 +7443,7 @@ BLOCK;
 			// Can't seem to trust the system to maintain a carbon copy of the post_content before update, so saving it as postmeta.
 			$this->handle_saving_post_content_as_meta( $post->post_content, $post->ID );
 
+			echo WP_CLI::colorize( "%BHANDLING IMAGES%n\n" );
 			$image_urls = $this->attachments->get_images_sources_from_content( $post->post_content );
 			foreach ( $image_urls as $image_url ) {
 				$this->high_contrast_output( 'Original URL', $image_url );
@@ -7453,6 +7460,7 @@ BLOCK;
 					$this->high_contrast_output( 'Replaced URL', $new_image_url );
 
 					if ( ! str_contains( $new_image_url, 'lasilla.com' ) ) {
+						echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
 						$attachment_id  = $this->attachments->import_external_file( $new_image_url, null, null, null, null, $post->ID );
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
@@ -7461,11 +7469,12 @@ BLOCK;
 					}
 				}
 
-				$exploded = explode( '/', $image_url );
-				$filename = array_pop( $exploded );
+				$exploded            = explode( '/', $image_url );
+				$filename            = array_pop( $exploded );
+				$filename            = urldecode( $filename );
 				$question_mark_index = strpos( $filename, '?' );
 
-				if ( $question_mark_index !== false ) {
+				if ( false !== $question_mark_index ) {
 					$filename = substr( $filename, 0, $question_mark_index );
 				}
 
@@ -7481,11 +7490,16 @@ BLOCK;
 				if ( $possible_attachment_id ) {
 					$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
-				} else {
-					$post->post_content = str_replace( $image_url, "https://lasillavacia.com/$filename", $post->post_content );
+				} elseif ( $file_exists ) {
+					echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
+					$attachment_id  = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+					$attachment_url = wp_get_attachment_url( $attachment_id );
+
+					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
 				}
 			}
 
+			echo WP_CLI::colorize( "%BHANDLING VIDEO URLs%n\n" );
 			preg_match_all( '/<video[^>]+(?:src)="([^">]+)"/', $post->post_content, $video_sources_match );
 			if ( array_key_exists( 1, $video_sources_match ) && ! empty( $video_sources_match[1] ) ) {
 				foreach ( $video_sources_match[1] as $match ) {
@@ -7507,21 +7521,16 @@ BLOCK;
 						if ( $possible_attachment_id ) {
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
-						} else {
-							$post->post_content = str_replace( $match, "https://lasillavacia.com/$filename", $post->post_content );
 						}
 					}
 				}
 			}
 
-			preg_match_all( '/<a[^>]+(?:href)="([^">]+)"/', $post->post_content, $document_sources_match );
-			if ( array_key_exists( 1, $document_sources_match ) && ! empty( $document_sources_match[1] ) ) {
-				foreach ( $document_sources_match[1] as $match ) {
-					if ( ! str_contains( $match, 'lasilla.com' ) ) {
-						continue;
-					}
-
-					$this->high_contrast_output( 'Doc URL', $match );
+			echo WP_CLI::colorize( "%BHANDLING IFRAME URLs%n\n" );
+			preg_match_all( '/<iframe[^>]+(?:src)="([^">]+)"/', $post->post_content, $iframe_source_matches );
+			if ( array_key_exists( 1, $iframe_source_matches ) && ! empty( $iframe_source_matches[1] ) ) {
+				foreach ( $iframe_source_matches[1] as $match ) {
+					$this->high_contrast_output( 'iFrame URL', $match );
 					$filename = WP_CLI\Utils\basename( $match );
 					$this->high_contrast_output( 'Basename filename', $filename );
 					$full_filename_path = $full_path( $filename );
@@ -7540,7 +7549,53 @@ BLOCK;
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 						} else {
-							continue;
+							// Only attempt to correct URL if it contains lasilla.com.
+							// Otherwise, the URL should be fine and/or we shouldn't be touching it.
+							if ( str_contains( $match, 'lasilla.com' ) ) {
+								$url = $this->attempt_to_get_correct_url( $match, $post->ID );
+
+								if ( $url !== null ) {
+									$post->post_content = str_replace( $match, $url, $post->post_content );
+								}
+							}
+						}
+					}
+				}
+			}
+
+			echo WP_CLI::colorize( "%BHANDLING DOCUMENT URLs%n\n" );
+			preg_match_all( '/<a[^>]+(?:href)="([^">]+)"/', $post->post_content, $document_sources_match );
+			if ( array_key_exists( 1, $document_sources_match ) && ! empty( $document_sources_match[1] ) ) {
+				foreach ( $document_sources_match[1] as $match ) {
+					if ( ! str_contains( $match, 'lasilla.com' ) ) {
+						continue;
+					}
+
+					$this->high_contrast_output( 'Doc URL', $match );
+					$filename = WP_CLI\Utils\basename( $match );
+					$this->high_contrast_output( 'Basename filename', $filename );
+					$full_filename_path = $full_path( $filename );
+					$file_exists        = file_exists( $full_filename_path );
+					$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+
+					if ( $file_exists ) {
+						WP_CLI::success('File exists');
+						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+						$attachment_url     = wp_get_attachment_url( $attachment_id );
+						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
+					} else {
+						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+						$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+
+						if ( $possible_attachment_id ) {
+							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
+							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
+						} else {
+							$url = $this->attempt_to_get_correct_url( $match, $post->ID );
+
+							if ( null !== $url ) {
+								$post->post_content = str_replace( $match, $url, $post->post_content );
+							}
 						}
 					}
 				}
@@ -7552,6 +7607,75 @@ BLOCK;
 					'ID'           => $post->ID,
 				)
 			);
+		}
+	}
+
+	/**
+	 * This function will attempt to find the correct URL for URL's containing lasilla.com in them.
+	 *
+	 * @param string $original_url The original URL that needs to be checked.
+	 * @param int    $post_id The post ID where the original URL was found.
+	 *
+	 * @return string|null
+	 */
+	private function attempt_to_get_correct_url( $original_url, $post_id ) {
+		$http        = new WP_Http();
+		$moved_codes = [ $http::MOVED_PERMANENTLY, $http::FOUND ];
+
+		$modified_url = str_replace( 'https://lasilla.com', '/media', $original_url );
+		$this->high_contrast_output( 'Modified URL', $modified_url );
+
+		if ( false === wp_http_validate_url( $modified_url ) ) {
+			echo WP_CLI::colorize( "%YInvalid URL%n\n" );
+			return null;
+		}
+
+		$response = $http->request( $modified_url, [ 'method' => 'HEAD' ] );
+
+		if ( is_wp_error( $response ) ) {
+			// Log error and keep it moving.
+			$this->file_logger( $response->get_error_message() );
+			return null;
+		}
+
+		$response_code = $response['response']['code'];
+
+		if ( in_array( $response_code, $moved_codes, true ) ) {
+			// Getting 302 might indicate that the page was legitimately moved.
+			// So requesting the URL again, this time with GET method, to see what code we get.
+			$response = $http->request( $modified_url, [ 'timeout' => 10, 'redirection' => 5 ] );
+
+			if ( is_wp_error( $response ) ) {
+				// Log error and keep it moving.
+				$this->file_logger( $response->get_error_message() );
+				return null;
+			}
+
+			$response_code = $response['response']['code'];
+		}
+
+		if ( $http::NOT_FOUND === $response_code ) {
+			// Try one more variation to the link.
+			$modified_url = str_replace( 'https://lasilla.com', '/media/docs', $original_url );
+			$response     = $http->request( $modified_url, [ 'timeout' => 10, 'redirection' => 5 ] );
+
+			if ( is_wp_error( $response ) ) {
+				// Log error and keep it moving.
+				$this->file_logger( $response->get_error_message() );
+				return null;
+			}
+
+			$response_code = $response['response']['code'];
+		}
+
+		if ( $http::OK === $response_code ) {
+			// Page was found, so update the post_content with the new URL.
+			echo WP_CLI::colorize( "%gReplacement URL found!%n\n" );
+			return $modified_url;
+		} else {
+			// Page was moved or not found. Log the link and move on.
+			$this->file_logger( "Post ID: $post_id\nOriginal URL:\n$original_url\nModified URL:\n$modified_url\nResponse Code: $response_code\n", true );
+			return null;
 		}
 	}
 
