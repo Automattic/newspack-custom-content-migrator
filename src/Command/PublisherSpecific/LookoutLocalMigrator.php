@@ -2352,9 +2352,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( "\n" . '%d/%d ID %d %s', $key_post_id + 1, count( $post_ids ), $post_id, $original_url ) );
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d", $post_id ) );
+			$is_slideshow = self::META_POST_LAYOUT_SLIDESHOW == get_post_meta( $post_id, 'newspackmigration_layouttype', true );
 
 			$post_content_updated = $this->clean_up_scraped_html( $post_id, $original_url, $post_content, $log_need_oembed_resave, $log_err_img_download, $log_unknown_div_enchancements );
-			if ( is_null( $post_content_updated ) ) {
+			if ( ! $is_slideshow && is_null( $post_content_updated ) ) {
 				throw new \UnexpectedValueException( 'post_content_updated is null -- due to unknown template.' );
 			}
 
@@ -2608,7 +2609,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		}
 
 		/**
-		 * CONTENT TYPE 2.
+		 * CONTENT TYPE 2a.
 		 *      - div#pico
 		 */
 		if ( ! $div_content_crawler ) {
@@ -2617,20 +2618,38 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 * This here was for when I thought there was just a single div#pico element:
 			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 			 */
-			$post_content_crawler = $this->filter_selector_element( 'div#pico', $this->crawler, $single = false );
-			if ( $post_content_crawler ) {
-				foreach ( $post_content_crawler->getIterator() as $post_content_node ) {
+			$div_content_crawler = $this->filter_selector_element( 'div#pico', $this->crawler, $single = false );
+			if ( $div_content_crawler ) {
+				foreach ( $div_content_crawler->getIterator() as $post_content_node ) {
 					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
 					$post_content .= $post_content_node->ownerDocument->saveHTML( $post_content_node );
 				}
-			}
 
-			$data['_layout_type'] = self::META_POST_LAYOUT_REGULAR;
+				$data['_layout_type'] = self::META_POST_LAYOUT_REGULAR;
+			}
 		}
 
 
 		/**
-		 * CONTENT TYPE 3. YouTube video in header
+		 * CONTENT TYPE 2b.
+		 *      - div.page-main-content > article.story > div.page-article-container > div.page-article-body > div.rich-text-article-body > div.rich-text-body
+		 * e.g. https://lookout.co/santacruz/news/newsletter/2022-12-09/fresh-truffle-dungeness-crab-season-delayed-pesticides-watsonville-pajaro-valley-organic-transition-santa-cruz-voting-data-mapped-flynn-creek-circus-capitola-mall-january-6-committee-denver-riggleman-morning-lookout-osmosys-app-workaround
+		 */
+		if ( ! $div_content_crawler ) {
+			$div_content_crawler = $this->filter_selector_element( 'div.page-main-content > article.story > div.page-article-container > div.page-article-body > div.rich-text-article-body > div.rich-text-body', $this->crawler, $single = false );
+			if ( $div_content_crawler ) {
+				foreach ( $div_content_crawler->getIterator() as $post_content_node ) {
+					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+					$post_content .= $post_content_node->ownerDocument->saveHTML( $post_content_node );
+				}
+
+				$data['_layout_type'] = self::META_POST_LAYOUT_REGULAR;
+			}
+		}
+
+
+		/**
+		 * CONTENT TYPE 3. Vimeo video in header
 		 */
 		if ( ! $div_content_crawler ) {
 			/**
@@ -2638,9 +2657,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 * This here was for when I thought there was just a single div#pico element:
 			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 			 */
-			$post_content_crawler = $this->filter_selector_element( 'div.page-lead > div.video-page-player > ps-vimeoplayer', $this->crawler, $single = true );
-			if ( $post_content_crawler ) {
-				$video_id = $post_content_crawler->getAttribute( 'data-video-id' );
+			$div_content_crawler = $this->filter_selector_element( 'div.page-lead > div.video-page-player > ps-vimeoplayer', $this->crawler, $single = true );
+			if ( $div_content_crawler ) {
+				$video_id = $div_content_crawler->getAttribute( 'data-video-id' );
 				if ( ! $video_id ) {
 					throw new \UnexpectedValueException( 'NOT FOUND YT video_id' );
 				}
@@ -2655,9 +2674,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$post_content .= $block_html;
 
 				// Search more post_content if available.
-				$post_content_crawler = $this->filter_selector_element( 'div.page-description-body', $this->crawler, $single = true );
-				if ( $post_content_crawler ) {
-					$description_html = $post_content_crawler->ownerDocument->saveHtml( $post_content_crawler );
+				$div_content_crawler_helper = $this->filter_selector_element( 'div.page-description-body', $this->crawler, $single = true );
+				if ( $div_content_crawler_helper ) {
+					$description_html = $div_content_crawler_helper->ownerDocument->saveHtml( $div_content_crawler_helper );
 
 					// Append.
 					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
@@ -2670,7 +2689,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 
 		/**
-		 * CONTENT TYPE 4. Vimeo video in header
+		 * CONTENT TYPE 4. Youtube video in header
 		 *      - div#pico
 		 */
 		if ( ! $div_content_crawler ) {
@@ -2679,9 +2698,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 * This here was for when I thought there was just a single div#pico element:
 			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 			 */
-			$post_content_crawler = $this->filter_selector_element( 'div.page-lead > div.video-page-player > ps-youtubeplayer', $this->crawler, $single = true );
-			if ( $post_content_crawler ) {
-				$video_id = $post_content_crawler->getAttribute( 'data-video-id' );
+			$div_content_crawler = $this->filter_selector_element( 'div.page-lead > div.video-page-player > ps-youtubeplayer', $this->crawler, $single = true );
+			if ( $div_content_crawler ) {
+				$video_id = $div_content_crawler->getAttribute( 'data-video-id' );
 				if ( ! $video_id ) {
 					throw new \UnexpectedValueException( 'NOT FOUND YT video_id' );
 				}
@@ -2696,9 +2715,9 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$post_content .= $block_html;
 
 				// Search more post_content if available.
-				$post_content_crawler = $this->filter_selector_element( 'div.page-description-body', $this->crawler, $single = true );
-				if ( $post_content_crawler ) {
-					$description_html = $post_content_crawler->ownerDocument->saveHtml( $post_content_crawler );
+				$div_content_crawler_helper = $this->filter_selector_element( 'div.page-description-body', $this->crawler, $single = true );
+				if ( $div_content_crawler_helper ) {
+					$description_html = $div_content_crawler_helper->ownerDocument->saveHtml( $div_content_crawler_helper );
 
 					// Append.
 					$post_content .= ! empty( $post_content ) ? "\n\n" : '';
@@ -2720,10 +2739,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 *      $post_content = $this->filter_selector( 'div#pico', $this->crawler, false, false );
 			 */
 			$slides = [];
-			$post_content_crawler = $this->filter_selector_element( 'div.gallery-page-slides > div.gallery-page-slide > div.gallery-slide', $this->crawler, $single = false );
-			if ( $post_content_crawler ) {
+			$div_content_crawler = $this->filter_selector_element( 'div.gallery-page-slides > div.gallery-page-slide > div.gallery-slide', $this->crawler, $single = false );
+			if ( $div_content_crawler ) {
 
-				foreach ( $post_content_crawler->getIterator() as $key_slide => $slide_crawler ) {
+				foreach ( $div_content_crawler->getIterator() as $key_slide => $slide_crawler ) {
 					// First slide is the "featured image".
 					if ( 0 == $key_slide ) {
 						continue;
