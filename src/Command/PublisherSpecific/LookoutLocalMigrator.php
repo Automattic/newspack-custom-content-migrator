@@ -9,6 +9,7 @@ use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use \NewspackCustomContentMigrator\Logic\Redirection;
 use \Newspack_Scraper_Migrator_Util;
 use \Newspack_Scraper_Migrator_HTML_Parser;
 use \WP_CLI;
@@ -139,6 +140,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $gutenberg;
 
 	/**
+	 * Redirection instance.
+	 *
+	 * @var Redirection Redirection instance.
+	 */
+	private $redirection;
+
+	/**
 	 * Used as a development QA helper.
 	 * If set, no images will actually be downloaded from live, and this image will be used instead. This will prevent all image downloads and speed up dev and QA.
 	 *
@@ -172,6 +180,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		$this->cap         = new CoAuthorPlus();
 		$this->posts       = new Posts();
 		$this->gutenberg   = new GutenbergBlockGenerator();
+		$this->redirection = new Redirection();
 	}
 
 	/**
@@ -286,6 +295,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-create-posts-redirects',
+			[ $this, 'cmd_create_posts_redirects' ],
+		);
 
 		// WP_CLI::add_command(
 		// 	'newspack-content-migrator lookoutlocal-scrape-posts',
@@ -376,6 +389,50 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 
 		);
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator lookoutlocal-create-posts-redirects'.
+	 *
+	 * @param $pos_args
+	 * @param $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_create_posts_redirects( $pos_args, $assoc_args ) {
+
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '%d/%d %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			$url_original = get_post_meta( $post_id, self::META_POST_ORIGINAL_URL, true );
+			if ( ! $url_original ) {
+				WP_CLI::warning( sprintf( 'No %s for post ID %d', self::META_POST_ORIGINAL_URL, $post_id ) );
+				continue;
+			}
+
+			// Rule title.
+			$rule_title = sprintf( 'Migrated post ID %d', $post_id );
+
+			// Remove hostname and scheme from $url_from.
+			$parsed_url_original = parse_url( $url_original );
+			$url_from = $parsed_url_original['path'] . ( isset( $parsed_url_original[ 'query' ] ) ? '?' . $parsed_url_original[ 'query' ] : '' );
+
+			$exists = $this->redirection->get_redirects_by_exact_from_url( $url_from );
+			if ( ! empty( $exists ) ) {
+				WP_CLI::line( sprintf( 'Redirect exists, skipping post ID %d', $post_id ) );
+				continue;
+			}
+
+			// Get $post_id's redirection URL.
+			$url_to = get_permalink( $post_id );
+			$parsed_url_to = parse_url( $url_to );
+			$url_to = $parsed_url_to['path'] . ( isset( $parsed_url_to[ 'query' ] ) ? '?' . $parsed_url_to[ 'query' ] : '' );
+
+			// Create.
+			$this->redirection->create_redirection_rule( $rule_title, $url_from, $url_to );
+			WP_CLI::success( sprintf( 'Created redirect ID %d FROM: %s TO: %s', $post_id, $url_original, $url_to ) );
+		}
 	}
 
 	/**
