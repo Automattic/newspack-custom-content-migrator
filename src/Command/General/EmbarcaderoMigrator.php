@@ -165,6 +165,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'email-domain',
+						'description' => 'Domain to use for the email address of the users that don\'t have an email address in the CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
@@ -489,6 +496,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_dir_path             = $assoc_args['story-photos-dir-path'];
 		$story_media_csv_file_path         = $assoc_args['story-media-file-path'];
 		$story_carousel_items_dir_path     = $assoc_args['story-carousel-items-dir-path'];
+		$email_domain                      = $assoc_args['email-domain'];
 		$index_from                        = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to                          = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 		$refresh_content                   = isset( $assoc_args['refresh-content'] ) ? true : false;
@@ -604,7 +612,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Migrate post content shortcodes.
 			// phpcs:ignore
 			$post_content         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
-			$updated_post_content = $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items );
+			$updated_post_content = $update_post_content
+			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items )
+			: $post_content;
 
 			// Set the original ID.
 			update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
@@ -621,9 +631,26 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Set co-author if needed.
 			if ( ! $wp_contributor_id ) {
-				$coauthors           = $this->get_co_authors_from_bylines( $post['byline'] );
-				$co_author_nicenames = $this->get_generate_coauthor_nicenames( $coauthors, $contributors );
-				$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $wp_post_id, $co_author_nicenames );
+				$coauthors       = $this->get_co_authors_from_bylines( $post['byline'] );
+				$co_author_users = $this->get_generate_coauthor_users( $coauthors, $contributors, $email_domain );
+				if ( 1 === count( $co_author_users ) ) {
+					$author_user = current( $co_author_users );
+					wp_update_post(
+						[
+							'ID'          => $wp_post_id,
+							'post_author' => $author_user->ID,
+						]
+					);
+				} else {
+					$co_author_nicenames = array_map(
+						function( $co_author_user ) {
+							return $co_author_user->user_nicename;
+						},
+						$co_author_users
+					);
+
+					$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $wp_post_id, $co_author_nicenames );
+				}
 
 				$this->logger->log( self::LOG_FILE, sprintf( 'Assigned co-authors %s to post "%s"', implode( ', ', $coauthors ), $post['headline'] ), Logger::LINE );
 			}
@@ -1589,37 +1616,28 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	/**
 	 * Get or create co-authors.
 	 *
-	 * @param array $coauthors Array of co-authors.
-	 * @param array $all_contributors Array of all contributors.
-	 * @return array Array of co-authors nicenames.
+	 * @param array  $coauthors Array of co-authors.
+	 * @param array  $all_contributors Array of all contributors.
+	 * @param string $email_domain Email domain.
+	 * @return array Array of co-authors users.
 	 */
-	private function get_generate_coauthor_nicenames( $coauthors, $all_contributors ) {
-		$coauthor_nicenames = [];
+	private function get_generate_coauthor_users( $coauthors, $all_contributors, $email_domain ) {
+		$coauthor_users = [];
 		foreach ( $coauthors as $coauthor ) {
 			$contributor_index = array_search( $coauthor, array_column( $all_contributors, 'full_name' ) );
 
 			if ( false !== $contributor_index ) {
-				$contributor          = $all_contributors[ $contributor_index ];
-				$author_id            = $this->get_or_create_user( $contributor['full_name'], $contributor['email_address'], 'contributor' );
-				$coauthor_nicenames[] = get_user_by( 'id', $author_id )->user_nicename;
+				$contributor      = $all_contributors[ $contributor_index ];
+				$author_id        = $this->get_or_create_user( $contributor['full_name'], $contributor['email_address'], 'contributor' );
+				$coauthor_users[] = get_user_by( 'id', $author_id );
 			} else {
-				// Set as a co-author.
-				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $coauthor );
-				if ( $guest_author ) {
-					$coauthor_nicenames[] = $guest_author->user_nicename;
-				} else {
-					$coauthor_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $coauthor ] );
-					if ( ! is_wp_error( $coauthor_id ) ) {
-						$guest_author         = $this->coauthorsplus_logic->get_guest_author_by_id( $coauthor_id );
-						$coauthor_nicenames[] = $guest_author->user_nicename;
-					} else {
-						$this->logger->log( self::LOG_FILE, sprintf( 'Could not create co-author %s: %s', $coauthor, $coauthor_id->get_error_message() ), Logger::ERROR );
-					}
-				}
+				$author_email     = sanitize_title( $coauthor, true ) . '@' . $email_domain;
+				$author_id        = $this->get_or_create_user( $coauthor, $author_email, 'contributor' );
+				$coauthor_users[] = get_user_by( 'id', $author_id );
 			}
 		}
 
-		return $coauthor_nicenames;
+		return $coauthor_users;
 	}
 
 	/**
