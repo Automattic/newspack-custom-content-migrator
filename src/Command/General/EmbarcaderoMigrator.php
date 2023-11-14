@@ -537,7 +537,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Importing post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
 
 			$wp_contributor_id = null;
-			if ( isset( $post['author_email'] ) && ! empty( $post['byline'] ) && ! empty( $post['author_email'] ) ) {
+			if ( ! empty( $post['byline'] ) && ! empty( $post['author_email'] ) ) {
 				$wp_contributor_id = $this->get_or_create_user( $post['byline'], $post['author_email'], 'contributor' );
 				if ( is_wp_error( $wp_contributor_id ) ) {
 					$wp_contributor_id = null;
