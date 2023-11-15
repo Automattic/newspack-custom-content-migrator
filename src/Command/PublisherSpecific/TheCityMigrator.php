@@ -126,6 +126,81 @@ class TheCityMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator thecity-postlaunch-update-subtitles',
+			[ $this, 'cmd_postlaunch_update_subtitles' ],
+		);
+	}
+
+	public function cmd_postlaunch_update_subtitles( array $pos_args, array $assoc_args ): void {
+
+		global $wpdb;
+		$file_urls_subtitles = '/Users/ivanuravic/www/thecity/app/setup6/urls_subtitlejsons.php';
+		$urls_subtitles = include $file_urls_subtitles;
+		$urls_not_found = [];
+		$urls_post_ids = [];
+		foreach ( $urls_subtitles as $url_original => $subtitle_json ) {
+
+			/**
+			 * Get current URL.
+			 */
+			$url_local = str_replace( '//www.thecity.nyc', '//thecity.local', $url_original );
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key=%s and meta_value=%s", 'newspack_chorus_entry_url', $url_local ) );
+			if ( ! $post_id ) {
+				$urls_not_found[] = $url_original;
+				WP_CLI::warning( 'Not found URL in posts ' . $url_original );
+				continue;
+			}
+
+			/**
+			 * Get new subtitle.
+			 */
+			$subtitle = $subtitle_json;
+			// Remove {"html"=>" from beginning.
+			if ( 0 !== strpos( $subtitle, '{"html"=>"' ) ) {
+				$d=1;
+			}
+			$subtitle = preg_replace( '/^\{"html"=>"/' , '', $subtitle );
+			// Remove '"}' from end.
+			$chars_end = '"}';
+			if ( $chars_end !== substr( $subtitle, -strlen( $chars_end ) ) ) {
+				$d=1;
+			}
+			$subtitle = preg_replace( '/"}$/' , '', $subtitle );
+			// Replace " " char.
+			$subtitle = str_replace( " ", " ", $subtitle );
+			if ( empty( $subtitle ) ) {
+				$d=1;
+			}
+
+			// Save URL to post ID.
+			$urls_post_ids[ $url_original ] = $post_id;
+
+			// Update post excerpt.
+			$post_excerpt_old = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d and meta_key = %s", $post_id, 'newspack_post_subtitle' ) );
+			WP_CLI::success( $post_id );
+			$updated = $wpdb->update( $wpdb->postmeta, [ 'meta_value' => $subtitle ], [ 'post_id' => $post_id, 'meta_key' => 'newspack_post_subtitle' ] );
+
+			// Log.
+			$post_log = [
+				'url' => $url_original,
+				'post_id' => $post_id,
+				'post_excerpt_old' => $post_excerpt_old,
+			];
+			$this->logger->log( 'postlaunch_update_subtitles.log', json_encode( $post_log ), null );
+		}
+
+		WP_CLI::warning( 'URLs not found: ' . count( $urls_not_found ) );
+		WP_CLI::warning( implode( "\n", $urls_not_found ) );
+
+		$scv = '';
+		foreach ( $urls_post_ids as $url => $id ) {
+			$scv .= ! empty( $scv ) ? "\n" : '';
+			$scv .= sprintf( "%s|%s|%s\n", $url, $id, $post_excerpt_old );
+		}
+		$this->logger->log( 'data.csv', $scv, null );
+
+		$d=1;
 	}
 
 	public function cmd_update_assets_credits( array $pos_args, array $assoc_args ): void {
