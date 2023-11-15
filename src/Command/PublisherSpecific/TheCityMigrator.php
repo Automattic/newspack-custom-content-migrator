@@ -135,7 +135,7 @@ class TheCityMigrator implements InterfaceCommand {
 	public function cmd_postlaunch_update_subtitles( array $pos_args, array $assoc_args ): void {
 
 		global $wpdb;
-		$file_urls_subtitles = '/Users/ivanuravic/www/thecity/app/setup6/urls_subtitlejsons.php';
+		$file_urls_subtitles = '/tmp/postlaunch_update_subtitles/urls_subtitlejsons.php';
 		$urls_subtitles = include $file_urls_subtitles;
 		$urls_not_found = [];
 		$urls_post_ids = [];
@@ -144,8 +144,9 @@ class TheCityMigrator implements InterfaceCommand {
 			/**
 			 * Get current URL.
 			 */
-			$url_local = str_replace( '//www.thecity.nyc', '//thecity.local', $url_original );
-			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key=%s and meta_value=%s", 'newspack_chorus_entry_url', $url_local ) );
+			// $url_local = str_replace( '//www.thecity.nyc', '//thecity.local', $url_original );
+			// $post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key=%s and meta_value=%s", 'newspack_chorus_entry_url', $url_local ) );
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key=%s and meta_value=%s", 'newspack_chorus_entry_url', $url_original ) );
 			if ( ! $post_id ) {
 				$urls_not_found[] = $url_original;
 				WP_CLI::warning( 'Not found URL in posts ' . $url_original );
