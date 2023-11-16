@@ -96,5 +96,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 		Command\PublisherSpecific\BlockClubChicagoMigrator::class,
 		Command\PublisherSpecific\BaristanetMigrator::class,
+		Command\PublisherSpecific\SoprisSunMigrator::class,
 	)
 );
