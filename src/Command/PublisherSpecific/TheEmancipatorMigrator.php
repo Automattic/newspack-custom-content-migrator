@@ -8,27 +8,28 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use CWS_PageLinksTo;
+use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use WP_CLI;
+use WP_CLI\ExitException;
 
 /**
  * Custom migration scripts for The Emancipator.
  */
 class TheEmancipatorMigrator implements InterfaceCommand {
 
-	const CATEGORY_ID_OPINION         = 8;
-	const CATEGORY_ID_THE_EMANCIPATOR = 9;
+	const SITE_TIMEZONE = 'America/New_York';
 
 	/**
 	 * Singleton instance.
 	 *
-	 * @var null|TheEmancipatorMigrator
+	 * @var ?self
 	 */
-	private static $instance = null;
+	private static ?self $instance = null;
 
 	private CoAuthorPlus $coauthorsplus_logic;
 
@@ -61,6 +62,9 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		return self::$instance;
 	}
 
+	/**
+	 * @throws Exception
+	 */
 	public function register_commands(): void {
 
 		WP_CLI::add_command(
@@ -93,8 +97,9 @@ EOT
 			'newspack-content-migrator emancipator-taxonomy',
 			[ $this, 'cmd_taxonomy' ],
 			[
-				'shortdesc' => 'Remove unneeded categories.',
-				'synopsis'  => $synopsis,
+				'shortdesc'     => 'Remove unneeded categories.',
+				'synopsis'      => $synopsis,
+				'before_invoke' => [ $this, 'check_requirements' ],
 			]
 		);
 
@@ -102,8 +107,9 @@ EOT
 			'newspack-content-migrator emancipator-authors',
 			[ $this, 'cmd_post_authors' ],
 			[
-				'shortdesc' => 'Migrates post authors/owners from the API content.',
-				'synopsis'  => $synopsis,
+				'shortdesc'     => 'Migrates post authors/owners from the API content.',
+				'synopsis'      => $synopsis,
+				'before_invoke' => [ $this, 'check_requirements' ],
 			]
 		);
 
@@ -111,8 +117,9 @@ EOT
 			'newspack-content-migrator emancipator-bylines',
 			[ $this, 'cmd_post_bylines' ],
 			[
-				'shortdesc' => 'Migrates bylines from the API content as Co-Authors.',
-				'synopsis'  => $synopsis,
+				'shortdesc'     => 'Migrates bylines from the API content as Co-Authors.',
+				'synopsis'      => $synopsis,
+				'before_invoke' => [ $this, 'check_requirements' ],
 			]
 		);
 
@@ -120,8 +127,9 @@ EOT
 			'newspack-content-migrator emancipator-post-subtitles',
 			[ $this, 'cmd_post_subtitles' ],
 			[
-				'shortdesc' => 'Add post subtitles',
-				'synopsis'  => $synopsis,
+				'shortdesc'     => 'Add post subtitles',
+				'synopsis'      => $synopsis,
+				'before_invoke' => [ $this, 'check_requirements' ],
 			]
 		);
 
@@ -129,8 +137,9 @@ EOT
 			'newspack-content-migrator emancipator-redirects',
 			[ $this, 'cmd_redirects' ],
 			[
-				'shortdesc' => 'Create redirects for articles that are just redirects.',
-				'synopsis'  => $synopsis,
+				'shortdesc'     => 'Create redirects for articles that are just redirects.',
+				'synopsis'      => $synopsis,
+				'before_invoke' => [ $this, 'check_requirements' ],
 			]
 		);
 
@@ -138,11 +147,30 @@ EOT
 			'newspack-content-migrator emancipator-process-images',
 			[ $this, 'cmd_process_images' ],
 			[
-				'shortdesc' => 'Add captions and credits and download missing images.',
-				'synopsis'  => $synopsis,
+				'shortdesc'     => 'Add captions and credits and download missing images.',
+				'synopsis'      => $synopsis,
+				'before_invoke' => [ $this, 'check_requirements' ],
 			]
 		);
 
+	}
+
+	/**
+	 * Do some quick sanity checks before running the commands.
+	 *
+	 * @throws ExitException
+	 */
+	public function check_requirements(): void {
+		if ( ! class_exists( 'CWS_PageLinksTo' ) ) {
+			WP_CLI::error( '"Page Links To" plugin not found. Install and activate it before using the migration commands.' );
+		}
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( '"Co-Authors Plus" plugin not found. Install and activate it before using the migration commands.' );
+		}
+
+		if ( get_option( 'timezone_string', false ) !== self::SITE_TIMEZONE ) {
+			WP_CLI::error( sprintf( "Site timezone should be '%s'. Make sure it's set correctly before running the migration commands", self::SITE_TIMEZONE ) );
+		}
 	}
 
 	public function cmd_process_images( array $args, array $assoc_args ): void {
@@ -247,6 +275,14 @@ EOT
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
 
+		$opinion_cat     = get_category_by_slug( 'opinion' );
+		$emancipator_cat = get_category_by_slug( 'the-emancipator' );
+		if ( empty( $emancipator_cat ) ) {
+			WP_CLI::log( 'Taxonomies already processed.' );
+
+			return;
+		}
+
 		WP_CLI::log( 'Removing the superfluous "Opinion" and "The Emancipator" categories.' );
 
 		$dry_run = $assoc_args['dry-run'] ?? false;
@@ -254,15 +290,15 @@ EOT
 		// Remove the categories "opinion" and "the emancipator" from all posts.
 		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
 			if ( ! $dry_run ) {
-				wp_remove_object_terms( $post->ID, self::CATEGORY_ID_OPINION, 'category' );
-				wp_remove_object_terms( $post->ID, self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
+				wp_remove_object_terms( $post->ID, $opinion_cat->term_id, 'category' );
+				wp_remove_object_terms( $post->ID, $emancipator_cat->term_id, 'category' );
 			}
 		}
 
 		// Now unnest the categories under opinion -> the emancipator.
 		$children = get_categories(
 			[
-				'parent' => self::CATEGORY_ID_THE_EMANCIPATOR,
+				'parent' => $emancipator_cat->term_id,
 			]
 		);
 		foreach ( $children as $child ) {
@@ -278,8 +314,8 @@ EOT
 		}
 		// And finally delete the two categories.
 		if ( ! $dry_run ) {
-			wp_delete_term( self::CATEGORY_ID_OPINION, 'category' );
-			wp_delete_term( self::CATEGORY_ID_THE_EMANCIPATOR, 'category' );
+			wp_delete_term( $opinion_cat->term_id, 'category' );
+			wp_delete_term( $emancipator_cat->term_id, 'category' );
 		}
 	}
 
@@ -305,13 +341,9 @@ EOT
 	/**
 	 * Create redirects for articles that are just redirects. Uses the Page Links To plugin.
 	 *
-	 * @throws WP_CLI\ExitException
+	 * @throws ExitException
 	 */
 	public function cmd_redirects( array $args, array $assoc_args ): void {
-		if ( ! class_exists( 'CWS_PageLinksTo' ) ) {
-			WP_CLI::error( 'Page Links To plugin not found. Install and activate it before using this command.' );
-		}
-
 		WP_CLI::log( 'Processing redirects into page links to.' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
 
@@ -328,7 +360,12 @@ EOT
 	}
 
 
+	/**
+	 * @throws ExitException
+	 */
 	public function cmd_post_authors( array $args, array $assoc_args ): void {
+		// I think this function is not needed, so just return here for now.
+		return;
 		WP_CLI::log( 'Processing post authors' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
 
@@ -374,24 +411,32 @@ EOT
 	 */
 	public function cmd_post_bylines( array $args, array $assoc_args ): void {
 
-		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-		}
-
 		WP_CLI::log( 'Processing bylines' );
 		$dry_run = $assoc_args['dry-run'] ?? false;
 		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		foreach ( $posts as $post ) {
-			$credits     = [];
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
+			$label_meta  = get_post_meta( $post->ID, 'label_storycard', true );
 
+			$credits = [];
 			if ( ! empty( $api_content['credits']['by'] ) ) {
 				foreach ( $api_content['credits']['by'] as $credit ) {
 					$credits[] = empty( $credit['name'] ) ? $credit : $credit['name'];
 				}
 
+			} elseif ( ! empty( $label_meta ) && str_contains( $label_meta, '|' ) ) {
+				$byline = explode( '|', $label_meta )[1];
+				foreach ( preg_split( '/(,\s|\s&\s|(\sand\s))/', $byline ) as $candidate ) {
+					$candidate = trim( $candidate );
+					if ( ! empty( $candidate ) && ! preg_match( '/[0-9]/', $candidate ) && ! ctype_upper( $candidate ) ) {
+						$credits[] = ucwords( strtolower( trim( $candidate, '.' ) ) );
+					}
+				}
+			}
+
+			if ( ! empty( $credits ) ) {
 				if ( $dry_run ) {
 					continue;
 				}
