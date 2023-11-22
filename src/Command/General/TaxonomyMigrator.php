@@ -379,10 +379,10 @@ class TaxonomyMigrator implements InterfaceCommand {
 		// Check IDs.
 		$source_term      = get_term( $source_term_id, $taxonomy );
 		$destination_term = get_term( $destination_term_id, $taxonomy );
-		if ( is_null( $source_term ) ) {
+		if ( ! $source_term instanceof \WP_Term ) {
 			WP_CLI::error( 'Wrong source term ID.' );
 		}
-		if ( is_null( $destination_term ) ) {
+		if ( ! $destination_term instanceof \WP_Term ) {
 			WP_CLI::error( 'Wrong destination term ID.' );
 		}
 		if ( $source_term_id == $destination_term_id ) {
