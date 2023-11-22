@@ -6202,12 +6202,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
     			t.slug, 
     			tt.taxonomy, 
     			tt.term_taxonomy_id
-			FROM wp_terms t
-			         LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
+			FROM $wpdb->terms t
+			         LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 			WHERE SUBSTR( t.slug, 1, 4 ) = 'cap-' 
 			  AND tt.term_taxonomy_id IS NULL
 			  AND t.term_id NOT IN (
-			      SELECT term_id FROM $wpdb->termmeta WHERE meta_key = 'updated_by_loose_terms_script'
+			      SELECT term_id FROM $wpdb->termmeta WHERE meta_key IN ( 'updated_by_loose_terms_script', 'skipped_by_loose_terms_script' )
 			  )"
 		);
 
@@ -6389,11 +6389,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							echo WP_CLI::colorize( "%BUser by login%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
 							$this->output_users_as_table( array( $user_by_login ) );
 
-							$user_by_email = false;
 							if ( is_email( $terms[0]->name ) ) {
-								$user_by_email = get_user_by( 'email', $terms[0]->name );
+								$user_by_email_taxonomy = get_user_by( 'email', $terms[0]->name );
 								echo WP_CLI::colorize( "%BUser by email%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
-								$this->output_users_as_table( array( $user_by_email ) );
+								$this->output_users_as_table( array( $user_by_email_taxonomy ) );
+								$user_by_email = $this->choose_between_users( $user_by_email, $user_by_email_taxonomy, 'Email', 'Taxonomy-Email' );
 							}
 
 							if ( $single_taxonomy && 'author' == $taxonomy_record->taxonomy ) {
@@ -6596,7 +6596,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				$command = "$standalone_command --guest-author-id=$post_ids[0] ";
-				$prompt  = 'Run the following command? (y/n/h) ';
+				$prompt  = 'Run the following command? (y/n/s/h) ';
 				if ( 1 === count( $term_taxonomy_ids_from_post_id_relationships ) && 1 === count( $term_taxonomy_ids ) ) {
 					if ( $term_taxonomy_ids_from_post_id_relationships[0] === $term_taxonomy_ids[0] ) {
 						$taxonomy_description = $wpdb->get_var(
@@ -6643,6 +6643,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							continue;
 						} elseif ( 'h' === $response ) {
 							die();
+						} elseif ( 's' === $response ) {
+							$wpdb->insert(
+								$wpdb->termmeta,
+								array(
+									'term_id'    => $loose_author_term->term_id,
+									'meta_key'   => 'skipped_by_loose_terms_script',
+									'meta_value' => 1,
+								)
+							);
+							continue;
 						} else {
 							continue;
 						}
@@ -6848,6 +6858,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( 'h' === $prompt ) {
 			die();
 		} elseif ( 's' === $prompt ) {
+			$wpdb->insert(
+				$wpdb->termmeta,
+				array(
+					'term_id' => $term_id,
+					'meta_key' => 'skipped_by_loose_terms_script',
+					'meta_value' => 1,
+				)
+			);
 			return false;
 		} else {
 			if ( $delete ) {
