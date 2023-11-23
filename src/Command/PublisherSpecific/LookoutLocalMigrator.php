@@ -767,6 +767,17 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$src
 		) );
 		if ( $attachment_id ) {
+
+			// Update meta before returning.
+
+			$post_arr = [];
+			$post_arr['post_title'] = $title;
+			$post_arr['post_excerpt'] = $caption;
+			$post_arr['post_content'] = $description;
+			$wpdb->update( $wpdb->posts, $post_arr, [ 'ID' => $attachment_id ] );
+
+			update_post_meta( $attachment_id, '_wp_attachment_image_alt', $alt );
+
 			return $attachment_id;
 		}
 
@@ -1266,6 +1277,12 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			// Tracking pixel.
 			$custom_html = '';
 
+		} elseif ( $enhancement_crawler->filter( 'div.html-module > div > form' )->count()
+		           && ( false !== strpos( $enhancement_crawler->filter( 'div.html-module > div > form' )->getNode(0)->getAttribute( 'action' ), '//lookoutlocal.activehosted.com/proc.php' ) )
+		) {
+			// Skip 'Sign up for Morning Lookout' form.
+			$custom_html = '';
+
 
 
 
@@ -1590,6 +1607,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			 *      @type string $src           Image URL.
 			 *      @type string $alt           Image alt text.
 			 *      @type string $credit        Image credit.
+			 *      @type string $caption       Image credit.
 			 *      @type string $attachment_id Image credit.
 			 * }
 			 */
@@ -1612,6 +1630,14 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner' );
 				$attribution = $slide_inner_crawler->count() > 0 ? $slide_inner_crawler->getNode(0)->getAttribute('data-info-attribution') : null;
 				$images_data [ $img_index ][ 'credit' ] = $attribution;
+
+				// Get Caption from >
+				$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner > div.carousel-slide-info > div.carousel-slide-info-content > div.carousel-slide-info-title' );
+				$caption = $slide_inner_crawler->innerText();
+				$caption = trim( str_replace( ' ', ' ', $caption ) );
+				if ( ! empty( $caption ) ) {
+					$images_data [ $img_index ][ 'caption' ] = $caption;
+				}
 
 				// Get Src and Alt from > div class=carousel-slide-inner > div.carousel-slide-media > img ::: alt src
 				$slide_inner_crawler = $slides_info_crawler->filter( 'div.carousel-slide-inner > div.carousel-slide-media > img' );
@@ -1646,7 +1672,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 				if ( $this->dev_fake_image_override ) {
 					$image_data[ 'src' ] = $this->dev_fake_image_override;
 				}
-				$attachment_id    = $this->get_or_download_image( $log_err_img_download, $image_data[ 'src' ], $title = null, $caption = null, $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
+				$attachment_id    = $this->get_or_download_image( $log_err_img_download, $image_data[ 'src' ], $title = null, $caption = $image_data[ 'caption' ], $description = null, $image_data[ 'alt' ], $post_id, $image_data[ 'credit' ] );
 				$attachment_ids[] = $attachment_id;
 			}
 
@@ -3099,6 +3125,54 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_dev( $pos_args, $assoc_args ) {
+
+
+		/**
+		 * Get list of remaining URLs to scrape and import.
+		 *          /Users/ivanuravic/www/lookoutlocalx/app/public/0_run_scrapeimport/0_1_prelaunch_test/0__all_urls.txt
+		 *  minus   all in DB
+		 *  minus   not imported.
+		 */
+		global $wpdb;
+		$all_urls = explode( "\n", file_get_contents( '/Users/ivanuravic/www/lookoutlocalx/app/public/0_run_scrapeimport/0_1_prelaunch_test/0__all_urls.txt' ) );
+		$not_imported = [  ];
+		$remaining = [];
+		foreach ( $all_urls as $url ) {
+			if ( ! $url || empty( $url ) ) {
+				continue;
+			}
+			if ( in_array( $url, $not_imported ) ) {
+				continue;
+			}
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s", self::META_POST_ORIGINAL_URL, $url ) );
+			if ( $post_id ) {
+				continue;
+			}
+
+			$remaining[] = $url;
+		}
+
+		return;
+
+
+		/**
+		 * Compare URLs they found VS URLs sitemap has.
+		 *  => result, we got all of these, none were missed.
+		 */
+		$their_urls = [  ];
+		$sitemap_urls = explode( "\n", file_get_contents( '/Users/ivanuravic/www/lookoutlocalx/app/public/0_run_scrapeimport/0_2_prelaunch_scrape/0__all_urls.txt' ) );
+		$new_urls = [];
+		foreach ( $their_urls as $url ) {
+			$url = trim( $url );
+			if ( ! in_array( $url, $sitemap_urls ) ) {
+				$new_urls[] = $url;
+			}
+		}
+
+		return;
+
+
+
 		global $wpdb;
 
 		$urls = [];
