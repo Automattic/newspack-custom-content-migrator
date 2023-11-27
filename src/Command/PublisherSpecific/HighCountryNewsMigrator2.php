@@ -5,14 +5,13 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DateTime;
 use DateTimeZone;
 use Exception;
-use HTMLPurifier;
-use HTMLPurifier_HTML5Config;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -27,9 +26,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	/**
 	 * Singleton.
 	 *
-	 * @var self
+	 * @var ?self
 	 */
-	private static $instance;
+	private static ?self $instance = null;
 
 	/**
 	 * @var CoAuthorPlus $coauthorsplus_logic
@@ -65,6 +64,20 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @var Attachments
 	 */
 	private Attachments $attachments;
+
+	private array $only_with_id = [
+		'type'        => 'assoc',
+		'name'        => 'only-with-id',
+		'description' => 'Will only process the post that with an @id that ends in the given string',
+		'optional'    => true,
+	];
+
+	private array $refresh_existing = [
+		'type'        => 'flag',
+		'name'        => 'refresh-existing',
+		'description' => 'Will refresh existing content rather than create new',
+		'optional'    => true,
+	];
 
 	private array $articles_json_arg = [
 		'type'        => 'assoc',
@@ -110,15 +123,24 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
 
-	const PARENT_PAGE_FOR_ISSUES = 180504; // The page that all issues will have as parent.
-	const DEFAULT_AUTHOR_ID      = 223746; // User ID of default author.
-	const TAG_ID_THE_MAGAZINE    = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
-	const CATEGORY_ID_ISSUES     = 385;
+	const PARENT_PAGE_FOR_ISSUES  = 180504; // The page that all issues will have as parent.
+	const DEFAULT_AUTHOR_ID       = 223746; // User ID of default author.
+	const TAG_ID_THE_MAGAZINE     = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
+	const CATEGORY_ID_ISSUES      = 385;
+	const CATEGORY_ID_DEPARTMENTS = 7655;
 
 	private DateTimeZone $site_timezone;
 
 	private function __construct() {
-		// Do nothing.
+		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->redirection               = new Redirection();
+		$this->logger                    = new Logger();
+		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+		$this->attachments               = new Attachments();
+		$this->json_iterator             = new JsonIterator();
+		$this->site_timezone             = new DateTimeZone( 'America/Denver' );
+		$this->posts_logic               = new Posts();
+		$this->taxonomy_logic            = new Taxonomy();
 	}
 
 	/**
@@ -127,17 +149,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @return self
 	 */
 	public static function get_instance(): self {
-
 		if ( null === self::$instance ) {
-			self::$instance                            = new self();
-			self::$instance->coauthorsplus_logic       = new CoAuthorPlus();
-			self::$instance->redirection               = new Redirection();
-			self::$instance->logger                    = new Logger();
-			self::$instance->gutenberg_block_generator = new GutenbergBlockGenerator();
-			self::$instance->attachments               = new Attachments();
-			self::$instance->json_iterator             = new JsonIterator();
-			self::$instance->site_timezone             = new DateTimeZone( 'America/Denver' );
-			self::$instance->posts_logic               = new Posts();
+			self::$instance = new self();
 		}
 
 		return self::$instance;
@@ -278,16 +291,16 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator hcn-fix-redirects',
-			array( $this, 'fix_redirects' ),
-			array(
+			[ $this, 'fix_redirects' ],
+			[
 				'shortdesc' => 'Fix existing redirects.',
-				'synopsis'  => array(
+				'synopsis'  => [
 					[
 						$this->articles_json_arg,
 						...BatchLogic::get_batch_args(),
 					],
-				),
-			)
+				],
+			]
 		);
 	}
 
@@ -358,6 +371,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'synopsis'  => [
 					$this->articles_json_arg,
 					...BatchLogic::get_batch_args(),
+					$this->refresh_existing,
+					$this->only_with_id,
 				],
 			]
 		);
@@ -659,27 +674,26 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( empty( $related_post_id ) ) {
 				continue;
 			}
-			$post    = get_post( $post_id );
-			$content = $post->post_content;
-			$content .= serialize_block(
-				$this->gutenberg_block_generator->get_paragraph( 'Read More:' )
-			);
-
-			$content .= serialize_block(
-				$this->gutenberg_block_generator->get_list(
-					array_map(
-						fn( $related_post ) => '<a href="' . $related_post['permalink'] . '">' . $related_post['title'] . '</a>',
-						$related_links
+			$post  = get_post( $post_id );
+			$group = $this->gutenberg_block_generator->get_group_constrained(
+				[
+					$this->gutenberg_block_generator->get_paragraph( 'Read More:' ),
+					$this->gutenberg_block_generator->get_list(
+						array_map(
+							fn( $related_post ) => '<a href="' . $related_post['permalink'] . '">' . $related_post['title'] . '</a>',
+							$related_links
+						)
 					)
-				)
+				],
+				[ 'hcn-bottom-read-more' ]
 			);
 			wp_update_post(
 				[
 					'ID'           => $post_id,
-					'post_content' => $content,
+					'post_content' => $post->post_content . serialize_block( $group ),
 				]
 			);
-			$this->logger->log( $log_file, sprintf( 'Added related links block to %s', get_permalink( $post ) ), Logger::SUCCESS );
+			$this->logger->log( $log_file, sprintf( 'Added a "Read more" block to %s', get_permalink( $post ) ), Logger::SUCCESS );
 			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
 		}
 
@@ -691,7 +705,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$log_file = __FUNCTION__ . 'log';
 
 		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
-		$post_ids  = $assoc_args['post-id'] ?? false;
+		$post_ids  = $assoc_args['post-id'] ? [ $assoc_args['post-id'] ] : false;
 		if ( ! $post_ids ) {
 			global $wpdb;
 			$post_ids = $wpdb->get_col(
@@ -701,6 +715,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				)
 			);
 		}
+
 		foreach ( $post_ids as $post_id ) {
 			$post   = get_post( $post_id );
 			$result = wp_update_post(
@@ -805,6 +820,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( empty( $row->email ) ) {
 				continue; // Nope. No email, no user.
 			}
+			if ( get_user_by( 'email', $row->email ) ) {
+				WP_CLI::log( sprintf( 'User with email %s already exists, skipping', $row->email ) );
+				continue;
+			}
+
 			if ( ! empty( $creators ) && ! in_array( $row->username, $creators ) ) {
 				continue;
 			}
@@ -1106,12 +1126,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @throws Exception
 	 */
 	public function migrate_articles_from_json( array $args, array $assoc_args ): void {
-		$log_file   = __FUNCTION__ . '.log';
-		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
-		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+		$log_file         = __FUNCTION__ . '.log';
+		$file_path        = $assoc_args[ $this->articles_json_arg['name'] ];
+		$batch_args       = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+		$refresh_existing = $assoc_args[ $this->refresh_existing['name'] ] ?? false;
+		$only_with_id     = $assoc_args[ $this->only_with_id['name'] ] ?? false;
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			if ( $only_with_id && ! str_ends_with( $row->{'@id'}, $only_with_id ) ) {
+				continue;
+			}
+
 			WP_CLI::log( sprintf( 'Article %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 			if ( empty( $row->text ) ) {
 				$this->logger->log( $log_file, sprintf( 'Article %s has no text. Skipping', $row->{'@id'} ), Logger::WARNING );
@@ -1119,15 +1145,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			if ( 'download-entire-issue' === $row->id ) {
 				$this->logger->log( $log_file, sprintf( 'Article is a download-entire-issue. Skipping: %s', $row->{'@id'} ) );
+				// TODO. Check if we need to delete an existing one?
 				continue;
 			}
 
 			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			$existing_id = $this->get_post_id_from_uid( $row->UID );
-			if ( $existing_id ) {
+			if ( $existing_id && ! $refresh_existing ) {
 				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
 				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
-				continue;
 			}
 
 			$post_date_string     = $row->effective ?? $row->created;
@@ -1165,11 +1191,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 			}
 
-			$text      = $this->cleanup_text( $row->text ?? '' );
+			$text      = $row->text;
 			$replacers = [];
-			if ( str_contains( $text, 'twitter-tweet' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->replace_twitter_embeds( $html_doc );
-			}
 			if ( str_contains( $text, 'resolveuid/' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->replace_img_tags( $html_doc );
 			}
@@ -1185,7 +1208,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			$article_layout          = $row->layout ?? '';
-			$featured_image_position = 'fullwidth_article_view' === $article_layout ? 'above' : 'hidden';
+			$featured_image_position = 'hidden';
+			if ( in_array( $article_layout, [ 'fullwidth_article_view', 'gallery_view' ] ) ) {
+				$featured_image_position = 'above';
+				// TODO: I'm not sure why this is necessary. It should be set automagically somewhere?
+				$post_data['meta_input']['_wp_page_template'] = 'single-feature.php';
+			}
 
 			// Featured image.
 			if ( ! empty( $row->image ) ) {
@@ -1215,11 +1243,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			$intro                     = $row->intro ?? '';
-			$post_data['post_content'] = wp_kses_post( $intro . $gallery . $text );
+			$post_data['post_content'] = $intro . $gallery . $text;
 
-			$created_post_id = wp_insert_post( $post_data );
-			if ( is_wp_error( $created_post_id ) ) {
-				$this->logger->log( $log_file, sprintf( "Failed creating post: %s \n\t%s ", $row->{'@id'}, $created_post_id->get_error_message() ), Logger::ERROR );
+			if ( $refresh_existing && $existing_id ) {
+				$verb              = 'updated';
+				$post_data['ID']   = $existing_id;
+				$processed_post_id = wp_update_post( $post_data );
+			} else {
+				$verb              = 'created';
+				$processed_post_id = wp_insert_post( $post_data );
+			}
+			if ( is_wp_error( $processed_post_id ) ) {
+				$this->logger->log( $log_file, sprintf( "Failed %s post: %s \n\t%s ", $verb, $row->{'@id'}, $processed_post_id->get_error_message() ), Logger::ERROR );
 				continue;
 			}
 
@@ -1228,17 +1263,24 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
 				$this->parse_author_string( $row->author ?? '' )
 			);
-			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $created_post_id );
+			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $processed_post_id );
 
 			if ( ! empty( $row->subjects ) ) {
-				wp_set_object_terms( $created_post_id, $row->subjects, 'post_tag' );
+				wp_set_object_terms( $processed_post_id, $row->subjects, 'post_tag' );
 				$primary_tag = get_term_by( 'name', $row->subjects[0], 'post_tag' );
-				update_post_meta( $created_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
+				update_post_meta( $processed_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
 			}
-			$this->set_categories_on_post_from_path( get_post( $created_post_id ), $tree_path );
-			$this->add_post_redirects( get_post( $created_post_id ), $row, $tree_path );
 
-			$this->logger->log( $log_file, sprintf( 'Created post: %s', get_permalink( $created_post_id ) ), Logger::SUCCESS );
+			$this->set_categories_on_post_from_path( get_post( $processed_post_id ), $tree_path );
+
+			if ( ! empty( $row->department ) ) {
+				$department_category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $row->department, self::CATEGORY_ID_DEPARTMENTS );
+				wp_set_post_categories( $processed_post_id, [ $department_category_id ], true );
+			}
+
+			$this->add_post_redirects( get_post( $processed_post_id ), $row, $tree_path );
+
+			$this->logger->log( $log_file, sprintf( '%s post: %s', $verb, get_permalink( $processed_post_id ) ), Logger::SUCCESS );
 		}
 
 	}
@@ -1278,29 +1320,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
-	/**
-	 * Fix the HTML and remove stuff we don't like.
-	 *
-	 * See http://htmlpurifier.org/live/configdoc/plain.html
-	 *
-	 * @param string $text The text to clean up.
-	 *
-	 * @return string
-	 */
-	private function cleanup_text( string $text ): string {
-		static $purifier = null;
-		if ( null === $purifier ) {
-			$config = HTMLPurifier_HTML5Config::createDefault();
-			$config->set( 'AutoFormat.RemoveEmpty.RemoveNbsp', true );
-			$config->set( 'AutoFormat.RemoveEmpty', true );
-			$config->set( 'Attr.AllowedFrameTargets', [ '_blank' ] );
-			$config->set( 'AutoFormat.RemoveSpansWithoutAttributes', true );
-			$purifier = new HTMLPurifier( $config );
-		}
-
-		return $purifier->purify( $text );
-	}
-
 	private function grab_featured_image( $url ): int {
 		$response = wp_remote_get( $url );
 		if ( 200 !== wp_remote_retrieve_response_code( $response ) || empty( $response['body'] ) ) {
@@ -1333,6 +1352,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			return $content;
 		}
 		global $wpdb;
+		$on_left_side = true; // Start the boxes on the left and then alternate sides. Only applies if there are mulitple boxes.
 		foreach ( $matches as $match ) {
 			$path         = trim( parse_url( $match[1], PHP_URL_PATH ), '/' );
 			$related_post = $wpdb->get_var(
@@ -1341,8 +1361,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$path
 				)
 			);
+			if ( empty( $related_post ) ) {
+				continue;
+			}
 
-			$args  = [
+			$args         = [
 				'showReadMore'  => false,
 				'showDate'      => false,
 				'showAuthor'    => false,
@@ -1352,10 +1375,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'postsToShow'   => 1,
 				'showExcerpt'   => false,
 			];
-			$block = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( [ $related_post ], $args, );
-			$group = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border', 'alignright' ] ) );
-
-			$content = str_replace( $match[0], $group, $content );
+			$block        = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( [ $related_post ], $args, );
+			$align        = 'align' . ( $on_left_side ? 'left' : 'right' );
+			$on_left_side = ! $on_left_side;
+			$group        = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border', $align ] ) );
+			$content      = str_replace( $match[0], $group, $content );
 		}
 
 		return $content;
@@ -1384,21 +1408,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
-	private function replace_twitter_embeds( HtmlDocument $html_doc ): void {
-
-		$twitter_blockquoutes = $html_doc->find( 'blockquote.twitter-tweet' );
-		foreach ( $twitter_blockquoutes as $tb ) {
-			$link = $tb->find( 'a', - 1 );
-			if ( empty( $link ) ) {
-				continue;
-			}
-			$url = $link->getAttribute( 'href' );
-			if ( $url ) {
-				$tb->outertext = serialize_block( $this->gutenberg_block_generator->get_twitter( $url ) );
-			}
-		}
-	}
-
 	private function replace_img_tags( HtmlDocument $html_doc ): void {
 		$imgs_to_resolve = $html_doc->find( 'img' );
 		foreach ( $imgs_to_resolve as $img ) {
@@ -1418,8 +1427,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$align = null;
 
 			$container_class = $img->find_ancestor_tag( 'div' )?->getAttribute( 'class' ) ?? '';
+			$image_class     = $img->getAttribute( 'class' ) ?? '';
 			if ( str_contains( $container_class, 'full-bleed' ) ) {
 				$align = 'full';
+			} elseif ( str_contains( $image_class, 'image-right' ) ) {
+				$align = 'right';
+			} elseif ( str_contains( $image_class, 'image-left' ) ) {
+				$align = 'left';
 			}
 			$img->outertext = serialize_block(
 				$this->gutenberg_block_generator->get_image(
