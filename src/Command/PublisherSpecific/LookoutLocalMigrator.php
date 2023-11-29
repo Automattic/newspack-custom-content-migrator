@@ -412,11 +412,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 		global $wpdb;
 		$cdn_host = 'lookout.brightspotcdn.com';
-		// $post_ids = [ 34324 ];
 		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-
-if ( ($key_post_id + 1) < 1065 ) { continue; }
 
 			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $post_content );
@@ -439,7 +436,7 @@ if ( ($key_post_id + 1) < 1065 ) { continue; }
 				$att_id = $this->attachments->import_external_file(
 					$data_src, $title = null, $caption = null, $description = null, $alt = null, $post_id, $args = [], $desired_filename = ''
 				);
-// $att_id = 34331;
+
 				if ( ! $att_id || is_wp_error( $att_id ) ) {
 					$d=1;
 				}
