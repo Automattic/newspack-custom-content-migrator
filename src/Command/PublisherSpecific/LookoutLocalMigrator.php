@@ -12,6 +12,7 @@ use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Redirection;
 use \Newspack_Scraper_Migrator_Util;
 use \Newspack_Scraper_Migrator_HTML_Parser;
+use \NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use \WP_CLI;
 use Symfony\Component\DomCrawler\Crawler as Crawler;
 use DOMElement;
@@ -147,6 +148,13 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	private $redirection;
 
 	/**
+	 * HtmlElementManipulator instance.
+	 *
+	 * @var HtmlElementManipulator HtmlElementManipulator instance.
+	 */
+	private $html_element_manipulator;
+
+	/**
 	 * Used as a development QA helper.
 	 * If set, no images will actually be downloaded from live, and this image will be used instead. This will prevent all image downloads and speed up dev and QA.
 	 *
@@ -172,15 +180,16 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		require realpath( $plugin_dir . '/vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-util.php' );
 		require realpath( $plugin_dir . '/vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-html-parser.php' );
 
-		$this->attachments = new Attachments();
-		$this->logger      = new Logger();
-		$this->scraper     = new Newspack_Scraper_Migrator_Util();
-		$this->crawler     = new Crawler();
-		$this->data_parser = new Newspack_Scraper_Migrator_HTML_Parser();
-		$this->cap         = new CoAuthorPlus();
-		$this->posts       = new Posts();
-		$this->gutenberg   = new GutenbergBlockGenerator();
-		$this->redirection = new Redirection();
+		$this->attachments              = new Attachments();
+		$this->logger                   = new Logger();
+		$this->scraper                  = new Newspack_Scraper_Migrator_Util();
+		$this->crawler                  = new Crawler();
+		$this->data_parser              = new Newspack_Scraper_Migrator_HTML_Parser();
+		$this->cap                      = new CoAuthorPlus();
+		$this->posts                    = new Posts();
+		$this->gutenberg                = new GutenbergBlockGenerator();
+		$this->redirection              = new Redirection();
+		$this->html_element_manipulator = new HtmlElementManipulator();
 	}
 
 	/**
@@ -303,6 +312,10 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			'newspack-content-migrator lookoutlocal-excerpts-to-subtitles',
 			[ $this, 'cmd_excerpts_to_subtitles' ],
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator lookoutlocal-download-images-data-src-cdn',
+			[ $this, 'cmd_download_images_data_src_cdn' ],
+		);
 
 		// WP_CLI::add_command(
 		// 	'newspack-content-migrator lookoutlocal-scrape-posts',
@@ -393,6 +406,95 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			]
 
 		);
+	}
+
+	public function cmd_download_images_data_src_cdn( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+		$cdn_host = 'lookout.brightspotcdn.com';
+		// $post_ids = [ 34324 ];
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+if ( ($key_post_id + 1) < 1065 ) { continue; }
+
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $post_content );
+			if ( ! $matches || ! isset( $matches[0] ) ) {
+				continue;
+			}
+
+			$post_content_updated = $post_content;
+			foreach ( $matches[0] as $match ) {
+				$img = $match[0];
+				$data_src = $this->html_element_manipulator->get_attribute_value( 'data-src', $img );
+				if ( false === strpos( $data_src, '//' . $cdn_host ) ) {
+					continue;
+				}
+
+				WP_CLI::line( sprintf( '%d/%d %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+				// Download image.
+				WP_CLI::line( sprintf( 'Downloading %s', $data_src ) );
+				$att_id = $this->attachments->import_external_file(
+					$data_src, $title = null, $caption = null, $description = null, $alt = null, $post_id, $args = [], $desired_filename = ''
+				);
+// $att_id = 34331;
+				if ( ! $att_id || is_wp_error( $att_id ) ) {
+					$d=1;
+				}
+				WP_CLI::line( sprintf( 'Att ID %d', $att_id ) );
+
+				// Get attachment ID URL.
+				$att_url = wp_get_attachment_url( $att_id );
+				if ( ! $att_url ) {
+					$d=1;
+				}
+
+				// Update image HTML.
+				$img_updated = $img;
+
+				// Update src.
+				// Get src value.
+				$pos_src_minus_1 = strpos( $img_updated, ' src="' );
+				$pos_src = $pos_src_minus_1 + 1;
+				$pos_src_end = strpos( $img_updated, '"', $pos_src + 5 );
+				$src = substr( $img_updated, $pos_src, $pos_src_end - $pos_src + 1 );
+				// Replace src
+				if ( $pos_src && $pos_src_end && ($pos_src_end > $pos_src ) ) {
+					$src_new = sprintf( 'src="%s"', $att_url );
+					$img_updated = str_replace( $src, $src_new, $img_updated );
+				} else {
+					$d=1;
+				}
+
+				// Remove data-src.
+				// Get data-src value.
+				$pos_datasrc = strpos( $img_updated, 'data-src="' );
+				$pos_datasrc_end = strpos( $img_updated, '"', $pos_datasrc + 10 );
+				$datasrc = substr( $img_updated, $pos_datasrc, $pos_datasrc_end - $pos_datasrc + 1 );
+				$img_updated = str_replace( $datasrc, '', $img_updated );
+
+				// Update image HTML.
+				$post_content_updated = str_replace( $img, $img_updated, $post_content_updated );
+			}
+
+			// Update post.
+			if ( $post_content_updated != $post_content ) {
+				$d=1;
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_content' => $post_content_updated,
+					],
+					[ 'ID' => $post_id ],
+				);
+				WP_CLI::success( sprintf( 'Updated post ID %d', $post_id ) );
+			}
+
+		}
+
+		wp_cache_flush();
 	}
 
 	public function cmd_excerpts_to_subtitles( $pos_args, $assoc_args ) {
