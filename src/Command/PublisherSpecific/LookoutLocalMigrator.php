@@ -3163,6 +3163,68 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 
 		/**
+		 * Get which of the provided URLs were already imported and their post IDs.
+		 */
+		global $wpdb;
+		$urls = include( '/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/374_urls.php' );
+		$csv = 'url,post_id' . "\n";
+		foreach ( $urls as $url ) {
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s", self::META_POST_ORIGINAL_URL, $url ) );
+			if ( $post_id ) {
+				$csv .= sprintf( '%s,%d' . "\n", $url, $post_id );
+			} else {
+				$csv .= sprintf( '%s,%s' . "\n", $url, '' );
+			}
+		}
+		file_put_contents( '374_urls_to_post_ids.csv', $csv );
+		return;
+
+
+		/**
+		 * Extract URLs to live posts from LL's backend CMS editor HTML files.
+		 */
+		$paths_to_cms_htmls = [
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/1_2',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/3',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/4',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/5',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/6',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/7',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/8',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/9',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/10',
+			'/Users/ivanuravic/www/lookoutlocalx/app/public/0_scrape_537/CMS_sources/11',
+		];
+		$public_urls = [];
+
+		// Get all .html files in $path_to_cms_htmls.
+		foreach ( $paths_to_cms_htmls as $path_to_cms_htmls ) {
+			$files = glob( $path_to_cms_htmls . '/*.html' );
+			foreach ( $files as $file ) {
+
+				// Get HTML and feed to crawler.
+				$html = file_get_contents( $file );
+				$this->crawler->clear();
+				$this->crawler->add( $html );
+
+				// $data['name'] = trim( $this->filter_selector( 'div.widget-urlsItemLabel > a', $this->crawler ) );
+
+				$public_url_crawler = $this->filter_selector_element( 'div.widget-urlsItemLabel > a', $this->crawler, $single = true );
+				$public_url = $public_url_crawler ? $public_url_crawler->getAttribute( 'href' ) : null;
+				if ( is_null( $public_url ) ) {
+					$d=1;
+				}
+
+				$public_urls[] = $public_url;
+			}
+		}
+
+		$public_urls = array_unique( $public_urls );
+		file_put_contents( 'public_urls.txt', implode( "\n", $public_urls ) );
+
+		return;
+
+		/**
 		 * Get list of remaining URLs to scrape and import.
 		 *          /Users/ivanuravic/www/lookoutlocalx/app/public/0_run_scrapeimport/0_1_prelaunch_test/0__all_urls.txt
 		 *  minus   all in DB
