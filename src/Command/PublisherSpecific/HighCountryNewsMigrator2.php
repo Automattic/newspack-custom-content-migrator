@@ -1212,7 +1212,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 			}
 
-			$text      = $row->text;
+			$text      = $row->text ?? '';
+			$intro     = $row->intro ?? '';
 			$replacers = [];
 			if ( str_contains( $text, 'resolveuid/' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->replace_img_tags( $html_doc );
@@ -1237,8 +1238,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			// Featured image.
-			if ( ! empty( $row->image ) ) {
-				$filename  = $row->image->filename;
+			$featured_image = $row->image ?? ( $row->bigimage ?? false ); // Most posts use 'image', but some use 'bigimage'.
+			if ( ! empty( $featured_image ) ) {
+				$filename  = $featured_image->filename;
 				$path_info = pathinfo( $filename );
 				if ( str_ends_with( $path_info['filename'], '-thumb' ) ) {
 					$filename_without_extension = str_replace( '-thumb', '', $path_info['filename'] );
@@ -1258,12 +1260,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			$gallery = '';
-			if ( $row->gallery_enabled ) {
+			if ( $row->gallery_enabled || $row->image_viewer ) {
 				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path );
 				$gallery        = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
 			}
 
-			$intro                     = $row->intro ?? '';
 			$post_data['post_content'] = $intro . $gallery . $text;
 
 			if ( $refresh_existing && $existing_id ) {
@@ -1361,13 +1362,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$anchor = '[SIDEBAR]';
 		$offset = 0;
 		$len    = strlen( $anchor );
-		foreach ( $sidebars as $sidebar ) {
-			$found_sidebar = $sidebar->innertext();
+//		foreach ( $sidebars as $sidebar ) {
+//			$found_sidebar = $sidebar->innertext();
 //			$group = serialize_block($this->gutenberg_block_generator->get_group_constrained_w_classic($found_sidebar, ['align-left', 'hcn-sidebar'] ));
-			$pos           = strpos( $post_content, $anchor, $offset );
-			$offset        = $pos + $len;
-			$post_content  = substr_replace( $post_content, $group, $pos, $len );
-		}
+//			$pos           = strpos( $post_content, $anchor, $offset );
+//			$offset        = $pos + $len;
+//			$post_content  = substr_replace( $post_content, $group, $pos, $len );
+//		}
 
 		return $post_content;
 	}
