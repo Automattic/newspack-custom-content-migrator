@@ -896,7 +896,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
+		$command_meta_version = 10;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 		$articles_json        = $assoc_args[ $this->articles_json_arg['name'] ];
 		$issues_json          = $assoc_args[ $this->issues_json_arg['name'] ];
