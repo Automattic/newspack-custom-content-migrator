@@ -302,6 +302,19 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-sidebars',
+			[ $this, 'fix_sidebars' ],
+			[
+				'shortdesc' => 'Fix sidebars.',
+				'synopsis'  => [
+					[
+						$this->articles_json_arg,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -494,6 +507,14 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
 				}
 			}
+		}
+	}
+
+	public function fix_sidebars( array $positional_args, array $assoc_args ): void {
+		$scraped_content = '';
+		if ( str_contains( $text, '[SIDEBAR]' ) ) {
+			$scraped_content = $this->get_scrape_content( $row->{'@id'} );
+			$text            = $this->grab_sidebars( $scraped_content, $text );
 		}
 	}
 
@@ -1320,13 +1341,42 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
-	private function grab_featured_image( $url ): int {
+	private function get_scrape_content( string $url ): string {
 		$response = wp_remote_get( $url );
 		if ( 200 !== wp_remote_retrieve_response_code( $response ) || empty( $response['body'] ) ) {
-			return 0;
+			return '';
 		}
+
+		return $response['body'];
+	}
+
+	private function grab_sidebars( string $scraped_content, string $post_content ): string {
+		$html_doc = new HtmlDocument( $scraped_content );
+
+		$sidebars = $html_doc->find( '#content article aside.sidebar ul li' );
+		if ( empty( $sidebars ) ) {
+			// TODO. Log and warn?
+			return $post_content;
+		}
+		$anchor = '[SIDEBAR]';
+		$offset = 0;
+		$len    = strlen( $anchor );
+		foreach ( $sidebars as $sidebar ) {
+			$found_sidebar = $sidebar->innertext();
+//			$group = serialize_block($this->gutenberg_block_generator->get_group_constrained_w_classic($found_sidebar, ['align-left', 'hcn-sidebar'] ));
+			$pos           = strpos( $post_content, $anchor, $offset );
+			$offset        = $pos + $len;
+			$post_content  = substr_replace( $post_content, $group, $pos, $len );
+		}
+
+		return $post_content;
+	}
+
+	private function grab_featured_image( string $url ): int {
+		$scraped_content = $this->get_scrape_content( $url );
+
 		global $wpdb;
-		$html_doc = new HtmlDocument( $response['body'] );
+		$html_doc = new HtmlDocument( $scraped_content );
 
 		$img = $html_doc->find( 'header img', 0 );
 		$src = $img?->getAttribute( 'src' );
