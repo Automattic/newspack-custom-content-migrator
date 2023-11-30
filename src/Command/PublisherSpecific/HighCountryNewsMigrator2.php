@@ -211,7 +211,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		];
 
 		foreach ( get_posts( $post_args ) as $post ) {
-			WP_CLI::log( sprintf( 'Deleting post with title %s', $post->post_title ) );
+			WP_CLI::log( sprintf( 'Deleting issue page with title %s', $post->post_title ) );
 			wp_delete_post( $post->ID, true );
 		}
 
@@ -298,19 +298,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					[
 						$this->articles_json_arg,
 						...BatchLogic::get_batch_args(),
-					],
-				],
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator hcn-fix-sidebars',
-			[ $this, 'fix_sidebars' ],
-			[
-				'shortdesc' => 'Fix sidebars.',
-				'synopsis'  => [
-					[
-						$this->articles_json_arg,
 					],
 				],
 			]
@@ -417,6 +404,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'shortdesc' => 'Adds a block to articles with referenced links.',
 				'synopsis'  => [
 					$this->articles_json_arg,
+					...BatchLogic::get_batch_args(),
 				],
 			]
 		);
@@ -507,14 +495,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
 				}
 			}
-		}
-	}
-
-	public function fix_sidebars( array $positional_args, array $assoc_args ): void {
-		$scraped_content = '';
-		if ( str_contains( $text, '[SIDEBAR]' ) ) {
-			$scraped_content = $this->get_scrape_content( $row->{'@id'} );
-			$text            = $this->grab_sidebars( $scraped_content, $text );
 		}
 	}
 
@@ -722,11 +702,35 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$this->logger->log( $log_file, sprintf( 'Finished processing batch from %d to %s', $batch_args['start'], $end ) );
 	}
 
+	private function find_featured_image_on_post_without_one( int $post_id ): int {
+		$images = get_attached_media( 'image', $post_id );
+
+		// If this is an issue post, see if we can grab the cover from the issue.
+		if ( empty( $images ) && has_category( self::CATEGORY_ID_ISSUES, $post_id ) ) {
+			$post_issue = wp_get_post_categories( $post_id, [ 'parent' => self::CATEGORY_ID_ISSUES ] );
+			if ( ! empty( $post_issue ) ) {
+				$issue_cat  = current( $post_issue );
+				$issue_page = current( $this->posts_logic->get_post_objects_with_taxonomy_and_term( 'category', $issue_cat, [ 'page' ] ) );
+				if ( ! empty( $issue_page ) ) {
+					$images = get_attached_media( 'image', $issue_page->ID );
+				}
+
+			}
+		}
+		if ( empty( $images ) ) {
+			return 0;
+		}
+		$attachment_post = current( $images );
+
+		return $attachment_post->ID;
+	}
+
+
 	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
 		$log_file = __FUNCTION__ . 'log';
 
 		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
-		$post_ids  = $assoc_args['post-id'] ? [ $assoc_args['post-id'] ] : false;
+		$post_ids  = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
 		if ( ! $post_ids ) {
 			global $wpdb;
 			$post_ids = $wpdb->get_col(
@@ -736,8 +740,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				)
 			);
 		}
-
+		$total_posts = count( $post_ids );
+		$counter     = 0;
 		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing (%d/%d) post id: %d', ++ $counter, $total_posts, $post_id ) );
 			$post   = get_post( $post_id );
 			$result = wp_update_post(
 				[
@@ -896,7 +902,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 10;
+		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 		$articles_json        = $assoc_args[ $this->articles_json_arg['name'] ];
 		$issues_json          = $assoc_args[ $this->issues_json_arg['name'] ];
@@ -1052,13 +1058,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				// TODO. There are some "legacyPath" images. They seem to point at empty urls, but let's get back to this.
 				continue;
 			}
-			$has_gallery = ! empty( $row->gallery ) && 'inline' !== $row->gallery; // TODO. Figure out what an inline gallery is.
-			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
-			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
+			$is_gallery_image = ! empty( $row->gallery );
+			$tree_path        = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
+			$existing_id      = $this->get_attachment_id_by_uid( $row->UID );
 			if ( $existing_id ) {
 				$this->logger->log( $log_file, sprintf( 'Image already imported to %s', get_permalink( $existing_id ) ), Logger::WARNING );
 				// Gallery.
-				if ( $has_gallery ) {
+				if ( $is_gallery_image ) {
 					update_post_meta( $existing_id, 'plone_gallery_id', $row->gallery );
 					$this->logger->log( $log_file, sprintf( 'Updated gallery id on %s', get_permalink( $existing_id ) ), Logger::SUCCESS );
 				}
@@ -1107,7 +1113,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					'plone_tree_path'   => $tree_path,
 				],
 			];
-			if ( $has_gallery ) {
+			if ( $is_gallery_image ) {
 				$img_post_data['meta_input']['plone_gallery_id'] = $row->gallery;
 			}
 
@@ -1152,6 +1158,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args       = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 		$refresh_existing = $assoc_args[ $this->refresh_existing['name'] ] ?? false;
 		$only_with_id     = $assoc_args[ $this->only_with_id['name'] ] ?? false;
+
+		$current_domain = parse_url( get_site_url(), PHP_URL_HOST );
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
@@ -1212,60 +1220,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				}
 			}
 
-			$text      = $row->text ?? '';
-			$intro     = $row->intro ?? '';
-			$replacers = [];
-			if ( str_contains( $text, 'resolveuid/' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->replace_img_tags( $html_doc );
-			}
-			if ( str_contains( $text, '<video' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->replace_videos( $html_doc );
-			}
-			if ( ! empty( $replacers ) ) {
-				$html_doc = new HtmlDocument( $text );
-				foreach ( $replacers as $replacer ) {
-					$replacer( $html_doc );
-				}
-				$text = $html_doc->save();
-			}
-
 			$article_layout          = $row->layout ?? '';
-			$featured_image_position = 'hidden';
+			$featured_image_position = ( 'fullwidth_article_view' === $article_layout ) ? 'above' : 'hidden';
 			if ( in_array( $article_layout, [ 'fullwidth_article_view', 'gallery_view' ] ) ) {
-				$featured_image_position = 'above';
 				// TODO: I'm not sure why this is necessary. It should be set automagically somewhere?
 				$post_data['meta_input']['_wp_page_template'] = 'single-feature.php';
 			}
-
-			// Featured image.
-			$featured_image = $row->image ?? ( $row->bigimage ?? false ); // Most posts use 'image', but some use 'bigimage'.
-			if ( ! empty( $featured_image ) ) {
-				$filename  = $featured_image->filename;
-				$path_info = pathinfo( $filename );
-				if ( str_ends_with( $path_info['filename'], '-thumb' ) ) {
-					$filename_without_extension = str_replace( '-thumb', '', $path_info['filename'] );
-					$filename                   = $filename_without_extension . '.' . $path_info['extension'];
-				}
-				$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
-
-				if ( $attachment_id ) {
-					$post_data['meta_input']['_thumbnail_id'] = $attachment_id;
-				} else {
-					$attachment_id = $this->grab_featured_image( $row->{'@id'} );
-					if ( $attachment_id ) {
-						$post_data['meta_input']['_thumbnail_id'] = $attachment_id;
-					}
-				}
-				$post_data['meta_input']['newspack_featured_image_position'] = $featured_image_position;
-			}
-
-			$gallery = '';
-			if ( $row->gallery_enabled || $row->image_viewer ) {
-				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path );
-				$gallery        = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
-			}
-
-			$post_data['post_content'] = $intro . $gallery . $text;
 
 			if ( $refresh_existing && $existing_id ) {
 				$verb              = 'updated';
@@ -1279,6 +1239,85 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$this->logger->log( $log_file, sprintf( "Failed %s post: %s \n\t%s ", $verb, $row->{'@id'}, $processed_post_id->get_error_message() ), Logger::ERROR );
 				continue;
 			}
+
+			$text      = $row->text ?? '';
+			$intro     = $row->intro ?? '';
+			$replacers = [];
+			if ( str_contains( $text, 'resolveuid/' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->replace_img_tags( $html_doc, $processed_post_id );
+			}
+			if ( str_contains( $text, '<video' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->replace_videos( $html_doc, $processed_post_id );
+			}
+			if ( ! empty( $replacers ) ) {
+				$html_doc = new HtmlDocument( $text );
+				foreach ( $replacers as $replacer ) {
+					$replacer( $html_doc );
+				}
+				$text = $html_doc->save();
+			}
+
+			$has_inline_gallery = preg_match( '@\[GALLERY:?.*?\]@', $text, $gallery_matches );
+			if ( $row->gallery_enabled || $row->image_viewer || $has_inline_gallery ) {
+				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $has_inline_gallery );
+				if ( ! empty( $gallery_images ) ) {
+					array_map( fn( $id ) => wp_update_post( [ 'ID' => $id, 'post_parent' => $processed_post_id, ] ), $gallery_images );
+					$gallery = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
+					if ( $has_inline_gallery ) {
+						// Inline gallery needs to be replaced with a Gutenberg gallery block.
+						$text = str_replace( $gallery_matches[0], $gallery, $text );
+					} else {
+						// The other types of gallery are put at the top of the text.
+						$text = $gallery . $text;
+					}
+				}
+			}
+
+			// Featured image.
+			$featured_image    = $row->image ?? ( $row->bigimage ?? false ); // Most posts use 'image', but some use 'bigimage'.
+			$featured_image_id = 0;
+			if ( ! empty( $featured_image ) ) {
+				$filename  = $featured_image->filename;
+				$path_info = pathinfo( $filename );
+				if ( str_ends_with( $path_info['filename'], '-thumb' ) ) {
+					$filename_without_extension = str_replace( '-thumb', '', $path_info['filename'] );
+					$filename                   = $filename_without_extension . '.' . $path_info['extension'];
+				}
+				$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
+
+				// For "normal" featured images we can use the file name.
+				if ( $attachment_id && 'above' !== $featured_image_position ) {
+					$featured_image_id = $attachment_id;
+				} else {
+					// For the "above" featured image, we need can also try to scrape it to get the
+					// large beautiful image.
+					$grabbed_image     = $this->grab_featured_image( $row->{'@id'} );
+					$featured_image_id = $grabbed_image ? $grabbed_image : $attachment_id;
+				}
+
+			}
+			if ( ! $featured_image_id ) {
+				// If we never found a featured image, then let's just set some image.
+				$featured_image_id = $this->find_featured_image_on_post_without_one( $processed_post_id );
+			}
+			if ( $featured_image_id ) {
+				wp_update_post( [ 'ID' => $featured_image_id, 'post_parent' => $processed_post_id, ] );
+				// If we have a featured image, let's set it as the post thumbnail.
+				update_post_meta( $processed_post_id, '_thumbnail_id', $featured_image_id );
+				update_post_meta( $processed_post_id, 'newspack_featured_image_position', $featured_image_position );
+			}
+
+			$post_content = $intro . $text;
+			// Note that once we've transformed the links, some of the tricks we use in transformations don't work anymore,
+			// so don't do those tricks below the next line.
+			$post_content = str_replace( [ 'www.hcn.org', 'hcn.org' ], $current_domain, $post_content );
+			wp_update_post(
+				[
+					'ID'           => $processed_post_id,
+					'post_content' => $post_content,
+				]
+			);
+
 
 			// Now we have the ID of the created post, do a few more things:
 			$co_authors = array_map(
@@ -1351,28 +1390,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return $response['body'];
 	}
 
-	private function grab_sidebars( string $scraped_content, string $post_content ): string {
-		$html_doc = new HtmlDocument( $scraped_content );
-
-		$sidebars = $html_doc->find( '#content article aside.sidebar ul li' );
-		if ( empty( $sidebars ) ) {
-			// TODO. Log and warn?
-			return $post_content;
-		}
-		$anchor = '[SIDEBAR]';
-		$offset = 0;
-		$len    = strlen( $anchor );
-//		foreach ( $sidebars as $sidebar ) {
-//			$found_sidebar = $sidebar->innertext();
-//			$group = serialize_block($this->gutenberg_block_generator->get_group_constrained_w_classic($found_sidebar, ['align-left', 'hcn-sidebar'] ));
-//			$pos           = strpos( $post_content, $anchor, $offset );
-//			$offset        = $pos + $len;
-//			$post_content  = substr_replace( $post_content, $group, $pos, $len );
-//		}
-
-		return $post_content;
-	}
-
 	private function grab_featured_image( string $url ): int {
 		$scraped_content = $this->get_scrape_content( $url );
 
@@ -1413,6 +1430,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				)
 			);
 			if ( empty( $related_post ) ) {
+				// Maybe there is a redirect for that path?
+				$related_post = url_to_postid( $path );
+			}
+			if ( empty( $related_post ) ) {
 				continue;
 			}
 
@@ -1436,7 +1457,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return $content;
 	}
 
-	private function replace_videos( HtmlDocument $html_doc ): void {
+	private function replace_videos( HtmlDocument $html_doc, int $post_id ): void {
 		global $wpdb;
 
 		$vids = $html_doc->find( 'video' );
@@ -1454,12 +1475,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( ! $attachment_id ) {
 				continue;
 			}
+			// Set the post as the attachment's parent - images are imported before posts and are therefore unattached.
+			wp_update_post( [ 'ID' => $attachment_id, 'post_parent' => $post_id, ] );
+
 			$video_post     = get_post( $attachment_id );
 			$vid->outertext = serialize_block( $this->gutenberg_block_generator->get_video( $video_post ) );
 		}
 	}
 
-	private function replace_img_tags( HtmlDocument $html_doc ): void {
+	private function replace_img_tags( HtmlDocument $html_doc, int $post_id ): void {
 		$imgs_to_resolve = $html_doc->find( 'img' );
 		foreach ( $imgs_to_resolve as $img ) {
 			if ( ! preg_match( '@^resolveuid/([0-9a-z]+)/?(.*)@', $img->getAttribute( 'src' ), $matches ) ) {
@@ -1475,6 +1499,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( ! $img_post ) {
 				continue;
 			}
+			// Set the post as the attachment's parent - images are imported before posts and are therefore unattached.
+			wp_update_post( [ 'ID' => $attachment_id, 'post_parent' => $post_id, ] );
+
 			$align = null;
 
 			$container_class = $img->find_ancestor_tag( 'div' )?->getAttribute( 'class' ) ?? '';
@@ -1713,14 +1740,20 @@ QUERY;
 		return empty( $attachment_id ) ? 0 : (int) $attachment_id;
 	}
 
-	private function get_attachment_ids_by_tree_path( string $tree_path ): array {
+	private function get_attachment_ids_by_tree_path( string $tree_path, bool $gallery = false ): array {
 		global $wpdb;
 		$attachment_ids = $wpdb->get_col(
 			$wpdb->prepare(
-				"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s;",
+				"SELECT ID FROM $wpdb->posts LEFT JOIN $wpdb->postmeta ON ID = post_id WHERE post_type = 'attachment' AND meta_key = 'plone_tree_path' AND meta_value LIKE %s",
 				$wpdb->esc_like( $tree_path ) . '%'
 			)
 		);
+		if ( $gallery ) {
+			$attachment_ids = array_filter(
+				$attachment_ids,
+				fn( $attachment_id ) => ! empty( get_post_meta( $attachment_id, 'plone_gallery_id', true ) )
+			);
+		}
 
 		return $attachment_ids;
 	}
