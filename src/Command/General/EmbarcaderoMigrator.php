@@ -619,7 +619,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Set the original ID.
 			update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
-			update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY, $post['topic_id'] );
+
+			if ( '0' !== $post['topic_id'] ) {
+				update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY, $post['topic_id'] );
+			}
 
 			// Set the post subhead.
 			update_post_meta( $wp_post_id, 'newspack_post_subtitle', $post['subhead'] );
@@ -1960,6 +1963,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	private function get_post_id_by_meta( $meta_name, $meta_value ) {
 		global $wpdb;
+
+		if ( '0' === $meta_value ) {
+			return null;
+		}
 
 		return $wpdb->get_var(
 			$wpdb->prepare(
