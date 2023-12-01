@@ -562,7 +562,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$post_data['post_name'] = $post_name;
 			}
 
-			if ( '0' !== $post['date_updated_epoch'] ) {
+			if ( ! empty( $post['date_updated_epoch'] ) ) {
 				$post_data['post_modified'] = $this->get_post_date_from_timestamp( $post['date_updated_epoch'] );
 			}
 
@@ -620,7 +620,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Set the original ID.
 			update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
 
-			if ( '0' !== $post['topic_id'] ) {
+			if ( ! empty( $post['topic_id'] ) ) {
 				update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY, $post['topic_id'] );
 			}
 
@@ -1964,7 +1964,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private function get_post_id_by_meta( $meta_name, $meta_value ) {
 		global $wpdb;
 
-		if ( '0' === $meta_value ) {
+		if ( empty( $meta_value ) ) {
 			return null;
 		}
 
