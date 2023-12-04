@@ -767,7 +767,7 @@ class CCMMigrator implements InterfaceCommand {
 			}
 
 
-			$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
+			$this->taxonomy_logic->reassign_all_content_from_one_taxonomy_to_another( 'category', $source_term_id, $destination_term_id );
 
 			// Update category count.
 			$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
