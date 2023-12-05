@@ -644,7 +644,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	public function fix_referenced_articles_from_json( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
+		$command_meta_version = 10;
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 
 		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
@@ -668,7 +668,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				if ( $related_post_id ) {
 					$related_links[] = [
 						'title'     => get_the_title( $related_post_id ),
-						'permalink' => "/?p={$post_id}"
+						'permalink' => "/?p={$related_post_id}"
 					];
 				}
 			}
@@ -1061,6 +1061,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$is_gallery_image = ! empty( $row->gallery );
 			$tree_path        = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			$existing_id      = $this->get_attachment_id_by_uid( $row->UID );
+
+			$credit = $row->credit ?? '';
+			if ( str_starts_with( 'credit: ', mb_strtolower( $credit ) ) ) { // Some of their own data has a "Credit:" that they want removed.
+				$credit = substr( $credit, 8 );
+			}
+
 			if ( $existing_id ) {
 				$this->logger->log( $log_file, sprintf( 'Image already imported to %s', get_permalink( $existing_id ) ), Logger::WARNING );
 				// Gallery.
@@ -1081,9 +1087,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$this->logger->log( $log_file, sprintf( 'Updated caption on %s to: %s', get_permalink( $existing_id ), $row->description ), Logger::SUCCESS );
 				}
 				// Credit.
-				if ( ! empty( $row->credit ) ) {
-					update_post_meta( $existing_id, '_media_credit', $row->credit );
-					$this->logger->log( $log_file, sprintf( 'Updated credit on %s to: %s', get_permalink( $existing_id ), $row->credit ), Logger::SUCCESS );
+				if ( ! empty( $credit ) ) {
+					update_post_meta( $existing_id, '_media_credit', $credit );
+					$this->logger->log( $log_file, sprintf( 'Updated credit on %s to: %s', get_permalink( $existing_id ), $credit ), Logger::SUCCESS );
 				}
 				continue;
 			}
@@ -1108,7 +1114,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
 				'meta_input'    => [
 					'plone_image_UID'   => $row->UID,
-					'_media_credit'     => $row->credit ?? '',
+					'_media_credit'     => $credit ?? '',
 					'_media_credit_url' => $row->creditUrl ?? '',
 					'plone_tree_path'   => $tree_path,
 				],
