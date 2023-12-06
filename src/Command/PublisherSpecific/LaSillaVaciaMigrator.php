@@ -5393,7 +5393,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$wpdb->update(
 					$wpdb->posts,
 					array(
-						'post_title' => $value['Display Name'],
+						$key => $value['Display Name'],
 					),
 					array(
 						'ID' => $guest_author_id,
