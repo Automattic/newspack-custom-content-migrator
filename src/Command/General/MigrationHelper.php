@@ -77,6 +77,13 @@ class MigrationHelper implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'iterm-trigger',
+						'description' => 'Print a trigger for iTerm to pick up after the command has run.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -92,6 +99,7 @@ class MigrationHelper implements InterfaceCommand {
 		$command_string = $positional_args[0] ?? false;
 		$start_arg_name = $assoc_args['start-arg-name'] ?? BatchLogic::$start['name'];
 		$end_arg_name   = $assoc_args['end-arg-name'] ?? BatchLogic::$end['name'];
+		$iterm_trigger  = $assoc_args['iterm-trigger'] ?? false;
 
 		if ( $command_string ) {
 			if ( empty( preg_match( '/(wp\s\S+\s\S+)/', $command_string, $matches ) ) ) {
@@ -114,11 +122,20 @@ class MigrationHelper implements InterfaceCommand {
 			if ( $batch_end > $total_items ) {
 				$batch_end = 0;
 			}
-			WP_CLI::line( sprintf( '# MigrationHelper: Batch %d of %d', $batch + 1, $num_batches ) );
+			$batch_info = sprintf( 'Batch %d of %d', $batch + 1, $num_batches );
+			WP_CLI::line( sprintf( '# MigrationHelper: %s', $batch_info ) );
 			if ( $command_string ) {
-				WP_CLI::line( $command_string );
+				WP_CLI::out( $command_string );
 			}
-			WP_CLI::line( self::get_batch_string( $start_arg_name, $end_arg_name, $batch_start, $batch_end ) . PHP_EOL );
+
+			WP_CLI::out( self::get_batch_string( $start_arg_name, $end_arg_name, $batch_start, $batch_end )  );
+
+			if ( $iterm_trigger ) {
+				WP_CLI::line( sprintf( ' && echo "MigrationHelper says:___(%s)___"', $batch_info ) );
+			} else {
+				WP_CLI::line( '' ); // Just to add a newline for ease of copypasta
+			}
+
 		}
 	}
 
