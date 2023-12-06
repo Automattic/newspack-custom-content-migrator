@@ -4807,7 +4807,36 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function output_postmeta_table( array $identifiers ) {
+	/**
+	 * This function will output a table to terminal with the postmeta results for a given Post ID.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array
+	 */
+	public function output_postmeta_table( int $post_id ) {
+		global $wpdb;
+
+		$postmeta_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE post_id = %d ORDER BY meta_key ASC",
+				$post_id
+			)
+		);
+
+		echo WP_CLI::colorize( "%BPostmeta Table (%n%W$post_id%n%B)%n\n" );
+		WP_CLI\Utils\format_items(
+			'table',
+			$postmeta_rows,
+			array(
+				'meta_id',
+				'meta_key',
+				'meta_value',
+			)
+		);
+
+		return $postmeta_rows;
+	}
 
 	public function output_postmeta_data_table( array $identifiers ) {
 		global $wpdb;
@@ -4824,7 +4853,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			echo WP_CLI::colorize( "%BPostmeta's Table (%n%W$meta_key%n%B)%n\n" );
+			echo WP_CLI::colorize( "%BPostmeta Data (%n%W$meta_key%n%B)%n\n" );
 			WP_CLI\Utils\format_items(
 				'table',
 				$postmeta_rows,
