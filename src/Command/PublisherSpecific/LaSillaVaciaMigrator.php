@@ -1463,6 +1463,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-fix-missing-author-guest-author-link',
+			[ $this, 'cmd_fix_missing_author_guest_author_link' ],
+			[
+				'shortdesc' => 'This command will pull a list of authors which seem to be missing a linkage to a guest author',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-vacia-remove-duplicate-article-import-meta-data',
 			[ $this, 'cmd_remove_duplicate_article_import_meta_data' ],
 			[
@@ -4485,6 +4494,64 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will pull a list of users which have matching email addresses with Guest Authors, but missing
+	 * cap-linked_account meta data. If the accounts should be linked, then the user_login will be used to
+	 * update the meta data field.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_missing_author_guest_author_link( $args, $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$users_in_question = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM (
+					SELECT 
+					    u.ID as user_id, 
+					    cap_emails.post_id as email_post_id,
+					    u.user_email, 
+					    cap_emails.meta_value as guest_author_email
+					FROM $wpdb->users u 
+					    LEFT JOIN (
+					    	SELECT pm.* FROM wp_postmeta pm
+					    	    INNER JOIN wp_posts p ON pm.post_id = p.ID
+					    	WHERE p.post_type = 'guest-author' AND pm.meta_key = 'cap-user_email'
+					    ) as cap_emails 
+					        ON u.user_email = cap_emails.meta_value 
+					WHERE cap_emails.meta_value IS NOT NULL
+				) as emails
+					LEFT JOIN (
+						SELECT 
+						    post_id, 
+						    meta_value 
+						FROM wp_postmeta 
+						WHERE meta_key = 'cap-linked_account'
+					) as linked_accounts 
+					    ON emails.email_post_id = linked_accounts.post_id
+				WHERE linked_accounts.meta_value = '' 
+				   OR linked_accounts.meta_value IS NULL 
+				ORDER BY emails.email_post_id"
+			)
+		);
+
+		foreach ( $users_in_question as $user ) {
+			$this->output_users_as_table( [ $user->user_id ] );
+			$this->output_post_table( [ $user->email_post_id ] );
+			$this->output_postmeta_table( $user->email_post_id );
+			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
+
+			$this->output_terms_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ) );
+
+			if ( 1 === count( $author_taxonomies ) ) {
+				$this->fix_author_term_data_from_guest_author( intval( $user->email_post_id ), $author_taxonomies[0], get_user_by( 'id', $user->user_id ), false );
+			}
+		}
+	}
 
 	/**
 	 * This function will retrieve any associated term rows for a given guest author ID.
