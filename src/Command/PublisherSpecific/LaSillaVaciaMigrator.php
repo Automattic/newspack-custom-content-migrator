@@ -4537,7 +4537,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			foreach ( $connected_guest_author_terms as $connected_guest_author_term ) {
 				$term_ids          = array_filter( $term_ids, fn( $term_id ) => $term_id != $connected_guest_author_term->term_id );
-				$guest_author_post = $this->get_guest_author_post_from_term_id(
+				$guest_author_post = $this->get_guest_author_post_from_term_taxonomy_id(
 					$connected_guest_author_term->term_taxonomy_id
 				);
 
@@ -4808,6 +4808,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	}
 
 	public function output_postmeta_table( array $identifiers ) {
+
+	public function output_postmeta_data_table( array $identifiers ) {
 		global $wpdb;
 
 		$base_query = "SELECT * FROM $wpdb->postmeta WHERE ";
@@ -5032,7 +5034,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$table->display();
 	}
 
-	private function get_guest_author_post_from_term_id( int $term_taxonomy_id ) {
+	private function get_guest_author_post_from_term_taxonomy_id( int $term_taxonomy_id ) {
 		echo WP_CLI::colorize( "%BGetting Guest Author Record%n\n" );
 		$this->high_contrast_output( 'Term Taxonomy ID', $term_taxonomy_id );
 		global $wpdb;
@@ -6457,7 +6459,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_email->ID;
 				$user_emails[] = $user_by_email->user_email;
 				$this->output_users_as_table( array( $user_by_email ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_email->user_login,
 					)
@@ -6473,7 +6475,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_login->ID;
 				$user_emails[] = $user_by_login->user_email;
 				$this->output_users_as_table( array( $user_by_login ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_login->user_login,
 					)
@@ -6486,7 +6488,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$user = $this->choose_between_users( $user_by_login, $user_by_email );
 
-			$postmeta_records = $this->output_postmeta_table(
+			$postmeta_records = $this->output_postmeta_data_table(
 				array(
 					'cap-user_email' => $loose_author_term->name,
 					'cap-user_login' => $loose_author_term->slug,
