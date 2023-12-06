@@ -5425,7 +5425,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		if ( empty( $post_meta_display_name ) && ! empty( $user_display_name ) ) {
 			$guest_author_display_name = $user_display_name;
-		} elseif ( $user_display_name !== $guest_author_display_name ) {
+		} elseif ( $user_display_name !== $post_meta_display_name ) {
 			if ( $confirm ) {
 				$this->high_contrast_output( 'User Display Name', $user_display_name );
 				$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
