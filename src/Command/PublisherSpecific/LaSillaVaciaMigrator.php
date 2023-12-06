@@ -5322,6 +5322,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			'cap-display_name',
 		);
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
+		$filtered_author_cap_fields = $this->ensure_linked_account_meta_exists( $guest_author_id, $filtered_author_cap_fields );
 
 		$user_display_name         = $user->display_name;
 		$post_meta_display_name    = $filtered_author_cap_fields['cap-display_name'] ?? '';
@@ -5512,6 +5513,40 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		$this->update_author_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+	}
+
+	/**
+	 * This function will insert a row into wp_postmeta for guest authors with a missing cap-linked_account field.
+	 * This field needs to be in the DB so that it can be properly updated when necessary.
+	 *
+	 * @param int   $guest_author_id Guest Author ID.
+	 * @param array $filtered_author_cap_fields Filtered Author Cap Fields.
+	 *
+	 * @return array
+	 * @throws WP_CLI\ExitException Thorws an exception if the insert fails.
+	 */
+	private function ensure_linked_account_meta_exists( int $guest_author_id, array $filtered_author_cap_fields ) {
+		global $wpdb;
+
+		if ( ! array_key_exists( 'cap-linked_account', $filtered_author_cap_fields ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$result = $wpdb->insert(
+				$wpdb->postmeta,
+				[
+					'post_id'    => $guest_author_id,
+					'meta_key'   => 'cap-linked_account', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					'meta_value' => '', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				]
+			);
+
+			if ( false === $result ) {
+				WP_CLI::error( 'Failed to insert cap-linked_account postmeta' );
+			}
+
+			$filtered_author_cap_fields['cap-linked_account'] = '';
+		}
+
+		return $filtered_author_cap_fields;
 	}
 
 	private function procure_unique_user_login( $user_login ) {
