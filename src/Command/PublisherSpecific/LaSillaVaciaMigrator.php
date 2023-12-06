@@ -4485,6 +4485,42 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+
+	/**
+	 * This function will retrieve any associated term rows for a given guest author ID.
+	 *
+	 * @param int $guest_author_id Guest Author ID.
+	 *
+	 * @return array
+	 */
+	private function get_author_term_from_guest_author_id( int $guest_author_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
+    				t.term_id,
+    				tt.term_taxonomy_id,
+    				t.name,
+    				t.slug,
+    				tt.taxonomy,
+    				tt.description,
+    				tt.count,
+    				tt.parent
+				FROM $wpdb->term_relationships tr 
+				    LEFT JOIN $wpdb->term_taxonomy as tt
+				    	ON tr.term_taxonomy_id = tt.term_taxonomy_id
+					LEFT JOIN $wpdb->terms t 
+					    ON t.term_id = tt.term_id
+					INNER JOIN $wpdb->posts p 
+					    ON tr.object_id = p.ID
+				WHERE tt.taxonomy = 'author' AND p.post_type = 'guest-author' AND tr.object_id = %d",
+				$guest_author_id
+			)
+		);
+	}
+
 	public function cmd_resolve_damaged_author_guest_author_relationships( $args, $assoc_args ) {
 		global $wpdb;
 
