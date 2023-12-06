@@ -1422,13 +1422,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function replace_related_placeholders_with_homepage_blocks( string $content ): string {
-		if ( ! str_contains( $content, '[RELATED:' ) || ! preg_match_all( '@<p>\[RELATED:(.*?)]</p>@', $content, $matches, PREG_SET_ORDER ) ) {
+		if ( ! str_contains( $content, '[RELATED:' ) || ! preg_match_all( '@>\[RELATED:(.*?)]</@', $content, $matches, PREG_SET_ORDER ) ) {
 			return $content;
 		}
 		global $wpdb;
 		$on_left_side = true; // Start the boxes on the left and then alternate sides. Only applies if there are mulitple boxes.
 		foreach ( $matches as $match ) {
-			$path         = trim( parse_url( $match[1], PHP_URL_PATH ), '/' );
+			$path         = wp_strip_all_tags( trim( parse_url( $match[1], PHP_URL_PATH ), '/' ) );
 			$related_post = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_tree_path' AND meta_value = %s;",
@@ -1437,7 +1437,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			);
 			if ( empty( $related_post ) ) {
 				// Maybe there is a redirect for that path?
-				$related_post = url_to_postid( $path );
+				$redirects = $this->redirection->get_redirects_by_exact_from_url( '/' . $path );
+				if ( ! empty( $redirects[0]?->match->url ) ) {
+					$related_post = url_to_postid( $redirects[0]->match->url );
+				}
 			}
 			if ( empty( $related_post ) ) {
 				continue;
