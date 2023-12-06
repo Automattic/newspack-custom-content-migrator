@@ -6830,6 +6830,31 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
+	/**
+	 * Attempts to find Guest Authors by leveraging cap-user_email and cap-user_login postmeta fields.
+	 *
+	 * @param string $email
+	 *
+	 * @return array
+	 */
+	private function get_guest_authors_using_email( string $email ) {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				DISTINCT pm.post_id 
+				FROM $wpdb->postmeta pm 
+				    INNER JOIN $wpdb->posts p 
+				        ON p.ID = pm.post_id 
+				WHERE p.post_type = 'guest-author' 
+				  AND (pm.meta_key = 'cap-user_email' OR pm.meta_key = 'cap-user_login') 
+				  AND pm.meta_value = %s",
+				$email
+			)
+		);
+	}
+
 	private function get_guest_author_from_post_name( string $post_name ) {
 		global $wpdb;
 
