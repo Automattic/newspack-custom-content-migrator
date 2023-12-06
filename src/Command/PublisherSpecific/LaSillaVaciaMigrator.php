@@ -5347,7 +5347,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->fix_author_term_data_from_guest_author( $guest_author_id, $term, $user );
 	}
 
-	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user ) {
+	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user, $confirm = true ) {
 		global $wpdb;
 
 		$guest_author_record        = $this->get_guest_author_post_by_id( $guest_author_id );
@@ -5367,22 +5367,27 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( empty( $post_meta_display_name ) && ! empty( $user_display_name ) ) {
 			$guest_author_display_name = $user_display_name;
 		} elseif ( $user_display_name !== $guest_author_display_name ) {
-			$this->high_contrast_output( 'User Display Name', $user_display_name );
-			$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
-			$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
+			if ( $confirm ) {
+				$this->high_contrast_output( 'User Display Name', $user_display_name );
+				$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
+				$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
 
-			if ( 'u' === $prompt ) {
-				$guest_author_display_name = $user_display_name;
-			} if ( 'g' === $prompt ) {
+				if ( 'u' === $prompt ) {
+					$guest_author_display_name = $user_display_name;
+				}
+				if ( 'g' === $prompt ) {
+					$user->display_name = $post_meta_display_name;
+				} elseif ( 'h' === $prompt ) {
+					die();
+				}
+			} else {
 				$user->display_name = $post_meta_display_name;
-			} elseif ( 'h' === $prompt ) {
-				die();
 			}
 		}
 
 		$insert_guest_author_term_rel_result = $this->insert_guest_author_term_relationship( $guest_author_id, $term->term_taxonomy_id );
 
-		if ( null === $insert_guest_author_term_rel_result ) {
+		if ( null === $insert_guest_author_term_rel_result && $confirm ) {
 			$prompt = $this->ask_prompt( 'Would you like to (u)se that one, allow to (s)kip, or (h)alt execution?' );
 
 			if ( 'h' === $prompt ) {
