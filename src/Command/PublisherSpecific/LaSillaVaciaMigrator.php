@@ -6465,6 +6465,27 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$guest_author = $this->get_guest_author_from_post_name( $loose_author_term->slug );
 
+			// There might be a Guest Author that has different post_name somehow, but is tied to an email.
+			if ( is_email( $loose_author_term->name ) ) {
+				$potentially_same_guest_authors = $this->get_guest_authors_using_email( $loose_author_term->name );
+				if ( null !== $guest_author ) {
+					$potentially_same_guest_authors = array_filter(
+						$potentially_same_guest_authors,
+						function ( $psga ) use ( $guest_author ) {
+							return $psga->post_id !== $guest_author->ID;
+						}
+					);
+				}
+
+				if ( ! empty( $potentially_same_guest_authors ) ) {
+					echo WP_CLI::colorize( "%YFound%n %C" . count( $potentially_same_guest_authors ) . "%n %Ypotentially same Guest Authors.%n\n" );
+					foreach ( $potentially_same_guest_authors as $psga ) {
+						$this->output_post_table( [ $psga->post_id ] );
+						$this->output_postmeta_table( $psga->post_id );
+					}
+				}
+			}
+
 			if ( null !== $guest_author ) {
 				$this->output_post_table( array( $guest_author->ID ) );
 				$filtered_post_meta = $this->get_filtered_cap_fields(
