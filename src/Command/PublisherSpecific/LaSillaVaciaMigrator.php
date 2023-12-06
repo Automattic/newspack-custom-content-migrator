@@ -5444,6 +5444,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
+		$this->update_user_nicename_if_necessary( $user );
+
+		$cap_user_login = $this->get_guest_author_user_login( $user );
+
+		// Ensure that $cap_user_login is unique, since it will ultimately become the slug for the author term.
+		$cap_user_login = $this->prompt_for_unique_author_slug( $cap_user_login, $term->term_taxonomy_id );
+
 		$insert_guest_author_term_rel_result = $this->insert_guest_author_term_relationship( $guest_author_id, $term->term_taxonomy_id );
 
 		if ( null === $insert_guest_author_term_rel_result && $confirm ) {
@@ -5501,10 +5508,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				);
 			}
 		}
-
-		$this->update_user_nicename_if_necessary( $user );
-
-		$cap_user_login = $this->get_guest_author_user_login( $user );
 
 		echo WP_CLI::colorize( "%BGuest Author vs wp_postmeta field%n\n" );
 		$comparison = $this->output_value_comparison_table(
