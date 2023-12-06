@@ -4977,6 +4977,65 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return $user_login;
 	}
 
+	/**
+	 * This is a convenience function that allows for immediate feedback on whether the chosen slug is unique.
+	 *
+	 * @param string $slug This is the unique author slug, which should nearly match the user_nicename (e.g. slug = <user_nicename> or slug = cap-<user_nicename>).
+	 * @param int    $term_taxonomy_id Existing term_taxonomy_id to exclude from search result.
+	 *
+	 * @return string
+	 */
+	private function prompt_for_unique_author_slug( string $slug, int $term_taxonomy_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$existing_slugs = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT t.term_id, tt.term_taxonomy_id, t.slug, tt.description 
+					FROM $wpdb->terms t 
+    					LEFT JOIN $wpdb->term_taxonomy tt 
+    					    ON t.term_id = tt.term_id 
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+				$term_taxonomy_id,
+				$slug
+			)
+		);
+
+		if ( ! empty( $existing_slugs ) ) {
+			echo WP_CLI::colorize( "%YExisting slugs found%n\n" );
+			foreach ( $existing_slugs as $record ) {
+				$this->output_terms_table( [ intval( $record->term_id ) ] );
+				$description_id = $this->extract_id_from_description( $record->description );
+				$guest_author_record = $this->get_guest_author_post_from_term_taxonomy_id( $record->term_taxonomy_id );
+
+				if ( null === $guest_author_record ) {
+					echo WP_CLI::colorize( "%Yterm_taxonomy_id (%n%W$record->term_taxonomy_id%n%Y) not connected to Guest Author%n\n" );
+					$guest_author_record->ID = $description_id;
+				}
+
+				$post_ids = array_unique( [ $description_id, $guest_author_record->ID ] );
+
+				foreach ( $post_ids as $post_id ) {
+					$this->output_post_table( [ $post_id ] );
+					$this->output_postmeta_table( $post_id );
+				}
+			}
+			
+			$prompt = $this->ask_prompt( 'What would become the author slug for this GA already exists. Would you like to (u)pdate it, or (h)alt execution?' );
+
+			if ( 'u' === $prompt ) {
+				$user_provided_slug = $this->ask_prompt( 'Please enter a unique slug' );
+
+				return $this->prompt_for_unique_author_slug( $user_provided_slug, $term_taxonomy_id );
+
+			} elseif ( 'h' === $prompt ) {
+				die();
+			}
+		}
+
+		return $slug;
+	}
+
 	private function get_user_nicename( WP_User $user ) {
 		if ( ! empty( $user->display_name ) ) {
 			return sanitize_title( $user->display_name );
