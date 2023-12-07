@@ -1463,6 +1463,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-fix-missing-author-guest-author-link',
+			[ $this, 'cmd_fix_missing_author_guest_author_link' ],
+			[
+				'shortdesc' => 'This command will pull a list of authors which seem to be missing a linkage to a guest author',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-vacia-remove-duplicate-article-import-meta-data',
 			[ $this, 'cmd_remove_duplicate_article_import_meta_data' ],
 			[
@@ -4485,6 +4494,100 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will pull a list of users which have matching email addresses with Guest Authors, but missing
+	 * cap-linked_account meta data. If the accounts should be linked, then the user_login will be used to
+	 * update the meta data field.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_missing_author_guest_author_link( $args, $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$users_in_question = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM (
+					SELECT 
+					    u.ID as user_id, 
+					    cap_emails.post_id as email_post_id,
+					    u.user_email, 
+					    cap_emails.meta_value as guest_author_email
+					FROM $wpdb->users u 
+					    LEFT JOIN (
+					    	SELECT pm.* FROM wp_postmeta pm
+					    	    INNER JOIN wp_posts p ON pm.post_id = p.ID
+					    	WHERE p.post_type = 'guest-author' AND pm.meta_key = 'cap-user_email'
+					    ) as cap_emails 
+					        ON u.user_email = cap_emails.meta_value 
+					WHERE cap_emails.meta_value IS NOT NULL
+				) as emails
+					LEFT JOIN (
+						SELECT 
+						    post_id, 
+						    meta_value 
+						FROM wp_postmeta 
+						WHERE meta_key = 'cap-linked_account'
+					) as linked_accounts 
+					    ON emails.email_post_id = linked_accounts.post_id
+				WHERE linked_accounts.meta_value = '' 
+				   OR linked_accounts.meta_value IS NULL 
+				ORDER BY emails.email_post_id"
+			)
+		);
+
+		foreach ( $users_in_question as $user ) {
+			$this->output_users_as_table( [ $user->user_id ] );
+			$this->output_post_table( [ $user->email_post_id ] );
+			$this->output_postmeta_table( $user->email_post_id );
+			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
+
+			$this->output_terms_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ) );
+
+			if ( 1 === count( $author_taxonomies ) ) {
+				$this->fix_author_term_data_from_guest_author( intval( $user->email_post_id ), $author_taxonomies[0], get_user_by( 'id', $user->user_id ), false );
+			}
+		}
+	}
+
+	/**
+	 * This function will retrieve any associated term rows for a given guest author ID.
+	 *
+	 * @param int $guest_author_id Guest Author ID.
+	 *
+	 * @return array
+	 */
+	private function get_author_term_from_guest_author_id( int $guest_author_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
+    				t.term_id,
+    				tt.term_taxonomy_id,
+    				t.name,
+    				t.slug,
+    				tt.taxonomy,
+    				tt.description,
+    				tt.count,
+    				tt.parent
+				FROM $wpdb->term_relationships tr 
+				    LEFT JOIN $wpdb->term_taxonomy as tt
+				    	ON tr.term_taxonomy_id = tt.term_taxonomy_id
+					LEFT JOIN $wpdb->terms t 
+					    ON t.term_id = tt.term_id
+					INNER JOIN $wpdb->posts p 
+					    ON tr.object_id = p.ID
+				WHERE tt.taxonomy = 'author' AND p.post_type = 'guest-author' AND tr.object_id = %d",
+				$guest_author_id
+			)
+		);
+	}
+
 	public function cmd_resolve_damaged_author_guest_author_relationships( $args, $assoc_args ) {
 		global $wpdb;
 
@@ -4537,7 +4640,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			foreach ( $connected_guest_author_terms as $connected_guest_author_term ) {
 				$term_ids          = array_filter( $term_ids, fn( $term_id ) => $term_id != $connected_guest_author_term->term_id );
-				$guest_author_post = $this->get_guest_author_post_from_term_id(
+				$guest_author_post = $this->get_guest_author_post_from_term_taxonomy_id(
 					$connected_guest_author_term->term_taxonomy_id
 				);
 
@@ -4807,7 +4910,38 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function output_postmeta_table( array $identifiers ) {
+	/**
+	 * This function will output a table to terminal with the postmeta results for a given Post ID.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array
+	 */
+	public function output_postmeta_table( int $post_id ) {
+		global $wpdb;
+
+		$postmeta_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE post_id = %d ORDER BY meta_key ASC",
+				$post_id
+			)
+		);
+
+		echo WP_CLI::colorize( "%BPostmeta Table (%n%W$post_id%n%B)%n\n" );
+		WP_CLI\Utils\format_items(
+			'table',
+			$postmeta_rows,
+			array(
+				'meta_id',
+				'meta_key',
+				'meta_value',
+			)
+		);
+
+		return $postmeta_rows;
+	}
+
+	public function output_postmeta_data_table( array $identifiers ) {
 		global $wpdb;
 
 		$base_query = "SELECT * FROM $wpdb->postmeta WHERE ";
@@ -4822,7 +4956,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			echo WP_CLI::colorize( "%BPostmeta's Table (%n%W$meta_key%n%B)%n\n" );
+			echo WP_CLI::colorize( "%BPostmeta Data (%n%W$meta_key%n%B)%n\n" );
 			WP_CLI\Utils\format_items(
 				'table',
 				$postmeta_rows,
@@ -4908,6 +5042,65 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		return $user_login;
+	}
+
+	/**
+	 * This is a convenience function that allows for immediate feedback on whether the chosen slug is unique.
+	 *
+	 * @param string $slug This is the unique author slug, which should nearly match the user_nicename (e.g. slug = <user_nicename> or slug = cap-<user_nicename>).
+	 * @param int    $term_taxonomy_id Existing term_taxonomy_id to exclude from search result.
+	 *
+	 * @return string
+	 */
+	private function prompt_for_unique_author_slug( string $slug, int $term_taxonomy_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$existing_slugs = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT t.term_id, tt.term_taxonomy_id, t.slug, tt.description 
+					FROM $wpdb->terms t 
+    					LEFT JOIN $wpdb->term_taxonomy tt 
+    					    ON t.term_id = tt.term_id 
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+				$term_taxonomy_id,
+				$slug
+			)
+		);
+
+		if ( ! empty( $existing_slugs ) ) {
+			echo WP_CLI::colorize( "%YExisting slugs found%n\n" );
+			foreach ( $existing_slugs as $record ) {
+				$this->output_terms_table( [ intval( $record->term_id ) ] );
+				$description_id = $this->extract_id_from_description( $record->description );
+				$guest_author_record = $this->get_guest_author_post_from_term_taxonomy_id( $record->term_taxonomy_id );
+
+				if ( null === $guest_author_record ) {
+					echo WP_CLI::colorize( "%Yterm_taxonomy_id (%n%W$record->term_taxonomy_id%n%Y) not connected to Guest Author%n\n" );
+					$guest_author_record->ID = $description_id;
+				}
+
+				$post_ids = array_unique( [ $description_id, $guest_author_record->ID ] );
+
+				foreach ( $post_ids as $post_id ) {
+					$this->output_post_table( [ $post_id ] );
+					$this->output_postmeta_table( $post_id );
+				}
+			}
+			
+			$prompt = $this->ask_prompt( 'What would become the author slug for this GA already exists. Would you like to (u)pdate it, or (h)alt execution?' );
+
+			if ( 'u' === $prompt ) {
+				$user_provided_slug = $this->ask_prompt( 'Please enter a unique slug' );
+
+				return $this->prompt_for_unique_author_slug( $user_provided_slug, $term_taxonomy_id );
+
+			} elseif ( 'h' === $prompt ) {
+				die();
+			}
+		}
+
+		return $slug;
 	}
 
 	private function get_user_nicename( WP_User $user ) {
@@ -5032,7 +5225,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$table->display();
 	}
 
-	private function get_guest_author_post_from_term_id( int $term_taxonomy_id ) {
+	private function get_guest_author_post_from_term_taxonomy_id( int $term_taxonomy_id ) {
 		echo WP_CLI::colorize( "%BGetting Guest Author Record%n\n" );
 		$this->high_contrast_output( 'Term Taxonomy ID', $term_taxonomy_id );
 		global $wpdb;
@@ -5280,7 +5473,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->fix_author_term_data_from_guest_author( $guest_author_id, $term, $user );
 	}
 
-	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user ) {
+	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user, $confirm = true ) {
 		global $wpdb;
 
 		$guest_author_record        = $this->get_guest_author_post_by_id( $guest_author_id );
@@ -5291,6 +5484,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			'cap-display_name',
 		);
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
+		$filtered_author_cap_fields = $this->ensure_linked_account_meta_exists( $guest_author_id, $filtered_author_cap_fields );
 
 		$user_display_name         = $user->display_name;
 		$post_meta_display_name    = $filtered_author_cap_fields['cap-display_name'] ?? '';
@@ -5298,23 +5492,35 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		if ( empty( $post_meta_display_name ) && ! empty( $user_display_name ) ) {
 			$guest_author_display_name = $user_display_name;
-		} elseif ( $user_display_name !== $guest_author_display_name ) {
-			$this->high_contrast_output( 'User Display Name', $user_display_name );
-			$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
-			$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
+		} elseif ( $user_display_name !== $post_meta_display_name ) {
+			if ( $confirm ) {
+				$this->high_contrast_output( 'User Display Name', $user_display_name );
+				$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
+				$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
 
-			if ( 'u' === $prompt ) {
-				$guest_author_display_name = $user_display_name;
-			} if ( 'g' === $prompt ) {
+				if ( 'u' === $prompt ) {
+					$guest_author_display_name = $user_display_name;
+				}
+				if ( 'g' === $prompt ) {
+					$user->display_name = $post_meta_display_name;
+				} elseif ( 'h' === $prompt ) {
+					die();
+				}
+			} else {
 				$user->display_name = $post_meta_display_name;
-			} elseif ( 'h' === $prompt ) {
-				die();
 			}
 		}
 
+		$this->update_user_nicename_if_necessary( $user );
+
+		$cap_user_login = $this->get_guest_author_user_login( $user );
+
+		// Ensure that $cap_user_login is unique, since it will ultimately become the slug for the author term.
+		$cap_user_login = $this->prompt_for_unique_author_slug( $cap_user_login, $term->term_taxonomy_id );
+
 		$insert_guest_author_term_rel_result = $this->insert_guest_author_term_relationship( $guest_author_id, $term->term_taxonomy_id );
 
-		if ( null === $insert_guest_author_term_rel_result ) {
+		if ( null === $insert_guest_author_term_rel_result && $confirm ) {
 			$prompt = $this->ask_prompt( 'Would you like to (u)se that one, allow to (s)kip, or (h)alt execution?' );
 
 			if ( 'h' === $prompt ) {
@@ -5361,7 +5567,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$wpdb->update(
 					$wpdb->posts,
 					array(
-						'post_title' => $value['Display Name'],
+						$key => $value['Display Name'],
 					),
 					array(
 						'ID' => $guest_author_id,
@@ -5369,10 +5575,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				);
 			}
 		}
-
-		$this->update_user_nicename_if_necessary( $user );
-
-		$cap_user_login = $this->get_guest_author_user_login( $user );
 
 		echo WP_CLI::colorize( "%BGuest Author vs wp_postmeta field%n\n" );
 		$comparison = $this->output_value_comparison_table(
@@ -5481,6 +5683,40 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		$this->update_author_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+	}
+
+	/**
+	 * This function will insert a row into wp_postmeta for guest authors with a missing cap-linked_account field.
+	 * This field needs to be in the DB so that it can be properly updated when necessary.
+	 *
+	 * @param int   $guest_author_id Guest Author ID.
+	 * @param array $filtered_author_cap_fields Filtered Author Cap Fields.
+	 *
+	 * @return array
+	 * @throws WP_CLI\ExitException Thorws an exception if the insert fails.
+	 */
+	private function ensure_linked_account_meta_exists( int $guest_author_id, array $filtered_author_cap_fields ) {
+		global $wpdb;
+
+		if ( ! array_key_exists( 'cap-linked_account', $filtered_author_cap_fields ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$result = $wpdb->insert(
+				$wpdb->postmeta,
+				[
+					'post_id'    => $guest_author_id,
+					'meta_key'   => 'cap-linked_account', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					'meta_value' => '', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				]
+			);
+
+			if ( false === $result ) {
+				WP_CLI::error( 'Failed to insert cap-linked_account postmeta' );
+			}
+
+			$filtered_author_cap_fields['cap-linked_account'] = '';
+		}
+
+		return $filtered_author_cap_fields;
 	}
 
 	private function procure_unique_user_login( $user_login ) {
@@ -6229,6 +6465,27 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$guest_author = $this->get_guest_author_from_post_name( $loose_author_term->slug );
 
+			// There might be a Guest Author that has different post_name somehow, but is tied to an email.
+			if ( is_email( $loose_author_term->name ) ) {
+				$potentially_same_guest_authors = $this->get_guest_authors_using_email( $loose_author_term->name );
+				if ( null !== $guest_author ) {
+					$potentially_same_guest_authors = array_filter(
+						$potentially_same_guest_authors,
+						function ( $psga ) use ( $guest_author ) {
+							return $psga->post_id !== $guest_author->ID;
+						}
+					);
+				}
+
+				if ( ! empty( $potentially_same_guest_authors ) ) {
+					echo WP_CLI::colorize( "%YFound%n %C" . count( $potentially_same_guest_authors ) . "%n %Ypotentially same Guest Authors.%n\n" );
+					foreach ( $potentially_same_guest_authors as $psga ) {
+						$this->output_post_table( [ $psga->post_id ] );
+						$this->output_postmeta_table( $psga->post_id );
+					}
+				}
+			}
+
 			if ( null !== $guest_author ) {
 				$this->output_post_table( array( $guest_author->ID ) );
 				$filtered_post_meta = $this->get_filtered_cap_fields(
@@ -6457,7 +6714,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_email->ID;
 				$user_emails[] = $user_by_email->user_email;
 				$this->output_users_as_table( array( $user_by_email ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_email->user_login,
 					)
@@ -6473,7 +6730,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_login->ID;
 				$user_emails[] = $user_by_login->user_email;
 				$this->output_users_as_table( array( $user_by_login ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_login->user_login,
 					)
@@ -6486,7 +6743,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$user = $this->choose_between_users( $user_by_login, $user_by_email );
 
-			$postmeta_records = $this->output_postmeta_table(
+			$postmeta_records = $this->output_postmeta_data_table(
 				array(
 					'cap-user_email' => $loose_author_term->name,
 					'cap-user_login' => $loose_author_term->slug,
@@ -6760,6 +7017,31 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				"SELECT term_taxonomy_id FROM $wpdb->term_taxonomy WHERE taxonomy = 'author' AND description LIKE %s AND description LIKE %s",
 				"%{$wpdb->esc_like($first_name)}%",
 				"%{$wpdb->esc_like($last_name)}%",
+			)
+		);
+	}
+
+	/**
+	 * Attempts to find Guest Authors by leveraging cap-user_email and cap-user_login postmeta fields.
+	 *
+	 * @param string $email
+	 *
+	 * @return array
+	 */
+	private function get_guest_authors_using_email( string $email ) {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				DISTINCT pm.post_id 
+				FROM $wpdb->postmeta pm 
+				    INNER JOIN $wpdb->posts p 
+				        ON p.ID = pm.post_id 
+				WHERE p.post_type = 'guest-author' 
+				  AND (pm.meta_key = 'cap-user_email' OR pm.meta_key = 'cap-user_login') 
+				  AND pm.meta_value = %s",
+				$email
 			)
 		);
 	}
