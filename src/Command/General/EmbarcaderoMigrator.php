@@ -64,6 +64,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const FEATURED_IMAGES_LOG_FILE                  = 'embarcadero_featured_images_migrator.log';
 	const MORE_POSTS_LOG_FILE                       = 'embarcadero_more_posts_migrator.log';
 	const EMBARCADERO_ORIGINAL_ID_META_KEY          = '_newspack_import_id';
+	const EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY    = '_newspack_import_topic_id';
 	const EMBARCADERO_IMPORTED_TAG_META_KEY         = '_newspack_import_tag_id';
 	const EMBARCADERO_IMPORTED_FEATURED_META_KEY    = '_newspack_import_featured_image_id';
 	const EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY  = '_newspack_import_more_posts_image_id';
@@ -561,7 +562,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$post_data['post_name'] = $post_name;
 			}
 
-			if ( '0' !== $post['date_updated_epoch'] ) {
+			if ( ! empty( $post['date_updated_epoch'] ) ) {
 				$post_data['post_modified'] = $this->get_post_date_from_timestamp( $post['date_updated_epoch'] );
 			}
 
@@ -618,6 +619,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Set the original ID.
 			update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+
+			if ( ! empty( $post['topic_id'] ) ) {
+				update_post_meta( $wp_post_id, self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY, $post['topic_id'] );
+			}
 
 			// Set the post subhead.
 			update_post_meta( $wp_post_id, 'newspack_post_subtitle', $post['subhead'] );
@@ -1039,7 +1044,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ), Logger::LINE );
 
-			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $comment['topic_id'] );
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY, $comment['topic_id'] );
 
 			if ( ! $wp_post_id ) {
 				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $comment['topic_id'] ), Logger::WARNING );
@@ -1082,7 +1087,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'comment_post_ID'      => $wp_post_id,
 				'comment_approved'     => 'no' === $comment['hide'],
 				'user_id'              => $wp_user ? $wp_user->ID : '',
-				'comment_author'       => $wp_user ? $wp_user->user_login : '',
+				'comment_author'       => $wp_user ? $wp_user->user_nicename : $comment['user_name'],
 				'comment_author_email' => $wp_user ? $wp_user->user_email : '',
 				'comment_author_url'   => $wp_user ? $wp_user->user_url : '',
 				'comment_author_IP'    => $comment['ip_address'] ?? '',
@@ -1958,6 +1963,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	private function get_post_id_by_meta( $meta_name, $meta_value ) {
 		global $wpdb;
+
+		if ( empty( $meta_value ) ) {
+			return null;
+		}
 
 		return $wpdb->get_var(
 			$wpdb->prepare(
