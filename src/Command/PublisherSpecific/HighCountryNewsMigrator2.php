@@ -1291,7 +1291,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $has_inline_gallery );
 				if ( ! empty( $gallery_images ) ) {
 					array_map( fn( $id ) => wp_update_post( [ 'ID' => $id, 'post_parent' => $processed_post_id, ] ), $gallery_images );
-					$gallery = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images ) );
+					if ( count( $gallery_images ) > 1 ) {
+						$block = $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images );
+						$block['attrs']['className'] = 'hcn-gallery'; // Add a classname so we can fish it out again if we need to.
+						$gallery = serialize_block( $block );
+					} else { // Some galleries only have one image – in that case we don't need a gallery block.
+						$attachment_post = get_post( current( $gallery_images ) );
+						$gallery = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img') );
+					}
+
 					if ( $has_inline_gallery ) {
 						// Inline gallery needs to be replaced with a Gutenberg gallery block.
 						$text = str_replace( $gallery_matches[0], $gallery, $text );
