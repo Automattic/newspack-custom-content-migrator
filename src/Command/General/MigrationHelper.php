@@ -108,7 +108,7 @@ class MigrationHelper implements InterfaceCommand {
 			$command        = $matches[1];
 			$command_args   = trim( str_replace( $command, '', $command_string ) );
 			$command_args   = trim( preg_replace( '/\s+/', " \\\n", $command_args ), '\\' );
-			$command_string = $command . " \\\n" . $command_args . " \\";
+			$command_string = $command . " \\\n" . $command_args . " \\\n";
 		}
 
 		if ( $begin_at > 0 ) {
@@ -123,7 +123,7 @@ class MigrationHelper implements InterfaceCommand {
 				$batch_end = 0;
 			}
 			$batch_info = sprintf( 'Batch %d of %d', $batch + 1, $num_batches );
-			WP_CLI::line( sprintf( '# MigrationHelper: %s', $batch_info ) );
+			WP_CLI::line( sprintf( PHP_EOL . '# MigrationHelper: %s', $batch_info ) );
 			if ( $command_string ) {
 				WP_CLI::out( $command_string );
 			}
