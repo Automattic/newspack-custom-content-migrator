@@ -980,6 +980,9 @@ VIDEO;
 			return [];
 		}
 		$args['specificPosts'] = $post_ids;
+		if ( is_array( $args['className'] ) ) {
+			$args['className'] = implode( ' ', $args['className'] );
+		}
 
 		if ( empty( $args['postsToShow'] ) ) {
 			// Enforce a sane default if the value is not passed.

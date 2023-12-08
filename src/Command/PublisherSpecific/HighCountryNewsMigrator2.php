@@ -18,6 +18,7 @@ use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
+use WP_CLI\ExitException;
 use WP_Post;
 use WP_User;
 
@@ -642,18 +643,36 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * @throws ExitException
+	 */
 	public function fix_referenced_articles_from_json( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 10;
+		$command_meta_version = 12;
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 
 		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
+		$block_class_name     = 'hcn-bottom-read-more';
+		$read_more_block_args = [
+			'showExcerpt'   => false,
+			'showDate'      => false,
+			'showAuthor'    => false,
+			'postLayout'    => 'grid',
+			'columns'       => 2,
+			'postsToShow'   => 2,
+			'mediaPosition' => 'left',
+			'typeScale'     => 2,
+			'imageScale'    => 2,
+			'sectionHeader' => 'Read More',
+			'specificMode'  => true,
+			'className'     => [ $block_class_name, 'read-more-box' ],
+		];
+
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $article ) {
-			$row_number ++;
-			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number, $batch_args['total'], $article->{'@id'} ) );
+			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', ++ $row_number, $batch_args['total'], $article->{'@id'} ) );
 			$post_id = $this->get_post_id_from_uid( $article->UID );
 			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
 				$this->logger->log( $log_file, sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
@@ -662,36 +681,21 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( empty( $article->references->relatesTo ) ) {
 				continue;
 			}
-			$related_links = [];
-			foreach ( $article->references->relatesTo as $uid ) {
-				$related_post_id = $this->get_post_id_from_uid( $uid );
-				if ( $related_post_id ) {
-					$related_links[] = [
-						'title'     => get_the_title( $related_post_id ),
-						'permalink' => "/?p={$related_post_id}"
-					];
-				}
-			}
-			if ( empty( $related_post_id ) ) {
+			$related_post_ids = array_filter( array_map( fn( $uid ) => $this->get_post_id_from_uid( $uid ), $article->references->relatesTo ) );
+			if ( empty( $related_post_ids ) ) {
 				continue;
 			}
-			$post  = get_post( $post_id );
-			$group = $this->gutenberg_block_generator->get_group_constrained(
-				[
-					$this->gutenberg_block_generator->get_paragraph( 'Read More:' ),
-					$this->gutenberg_block_generator->get_list(
-						array_map(
-							fn( $related_post ) => '<a href="' . $related_post['permalink'] . '">' . $related_post['title'] . '</a>',
-							$related_links
-						)
-					)
-				],
-				[ 'hcn-bottom-read-more' ]
-			);
+
+			$post = get_post( $post_id );
+			if ( str_contains( $post->post_content, $block_class_name ) ) {
+				// Remove the block if there is one already.
+				$post->post_content = $this->remove_block_with_class( $block_class_name, $post->post_content );
+			}
+			$read_more_block = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( $related_post_ids, $read_more_block_args );
 			wp_update_post(
 				[
 					'ID'           => $post_id,
-					'post_content' => $post->post_content . serialize_block( $group ),
+					'post_content' => $post->post_content . serialize_block( $read_more_block ),
 				]
 			);
 			$this->logger->log( $log_file, sprintf( 'Added a "Read more" block to %s', get_permalink( $post ) ), Logger::SUCCESS );
@@ -700,6 +704,25 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$end = ( PHP_INT_MAX === $batch_args['end'] ) ? 'end' : $batch_args['end'];
 		$this->logger->log( $log_file, sprintf( 'Finished processing batch from %d to %s', $batch_args['start'], $end ) );
+	}
+
+	private function remove_block_with_class( string $class, string $content ): string {
+		$filtered_blocks = array_filter(
+			parse_blocks( $content ),
+			function ( $block ) use ( $class ) {
+				if ( empty( $block['attrs']['className'] ) ) {
+					return true;
+				}
+
+				return ! preg_match( "/\b{$class}\b/", $block['attrs']['className'] );
+			}
+		);
+
+		return array_reduce(
+			$filtered_blocks,
+			fn( $carry, $block ) => $carry . render_block( $block ),
+			''
+		);
 	}
 
 	private function find_featured_image_on_post_without_one( int $post_id ): int {
@@ -1425,6 +1448,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		if ( ! str_contains( $content, '[RELATED:' ) || ! preg_match_all( '@>\[RELATED:(.*?)]</@', $content, $matches, PREG_SET_ORDER ) ) {
 			return $content;
 		}
+		$homepage_block_args = [
+			'showReadMore'  => false,
+			'showDate'      => false,
+			'showAuthor'    => false,
+			'specificMode'  => true,
+			'typeScale'     => 2,
+			'sectionHeader' => 'Related',
+			'postsToShow'   => 1,
+			'showExcerpt'   => false,
+		];
+		$wrapper_class       = 'hcn-related-inline';
+
 		global $wpdb;
 		$on_left_side = true; // Start the boxes on the left and then alternate sides. Only applies if there are mulitple boxes.
 		foreach ( $matches as $match ) {
@@ -1445,21 +1480,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( empty( $related_post ) ) {
 				continue;
 			}
-
-			$args         = [
-				'showReadMore'  => false,
-				'showDate'      => false,
-				'showAuthor'    => false,
-				'specificMode'  => true,
-				'typeScale'     => 3,
-				'sectionHeader' => 'Related',
-				'postsToShow'   => 1,
-				'showExcerpt'   => false,
-			];
-			$block        = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( [ $related_post ], $args, );
+			$block        = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( [ $related_post ], $homepage_block_args, );
 			$align        = 'align' . ( $on_left_side ? 'left' : 'right' );
 			$on_left_side = ! $on_left_side;
-			$group        = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border', $align ] ) );
+			$group        = serialize_block( $this->gutenberg_block_generator->get_group_constrained( [ $block ], [ 'is-style-border', $align, $wrapper_class ] ) );
 			$content      = str_replace( $match[0], $group, $content );
 		}
 
