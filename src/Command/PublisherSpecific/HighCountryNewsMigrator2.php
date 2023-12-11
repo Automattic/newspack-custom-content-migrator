@@ -1452,7 +1452,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function replace_related_placeholders_with_homepage_blocks( string $content ): string {
-		if ( ! str_contains( $content, '[RELATED:' ) || ! preg_match_all( '@>\[RELATED:(.*?)]</@', $content, $matches, PREG_SET_ORDER ) ) {
+		if ( ! str_contains( $content, '[RELATED:' ) || ! preg_match_all( '@<([a-z][a-z0-9]*)\b[^>]*>\[RELATED:\s?([^\]]+)\]<\/\1>@', $content, $matches, PREG_SET_ORDER ) ) {
 			return $content;
 		}
 		$homepage_block_args = [
@@ -1470,7 +1470,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		global $wpdb;
 		$on_left_side = true; // Start the boxes on the left and then alternate sides. Only applies if there are mulitple boxes.
 		foreach ( $matches as $match ) {
-			$path         = wp_strip_all_tags( trim( parse_url( $match[1], PHP_URL_PATH ), '/' ) );
+			$path         = wp_strip_all_tags( trim( parse_url( $match[2], PHP_URL_PATH ), '/' ) );
 			$related_post = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_tree_path' AND meta_value = %s;",
