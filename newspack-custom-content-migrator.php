@@ -60,7 +60,6 @@ PluginSetup::register_migrators(
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
-		Command\General\PloneCMSMigrator::class,
 		Command\General\ProfilePress::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
@@ -68,13 +67,14 @@ PluginSetup::register_migrators(
 		Command\General\ChorusCmsMigrator::class,
 		Command\General\LedeMigrator::class,
 		Command\General\DownloadMissingImages::class,
+		Command\General\MigrationHelper::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
 		Command\PublisherSpecific\SearchLightNMMigrator::class,
 		Command\PublisherSpecific\CalMattersMigrator::class,
-		Command\PublisherSpecific\HighCountryNewsMigrator::class,
+		Command\PublisherSpecific\HighCountryNewsMigrator2::class,
 		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
 		Command\PublisherSpecific\MassterlistMigrator::class,
 		Command\PublisherSpecific\MauiTimesMigrator::class,
@@ -95,6 +95,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BenitoLinkMigrator::class,
 		Command\PublisherSpecific\EfectoCocuyoContentMigrator::class,
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
+		Command\PublisherSpecific\BlockClubChicagoMigrator::class,
 		Command\PublisherSpecific\BaristanetMigrator::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
 	)

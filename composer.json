@@ -27,7 +27,10 @@
     "automattic/newspack-cms-importers": "dev-master",
     "automattic/newspack-post-image-downloader": "dev-master",
     "automattic/newspack-content-converter": "dev-master",
-    "halaxa/json-machine": "^1.1"
+    "halaxa/json-machine": "^1.1",
+    "mustache/mustache": "^2.14",
+    "simplehtmldom/simplehtmldom": "2.0-RC2",
+    "xemlock/htmlpurifier-html5": "^0.1.11"
   },
   "require-dev": {
     "automattic/vipwpcs": "^2.0",

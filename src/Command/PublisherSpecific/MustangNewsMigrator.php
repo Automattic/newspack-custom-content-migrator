@@ -2,7 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Logic\MigrationMeta;
+use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;

@@ -24,6 +24,7 @@ use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
+use WP_Http;
 use WP_Term;
 use WP_User;
 
@@ -1418,6 +1419,65 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					),
 				),
 			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-upload-missing-publicaciones-images',
+			[ $this, 'cmd_upload_missing_publicaciones_images' ],
+			[
+				'shortdesc' => 'This command will upload a missing featured image for Publicaciones content',
+				'synopsis' => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'import-json',
+						'description' => 'The file that contains podcasts data.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-location',
+						'description' => 'Path to media directory',
+						'optional'    => false,
+						'repeating'   => false,
+					]
+				]
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-fix-featured-images-for-publicaciones-directly',
+			[ $this, 'cmd_fix_featured_images_for_publicaciones_directly' ],
+			[
+				'shortdesc' => 'This command will upload a missing featured image for Publicaciones content',
+				'synopsis' => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'The Post IDs to address',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				]
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-fix-missing-author-guest-author-link',
+			[ $this, 'cmd_fix_missing_author_guest_author_link' ],
+			[
+				'shortdesc' => 'This command will pull a list of authors which seem to be missing a linkage to a guest author',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-remove-duplicate-article-import-meta-data',
+			[ $this, 'cmd_remove_duplicate_article_import_meta_data' ],
+			[
+				'shortdesc' => 'This command will address a set of data which has been duplicated from various imports',
+				'synopsis'  => [],
+			]
 		);
 	}
 
@@ -4434,6 +4494,100 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will pull a list of users which have matching email addresses with Guest Authors, but missing
+	 * cap-linked_account meta data. If the accounts should be linked, then the user_login will be used to
+	 * update the meta data field.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_missing_author_guest_author_link( $args, $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$users_in_question = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM (
+					SELECT 
+					    u.ID as user_id, 
+					    cap_emails.post_id as email_post_id,
+					    u.user_email, 
+					    cap_emails.meta_value as guest_author_email
+					FROM $wpdb->users u 
+					    LEFT JOIN (
+					    	SELECT pm.* FROM wp_postmeta pm
+					    	    INNER JOIN wp_posts p ON pm.post_id = p.ID
+					    	WHERE p.post_type = 'guest-author' AND pm.meta_key = 'cap-user_email'
+					    ) as cap_emails 
+					        ON u.user_email = cap_emails.meta_value 
+					WHERE cap_emails.meta_value IS NOT NULL
+				) as emails
+					LEFT JOIN (
+						SELECT 
+						    post_id, 
+						    meta_value 
+						FROM wp_postmeta 
+						WHERE meta_key = 'cap-linked_account'
+					) as linked_accounts 
+					    ON emails.email_post_id = linked_accounts.post_id
+				WHERE linked_accounts.meta_value = '' 
+				   OR linked_accounts.meta_value IS NULL 
+				ORDER BY emails.email_post_id"
+			)
+		);
+
+		foreach ( $users_in_question as $user ) {
+			$this->output_users_as_table( [ $user->user_id ] );
+			$this->output_post_table( [ $user->email_post_id ] );
+			$this->output_postmeta_table( $user->email_post_id );
+			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
+
+			$this->output_terms_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ) );
+
+			if ( 1 === count( $author_taxonomies ) ) {
+				$this->fix_author_term_data_from_guest_author( intval( $user->email_post_id ), $author_taxonomies[0], get_user_by( 'id', $user->user_id ), false );
+			}
+		}
+	}
+
+	/**
+	 * This function will retrieve any associated term rows for a given guest author ID.
+	 *
+	 * @param int $guest_author_id Guest Author ID.
+	 *
+	 * @return array
+	 */
+	private function get_author_term_from_guest_author_id( int $guest_author_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
+    				t.term_id,
+    				tt.term_taxonomy_id,
+    				t.name,
+    				t.slug,
+    				tt.taxonomy,
+    				tt.description,
+    				tt.count,
+    				tt.parent
+				FROM $wpdb->term_relationships tr 
+				    LEFT JOIN $wpdb->term_taxonomy as tt
+				    	ON tr.term_taxonomy_id = tt.term_taxonomy_id
+					LEFT JOIN $wpdb->terms t 
+					    ON t.term_id = tt.term_id
+					INNER JOIN $wpdb->posts p 
+					    ON tr.object_id = p.ID
+				WHERE tt.taxonomy = 'author' AND p.post_type = 'guest-author' AND tr.object_id = %d",
+				$guest_author_id
+			)
+		);
+	}
+
 	public function cmd_resolve_damaged_author_guest_author_relationships( $args, $assoc_args ) {
 		global $wpdb;
 
@@ -4486,7 +4640,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			foreach ( $connected_guest_author_terms as $connected_guest_author_term ) {
 				$term_ids          = array_filter( $term_ids, fn( $term_id ) => $term_id != $connected_guest_author_term->term_id );
-				$guest_author_post = $this->get_guest_author_post_from_term_id(
+				$guest_author_post = $this->get_guest_author_post_from_term_taxonomy_id(
 					$connected_guest_author_term->term_taxonomy_id
 				);
 
@@ -4756,7 +4910,38 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function output_postmeta_table( array $identifiers ) {
+	/**
+	 * This function will output a table to terminal with the postmeta results for a given Post ID.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array
+	 */
+	public function output_postmeta_table( int $post_id ) {
+		global $wpdb;
+
+		$postmeta_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE post_id = %d ORDER BY meta_key ASC",
+				$post_id
+			)
+		);
+
+		echo WP_CLI::colorize( "%BPostmeta Table (%n%W$post_id%n%B)%n\n" );
+		WP_CLI\Utils\format_items(
+			'table',
+			$postmeta_rows,
+			array(
+				'meta_id',
+				'meta_key',
+				'meta_value',
+			)
+		);
+
+		return $postmeta_rows;
+	}
+
+	public function output_postmeta_data_table( array $identifiers ) {
 		global $wpdb;
 
 		$base_query = "SELECT * FROM $wpdb->postmeta WHERE ";
@@ -4771,7 +4956,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			echo WP_CLI::colorize( "%BPostmeta's Table (%n%W$meta_key%n%B)%n\n" );
+			echo WP_CLI::colorize( "%BPostmeta Data (%n%W$meta_key%n%B)%n\n" );
 			WP_CLI\Utils\format_items(
 				'table',
 				$postmeta_rows,
@@ -4857,6 +5042,65 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		return $user_login;
+	}
+
+	/**
+	 * This is a convenience function that allows for immediate feedback on whether the chosen slug is unique.
+	 *
+	 * @param string $slug This is the unique author slug, which should nearly match the user_nicename (e.g. slug = <user_nicename> or slug = cap-<user_nicename>).
+	 * @param int    $term_taxonomy_id Existing term_taxonomy_id to exclude from search result.
+	 *
+	 * @return string
+	 */
+	private function prompt_for_unique_author_slug( string $slug, int $term_taxonomy_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$existing_slugs = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT t.term_id, tt.term_taxonomy_id, t.slug, tt.description 
+					FROM $wpdb->terms t 
+    					LEFT JOIN $wpdb->term_taxonomy tt 
+    					    ON t.term_id = tt.term_id 
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+				$term_taxonomy_id,
+				$slug
+			)
+		);
+
+		if ( ! empty( $existing_slugs ) ) {
+			echo WP_CLI::colorize( "%YExisting slugs found%n\n" );
+			foreach ( $existing_slugs as $record ) {
+				$this->output_terms_table( [ intval( $record->term_id ) ] );
+				$description_id = $this->extract_id_from_description( $record->description );
+				$guest_author_record = $this->get_guest_author_post_from_term_taxonomy_id( $record->term_taxonomy_id );
+
+				if ( null === $guest_author_record ) {
+					echo WP_CLI::colorize( "%Yterm_taxonomy_id (%n%W$record->term_taxonomy_id%n%Y) not connected to Guest Author%n\n" );
+					$guest_author_record->ID = $description_id;
+				}
+
+				$post_ids = array_unique( [ $description_id, $guest_author_record->ID ] );
+
+				foreach ( $post_ids as $post_id ) {
+					$this->output_post_table( [ $post_id ] );
+					$this->output_postmeta_table( $post_id );
+				}
+			}
+			
+			$prompt = $this->ask_prompt( 'What would become the author slug for this GA already exists. Would you like to (u)pdate it, or (h)alt execution?' );
+
+			if ( 'u' === $prompt ) {
+				$user_provided_slug = $this->ask_prompt( 'Please enter a unique slug' );
+
+				return $this->prompt_for_unique_author_slug( $user_provided_slug, $term_taxonomy_id );
+
+			} elseif ( 'h' === $prompt ) {
+				die();
+			}
+		}
+
+		return $slug;
 	}
 
 	private function get_user_nicename( WP_User $user ) {
@@ -4981,7 +5225,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$table->display();
 	}
 
-	private function get_guest_author_post_from_term_id( int $term_taxonomy_id ) {
+	private function get_guest_author_post_from_term_taxonomy_id( int $term_taxonomy_id ) {
 		echo WP_CLI::colorize( "%BGetting Guest Author Record%n\n" );
 		$this->high_contrast_output( 'Term Taxonomy ID', $term_taxonomy_id );
 		global $wpdb;
@@ -5229,7 +5473,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->fix_author_term_data_from_guest_author( $guest_author_id, $term, $user );
 	}
 
-	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user ) {
+	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user, $confirm = true ) {
 		global $wpdb;
 
 		$guest_author_record        = $this->get_guest_author_post_by_id( $guest_author_id );
@@ -5240,6 +5484,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			'cap-display_name',
 		);
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
+		$filtered_author_cap_fields = $this->ensure_linked_account_meta_exists( $guest_author_id, $filtered_author_cap_fields );
 
 		$user_display_name         = $user->display_name;
 		$post_meta_display_name    = $filtered_author_cap_fields['cap-display_name'] ?? '';
@@ -5247,23 +5492,35 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		if ( empty( $post_meta_display_name ) && ! empty( $user_display_name ) ) {
 			$guest_author_display_name = $user_display_name;
-		} elseif ( $user_display_name !== $guest_author_display_name ) {
-			$this->high_contrast_output( 'User Display Name', $user_display_name );
-			$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
-			$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
+		} elseif ( $user_display_name !== $post_meta_display_name ) {
+			if ( $confirm ) {
+				$this->high_contrast_output( 'User Display Name', $user_display_name );
+				$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
+				$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
 
-			if ( 'u' === $prompt ) {
-				$guest_author_display_name = $user_display_name;
-			} if ( 'g' === $prompt ) {
+				if ( 'u' === $prompt ) {
+					$guest_author_display_name = $user_display_name;
+				}
+				if ( 'g' === $prompt ) {
+					$user->display_name = $post_meta_display_name;
+				} elseif ( 'h' === $prompt ) {
+					die();
+				}
+			} else {
 				$user->display_name = $post_meta_display_name;
-			} elseif ( 'h' === $prompt ) {
-				die();
 			}
 		}
 
+		$this->update_user_nicename_if_necessary( $user );
+
+		$cap_user_login = $this->get_guest_author_user_login( $user );
+
+		// Ensure that $cap_user_login is unique, since it will ultimately become the slug for the author term.
+		$cap_user_login = $this->prompt_for_unique_author_slug( $cap_user_login, $term->term_taxonomy_id );
+
 		$insert_guest_author_term_rel_result = $this->insert_guest_author_term_relationship( $guest_author_id, $term->term_taxonomy_id );
 
-		if ( null === $insert_guest_author_term_rel_result ) {
+		if ( null === $insert_guest_author_term_rel_result && $confirm ) {
 			$prompt = $this->ask_prompt( 'Would you like to (u)se that one, allow to (s)kip, or (h)alt execution?' );
 
 			if ( 'h' === $prompt ) {
@@ -5310,7 +5567,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$wpdb->update(
 					$wpdb->posts,
 					array(
-						'post_title' => $value['Display Name'],
+						$key => $value['Display Name'],
 					),
 					array(
 						'ID' => $guest_author_id,
@@ -5318,10 +5575,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				);
 			}
 		}
-
-		$this->update_user_nicename_if_necessary( $user );
-
-		$cap_user_login = $this->get_guest_author_user_login( $user );
 
 		echo WP_CLI::colorize( "%BGuest Author vs wp_postmeta field%n\n" );
 		$comparison = $this->output_value_comparison_table(
@@ -5430,6 +5683,40 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		$this->update_author_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+	}
+
+	/**
+	 * This function will insert a row into wp_postmeta for guest authors with a missing cap-linked_account field.
+	 * This field needs to be in the DB so that it can be properly updated when necessary.
+	 *
+	 * @param int   $guest_author_id Guest Author ID.
+	 * @param array $filtered_author_cap_fields Filtered Author Cap Fields.
+	 *
+	 * @return array
+	 * @throws WP_CLI\ExitException Thorws an exception if the insert fails.
+	 */
+	private function ensure_linked_account_meta_exists( int $guest_author_id, array $filtered_author_cap_fields ) {
+		global $wpdb;
+
+		if ( ! array_key_exists( 'cap-linked_account', $filtered_author_cap_fields ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$result = $wpdb->insert(
+				$wpdb->postmeta,
+				[
+					'post_id'    => $guest_author_id,
+					'meta_key'   => 'cap-linked_account', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					'meta_value' => '', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				]
+			);
+
+			if ( false === $result ) {
+				WP_CLI::error( 'Failed to insert cap-linked_account postmeta' );
+			}
+
+			$filtered_author_cap_fields['cap-linked_account'] = '';
+		}
+
+		return $filtered_author_cap_fields;
 	}
 
 	private function procure_unique_user_login( $user_login ) {
@@ -6151,12 +6438,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
     			t.slug, 
     			tt.taxonomy, 
     			tt.term_taxonomy_id
-			FROM wp_terms t
-			         LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
+			FROM $wpdb->terms t
+			         LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 			WHERE SUBSTR( t.slug, 1, 4 ) = 'cap-' 
 			  AND tt.term_taxonomy_id IS NULL
 			  AND t.term_id NOT IN (
-			      SELECT term_id FROM $wpdb->termmeta WHERE meta_key = 'updated_by_loose_terms_script'
+			      SELECT term_id FROM $wpdb->termmeta WHERE meta_key IN ( 'updated_by_loose_terms_script', 'skipped_by_loose_terms_script' )
 			  )"
 		);
 
@@ -6177,6 +6464,27 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			);
 
 			$guest_author = $this->get_guest_author_from_post_name( $loose_author_term->slug );
+
+			// There might be a Guest Author that has different post_name somehow, but is tied to an email.
+			if ( is_email( $loose_author_term->name ) ) {
+				$potentially_same_guest_authors = $this->get_guest_authors_using_email( $loose_author_term->name );
+				if ( null !== $guest_author ) {
+					$potentially_same_guest_authors = array_filter(
+						$potentially_same_guest_authors,
+						function ( $psga ) use ( $guest_author ) {
+							return $psga->post_id !== $guest_author->ID;
+						}
+					);
+				}
+
+				if ( ! empty( $potentially_same_guest_authors ) ) {
+					echo WP_CLI::colorize( "%YFound%n %C" . count( $potentially_same_guest_authors ) . "%n %Ypotentially same Guest Authors.%n\n" );
+					foreach ( $potentially_same_guest_authors as $psga ) {
+						$this->output_post_table( [ $psga->post_id ] );
+						$this->output_postmeta_table( $psga->post_id );
+					}
+				}
+			}
 
 			if ( null !== $guest_author ) {
 				$this->output_post_table( array( $guest_author->ID ) );
@@ -6338,11 +6646,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							echo WP_CLI::colorize( "%BUser by login%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
 							$this->output_users_as_table( array( $user_by_login ) );
 
-							$user_by_email = false;
 							if ( is_email( $terms[0]->name ) ) {
-								$user_by_email = get_user_by( 'email', $terms[0]->name );
+								$user_by_email_taxonomy = get_user_by( 'email', $terms[0]->name );
 								echo WP_CLI::colorize( "%BUser by email%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
-								$this->output_users_as_table( array( $user_by_email ) );
+								$this->output_users_as_table( array( $user_by_email_taxonomy ) );
+								$user_by_email = $this->choose_between_users( $user_by_email, $user_by_email_taxonomy, 'Email', 'Taxonomy-Email' );
 							}
 
 							if ( $single_taxonomy && 'author' == $taxonomy_record->taxonomy ) {
@@ -6406,7 +6714,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_email->ID;
 				$user_emails[] = $user_by_email->user_email;
 				$this->output_users_as_table( array( $user_by_email ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_email->user_login,
 					)
@@ -6422,7 +6730,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_login->ID;
 				$user_emails[] = $user_by_login->user_email;
 				$this->output_users_as_table( array( $user_by_login ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_login->user_login,
 					)
@@ -6435,7 +6743,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$user = $this->choose_between_users( $user_by_login, $user_by_email );
 
-			$postmeta_records = $this->output_postmeta_table(
+			$postmeta_records = $this->output_postmeta_data_table(
 				array(
 					'cap-user_email' => $loose_author_term->name,
 					'cap-user_login' => $loose_author_term->slug,
@@ -6545,7 +6853,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				$command = "$standalone_command --guest-author-id=$post_ids[0] ";
-				$prompt  = 'Run the following command? (y/n/h) ';
+				$prompt  = 'Run the following command? (y/n/s/h) ';
 				if ( 1 === count( $term_taxonomy_ids_from_post_id_relationships ) && 1 === count( $term_taxonomy_ids ) ) {
 					if ( $term_taxonomy_ids_from_post_id_relationships[0] === $term_taxonomy_ids[0] ) {
 						$taxonomy_description = $wpdb->get_var(
@@ -6592,6 +6900,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							continue;
 						} elseif ( 'h' === $response ) {
 							die();
+						} elseif ( 's' === $response ) {
+							$wpdb->insert(
+								$wpdb->termmeta,
+								array(
+									'term_id'    => $loose_author_term->term_id,
+									'meta_key'   => 'skipped_by_loose_terms_script',
+									'meta_value' => 1,
+								)
+							);
+							continue;
 						} else {
 							continue;
 						}
@@ -6703,6 +7021,31 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
+	/**
+	 * Attempts to find Guest Authors by leveraging cap-user_email and cap-user_login postmeta fields.
+	 *
+	 * @param string $email
+	 *
+	 * @return array
+	 */
+	private function get_guest_authors_using_email( string $email ) {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				DISTINCT pm.post_id 
+				FROM $wpdb->postmeta pm 
+				    INNER JOIN $wpdb->posts p 
+				        ON p.ID = pm.post_id 
+				WHERE p.post_type = 'guest-author' 
+				  AND (pm.meta_key = 'cap-user_email' OR pm.meta_key = 'cap-user_login') 
+				  AND pm.meta_value = %s",
+				$email
+			)
+		);
+	}
+
 	private function get_guest_author_from_post_name( string $post_name ) {
 		global $wpdb;
 
@@ -6797,6 +7140,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( 'h' === $prompt ) {
 			die();
 		} elseif ( 's' === $prompt ) {
+			$wpdb->insert(
+				$wpdb->termmeta,
+				array(
+					'term_id' => $term_id,
+					'meta_key' => 'skipped_by_loose_terms_script',
+					'meta_value' => 1,
+				)
+			);
 			return false;
 		} else {
 			if ( $delete ) {
@@ -7367,14 +7718,19 @@ BLOCK;
 
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
-    				sub.ID, 
-    				sub.post_content 
+				"
+				SELECT 
+				* 
 				FROM (
-				    SELECT ID, post_content FROM $wpdb->posts 
-				    WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
-				) AS sub
-				WHERE sub.ID > %d",
+					SELECT 
+    					*
+					FROM (
+				    	SELECT ID, post_content FROM $wpdb->posts 
+				    	WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
+					) AS sub
+					ORDER BY sub.ID
+				) AS subber
+				WHERE subber.ID > %d",
 				'%' . $wpdb->esc_like( 'lasilla.com' ) . '%',
 				$after_post_id
 			)
@@ -7387,6 +7743,7 @@ BLOCK;
 			// Can't seem to trust the system to maintain a carbon copy of the post_content before update, so saving it as postmeta.
 			$this->handle_saving_post_content_as_meta( $post->post_content, $post->ID );
 
+			echo WP_CLI::colorize( "%BHANDLING IMAGES%n\n" );
 			$image_urls = $this->attachments->get_images_sources_from_content( $post->post_content );
 			foreach ( $image_urls as $image_url ) {
 				$this->high_contrast_output( 'Original URL', $image_url );
@@ -7403,6 +7760,7 @@ BLOCK;
 					$this->high_contrast_output( 'Replaced URL', $new_image_url );
 
 					if ( ! str_contains( $new_image_url, 'lasilla.com' ) ) {
+						echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
 						$attachment_id  = $this->attachments->import_external_file( $new_image_url, null, null, null, null, $post->ID );
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
@@ -7411,11 +7769,12 @@ BLOCK;
 					}
 				}
 
-				$exploded = explode( '/', $image_url );
-				$filename = array_pop( $exploded );
+				$exploded            = explode( '/', $image_url );
+				$filename            = array_pop( $exploded );
+				$filename            = urldecode( $filename );
 				$question_mark_index = strpos( $filename, '?' );
 
-				if ( $question_mark_index !== false ) {
+				if ( false !== $question_mark_index ) {
 					$filename = substr( $filename, 0, $question_mark_index );
 				}
 
@@ -7431,11 +7790,16 @@ BLOCK;
 				if ( $possible_attachment_id ) {
 					$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
-				} else {
-					$post->post_content = str_replace( $image_url, "https://lasillavacia.com/$filename", $post->post_content );
+				} elseif ( $file_exists ) {
+					echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
+					$attachment_id  = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+					$attachment_url = wp_get_attachment_url( $attachment_id );
+
+					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
 				}
 			}
 
+			echo WP_CLI::colorize( "%BHANDLING VIDEO URLs%n\n" );
 			preg_match_all( '/<video[^>]+(?:src)="([^">]+)"/', $post->post_content, $video_sources_match );
 			if ( array_key_exists( 1, $video_sources_match ) && ! empty( $video_sources_match[1] ) ) {
 				foreach ( $video_sources_match[1] as $match ) {
@@ -7457,21 +7821,16 @@ BLOCK;
 						if ( $possible_attachment_id ) {
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
-						} else {
-							$post->post_content = str_replace( $match, "https://lasillavacia.com/$filename", $post->post_content );
 						}
 					}
 				}
 			}
 
-			preg_match_all( '/<a[^>]+(?:href)="([^">]+)"/', $post->post_content, $document_sources_match );
-			if ( array_key_exists( 1, $document_sources_match ) && ! empty( $document_sources_match[1] ) ) {
-				foreach ( $document_sources_match[1] as $match ) {
-					if ( ! str_contains( $match, 'lasilla.com' ) ) {
-						continue;
-					}
-
-					$this->high_contrast_output( 'Doc URL', $match );
+			echo WP_CLI::colorize( "%BHANDLING IFRAME URLs%n\n" );
+			preg_match_all( '/<iframe[^>]+(?:src)="([^">]+)"/', $post->post_content, $iframe_source_matches );
+			if ( array_key_exists( 1, $iframe_source_matches ) && ! empty( $iframe_source_matches[1] ) ) {
+				foreach ( $iframe_source_matches[1] as $match ) {
+					$this->high_contrast_output( 'iFrame URL', $match );
 					$filename = WP_CLI\Utils\basename( $match );
 					$this->high_contrast_output( 'Basename filename', $filename );
 					$full_filename_path = $full_path( $filename );
@@ -7490,7 +7849,53 @@ BLOCK;
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 						} else {
-							continue;
+							// Only attempt to correct URL if it contains lasilla.com.
+							// Otherwise, the URL should be fine and/or we shouldn't be touching it.
+							if ( str_contains( $match, 'lasilla.com' ) ) {
+								$url = $this->attempt_to_get_correct_url( $match, $post->ID );
+
+								if ( $url !== null ) {
+									$post->post_content = str_replace( $match, $url, $post->post_content );
+								}
+							}
+						}
+					}
+				}
+			}
+
+			echo WP_CLI::colorize( "%BHANDLING DOCUMENT URLs%n\n" );
+			preg_match_all( '/<a[^>]+(?:href)="([^">]+)"/', $post->post_content, $document_sources_match );
+			if ( array_key_exists( 1, $document_sources_match ) && ! empty( $document_sources_match[1] ) ) {
+				foreach ( $document_sources_match[1] as $match ) {
+					if ( ! str_contains( $match, 'lasilla.com' ) ) {
+						continue;
+					}
+
+					$this->high_contrast_output( 'Doc URL', $match );
+					$filename = WP_CLI\Utils\basename( $match );
+					$this->high_contrast_output( 'Basename filename', $filename );
+					$full_filename_path = $full_path( $filename );
+					$file_exists        = file_exists( $full_filename_path );
+					$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+
+					if ( $file_exists ) {
+						WP_CLI::success('File exists');
+						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+						$attachment_url     = wp_get_attachment_url( $attachment_id );
+						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
+					} else {
+						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+						$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+
+						if ( $possible_attachment_id ) {
+							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
+							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
+						} else {
+							$url = $this->attempt_to_get_correct_url( $match, $post->ID );
+
+							if ( null !== $url ) {
+								$post->post_content = str_replace( $match, $url, $post->post_content );
+							}
 						}
 					}
 				}
@@ -7502,6 +7907,366 @@ BLOCK;
 					'ID'           => $post->ID,
 				)
 			);
+		}
+	}
+
+	/**
+	 * This function will attempt to find the correct URL for URL's containing lasilla.com in them.
+	 *
+	 * @param string $original_url The original URL that needs to be checked.
+	 * @param int    $post_id The post ID where the original URL was found.
+	 *
+	 * @return string|null
+	 */
+	private function attempt_to_get_correct_url( $original_url, $post_id ) {
+		$http        = new WP_Http();
+		$moved_codes = [ $http::MOVED_PERMANENTLY, $http::FOUND ];
+
+		$modified_url = str_replace( 'https://lasilla.com', '/media', $original_url );
+		$this->high_contrast_output( 'Modified URL', $modified_url );
+
+		if ( false === wp_http_validate_url( $modified_url ) ) {
+			echo WP_CLI::colorize( "%YInvalid URL%n\n" );
+			return null;
+		}
+
+		$response = $http->request( $modified_url, [ 'method' => 'HEAD' ] );
+
+		if ( is_wp_error( $response ) ) {
+			// Log error and keep it moving.
+			$this->file_logger( $response->get_error_message() );
+			return null;
+		}
+
+		$response_code = $response['response']['code'];
+
+		if ( in_array( $response_code, $moved_codes, true ) ) {
+			// Getting 302 might indicate that the page was legitimately moved.
+			// So requesting the URL again, this time with GET method, to see what code we get.
+			$response = $http->request( $modified_url, [ 'timeout' => 10, 'redirection' => 5 ] );
+
+			if ( is_wp_error( $response ) ) {
+				// Log error and keep it moving.
+				$this->file_logger( $response->get_error_message() );
+				return null;
+			}
+
+			$response_code = $response['response']['code'];
+		}
+
+		if ( $http::NOT_FOUND === $response_code ) {
+			// Try one more variation to the link.
+			$modified_url = str_replace( 'https://lasilla.com', '/media/docs', $original_url );
+			$response     = $http->request( $modified_url, [ 'timeout' => 10, 'redirection' => 5 ] );
+
+			if ( is_wp_error( $response ) ) {
+				// Log error and keep it moving.
+				$this->file_logger( $response->get_error_message() );
+				return null;
+			}
+
+			$response_code = $response['response']['code'];
+		}
+
+		if ( $http::OK === $response_code ) {
+			// Page was found, so update the post_content with the new URL.
+			echo WP_CLI::colorize( "%gReplacement URL found!%n\n" );
+			return $modified_url;
+		} else {
+			// Page was moved or not found. Log the link and move on.
+			$this->file_logger( "Post ID: $post_id\nOriginal URL:\n$original_url\nModified URL:\n$modified_url\nResponse Code: $response_code\n", true );
+			return null;
+		}
+	}
+
+	public function cmd_upload_missing_publicaciones_images( $args, $assoc_args ) {
+		$media_location = $assoc_args['media-location'];
+
+		global $wpdb;
+
+		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $item ) {
+			echo "\n\n\n";
+			$this->high_contrast_output( 'Original Post ID', $item->id );
+
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'original_post_id' AND meta_value = %d",
+					$item->id
+				)
+			);
+
+			if ( ! $post_id ) {
+				echo WP_CLI::colorize( "%YOriginal Post ID wasn't imported: $item->id%n\n" );
+				continue;
+			}
+
+			$this->high_contrast_output( 'NEWSPACK POST ID', $post_id );
+
+			$filename = basename( $item->picture );
+
+			$post_content = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_content FROM $wpdb->posts WHERE ID = %d",
+					$post_id
+				)
+			);
+
+			$featured_image_id = get_post_thumbnail_id( $post_id );
+
+			if ( ! empty( $featured_image_id ) ) {
+				$url = wp_get_attachment_image_src( $featured_image_id, 'full' )[0];
+
+				if ( str_contains( $post_content, '{image_attachment_src}' ) ) {
+					$this->high_contrast_output( 'Post has featured image, but it is not in the post_content. Updating post_content.', '' );
+					$post_content = strtr(
+						$post_content,
+						[
+							'{image_attachment_id}'  => $featured_image_id,
+							'{image_attachment_src}' => $url,
+						]
+					);
+
+					$wpdb->update(
+						$wpdb->posts,
+						[
+							'post_content' => $post_content,
+						],
+						[
+							'ID' => $post_id,
+						]
+					);
+				}
+
+				$this->high_contrast_output( 'Post has featured image', "($featured_image_id) $url" );
+				continue;
+			}
+
+			if ( null === $item->picture ) {
+				echo WP_CLI::colorize( "%YOriginal Post ID doesn't have a 'picture' field%n\n" );
+				continue;
+			}
+
+			if ( ! str_contains( $post_content, '{image_attachment_id}' ) ) {
+				$potential_attachment_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT 
+	                        post_id 
+						FROM $wpdb->postmeta 
+						WHERE meta_key = '_wp_attached_file' 
+						  AND meta_value LIKE %s 
+						ORDER BY post_id 
+						LIMIT 1",
+						'%' . $wpdb->esc_like( $filename )
+					)
+				);
+
+				if ( $potential_attachment_id ) {
+					$this->high_contrast_output( 'Potential Attachment ID', $potential_attachment_id );
+					// If $post_content has URL, $post_id does not have a thumbnail_id, fill it in.
+					$potential_attachment_url = wp_get_attachment_url( $potential_attachment_id );
+					$potential_attachment_url = str_replace( 'https://www.', '', $potential_attachment_url );
+					if ( str_contains( $post_content, $potential_attachment_url ) ) {
+						update_post_meta( $post_id, '_thumbnail_id', $potential_attachment_id );
+						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+						continue;
+					}
+				}
+
+				echo WP_CLI::colorize( "%MLooks like this contains featured image, but cannot find in DB.%n\n" );
+				continue;
+			}
+
+			$image = [
+				'FriendlyName' => $filename,
+			];
+
+			$featured_image_id = $this->handle_featured_image( $image, $item->id, 0, $media_location );
+
+			if ( ! $featured_image_id ) {
+				echo WP_CLI::colorize( "%MUnable to find image $item->picture%n\n" );
+				continue;
+			}
+
+			$post_content = strtr(
+				$post_content,
+				[
+					'{image_attachment_id}'  => $featured_image_id,
+					'{image_attachment_src}' => wp_get_attachment_image_src( $featured_image_id, 'full' )[0],
+				]
+			);
+
+			$update = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $post_content,
+				],
+				[
+					'ID' => $post_id
+				]
+			);
+
+			if ( $update ) {
+				echo WP_CLI::colorize( "%GFeatured image successfully updated.%n\n" );
+				update_post_meta( $post_id, '_thumbnail_id', $featured_image_id );
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+			} else {
+				echo WP_CLI::colorize( "%RUnable to update featured image.%n\n" );
+			}
+		}
+	}
+
+	/**
+	 * During our various article import exercises it seems we created a small batch of duplicate articles and
+	 * duplicate metadata. It's important to clean this up so that if we need to do future imports or updates,
+	 * we can clearly track which articles should be affected and which should not.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_remove_duplicate_article_import_meta_data( $args, $assoc_args ) {
+		/*
+		 * wp_postmeta.meta_value (key) => [ ...duplicate wp_posts.ID ]
+		 */
+		$target_data = [
+			8367 => [ 12543, 26680 ],
+			8411 => [ 12631, 26706 ],
+			8435 => [ 12679, 26724 ],
+			8437 => [ 12683, 162753 ],
+			8457 => [ 12723, 26738 ],
+			8479 => [ 12767, 162757 ],
+			8515 => [ 12839, 26788 ],
+			8601 => [ 13011, 26860 ],
+			8605 => [ 13019, 26864 ],
+			8607 => [ 13023, 26866 ],
+			8623 => [ 13055, 26882 ],
+			8631 => [ 13071, 26889 ],
+			8637 => [ 13083, 26895 ],
+			8699 => [ 13207, 26944 ],
+			8707 => [ 13223, 26950 ],
+			8739 => [ 13287, 26977 ],
+			8783 => [ 13375, 27012 ],
+			8841 => [ 13491, 27058 ],
+			8881 => [ 13571, 27093 ],
+			8885 => [ 13579, 27096 ],
+			8899 => [ 13607, 27108 ],
+			8915 => [ 13639, 27121 ],
+		];
+
+		global $wpdb;
+		foreach ( $target_data as $meta_value => $post_ids ) {
+			WP_CLI::log( sprintf( 'Processing meta_value (LSV Article ID): %d', $meta_value ) );
+			$first_post_id = $post_ids[0];
+			$dupe_post_id  = $post_ids[1];
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$first_post = $wpdb->get_row(
+				$wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE ID = %d", $first_post_id ),
+				ARRAY_A
+			);
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$dupe_post = $wpdb->get_row(
+				$wpdb->prepare( "SELECT * FROM $wpdb->posts WHERE ID = %d", $dupe_post_id ),
+				ARRAY_A
+			);
+
+			$comparison = $this->output_value_comparison_table( [], $first_post, $dupe_post );
+
+			$target_column_names = [ 'post_date', 'post_date_gmt', 'post_content' ];
+			$update_columns      = [];
+			if ( ! empty( $comparison['different'] ) ) {
+				foreach ( $comparison['different'] as $column_name => $value ) {
+					if ( in_array( $column_name, $target_column_names, true ) ) {
+						$update_columns[ $column_name ] = $value;
+					}
+				}
+			}
+
+			if ( ! empty( $update_columns ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$update_first_post = $wpdb->update(
+					$wpdb->posts,
+					$update_columns,
+					[
+						'ID' => $first_post_id,
+					]
+				);
+
+				if ( $update_first_post ) {
+					WP_CLI::success( sprintf( 'Updated Post ID: %d', $first_post_id ) );
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$delete_dupe_meta = $wpdb->query(
+						$wpdb->prepare(
+							"DELETE FROM $wpdb->postmeta WHERE post_id = %d AND meta_value = %d AND meta_key LIKE %s",
+							$dupe_post_id,
+							$meta_value,
+							'%' . $wpdb->esc_like( 'original_article_id' )
+						)
+					);
+
+					if ( $delete_dupe_meta ) {
+						WP_CLI::success(
+							sprintf(
+								'Deleted duplicate meta data for Post ID: %d',
+								$dupe_post_id
+							)
+						);
+					} else {
+						WP_CLI::warning(
+							sprintf(
+								'Failed to delete duplicate meta data for Post ID: %d',
+								$dupe_post_id
+							)
+						);
+					}
+
+					$correct_meta_exists = get_post_meta( $first_post_id, 'newspack_original_article_id', true );
+
+					if ( ! $correct_meta_exists ) {
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$update_remaining_meta_key = $wpdb->query(
+							$wpdb->prepare(
+								"UPDATE $wpdb->postmeta SET meta_key = 'newspack_original_article_id' 
+             				WHERE post_id = %d AND meta_value = %d AND meta_key LIKE %s",
+								$first_post_id,
+								$meta_value,
+								'%' . $wpdb->esc_like( 'original_article_id' )
+							)
+						);
+
+						if ( $update_remaining_meta_key ) {
+							WP_CLI::success(
+								sprintf(
+									'Updated remaining meta key for Post ID: %d',
+									$first_post_id
+								)
+							);
+						} else {
+							WP_CLI::warning(
+								sprintf(
+									'Failed to update remaining meta key for Post ID: %d',
+									$first_post_id
+								)
+							);
+						}
+					}
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$delete_dupe_post = $wpdb->delete(
+						$wpdb->posts,
+						[
+							'ID' => $dupe_post_id,
+						]
+					);
+
+					if ( $delete_dupe_post ) {
+						WP_CLI::success( sprintf( 'Deleted duplicate Post ID: %d', $dupe_post_id ) );
+					} else {
+						WP_CLI::warning( sprintf( 'Failed to delete duplicate Post ID: %d', $dupe_post_id ) );
+					}
+				}
+			}
 		}
 	}
 
@@ -7528,6 +8293,49 @@ BLOCK;
 		}
 
 		update_post_meta( $post_id, $key, $post_content );
+	}
+
+	public function cmd_fix_featured_images_for_publicaciones_directly( $args, $assoc_args ) {
+		$post_ids = $assoc_args['post-ids'];
+		$post_ids = explode( ',', $post_ids );
+
+		foreach ( $post_ids as $post_id ) {
+			echo "\n\n\n";
+			$this->high_contrast_output( 'Post ID', $post_id );
+			$post = get_post( $post_id );
+
+			$featured_image = $this->attachments->get_images_sources_from_content( $post->post_content );
+
+			if ( is_array( $featured_image ) && ! empty( $featured_image ) ) {
+				$featured_image = $featured_image[0];
+				$this->high_contrast_output( 'Featured Image', $featured_image );
+
+				$path = wp_parse_url( $featured_image )['path'];
+				$path = str_replace( '/wp-content/uploads/', '', $path );
+
+				$this->high_contrast_output( 'Filename', $path );
+
+				global $wpdb;
+
+				$potential_attachment_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value = %s",
+						$path
+					)
+				);
+
+				if ( $potential_attachment_id ) {
+					$potential_attachment_url = wp_get_attachment_url( $potential_attachment_id );
+					$potential_attachment_url = str_replace( 'www.', '', $potential_attachment_url );
+					$potential_attachment_url = str_replace( 'https://', '', $potential_attachment_url );
+					if ( str_contains( $post->post_content, $potential_attachment_url ) ) {
+						echo WP_CLI::colorize( "%gUpdating meta%n\n" );
+						update_post_meta( $post_id, '_thumbnail_id', $potential_attachment_id );
+						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+					}
+				}
+			}
+		}
 	}
 
 	private function handle_podcast_audio( string $audio, string $media_location ) {

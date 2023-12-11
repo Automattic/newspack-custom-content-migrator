@@ -288,6 +288,24 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 				'shortdesc' => 'Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-delete-all-co-authors',
+			[ $this, 'cmd_delete_all_co_authors' ],
+			[
+				'shortdesc' => 'Delete all Guest Authors on the site.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run without deleting any Guest Authors.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-delete-authors-with-zero-posts',
 			[ $this, 'cmd_delete_authors_with_zero_posts' ],
@@ -1166,6 +1184,36 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			WP_CLI::log( sprintf( '(%d)/(%d) updating term_id %d', $key_term_id, count( $update_term_ids ), $term_id ) );
 			wp_update_term_count_now( [ $term_id ], $update_taxonomy );
 		}
+	}
+
+	public function cmd_delete_all_co_authors( array $positional_args, array $assoc_args ): void {
+		$dry_run = $assoc_args['dry-run'] ?? false;
+		if ( $dry_run ) {
+			WP_CLI::log( 'Dry run is enabled, so this command will only show what would be deleted.' );
+		}
+
+		global $coauthors_plus;
+		global $wpdb;
+
+		// This query was taken directly from \CoAuthors_Guest_Authors::get_guest_author_by.
+		$post_ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'guest-author'" );
+
+		$total_gas = count( $post_ids );
+		$counter   = 0;
+		WP_CLI::confirm( sprintf( 'About to delete %d guest authors. Is that OK?', $total_gas ) );
+
+		foreach ( $post_ids as $post_id ) {
+			$ga = $coauthors_plus->guest_authors->get_guest_author_by( 'ID', $post_id );
+
+			WP_CLI::log( sprintf( '(%d)/(%d) Guest Author #%d %s.', ++ $counter, $total_gas, $ga->ID, $ga->display_name ) );
+			if ( ! $dry_run ) {
+				$coauthors_plus->guest_authors->delete( $ga->ID );
+				WP_CLI::log( sprintf( 'Deleted #%d.', $ga->ID ) );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::success( 'Done' );
 	}
 
 	/**
