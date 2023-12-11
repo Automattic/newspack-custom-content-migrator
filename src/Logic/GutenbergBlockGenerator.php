@@ -980,7 +980,7 @@ VIDEO;
 			return [];
 		}
 		$args['specificPosts'] = $post_ids;
-		if ( is_array( $args['className'] ) ) {
+		if ( is_array( $args['className'] ?? false ) ) {
 			$args['className'] = implode( ' ', $args['className'] );
 		}
 

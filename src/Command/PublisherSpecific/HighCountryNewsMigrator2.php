@@ -25,13 +25,6 @@ use WP_User;
 class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	/**
-	 * Singleton.
-	 *
-	 * @var ?self
-	 */
-	private static ?self $instance = null;
-
-	/**
 	 * @var CoAuthorPlus $coauthorsplus_logic
 	 */
 	private CoAuthorPlus $coauthorsplus_logic;
@@ -65,6 +58,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @var Attachments
 	 */
 	private Attachments $attachments;
+
+	/**
+	 * @var Taxonomy
+	 */
+	private Taxonomy $taxonomy_logic;
 
 	private array $only_with_id = [
 		'type'        => 'assoc',
@@ -150,11 +148,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @return self
 	 */
 	public static function get_instance(): self {
-		if ( null === self::$instance ) {
-			self::$instance = new self();
+		static $instance = null;
+		if ( null === $instance ) {
+			$instance = new self();
 		}
 
-		return self::$instance;
+		return $instance;
 	}
 
 	/**
