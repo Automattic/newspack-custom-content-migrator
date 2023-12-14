@@ -9,6 +9,7 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
@@ -127,6 +128,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	const TAG_ID_THE_MAGAZINE     = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
 	const CATEGORY_ID_ISSUES      = 385;
 	const CATEGORY_ID_DEPARTMENTS = 7655;
+
+	const CLASS_PRINT_EDITION_BOX = 'hcn-print-edition-box';
+	const CLASS_READ_MORE_BOTTOM  = 'hcn-bottom-read-more';
 
 	private DateTimeZone $site_timezone;
 
@@ -385,18 +389,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	private function set_fixes_command(): void {
 
-		// TODO. This one might not be necessary.
-		WP_CLI::add_command(
-			'newspack-content-migrator hcn-fix-related-links-from-json',
-			[ $this, 'fix_related_links_from_json' ],
-			[
-				'shortdesc' => 'Massages related links coming from the JSON',
-				'synopsis'  => [
-					$this->articles_json_arg,
-				],
-			]
-		);
-
 		WP_CLI::add_command(
 			'newspack-content-migrator hcn-fix-referenced-articles-from-json',
 			[ $this, 'fix_referenced_articles_from_json' ],
@@ -425,6 +417,36 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-add-from-print-edition',
+			[ $this, 'cmd_add_from_print_edition' ],
+			[
+				'shortdesc' => 'Adds "From print edition" links to posts if it is not already there.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'Specific post id to process',
+						'optional'    => true,
+					],
+					BatchLogic::$num_items,
+					$this->refresh_existing,
+				],
+			]
+		);
+
+		// TODO. This one might not be necessary.
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-related-links-from-json',
+			[ $this, 'fix_related_links_from_json' ],
+			[
+				'shortdesc' => 'Massages related links coming from the JSON',
+				'synopsis'  => [
+					$this->articles_json_arg,
+				],
+			]
+		);
 	}
 
 	/**
@@ -444,7 +466,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		);
 
 		global $wpdb;
-
 
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
 		$counter    = 0;
@@ -647,13 +668,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	public function fix_referenced_articles_from_json( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 12;
+		$command_meta_version = 20;
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 
 		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 
-		$block_class_name     = 'hcn-bottom-read-more';
 		$read_more_block_args = [
 			'showExcerpt'   => false,
 			'showDate'      => false,
@@ -666,7 +686,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			'imageScale'    => 2,
 			'sectionHeader' => 'Read More',
 			'specificMode'  => true,
-			'className'     => [ $block_class_name, 'read-more-box' ],
+			'className'     => [ self::CLASS_READ_MORE_BOTTOM, 'read-more-box' ],
 		];
 
 		$row_number = 0;
@@ -686,9 +706,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			$post = get_post( $post_id );
-			if ( str_contains( $post->post_content, $block_class_name ) ) {
+			if ( str_contains( $post->post_content, self::CLASS_READ_MORE_BOTTOM ) ) {
 				// Remove the block if there is one already.
-				$post->post_content = $this->remove_block_with_class( $block_class_name, $post->post_content );
+				$post->post_content = serialize_blocks( GutenbergBlockManipulator::remove_block_with_class( self::CLASS_READ_MORE_BOTTOM, $post->post_content ) );
 			}
 			$read_more_block = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( $related_post_ids, $read_more_block_args );
 			wp_update_post(
@@ -703,25 +723,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$end = ( PHP_INT_MAX === $batch_args['end'] ) ? 'end' : $batch_args['end'];
 		$this->logger->log( $log_file, sprintf( 'Finished processing batch from %d to %s', $batch_args['start'], $end ) );
-	}
-
-	private function remove_block_with_class( string $class, string $content ): string {
-		$filtered_blocks = array_filter(
-			parse_blocks( $content ),
-			function ( $block ) use ( $class ) {
-				if ( empty( $block['attrs']['className'] ) ) {
-					return true;
-				}
-
-				return ! preg_match( "/\b{$class}\b/", $block['attrs']['className'] );
-			}
-		);
-
-		return array_reduce(
-			$filtered_blocks,
-			fn( $carry, $block ) => $carry . render_block( $block ),
-			''
-		);
 	}
 
 	private function find_featured_image_on_post_without_one( int $post_id ): int {
@@ -747,6 +748,60 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		return $attachment_post->ID;
 	}
 
+	public function cmd_add_from_print_edition( array $positional_args, array $assoc_args ): void {
+
+		$refresh  = $assoc_args['refresh-existing'] ?? false;
+		$post_ids = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
+		if ( ! $post_ids ) {
+			$post_ids = $this->posts_logic->get_all_posts_ids_in_category( self::CATEGORY_ID_ISSUES, [ 'post' ], [ 'publish' ] );
+			if ( $assoc_args['num-items'] ?? false ) {
+				$post_ids = array_slice( $post_ids, 0, $assoc_args['num-items'] );
+			}
+		}
+		$total_posts = count( $post_ids );
+		$counter     = 0;
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing (%d/%d): %s', ++ $counter, $total_posts, get_permalink( $post_id ) ) );
+			$issue_block = $this->get_from_print_edition_block( $post_id );
+			if ( empty( $issue_block ) ) {
+				continue;
+			}
+
+			$post = get_post( $post_id );
+			if ( str_contains( $post->post_content, self::CLASS_PRINT_EDITION_BOX ) ) {
+				if ( ! $refresh ) {
+					continue;
+				}
+				$post->post_content = serialize_blocks(
+					GutenbergBlockManipulator::replace_block_with_class(
+						self::CLASS_PRINT_EDITION_BOX,
+						$post->post_content,
+						$issue_block
+					)
+				);
+			} elseif ( str_contains( $post->post_content, self::CLASS_READ_MORE_BOTTOM ) ) {
+
+				$post->post_content = serialize_blocks(
+					GutenbergBlockManipulator::prepend_block_to_block_with_class(
+						self::CLASS_READ_MORE_BOTTOM,
+						$post->post_content,
+						$issue_block
+					)
+				);
+			} else {
+				$post->post_content = $post->post_content . serialize_block( $issue_block );
+			}
+			if ( ! empty( $post->post_content ) ) {
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => $post->post_content,
+					]
+				);
+				WP_CLI::log( sprintf( 'Added "From print edition" block to %s', get_permalink( $post_id ) ), Logger::SUCCESS );
+			}
+		}
+	}
 
 	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
 		$log_file = __FUNCTION__ . 'log';
@@ -924,7 +979,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function import_issues_as_pages( array $args, array $assoc_args ): void {
 
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
+		$command_meta_version = 12;
 		$log_file             = "{$command_meta_key}_{$command_meta_version}.log";
 		$articles_json        = $assoc_args[ $this->articles_json_arg['name'] ];
 		$issues_json          = $assoc_args[ $this->issues_json_arg['name'] ];
@@ -968,7 +1023,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$this->logger->log( $log_file, sprintf( 'Could not find or create category for %s', $issue->{'@id'} ), Logger::ERROR );
 				continue;
 			}
-			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
+			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->UID );
 
 			if ( MigrationMeta::get( $cat->term_id, $command_meta_key, 'term' ) >= $command_meta_version ) {
 				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_term_link( $cat->term_id ), $command_meta_version ) );
@@ -1036,12 +1091,14 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$this->logger->log( $log_file, sprintf( 'Updated issue page: %s', get_permalink( $page_data['ID'] ) ), Logger::SUCCESS );
 
 			if ( $alias ) {
-				$this->redirection->create_redirection_rule(
-					'Pagename redirect: ' . $alias,
-					$alias,
-					"/?p={$post_id}"
-				);
-				$this->logger->log( $log_file, sprintf( 'Added alias for numeric issue page slug: %s', home_url( $alias ) ), Logger::SUCCESS );
+				if ( empty( $this->redirection->get_redirects_by_exact_from_url( $alias ) ) ) {
+					$this->redirection->create_redirection_rule(
+						'Pagename redirect: ' . $alias,
+						$alias,
+						"/?p={$post_id}"
+					);
+					$this->logger->log( $log_file, sprintf( 'Added alias for numeric issue page slug: %s', home_url( $alias ) ), Logger::SUCCESS );
+				}
 			}
 
 			wp_update_term(
@@ -1053,7 +1110,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					'description' => '', // Remove the HTML if it was already added earlier on issues.
 				]
 			);
-			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->id );
+			update_term_meta( $cat->term_id, 'plone_issue_UID', $issue->UID );
 			MigrationMeta::update( $cat->term_id, $command_meta_key, 'term', $command_meta_version );
 			$this->logger->log( $log_file, sprintf( 'Updated issue category: %s', get_term_link( $cat->term_id ) ), Logger::SUCCESS );
 		}
@@ -1217,6 +1274,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$post_modified_string = $row->modified ?? $post_date_string;
 			$post_date            = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_date_string, $this->site_timezone );
 			$post_modified        = DateTime::createFromFormat( 'Y-m-d\TH:i:sP', $post_modified_string, $this->site_timezone );
+			$parent_type          = $row?->parent->{'@type'} ?? '';
+			$is_part_of_issue     = ( 'issue' === strtolower( $parent_type ) );
 
 			$post_data = [
 				'post_title'    => $row->title,
@@ -1268,9 +1327,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				continue;
 			}
 
-			$text      = $row->text ?? '';
-			$intro     = $row->intro ?? '';
-			$replacers = [];
+			$text          = $row->text ?? '';
+			$intro         = $row->intro ?? '';
+			$print_edition = '';
+			$replacers     = [];
 			if ( str_contains( $text, 'resolveuid/' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->replace_img_tags( $html_doc, $processed_post_id );
 			}
@@ -1291,12 +1351,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				if ( ! empty( $gallery_images ) ) {
 					array_map( fn( $id ) => wp_update_post( [ 'ID' => $id, 'post_parent' => $processed_post_id, ] ), $gallery_images );
 					if ( count( $gallery_images ) > 1 ) {
-						$block = $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images );
+						$block                       = $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images );
 						$block['attrs']['className'] = 'hcn-gallery'; // Add a classname so we can fish it out again if we need to.
-						$gallery = serialize_block( $block );
+						$gallery                     = serialize_block( $block );
 					} else { // Some galleries only have one image – in that case we don't need a gallery block.
 						$attachment_post = get_post( current( $gallery_images ) );
-						$gallery = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img') );
+						$gallery         = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img' ) );
 					}
 
 					if ( $has_inline_gallery ) {
@@ -1342,8 +1402,40 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				update_post_meta( $processed_post_id, '_thumbnail_id', $featured_image_id );
 				update_post_meta( $processed_post_id, 'newspack_featured_image_position', $featured_image_position );
 			}
+			// Tags.
+			if ( ! empty( $row->subjects ) ) {
+				wp_set_object_terms( $processed_post_id, $row->subjects, 'post_tag' );
+				$primary_tag = get_term_by( 'name', $row->subjects[0], 'post_tag' );
+				update_post_meta( $processed_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
+			}
 
-			$post_content = $intro . $text;
+			// Categories.
+			if ( $is_part_of_issue && ! empty( $row->parent->UID ) ) {
+				update_post_meta( $processed_post_id, 'nccm_from_plone_issue_uid', $row->parent->UID );
+				$issue_cat_id = $this->get_issue_category_id_from_plone_uid( $row->parent->UID );
+				if ( empty( $issue_cat_id ) ) {
+					WP_CLI::error( sprintf( 'Could not find issue category for %s', $row->{'@id'} ) );
+				}
+				if ( ! empty( $row->magtitle ) ) {
+					update_post_meta( $processed_post_id, 'nccm_magtitle', $row->magtitle );
+				}
+
+				wp_set_post_categories( $processed_post_id, [ $issue_cat_id, self::CATEGORY_ID_ISSUES ] );
+				update_post_meta( $processed_post_id, '_yoast_wpseo_primary_category', $issue_cat_id );
+				$print_edition_block = $this->get_from_print_edition_block( $processed_post_id );
+				if ( ! empty( $print_edition_block ) ) {
+					$print_edition = serialize_block( $print_edition_block );
+				}
+			} else {
+				$this->set_categories_on_post_from_path( get_post( $processed_post_id ), $tree_path );
+			}
+			if ( ! empty( $row->department ) ) {
+				$department_category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $row->department, self::CATEGORY_ID_DEPARTMENTS );
+				wp_set_post_categories( $processed_post_id, [ $department_category_id ], true );
+			}
+
+			$post_content = $intro . $text . $print_edition;
+
 			// Note that once we've transformed the links, some of the tricks we use in transformations don't work anymore,
 			// so don't do those tricks below the next line.
 			$post_content = str_replace( [ 'www.hcn.org', 'hcn.org' ], $current_domain, $post_content );
@@ -1354,25 +1446,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				]
 			);
 
-
-			// Now we have the ID of the created post, do a few more things:
 			$co_authors = array_map(
 				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
 				$this->parse_author_string( $row->author ?? '' )
 			);
-			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $processed_post_id );
-
-			if ( ! empty( $row->subjects ) ) {
-				wp_set_object_terms( $processed_post_id, $row->subjects, 'post_tag' );
-				$primary_tag = get_term_by( 'name', $row->subjects[0], 'post_tag' );
-				update_post_meta( $processed_post_id, '_yoast_wpseo_primary_post_tag', $primary_tag->term_id );
-			}
-
-			$this->set_categories_on_post_from_path( get_post( $processed_post_id ), $tree_path );
-
-			if ( ! empty( $row->department ) ) {
-				$department_category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $row->department, self::CATEGORY_ID_DEPARTMENTS );
-				wp_set_post_categories( $processed_post_id, [ $department_category_id ], true );
+			if ( ! empty( $co_authors ) ) {
+				$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $processed_post_id );
 			}
 
 			$this->add_post_redirects( get_post( $processed_post_id ), $row, $tree_path );
@@ -1380,6 +1459,38 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$this->logger->log( $log_file, sprintf( '%s post: %s', $verb, get_permalink( $processed_post_id ) ), Logger::SUCCESS );
 		}
 
+	}
+
+	private function get_from_print_edition_block( int $post_id ): array {
+		$post = get_post( $post_id );
+		if ( str_contains( $post->post_content, 'Download entire issue to view this article' ) ) {
+			// We skip the posts that already have the issue link.
+			return [];
+		}
+		$issue_uid     = get_post_meta( $post_id, 'nccm_from_plone_issue_uid', true );
+		$issue_page_id = $this->get_issue_page_id_from_plone_uid( $issue_uid );
+		$issue_page    = get_post( $issue_page_id );
+
+		if ( empty( $issue_page ) || is_wp_error( $issue_page ) ) {
+			WP_CLI::error( sprintf( 'Could not find issue page for %s', get_permalink( $post_id ) ) );
+
+			return [];
+		}
+		$magtitle = get_post_meta( $post_id, 'nccm_magtitle', true );
+		if ( empty( trim( $magtitle ) ) ) {
+			$magtitle = $post->post_title;
+		}
+
+		$url       = "/?p={$issue_page->ID}";
+		$paragraph = $this->gutenberg_block_generator->get_paragraph(
+			sprintf(
+				'This article appeared in the <a href="%s">print edition of the magazine</a> with the headline <span class="hcn-magtitle">%s</span>.',
+				esc_url( $url ),
+				$magtitle
+			)
+		);
+
+		return $this->gutenberg_block_generator->get_group_constrained( [ $paragraph ], [ self::CLASS_PRINT_EDITION_BOX ] );
 	}
 
 	private function add_post_redirects( WP_Post $post, object $article, string $tree_path ): void {
@@ -1766,6 +1877,30 @@ QUERY;
 		}
 
 		return 0;
+	}
+
+	private function get_issue_category_id_from_plone_uid( string $uid ): int {
+		global $wpdb;
+		$issue_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT term_id FROM $wpdb->termmeta WHERE meta_key = 'plone_issue_UID' AND meta_value = %s",
+				$uid
+			)
+		);
+
+		return empty( $issue_id ) ? 0 : (int) $issue_id;
+	}
+
+	private function get_issue_page_id_from_plone_uid( string $uid ): int {
+		global $wpdb;
+		$issue_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'plone_issue_page_UID' AND meta_value = %s",
+				$uid
+			)
+		);
+
+		return empty( $issue_id ) ? 0 : (int) $issue_id;
 	}
 
 	private function get_attachment_id_by_uid( string $uid ): int {
