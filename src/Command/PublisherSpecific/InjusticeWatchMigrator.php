@@ -6,6 +6,7 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\CsvIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
@@ -93,6 +94,7 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 
 		$home_url = untrailingslashit( parse_url( home_url(), PHP_URL_SCHEME | PHP_URL_HOST ) );
 
+
 		foreach ( $this->csv_iterator->items( $csv_file_path, ',' ) as $row ) {
 			if ( empty( $row['Categories-NEW'] ) ) { // Permalink should not have changed.
 				continue;
@@ -133,8 +135,12 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 		$csv_file_path = $assoc_args[ $this->csv_input_file['name'] ];
 
 		$batch_args = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
-		$counter    = 0;
-		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row ) {
+		$iterator = ( new FileImportFactory() )->get_file( $csv_file_path )
+		                                       ->set_start( $batch_args['start'] )
+		                                       ->set_end( $batch_args['end'] )
+		                                       ->getIterator();
+		$counter = 0;
+		foreach ( $iterator as $row ) {
 			++ $counter;
 			$post_id   = (int) $row['id'];
 			$post_path = get_permalink( $post_id );
