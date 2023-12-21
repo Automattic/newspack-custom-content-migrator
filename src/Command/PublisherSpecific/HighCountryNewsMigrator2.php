@@ -1133,8 +1133,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 
-			if ( empty( $row->image->filename ) ) {
-				// TODO. There are some "legacyPath" images. They seem to point at empty urls, but let's get back to this.
+			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
 			}
 			$is_gallery_image = ! empty( $row->gallery );
@@ -1202,15 +1201,23 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$img_post_data['meta_input']['plone_gallery_id'] = $row->gallery;
 			}
 
+			$path = $blobs_path . '/' . $row->image->blob_path;
+			$filename = $row->image->filename;
+			// The legacy path images are not in the blobs folder, but we grab them from web.
+			if ( ! empty( $row->legacyPath ) ) {
+				$path =  'https://www.hcn.org/external_files/allimages/' . $row->legacyPath;
+				$filename = basename( $path );
+			}
+
 			$attachment_id = $this->attachments->import_external_file(
-				$blobs_path . '/' . $row->image->blob_path,
-				$row->image->filename,
+				$path,
+				$filename,
 				$row->description ?? '',
 				$row->description ?? '',
 				$row->description ?? '',
 				0,
 				$img_post_data,
-				$row->image->filename,
+				$filename,
 			);
 
 			if ( is_wp_error( $attachment_id ) ) {
@@ -1218,7 +1225,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			} else {
 				$media_lib_url = sprintf(
 					$media_lib_search_url,
-					$row->image->filename
+					$filename
 				);
 				$this->logger->log(
 					$log_file,
