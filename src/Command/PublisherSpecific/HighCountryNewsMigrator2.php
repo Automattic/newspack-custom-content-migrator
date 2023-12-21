@@ -1201,11 +1201,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$img_post_data['meta_input']['plone_gallery_id'] = $row->gallery;
 			}
 
-			$path = $blobs_path . '/' . $row->image->blob_path;
-			$filename = $row->image->filename;
-			// The legacy path images are not in the blobs folder, but we grab them from web.
-			if ( ! empty( $row->legacyPath ) ) {
-				$path =  'https://www.hcn.org/external_files/allimages/' . $row->legacyPath;
+			if ( ! empty( $row->image->blob_path ) ) {
+				$path     = $blobs_path . '/' . $row->image->blob_path;
+				$filename = $row->image->filename;
+			} else {
+				if ( str_contains( $row->legacyPath, '/' ) ) {
+					$path = 'https://www.hcn.org/external_files/allimages/' . $row->legacyPath;
+				} else {
+					$path = $row->{'@id'};
+				}
 				$filename = basename( $path );
 			}
 
@@ -1221,7 +1225,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			);
 
 			if ( is_wp_error( $attachment_id ) ) {
-				$this->logger->log( $log_file, $attachment_id->get_error_message(), Logger::ERROR );
+				$this->logger->log( 'failed-img-imports.log', sprintf( 'Could not import %s', $path ), Logger::ERROR );
 			} else {
 				$media_lib_url = sprintf(
 					$media_lib_search_url,
