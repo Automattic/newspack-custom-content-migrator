@@ -165,10 +165,33 @@ class MolonguiAutorship implements InterfaceCommand {
 		}
 
 		// Main CAP GA creation args.
-		$cap_args = [
-			'display_name' => $author_row['display_name'],
-			'user_email' => $author_row['user_email'],
-		];
+		$cap_args = [];
+
+		// Basic info.
+		$display_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_display_name';", $guest_id ) );
+		if ( $display_name ) {
+			$cap_args['display_name'] = $display_name;
+		}
+		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_first_name';", $guest_id ) );
+		if ( $first_name ) {
+			$cap_args['first_name'] = $first_name;
+		}
+		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_last_name';", $guest_id ) );
+		if ( $last_name ) {
+			$cap_args['last_name'] = $last_name;
+		}
+		$email = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
+		if ( $email ) {
+			$cap_args['user_email'] = $email;
+		}
+		$description = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->posts} where ID = %d and meta_key = 'post_content';", $wpuser_id ) );
+		if ( $description ) {
+			$cap_args['description'] = $description;
+		}
+		$avatar = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_thumbnail_id';", $guest_id ) );
+		if ( $avatar ) {
+			$cap_args['avatar'] = $avatar;
+		}
 
 		// HTML that will be appended to bio/description.
 		$htmls_append_to_bio = [];
@@ -330,6 +353,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		// HTML that will be appended to bio/description.
 		$htmls_append_to_bio = [];
 
+		// Basic info.
 		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'first_name';", $wpuser_id ) );
 		if ( $first_name ) {
 			$cap_args['first_name'] = $first_name;
