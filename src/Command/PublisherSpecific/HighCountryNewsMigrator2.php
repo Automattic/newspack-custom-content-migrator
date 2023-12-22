@@ -1117,6 +1117,42 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	}
 
+	private function update_image_meta( object $row, int $attachment_id, string $tree_path, string $credit ): void {
+		$this->logger->log( 'updated_image_meta.log', sprintf( 'Updating metadata on %s:', sprintf('%s/wp-admin/upload.php?item=%d', home_url(), $attachment_id) ) );
+		$log_lines = [];
+
+		update_post_meta( $attachment_id, 'plone_image_UID', $row->UID );
+		$log_lines[] = sprintf( 'Plone image id: %s', $row->UID );
+
+		// Gallery.
+		if ( ! empty( $row->gallery ) ) {
+			update_post_meta( $attachment_id, 'plone_gallery_id', $row->gallery );
+			$log_lines[] = sprintf( 'Gallery id: %s', $row->gallery );
+		}
+		// Tree path.
+		update_post_meta( $attachment_id, 'plone_tree_path', $tree_path );
+		// Caption.
+		if ( ! empty( $row->description ) ) {
+			wp_update_post(
+				[
+					'ID'           => $attachment_id,
+					'post_excerpt' => $row->description,
+				]
+			);
+			$log_lines[] = sprintf( 'Description: %s', $row->description );
+		}
+		// Credit.
+		if ( ! empty( $credit ) ) {
+			update_post_meta( $attachment_id, '_media_credit', $credit );
+			$log_lines[] = sprintf( 'Credit: %s', $credit );
+		}
+		if ( ! empty( $row->creditUrl ) ) {
+			update_post_meta( $attachment_id, '_media_credit_url', $row->creditUrl );
+			$log_lines[] = sprintf( 'Credit url: %s', $row->creditUrl );
+		}
+		array_map( fn( $line ) => $this->logger->log( 'updated_image_meta.log', "\t" . $line ), $log_lines );
+	}
+
 	/**
 	 * Migrate new images and update the old ones if they need to be.
 	 *
@@ -1128,15 +1164,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 		$blobs_path = untrailingslashit( $assoc_args[ $this->blobs_path_arg['name'] ] );
 
-		$media_lib_search_url = home_url() . '/wp-admin/upload.php?search=%s';
-		$row_number           = 0;
+		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
 			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
 
 			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
 			}
-			$is_gallery_image = ! empty( $row->gallery );
 			$tree_path        = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			$existing_id      = $this->get_attachment_id_by_uid( $row->UID );
 
@@ -1146,29 +1180,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 
 			if ( $existing_id ) {
-				$this->logger->log( $log_file, sprintf( 'Image already imported to %s', get_permalink( $existing_id ) ), Logger::WARNING );
-				// Gallery.
-				if ( $is_gallery_image ) {
-					update_post_meta( $existing_id, 'plone_gallery_id', $row->gallery );
-					$this->logger->log( $log_file, sprintf( 'Updated gallery id on %s', get_permalink( $existing_id ) ), Logger::SUCCESS );
-				}
-				// Tree path.
-				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
-				// Caption.
-				if ( ! empty( $row->description ) ) {
-					wp_update_post(
-						[
-							'ID'           => $existing_id,
-							'post_excerpt' => $row->description,
-						]
-					);
-					$this->logger->log( $log_file, sprintf( 'Updated caption on %s to: %s', get_permalink( $existing_id ), $row->description ), Logger::SUCCESS );
-				}
-				// Credit.
-				if ( ! empty( $credit ) ) {
-					update_post_meta( $existing_id, '_media_credit', $credit );
-					$this->logger->log( $log_file, sprintf( 'Updated credit on %s to: %s', get_permalink( $existing_id ), $credit ), Logger::SUCCESS );
-				}
+				$this->update_image_meta( $row, $existing_id, $tree_path, $credit );
 				continue;
 			}
 
@@ -1190,16 +1202,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_author'   => $post_author,
 				'post_date'     => $created_at->format( 'Y-m-d H:i:s' ),
 				'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
-				'meta_input'    => [
-					'plone_image_UID'   => $row->UID,
-					'_media_credit'     => $credit ?? '',
-					'_media_credit_url' => $row->creditUrl ?? '',
-					'plone_tree_path'   => $tree_path,
-				],
 			];
-			if ( $is_gallery_image ) {
-				$img_post_data['meta_input']['plone_gallery_id'] = $row->gallery;
-			}
 
 			if ( ! empty( $row->image->blob_path ) ) {
 				$path     = $blobs_path . '/' . $row->image->blob_path;
@@ -1224,16 +1227,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$filename,
 			);
 
-			if ( is_wp_error( $attachment_id ) ) {
+			if ( is_wp_error( $attachment_id ) || ! $attachment_id ) {
 				$this->logger->log( 'failed-img-imports.log', sprintf( 'Could not import %s', $path ), Logger::ERROR );
 			} else {
-				$media_lib_url = sprintf(
-					$media_lib_search_url,
-					$filename
-				);
+				$this->update_image_meta( $row, $attachment_id, $tree_path, $credit );
 				$this->logger->log(
 					$log_file,
-					sprintf( 'Image imported to %s (%s)', $media_lib_url, $row->{'@id'} ),
+					sprintf( 'Image imported from (%s)', $row->{'@id'} ),
 					Logger::SUCCESS
 				);
 			}
