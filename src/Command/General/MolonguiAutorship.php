@@ -122,7 +122,9 @@ class MolonguiAutorship implements InterfaceCommand {
 				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
 				// phpcs:enable
 				if ( ! $author_wpuser_row ) {
-					WP_CLI::error( sprintf( 'WP_User with ID %d not found (postmeta key: user-%s).', $wpuser_id, $wpuser_id ) );
+					$msg = sprintf( 'WP_User with ID %d not found (postmeta key: user-%s).', $wpuser_id, $wpuser_id );
+					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
+					continue;
 				}
 
 				// Create CAP GA.
@@ -135,7 +137,8 @@ class MolonguiAutorship implements InterfaceCommand {
 				}
 
 				// Save custom postmeta to GA saying which Molongui user this was.
-				update_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
+				// There could be both a WP_User and a guest author with the same email, so we need to save both of them, i.e. add_post_meta, not update.
+				add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
 
 				WP_CLI::success( sprintf( "Created GA ID %s from '%s' %s", $cap_id, 'user-' . $wpuser_id, $cap_args['display_name'] ) );
 
@@ -148,7 +151,9 @@ class MolonguiAutorship implements InterfaceCommand {
 				$guest_id  = (int) str_replace( 'guest-', '', $author_molongui_value );
 				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
-					WP_CLI::error( sprintf( 'Guest author with ID %d not found (postmeta key: guest-%s).', $guest_id, $guest_id ) );
+					$msg = sprintf( 'Guest author with ID %d not found (postmeta key: guest-%s).', $guest_id, $guest_id );
+					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
+					continue;
 				}
 
 				// Create CAP GA.
@@ -161,7 +166,8 @@ class MolonguiAutorship implements InterfaceCommand {
 				}
 
 				// Save custom postmeta to GA saying which Molongui user this was.
-				update_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
+				// There could be both a WP_User and a guest author with the same email, so we need to save both of them, i.e. add_post_meta, not update.
+				add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
 
 				WP_CLI::success( sprintf( "Created GA ID %s from '%s' %s", $cap_id, 'guest-' . $guest_id, $cap_args['display_name'] ) );
 
@@ -169,7 +175,6 @@ class MolonguiAutorship implements InterfaceCommand {
 				WP_CLI::error( sprintf( 'Unsupported Molongui author postmeta key: %s. Add support for this type then rerun command.', $cap_args['display_name'] ) );
 			}
 		}
-
 
 		/**
 		 * Assign GAs to posts.
