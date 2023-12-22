@@ -1445,15 +1445,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				wp_set_post_categories( $processed_post_id, [ $department_category_id ], true );
 			}
 
-			$post_content = $intro . $text . $print_edition;
-
-			// Note that once we've transformed the links, some of the tricks we use in transformations don't work anymore,
-			// so don't do those tricks below the next line.
-			$post_content = str_replace( [ 'www.hcn.org', 'hcn.org' ], $current_domain, $post_content );
 			wp_update_post(
 				[
 					'ID'           => $processed_post_id,
-					'post_content' => $post_content,
+					'post_content' => $intro . $text . $print_edition,
 				]
 			);
 
