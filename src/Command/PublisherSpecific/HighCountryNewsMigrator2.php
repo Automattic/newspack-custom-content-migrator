@@ -668,7 +668,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	public function fix_referenced_articles_from_json( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 20;
+		$command_meta_version = 25;
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 
 		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
