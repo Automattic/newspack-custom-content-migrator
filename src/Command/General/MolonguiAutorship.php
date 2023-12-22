@@ -69,13 +69,16 @@ class MolonguiAutorship implements InterfaceCommand {
 
 		$log_error = 'molongui-to-cap_ERR.txt';
 
+		// Get Molongui authors.
 		$authors_molongui_values = $wpdb->get_col( "select distinct meta_value from wp_postmeta where meta_key = '_molongui_author';" );
 		if ( ! $authors_molongui_values ) {
 			WP_CLI::warning( 'No authors found.' );
 			return;
 		}
 
-		// Loop through Molongui authors and create GAs.
+		/**
+		 * Create GAs.
+		 */
 		foreach ( $authors_molongui_values as $key_author_molongui_value => $author_molongui_value ) {
 			WP_CLI::line( sprintf( '%d/%d %s', $key_author_molongui_value + 1, count( $authors_molongui_values ), $author_molongui_value ) );
 
@@ -89,7 +92,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				 * In this case, the postmeta key_value is 'user-{ID}' (where meta_key = '_molongui_author').
 				 */
 				$wpuser_id = (int) str_replace( 'user-', '', $author_molongui_value );
-				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_users where ID = %d;", $wpuser_id ), ARRAY_A );
+				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
 				if ( ! $author_wpuser_row ) {
 					WP_CLI::error( sprintf( 'WP_User with ID %d not found (postmeta key: user-%s).', $wpuser_id, $wpuser_id ) );
 				}
@@ -115,7 +118,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				 * In this case, the postmeta key_value is 'guest-{ID}' (where meta_key = '_molongui_author').
 				 */
 				$guest_id = (int) str_replace( 'guest-', '', $author_molongui_value );
-				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
+				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
 					WP_CLI::error( sprintf( 'Guest author with ID %d not found (postmeta key: guest-%s).', $guest_id, $guest_id ) );
 				}
@@ -139,11 +142,51 @@ class MolonguiAutorship implements InterfaceCommand {
 			}
 		}
 
+
 		/**
 		 * Assign GAs to posts.
 		 */
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		$cached_mologui_authors_to_ga_ids = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '%d/%d %s', $key_post_id + 1, count( $post_ids ), $post_id ) );
+
+			// Get Mologui authors for this post.
+			$molongui_authors_rows = $wpdb->get_results( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_author';", $post_id ), ARRAY_A );
+			if ( ! $molongui_authors_rows ) {
+				continue;
+			}
+
+			$ga_ids = [];
+			foreach ( $molongui_authors_rows as $molongui_author_row ) {
+				$molongui_author = $molongui_author_row['meta_value'];
+
+				// Get GA IDs for this Mologui author.
+				if ( isset( $cached_mologui_authors_to_ga_ids[ $molongui_author ] ) ) {
+					$ga_id = $cached_mologui_authors_to_ga_ids[ $molongui_author ];
+				} else {
+					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = '%s' and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author ) );
+					if ( ! $ga_id ) {
+						$msg = sprintf( 'Error fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author, $post_id );
+						$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
+						continue;
+					}
+					$cached_mologui_authors_to_ga_ids[ $molongui_author ] = $ga_id;
+				}
+
+				$ga_ids[] = $ga_id;
+			}
+
+			// Assign GAs to Post.
+			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+		}
+
+		if ( file_exists( $log_error ) ) {
+			WP_CLI::warning( sprintf( 'There were errors. See %s.', $log_error ) );
+		}
 
 		WP_CLI::line( 'Done.' );
+		wp_cache_flush();
 	}
 
 	/**
@@ -159,7 +202,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	public function get_cap_creation_args_for_mologui_guestauthor( int $guest_id ): array {
 		global $wpdb;
 
-		$author_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
+		$author_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 		if ( ! $author_row ) {
 			throw new \UnexpectedValueException( sprintf( 'Mologui guest user with ID %d not found.', $guest_id ) );
 		}
@@ -339,7 +382,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	public function get_cap_creation_args_for_mologui_wpuser( int $wpuser_id ): array {
 		global $wpdb;
 
-		$wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_users where ID = %d;", $wpuser_id ), ARRAY_A );
+		$wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
 		if ( ! $wpuser_row ) {
 			throw new \UnexpectedValueException( sprintf( 'WP_User with ID %d not found.', $wpuser_id ) );
 		}
