@@ -75,9 +75,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			return;
 		}
 
-		/**
-
-		 */
+		// Loop through Molongui authors and create GAs.
 		foreach ( $authors_molongui_values as $key_author_molongui_value => $author_molongui_value ) {
 			WP_CLI::line( sprintf( '%d/%d %s', $key_author_molongui_value + 1, count( $authors_molongui_values ), $author_molongui_value ) );
 
@@ -91,7 +89,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				 * In this case, the postmeta key_value is 'user-{ID}' (where meta_key = '_molongui_author').
 				 */
 				$wpuser_id = (int) str_replace( 'user-', '', $author_molongui_value );
-				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_users where ID = %d;", $wpuser_id ) );
+				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_users where ID = %d;", $wpuser_id ), ARRAY_A );
 				if ( ! $author_wpuser_row ) {
 					WP_CLI::error( sprintf( 'WP_User with ID %d not found (postmeta key: user-%s).', $wpuser_id, $wpuser_id ) );
 				}
@@ -108,7 +106,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				// Save custom postmeta to GA saying which Molongui user this was.
 				update_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
 
-				WP_CLI::success( sprintf( "Created GA ID %s for Molongui user %s.", $cap_id, 'user-' . $wpuser_id ) );
+				WP_CLI::success( sprintf( "Created GA ID %s from '%s' %s", $cap_id, 'user-' . $wpuser_id, $cap_args['display_name'] ) );
 
 			} elseif ( 0 === strpos( $author_molongui_value, 'guest-' ) ) {
 
@@ -117,7 +115,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				 * In this case, the postmeta key_value is 'guest-{ID}' (where meta_key = '_molongui_author').
 				 */
 				$guest_id = (int) str_replace( 'guest-', '', $author_molongui_value );
-				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_posts where ID = %d and post_type = 'guest_author';", $guest_id ) );
+				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from wp_posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
 					WP_CLI::error( sprintf( 'Guest author with ID %d not found (postmeta key: guest-%s).', $guest_id, $guest_id ) );
 				}
@@ -134,8 +132,10 @@ class MolonguiAutorship implements InterfaceCommand {
 				// Save custom postmeta to GA saying which Molongui user this was.
 				update_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
 
+				WP_CLI::success( sprintf( "Created GA ID %s from '%s' %s", $cap_id, 'guest-' . $guest_id, $cap_args['display_name'] ) );
+
 			} else {
-				WP_CLI::error( sprintf( 'Unsupported Molongui author postmeta key: %s. Add support for this type then rerun command.', $author_molongui_value ) );
+				WP_CLI::error( sprintf( 'Unsupported Molongui author postmeta key: %s. Add support for this type then rerun command.', $cap_args['display_name'] ) );
 			}
 		}
 
@@ -184,7 +184,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		if ( $email ) {
 			$cap_args['user_email'] = $email;
 		}
-		$description = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->posts} where ID = %d and meta_key = 'post_content';", $wpuser_id ) );
+		$description = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d;", $guest_id ) );
 		if ( $description ) {
 			$cap_args['description'] = $description;
 		}
@@ -214,7 +214,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		// Author web -- append to description/bio.
 		$authorweb_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_web';", $guest_id ) );
 		if ( $authorweb_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Web" target="_blank">%s</a>', $authorweb_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Web</a>', $authorweb_url );
 		}
 		// Job meta.
 		$molongui_guest_author_job = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = '_molongui_guest_author_job';", $guest_id ) );
@@ -233,47 +233,47 @@ class MolonguiAutorship implements InterfaceCommand {
 		// FB.
 		$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_facebook';", $guest_id ) );
 		if ( $facebook_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Facebook" target="_blank">%s</a>', $facebook_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Facebook</a>', $facebook_url );
 		}
 		// IG.
 		$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_instagram';", $guest_id ) );
 		if ( $instagram_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Instagram" target="_blank">%s</a>', $instagram_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Instagram</a>', $instagram_url );
 		}
 		// Twitter.
 		$twitter_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_twitter';", $guest_id ) );
 		if ( $twitter_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Twitter" target="_blank">%s</a>', $twitter_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Twitter</a>', $twitter_url );
 		}
 		// Tumblr.
 		$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_tumblr';", $guest_id ) );
 		if ( $tumblr_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Tumblr" target="_blank">%s</a>', $tumblr_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Tumblr</a>', $tumblr_url );
 		}
 		// YouTube.
 		$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_youtube';", $guest_id ) );
 		if ( $youtube_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="YouTube" target="_blank">%s</a>', $youtube_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">YouTube</a>', $youtube_url );
 		}
 		// Medium.
 		$medium_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_medium';", $guest_id ) );
 		if ( $medium_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Medium" target="_blank">%s</a>', $medium_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Medium</a>', $medium_url );
 		}
 		// Pinterest.
 		$pinterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_pinterest';", $guest_id ) );
 		if ( $pinterest_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Pinterest" target="_blank">%s</a>', $pinterest_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Pinterest</a>', $pinterest_url );
 		}
 		// Soundcloud.
 		$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_soundcloud';", $guest_id ) );
 		if ( $soundcloud_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Soundcloud" target="_blank">%s</a>', $soundcloud_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Soundcloud</a>', $soundcloud_url );
 		}
 		// Spotify.
 		$spotify_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_spotify';", $guest_id ) );
 		if ( $spotify_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Spotify" target="_blank">%s</a>', $spotify_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Spotify</a>', $spotify_url );
 		}
 
 		/**
@@ -312,10 +312,10 @@ class MolonguiAutorship implements InterfaceCommand {
 			if ( 0 == $key && ! empty( $description ) ) {
 				$description .= "\n";
 			} elseif ( $key > 0 ) {
-				$description .= ". ";
+				$description .= ' ';
 			}
 
-			$description .= $html;
+			$description .= $html . '.';
 		}
 
 		// Update description
@@ -427,12 +427,12 @@ class MolonguiAutorship implements InterfaceCommand {
 		// Wiki.
 		$wikipedia_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'wikipedia';", $wpuser_id ) );
 		if ( $wikipedia_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Wikipedia" target="_blank">%s</a>', $wikipedia_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Wikipedia</a>', $wikipedia_url );
 		}
 		// LI.
 		$linkedin_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'linkedin';", $wpuser_id ) );
 		if ( $linkedin_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="LinkedIn" target="_blank">%s</a>', $linkedin_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">LinkedIn</a>', $linkedin_url );
 		}
 		// FB.
 		$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'facebook';", $wpuser_id ) );
@@ -440,7 +440,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_facebook';", $wpuser_id ) );
 		}
 		if ( $facebook_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Facebook" target="_blank">%s</a>', $facebook_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Facebook</a>', $facebook_url );
 		}
 		// IG.
 		$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'instagram';", $wpuser_id ) );
@@ -448,7 +448,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_instagram';", $wpuser_id ) );
 		}
 		if ( $instagram_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Instagram" target="_blank">%s</a>', $instagram_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Instagram</a>', $instagram_url );
 		}
 		// Twitter.
 		$twitter_with_at = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'twitter';", $wpuser_id ) );
@@ -456,12 +456,12 @@ class MolonguiAutorship implements InterfaceCommand {
 		$twitter_handle = null;
 		if ( $twitter_with_at && "@" == substr( $twitter_with_at, 0, 1 ) ) {
 			$twitter_handle = substr( $twitter_with_at, 1 );
-			$htmls_append_to_bio[] = sprintf( '<a href="Twitter" target="_blank">https://twitter.com/%s</a>', $twitter_handle );
+			$htmls_append_to_bio[] = sprintf( '<a href="https://twitter.com/%s" target="_blank">Twitter</a>', $twitter_handle );
 		}
 		if ( ! $twitter_handle ) {
 			$twitter_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_twitter';", $wpuser_id ) );
 			if ( $twitter_url ) {
-				$htmls_append_to_bio[] = sprintf( '<a href="Twitter" target="_blank">%s</a>', $twitter_url );
+				$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Twitter</a>', $twitter_url );
 			}
 		}
 		// Tumblr.
@@ -470,7 +470,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_tumblr';", $wpuser_id ) );
 		}
 		if ( $tumblr_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Tumblr" target="_blank">%s</a>', $tumblr_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Tumblr</a>', $tumblr_url );
 		}
 		// YT.
 		$youtube_url =  $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'youtube';", $wpuser_id ) );
@@ -478,12 +478,12 @@ class MolonguiAutorship implements InterfaceCommand {
 			$youtube_url =  $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_youtube';", $wpuser_id ) );
 		}
 		if ( $youtube_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="YouTube" target="_blank">%s</a>', $youtube_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">YouTube</a>', $youtube_url );
 		}
 		// Medium.
 		$medium_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_medium';", $wpuser_id ) );
 		if ( $medium_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Medium" target="_blank">%s</a>', $medium_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Medium</a>', $medium_url );
 		}
 		// Pinterest.
 		$pininterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'pinterest';", $wpuser_id ) );
@@ -491,7 +491,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$pininterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_pinterest';", $wpuser_id ) );
 		}
 		if ( $pininterest_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Pinterest" target="_blank">%s</a>', $pininterest_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Pinterest</a>', $pininterest_url );
 		}
 		// Soundcloud.
 		$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'soundcloud';", $wpuser_id ) );
@@ -499,17 +499,17 @@ class MolonguiAutorship implements InterfaceCommand {
 			$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_soundcloud';", $wpuser_id ) );
 		}
 		if ( $soundcloud_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Soundcloud" target="_blank">%s</a>', $soundcloud_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Soundcloud</a>', $soundcloud_url );
 		}
 		// Spotify.
 		$spotify_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_spotify';", $wpuser_id ) );
 		if ( $spotify_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Spotify" target="_blank">%s</a>', $spotify_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Spotify</a>', $spotify_url );
 		}
 		// Myspace.
 		$myspace_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'myspace';", $wpuser_id ) );
 		if ( $myspace_url ) {
-			$htmls_append_to_bio[] = sprintf( '<a href="Myspace" target="_blank">%s</a>', $myspace_url );
+			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Myspace</a>', $myspace_url );
 		}
 
 		/**
@@ -533,10 +533,10 @@ class MolonguiAutorship implements InterfaceCommand {
 			if ( 0 == $key && ! empty( $description ) ) {
 				$description .= "\n";
 			} elseif ( $key > 0 ) {
-				$description .= ". ";
+				$description .= ' ';
 			}
 
-			$description .= $html;
+			$description .= $html . '.';
 		}
 
 		// Update description
