@@ -1,4 +1,9 @@
 <?php
+/**
+ * Newspack Custom Content Migrator CAP logic class.
+ *
+ * @package NewspackCustomContentMigrator.
+ */
 
 namespace NewspackCustomContentMigrator\Logic;
 
@@ -115,7 +120,7 @@ class CoAuthorPlus {
 			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
 			 * CAP saves and then retrieves it.
 			 *
-			 * see \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
+			 * See \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
 			 *   - because they do:
 			 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
 			 *
@@ -133,7 +138,7 @@ class CoAuthorPlus {
 			$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
 
 			// If user_login is the same as existing WP_User.username, CAP will allow it to be created, but it will not allow it to be edited:
-			//      "There is a WordPress user with the same username as this guest author, please go back and link them in order to update."
+			// "There is a WordPress user with the same username as this guest author, please go back and link them in order to update."
 			// So let's prevent that by giving it a unique user_login which is not used by WP_User. That way, we can keep the GA and WP_User separate.
 			// or link them afterwards, both options will work fine.
 			// Check if $args['user_login'] is used by WP_User.username.
@@ -162,7 +167,9 @@ class CoAuthorPlus {
 		global $wpdb;
 
 		// Return this $user_login if it doesn't exist as WP_User.user_login or CAP postmeta 'cap-user_login'.
+		// phpcs:disable -- Allow querying users table.
 		$wpuser_login_exists  = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE user_login = %s", $user_login ) );
+		// phpcs:enable
 		$capuser_login_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'cap-user_login' AND meta_value = %s", $user_login ) );
 		if ( ! $wpuser_login_exists && ! $capuser_login_exists ) {
 			return $user_login;
@@ -170,7 +177,9 @@ class CoAuthorPlus {
 
 		// Create a unique user_login one and return that if it's not taken.
 		$unique_user_login           = sprintf( '%s_%s', $user_login, $this->generate_random_string() );
+		// phpcs:disable -- Allow querying users table.
 		$unique_wpuser_login_exists  = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE user_login = %s", $unique_user_login ) );
+		// phpcs:ensable
 		$unique_capuser_login_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'cap-user_login' AND meta_value = %s", $unique_user_login ) );
 		if ( ! $unique_wpuser_login_exists && ! $unique_capuser_login_exists ) {
 			return $unique_user_login;
@@ -180,7 +189,14 @@ class CoAuthorPlus {
 		return $this->get_unique_user_login( $user_login );
 	}
 
-	public function generate_random_string( $length = 5 ) {
+	/**
+	 * Generates a random string.
+	 *
+	 * @param int $length Length of the random string to generate.
+	 *
+	 * @return string Random string.
+	 */
+	public function generate_random_string( int $length = 5 ): string {
 		$characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
 		return substr( str_shuffle( str_repeat( $characters, $length ) ), 0, $length );
 	}
@@ -347,7 +363,7 @@ class CoAuthorPlus {
 	/**
 	 * Returns the Guest Author object which has a linked WP_User with given $user_login_of_linked_wpuser account.
 	 *
-	 * @param int $user_login_of_linked_account user_login of linked WP_User account.
+	 * @param int $user_login_of_linked_wpuser user_login of linked WP_User account.
 	 *
 	 * @return ?object Guest Author object or null.
 	 */
@@ -806,7 +822,7 @@ class CoAuthorPlus {
 	 * Convenience function to help validate a WP User object. If passed a User ID,
 	 * it will convert it to a WP User object.
 	 *
-	 * @param \WP_User|int $wp_user
+	 * @param \WP_User|int $wp_user WP User object or ID.
 	 *
 	 * @return false|mixed|\WP_User
 	 */

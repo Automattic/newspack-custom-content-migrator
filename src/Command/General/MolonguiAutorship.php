@@ -1,4 +1,9 @@
 <?php
+/**
+ * Newspack Custom Content Migrator Molongui plugin autorship to CAP.
+ *
+ * @package NewspackCustomContentMigrator.
+ */
 
 namespace NewspackCustomContentMigrator\Command\General;
 
@@ -8,26 +13,37 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
+/**
+ * Migrates Molongui plugin autorship to CAP.
+ */
 class MolonguiAutorship implements InterfaceCommand {
 
 	const POSTMETA_ORIGINAL_MOLOGUI_USER = 'newspack_molongui_original_user';
 
 	/**
+	 * Instance.
+	 *
 	 * @var null|self
 	 */
 	private static $instance = null;
 
 	/**
+	 * Posts instance.
+	 *
 	 * @var Posts
 	 */
 	private $posts;
 
 	/**
+	 * CoAuthorPlus instance.
+	 *
 	 * @var CoAuthorPlus
 	 */
 	private $cap;
 
 	/**
+	 * Logger instance.
+	 *
 	 * @var Logger
 	 */
 	private $logger;
@@ -37,7 +53,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->posts  = new Posts();
-		$this->cap  = new CoAuthorPlus();
+		$this->cap    = new CoAuthorPlus();
 		$this->logger = new Logger();
 	}
 
@@ -49,14 +65,18 @@ class MolonguiAutorship implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
 	}
 
+	/**
+	 * See InterfaceCommand::register_commands.
+	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator molongui-to-cap',
+		WP_CLI::add_command(
+			'newspack-content-migrator molongui-to-cap',
 			[ $this, 'cmd_molongui_to_cap' ],
 			[
 				'shortdesc' => 'Converts Molongui authorship to CAP.',
@@ -64,7 +84,13 @@ class MolonguiAutorship implements InterfaceCommand {
 		);
 	}
 
-	public function cmd_molongui_to_cap( $pos_args, $assoc_args ) {
+	/**
+	 * Migrates Molongui plugin autorship to CAP.
+	 *
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_molongui_to_cap( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
 		$log_error = 'molongui-to-cap_ERR.txt';
@@ -91,15 +117,17 @@ class MolonguiAutorship implements InterfaceCommand {
 				 * Mologui uses an existing WP_User which it extends with custom meta.
 				 * In this case, the postmeta key_value is 'user-{ID}' (where meta_key = '_molongui_author').
 				 */
-				$wpuser_id = (int) str_replace( 'user-', '', $author_molongui_value );
+				$wpuser_id         = (int) str_replace( 'user-', '', $author_molongui_value );
+				// phpcs:disable -- Allow querying users table.
 				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
+				// phpcs:enable
 				if ( ! $author_wpuser_row ) {
 					WP_CLI::error( sprintf( 'WP_User with ID %d not found (postmeta key: user-%s).', $wpuser_id, $wpuser_id ) );
 				}
 
 				// Create CAP GA.
 				$cap_args = $this->get_cap_creation_args_for_mologui_wpuser( $wpuser_id );
-				$cap_id = $this->cap->create_guest_author( $cap_args );
+				$cap_id   = $this->cap->create_guest_author( $cap_args );
 				if ( is_wp_error( $cap_id ) ) {
 					$msg = sprintf( 'Error creating CAP GA for Molongui user %s: %s', 'user-' . $wpuser_id, $cap_id->get_error_message() );
 					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
@@ -117,7 +145,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				 * Molongui uses its own Guest type user.
 				 * In this case, the postmeta key_value is 'guest-{ID}' (where meta_key = '_molongui_author').
 				 */
-				$guest_id = (int) str_replace( 'guest-', '', $author_molongui_value );
+				$guest_id  = (int) str_replace( 'guest-', '', $author_molongui_value );
 				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
 					WP_CLI::error( sprintf( 'Guest author with ID %d not found (postmeta key: guest-%s).', $guest_id, $guest_id ) );
@@ -125,7 +153,7 @@ class MolonguiAutorship implements InterfaceCommand {
 
 				// Create CAP GA.
 				$cap_args = $this->get_cap_creation_args_for_mologui_guestauthor( $guest_id );
-				$cap_id = $this->cap->create_guest_author( $cap_args );
+				$cap_id   = $this->cap->create_guest_author( $cap_args );
 				if ( is_wp_error( $cap_id ) ) {
 					$msg = sprintf( 'Error creating CAP GA for Molongui user %s: %s', 'user-' . $wpuser_id, $cap_id->get_error_message() );
 					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
@@ -146,7 +174,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		/**
 		 * Assign GAs to posts.
 		 */
-		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		$post_ids                         = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 		$cached_mologui_authors_to_ga_ids = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d %s', $key_post_id + 1, count( $post_ids ), $post_id ) );
@@ -165,7 +193,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				if ( isset( $cached_mologui_authors_to_ga_ids[ $molongui_author ] ) ) {
 					$ga_id = $cached_mologui_authors_to_ga_ids[ $molongui_author ];
 				} else {
-					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = '%s' and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author ) );
+					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author ) );
 					if ( ! $ga_id ) {
 						$msg = sprintf( 'Error fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author, $post_id );
 						$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
@@ -338,18 +366,18 @@ class MolonguiAutorship implements InterfaceCommand {
 		 */
 		// Mail.
 		$show_mail = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_show_meta_mail';", $guest_id ) );
-		$mail = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
+		$mail      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
 		if ( $mail && $show_mail ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="mailto:%s">%s</a>', $mail, $mail );
 		}
 		// Phone.
 		$show_phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_show_meta_phone';", $guest_id ) );
-		$phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_phone';", $guest_id ) );
+		$phone      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_phone';", $guest_id ) );
 		if ( $mail && $show_phone ) {
 			$htmls_append_to_bio[] = sprintf( 'Phone: %s', $phone );
 		}
 
-		// Append $htmls_append_to_bio to
+		// Append $htmls_append_to_bio to description.
 		foreach ( $htmls_append_to_bio as $key => $html ) {
 			// Add a delimiter to $description first.
 			if ( 0 == $key && ! empty( $description ) ) {
@@ -361,7 +389,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$description .= $html . '.';
 		}
 
-		// Update description
+		// Update description.
 		if ( $description ) {
 			$cap_args['description'] = $description;
 		}
@@ -382,7 +410,9 @@ class MolonguiAutorship implements InterfaceCommand {
 	public function get_cap_creation_args_for_mologui_wpuser( int $wpuser_id ): array {
 		global $wpdb;
 
+		// phpcs:disable -- Allow querying users table.
 		$wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
+		// phpcs:enable
 		if ( ! $wpuser_row ) {
 			throw new \UnexpectedValueException( sprintf( 'WP_User with ID %d not found.', $wpuser_id ) );
 		}
@@ -390,7 +420,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		// Main CAP GA creation args.
 		$cap_args = [
 			'display_name' => $wpuser_row['display_name'],
-			'user_email' => $wpuser_row['user_email'],
+			'user_email'   => $wpuser_row['user_email'],
 		];
 
 		// HTML that will be appended to bio/description.
@@ -431,20 +461,20 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * first and only if it's empty also checks for postmeta. So we will save these as usermeta.
 		 */
 		// Job meta.
-		$newspack_job_title = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_job_title';", $wpuser_id ) );
+		$newspack_job_title  = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_job_title';", $wpuser_id ) );
 		$molongui_author_job = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_job';", $wpuser_id ) );
 		if ( ! $newspack_job_title && $molongui_author_job ) {
 			update_user_meta( $wpuser_id, 'newspack_job_title', $molongui_author_job );
 		}
 		// Employer/company meta.
-		$newspack_employer = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_employer';", $wpuser_id ) );
+		$newspack_employer       = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_employer';", $wpuser_id ) );
 		$molongui_author_company = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_company';", $wpuser_id ) );
 		if ( ! $newspack_employer && $molongui_author_company ) {
 			update_user_meta( $wpuser_id, 'newspack_employer', $molongui_author_company );
 		}
 		// Phone meta.
 		$newspack_phone_number = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_phone_number';", $wpuser_id ) );
-		$phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
+		$phone                 = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
 		if ( ! $newspack_phone_number && $phone ) {
 			update_user_meta( $wpuser_id, 'newspack_phone_number', $phone );
 		}
@@ -459,7 +489,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		}
 		// Phone.
 		$show_phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_show_meta_phone';", $wpuser_id ) );
-		$phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
+		$phone      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
 		if ( $show_phone && $phone ) {
 			$htmls_append_to_bio[] = sprintf( 'Phone: %s', $phone );
 		}
@@ -497,8 +527,8 @@ class MolonguiAutorship implements InterfaceCommand {
 		$twitter_with_at = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'twitter';", $wpuser_id ) );
 		// 'twitter' usermeta must begin with "@". Get handle from it.
 		$twitter_handle = null;
-		if ( $twitter_with_at && "@" == substr( $twitter_with_at, 0, 1 ) ) {
-			$twitter_handle = substr( $twitter_with_at, 1 );
+		if ( $twitter_with_at && '@' == substr( $twitter_with_at, 0, 1 ) ) {
+			$twitter_handle        = substr( $twitter_with_at, 1 );
 			$htmls_append_to_bio[] = sprintf( '<a href="https://twitter.com/%s" target="_blank">Twitter</a>', $twitter_handle );
 		}
 		if ( ! $twitter_handle ) {
@@ -516,9 +546,9 @@ class MolonguiAutorship implements InterfaceCommand {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Tumblr</a>', $tumblr_url );
 		}
 		// YT.
-		$youtube_url =  $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'youtube';", $wpuser_id ) );
+		$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'youtube';", $wpuser_id ) );
 		if ( ! $youtube_url ) {
-			$youtube_url =  $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_youtube';", $wpuser_id ) );
+			$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_youtube';", $wpuser_id ) );
 		}
 		if ( $youtube_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">YouTube</a>', $youtube_url );
@@ -570,7 +600,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$whatsapp_chat_link;
 		}
 
-		// Append $htmls_append_to_bio to
+		// Append $htmls_append_to_bio to description.
 		foreach ( $htmls_append_to_bio as $key => $html ) {
 			// Add a delimiter to $description first.
 			if ( 0 == $key && ! empty( $description ) ) {
@@ -582,7 +612,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			$description .= $html . '.';
 		}
 
-		// Update description
+		// Update description.
 		if ( $description ) {
 			$cap_args['description'] = $description;
 		}
