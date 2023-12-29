@@ -25,11 +25,11 @@ class Attachments {
 	/**
 	 * Wrapper for import_external_file() with fewer args and enforced post_id.
 	 *
-	 * @param int $post_id              Post ID of the post the media should be attached to.
+	 * @param int    $post_id              Post ID of the post the media should be attached to.
 	 * @param string $path              Media file full URL or full local path, or URL to the media file.
 	 * @param string $alt_text          Optional. Image Attachment `alt` attribute.
-	 * @param array $attachment_args    Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
-	 *                                      internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
+	 * @param array  $attachment_args    Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
+	 *                                       internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
 	 * @param string $desired_filename  Optional. If the file you are importing has a different (or no) file extension than the one
 	 *                                      you want the resulting attachment to have, you can specify it here. Make sure that it
 	 *                                      actually matches the file mime type.
@@ -149,7 +149,7 @@ class Attachments {
 		}
 
 		global $wpdb;
-		$like = '%' . $wpdb->esc_like( $filename );
+		$like = '%' . $wpdb->esc_like( sanitize_title( $filename ) );
 		$sql  = $wpdb->prepare(
 			"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
 			$like
@@ -165,7 +165,7 @@ class Attachments {
 
 			if ( md5_file( $candidate_path ) === md5_file( $filepath ) ) {
 				return $attachment_id;
-			}       
+			}
 		}
 
 		return null;
@@ -319,7 +319,7 @@ class Attachments {
 
 	/**
 	 * Find an attachment by its filename.
-	 * 
+	 *
 	 * @param string $filename The filename.
 	 * @return int The attachment ID.
 	 */
