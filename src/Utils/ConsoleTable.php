@@ -51,7 +51,17 @@ class ConsoleTable {
 			);
 
 			foreach ( $array_bag as $array ) {
-				$row[] = $array[ $key ] ?? '';
+				if ( array_key_exists( $key, $array ) ) {
+					if ( is_bool( $array[ $key ] ) ) {
+						$row[] = $array[ $key ] ? 'true' : 'false';
+					} elseif ( empty( $array[ $key ] ) ) {
+						$row[] = '-';
+					} else {
+						$row[] = $array[ $key ] ?? '';
+					}
+				} else {
+					$row[] = '-';
+				}
 			}
 
 			$table->addRow( $row );
