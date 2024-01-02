@@ -1078,32 +1078,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$text = $html_doc->save();
 			}
 
-			preg_match_all( '@\[GALLERY:?(.?)]@', $text, $gallery_matches );
-			$has_inline_gallery = ! empty( $gallery_matches[0] );
+			$has_inline_gallery = str_contains( $text, '[GALLERY' );
 			if ( $row->gallery_enabled || $row->image_viewer || $has_inline_gallery ) {
-				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $has_inline_gallery );
-				if ( ! empty( $gallery_images ) ) {
-					// Create a connection between the gallery images and the post.
-					array_map( fn( $id ) => wp_update_post( [ 'ID' => $id, 'post_parent' => $processed_post_id, ] ), $gallery_images );
-
-					if ( $has_inline_gallery ) {
-						// If there is more than one gallery in the text, they have a "gallery ID". Eg. [GALLERY:1234]
-						// If there is only one inline galleries it tends to be just [GALLERY] with no ID.
-						foreach ( $gallery_matches[0] as $idx => $gallery_anchor ) {
-							$gallery_id = $gallery_matches[1][ $idx ] ?? false;
-							if ( false !== $gallery_id ) {
-								$gallery = $this->get_gallery_with_id( $gallery_images, $gallery_id );
-							} else {
-								$gallery = $this->get_gallery( $gallery_images );
-							}
-							$text = str_replace( $gallery_anchor, $gallery, $text );
-						}
-					} else {
-						$gallery = $this->get_gallery( $gallery_images );
-						// The non-inline types of gallery are put at the top of the text.
-						$text = $gallery . $text;
-					}
-				}
+				$text = $this->replace_galleries_in_post_content( $text, $tree_path, $processed_post_id, $has_inline_gallery );
 			}
 
 			// Featured image.
@@ -1193,6 +1170,39 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	}
 
+	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline ): string {
+		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $is_inline );
+		if ( empty( $gallery_images ) ) {
+			return $text;
+		}
+		// Create a connection between the gallery images and the post.
+		array_map( fn( $id ) => wp_update_post( [ 'ID' => $id, 'post_parent' => $post_id, ] ), $gallery_images );
+
+		if ( $is_inline ) {
+			// If there is more than one gallery in the text, they have a "gallery ID". Eg. [GALLERY:1234]
+			// If there is only one inline galleries it tends to be just [GALLERY] with no ID.
+			$regex = '@\[GALLERY:(.*?)]|\[GALLERY]@';
+			preg_match_all( $regex, $text, $gallery_matches );
+
+			foreach ( $gallery_matches[0] as $idx => $gallery_anchor ) {
+				$gallery_id = $gallery_matches[1][ $idx ] ?? false;
+				if ( false !== $gallery_id ) {
+					// Grab only the ones with the given gallery id.
+					$gallery_images = array_filter(
+						$gallery_images,
+						fn( $attachment_id ) => $gallery_id === get_post_meta( $attachment_id, 'plone_gallery_id', true )
+					);
+				}
+				$text = str_replace( $gallery_anchor, $this->get_gallery( $gallery_images ), $text );
+			}
+		} else {
+			// The non-inline types of gallery are put at the top of the text.
+			$text = $this->get_gallery( $gallery_images ) . $text;
+		}
+
+		return $text;
+	}
+
 	private function get_from_print_edition_block( int $post_id ): array {
 		$post = get_post( $post_id );
 		if ( str_contains( $post->post_content, 'Download entire issue to view this article' ) ) {
@@ -1236,16 +1246,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		}
 
 		return $gallery;
-	}
-
-	private function get_gallery_with_id( array $gallery_images, string $gallery_id ): string {
-		// Grab only the ones with the given gallery id.
-		$images_w_gallery_id = array_filter(
-			$gallery_images,
-			fn( $attachment_id ) => $gallery_id === get_post_meta( $attachment_id, 'plone_gallery_id', true )
-		);
-
-		return $this->get_gallery( $images_w_gallery_id );
 	}
 
 	private function add_post_redirects( WP_Post $post, object $article, string $tree_path ): void {
