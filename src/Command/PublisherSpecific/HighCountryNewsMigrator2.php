@@ -308,6 +308,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$this->images_json_arg,
 					$this->blobs_path_arg,
 					...BatchLogic::get_batch_args(),
+					$this->refresh_existing,
 				],
 			]
 		);
@@ -887,6 +888,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 		$blobs_path = untrailingslashit( $assoc_args[ $this->blobs_path_arg['name'] ] );
+		$refresh    = $assoc_args['refresh-existing'] ?? false;
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
@@ -895,14 +897,19 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
 			}
-			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
+
+			if ( $existing_id && ! $refresh ) {
+				$this->logger->log( $log_file, 'Image already imported. Skipping.' );
+				continue;
+			}
 
 			$credit = $row->credit ?? '';
 			if ( str_starts_with( 'credit: ', mb_strtolower( $credit ) ) ) { // Some of their own data has a "Credit:" that they want removed.
 				$credit = substr( $credit, 8 );
 			}
 
+			$tree_path = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
 			if ( $existing_id ) {
 				$this->update_image_meta( $row, $existing_id, $tree_path, $credit );
 				continue;
