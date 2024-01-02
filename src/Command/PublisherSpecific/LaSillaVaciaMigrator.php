@@ -19,6 +19,7 @@ use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
@@ -628,6 +629,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
+	 * Console table.
+	 *
+	 * @var ConsoleTable $console_table
+	 */
+	private $console_table;
+
+	/**
 	 * Taxonomy logic.
 	 *
 	 * @var Taxonomy $taxonomy.
@@ -651,6 +659,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->redirection          = new Redirection();
 		$this->logger               = new Logger();
 		$this->attachments          = new Attachments();
+		$this->console_table        = new ConsoleTable();
 		$this->taxonomy             = new Taxonomy();
 		$this->images               = new Images();
 		$this->json_iterator        = new JsonIterator();
@@ -5168,7 +5177,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					continue;
 				}
 
-				$this->output_value_comparison_table(
+				$this->console_table->output_value_comparison(
 					array(),
 					$user_by_id ? $user_by_id->to_array() : array(),
 					$user_by_email ? $user_by_email->to_array() : array(),
@@ -5210,7 +5219,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$filtered_author_cap_fields = $this->get_filtered_cap_fields( $id, $cap_fields );
 
 				echo WP_CLI::colorize( "%BWP_User vs wp_postmeta field%n\n" );
-				$comparison = $this->output_value_comparison_table(
+				$comparison = $this->console_table->output_value_comparison(
 					array(
 						'cap-user_login',
 					),
@@ -5245,7 +5254,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$this->fix_wp_post_postmeta_data( $guest_author_post, $filtered_author_cap_fields );
 
 				echo WP_CLI::colorize( "%BWP_User vs Guest Author%n\n" );
-				$comparison = $this->output_value_comparison_table(
+				$comparison = $this->console_table->output_value_comparison(
 					array(
 						'post_name',
 						'cap-linked_account',
@@ -5806,101 +5815,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return $user_nicename;
 	}
 
-	private function output_value_comparison_table( array $keys, array $left_set, array $right_set, bool $strict = true, string $left = 'left', string $right = 'right' ) {
-		if ( empty( $keys ) ) {
-			$keys = array_keys( array_merge( $left_set, $right_set ) );
-		}
-
-		$table = new Table();
-		$table->setHeaders(
-			array(
-				'',
-				'Match?',
-				$left,
-				$right,
-			)
-		);
-
-		$matching_rows     = array();
-		$different_rows    = array();
-		$undetermined_rows = array();
-
-		foreach ( $keys as $key ) {
-			if ( array_key_exists( $key, $left_set ) && array_key_exists( $key, $right_set ) ) {
-				if ( empty( $left_set[ $key ] ) && empty( $right_set[ $key ] ) ) {
-					$match = '-';
-				} else {
-					$match = $strict ? ( $left_set[ $key ] === $right_set[ $key ] ? 'Yes' : 'No' ) : ( $left_set[ $key ] == $right_set[ $key ] ? 'Yes' : 'No' );
-				}
-			} elseif ( empty( $left_set[ $key ] ) && empty( $right_set[ $key ] ) ) {
-					$match = '-';
-			} else {
-				$match = 'No';
-			}
-
-			$values = array(
-				$left  => $left_set[ $key ] ?? '',
-				$right => $right_set[ $key ] ?? '',
-			);
-
-			$row = array(
-				$key,
-				$match,
-				...array_values( $values ),
-			);
-
-			if ( 'Yes' === $match ) {
-				$matching_rows[ $key ] = $values;
-			} elseif ( 'No' === $match ) {
-				$different_rows[ $key ] = $values;
-			} else {
-				$undetermined_rows[ $key ] = $values;
-			}
-
-			$table->addRow( $row );
-		}
-
-		$table->display();
-
-		return array(
-			'matching'     => $matching_rows,
-			'different'    => $different_rows,
-			'undetermined' => $undetermined_rows,
-		);
-	}
-
-	private function output_comparison_table( array $keys, array ...$arrays ) {
-		$array_bag = array(
-			...$arrays,
-		);
-
-		if ( empty( $keys ) ) {
-			$keys = array_keys( array_merge( ...$arrays ) );
-		}
-
-		$table = new Table();
-		$table->setHeaders(
-			array(
-				'',
-				...array_keys( $array_bag ),
-			)
-		);
-
-		foreach ( $keys as $key ) {
-			$row = array(
-				$key,
-			);
-
-			foreach ( $array_bag as $array ) {
-				$row[] = $array[ $key ] ?? '';
-			}
-
-			$table->addRow( $row );
-		}
-
-		$table->display();
-	}
-
 	private function get_guest_author_post_from_term_taxonomy_id( int $term_taxonomy_id ) {
 		echo WP_CLI::colorize( "%BGetting Guest Author Record%n\n" );
 		$this->high_contrast_output( 'Term Taxonomy ID', $term_taxonomy_id );
@@ -6053,7 +5967,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 //		$cap_user_login = $this->get_guest_author_user_login( $user );
 
 		echo WP_CLI::colorize( "%BWP_User vs wp_postmeta fields%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			$cap_fields,
 			array(
 				'cap-user_login'     => $cap_user_login,
@@ -6096,7 +6010,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$filtered_author_cap_fields['cap-user_login'] = 'cap-' . $filtered_author_cap_fields['cap-user_login'];
 		}
 
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'post_name',
 			),
@@ -6302,7 +6216,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		echo WP_CLI::colorize( "%BDisplay Name vs WP_Posts.post_title%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'post_title',
 			),
@@ -6334,7 +6248,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		echo WP_CLI::colorize( "%BGuest Author vs wp_postmeta field%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'cap-user_login',
 			),
@@ -6369,7 +6283,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->fix_wp_post_postmeta_data( $guest_author_record, $filtered_author_cap_fields );
 
 		echo WP_CLI::colorize( "%BGuest Author Record vs WP_Terms%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'name',
 				'slug',
@@ -6404,7 +6318,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		//$this->fix_user_login_and_nicename( $user );
 
 		echo WP_CLI::colorize( "%Bwp_postmeta vs User Fields%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'cap-user_email',
 				'cap-linked_account',
@@ -6532,7 +6446,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->high_contrast_output( 'user_login', $user->user_login );
 		$this->update_relevant_user_fields_if_necessary( $user );
 
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'name',
 				'slug',
@@ -6634,7 +6548,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			)
 		);
 		echo WP_CLI::colorize( "%BPost Meta Fields%n\n" );
-		$this->output_comparison_table( array(), $filtered_author_cap_fields );
+		$this->console_table->output_comparison( [], $filtered_author_cap_fields );
 
 		$display_name = $this->ask_prompt( "Use '{$filtered_author_cap_fields['cap-display_name']}' as display_name? (y/n)" );
 
@@ -6670,7 +6584,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		echo WP_CLI::colorize( "%BUser Login and Display Name vs CAP User Login and Display Name%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'cap-user_login',
 				'cap-display_name',
@@ -6702,7 +6616,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		echo WP_CLI::colorize( "%BName and Title vs WP_Post Name and Title%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'post_name',
 				'post_title',
@@ -6733,7 +6647,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		echo WP_CLI::colorize( "%BCAP Display Name vs Author Term%n\n" );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			array(
 				'name',
 				'slug',
@@ -7456,7 +7370,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					$term_slug = $author_terms[0]->slug;
 				}
 
-				$this->output_comparison_table(
+				$this->console_table->output_comparison(
 					[],
 					[
 						'cap-user_login' => $cap_fields['cap-user_login'],
@@ -7785,7 +7699,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		$validated_user = $this->validate_user_name_fields( $user );
-		$comparison = $this->output_value_comparison_table(
+		$comparison = $this->console_table->output_value_comparison(
 			[],
 			$user->to_array(),
 			$validated_user->to_array(),
@@ -7941,7 +7855,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						'cap-display_name',
 					)
 				);
-				$this->output_comparison_table( array(), $filtered_post_meta );
+				$this->console_table->output_comparison( [], $filtered_post_meta );
 
 				$user_by_login = get_user_by( 'login', $loose_author_term->name );
 				echo WP_CLI::colorize( "%BUser by login%n %w(%n%W$loose_author_term->name%n%w)%n\n" );
@@ -8214,7 +8128,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							'cap-display_name',
 						)
 					);
-					$this->output_comparison_table( array(), $filtered_post_meta );
+					$this->console_table->output_comparison( [], $filtered_post_meta );
 				}
 				$post_ids_placeholder                         = implode( ', ', array_fill( 0, count( $post_ids ), '%d' ) );
 				$term_taxonomy_ids_from_post_id_relationships = $wpdb->get_col(
@@ -8545,7 +8459,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			if ( $user_by_login->ID === $user_by_email->ID ) {
 				$user = $user_by_login;
 			} else {
-				$this->output_value_comparison_table(
+				$this->console_table->output_value_comparison(
 					array(),
 					$user_by_login->to_array(),
 					$user_by_email->to_array(),
@@ -9635,7 +9549,7 @@ BLOCK;
 				ARRAY_A
 			);
 
-			$comparison = $this->output_value_comparison_table( [], $first_post, $dupe_post );
+			$comparison = $this->console_table->output_value_comparison( [], $first_post, $dupe_post );
 
 			$target_column_names = [ 'post_date', 'post_date_gmt', 'post_content' ];
 			$update_columns      = [];
