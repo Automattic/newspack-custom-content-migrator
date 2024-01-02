@@ -1118,7 +1118,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function update_image_meta( object $row, int $attachment_id, string $tree_path, string $credit ): void {
-		$this->logger->log( 'updated_image_meta.log', sprintf( 'Updating metadata on %s:', sprintf('%s/wp-admin/upload.php?item=%d', home_url(), $attachment_id) ) );
+		$this->logger->log( 'updated_image_meta.log', sprintf( 'Updating metadata on %s:', sprintf( '%s/wp-admin/upload.php?item=%d', home_url(), $attachment_id ) ) );
 		$log_lines = [];
 
 		update_post_meta( $attachment_id, 'plone_image_UID', $row->UID );
@@ -1171,8 +1171,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
 			}
-			$tree_path        = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
-			$existing_id      = $this->get_attachment_id_by_uid( $row->UID );
+			$tree_path   = trim( parse_url( $row->{'@id'}, PHP_URL_PATH ), '/' );
+			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
 
 			$credit = $row->credit ?? '';
 			if ( str_starts_with( 'credit: ', mb_strtolower( $credit ) ) ) { // Some of their own data has a "Credit:" that they want removed.
@@ -1263,7 +1263,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				continue;
 			}
 
-			WP_CLI::log( sprintf( 'Article %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
+			WP_CLI::log( sprintf( 'Article %d of %d: %s', ++ $row_number, $batch_args['total'], $row->{'@id'} ) );
 			if ( empty( $row->text ) ) {
 				$this->logger->log( $log_file, sprintf( 'Article %s has no text. Skipping', $row->{'@id'} ), Logger::WARNING );
 			}
@@ -1356,25 +1356,29 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$text = $html_doc->save();
 			}
 
-			$has_inline_gallery = preg_match( '@\[GALLERY:?.*?\]@', $text, $gallery_matches );
+			preg_match_all( '@\[GALLERY:?(.?)]@', $text, $gallery_matches );
+			$has_inline_gallery = ! empty( $gallery_matches[0] );
 			if ( $row->gallery_enabled || $row->image_viewer || $has_inline_gallery ) {
 				$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $has_inline_gallery );
 				if ( ! empty( $gallery_images ) ) {
+					// Create a connection between the gallery images and the post.
 					array_map( fn( $id ) => wp_update_post( [ 'ID' => $id, 'post_parent' => $processed_post_id, ] ), $gallery_images );
-					if ( count( $gallery_images ) > 1 ) {
-						$block                       = $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images );
-						$block['attrs']['className'] = 'hcn-gallery'; // Add a classname so we can fish it out again if we need to.
-						$gallery                     = serialize_block( $block );
-					} else { // Some galleries only have one image – in that case we don't need a gallery block.
-						$attachment_post = get_post( current( $gallery_images ) );
-						$gallery         = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img' ) );
-					}
 
 					if ( $has_inline_gallery ) {
-						// Inline gallery needs to be replaced with a Gutenberg gallery block.
-						$text = str_replace( $gallery_matches[0], $gallery, $text );
+						// If there is more than one gallery in the text, they have a "gallery ID". Eg. [GALLERY:1234]
+						// If there is only one inline galleries it tends to be just [GALLERY] with no ID.
+						foreach ( $gallery_matches[0] as $idx => $gallery_anchor ) {
+							$gallery_id = $gallery_matches[1][ $idx ] ?? false;
+							if ( false !== $gallery_id ) {
+								$gallery = $this->get_gallery_with_id( $gallery_images, $gallery_id );
+							} else {
+								$gallery = $this->get_gallery( $gallery_images );
+							}
+							$text = str_replace( $gallery_anchor, $gallery, $text );
+						}
 					} else {
-						// The other types of gallery are put at the top of the text.
+						$gallery = $this->get_gallery( $gallery_images );
+						// The non-inline types of gallery are put at the top of the text.
 						$text = $gallery . $text;
 					}
 				}
@@ -1497,6 +1501,29 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		);
 
 		return $this->gutenberg_block_generator->get_group_constrained( [ $paragraph ], [ self::CLASS_PRINT_EDITION_BOX ] );
+	}
+
+	private function get_gallery( array $gallery_images ): string {
+		if ( count( $gallery_images ) > 1 ) {
+			$block                       = $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images );
+			$block['attrs']['className'] = 'hcn-gallery'; // Add a classname, so we can fish it out again if we need to.
+			$gallery                     = serialize_block( $block );
+		} else { // Some galleries only have one image – in that case we don't need a gallery block.
+			$attachment_post = get_post( current( $gallery_images ) );
+			$gallery         = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img' ) );
+		}
+
+		return $gallery;
+	}
+
+	private function get_gallery_with_id( array $gallery_images, string $gallery_id ): string {
+		// Grab only the ones with the given gallery id.
+		$images_w_gallery_id = array_filter(
+			$gallery_images,
+			fn( $attachment_id ) => $gallery_id === get_post_meta( $attachment_id, 'plone_gallery_id', true )
+		);
+
+		return $this->get_gallery( $images_w_gallery_id );
 	}
 
 	private function add_post_redirects( WP_Post $post, object $article, string $tree_path ): void {
