@@ -653,7 +653,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 * Singleton constructor.
 	 */
 	private function __construct() {
-		$this->log_file_path        = date( 'YmdHis', time() ) . 'LSV_import.log';
+		$this->log_file_path        = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
 		$this->coauthorsplus_logic  = new CoAuthorPlus();
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 		$this->redirection          = new Redirection();
