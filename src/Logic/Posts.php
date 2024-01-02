@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Logic;
 
 use WP_Query;
 use WP_CLI;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 
 /**
  * Posts logic class.
@@ -701,5 +702,55 @@ SQL;
 		wp_cache_flush();
 
 		return $updated;
+	}
+
+	/**
+	 * This function will output a table with the given post IDs.
+	 *
+	 * @param array  $post_ids The post IDs to output.
+	 * @param array  $columns The specific columns to output.
+	 * @param string $title The title of the table.
+	 *
+	 * @return void
+	 */
+	public function output_table( array $post_ids, array $columns = [], string $title = 'Post\'s Table' ) {
+		if ( empty( $post_ids ) ) {
+			return;
+		}
+
+		if ( empty( $columns ) ) {
+			$columns = [
+				'ID',
+				'post_type',
+				'post_title',
+				'post_name',
+				'post_status',
+				'post_author',
+				'post_date',
+				'post_modified',
+				'post_parent',
+			];
+		}
+
+		$post_ids_placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+		$columns_escaped       = esc_sql( implode( ',', $columns ) );
+
+		global $wpdb;
+
+		( new ConsoleTable() )->output_data(
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->get_results(
+			// phpcs:disable -- Placeholders used and query sanitized
+				$wpdb->prepare(
+					"SELECT $columns_escaped
+				FROM $wpdb->posts
+				WHERE ID IN ( $post_ids_placeholders );",
+					...$post_ids
+				)
+			// phpcs:enable
+			),
+			$columns,
+			$title
+		);
 	}
 }
