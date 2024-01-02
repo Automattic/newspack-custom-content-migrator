@@ -19,7 +19,7 @@ class CsvIterator {
 	 * @return iterable
 	 * @throws Exception
 	 */
-	private function items( string $csv_path, string $separator ): iterable {
+	public function items( string $csv_path, string $separator ): iterable {
 		if ( ! is_readable( $csv_path ) ) {
 			WP_CLI::error( "Could not read CSV file: $csv_path" );
 
