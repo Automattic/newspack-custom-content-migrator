@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Utils;
 
 use cli\Table;
+use WP_CLI;
 
 /**
  * Class to output various tables to the console.
@@ -156,5 +157,28 @@ class ConsoleTable {
 			'different'    => $different_rows,
 			'undetermined' => $undetermined_rows,
 		);
+	}
+
+	/**
+	 * Simple function to output a table of data, with an optional title.
+	 *
+	 * @param array  $array_of_arrays An array of arrays that hold the data to be output.
+	 * @param array  $header An array of strings that will be used as the table header.
+	 * @param string $title The title of the table.
+	 *
+	 * @return void
+	 */
+	public function output_data( array $array_of_arrays, array $header = [], string $title = '' ) {
+		if ( empty( $header ) && isset( $array_of_arrays[0] ) ) {
+			$header = array_keys( $array_of_arrays[0] );
+		}
+
+		if ( ! empty( $title ) ) {
+			$title         = WP_CLI::colorize( '%B%U' . $title . '%n' ) . PHP_EOL;
+			$title_escaped = esc_html( $title );
+			echo $title_escaped; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		}
+
+		WP_CLI\Utils\format_items( 'table', $array_of_arrays, $header );
 	}
 }
