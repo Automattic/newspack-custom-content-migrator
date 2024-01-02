@@ -481,7 +481,7 @@ class CoAuthorPlus {
 	 *
 	 * @param int $post_id Post ID.
 	 *
-	 * @return mixed|void
+	 * @return array Array of Guest Author objects.
 	 */
 	public function get_guest_authors_for_post( $post_id ) {
 		$guest_authors = [];
