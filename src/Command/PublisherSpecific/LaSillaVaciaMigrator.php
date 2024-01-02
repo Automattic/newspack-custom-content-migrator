@@ -659,6 +659,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->redirection          = new Redirection();
 		$this->logger               = new Logger();
 		$this->attachments          = new Attachments();
+		$this->posts                = new Posts();
 		$this->console_table        = new ConsoleTable();
 		$this->taxonomy             = new Taxonomy();
 		$this->images               = new Images();
@@ -5031,7 +5032,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		foreach ( $users_in_question as $user ) {
 			$this->output_users_as_table( [ $user->user_id ] );
-			$this->output_post_table( [ $user->email_post_id ] );
+			$this->posts->output_table( [ $user->email_post_id ], [], '' );
 			$this->output_postmeta_table( $user->email_post_id );
 			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
 
@@ -5329,37 +5330,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return $author_terms;
 	}
 
-	private function output_post_table( array $post_ids ): void {
-		global $wpdb;
-
-		$post_ids_placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
-
-		$post_rows = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT * FROM $wpdb->posts WHERE ID IN ( $post_ids_placeholders )",
-				...$post_ids
-			)
-		);
-
-		echo WP_CLI::colorize( "%BPost's Table%n\n" );
-		WP_CLI\Utils\format_items(
-			'table',
-			$post_rows,
-			array(
-				'ID',
-				'post_type',
-				'post_title',
-				'post_name',
-				'post_status',
-				'post_date',
-				'post_modified',
-				'post_content',
-				'post_author',
-				'post_parent',
-			)
-		);
-	}
-
 	private function output_users_as_table( array $users ) {
 		$users = array_map(
 			function ( $user ) {
@@ -5579,7 +5549,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$post_ids = array_unique( [ $description_id, $guest_author_record->ID ] );
 
 				foreach ( $post_ids as $post_id ) {
-					$this->output_post_table( [ $post_id ] );
+					$this->posts->output_table( [ $post_id ], [], '' );
 					$this->output_postmeta_table( $post_id );
 				}
 			}
@@ -6533,8 +6503,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private function handle_fixing_standalone_guest_author_data( $guest_author_id, $term ) {
 		global $wpdb;
 
-		echo WP_CLI::colorize( "%BGuest Author Record%n\n" );
-		$this->output_post_table( array( $guest_author_id ) );
+		$this->posts->output_table( [ $guest_author_id ], [], 'Guest Author Record' );
 		$post = get_post( $guest_author_id );
 		echo WP_CLI::colorize( "%BAuthor Term%n\n" );
 		$this->output_terms_table( array( $term->term_id ) );
@@ -7107,7 +7076,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$validated = true;
 			$validation_issues = [];
 
-			$this->output_post_table( array( $guest_author_id ) );
+			$this->posts->output_table( [ $guest_author_id ], [], '' );
 			$meta_data = $this->output_postmeta_table( $guest_author_id );
 			$cap_fields = $this->get_filtered_cap_fields( $guest_author_id, array_column( $meta_data, 'meta_key' ) );
 
@@ -7838,14 +7807,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				if ( ! empty( $potentially_same_guest_authors ) ) {
 					echo WP_CLI::colorize( "%YFound%n %C" . count( $potentially_same_guest_authors ) . "%n %Ypotentially same Guest Authors.%n\n" );
 					foreach ( $potentially_same_guest_authors as $psga ) {
-						$this->output_post_table( [ $psga->post_id ] );
+						$this->posts->output_table( [ $psga->post_id ], [], '' );
 						$this->output_postmeta_table( $psga->post_id );
 					}
 				}
 			}
 
 			if ( null !== $guest_author ) {
-				$this->output_post_table( array( $guest_author->ID ) );
+				$this->posts->output_table( [ $guest_author->ID ], [], '' );
 				$filtered_post_meta = $this->get_filtered_cap_fields(
 					$guest_author->ID,
 					array(
@@ -8118,7 +8087,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			if ( ! empty( $post_ids ) ) {
 				foreach ( $post_ids as $post_id ) {
-					$this->output_post_table( array( $post_id ) );
+					$this->posts->output_table( [ $post_id ], [], '' );
 					$filtered_post_meta = $this->get_filtered_cap_fields(
 						$post_id,
 						array(
@@ -8195,7 +8164,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						}
 					}
 
-					$this->output_post_table( array( $description_id ) );
+					$this->posts->output_table( [ $description_id ], [], '' );
 				}
 			}
 
