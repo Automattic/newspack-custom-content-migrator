@@ -165,11 +165,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	public function register_commands(): void {
 		$this->delete_content_commands();
-		$this->set_fixes_on_existing_command();
 		$this->set_importer_commands();
 		$this->set_fixes_command();
 	}
 
+	/**
+	 * @throws Exception
+	 */
 	public function delete_content_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator hcn-delete-caps',
@@ -263,49 +265,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				break;
 			}
 		}
-	}
-
-	/**
-	 * Commands here need to be run on the already migrated content on staging.
-	 *
-	 * @throws Exception
-	 */
-	private function set_fixes_on_existing_command(): void {
-
-		WP_CLI::add_command(
-			'newspack-content-migrator hcn-fix-wp-related-links',
-			[ $this, 'fix_wp_related_links' ],
-			[
-				'shortdesc' => 'Fixes existing related link paths.',
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator hcn-fix-urls',
-			[ $this, 'fix_post_urls' ],
-			[
-				'shortdesc' => 'Fix post names (slugs).',
-				'synopsis'  => [
-					$this->articles_json_arg,
-					$this->num_items_arg,
-					...BatchLogic::get_batch_args(),
-				],
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator hcn-fix-redirects',
-			[ $this, 'fix_redirects' ],
-			[
-				'shortdesc' => 'Fix existing redirects.',
-				'synopsis'  => [
-					[
-						$this->articles_json_arg,
-						...BatchLogic::get_batch_args(),
-					],
-				],
-			]
-		);
 	}
 
 	/**
@@ -436,231 +395,64 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			]
 		);
 
-		// TODO. This one might not be necessary.
 		WP_CLI::add_command(
-			'newspack-content-migrator hcn-fix-related-links-from-json',
-			[ $this, 'fix_related_links_from_json' ],
+			'newspack-content-migrator hcn-post-process-galleries',
+			[ $this, 'cmd_post_process_galleries' ],
 			[
-				'shortdesc' => 'Massages related links coming from the JSON',
+				'shortdesc' => 'Post process galleries.',
 				'synopsis'  => [
-					$this->articles_json_arg,
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'Specific post id to process',
+						'optional'    => true,
+					],
+					BatchLogic::$num_items,
 				],
 			]
 		);
 	}
 
 	/**
-	 * Callback for the command hcn-generate-redirects.
+	 * Process galleries in existing posts (that still have [GALLERY] in the post text).
 	 *
-	 * @throws Exception
-	 */
-	public function fix_redirects( array $args, array $assoc_args ): void {
-		$log_file           = __FUNCTION__ . '.log';
-		$home_url           = home_url();
-		$articles_json_file = $assoc_args[ $this->articles_json_arg['name'] ];
-
-		$categories = get_categories(
-			[
-				'fields' => 'slugs',
-			]
-		);
-
-		global $wpdb;
-
-		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
-		$counter    = 0;
-		foreach ( $this->json_iterator->batched_items( $articles_json_file, $batch_args['start'], $batch_args['end'] ) as $article ) {
-			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter ++, $batch_args['total'] ) );
-
-			if ( empty( $article->aliases ) ) {
-				continue;
-			}
-
-			$post_id = $wpdb->get_var(
-				$wpdb->prepare(
-					"SELECT post_id FROM $wpdb->postmeta WHERE ID <= %d AND meta_key = 'plone_article_UID' and meta_value = %s",
-					self::MAX_POST_ID_FROM_STAGING,
-					$article->UID
-				)
-			);
-			if ( ! $post_id ) {
-				$this->logger->log( $log_file, sprintf( 'Post with plone_article_UID %s not found', $article->UID ), Logger::WARNING );
-				continue;
-			}
-
-			foreach ( $article->aliases as $alias ) {
-				$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $alias );
-				if ( ! empty( $existing_redirects ) ) {
-					foreach ( $existing_redirects as $existing_redirect ) {
-						$existing_redirect->delete();
-					}
-				}
-				// We will use a regex redirect for the /hcn/hcn/ prefix, so remove that.
-				$no_prefix          = str_replace( '/hcn/hcn', '', $alias );
-				$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $no_prefix );
-				if ( ! empty( $existing_redirects ) ) {
-					foreach ( $existing_redirects as $existing_redirect ) {
-						$existing_redirect->delete();
-					}
-				}
-
-				$alias_parts = explode( '/', trim( $no_prefix, '/' ) );
-				// If the alias is the category we would already have that because of " wp option get permalink_structure %category%/%postname%/".
-				// If there are more than 2 parts, e.g. /issues/123/post-name, then it's OK to create the alias.
-				if ( ! in_array( $alias_parts[0], $categories, true ) || count( $alias_parts ) > 2 ) {
-					$this->redirection->create_redirection_rule(
-						'Plone ID ' . $article->UID,
-						$no_prefix,
-						"/?p={$post_id}",
-					);
-					$this->logger->log( $log_file, sprintf( 'Created redirect on post ID %d for %s', $post_id, $home_url . $no_prefix ), Logger::SUCCESS );
-				}
-			}
-		}
-	}
-
-	/**
-	 * Fix existing slugs and urls.
-	 *
-	 * @param array $args Params.
-	 * @param array $assoc_args Params.
+	 * @param array $pos_args
+	 * @param array $assoc_args
 	 *
 	 * @return void
-	 * @throws Exception
 	 */
-	public function fix_post_urls( array $args, array $assoc_args ): void {
-		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_$command_meta_version.log";
-		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
+	public function cmd_post_process_galleries( array $pos_args, array $assoc_args ): void {
+		$post_ids = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
 
-		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $articles_json_file, $assoc_args );
-		$counter    = 0;
-		foreach ( $this->json_iterator->batched_items( $articles_json_file, $batch_args['start'], $batch_args['end'] ) as $article ) {
-			WP_CLI::log( sprintf( 'Processing article (%d of %d)', $counter ++, $batch_args['total'] ) );
-
-			$post_id = $this->get_post_id_from_uid( $article->UID );
-			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
-				continue;
-			}
-
-			if ( $post_id > self::MAX_POST_ID_FROM_STAGING ) {
-				$this->logger->log( sprintf( 'Post ID %d is greater MAX ID (%d), skipping', $post_id, self::MAX_POST_ID_FROM_STAGING ), Logger::WARNING );
-				continue;
-			}
-
-			$post = get_post( $post_id );
-			if ( ! $post ) {
-				$this->logger->log( sprintf( "Didn't find a post for: %s", $article->{'@id'} ), Logger::WARNING );
-				continue;
-			}
-			if ( $post->post_status !== 'publish' ) {
-				MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
-				continue;
-			}
-
-			$current_path = trim( parse_url( get_permalink( $post->ID ), PHP_URL_PATH ), '/' );
-
-			$original_path = trim( parse_url( $article->{'@id'}, PHP_URL_PATH ), '/' );
-			if ( 0 !== substr_count( $original_path, '/' ) ) {
-				$this->set_categories_on_post_from_path( $post, $original_path );
-			}
-
-			$correct_post_name = $this->get_post_name( $article->{'@id'} );
-			if ( $correct_post_name !== $post->post_name ) {
-				wp_update_post(
-					[
-						'ID'        => $post_id,
-						'post_name' => $correct_post_name,
-					]
-				);
-			}
-
-			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
-
-			$original_path  = trim( parse_url( $article->{'@id'}, PHP_URL_PATH ), '/' );
-			$post_permalink = get_permalink( $post_id );
-			$wp_path        = trim( parse_url( $post_permalink, PHP_URL_PATH ), '/' );
-			if ( $wp_path !== mb_strtolower( $original_path ) ) {
-				$this->logger->log(
-					$log_file,
-					sprintf(
-						"Changed post path from:\n %s \n %s\n on %s ",
-						$current_path,
-						$wp_path,
-						"/?p={$post_id}"
-					),
-					Logger::SUCCESS
-				);
-			} else {
-				$this->logger->log( $log_file, sprintf( 'Postname was fine on: %s, not updating it', $post_permalink ) );
-			}
+		if ( ! $post_ids ) {
+			$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
+			global $wpdb;
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[GALLERY%' AND post_status = 'publish' ORDER BY ID DESC LIMIT %d",
+					[ $num_items ]
+				)
+			);
 		}
-	}
-
-	public function fix_related_links_from_json( array $args, array $assoc_args ): void {
-		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_$command_meta_version.log";
-		$articles_json_file   = $assoc_args[ $this->articles_json_arg['name'] ];
-
-
-		$article_url_and_uid = [];
-		foreach ( json_decode( file_get_contents( $articles_json_file ), true ) as $article ) {
-			$article_url_and_uid[ parse_url( $article['@id'], PHP_URL_PATH ) ] = $article['UID'];
-		}
-
-		global $wpdb;
-
-		$posts = $wpdb->get_results(
-			"SELECT ID, post_title, post_content FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[RELATED:%'"
-		);
-
-		foreach ( $posts as $post ) {
-			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
+		$total_posts = count( $post_ids );
+		$counter     = 0;
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing galleries (%d/%d) %s', ++ $counter, $total_posts, get_permalink( $post_id ) ) );
+			$post      = get_post( $post_id );
+			$tree_path = get_post_meta( $post_id, 'plone_tree_path', true );
+			if ( empty( $tree_path ) ) {
+				WP_CLI::warning( sprintf( 'No tree path found for %s', get_permalink( $post_id ) ) );
 				continue;
 			}
-
-			preg_match_all( '/\[RELATED:(.*?)]/', $post->post_content, $matches, PREG_SET_ORDER );
-
-			$update       = false;
-			$post_content = $post->post_content;
-			foreach ( $matches as $match ) {
-				$path = parse_url( $match[1], PHP_URL_PATH );
-				if ( empty( $article_url_and_uid[ $path ] ) ) {
-					$this->logger->log( $log_file, sprintf( 'Could not find UID for %s', $match[1] ), Logger::WARNING );
-					continue;
-				}
-
-				$linked_post_id = $this->get_post_id_from_uid( $article_url_and_uid[ $path ] );
-				if ( ! $linked_post_id ) {
-					$this->logger->log( $log_file, sprintf( 'Could not find post from UID for %s', $match[1] ), Logger::WARNING );
-					continue;
-				}
-
-
-				$update      = true;
-				$replacement = $this->get_related_link_markup( $linked_post_id );
-
-				$post_content = str_replace( $match[0], $replacement, $post_content );
-
-			}
-			if ( $update ) {
-				$result = wp_update_post(
-					[
-						'ID'           => $post->ID,
-						'post_content' => $post_content,
-					]
-				);
-
-				if ( $result ) {
-					$this->logger->log( $log_file, sprintf( 'Updated wp links in "RELATED" on %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
-				}
-			}
-			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
+			$processed_text = $this->replace_galleries_in_post_content( $post->post_content, $tree_path, $post_id, true );
+			wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => $processed_text,
+				]
+			);
 		}
+		WP_CLI::success( 'Done processing galleries' );
 	}
 
 	/**
@@ -833,74 +625,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			} else {
 				$this->logger->log( $log_file, sprintf( 'Failed to update related links in %s', get_permalink( $post_id ) ), Logger::ERROR );
 			}
-		}
-	}
-
-	/**
-	 * This one fixes the related links that were already changed to wp permalinks with paths that were not working.
-	 */
-	public function fix_wp_related_links( array $args, array $assoc_args ): void {
-		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 1;
-		$log_file             = "{$command_meta_key}_$command_meta_version.log";
-
-		global $wpdb;
-
-		$post_ids = $wpdb->get_col(
-			$wpdb->prepare(
-				"SELECT ID FROM $wpdb->posts WHERE ID <= %d AND post_type = 'post' AND post_content LIKE '%<strong>RELATED:%'",
-				self::MAX_POST_ID_FROM_STAGING
-			)
-		);
-
-		$total_posts = count( $post_ids );
-		$counter     = 0;
-
-		foreach ( $post_ids as $post_id ) {
-			WP_CLI::log( sprintf( 'Processing %s of %s with post id: %d', $counter ++, $total_posts, $post_id ) );
-
-			if ( ! empty( $post_id ) && MigrationMeta::get( $post_id, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::warning( sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post_id ), $command_meta_version ) );
-				continue;
-			}
-
-			$post         = get_post( $post_id );
-			$update       = false;
-			$post_content = $post->post_content;
-			preg_match_all( '@<p><strong>RELATED:</strong>.*href=[\'"]([^ ]*)[\'"].*</p>@', $post_content, $matches, PREG_SET_ORDER );
-
-			if ( empty( $matches ) ) {
-				$this->logger->log( $log_file, sprintf( 'Post seems to have wrong format related link %s', get_permalink( $post_id ) ), Logger::ERROR );
-			}
-
-			foreach ( $matches as $match ) {
-				$linked_url_post_name = trim( basename( $match[1] ), '/' );
-				$post_linked_to       = get_page_by_path( $linked_url_post_name, OBJECT, 'post' );
-				if ( ! $post_linked_to ) {
-					$this->logger->log( $log_file, sprintf( 'Could not find post for %s', $match[1] ), Logger::WARNING );
-					continue;
-				}
-
-				$update      = true;
-				$replacement = $this->get_related_link_markup( $post_linked_to->ID );
-
-				$post_content = str_replace( $match[0], $replacement, $post_content );
-			}
-
-			if ( $update ) {
-				$result = wp_update_post(
-					[
-						'ID'           => $post_id,
-						'post_content' => $post_content,
-					]
-				);
-
-				if ( $result ) {
-					$this->logger->log( $log_file, sprintf( 'Updated wp links in "RELATED" on %s', get_permalink( $post_id ) ), Logger::SUCCESS );
-				}
-			}
-
-			MigrationMeta::update( $post_id, $command_meta_key, 'post', $command_meta_version );
 		}
 	}
 
@@ -1254,8 +978,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args       = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
 		$refresh_existing = $assoc_args[ $this->refresh_existing['name'] ] ?? false;
 		$only_with_id     = $assoc_args[ $this->only_with_id['name'] ] ?? false;
-
-		$current_domain = parse_url( get_site_url(), PHP_URL_HOST );
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
@@ -1964,15 +1686,6 @@ QUERY;
 		}
 
 		return $attachment_ids;
-	}
-
-	private function get_related_link_markup( int $post_id ): string {
-		$permalink  = "/?p={$post_id}";
-		$post_title = get_the_title( $post_id );
-
-		return <<<HTML
-<p class="hcn-related"><span class="hcn-related__label">Related:</span> <a href="$permalink" class="hcn-related__link" target="_blank">$post_title</a></p>
-HTML;
 	}
 
 	/**
