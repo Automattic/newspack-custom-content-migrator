@@ -149,7 +149,7 @@ class Attachments {
 		}
 
 		global $wpdb;
-		$like = '%' . $wpdb->esc_like( sanitize_title( $filename ) );
+		$like = '%' . $wpdb->esc_like( sanitize_file_name( $filename ) );
 		$sql  = $wpdb->prepare(
 			"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
 			$like
