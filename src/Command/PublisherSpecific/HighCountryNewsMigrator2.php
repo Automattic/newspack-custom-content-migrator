@@ -114,15 +114,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		'optional'    => false,
 	];
 
-	private array $num_items_arg = [
-		'type'        => 'assoc',
-		'name'        => 'num-items',
-		'description' => 'Number of items to process',
-		'optional'    => true,
-	];
-
-	const MAX_POST_ID_FROM_STAGING = 185173; // SELECT max(ID) FROM wp_posts on staging.
-
 	const PARENT_PAGE_FOR_ISSUES  = 180504; // The page that all issues will have as parent.
 	const DEFAULT_AUTHOR_ID       = 223746; // User ID of default author.
 	const TAG_ID_THE_MAGAZINE     = 7640; // All issues will have this tag to create a neat looking page at /topic/the-magazine.
@@ -408,6 +399,12 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						'description' => 'Specific post id to process',
 						'optional'    => true,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'force-gallery-images',
+						'description' => 'If this is set, then all images associated with a post (that are not already in use on the post) will be added to the gallery.',
+						'optional'    => true,
+					],
 					BatchLogic::$num_items,
 				],
 			]
@@ -423,7 +420,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_post_process_galleries( array $pos_args, array $assoc_args ): void {
-		$post_ids = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
+		$post_ids = $assoc_args['post-id'] ?? false;
+		// Force will add all images associated with the post to the gallery EVEN IF THEY ARE NOT MARKED AS GALLERY IMAGES.
+		$force_gallery_images = $assoc_args['force-gallery-images'] ?? false;
+
+		$log_file = $force_gallery_images ? 'post-process-galleries-force-gallery-images.log' : 'post-process-galleries.log';
 
 		if ( ! $post_ids ) {
 			$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
@@ -434,6 +435,8 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					[ $num_items ]
 				)
 			);
+		} else {
+			$post_ids = [ $post_ids ];
 		}
 		$total_posts = count( $post_ids );
 		$counter     = 0;
@@ -445,13 +448,14 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				WP_CLI::warning( sprintf( 'No tree path found for %s', get_permalink( $post_id ) ) );
 				continue;
 			}
-			$processed_text = $this->replace_galleries_in_post_content( $post->post_content, $tree_path, $post_id, true );
+			$processed_text = $this->replace_galleries_in_post_content( $post->post_content, $tree_path, $post_id, true, ! $force_gallery_images );
 			wp_update_post(
 				[
 					'ID'           => $post_id,
 					'post_content' => $processed_text,
 				]
 			);
+			$this->logger->log( $log_file, sprintf( 'Processed gallery/galleries on %s', get_permalink( $post_id ) ), Logger::SUCCESS );
 		}
 		WP_CLI::success( 'Done processing galleries' );
 	}
@@ -1177,8 +1181,18 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	}
 
-	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline ): string {
-		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $is_inline );
+	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline, bool $only_gallery_images = true ): string {
+		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $only_gallery_images );
+
+		if ( ! $only_gallery_images ) {
+			// If we are not only looking for gallery images, we need to filter out the ones that are already in the post.
+			// This approach is pretty low-tech and a bit desperate, but it works OK.
+			$gallery_images = array_filter(
+				$gallery_images,
+				fn( $attachment_id ) => ! str_contains( $text, "wp-image-$attachment_id" )
+			);
+		}
+
 		if ( empty( $gallery_images ) ) {
 			return $text;
 		}
@@ -1200,11 +1214,17 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						fn( $attachment_id ) => $gallery_id === get_post_meta( $attachment_id, 'plone_gallery_id', true )
 					);
 				}
-				$text = str_replace( $gallery_anchor, $this->get_gallery( $gallery_images ), $text );
+				$gallery = $this->get_gallery( $gallery_images );
+				if ( ! empty( $gallery ) ) {
+					$text = str_replace( $gallery_anchor, $gallery, $text );
+				}
 			}
 		} else {
-			// The non-inline types of gallery are put at the top of the text.
-			$text = $this->get_gallery( $gallery_images ) . $text;
+			$gallery = $this->get_gallery( $gallery_images );
+			if ( ! empty( $gallery ) ) {
+				// The non-inline types of gallery are put at the top of the text.
+				$text = $gallery . $text;
+			}
 		}
 
 		return $text;
@@ -1243,13 +1263,19 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	private function get_gallery( array $gallery_images ): string {
+		if ( empty( $gallery_images ) ) {
+			return '';
+		}
 		if ( count( $gallery_images ) > 1 ) {
 			$block                       = $this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images );
 			$block['attrs']['className'] = 'hcn-gallery'; // Add a classname, so we can fish it out again if we need to.
 			$gallery                     = serialize_block( $block );
 		} else { // Some galleries only have one image – in that case we don't need a gallery block.
 			$attachment_post = get_post( current( $gallery_images ) );
-			$gallery         = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img' ) );
+			if ( ! $attachment_post instanceof WP_Post ) {
+				return '';
+			}
+			$gallery = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, 'hcn-gallery-1-img' ) );
 		}
 
 		return $gallery;
