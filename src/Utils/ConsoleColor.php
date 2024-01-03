@@ -8,8 +8,6 @@
 namespace NewspackCustomContentMigrator\Utils;
 
 use cli\Colors;
-use ReflectionClass;
-use ReflectionMethod;
 
 /**
  * This is a class to output colored text to the console.
@@ -350,19 +348,6 @@ class ConsoleColor {
 	 * @return string|ConsoleColor
 	 */
 	public function __call( $name, $arguments ) {
-		$class          = new ReflectionClass( $this );
-		$public_methods = $class->getMethods( ReflectionMethod::IS_PUBLIC );
-
-		foreach ( $public_methods as $method ) {
-			if ( str_starts_with( $method->name, '__' ) ) {
-				continue;
-			}
-
-			if ( $name === $method->name ) {
-				return $this->$name( ...$arguments );
-			}
-		}
-
 		$name   = strtr( $name, $this->replacements );
 		$string = $arguments[0];
 
