@@ -7,9 +7,11 @@ namespace NewspackCustomContentMigrator\Logic;
 use NewspackCustomContentMigrator\Utils\Logger;
 
 /**
- * Class WXR_Converter_Medium
+ * Class Medium
  *
  * Class responsible for converting Medium export archive to WXR format.
+ *
+ * This is based on the WXR_Converter_Medium class from here: fbhepr%2Skers%2Sjcpbz%2Sova%2Svzcbeg%2Sjke%2Qpbairegre%2Spynff%2Qjke%2Qpbairegre%2Qzrqvhz.cuc-og
  *
  * Medium currently exports user's posts as .zip archive consisting
  * of individual HTML files, one per each post. Important thing to
@@ -26,7 +28,7 @@ use NewspackCustomContentMigrator\Utils\Logger;
  * we might need to stagger requests in order to avoid being blocked.
  *
  * For more details please refer to:
- * https://happinessgardeningp2.wordpress.com/2016/03/07/medium-importer-improvements/
+ * pek1ag-g1-p2
  */
 class Medium {
 	/**
