@@ -414,6 +414,18 @@ class ConsoleColor {
 	}
 
 	/**
+	 * Provides a way to output a key/value pair with color, style, or background applied to console.
+	 *
+	 * @param string $key The key to output.
+	 * @param string $value The value to output.
+	 *
+	 * @return void
+	 */
+	public static function high_contrast_kv_output( string $key, string $value ) {
+		( new self() )->black_with_white_background( "$key:" )->bright_white( $value )->output();
+	}
+
+	/**
 	 * This function applies a color to a string.
 	 *
 	 * @param string $color The color to apply.
