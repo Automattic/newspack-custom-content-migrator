@@ -395,6 +395,55 @@ class Medium {
 		return $post_title;
 	}
 
+	/**
+	 * Returns the subtitle of the current post.
+	 *
+	 * The subtitle is stored in <section class='e-content'> section inside <h4 class='graf--subtitle'> element.
+	 *
+	 * @access private
+	 *
+	 * @param object $xpath DOMXPath object for current post HTML.
+	 *
+	 * @return string $post_title Post's title, or empty string if none is found.
+	 */
+	private function get_post_subtitle( $xpath ) {
+		$post_title = '';
+
+		$nodes = $xpath->query( '//section[contains(@class, "e-content")]//h4[contains(@class, "graf--subtitle")]' );
+		if ( $nodes && $nodes->length ) {
+			$post_title = $nodes->item( 0 )->textContent;
+		}
+
+		return $post_title;
+	}
+
+	/**
+	 * Returns the subtitle of the current post.
+	 *
+	 * The image is stored in <img data-is-featured='true'> element.
+	 * The caption is stored in the img parent node in the <figcaption class='imageCaption'> element.
+	 *
+	 * @access private
+	 *
+	 * @param object $xpath DOMXPath object for current post HTML.
+	 *
+	 * @return string $post_title Post's title, or empty string if none is found.
+	 */
+	private function get_post_featured_image( $xpath ) {
+		$featured_image = [];
+
+		$img_nodes = $xpath->query( '//img[@data-is-featured="true"]' );
+		if ( $img_nodes->length ) {
+			$featured_image_node   = $img_nodes->item( 0 );
+			$featured_image['url'] = $featured_image_node->attributes->getNamedItem( 'src' )->value;
+
+			$caption_nodes             = $xpath->query( '//img[@data-is-featured="true"]//parent::*/figcaption[@class="imageCaption"]' );
+			$featured_image['caption'] = $caption_nodes->length ? $caption_nodes->item( 0 )->textContent : '';
+		}
+
+		return $featured_image;
+	}
+
 
 	/**
 	 * Returns the content of the current post.
@@ -501,6 +550,28 @@ class Medium {
 	}
 
 	/**
+	 * Removes duplicate sub-title from content.
+	 *
+	 * Exported HTML file contains the post title in header section,
+	 * but it is also inserted at the start of post's content,
+	 * where it does not originally belong.
+	 *
+	 * @param object $xpath DOMXPath object for current HTML file.
+	 */
+	private function remove_duplicate_subtitle( $xpath ) {
+		for ( $i = 1; $i <= 6; $i ++ ) {
+			$nodes = $xpath->query( "//h{$i}[ contains( @class, 'graf--subtitle' ) ]" );
+
+			if ( $nodes->length ) {
+				$duplicate_title = $nodes->item( 0 );
+				$duplicate_title->parentNode->removeChild( $duplicate_title );
+
+				return;
+			}
+		}
+	}
+
+	/**
 	 * Removes unneeded <hr> tag that every exported post starts with.
 	 *
 	 * @param object $xpath DOMXPath object for current HTML file.
@@ -570,6 +641,21 @@ class Medium {
 			if ( preg_match( '/\/NaN\/NaN\//', $image->getAttribute( 'src' ) ) === 1 ) {
 				$image->parentNode->removeChild( $image );
 			}
+		}
+	}
+
+	/**
+	 * Removes featured image from the post body.
+	 *
+	 * @access private
+	 *
+	 * @param object $xpath DOMXPath object for current HTML file.
+	 */
+	private function remove_featured_image( $xpath ) {
+		$featured_image_figure_parent_node = $xpath->query( '//img[@data-is-featured="true"]/ancestor::figure' );
+		if ( $featured_image_figure_parent_node->length ) {
+			$featured_image_figure_parent_node = $featured_image_figure_parent_node->item( 0 );
+			$featured_image_figure_parent_node->parentNode->removeChild( $featured_image_figure_parent_node );
 		}
 	}
 
@@ -802,9 +888,11 @@ class Medium {
 		 * elements that will ultimately be removed from the doc.
 		 */
 		$this->remove_duplicate_title( $xpath );
+		$this->remove_duplicate_subtitle( $xpath );
 		$this->remove_leading_hr( $xpath );
 		$this->remove_duplicate_images( $xpath );
 		$this->remove_broken_images( $xpath );
+		$this->remove_featured_image( $xpath );
 		$this->remove_attributes( $xpath );
 
 		// After removals we can insert some WordPress specific attributes.
@@ -939,7 +1027,7 @@ class Medium {
 			$xpath = new \DOMXPath( $doc );
 
 			// If it's a profile file.
-			if ( str_ends_with( $file, '/profile/profile.html' ) ) {
+			if ( str_ends_with( $file, 'profile/profile.html' ) ) {
 				$this->logger->log( self::$log_file, " -- Processing $file as profile\n" );
 
 				// Get the display name.
@@ -1016,7 +1104,9 @@ class Medium {
 			}
 
 			// Let's first extract the data that is present in HTML files.
-			$item['title'] = $this->get_post_title( $xpath );
+			$item['title']          = $this->get_post_title( $xpath );
+			$item['subtitle']       = $this->get_post_subtitle( $xpath );
+			$item['featured_image'] = $this->get_post_featured_image( $xpath );
 
 			/*
 			 * After that, attempt to fetch additional post metadata from Medium.

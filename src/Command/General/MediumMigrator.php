@@ -255,6 +255,7 @@ class MediumMigrator implements InterfaceCommand {
 		// Get/add author.
 		if ( empty( $this->medium_logic->get_author() ) ) {
 			$this->logger->log( self::$log_file, ' -- Error: Author not found: ' . $article['author'], Logger::WARNING );
+			return;
 		}
 
 		$author_id = $this->get_or_insert_author( $this->medium_logic->get_author() );
@@ -296,6 +297,16 @@ class MediumMigrator implements InterfaceCommand {
 
 		$this->logger->log( self::$log_file, ' -- Article inserted with ID: ' . $post_id, Logger::LINE );
 
+		// Set the featured image.
+		if ( ! empty( $article['featured_image'] ) ) {
+			$featured_image_id = $this->attachments->import_external_file( $article['featured_image']['url'], $article['title'], $article['featured_image']['caption'] );
+			if ( is_wp_error( $featured_image_id ) ) {
+				$this->logger->log( self::$log_file, ' -- Error importing featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
+			} else {
+				set_post_thumbnail( $post_id, $featured_image_id );
+			}
+		}
+
 		// Set article taxonomies.
 		foreach ( $article['post_taxonomies'] as $term ) {
 			$created_term = term_exists( $term['name'], $term['domain'] );
@@ -317,5 +328,6 @@ class MediumMigrator implements InterfaceCommand {
 		// Set a few meta fields.
 		update_post_meta( $post_id, self::ORIGINAL_ID_META_KEY, $article['original_id'] );
 		update_post_meta( $post_id, '_medium_post_url', $article['post_url'] );
+		update_post_meta( $post_id, 'newspack_post_subtitle', $article['subtitle'] );
 	}
 }
