@@ -5033,7 +5033,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		foreach ( $users_in_question as $user ) {
 			$this->output_users_as_table( [ $user->user_id ] );
 			$this->posts->output_table( [ $user->email_post_id ], [], '' );
-			$this->output_postmeta_table( $user->email_post_id );
+			$this->posts->get_and_output_postmeta_table( $user->email_post_id, '' );
 			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
 
 			$this->output_terms_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ) );
@@ -5370,37 +5370,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	/**
-	 * This function will output a table to terminal with the postmeta results for a given Post ID.
-	 *
-	 * @param int $post_id Post ID.
-	 *
-	 * @return array
-	 */
-	public function output_postmeta_table( int $post_id ) {
-		global $wpdb;
-
-		$postmeta_rows = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT * FROM $wpdb->postmeta WHERE post_id = %d ORDER BY meta_key ASC",
-				$post_id
-			)
-		);
-
-		echo WP_CLI::colorize( "%BPostmeta Table (%n%W$post_id%n%B)%n\n" );
-		WP_CLI\Utils\format_items(
-			'table',
-			$postmeta_rows,
-			array(
-				'meta_id',
-				'meta_key',
-				'meta_value',
-			)
-		);
-
-		return $postmeta_rows;
-	}
-
 	public function output_postmeta_data_table( array $identifiers ) {
 		global $wpdb;
 
@@ -5550,7 +5519,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 				foreach ( $post_ids as $post_id ) {
 					$this->posts->output_table( [ $post_id ], [], '' );
-					$this->output_postmeta_table( $post_id );
+					$this->posts->get_and_output_postmeta_table( $post_id, '' );
 				}
 			}
 			
@@ -7077,7 +7046,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$validation_issues = [];
 
 			$this->posts->output_table( [ $guest_author_id ], [], '' );
-			$meta_data = $this->output_postmeta_table( $guest_author_id );
+			$meta_data = $this->posts->get_and_output_postmeta_table( $guest_author_id, '' );
 			$cap_fields = $this->get_filtered_cap_fields( $guest_author_id, array_column( $meta_data, 'meta_key' ) );
 
 			// Search for email in users table.
@@ -7808,7 +7777,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					echo WP_CLI::colorize( "%YFound%n %C" . count( $potentially_same_guest_authors ) . "%n %Ypotentially same Guest Authors.%n\n" );
 					foreach ( $potentially_same_guest_authors as $psga ) {
 						$this->posts->output_table( [ $psga->post_id ], [], '' );
-						$this->output_postmeta_table( $psga->post_id );
+						$this->posts->get_and_output_postmeta_table( $psga->post_id, '' );
 					}
 				}
 			}

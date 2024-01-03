@@ -753,4 +753,48 @@ SQL;
 			$title
 		);
 	}
+
+	/**
+	 * This function facilitates obtaining and outputting the postmeta data for a given
+	 * post ID to the console as a table.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $title Table title.
+	 *
+	 * @return array
+	 */
+	public function get_and_output_postmeta_table( int $post_id, string $title = 'Postmeta Table' ): array {
+		if ( ! empty( $title ) ) {
+			if ( ! ConsoleColor::has_color( $title ) ) {
+				$title = ConsoleColor::title( $title )->get();
+			}
+
+			$title .= ' ' . ConsoleColor::bright_blue( '(' )
+										->bright_white( $post_id )
+										->bright_blue( ')' )
+										->get();
+		}
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$postmeta_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE post_id = %d ORDER BY meta_key ASC",
+				$post_id
+			)
+		);
+
+		( new ConsoleTable() )->output_data(
+			$postmeta_rows,
+			[
+				'meta_id',
+				'meta_key',
+				'meta_value',
+			],
+			$title
+		);
+
+		return $postmeta_rows;
+	}
 }
