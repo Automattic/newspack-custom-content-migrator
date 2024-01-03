@@ -414,25 +414,6 @@ class ConsoleColor {
 	}
 
 	/**
-	 * This function applies a color, style, or background to a string.
-	 *
-	 * @param string $type Whether to apply a color, style, or background.
-	 * @param string $property The color, style, or background to apply.
-	 * @param string $text The string to apply the color, style, or background to.
-	 *
-	 * @return string
-	 */
-	private function apply( string $type, string $property, string $text ): string {
-		$text_sanitized = wp_kses( $text, wp_kses_allowed_html( 'post' ) );
-
-		if ( array_key_exists( $property, $this->$type ) ) {
-			$text_sanitized = $this->$type[ $property ] . $text_sanitized . '%n';
-		}
-
-		return $text_sanitized;
-	}
-
-	/**
 	 * This function applies a color to a string.
 	 *
 	 * @param string $color The color to apply.
@@ -466,5 +447,24 @@ class ConsoleColor {
 	 */
 	protected function background( string $background, string $text ): string {
 		return $this->apply( 'backgrounds', $background, $text );
+	}
+
+	/**
+	 * This function applies a color, style, or background to a string.
+	 *
+	 * @param string $type Whether to apply a color, style, or background.
+	 * @param string $property The color, style, or background to apply.
+	 * @param string $text The string to apply the color, style, or background to.
+	 *
+	 * @return string
+	 */
+	private function apply( string $type, string $property, string $text ): string {
+		$text_sanitized = wp_kses( $text, wp_kses_allowed_html( 'post' ) );
+
+		if ( array_key_exists( $property, $this->$type ) ) {
+			$text_sanitized = $this->$type[ $property ] . $text_sanitized . '%n';
+		}
+
+		return $text_sanitized;
 	}
 }
