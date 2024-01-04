@@ -465,7 +465,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 */
 	public function fix_referenced_articles_from_json( array $args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
-		$command_meta_version = 25;
+		$command_meta_version = 30;
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 
 		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
@@ -601,7 +601,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	}
 
 	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
-		$log_file = __FUNCTION__ . 'log';
+		$log_file = __FUNCTION__ . '.log';
 
 		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
 		$post_ids  = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
