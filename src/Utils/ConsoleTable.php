@@ -174,9 +174,11 @@ class ConsoleTable {
 		}
 
 		if ( ! empty( $title ) ) {
-			$title         = WP_CLI::colorize( '%B%U' . $title . '%n' ) . PHP_EOL;
-			$title_escaped = esc_html( $title );
-			echo $title_escaped; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			if ( ConsoleColor::has_color( $title ) ) {
+				echo esc_html( $title ) . PHP_EOL;
+			} else {
+				ConsoleColor::title_output( $title );
+			}
 		}
 
 		WP_CLI\Utils\format_items( 'table', $array_of_arrays, $header );
