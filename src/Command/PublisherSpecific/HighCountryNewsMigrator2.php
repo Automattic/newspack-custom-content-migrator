@@ -505,7 +505,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$post = get_post( $post_id );
 			if ( str_contains( $post->post_content, self::CLASS_READ_MORE_BOTTOM ) ) {
 				// Remove the block if there is one already.
-				$post->post_content = serialize_blocks( GutenbergBlockManipulator::remove_block_with_class( self::CLASS_READ_MORE_BOTTOM, $post->post_content ) );
+				$post->post_content = serialize_blocks( GutenbergBlockManipulator::remove_blocks_with_class( self::CLASS_READ_MORE_BOTTOM, $post->post_content ) );
 			}
 			$read_more_block = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( $related_post_ids, $read_more_block_args );
 			wp_update_post(
