@@ -5370,38 +5370,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function output_postmeta_data_table( array $identifiers ) {
-		global $wpdb;
-
-		$base_query = "SELECT * FROM $wpdb->postmeta WHERE ";
-
-		$post_meta_records = array();
-		foreach ( $identifiers as $meta_key => $meta_value ) {
-			$query         = "$base_query meta_key = '$meta_key' AND meta_value = '$meta_value'";
-			$postmeta_rows = $wpdb->get_results( $query );
-
-			if ( empty( $postmeta_rows ) ) {
-				echo WP_CLI::colorize( "%YNo postmeta found for meta_key: $meta_key and meta_value: $meta_value%n\n" );
-				continue;
-			}
-
-			echo WP_CLI::colorize( "%BPostmeta Data (%n%W$meta_key%n%B)%n\n" );
-			WP_CLI\Utils\format_items(
-				'table',
-				$postmeta_rows,
-				array(
-					'meta_id',
-					'post_id',
-					'meta_key',
-					'meta_value',
-				)
-			);
-			$post_meta_records = array_merge( $post_meta_records, $postmeta_rows );
-		}
-
-		return $post_meta_records;
-	}
-
 	public function output_term_taxonomy_table( array $term_taxonomy_ids ) {
 		global $wpdb;
 
@@ -8010,7 +7978,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_email->ID;
 				$user_emails[] = $user_by_email->user_email;
 				$this->output_users_as_table( array( $user_by_email ) );
-				$postmeta_records = $this->output_postmeta_data_table(
+				$postmeta_records = $this->posts->get_and_output_matching_postmeta_datapoints_tables(
 					array(
 						'cap-linked_account' => $user_by_email->user_login,
 					)
@@ -8026,7 +7994,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_login->ID;
 				$user_emails[] = $user_by_login->user_email;
 				$this->output_users_as_table( array( $user_by_login ) );
-				$postmeta_records = $this->output_postmeta_data_table(
+				$postmeta_records = $this->posts->get_and_output_matching_postmeta_datapoints_tables(
 					array(
 						'cap-linked_account' => $user_by_login->user_login,
 					)
@@ -8039,7 +8007,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$user = $this->choose_between_users( $user_by_login, $user_by_email );
 
-			$postmeta_records = $this->output_postmeta_data_table(
+			$postmeta_records = $this->posts->get_and_output_matching_postmeta_datapoints_tables(
 				array(
 					'cap-user_email' => $loose_author_term->name,
 					'cap-user_login' => $loose_author_term->slug,

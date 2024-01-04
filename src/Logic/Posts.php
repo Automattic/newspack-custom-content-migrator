@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use WP_Query;
 use WP_CLI;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
@@ -796,5 +797,71 @@ SQL;
 		);
 
 		return $postmeta_rows;
+	}
+
+
+	/**
+	 * This function will facilitate obtaining and outputting the postmeta data for any given
+	 * pairs of meta_key => meta_value combos. This is useful for determining if a
+	 * meta_key => meta_value combo is being used for more than one post.
+	 *
+	 * @param array $identifiers {
+	 *      Array of meta_key => meta_value pairs.
+	 *
+	 * @type string $meta_key Meta key.
+	 * @type string $meta_value Meta value.
+	 * }
+	 *
+	 * @return array|object[]
+	 */
+	public function get_and_output_matching_postmeta_datapoints_tables( array $identifiers ): array {
+		global $wpdb;
+
+		$base_query_escaped = esc_sql( "SELECT * FROM $wpdb->postmeta WHERE " );
+
+		$all_postmeta_rows = [];
+
+		foreach ( $identifiers as $meta_key => $meta_value ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$postmeta_rows = $wpdb->get_results(
+			// phpcs:disable -- Placeholders used and query sanitized
+				$wpdb->prepare(
+					$base_query_escaped . 'meta_key = %s AND meta_value = %s ORDER BY meta_id ASC',
+					$meta_key,
+					$meta_value
+				)
+			// phpcs:enable
+			);
+
+			if ( empty( $postmeta_rows ) ) {
+				ConsoleColor::yellow( 'No postmeta rows found for meta_key:' )
+							->bright_white( $meta_key )
+							->yellow( 'with meta_value:' )
+							->bright_white( $meta_value )
+							->output();
+				continue;
+			}
+
+			$table_title = ConsoleColor::title( 'Postmeta Data' )
+										->bright_blue( '(' )
+										->bright_white( $meta_key )
+										->bright_blue( ')' )
+										->get();
+
+			ConsoleTable::output_data(
+				$postmeta_rows,
+				[
+					'meta_id',
+					'post_id',
+					'meta_key',
+					'meta_value',
+				],
+				$table_title
+			);
+
+			$all_postmeta_rows = array_merge( $all_postmeta_rows, $postmeta_rows );
+		}
+
+		return $all_postmeta_rows;
 	}
 }
