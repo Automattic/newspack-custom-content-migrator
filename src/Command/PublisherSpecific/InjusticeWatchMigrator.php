@@ -4,11 +4,14 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\CsvIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
+use WP_Post;
 
 class InjusticeWatchMigrator implements InterfaceCommand {
 	private array $csv_input_file = [
@@ -20,13 +23,15 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 
 	private CsvIterator $csv_iterator;
 	private Redirection $redirection;
+	private GutenbergBlockGenerator $block_generator;
 
 	private Logger $logger;
 
 	private function __construct() {
-		$this->csv_iterator = new CsvIterator();
-		$this->redirection  = new Redirection();
-		$this->logger       = new Logger();
+		$this->csv_iterator    = new CsvIterator();
+		$this->redirection     = new Redirection();
+		$this->logger          = new Logger();
+		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
 	public static function get_instance(): self {
@@ -66,7 +71,130 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator ijw-transform-readmore',
+			[ $this, 'cmd_transform_readmore' ],
+			[
+				'shortdesc' => 'Transform readmore shortcodes.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'Specific post id to process',
+						'optional'    => true,
+					],
+				],
+			]
+		);
+
 		$this->register_test_commands();
+	}
+
+	public function cmd_transform_readmore( array $pos_args, array $assoc_args ): void {
+		$post_id = $assoc_args['post-id'] ?? false;
+		$log_file = 'readmore-blocks.log';
+
+		$homepage_block_default_args = [
+			'showReadMore'  => false,
+			'showDate'      => false,
+			'showAuthor'    => false,
+			'specificMode'  => true,
+			'typeScale'     => 3,
+			'columns'       => 2,
+			'sectionHeader' => 'Read More',
+			'postsToShow'   => 1,
+			'showExcerpt'   => false,
+			'imageShape'    => 'uncropped',
+		];
+
+		if ( ! $post_id ) {
+			$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
+			global $wpdb;
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[readmore%' ORDER BY ID DESC LIMIT %d",
+					[ $num_items ]
+				)
+			);
+		} else {
+			$post_ids = [ $post_id ];
+		}
+		$total_posts = count( $post_ids );
+		$counter     = 0;
+
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( '-- %d/%d --', ++ $counter, $total_posts ) );
+			$post           = get_post( $post_id );
+			$post_permalink = get_permalink( $post );
+
+			// Parse the post content into blocks.
+			$post_blocks      = parse_blocks( $post->post_content );
+			$shortcode_blocks = array_filter(
+				$post_blocks,
+				fn( $block ) => 'core/shortcode' === ( $block['blockName'] ?? '' ) && str_contains( $block['innerHTML'], '[readmore' )
+			);
+			if ( empty( $shortcode_blocks ) ) {
+				$this->logger->log( $log_file, sprintf( 'Post has shortcode outside of block: %s', $post_permalink ), Logger::ERROR );
+				continue;
+			}
+
+			// Array filter keeps the indices, so grab $idx here, so we can replace blocks.
+			foreach ( $shortcode_blocks as $idx => $block ) {
+				// The shortcode is a bit of a mess with quotes, newlines, and all kinds of inconsistencies
+				$parsed_attrs = array_map(
+					fn( $attr ) => trim( $attr, "\n“”" ),
+					shortcode_parse_atts( html_entity_decode( $block['innerHTML'] ) )
+				);
+				if ( empty( $parsed_attrs['id'] ) ) {
+					$this->logger->log( $log_file, sprintf( 'Could not parse attributes on %s', $post_permalink ), Logger::ERROR );
+					continue;
+				}
+
+				// There can be one post only, or multiple, separated by commas.
+				$referenced_post_ids = str_contains( $parsed_attrs['id'], ',' ) ? explode( ',', $parsed_attrs['id'] ) : [ $parsed_attrs['id'] ];
+				// They are pretty probably wrapped in all kinds of fluff that is not a post id.
+				$referenced_post_ids = array_map( fn( $ref_post_id ) => preg_replace( '/[^0-9]/', '', $ref_post_id ), $referenced_post_ids );
+				// And we want to make sure that we actually have posts with those ids.
+				$referenced_post_ids = array_filter(
+					$referenced_post_ids,
+					fn( $ref_post_id ) => get_post( $ref_post_id ) instanceof WP_Post
+				);
+				if ( empty( $referenced_post_ids ) ) {
+					$this->logger->log( $log_file, sprintf( 'No valid post id references found for %s', $post_permalink ), Logger::ERROR );
+					continue;
+				}
+
+				$group_classes = [ 'ijw-readmore-inline' ];
+				$align         = 'left';
+				if ( ! empty( $parsed_attrs['float'] ) && str_contains( $parsed_attrs['float'], 'right' ) ) {
+					$align = 'right';
+				}
+				$group_classes[] = 'align' . $align;
+
+				$block_args                = $homepage_block_default_args;
+				$block_args['showExcerpt'] = ! empty( $parsed_attrs['excerpt'] ) && str_contains( $parsed_attrs['excerpt'], 'true' );
+
+				$homepage_block = $this->block_generator->get_homepage_articles_for_specific_posts( $referenced_post_ids, $block_args );
+
+				$post_blocks[ $idx ] = $this->block_generator->get_group_constrained( [ $homepage_block ], $group_classes );
+			}
+			wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => serialize_blocks( $post_blocks ),
+				]
+			);
+			$this->logger->log(
+				$log_file,
+				sprintf(
+					"Added read more block to:\n\t%s\n\t%s",
+					$post_permalink, 'https://injusticewatch.org' . parse_url( $post_permalink, PHP_URL_PATH )
+				),
+				Logger::SUCCESS
+			);
+		}
+		WP_CLI::success( 'Done transforming readmores. Log file in ' . $log_file );
 	}
 
 	/**
@@ -109,7 +237,7 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 
 			$live_url = parse_url( $row['Permalink'], PHP_URL_SCHEME | PHP_URL_HOST );
 			$post_url = str_replace( $live_url, $home_url, $row['Permalink'] );
-			$path = untrailingslashit( parse_url( $row['Permalink'], PHP_URL_PATH ) );
+			$path     = untrailingslashit( parse_url( $row['Permalink'], PHP_URL_PATH ) );
 
 			if ( ! $this->redirection->redirect_from_exists( $path ) ) {
 				$req = wp_remote_head( $post_url, [ 'sslverify' => false ] );
