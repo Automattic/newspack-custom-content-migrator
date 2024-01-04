@@ -737,7 +737,7 @@ SQL;
 
 		global $wpdb;
 
-		( new ConsoleTable() )->output_data(
+		ConsoleTable::output_data(
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->get_results(
 			// phpcs:disable -- Placeholders used and query sanitized
@@ -785,7 +785,7 @@ SQL;
 			)
 		);
 
-		( new ConsoleTable() )->output_data(
+		ConsoleTable::output_data(
 			$postmeta_rows,
 			[
 				'meta_id',

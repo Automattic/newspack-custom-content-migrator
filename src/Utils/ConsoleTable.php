@@ -29,7 +29,7 @@ class ConsoleTable {
 	 *
 	 * @return void
 	 */
-	public function output_comparison( array $keys, array ...$arrays ) {
+	public static function output_comparison( array $keys, array ...$arrays ) {
 		$array_bag = array(
 			...$arrays,
 		);
@@ -83,7 +83,7 @@ class ConsoleTable {
 	 *
 	 * @return array[]
 	 */
-	public function output_value_comparison( array $keys, array $left_set, array $right_set, bool $strict = true, string $left = 'LEFT', string $right = 'RIGHT' ) {
+	public static function output_value_comparison( array $keys, array $left_set, array $right_set, bool $strict = true, string $left = 'LEFT', string $right = 'RIGHT' ) {
 		if ( empty( $keys ) ) {
 			$keys = array_keys( array_merge( $left_set, $right_set ) );
 		}
@@ -168,7 +168,7 @@ class ConsoleTable {
 	 *
 	 * @return void
 	 */
-	public function output_data( array $array_of_arrays, array $header = [], string $title = '' ) {
+	public static function output_data( array $array_of_arrays, array $header = [], string $title = '' ) {
 		if ( empty( $header ) && isset( $array_of_arrays[0] ) ) {
 			$header = array_keys( $array_of_arrays[0] );
 		}
