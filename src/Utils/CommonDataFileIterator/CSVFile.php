@@ -7,8 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use \Exception;
-use \Iterator;
+use Exception;
+use Iterator;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\CSVFile as CSVFileInterface;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\IterableFile;
 
@@ -69,7 +69,7 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 		$this->set_escape( $escape );
 
 		$this->encoding = function_exists( 'mb_detect_encoding' ) ?
-			mb_detect_encoding( $path, 'UTF-8, ISO-8859-1', true ) :
+			mb_detect_encoding( $path, 'UTF-8,ISO-8859-1', true ) :
 			false;
 	}
 
@@ -90,9 +90,9 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 	 * @throws Exception Exception thrown if file does not exist on system.
 	 */
 	public function getIterator(): Iterator {
-		$handle = $this->get_handle();
-		$header = $this->get_row( $handle );
-		$header = array_map( fn( $column) => trim( $column ), $header );
+		$handle       = $this->get_handle();
+		$header       = $this->get_row( $handle );
+		$header       = array_map( fn( $column ) => trim( $column ), $header );
 		$header_count = count( $header );
 
 		$row_count = 1;
@@ -104,22 +104,22 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 				return;
 			}
 
-			$row_count++;
+			++$row_count;
 		}
 
 		while ( $row_count <= $this->get_end() && ! feof( $handle ) ) {
 			$raw_row = $this->get_row( $handle );
 
-			if ( $header_count !== count( $raw_row ) ) {
+			if ( count( $raw_row ) !== $header_count ) {
 				throw new Exception( 'CSV row does not have the same number of columns as the header. Likely an issue with the CSV File.' );
 			}
 
 			$row = array_combine( $header, $raw_row );
 
 			array_map(
-				function( $value ) {
-					if ( 'UTF-8' == $this->get_encoding() ) {
-						return function_exists( 'utf8_encode' ) ? utf8_encode( $value ) : $value;
+				function ( $value ) {
+					if ( false !== $this->get_encoding() && 'UTF-8' !== $this->get_encoding() ) {
+						return iconv( $this->get_encoding(), 'UTF-8', $value );
 					}
 
 					return $value;
@@ -128,7 +128,7 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 			);
 
 			yield $row;
-			$row_count++;
+			++$row_count;
 		}
 	}
 
