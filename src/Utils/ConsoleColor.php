@@ -671,6 +671,40 @@ class ConsoleColor {
 	}
 
 	/**
+	 * Checks if a string has color, style, or background applied.
+	 *
+	 * @param string $text The string to check.
+	 *
+	 * @return bool
+	 */
+	public static function has_color( string $text ): bool {
+		return Colors::decolorize( $text ) !== $text;
+	}
+
+	/**
+	 * Convenience function to get a title string with color, style, or background applied.
+	 *
+	 * @param string $title The title to output.
+	 *
+	 * @return ConsoleColor
+	 */
+	public static function title( string $title ): ConsoleColor {
+		return ( new self() )->underlined_bright_blue( $title );
+	}
+
+	/**
+	 * Convenience function to display a title with color, style, or background applied to console.
+	 *
+	 * @param string $title The title to output.
+	 *
+	 * @return void
+	 */
+	public static function title_output( string $title ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		echo self::title( $title )->get() . "\n";
+	}
+
+	/**
 	 * Provides a way to output a key/value pair with color, style, or background applied to console.
 	 *
 	 * @param string $key The key to output.
