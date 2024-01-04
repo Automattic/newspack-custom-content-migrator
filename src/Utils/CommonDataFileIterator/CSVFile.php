@@ -111,7 +111,16 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 			$raw_row = $this->get_row( $handle );
 
 			if ( count( $raw_row ) !== $header_count ) {
-				throw new Exception( 'CSV row does not have the same number of columns as the header. Likely an issue with the CSV File.' );
+				throw new Exception(
+					sprintf(
+						"CSV row (No. %d) does not have the same number of columns as the header. Likely an issue with the CSV File.\n%s",
+						absint( $row_count ),
+						wp_kses(
+							implode( ' <> ', $raw_row ),
+							wp_kses_allowed_html( 'post' )
+						)
+					)
+				);
 			}
 
 			$row = array_combine( $header, $raw_row );
