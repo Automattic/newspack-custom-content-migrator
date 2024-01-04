@@ -448,7 +448,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				WP_CLI::warning( sprintf( 'No tree path found for %s', get_permalink( $post_id ) ) );
 				continue;
 			}
-			$processed_text = $this->replace_galleries_in_post_content( $post->post_content, $tree_path, $post_id, true, ! $force_gallery_images );
+			$processed_text = $this->replace_galleries_in_post_content( $post->post_content, $tree_path, $post_id, true, $force_gallery_images );
 			wp_update_post(
 				[
 					'ID'           => $post_id,
@@ -1181,10 +1181,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	}
 
-	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline, bool $only_gallery_images = true ): string {
-		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $only_gallery_images );
+	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline, bool $force_all_images_fetch = false ): string {
+		// The force fetch is a desperate measure to get the images for the inline galleries. Should only be used in
+		// runs where we are trying to fix the inline galleries.
+		$fetch_all_img = $is_inline || $force_all_images_fetch;
+		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $fetch_all_img );
 
-		if ( ! $only_gallery_images ) {
+		if ( $fetch_all_img ) {
 			// If we are not only looking for gallery images, we need to filter out the ones that are already in the post.
 			// This approach is pretty low-tech and a bit desperate, but it works OK.
 			$gallery_images = array_filter(
@@ -1207,14 +1210,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			foreach ( $gallery_matches[0] as $idx => $gallery_anchor ) {
 				$gallery_id = $gallery_matches[1][ $idx ] ?? false;
+				$images_for_this_gallery = $gallery_images;
 				if ( false !== $gallery_id ) {
 					// Grab only the ones with the given gallery id.
-					$gallery_images = array_filter(
+					$images_for_this_gallery = array_filter(
 						$gallery_images,
 						fn( $attachment_id ) => $gallery_id === get_post_meta( $attachment_id, 'plone_gallery_id', true )
 					);
 				}
-				$gallery = $this->get_gallery( $gallery_images );
+				$gallery = $this->get_gallery( $images_for_this_gallery );
 				if ( ! empty( $gallery ) ) {
 					$text = str_replace( $gallery_anchor, $gallery, $text );
 				}
