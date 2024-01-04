@@ -260,12 +260,13 @@ class GutenbergBlockGenerator {
 			$size = 'full';
 		}
 
-		$caption_tag = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
-		$image_alt   = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
-		$image_url   = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$caption_tag   = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
+		$image_alt     = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
+		$image_url     = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$attachment_id = intval( $attachment_post->ID );
 
 		$attrs = [
-			'id'       => $attachment_post->ID,
+			'id'       => $attachment_id,
 			'sizeSlug' => $size,
 		];
 
@@ -287,7 +288,7 @@ class GutenbergBlockGenerator {
 
 		$figure_class = 'wp-block-image size-' . $size . ( $classname ? " $classname" : '' ) . ( $align ? " align$align" : '' );
 
-		$content = '<figure class="' . $figure_class . '">' . $a_opening_tag . '<img src="' . $image_url . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_post->ID . '"/>' . $a_closing_tag . $caption_tag . '</figure>';
+		$content = '<figure class="' . $figure_class . '">' . $a_opening_tag . '<img src="' . $image_url . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_id . '"/>' . $a_closing_tag . $caption_tag . '</figure>';
 
 		return [
 			'blockName'    => 'core/image',
@@ -306,8 +307,8 @@ class GutenbergBlockGenerator {
 	 * @return array
 	 */
 	public function get_video( WP_Post $attachment_post ): array {
-		$video_url   = wp_get_attachment_url( $attachment_post->ID);
-		$content = <<<VIDEO
+		$video_url = wp_get_attachment_url( $attachment_post->ID );
+		$content   = <<<VIDEO
 <figure class="wp-block-video"><video controls src="$video_url"></video></figure>
 VIDEO;
 		return [
@@ -388,24 +389,33 @@ VIDEO;
 	 * @param string $anchor Paragraph anchor.
 	 * @param string $text_color Paragraph text color (black, blue, green, red, yellow, gray, dark-gray, medium-gray, light-gray, white).
 	 * @param string $font_size Paragraph font size (small, normal, medium, large, huge).
+	 * @param array  $additional_css_classes Additional paragraph classes.
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
-	public function get_paragraph( $paragraph_content, $anchor = '', $text_color = '', $font_size = '' ) {
-		$classes = [];
-		$attrs   = [];
+	public function get_paragraph( $paragraph_content, $anchor = '', $text_color = '', $font_size = '', array $additional_css_classes = [] ) {
+
+		// Paragraph can have both <p class=""> classes, and <!-- wp:paragraph {"className":""} --> className attributes (called "Additional CSS classes" in Gutenberg).
+		$paragraph_element_classes = [];
+		$attrs                     = [];
 		if ( ! empty( $text_color ) ) {
-			$classes[]         = 'has-' . $text_color . '-color has-text-color';
-			$attrs['fontSize'] = $text_color;
+			$paragraph_element_classes[] = 'has-' . $text_color . '-color has-text-color';
+			$attrs['fontSize']           = $text_color;
 		}
 		if ( ! empty( $font_size ) ) {
-			$classes[]         = 'has-' . $font_size . '-font-size';
-			$attrs['fontSize'] = $font_size;
+			$paragraph_element_classes[] = 'has-' . $font_size . '-font-size';
+			$attrs['fontSize']           = $font_size;
 		}
 
-		$class = ! empty( $classes ) ? ' class="' . implode( ' ', $classes ) . '"' : '';
+		// Add additional CSS classes to <p> and Block.
+		if ( ! empty( $additional_css_classes ) ) {
+			$paragraph_element_classes = array_merge( $paragraph_element_classes, $additional_css_classes );
+			$attrs['className']        = implode( ' ', $additional_css_classes );
+		}
+
+		$paragraph_element_class_string = ! empty( $paragraph_element_classes ) ? ' class="' . implode( ' ', $paragraph_element_classes ) . '"' : '';
 
 		$anchor_attribute = ! empty( $anchor ) ? ' id="' . $anchor . '"' : '';
-		$content          = '<p' . $anchor_attribute . $class . '>' . $paragraph_content . '</p>';
+		$content          = '<p' . $anchor_attribute . $paragraph_element_class_string . '>' . $paragraph_content . '</p>';
 
 		return [
 			'blockName'    => 'core/paragraph',
@@ -665,6 +675,7 @@ VIDEO;
 	 *
 	 * @param array $inner_blocks   Inner blocks.
 	 * @param array $custom_classes Custom classes to be added to the group block.
+	 * @param array $attrs          Attributes to be added to the group block.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
@@ -970,7 +981,7 @@ VIDEO;
 	/**
 	 * Generate a Newspack Homepage Articles Block with specific posts.
 	 *
-	 * @param array $category_ids array of post IDs.
+	 * @param array $post_ids array of post IDs.
 	 * @param array $args args to pass to the block.
 	 *
 	 * @return array
