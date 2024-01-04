@@ -7,12 +7,17 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use WP_CLI;
 
 /**
  * Taxonomy implements common migration logic that are used to work with the Simple Local Avatars plugin
  */
 class Taxonomy {
+
+	const TERM_ID = 'term_id';
+	const TAX_ID  = 'term_taxonomy_id';
 
 	/**
 	 * Fixes counts for taxonomy.
@@ -290,5 +295,77 @@ class Taxonomy {
 		} while ( $slug_exists );
 
 		return $new_slug;
+	}
+
+	/**
+	 * Retrieves and outputs a table of terms and taxonomies, based on a given array of term_ids or term_taxonomy_ids.
+	 *
+	 * @param int[]  $ids Array of term_ids or term_taxonomy_ids.
+	 * @param string $type Type of IDs, either self::TERM_ID or self::TAX_ID.
+	 * @param string $title Title of the table.
+	 *
+	 * @return array|null
+	 */
+	public function output_term_and_term_taxonomy_table( array $ids, string $type = self::TERM_ID, string $title = 'Terms and Taxonomies Table' ): ?array {
+		if ( empty( $ids ) ) {
+			return null;
+		}
+
+		$ids_placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		$constraint_column = 't.term_id';
+
+		if ( self::TAX_ID === $type ) {
+			$constraint_column = 'tt.term_taxonomy_id';
+		}
+
+		$columns = [
+			't.term_id',
+			't.name',
+			't.slug',
+			'tt.term_taxonomy_id',
+			'tt.taxonomy',
+			'tt.description',
+			'tt.parent',
+			'tt.count',
+		];
+
+		global $wpdb;
+
+		$imploded_columns_escaped = $wpdb->_escape( implode( ', ', $columns ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$rows = $wpdb->get_results(
+		// phpcs:disable
+			$wpdb->prepare(
+				"SELECT 
+					$imploded_columns_escaped 
+				FROM $wpdb->terms t 
+				    LEFT JOIN $wpdb->term_taxonomy tt
+				        ON t.term_id = tt.term_id 
+				WHERE $constraint_column IN ( $ids_placeholders )",
+				...$ids
+			)
+		// phpcs:enable
+		);
+
+		if ( empty( $rows ) ) {
+			ConsoleColor::yellow( "No rows found for $type's: " )
+						->bright_white( implode( ', ', $ids ) )
+						->output();
+
+			return null;
+		}
+
+		$renamed_columns = array_map(
+			function ( $column ) {
+				return str_replace( [ 'tt.', 't.' ], '', $column );
+			},
+			$columns
+		);
+
+		ConsoleTable::output_data( $rows, $renamed_columns, $title );
+
+		return $rows;
 	}
 }

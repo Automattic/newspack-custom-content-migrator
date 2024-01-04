@@ -5036,7 +5036,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$this->posts->get_and_output_postmeta_table( $user->email_post_id, '' );
 			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
 
-			$this->output_terms_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ) );
+			$this->taxonomy->output_term_and_term_taxonomy_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ), Taxonomy::TERM_ID, '' );
 
 			if ( 1 === count( $author_taxonomies ) ) {
 				$this->fix_author_term_data_from_guest_author( intval( $user->email_post_id ), $author_taxonomies[0], get_user_by( 'id', $user->user_id ), false );
@@ -5101,7 +5101,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$copy_term_ids         = $term_ids;
 			$term_ids_placeholders = implode( ',', array_fill( 0, count( $term_ids ), '%d' ) );
 
-			$this->output_terms_table( $copy_term_ids );
+			$this->taxonomy->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
 
 			$connected_guest_author_terms = $wpdb->get_results(
 				$wpdb->prepare(
@@ -5299,35 +5299,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 			}
 
-			$this->output_terms_table( $copy_term_ids );
+			$this->taxonomy->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
 		}
-	}
-
-	private function output_terms_table( array $term_ids ): ?array {
-		global $wpdb;
-
-		$term_ids_placeholders = implode( ',', array_fill( 0, count( $term_ids ), '%d' ) );
-
-		$author_terms = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT 
-					    t.term_id, 
-					    t.name, 
-					    t.slug, 
-					    tt.term_taxonomy_id, 
-					    tt.taxonomy, 
-					    tt.description, 
-					    tt.parent,
-					    tt.count
-					FROM wp_terms t
-					    LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
-					WHERE t.term_id IN ( $term_ids_placeholders )",
-				...$term_ids
-			)
-		);
-
-		WP_CLI\Utils\format_items( 'table', $author_terms, array( 'term_id', 'name', 'slug', 'term_taxonomy_id', 'taxonomy', 'description', 'parent', 'count' ) );
-		return $author_terms;
 	}
 
 	private function output_users_as_table( array $users ) {
@@ -5473,7 +5446,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( ! empty( $existing_slugs ) ) {
 			echo WP_CLI::colorize( "%YExisting slugs found%n\n" );
 			foreach ( $existing_slugs as $record ) {
-				$this->output_terms_table( [ intval( $record->term_id ) ] );
+				$this->taxonomy->output_term_and_term_taxonomy_table( [ intval( $record->term_id ) ], Taxonomy::TERM_ID, '' );
 				$description_id = $this->extract_id_from_description( $record->description );
 				$guest_author_record = $this->get_guest_author_post_from_term_taxonomy_id( $record->term_taxonomy_id );
 
@@ -6442,8 +6415,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		$this->posts->output_table( [ $guest_author_id ], [], 'Guest Author Record' );
 		$post = get_post( $guest_author_id );
-		echo WP_CLI::colorize( "%BAuthor Term%n\n" );
-		$this->output_terms_table( array( $term->term_id ) );
+		$this->taxonomy->output_term_and_term_taxonomy_table( [ $term->term_id ], Taxonomy::TERM_ID, 'Author Term' );
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields(
 			$guest_author_id,
 			array(
@@ -7900,7 +7872,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					$single_taxonomy = count( $term_taxonomy_ids ) === 1;
 
 					foreach ( $taxonomies as $taxonomy_record ) {
-						$terms       = $this->output_terms_table( array( $taxonomy_record->term_id ) );
+						$terms = $this->taxonomy->output_term_and_term_taxonomy_table( [ $taxonomy_record->term_id ], Taxonomy::TERM_ID, '' );
 						$terms_count = count( $terms );
 
 						if ( $terms_count > 1 ) {
