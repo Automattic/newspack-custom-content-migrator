@@ -183,6 +183,22 @@ class ThePublicsRadioMigrator implements InterfaceCommand {
 	public function register_commands() {
 
 		WP_CLI::add_command(
+			'newspack-content-migrator thepublicsradio-dedup-media',
+			[ $this, 'cmd_dedup_media' ],
+			[
+				'shortdesc' => 'De-duplicate media files from initial vs launch: images and audio (based on rules from Partha)',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-file',
+						'description' => 'CSV file relative to Uploads folder. Usage: --csv-file="2023/12/file.csv"',
+						'optional'    => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator thepublicsradio-fix-categories',
 			[ $this, 'cmd_fix_categories' ],
 			[
@@ -460,6 +476,157 @@ class ThePublicsRadioMigrator implements InterfaceCommand {
 			]
 		);
 
+	}
+
+	/**
+	 * Callable for 'newspack-content-migrator thepublicsradio-dedup-media'.
+	 * 
+	 * @param array $pos_args   WP CLI command positional arguments.
+	 * @param array $assoc_args WP CLI command positional arguments.
+	 */
+	public function cmd_dedup_media( $pos_args, $assoc_args ) {
+
+		// set path to file
+		$csv_path = wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'csv-file' ];
+		if( ! is_file( $csv_path ) ) {
+			WP_CLI::error( 'Could not find CSV at path: ' . $csv_path );
+		}
+		
+		// read
+		$handle = fopen( $csv_path, 'r' );
+		if ( $handle == FALSE ) {
+			WP_CLI::error( 'Could not fopen CSV at path: ' . $csv_path );
+		}
+
+		// clear output file
+		$out_handle = fopen( $csv_path . '-DEDUP-' . microtime( true ) . '.csv', 'w');
+		if ( ! $out_handle ) {
+			WP_CLI::error( 'Output file not writable.' );
+		}
+		
+		// Start doing work
+		// WP_CLI::line( "Doing dedup media..." );
+
+		global $wpdb;
+
+		// if( preg_match( '/media-image-attach-combined.csv$/', $csv_path ) ) {
+		// 	$csv_row_count = 5;
+		// 	$csv_uuid_index = 1;
+		// 	$csv_url_index = 2;
+		// }
+		// else if( preg_match( '/media-image-cover-combined.csv$/', $csv_path ) ) {
+		// 	$csv_row_count = 5;
+		// 	$csv_uuid_index = 1;
+		// 	$csv_url_index = 2;
+		// }
+		// else 
+		if( preg_match( '/tpr-media-audio-combined.csv$/', $csv_path ) ) {
+			$csv_row_count = 6;
+			$csv_post_id_index = 0;
+			$csv_uuid_index = 1;
+			$csv_url_index = 3;
+			$post_id_lookups = $this->load_from_csv( $csv_path, $csv_row_count, 'lookup_column_1_multiple' );			
+		}
+
+		$rows_by_post_id = array();
+		$count_non_unique_rows = 0;
+
+		while ( ( $row = fgetcsv( $handle ) ) !== FALSE ) {
+
+			// csv data integrity
+			if( $csv_row_count != count( $row ) ) {
+				WP_CLI::error( 'Error row column count mismatch: ' . print_r( $row, true ) );
+			}
+
+			$post_id = $row[$csv_post_id_index];
+			$uuid = $row[$csv_uuid_index];
+			$url = $row[$csv_url_index];
+
+			// do lookup
+			if( empty( $post_id_lookups[$post_id] ) || ! is_array( $post_id_lookups[$post_id] ) || ! ( count( $post_id_lookups[$post_id] ) >= 1 ) ) {
+				WP_CLI::error( 'Lookup not found: ' . print_r( $row, true ) );
+			}
+			// save uniques to file
+			else if( 1 == count( $post_id_lookups[$post_id] ) ) {		
+				// put line in output
+				fputcsv( $out_handle, $row );
+			}
+			// track duplicates
+			else {
+
+				if( empty( $rows_by_post_id[$post_id] ) ) $rows_by_post_id[$post_id] = array();
+				$rows_by_post_id[$post_id][] = $row;
+
+				$count_non_unique_rows++;
+	
+			}
+
+		}
+
+		WP_CLI::line( 'Rows pulled from file: ' . $count_non_unique_rows );
+		WP_CLI::line( 'Post ids to process: ' . count( $rows_by_post_id ) );
+
+		$keep_count = 0;
+
+		foreach( $rows_by_post_id as $post_id => $rows ) {
+
+			// print_r($rows);
+
+			$uuid = $rows[0][1];
+			$url = 'https://api-prod-ripr.thepublicsradio.org/Media/byArticle/' . $uuid;
+
+			WP_CLI::line( 'Media by url: ' . $url );
+
+			$json = json_decode( file_get_contents( $url ) );
+			if( empty( $json ) || ! is_array( $json ) || ! ( count( $json ) >=1 ) ) {
+				WP_CLI::error( 'Json is empty for url: ' . $url );
+			}
+
+			WP_CLI::line( 'Found json objects: ' . count( $json ) );
+
+			$last_obj = null;
+
+			foreach( $json as $i => $obj ) {
+				
+				// print_r($obj);
+
+				// mediaType = "Audio"
+				if( empty( $obj->mediaType ) ) continue;
+				if( 'Audio' != $obj->mediaType ) continue;
+
+				// relativePath is present
+				if( empty( $obj->relativePath ) ) continue;
+
+				// deletedAt is not present / null
+				if( ! empty( $obj->deletedAt ) ) {
+					WP_CLI::warning( 'Deleted has value for url: ' . $url );
+					continue;
+				}
+
+				$last_obj = $obj;
+
+			}
+
+			if( empty( $last_obj->uuid ) ) {
+				WP_CLI::error( 'Null last obj for url: ' . $url );
+			}
+
+			WP_CLI::line( 'Last object uuid: ' . $last_obj->uuid );
+
+			// find it in the rows
+			foreach( $rows as $i => $post_row ) {
+				if( $last_obj->uuid == $post_row[2] ) {
+					// keep this row only
+					fputcsv( $out_handle, $post_row );
+					$keep_count++;
+					continue;
+				}
+			}
+
+		}		
+
+		WP_CLI::line( 'Kept count: '. $keep_count );
+					
 	}
 
 	/**
@@ -3562,6 +3729,10 @@ class ThePublicsRadioMigrator implements InterfaceCommand {
 			// put data into a lookup based on first column
 			if( 'lookup_column_1' == $format ) {
 				$output[$row[0]] = array_slice( $row, 1 ); 
+			}
+			else if( 'lookup_column_1_multiple' == $format ) {
+				if( empty( $output[$row[0]] ) ) $output[$row[0]] = array();
+				$output[$row[0]][] = array_slice( $row, 1 ); 
 			}
 			else if( 'lookup_column_4' == $format ) {
 				$output[$row[3]] = array_slice( $row, 0, 3 ); 
