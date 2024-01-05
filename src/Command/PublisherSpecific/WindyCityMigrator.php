@@ -165,9 +165,13 @@ class WindyCityMigrator implements InterfaceCommand {
 				'post_status'    => 'publish',
 				'post_type'      => 'post',
 				'post_author'    => $author_id,
-				'post_date'      => $entry['DATE'],
 				'comment_status' => 'yes' === $entry['ACOMMENTS'] ? 'open' : 'closed',
 			];
+
+			// Dates are in Central Time and should be converted to UTC.
+			$gmt_date = new \DateTime( $entry['DATE'], new \DateTimeZone( 'America/Chicago' ) );
+			$gmt_date->setTimezone( new \DateTimeZone( 'UTC' ) );
+			$post_data['post_date_gmt'] = $gmt_date->format( 'Y-m-d H:i:s' );
 
 			if ( ! empty( $entry['CANONICALURL'] ) ) {
 				// Canonical URL is in the format: https://www.windycitymediagroup.com/lgbt/{post-slug}/69796.html
