@@ -19,6 +19,7 @@ use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
@@ -28,6 +29,7 @@ use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
+use NewspackCustomContentMigrator\Logic\User;
 use WP_CLI;
 use WP_Http;
 use WP_Term;
@@ -650,6 +652,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private $images;
 
 	/**
+	 * User logic.
+	 *
+	 * @var User $user User logic.
+	 */
+	private $user;
+
+	/**
 	 * Singleton constructor.
 	 */
 	private function __construct() {
@@ -664,6 +673,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->taxonomy             = new Taxonomy();
 		$this->images               = new Images();
 		$this->json_iterator        = new JsonIterator();
+		$this->user = new User();
 	}
 
 	/**
@@ -5031,7 +5041,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		foreach ( $users_in_question as $user ) {
-			$this->output_users_as_table( [ $user->user_id ] );
+			$this->user->output_users_table( [ $user->user_id ], '' );
 			$this->posts->output_table( [ $user->email_post_id ], [], '' );
 			$this->posts->get_and_output_postmeta_table( $user->email_post_id, '' );
 			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
@@ -5301,46 +5311,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$this->taxonomy->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
 		}
-	}
-
-	private function output_users_as_table( array $users ) {
-		$users = array_map(
-			function ( $user ) {
-				if ( $user instanceof WP_User ) {
-					return $user->to_array();
-				}
-
-				if ( is_numeric( $user ) ) {
-					$user = get_user_by( 'id', $user );
-
-					if ( $user ) {
-						return $user->to_array();
-					}
-				}
-
-				return null;
-			},
-			$users
-		);
-		$users = array_filter( $users );
-
-		if ( empty( $users ) ) {
-			echo WP_CLI::colorize( "%YNo users found%n\n" );
-			return null;
-		}
-
-		echo WP_CLI::colorize( "%BUser's Table%n\n" );
-		WP_CLI\Utils\format_items(
-			'table',
-			$users,
-			array(
-				'ID',
-				'user_login',
-				'user_nicename',
-				'user_email',
-				'display_name',
-			)
-		);
 	}
 
 	private function get_guest_author_post_by_id( int $post_id ): ?object {
@@ -7035,7 +7005,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$user = $this->choose_between_users( $user_by_login, $user_by_email, 'Linked Account' );
 
 			if ( $user instanceof WP_User ) {
-				$this->output_users_as_table( [ $user ] );
+				$this->user->output_users_table( [ $user ], '' );
 			}
 
 			$author_terms = $this->get_author_term_from_guest_author_id( $guest_author_id );
@@ -7698,21 +7668,41 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$this->console_table->output_comparison( [], $filtered_post_meta );
 
 				$user_by_login = get_user_by( 'login', $loose_author_term->name );
-				echo WP_CLI::colorize( "%BUser by login%n %w(%n%W$loose_author_term->name%n%w)%n\n" );
-				$this->output_users_as_table( array( $user_by_login ) );
+				$this->user->output_users_table(
+					[
+						$user_by_login,
+					],
+					ConsoleColor::title( 'User by login' )
+								->white( '(' )
+								->bright_white( $loose_author_term->name )
+								->white( ')' )
+								->get()
+				);
 
 				$user_by_email = null;
 				if ( is_email( $loose_author_term->name ) ) {
 					$user_by_email = get_user_by( 'email', $loose_author_term->name );
-					echo WP_CLI::colorize( "%BUser by email%n %w(%n%W$loose_author_term->name%n%w)%n\n" );
-					$this->output_users_as_table( array( $user_by_email ) );
+					$this->user->output_users_table(
+						[ $user_by_email ],
+						ConsoleColor::title( 'User by email' )
+									->white( '(' )
+									->bright_white( $loose_author_term->name )
+									->white( ')' )
+									->get()
+					);
 				}
 
 				$user_by_cap_linked_account = null;
 				if ( array_key_exists( 'cap-linked_account', $filtered_post_meta ) && ! empty( $filtered_post_meta['cap-linked_account'] ) ) {
 					$user_by_cap_linked_account = get_user_by( 'login', $filtered_post_meta['cap-linked_account'] );
-					echo WP_CLI::colorize( "%BUser by cap-linked_account%n %w(%n%W{$filtered_post_meta['cap-linked_account']}%n%w)%n\n" );
-					$this->output_users_as_table( array( $user_by_cap_linked_account ) );
+					$this->user->output_users_table(
+						[ $user_by_cap_linked_account ],
+						ConsoleColor::title( 'User by cap-linked_account' )
+									->white( '(' )
+									->bright_white( $filtered_post_meta['cap-linked_account'] )
+									->white( ')' )
+									->get()
+					);
 				}
 
 				$term_taxonomy_ids = $wpdb->get_col(
@@ -7841,13 +7831,25 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							var_dump( $terms );
 						} elseif ( 1 === $terms_count ) {
 							$user_by_login = get_user_by( 'login', $terms[0]->name );
-							echo WP_CLI::colorize( "%BUser by login%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
-							$this->output_users_as_table( array( $user_by_login ) );
+							$this->user->output_users_table(
+								[ $user_by_login ],
+								ConsoleColor::title( 'User by login' )
+											->white( '(' )
+											->bright_white( $terms[0]->name )
+											->white( ')' )
+											->get()
+							);
 
 							if ( is_email( $terms[0]->name ) ) {
 								$user_by_email_taxonomy = get_user_by( 'email', $terms[0]->name );
-								echo WP_CLI::colorize( "%BUser by email%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
-								$this->output_users_as_table( array( $user_by_email_taxonomy ) );
+								$this->user->output_users_table(
+									[ $user_by_email_taxonomy ],
+									ConsoleColor::title( 'User by email' )
+												->white( '(' )
+												->bright_white( $terms[0]->name )
+												->white( ')' )
+												->get()
+								);
 								$user_by_email = $this->choose_between_users( $user_by_email, $user_by_email_taxonomy, 'Email', 'Taxonomy-Email' );
 							}
 
@@ -7908,10 +7910,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$post_ids = array();
 			if ( $user_by_email ) {
-				echo WP_CLI::colorize( "%BUSER BY EMAIL%n\n" );
 				$user_ids[]    = $user_by_email->ID;
 				$user_emails[] = $user_by_email->user_email;
-				$this->output_users_as_table( array( $user_by_email ) );
+				$this->user->output_users_table(
+					[ $user_by_email ],
+					'USER BY EMAIL'
+				);
 				$postmeta_records = $this->posts->get_and_output_matching_postmeta_datapoints_tables(
 					array(
 						'cap-linked_account' => $user_by_email->user_login,
@@ -7924,10 +7928,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 
 			if ( $user_by_login ) {
-				echo WP_CLI::colorize( '%BUSER BY LOGIN%n' );
 				$user_ids[]    = $user_by_login->ID;
 				$user_emails[] = $user_by_login->user_email;
-				$this->output_users_as_table( array( $user_by_login ) );
+				$this->user->output_users_table(
+					[ $user_by_login ],
+					'USER BY LOGIN'
+				);
 				$postmeta_records = $this->posts->get_and_output_matching_postmeta_datapoints_tables(
 					array(
 						'cap-linked_account' => $user_by_login->user_login,
@@ -8024,14 +8030,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					$this->high_contrast_output( 'Description ID', $description_id );
 					$this->high_contrast_output( 'Description Email', $description_email );
 					if ( ! in_array( $description_id, $user_ids ) ) {
-						$this->output_users_as_table( array( $description_id ) );
+						$this->user->output_users_table( [ $description_id ] );
 					}
 
 					if ( ! in_array( $description_email, $user_emails ) ) {
 						$description_user_by_email = get_user_by( 'email', $description_email );
 
 						if ( $description_user_by_email ) {
-							$this->output_users_as_table( array( $description_user_by_email ) );
+							$this->user->output_users_table( [ $description_user_by_email ] );
 						}
 					}
 
