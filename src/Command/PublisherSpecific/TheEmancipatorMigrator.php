@@ -91,15 +91,18 @@ EOT
 			]
 		);
 
-		$synopsis = '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>]';
+		$generic_args = [
+			'synopsis'      => '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>] [--min-post-id=<post-id>]',
+			'before_invoke' => [ $this, 'check_requirements' ],
+		];
+
 
 		WP_CLI::add_command(
 			'newspack-content-migrator emancipator-taxonomy',
 			[ $this, 'cmd_taxonomy' ],
 			[
-				'shortdesc'     => 'Remove unneeded categories.',
-				'synopsis'      => $synopsis,
-				'before_invoke' => [ $this, 'check_requirements' ],
+				'shortdesc' => 'Remove unneeded categories.',
+				...$generic_args,
 			]
 		);
 
@@ -107,9 +110,8 @@ EOT
 			'newspack-content-migrator emancipator-authors',
 			[ $this, 'cmd_post_authors' ],
 			[
-				'shortdesc'     => 'Migrates post authors/owners from the API content.',
-				'synopsis'      => $synopsis,
-				'before_invoke' => [ $this, 'check_requirements' ],
+				'shortdesc' => 'Migrates post authors/owners from the API content.',
+				...$generic_args,
 			]
 		);
 
@@ -117,9 +119,8 @@ EOT
 			'newspack-content-migrator emancipator-bylines',
 			[ $this, 'cmd_post_bylines' ],
 			[
-				'shortdesc'     => 'Migrates bylines from the API content as Co-Authors.',
-				'synopsis'      => $synopsis,
-				'before_invoke' => [ $this, 'check_requirements' ],
+				'shortdesc' => 'Migrates bylines from the API content as Co-Authors.',
+				...$generic_args,
 			]
 		);
 
@@ -127,9 +128,8 @@ EOT
 			'newspack-content-migrator emancipator-post-subtitles',
 			[ $this, 'cmd_post_subtitles' ],
 			[
-				'shortdesc'     => 'Add post subtitles',
-				'synopsis'      => $synopsis,
-				'before_invoke' => [ $this, 'check_requirements' ],
+				'shortdesc' => 'Add post subtitles',
+				...$generic_args,
 			]
 		);
 
@@ -137,9 +137,8 @@ EOT
 			'newspack-content-migrator emancipator-redirects',
 			[ $this, 'cmd_redirects' ],
 			[
-				'shortdesc'     => 'Create redirects for articles that are just redirects.',
-				'synopsis'      => $synopsis,
-				'before_invoke' => [ $this, 'check_requirements' ],
+				'shortdesc' => 'Create redirects for articles that are just redirects.',
+				...$generic_args,
 			]
 		);
 
@@ -147,11 +146,11 @@ EOT
 			'newspack-content-migrator emancipator-process-images',
 			[ $this, 'cmd_process_images' ],
 			[
-				'shortdesc'     => 'Add captions and credits and download missing images.',
-				'synopsis'      => $synopsis,
-				'before_invoke' => [ $this, 'check_requirements' ],
+				'shortdesc' => 'Add captions and credits and download missing images.',
+				...$generic_args,
 			]
 		);
+
 
 	}
 
@@ -161,6 +160,11 @@ EOT
 	 * @throws ExitException
 	 */
 	public function check_requirements(): void {
+		static $checked = false;
+		if ( $checked ) {
+			// It looks like this gets called at least more than once pr. run, so bail if we already checked.
+			return;
+		}
 		if ( ! class_exists( 'CWS_PageLinksTo' ) ) {
 			WP_CLI::error( '"Page Links To" plugin not found. Install and activate it before using the migration commands.' );
 		}
@@ -171,6 +175,7 @@ EOT
 		if ( get_option( 'timezone_string', false ) !== self::SITE_TIMEZONE ) {
 			WP_CLI::error( sprintf( "Site timezone should be '%s'. Make sure it's set correctly before running the migration commands", self::SITE_TIMEZONE ) );
 		}
+		$checked = true;
 	}
 
 	public function cmd_process_images( array $args, array $assoc_args ): void {
@@ -221,44 +226,23 @@ EOT
 				$url        = $matches[1];
 				$basename   = pathinfo( $url, PATHINFO_BASENAME );
 				$image_info = $content_img[ $basename ] ?? [];
-				$caption    = $image_info['caption'] ?? false;
+				$caption    = $image_info['caption'] ?? '';
 				WP_CLI::log( "\t processing image " . $url );
+				$attachment_id = $this->attachments_logic->import_attachment_for_post( $post->ID, $url, $caption, [ 'post_excerpt' => $caption ] );
 
-				if ( ! strpos( $url, 'wp-content/uploads' ) ) {
-					$maybe_already_attached = array_filter(
-						get_attached_media( 'image', $post->ID ),
-						fn( $v ) => str_ends_with( $v->guid, basename( $url ) )
+				if ( ! is_wp_error( $attachment_id ) ) {
+					if ( ! empty( $image_info ) ) {
+						// Update the byline on the newly imported image.
+						$this->update_image_byline( $attachment_id, $image_info, $dry_run );
+					}
+
+					$blocks[ $idx ] = $this->gutenberg_block_gen->get_image(
+						get_post( $attachment_id ),
+						'full',
+						false,
+						'np-emancipator-image'
 					);
-
-					if ( ! empty( $maybe_already_attached[0]->ID ) ) {
-						WP_CLI::log( "\t\t we already had this image, so skipping download " . $url );
-						// This image is already attached to this post.
-						$attachment_id = $maybe_already_attached[0]->ID;
-					} else {
-						WP_CLI::log( "\t\t downloading image " . $url );
-						$attachment_id = $this->attachments_logic->import_external_file(
-							$url,
-							false,
-							$caption,
-							false,
-							false,
-							$post->ID
-						);
-					}
-
-					if ( ! is_wp_error( $attachment_id ) ) {
-						if ( ! empty( $image_info ) ) {
-							// Update the byline on the newly imported image.
-							$this->update_image_byline( $attachment_id, $image_info, $dry_run );
-						}
-
-						$blocks[ $idx ]     = $this->gutenberg_block_gen->get_image(
-							get_post( $attachment_id ),
-							'full',
-							false
-						);
-						$replace_in_content = true;
-					}
+					$replace_in_content = true;
 				}
 			}
 
