@@ -5343,44 +5343,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function output_term_taxonomy_table( array $term_taxonomy_ids ) {
-		global $wpdb;
-
-		if ( empty( $term_taxonomy_ids ) ) {
-			echo WP_CLI::colorize( "%YNo term_taxonomy_ids provided%n\n" );
-			return null;
-		}
-
-		$term_taxonomy_ids_placeholder = implode( ',', array_fill( 0, count( $term_taxonomy_ids ), '%d' ) );
-		$taxonomies                    = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT * FROM $wpdb->term_taxonomy WHERE term_taxonomy_id IN ( $term_taxonomy_ids_placeholder )",
-				...$term_taxonomy_ids
-			)
-		);
-
-		if ( empty( $taxonomies ) ) {
-			echo WP_CLI::colorize( '%YNo term_taxonomy found for term_taxonomy_ids: ' . implode( ', ', $term_taxonomy_ids ) . "%n\n" );
-			return null;
-		}
-
-		echo WP_CLI::colorize( "%BTerm Taxonomy's Table%n\n" );
-		WP_CLI\Utils\format_items(
-			'table',
-			$taxonomies,
-			array(
-				'term_taxonomy_id',
-				'term_id',
-				'taxonomy',
-				'description',
-				'parent',
-				'count',
-			)
-		);
-
-		return $taxonomies;
-	}
-
 	private function get_guest_author_post_by_id( int $post_id ): ?object {
 		global $wpdb;
 
@@ -7815,7 +7777,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						$this->confirm_ok_to_proceed( $loose_author_term->term_id );
 						continue;
 					} else {
-						$this->output_term_taxonomy_table( $term_taxonomy_ids );
+						$this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids, '' );
 
 						if ( $user instanceof WP_User ) {
 							$command = "wp newspack-content-migrator la-silla-vacia-fix-user-guest-author-term-data --guest-author-id=$guest_author->ID --term-id=$loose_author_term->term_id --user-id=$user->ID";
@@ -7850,7 +7812,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						}
 					}
 				} else {
-					$taxonomies = $this->output_term_taxonomy_table( $term_taxonomy_ids );
+					$taxonomies = $this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids, '' );
 
 					if ( empty( $taxonomies ) ) {
 						// Somehow the term_taxonomy_id - guest author relationship is invalid. So no harm in automating this part
@@ -8045,12 +8007,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						continue;
 					}
 				} else {
-					$this->output_term_taxonomy_table( $term_taxonomy_ids_from_post_id_relationships );
+					$this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids_from_post_id_relationships, '' );
 				}
 			}
 
 			// Since term_id and term_taxonomy_id usually match, check to see if there's anything.
-			$taxonomies = $this->output_term_taxonomy_table( array( $loose_author_term->term_id ) );
+			$taxonomies = $this->taxonomy->output_term_taxonomy_table( [ $loose_author_term->term_id ], '' );
 
 			if ( ! empty( $taxonomies ) ) {
 				foreach ( $taxonomies as $taxonomy_record ) {
@@ -8079,7 +8041,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$term_taxonomy_ids = $this->search_for_taxonomies_with_descriptions_like( $loose_author_term->name );
 
-			$this->output_term_taxonomy_table( $term_taxonomy_ids );
+			$this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids, '' );
 
 			if ( 1 === count( $post_ids ) ) {
 				$standalone_command = 'newspack-content-migrator la-silla-vacia-fix-standalone-guest-author-term-data';

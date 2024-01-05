@@ -368,4 +368,55 @@ class Taxonomy {
 
 		return $rows;
 	}
+
+	/**
+	 * Retrieves and outputs a table of taxonomies, from a given set of term_taxonomy_id's.
+	 *
+	 * @param int[]  $term_taxonomy_ids Array of term_taxonomy_id's.
+	 * @param string $title Title of the table.
+	 *
+	 * @return array|null
+	 */
+	public function output_term_taxonomy_table( array $term_taxonomy_ids, string $title = 'Term Taxonomy Table' ): ?array {
+		if ( empty( $term_taxonomy_ids ) ) {
+			return null;
+		}
+
+		$term_taxonomy_ids_placeholder = implode( ',', array_fill( 0, count( $term_taxonomy_ids ), '%d' ) );
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$taxonomies = $wpdb->get_results(
+		// phpcs:disable
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->term_taxonomy WHERE term_taxonomy_id IN ( $term_taxonomy_ids_placeholder )",
+				...$term_taxonomy_ids
+			)
+		// php:enable
+		);
+
+		if ( empty( $taxonomies ) ) {
+			ConsoleColor::yellow( 'No taxonomies found for term_taxonomy_ids: ' )
+						->bright_white( implode( ', ', $term_taxonomy_ids ) )
+						->output();
+
+			return null;
+		}
+
+		ConsoleTable::output_data(
+			$taxonomies,
+			[
+				'term_taxonomy_id',
+				'term_id',
+				'taxonomy',
+				'description',
+				'parent',
+				'count',
+			],
+			$title
+		);
+
+		return $taxonomies;
+	}
 }
