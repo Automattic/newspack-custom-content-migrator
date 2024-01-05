@@ -4795,8 +4795,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	}
 
 	private function fix_user_login_and_nicename( WP_User $user ) {
-		$this->high_contrast_output( 'wp_user.user_login', $user->user_login );
-		$this->high_contrast_output( 'wp_user.user_nicename', $user->user_nicename );
+		ConsoleColor::high_contrast_kv_output( 'wp_user.user_login', $user->user_login );
+		ConsoleColor::high_contrast_kv_output( 'wp_user.user_nicename', $user->user_nicename );
 
 		$new_user_login = $user->user_login;
 		if ( is_email( $new_user_login ) ) {
@@ -4808,12 +4808,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$updated_attributes = array();
 
 		if ( $new_user_login !== $user->user_login ) {
-			$this->high_contrast_output( 'NEW wp_user.user_login', $new_user_login );
+			ConsoleColor::high_contrast_kv_output( 'NEW wp_user.user_login', $new_user_login );
 			$updated_attributes['user_login'] = $new_user_login;
 		}
 
 		if ( $new_user_nicename !== $user->user_nicename ) {
-			$this->high_contrast_output( 'NEW wp_user.user_nicename', $new_user_nicename );
+			ConsoleColor::high_contrast_kv_output( 'NEW wp_user.user_nicename', $new_user_nicename );
 			$updated_attributes['user_nicename'] = $new_user_nicename;
 		}
 
@@ -4841,7 +4841,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				if ( ! empty( $cap_linked_accounts ) ) {
 					foreach ( $cap_linked_accounts as $cap_linked_account ) {
 						echo WP_CLI::colorize( "%wUpdating cap-linked_account%n\n" );
-						$this->high_contrast_output( 'Guest Author ID | meta_id | meta_value', $cap_linked_account->post_id . ' | ' . $cap_linked_account->meta_id . ' | ' . $cap_linked_account->meta_value );
+						ConsoleColor::high_contrast_kv_output( 'Guest Author ID | meta_id | meta_value', $cap_linked_account->post_id . ' | ' . $cap_linked_account->meta_id . ' | ' . $cap_linked_account->meta_value );
 						if ( $new_user_login !== $cap_linked_account->meta_value ) {
 							$linked_account_updated = $wpdb->update(
 								$wpdb->postmeta,
@@ -5168,9 +5168,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			foreach ( $loose_guest_author_terms as $loose_guest_author_term ) {
 				echo "\n";
-				$this->high_contrast_output( 'Term ID', $loose_guest_author_term->term_id );
-				$this->high_contrast_output( 'Term Name', $loose_guest_author_term->name );
-				$this->high_contrast_output( 'Term Description', $loose_guest_author_term->description );
+				ConsoleColor::high_contrast_kv_output( 'Term ID', $loose_guest_author_term->term_id );
+				ConsoleColor::high_contrast_kv_output( 'Term Name', $loose_guest_author_term->name );
+				ConsoleColor::high_contrast_kv_output( 'Term Description', $loose_guest_author_term->description );
 
 				$id = $this->extract_id_from_description( $loose_guest_author_term->description );
 
@@ -5322,10 +5322,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$post_id
 			)
 		);
-	}
-
-	private function high_contrast_output( string $identifier, string $value ) {
-		echo WP_CLI::colorize( "%w$identifier%n: %W$value%n\n" );
 	}
 
 	private function get_guest_author_user_login( WP_User $user ) {
@@ -5629,7 +5625,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 	private function get_guest_author_post_from_term_taxonomy_id( int $term_taxonomy_id ) {
 		echo WP_CLI::colorize( "%BGetting Guest Author Record%n\n" );
-		$this->high_contrast_output( 'Term Taxonomy ID', $term_taxonomy_id );
+		ConsoleColor::high_contrast_kv_output( 'Term Taxonomy ID', $term_taxonomy_id );
 		global $wpdb;
 
 		$guest_author_post = $wpdb->get_row(
@@ -5642,7 +5638,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		if ( $guest_author_post ) {
-			$this->high_contrast_output( 'Guest Author Post ID', $guest_author_post->ID );
+			ConsoleColor::high_contrast_kv_output( 'Guest Author Post ID', $guest_author_post->ID );
 		}
 
 		return $guest_author_post;
@@ -5658,7 +5654,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		if ( ! is_null( $id ) ) {
-			$this->high_contrast_output( 'ID', $id );
+			ConsoleColor::high_contrast_kv_output( 'ID', $id );
 			$response = 'c';
 
 			// $response = $this->ask_prompt( "Is the ID actually (c)orrect? Or would you like to (u)pdate it? Should I (h)alt execution?" );
@@ -5693,7 +5689,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
-		$this->high_contrast_output( 'Email', $email );
+		ConsoleColor::high_contrast_kv_output( 'Email', $email );
 
 		return $email;
 	}
@@ -5928,8 +5924,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$user->display_name = $post_meta_display_name;
 		} elseif ( $user_display_name !== $post_meta_display_name ) {
 			if ( $confirm ) {
-				$this->high_contrast_output( 'User Display Name', $user_display_name );
-				$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
+				ConsoleColor::high_contrast_kv_output( 'User Display Name', $user_display_name );
+				ConsoleColor::high_contrast_kv_output( 'Guest Author Display Name', $post_meta_display_name );
 				$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (gu) guest author and update user display name, or (h)alt execution' );
 
 				if ( 'u' === $prompt ) {
@@ -6255,7 +6251,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
-		$this->high_contrast_output( 'user_login', $user->user_login );
+		ConsoleColor::high_contrast_kv_output( 'user_login', $user->user_login );
 		$this->update_relevant_user_fields_if_necessary( $user );
 
 		$comparison = $this->console_table->output_value_comparison(
@@ -6588,10 +6584,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		foreach ( $unlinked_author_terms as $author_term ) {
 			echo "\n\n\n";
-			$this->high_contrast_output( 'wp-term.term_id', $author_term->term_id );
-			$this->high_contrast_output( 'wp_term.name', $author_term->name );
-			$this->high_contrast_output( 'wp_term.slug', $author_term->slug );
-			$this->high_contrast_output( 'wp_term.description', $author_term->description );
+			ConsoleColor::high_contrast_kv_output( 'wp-term.term_id', $author_term->term_id );
+			ConsoleColor::high_contrast_kv_output( 'wp_term.name', $author_term->name );
+			ConsoleColor::high_contrast_kv_output( 'wp_term.slug', $author_term->slug );
+			ConsoleColor::high_contrast_kv_output( 'wp_term.description', $author_term->description );
 			// Confirm that the term does not belong to a Guest Author.
 			// If it does, ensure that the guest author and wp_term fields are correct.
 			// Insert relationship into wp_term_relationships.
@@ -6600,8 +6596,8 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$description_id    = $this->extract_id_from_description( $author_term->description );
 			$description_email = $this->extract_email_from_term_description( $author_term->description );
-			// $this->high_contrast_output( 'Description ID', $description_id );
-			// $this->high_contrast_output( 'Description Email', $description_email );
+			// ConsoleColor::high_contrast_kv_output( 'Description ID', $description_id );
+			// ConsoleColor::high_contrast_kv_output( 'Description Email', $description_email );
 
 			$guest_author_post = $this->get_guest_author_post_by_id( $description_id );
 
@@ -6677,9 +6673,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					} elseif ( $count_of_cap_linked_accounts === 1 ) {
 						// This means that this guest author is tied to a WP_User, but the wp_term_relationships table doesn't have the record for this guest author record
 						echo WP_CLI::colorize( "%wConfirmed one Guest Author with cap-linked_account = {$user->user_login}.%n\n" );
-						$this->high_contrast_output( 'wp_posts.ID', $cap_linked_accounts[0]->ID );
-						$this->high_contrast_output( 'wp_posts.post_name', $cap_linked_accounts[0]->post_name );
-						$this->high_contrast_output( 'wp_posts.post_type', $cap_linked_accounts[0]->post_type );
+						ConsoleColor::high_contrast_kv_output( 'wp_posts.ID', $cap_linked_accounts[0]->ID );
+						ConsoleColor::high_contrast_kv_output( 'wp_posts.post_name', $cap_linked_accounts[0]->post_name );
+						ConsoleColor::high_contrast_kv_output( 'wp_posts.post_type', $cap_linked_accounts[0]->post_type );
 
 						// Needs to go through process where WP_User and Guest Author data is handled
 						$this->fix_author_term_data_from_guest_author( $cap_linked_accounts[0]->ID, $author_term, $user );
@@ -6714,7 +6710,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 				if ( $cap_linked_account ) {
 					echo WP_CLI::colorize( "%wGuest Author is linked to a WP_User.%n\n" );
-					$this->high_contrast_output( 'cap-linked_account', $cap_linked_account['cap-linked_account'] );
+					ConsoleColor::high_contrast_kv_output( 'cap-linked_account', $cap_linked_account['cap-linked_account'] );
 					// Check that the necessary fields are correct along with WP_User fields
 					$this->fix_author_term_data_from_guest_author(
 						$guest_author_post->ID,
@@ -7470,10 +7466,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( ! empty( $guest_author_posts ) ) {
 			echo WP_CLI::colorize( "%RInsertion of new Guest Author Relationship failed because one already exists for term_taxonomy_id:%n %R%U$term_taxonomy_id%n\n" );
 			foreach ( $guest_author_posts as $guest_author_post ) {
-				$this->high_contrast_output( 'Post ID', $guest_author_post->post_id );
-				$this->high_contrast_output( 'Post name', $guest_author_post->post_name );
-				$this->high_contrast_output( 'Post Title', $guest_author_post->post_title );
-				$this->high_contrast_output( 'Post Type', $guest_author_post->post_type );
+				ConsoleColor::high_contrast_kv_output( 'Post ID', $guest_author_post->post_id );
+				ConsoleColor::high_contrast_kv_output( 'Post name', $guest_author_post->post_name );
+				ConsoleColor::high_contrast_kv_output( 'Post Title', $guest_author_post->post_title );
+				ConsoleColor::high_contrast_kv_output( 'Post Type', $guest_author_post->post_type );
 			}
 
 			return null;
@@ -7622,9 +7618,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		foreach ( $loose_author_terms as $index => $loose_author_term ) {
 			$curr = $total_records - $index;
 			echo "\n\n***** $curr ****\n\n";
-			// $this->high_contrast_output( 'wp_terms.term_id', $loose_author_term->term_id );
-			// $this->high_contrast_output( 'wp_terms.name', $loose_author_term->name );
-			// $this->high_contrast_output( 'wp_terms.slug', $loose_author_term->slug );
+			// ConsoleColor::high_contrast_kv_output( 'wp_terms.term_id', $loose_author_term->term_id );
+			// ConsoleColor::high_contrast_kv_output( 'wp_terms.name', $loose_author_term->name );
+			// ConsoleColor::high_contrast_kv_output( 'wp_terms.slug', $loose_author_term->slug );
 			WP_CLI\Utils\format_items(
 				'table',
 				array( $loose_author_term ),
@@ -8022,13 +8018,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			if ( ! empty( $taxonomies ) ) {
 				foreach ( $taxonomies as $taxonomy_record ) {
-					$this->high_contrast_output( 'wp_term_taxonomy.term_taxonomy_id', $taxonomy_record->term_taxonomy_id );
-					$this->high_contrast_output( 'wp_term_taxonomy.term_id', $taxonomy_record->term_id );
-					$this->high_contrast_output( 'wp_term_taxonomy.description', $taxonomy_record->description );
+					ConsoleColor::high_contrast_kv_output( 'wp_term_taxonomy.term_taxonomy_id', $taxonomy_record->term_taxonomy_id );
+					ConsoleColor::high_contrast_kv_output( 'wp_term_taxonomy.term_id', $taxonomy_record->term_id );
+					ConsoleColor::high_contrast_kv_output( 'wp_term_taxonomy.description', $taxonomy_record->description );
 					$description_id    = $this->extract_id_from_description( $taxonomy_record->description );
 					$description_email = $this->extract_email_from_term_description( $taxonomy_record->description );
-					$this->high_contrast_output( 'Description ID', $description_id );
-					$this->high_contrast_output( 'Description Email', $description_email );
+					ConsoleColor::high_contrast_kv_output( 'Description ID', $description_id );
+					ConsoleColor::high_contrast_kv_output( 'Description Email', $description_email );
 					if ( ! in_array( $description_id, $user_ids ) ) {
 						$this->user->output_users_table( [ $description_id ] );
 					}
@@ -8970,7 +8966,7 @@ BLOCK;
 			echo WP_CLI::colorize( "%BHANDLING IMAGES%n\n" );
 			$image_urls = $this->attachments->get_images_sources_from_content( $post->post_content );
 			foreach ( $image_urls as $image_url ) {
-				$this->high_contrast_output( 'Original URL', $image_url );
+				ConsoleColor::high_contrast_kv_output( 'Original URL', $image_url );
 
 				if ( str_contains( $image_url, 'lasillavacia.com' ) && str_contains( $image_url, 'wp-content/uploads/' ) && ! str_contains( $image_url, 'lasilla.com' ) ) {
 					echo WP_CLI::colorize( "%mSkipping%n\n" );
@@ -8981,7 +8977,7 @@ BLOCK;
 					$new_image_url = str_replace( 'https://i0.wp.com/', 'https://', $image_url );
 					$parsed_url    = WP_CLI\Utils\parse_url( $new_image_url );
 					$new_image_url = $parsed_url['scheme'] . '://' . $parsed_url['host'] . $parsed_url['path'];
-					$this->high_contrast_output( 'Replaced URL', $new_image_url );
+					ConsoleColor::high_contrast_kv_output( 'Replaced URL', $new_image_url );
 
 					if ( ! str_contains( $new_image_url, 'lasilla.com' ) ) {
 						echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
@@ -9002,14 +8998,14 @@ BLOCK;
 					$filename = substr( $filename, 0, $question_mark_index );
 				}
 
-				$this->high_contrast_output( 'Exploded Filename', $filename );
-				// $this->high_contrast_output( 'Basename filename', WP_CLI\Utils\basename( $image_url ) );
+				ConsoleColor::high_contrast_kv_output( 'Exploded Filename', $filename );
+				// ConsoleColor::high_contrast_kv_output( 'Basename filename', WP_CLI\Utils\basename( $image_url ) );
 				$full_filename_path = $full_path( $filename );
 				$file_exists        = file_exists( $full_filename_path );
-				$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+				ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
 				$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
-				$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+				ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 				if ( $possible_attachment_id ) {
 					$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
@@ -9027,12 +9023,12 @@ BLOCK;
 			preg_match_all( '/<video[^>]+(?:src)="([^">]+)"/', $post->post_content, $video_sources_match );
 			if ( array_key_exists( 1, $video_sources_match ) && ! empty( $video_sources_match[1] ) ) {
 				foreach ( $video_sources_match[1] as $match ) {
-					$this->high_contrast_output( 'Video URL', $match );
+					ConsoleColor::high_contrast_kv_output( 'Video URL', $match );
 					$filename = WP_CLI\Utils\basename( $match );
-					$this->high_contrast_output( 'Basename filename', $filename );
+					ConsoleColor::high_contrast_kv_output( 'Basename filename', $filename );
 					$full_filename_path = $full_path( $filename );
 					$file_exists        = file_exists( $full_filename_path );
-					$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+					ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
 					if ( $file_exists ) {
 						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
@@ -9040,7 +9036,7 @@ BLOCK;
 						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 					} else {
 						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
-						$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+						ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 						if ( $possible_attachment_id ) {
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
@@ -9054,12 +9050,12 @@ BLOCK;
 			preg_match_all( '/<iframe[^>]+(?:src)="([^">]+)"/', $post->post_content, $iframe_source_matches );
 			if ( array_key_exists( 1, $iframe_source_matches ) && ! empty( $iframe_source_matches[1] ) ) {
 				foreach ( $iframe_source_matches[1] as $match ) {
-					$this->high_contrast_output( 'iFrame URL', $match );
+					ConsoleColor::high_contrast_kv_output( 'iFrame URL', $match );
 					$filename = WP_CLI\Utils\basename( $match );
-					$this->high_contrast_output( 'Basename filename', $filename );
+					ConsoleColor::high_contrast_kv_output( 'Basename filename', $filename );
 					$full_filename_path = $full_path( $filename );
 					$file_exists        = file_exists( $full_filename_path );
-					$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+					ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
 					if ( $file_exists ) {
 						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
@@ -9067,7 +9063,7 @@ BLOCK;
 						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 					} else {
 						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
-						$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+						ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 						if ( $possible_attachment_id ) {
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
@@ -9095,12 +9091,12 @@ BLOCK;
 						continue;
 					}
 
-					$this->high_contrast_output( 'Doc URL', $match );
+					ConsoleColor::high_contrast_kv_output( 'Doc URL', $match );
 					$filename = WP_CLI\Utils\basename( $match );
-					$this->high_contrast_output( 'Basename filename', $filename );
+					ConsoleColor::high_contrast_kv_output( 'Basename filename', $filename );
 					$full_filename_path = $full_path( $filename );
 					$file_exists        = file_exists( $full_filename_path );
-					$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+					ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
 					if ( $file_exists ) {
 						WP_CLI::success('File exists');
@@ -9109,7 +9105,7 @@ BLOCK;
 						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 					} else {
 						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
-						$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+						ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 						if ( $possible_attachment_id ) {
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
@@ -9147,7 +9143,7 @@ BLOCK;
 		$moved_codes = [ $http::MOVED_PERMANENTLY, $http::FOUND ];
 
 		$modified_url = str_replace( 'https://lasilla.com', '/media', $original_url );
-		$this->high_contrast_output( 'Modified URL', $modified_url );
+		ConsoleColor::high_contrast_kv_output( 'Modified URL', $modified_url );
 
 		if ( false === wp_http_validate_url( $modified_url ) ) {
 			echo WP_CLI::colorize( "%YInvalid URL%n\n" );
@@ -9210,7 +9206,7 @@ BLOCK;
 
 		foreach ( $this->json_iterator->items( $assoc_args['import-json'] ) as $item ) {
 			echo "\n\n\n";
-			$this->high_contrast_output( 'Original Post ID', $item->id );
+			ConsoleColor::high_contrast_kv_output( 'Original Post ID', $item->id );
 
 			$post_id = $wpdb->get_var(
 				$wpdb->prepare(
@@ -9224,7 +9220,7 @@ BLOCK;
 				continue;
 			}
 
-			$this->high_contrast_output( 'NEWSPACK POST ID', $post_id );
+			ConsoleColor::high_contrast_kv_output( 'NEWSPACK POST ID', $post_id );
 
 			$filename = basename( $item->picture );
 
@@ -9241,7 +9237,7 @@ BLOCK;
 				$url = wp_get_attachment_image_src( $featured_image_id, 'full' )[0];
 
 				if ( str_contains( $post_content, '{image_attachment_src}' ) ) {
-					$this->high_contrast_output( 'Post has featured image, but it is not in the post_content. Updating post_content.', '' );
+					ConsoleColor::high_contrast_kv_output( 'Post has featured image, but it is not in the post_content. Updating post_content.', '' );
 					$post_content = strtr(
 						$post_content,
 						[
@@ -9261,7 +9257,7 @@ BLOCK;
 					);
 				}
 
-				$this->high_contrast_output( 'Post has featured image', "($featured_image_id) $url" );
+				ConsoleColor::high_contrast_kv_output( 'Post has featured image', "($featured_image_id) $url" );
 				continue;
 			}
 
@@ -9285,7 +9281,7 @@ BLOCK;
 				);
 
 				if ( $potential_attachment_id ) {
-					$this->high_contrast_output( 'Potential Attachment ID', $potential_attachment_id );
+					ConsoleColor::high_contrast_kv_output( 'Potential Attachment ID', $potential_attachment_id );
 					// If $post_content has URL, $post_id does not have a thumbnail_id, fill it in.
 					$potential_attachment_url = wp_get_attachment_url( $potential_attachment_id );
 					$potential_attachment_url = str_replace( 'https://www.', '', $potential_attachment_url );
@@ -9525,19 +9521,19 @@ BLOCK;
 
 		foreach ( $post_ids as $post_id ) {
 			echo "\n\n\n";
-			$this->high_contrast_output( 'Post ID', $post_id );
+			ConsoleColor::high_contrast_kv_output( 'Post ID', $post_id );
 			$post = get_post( $post_id );
 
 			$featured_image = $this->attachments->get_images_sources_from_content( $post->post_content );
 
 			if ( is_array( $featured_image ) && ! empty( $featured_image ) ) {
 				$featured_image = $featured_image[0];
-				$this->high_contrast_output( 'Featured Image', $featured_image );
+				ConsoleColor::high_contrast_kv_output( 'Featured Image', $featured_image );
 
 				$path = wp_parse_url( $featured_image )['path'];
 				$path = str_replace( '/wp-content/uploads/', '', $path );
 
-				$this->high_contrast_output( 'Filename', $path );
+				ConsoleColor::high_contrast_kv_output( 'Filename', $path );
 
 				global $wpdb;
 
