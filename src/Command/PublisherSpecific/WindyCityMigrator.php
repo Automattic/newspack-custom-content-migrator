@@ -15,9 +15,8 @@ use \NewspackCustomContentMigrator\Utils\Logger;
  * Custom migration scripts for Saporta News.
  */
 class WindyCityMigrator implements InterfaceCommand {
-	const LOG_FILE                    = 'windy-city-migrator.log';
-	const DEFAULT_AUTHOR_DISPLAY_NAME = 'WINDY CITY STAFF';
-	const ORIGINAL_ID_META_KEY        = '_newspack_original_id';
+	const LOG_FILE             = 'windy-city-migrator.log';
+	const ORIGINAL_ID_META_KEY = '_newspack_original_id';
 
 	/**
 	 * CSV input file.
@@ -92,6 +91,18 @@ class WindyCityMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					$this->csv_input_file,
 					...BatchLogic::get_batch_args(),
+					[
+						'type'        => 'assoc',
+						'name'        => 'default-author-display-name',
+						'description' => 'Default author display name.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'default-author-email',
+						'description' => 'Default author email.',
+						'optional'    => false,
+					],
 				],
 			]
 		);
@@ -104,11 +115,13 @@ class WindyCityMigrator implements InterfaceCommand {
 	 * @param array $assoc_args CLI args.
 	 */
 	public function cmd_windy_city_migrator( $args, $assoc_args ) {
-		$csv_file_path         = $assoc_args[ $this->csv_input_file['name'] ];
-		$batch_args            = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
-		$total_entries         = $this->csv_iterator->count_csv_file_entries( $csv_file_path, ',' );
-		$entries               = $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] );
-		$existing_original_ids = $this->get_existing_original_ids();
+		$csv_file_path               = $assoc_args[ $this->csv_input_file['name'] ];
+		$default_author_display_name = $assoc_args['default-author-display-name'];
+		$default_author_email        = $assoc_args['default-author-email'];
+		$batch_args                  = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
+		$total_entries               = $this->csv_iterator->count_csv_file_entries( $csv_file_path, ',' );
+		$entries                     = $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] );
+		$existing_original_ids       = $this->get_existing_original_ids();
 
 		$this->logger->log( self::LOG_FILE, sprintf( 'Migrating %d entries.', $total_entries ) );
 
@@ -122,7 +135,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			}
 
 			// Post Author.
-			$author_id = $this->get_create_author( $entry['AUTHOR'] );
+			$author_id = $this->get_create_author( $entry['AUTHOR'], $default_author_display_name, $default_author_email );
 			if ( false === $author_id ) {
 				continue;
 			}
@@ -179,13 +192,19 @@ class WindyCityMigrator implements InterfaceCommand {
 			// Post Categories.
 			$post_categories = explode( ';', $entry['CATEGORY'] );
 			$catgories_ids   = [];
-			foreach ( $post_categories as $post_category ) {
+			foreach ( $post_categories as $category_index => $post_category ) {
 				$post_category = trim( $post_category );
-				$category_id   = get_cat_ID( $post_category );
-				if ( 0 === $category_id ) {
+
+				if ( 0 !== $category_index ) {
+					$parent_category_id = get_cat_ID( $post_categories[ $category_index - 1 ] );
+					$category_id        = wp_create_category( $post_category, $parent_category_id );
+				} else {
 					$category_id = wp_create_category( $post_category );
 				}
-				$catgories_ids[] = $category_id;
+
+				if ( ! is_wp_error( $category_id ) ) {
+					$catgories_ids[] = $category_id;
+				}
 			}
 			wp_set_post_categories( $post_id, $catgories_ids );
 
@@ -212,13 +231,41 @@ class WindyCityMigrator implements InterfaceCommand {
 	 * Get or create author.
 	 *
 	 * @param string $display_name Author name.
+	 * @param string $default_author_display_name Default author display name.
+	 * @param string $default_author_email Default author email.
+	 *
 	 * @return int|bool Author ID or false on failure.
 	 */
-	private function get_create_author( $display_name ) {
+	private function get_create_author( $display_name, $default_author_display_name, $default_author_email ) {
 		if ( empty( $display_name ) ) {
-			return $this->get_create_author( self::DEFAULT_AUTHOR_DISPLAY_NAME );
+			$username = sanitize_user( $default_author_display_name, true );
+			$author   = get_user_by( 'login', $username );
+
+			if ( $author instanceof WP_User ) {
+				return $author->ID;
+			}
+
+			$author_id = wp_insert_user(
+				[
+					'display_name' => $default_author_display_name,
+					'user_login'   => $username,
+					'user_email'   => $default_author_email,
+					'user_pass'    => wp_generate_password(),
+					'role'         => 'author',
+				]
+			);
+
+			if ( is_wp_error( $author_id ) ) {
+				$this->logger->log( self::LOG_FILE, ' -- Error creating author: ' . $author_id->get_error_message(), Logger::WARNING );
+				return false;
+			}
+
+			$this->logger->log( self::LOG_FILE, ' -- Author (' . $default_author_display_name . ') created with ID: ' . $author_id, Logger::SUCCESS );
+
+			return $author_id;
 		}
 
+		// Author name is not empty.
 		$username = sanitize_user( $display_name, true );
 		// check if username is longer than 60 chars.
 		if ( strlen( $username ) > 60 ) {
@@ -245,6 +292,8 @@ class WindyCityMigrator implements InterfaceCommand {
 		}
 
 		$this->logger->log( self::LOG_FILE, ' -- Author (' . $display_name . ') created with ID: ' . $author_id, Logger::SUCCESS );
+
+		return $author_id;
 	}
 
 	/**
