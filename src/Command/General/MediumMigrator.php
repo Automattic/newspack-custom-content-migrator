@@ -301,7 +301,7 @@ class MediumMigrator implements InterfaceCommand {
 		if ( ! empty( $article['featured_image'] ) ) {
 			$featured_image_id = $this->attachments->import_external_file( $article['featured_image']['url'], $article['title'], $article['featured_image']['caption'] );
 			if ( is_wp_error( $featured_image_id ) ) {
-				$this->logger->log( self::$log_file, ' -- Error importing featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
+				$this->logger->log( 'featured-images-import-fail.log', ' -- Error importing featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
 			} else {
 				set_post_thumbnail( $post_id, $featured_image_id );
 			}
