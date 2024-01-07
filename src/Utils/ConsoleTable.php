@@ -55,6 +55,26 @@ class ConsoleTable {
 				if ( array_key_exists( $key, $array ) ) {
 					if ( is_bool( $array[ $key ] ) ) {
 						$row[] = $array[ $key ] ? 'true' : 'false';
+					} elseif ( is_array( $array[ $key ] ) ) {
+						$sub_key   = array_key_first( $array[ $key ] );
+						$sub_value = reset( $array[ $key ] );
+						$row[]     = ConsoleColor::black_with_cyan_background( $sub_key )->get() .
+									 ConsoleColor::white( ":{$sub_value}" )->get();
+
+						$table->addRow( $row );
+
+						unset( $array[ $key ][ $sub_key ] );
+						foreach ( $array[ $key ] as $sub_key => $sub_value ) {
+							$table->addRow(
+								[
+									'',
+									ConsoleColor::black_with_cyan_background( $sub_key )->get() .
+									ConsoleColor::white( ":{$sub_value}" )->get(),
+								]
+							);
+						}
+
+						continue 2;
 					} elseif ( empty( $array[ $key ] ) ) {
 						$row[] = '-';
 					} else {
