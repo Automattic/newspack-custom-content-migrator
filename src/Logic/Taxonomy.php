@@ -298,6 +298,49 @@ class Taxonomy {
 	}
 
 	/**
+	 * This function will return any wp_term records that match the given slug.
+	 *
+	 * @param string $slug The slug.
+	 * @param int    $ignore_term_id A specific term_id to ignore. Use this if you want to ensure no other terms with the same slug exist, except for this one.
+	 *
+	 * @return array
+	 */
+	public function get_term_by_slug( string $slug, int $ignore_term_id = 0 ): array {
+		global $wpdb;
+
+		$query = $wpdb->prepare( "SELECT * FROM $wpdb->terms WHERE slug = %s", $slug );
+
+		if ( $ignore_term_id ) {
+			$query .= $wpdb->prepare( ' AND term_id != %d', $ignore_term_id );
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared
+		return $wpdb->get_results( $query );
+	}
+
+	/**
+	 * Obtains a term record by its term_id from the DB. This is necessary when you need to confirm a
+	 * term record exists, albeit not one that's necessarily connected to a wp_term_taxonomy record.
+	 *
+	 * @param int $term_id Term ID.
+	 *
+	 * @return object|null
+	 */
+	public function get_term_record( int $term_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT term_id, name, slug FROM $wpdb->terms WHERE term_id = %d",
+				$term_id
+			)
+		);
+	}
+
+
+
+	/**
 	 * Retrieves and outputs a table of terms and taxonomies, based on a given array of term_ids or term_taxonomy_ids.
 	 *
 	 * @param int[]  $ids Array of term_ids or term_taxonomy_ids.
