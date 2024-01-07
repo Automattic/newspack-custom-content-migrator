@@ -162,13 +162,24 @@ class ConsoleTable {
 	/**
 	 * Simple function to output a table of data, with an optional title.
 	 *
-	 * @param array  $array_of_arrays An array of arrays that hold the data to be output.
-	 * @param array  $header An array of strings that will be used as the table header.
-	 * @param string $title The title of the table.
+	 * @param array[] $array_of_arrays An array of arrays that hold the data to be output.
+	 * @param array   $header An array of strings that will be used as the table header.
+	 * @param string  $title The title of the table.
 	 *
 	 * @return void
 	 */
 	public static function output_data( array $array_of_arrays, array $header = [], string $title = '' ) {
+		$array_of_arrays = array_map(
+			function ( $member ) {
+				if ( ! is_array( $member ) ) {
+					return (array) $member;
+				}
+
+				return $member;
+			},
+			$array_of_arrays
+		);
+
 		if ( empty( $header ) && isset( $array_of_arrays[0] ) ) {
 			$header = array_keys( $array_of_arrays[0] );
 		}
