@@ -14,8 +14,12 @@ use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\MigrationMeta;
+use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_CLI\ExitException;
+use WP_Post;
 
 /**
  * Custom migration scripts for The Emancipator.
@@ -23,6 +27,8 @@ use WP_CLI\ExitException;
 class TheEmancipatorMigrator implements InterfaceCommand {
 
 	const SITE_TIMEZONE = 'America/New_York';
+
+	const CATEGORY_VIDEO_ID = 16;
 
 	/**
 	 * Singleton instance.
@@ -36,6 +42,9 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private Posts $posts_logic;
 
 	private Attachments $attachments_logic;
+	private Logger $logger;
+
+	private GutenbergBlockGenerator $block_generator;
 
 	private GutenbergBlockGenerator $gutenberg_block_gen;
 
@@ -47,6 +56,8 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 		$this->posts_logic         = new Posts();
 		$this->attachments_logic   = new Attachments();
 		$this->gutenberg_block_gen = new GutenbergBlockGenerator();
+		$this->logger              = new Logger();
+		$this->block_generator     = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -75,7 +86,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 # Empty the trash
 wp post delete $( wp post list --post_status=trash --type=post_type --format=ids )
 wp newspack-content-migrator emancipator-taxonomy
-wp newspack-content-migrator emancipator-authors
 wp newspack-content-migrator emancipator-bylines
 wp newspack-content-migrator emancipator-post-subtitles
 wp newspack-content-migrator emancipator-redirects
@@ -92,7 +102,7 @@ EOT
 		);
 
 		$generic_args = [
-			'synopsis'      => '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>] [--min-post-id=<post-id>]',
+			'synopsis'      => '[--post-id=<post-id>] [--dry-run] [--num-posts=<num-posts>] [--min-post-id=<post-id>] [--refresh-existing]',
 			'before_invoke' => [ $this, 'check_requirements' ],
 		];
 
@@ -151,7 +161,32 @@ EOT
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-transform-readmore-in-series',
+			[ $this, 'cmd_transform_readmore_in_series' ],
+			[
+				'shortdesc' => 'Transform readmore blocks in series to a link to the series.',
+				...$generic_args,
+			]
+		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-ensure-featured-images',
+			[ $this, 'cmd_ensure_featured_images' ],
+			[
+				'shortdesc' => 'Ensure that all posts have featured images.',
+				...$generic_args,
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator emancipator-find-authors-in-text',
+			[ $this, 'cmd_find_authors_in_text' ],
+			[
+				'shortdesc' => 'Find authors in text.',
+				...$generic_args,
+			]
+		);
 	}
 
 	/**
@@ -178,12 +213,172 @@ EOT
 		$checked = true;
 	}
 
-	public function cmd_process_images( array $args, array $assoc_args ): void {
-		WP_CLI::log( 'Downloading missing images and adding image credits' );
+	/* This one does nothing - but it gives a list of posts that probably have italicezed text in the last paragraph
+	 * that probably is author info that should be removed or consolidated.
+	 */
+	public function cmd_find_authors_in_text( array $pos_args, array $assoc_args ): void {
+		$found_authors_in_text      = 0;
+		$posts_with_italicized_text = [];
+		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			$post_blocks = parse_blocks( $post->post_content );
 
-		$dry_run = $assoc_args['dry-run'] ?? false;
+			$last_block = end( $post_blocks );
+			if ( 'core/paragraph' !== $last_block['blockName'] || ! str_starts_with( $last_block['innerHTML'], '<p><i>' ) ) {
+				continue;
+			}
+			$posts_with_italicized_text[] = get_permalink( $post->ID );
+			$found_authors_in_text ++;
+		}
+		$logfile = 'authors-in-text.log';
+		$this->logger->log( $logfile, 'Posts with italicized text:' );
+		array_map( fn( $post ) => $this->logger->log( $logfile, $post ), $posts_with_italicized_text );
+		WP_CLI::success( sprintf( 'Found %d posts with italicized text. Logged them to authors-in-text.log', $found_authors_in_text ) );
+	}
+
+	public function cmd_ensure_featured_images( array $pos_args, array $assoc_args ): void {
+		WP_CLI::log( 'Ensuring featured images' );
 
 		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			if ( ! empty( get_post_meta( $post->ID, '_thumbnail_id', true ) ) ) {
+				// This post already has a featured image.
+				continue;
+			}
+			$images = get_attached_media( 'image', $post->ID );
+			if ( empty( $images ) ) {
+				// This post has no images.
+				continue;
+			}
+			$image = array_shift( $images );
+			update_post_meta( $post->ID, '_thumbnail_id', $image->ID );
+			update_post_meta( $post->ID, 'newspack_featured_image_position', 'hidden' );
+			WP_CLI::log( sprintf( 'Added featured image to %s', get_permalink( $post->ID ) ) );
+		}
+	}
+
+	public function cmd_transform_readmore_in_series( array $pos_args, array $assoc_args ): void {
+		WP_CLI::log( 'Processing readmore boxes' );
+		$post_id = $assoc_args['post-id'] ?? false;
+
+		$log_file = 'readmore-blocks.log';
+
+		$homepage_block_default_args = [
+			'showExcerpt'   => false,
+			'showDate'      => false,
+			'showAuthor'    => false,
+			'postLayout'    => 'grid',
+			'columns'       => 2,
+			'postsToShow'   => 2,
+			'mediaPosition' => 'left',
+			'typeScale'     => 2,
+			'imageScale'    => 2,
+			'sectionHeader' => 'Read More in this series',
+			'specificMode'  => true,
+			'className'     => [ 'emancipator-readmore-in-series', 'read-more-box' ],
+		];
+
+		if ( ! $post_id ) {
+			$num_posts = $assoc_args['num-posts'] ?? PHP_INT_MAX;
+			global $wpdb;
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%Read more in this series%' ORDER BY ID DESC LIMIT %d",
+					[ $num_posts ]
+				)
+			);
+		} else {
+			$post_ids = [ $post_id ];
+		}
+		$total_posts = count( $post_ids );
+		$counter     = 0;
+
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( '-- %d/%d --', ++ $counter, $total_posts ) );
+			$post           = get_post( $post_id );
+			$post_permalink = get_permalink( $post );
+
+			// Parse the post content into blocks.
+			$post_blocks   = parse_blocks( $post->post_content );
+			$target_blocks = array_filter(
+				$post_blocks,
+				fn( $block ) => 'core/html' === ( $block['blockName'] ?? '' ) && str_contains( $block['innerHTML'], 'Read more in this series' )
+			);
+			if ( empty( $target_blocks ) ) {
+				continue;
+			}
+
+			// Array filter keeps the indices, so grab $idx here, so we can replace blocks.
+			foreach ( $target_blocks as $idx => $block ) {
+
+				$html_doc   = new HtmlDocument( $block['innerHTML'] );
+				$link_paths = array_map(
+					function ( $node ) {
+						$href = $node->getAttribute( 'href' );
+						if ( str_contains( $href, 'bostonglobe.com' ) ) {
+							return parse_url( $href, PHP_URL_PATH );
+						}
+
+						return false;
+					},
+					$html_doc->find( 'div.panel a' )
+				);
+				// Get rid of the urls that were not from the site itself.
+				$link_paths = array_filter( $link_paths );
+
+				$referenced_post_ids = [];
+				foreach ( $link_paths as $path ) {
+					$slug       = basename( $path );
+					$maybe_post = get_page_by_path( $slug, OBJECT, 'post' );
+					if ( $maybe_post instanceof WP_Post ) {
+						$referenced_post_ids[] = $maybe_post->ID;
+					}
+				}
+
+				if ( empty( $referenced_post_ids ) ) {
+					$this->logger->log( $log_file, sprintf( 'No valid post id references found for %s', $post_permalink ), Logger::ERROR );
+					continue;
+				}
+
+				$homepage_block = $this->block_generator->get_homepage_articles_for_specific_posts( $referenced_post_ids, $homepage_block_default_args );
+
+				$post_blocks[ $idx ] = $this->block_generator->get_group_constrained( [ $homepage_block ], [ 'wrap-readmore-in-series' ] );
+			}
+			wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => serialize_blocks( $post_blocks ),
+				]
+			);
+			$this->logger->log(
+				$log_file,
+				sprintf(
+					"Added read more block to:\n\t%s\n\t%s",
+					$post_permalink,
+					'https://www.bostonglobe.com' . wp_parse_url( $post_permalink, PHP_URL_PATH )
+				),
+				Logger::SUCCESS
+			);
+		}
+		WP_CLI::success( 'Done transforming readmores. Log file in ' . $log_file );
+
+
+	}
+
+	/**
+	 * @throws ExitException
+	 */
+	public function cmd_process_images( array $args, array $assoc_args ): void {
+		WP_CLI::log( 'Downloading missing images and adding image credits' );
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
+
+		$dry_run          = $assoc_args['dry-run'] ?? false;
+		$refresh_existing = $assoc_args['refresh-existing'] ?? false;
+
+		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				WP_CLI::log( 'Skipping post ' . $post->ID . ' because it has already been processed.' );
+				continue;
+			}
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
@@ -236,7 +431,7 @@ EOT
 						$this->update_image_byline( $attachment_id, $image_info, $dry_run );
 					}
 
-					$blocks[ $idx ] = $this->gutenberg_block_gen->get_image(
+					$blocks[ $idx ]     = $this->gutenberg_block_gen->get_image(
 						get_post( $attachment_id ),
 						'full',
 						false,
@@ -253,12 +448,13 @@ EOT
 				];
 				wp_update_post( $post_data );
 			}
+
+			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
 		}
 
 	}
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
-
 		$opinion_cat     = get_category_by_slug( 'opinion' );
 		$emancipator_cat = get_category_by_slug( 'the-emancipator' );
 		if ( empty( $emancipator_cat ) ) {
@@ -304,12 +500,20 @@ EOT
 	}
 
 	public function cmd_post_subtitles( array $args, array $assoc_args ): void {
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
+
+		$refresh_existing = $assoc_args['refresh-existing'] ?? false;
+		$dry_run          = $assoc_args['dry-run'] ?? false;
+
+		$posts = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		WP_CLI::log( 'Processing post subtitles' );
-		$dry_run = $assoc_args['dry-run'] ?? false;
-		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
-
 		foreach ( $posts as $post ) {
+			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				WP_CLI::log('Skipping post ' . $post->ID . ' because it has already been processed.');
+				continue;
+			}
 
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
@@ -317,6 +521,7 @@ EOT
 			if ( ! $dry_run && $subtitle ) {
 				update_post_meta( $post->ID, 'newspack_post_subtitle', $subtitle );
 			}
+			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
 		}
 
 		WP_CLI::success( 'Finished processing post subtitles' );
@@ -324,14 +529,20 @@ EOT
 
 	/**
 	 * Create redirects for articles that are just redirects. Uses the Page Links To plugin.
-	 *
-	 * @throws ExitException
 	 */
 	public function cmd_redirects( array $args, array $assoc_args ): void {
-		WP_CLI::log( 'Processing redirects into page links to.' );
-		$dry_run = $assoc_args['dry-run'] ?? false;
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
 
+		$dry_run          = $assoc_args['dry-run'] ?? false;
+		$refresh_existing = $assoc_args['refresh-existing'] ?? false;
+
+		WP_CLI::log( 'Processing redirects into page links to.' );
 		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				WP_CLI::log('Skipping post ' . $post->ID . ' because it has already been processed.');
+				continue;
+			}
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
@@ -339,6 +550,7 @@ EOT
 			if ( ! $dry_run && $redirect_to && ! CWS_PageLinksTo::get_link( $post ) ) {
 				CWS_PageLinksTo::set_link( $post->ID, $redirect_to );
 			}
+			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
 		}
 		WP_CLI::success( 'Finished processing redirects' );
 	}
@@ -394,12 +606,20 @@ EOT
 	 * Also delete the "credit paragraphs" at the bottom of the post content if possible.
 	 */
 	public function cmd_post_bylines( array $args, array $assoc_args ): void {
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
 
-		WP_CLI::log( 'Processing bylines' );
-		$dry_run = $assoc_args['dry-run'] ?? false;
+		$dry_run          = $assoc_args['dry-run'] ?? false;
+		$refresh_existing = $assoc_args['refresh-existing'] ?? false;
+
 		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
+		WP_CLI::log( 'Processing bylines' );
 		foreach ( $posts as $post ) {
+			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				WP_CLI::log('Skipping post ' . $post->ID . ' because it has already been processed.');
+				continue;
+			}
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 			$label_meta  = get_post_meta( $post->ID, 'label_storycard', true );
@@ -409,7 +629,6 @@ EOT
 				foreach ( $api_content['credits']['by'] as $credit ) {
 					$credits[] = empty( $credit['name'] ) ? $credit : $credit['name'];
 				}
-
 			} elseif ( ! empty( $label_meta ) && str_contains( $label_meta, '|' ) ) {
 				$byline = explode( '|', $label_meta )[1];
 				foreach ( preg_split( '/(,\s|\s&\s|(\sand\s))/', $byline ) as $candidate ) {
@@ -430,27 +649,27 @@ EOT
 				$replace_in_content = false;
 
 				foreach ( $credits as $co_author ) {
-					$maybe_co_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
-					$co_author_id    = 0;
+					$maybe_co_author    = $this->coauthorsplus_logic->get_guest_author_by_display_name( $co_author );
+					$co_author_id       = 0;
+					$author_description = $this->find_byline_credit( $co_author, $post->post_content );
 					if ( empty( $maybe_co_author ) ) {
-						$author_description = $this->find_byline_credit( $co_author, $post->post_content );
-
 						$co_author_id = $this->coauthorsplus_logic->create_guest_author(
 							[
 								'display_name' => $co_author,
 								'description'  => wp_strip_all_tags( $author_description ),
 							]
 						);
-						if ( ! empty( $author_description ) ) {
-							$to_replace         = sprintf(
-								'<!-- wp:paragraph -->%s<!-- /wp:paragraph -->',
-								$author_description
-							);
-							$post->post_content = str_replace( $to_replace, '', $post->post_content );
-							$replace_in_content = true;
-						}
 					} elseif ( is_object( $maybe_co_author ) ) {
 						$co_author_id = $maybe_co_author->ID;
+					}
+
+					if ( ! empty( $author_description ) ) {
+						$to_replace         = sprintf(
+							'<!-- wp:paragraph -->%s<!-- /wp:paragraph -->',
+							$author_description
+						);
+						$post->post_content = str_replace( $to_replace, '', $post->post_content );
+						$replace_in_content = true;
 					}
 
 					if ( ! empty( $co_author_id ) ) {
@@ -477,11 +696,15 @@ EOT
 					wp_update_post( $post_data );
 				}
 			}
+			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
 		}
 
 		WP_CLI::success( 'Finished processing bylines' );
 	}
 
+	/**
+	 * @throws ExitException
+	 */
 	private function update_image_byline( int $attachment_id, array $item, bool $dry_run ): void {
 		if ( empty( $item['type'] ) || 'image' !== $item['type'] || ! $attachment_id ) {
 			return;
