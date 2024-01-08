@@ -28,8 +28,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	const SITE_TIMEZONE = 'America/New_York';
 
-	const CATEGORY_VIDEO_ID = 16;
-
 	/**
 	 * Singleton instance.
 	 *
@@ -83,13 +81,12 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 			function () {
 				echo esc_html(
 					<<<EOT
-# Empty the trash
-wp post delete $( wp post list --post_status=trash --type=post_type --format=ids )
 wp newspack-content-migrator emancipator-taxonomy
 wp newspack-content-migrator emancipator-bylines
 wp newspack-content-migrator emancipator-post-subtitles
 wp newspack-content-migrator emancipator-redirects
 wp newspack-content-migrator emancipator-process-images
+wp newspack-content-migrator emancipator-transform-readmore-in-series
 
 # With UI/manually
 # Maybe delete authors with 0 posts \n
@@ -238,11 +235,18 @@ EOT
 	public function cmd_ensure_featured_images( array $pos_args, array $assoc_args ): void {
 		WP_CLI::log( 'Ensuring featured images' );
 
-		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
+		$post_id = $assoc_args['post-id'] ?? false;
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			$posts = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
+		}
+		foreach ( $posts as $post ) {
 			if ( ! empty( get_post_meta( $post->ID, '_thumbnail_id', true ) ) ) {
 				// This post already has a featured image.
 				continue;
 			}
+
 			$images = get_attached_media( 'image', $post->ID );
 			if ( empty( $images ) ) {
 				// This post has no images.
@@ -382,22 +386,6 @@ EOT
 			$meta        = get_post_meta( $post->ID );
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
-			$attached_image_guids = array_map(
-				fn( $image ) => pathinfo( $image->guid, PATHINFO_FILENAME ),
-				get_attached_media( 'image', $post->ID )
-			);
-
-			if ( ! empty( $attached_image_guids ) ) {
-				// The promo items are the featured images. See if we can get data from that
-				// and update the featured image.
-				foreach ( $api_content['promo_items'] ?? [] as $item ) {
-					$attachment_id = array_search( $item['_id'], $attached_image_guids );
-					if ( $attachment_id ) {
-						$this->update_image_byline( $attachment_id, $item, $dry_run );
-					}
-				}
-			}
-
 			// Get image info from the api content for images in the body.
 			$content_img = [];
 			foreach ( $api_content['content_elements'] as $element ) {
@@ -449,9 +437,25 @@ EOT
 				wp_update_post( $post_data );
 			}
 
-			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
-		}
+			if ( empty( get_post_meta( $post->ID, '_thumbnail_id', true ) ) ) {
+				foreach ( $api_content['promo_items'] ?? [] as $item ) {
+					$image_url = $item['additional_properties']['originalUrl'] ?? '';
+					if ( empty( $image_url ) ) {
+						continue;
+					}
 
+					$caption       = $item['caption'] ?? '';
+					$attachment_id = $this->attachments_logic->import_attachment_for_post( $post->ID, $image_url, $caption, [ 'post_excerpt' => $caption ] );
+					if ( ! is_wp_error( $attachment_id ) ) {
+						update_post_meta( $post->ID, '_thumbnail_id', $attachment_id );
+						update_post_meta( $post->ID, 'newspack_featured_image_position', 'hidden' );
+						$this->update_image_byline( $attachment_id, $item, $dry_run );
+					}
+				}
+			}
+
+			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
+		} // end post loop.
 	}
 
 	public function cmd_taxonomy( $args, $assoc_args ): void {
@@ -511,7 +515,7 @@ EOT
 		WP_CLI::log( 'Processing post subtitles' );
 		foreach ( $posts as $post ) {
 			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::log('Skipping post ' . $post->ID . ' because it has already been processed.');
+				WP_CLI::log( 'Skipping post ' . $post->ID . ' because it has already been processed.' );
 				continue;
 			}
 
@@ -540,7 +544,7 @@ EOT
 		WP_CLI::log( 'Processing redirects into page links to.' );
 		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
 			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::log('Skipping post ' . $post->ID . ' because it has already been processed.');
+				WP_CLI::log( 'Skipping post ' . $post->ID . ' because it has already been processed.' );
 				continue;
 			}
 			$meta        = get_post_meta( $post->ID );
@@ -612,12 +616,12 @@ EOT
 		$dry_run          = $assoc_args['dry-run'] ?? false;
 		$refresh_existing = $assoc_args['refresh-existing'] ?? false;
 
-		$posts   = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
+		$posts = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 
 		WP_CLI::log( 'Processing bylines' );
 		foreach ( $posts as $post ) {
 			if ( ! $refresh_existing && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::log('Skipping post ' . $post->ID . ' because it has already been processed.');
+				WP_CLI::log( 'Skipping post ' . $post->ID . ' because it has already been processed.' );
 				continue;
 			}
 			$meta        = get_post_meta( $post->ID );
