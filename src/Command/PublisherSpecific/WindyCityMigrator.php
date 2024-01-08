@@ -269,6 +269,11 @@ class WindyCityMigrator implements InterfaceCommand {
 			return $author_id;
 		}
 
+		// check if the display name is an email.
+		if ( str_contains( $display_name, '@' ) ) {
+			$display_name = explode( '@', $display_name )[0];
+		}
+
 		// Author name is not empty.
 		$username = sanitize_user( $display_name, true );
 		// check if username is longer than 60 chars.
