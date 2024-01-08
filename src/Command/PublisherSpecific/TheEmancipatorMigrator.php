@@ -28,13 +28,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	const SITE_TIMEZONE = 'America/New_York';
 
-	/**
-	 * Singleton instance.
-	 *
-	 * @var ?self
-	 */
-	private static ?self $instance = null;
-
 	private CoAuthorPlus $coauthorsplus_logic;
 
 	private Posts $posts_logic;
@@ -64,11 +57,12 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 * @return TheEmancipatorMigrator
 	 */
 	public static function get_instance(): TheEmancipatorMigrator {
-		if ( null === self::$instance ) {
-			self::$instance = new self();
+		static $instance = null;
+		if ( null === $instance ) {
+			$instance = new self();
 		}
 
-		return self::$instance;
+		return $instance;
 	}
 
 	/**
