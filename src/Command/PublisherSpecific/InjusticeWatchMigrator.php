@@ -5,7 +5,6 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\CsvIterator;
@@ -308,7 +307,7 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 				$new_cat_names = array_map( fn( $category ) => $category->name, $new_cats );
 
 				wp_set_post_categories( $post_id, $new_cat_ids );
-				// Use the first of the categories as the primary category. TODO. We still don't know how they's like to denote the primary category, so come back to this.
+				// Use the first of the categories as the primary category.
 				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $new_cat_ids[0] );
 				$this->logger->log( 'category_reshuffle.log', sprintf( 'Updated categories on %s to %s', get_category( $post_id ), implode( ',', $new_cat_names ) ),
 					Logger::SUCCESS );
