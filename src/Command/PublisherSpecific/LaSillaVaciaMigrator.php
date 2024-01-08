@@ -2554,6 +2554,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$iterator      = ( new FileImportFactory() )->get_file( $csv_file_path )->getIterator();
 
 		foreach ( $iterator as $row ) {
+			ConsoleColor::white( 'Processing email:' )->underlined_white( $row['email'] )->output();
 			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_email( $row['email'] );
 
 			if ( ! $guest_author ) {
@@ -2567,6 +2568,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							$guest_author_login = sanitize_title( $user->first_name . ' ' . $user->last_name );
 						}
 
+						ConsoleColor::white( 'Error creating Guest Author:' )->underlined_white( $row['email'] )->output();
 						ConsoleColor::yellow( 'Possible duplicate user_login' )->underlined_yellow( $guest_author_login )->output();
 						continue;
 					}
