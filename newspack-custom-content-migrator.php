@@ -68,6 +68,7 @@ PluginSetup::register_migrators(
 		Command\General\LedeMigrator::class,
 		Command\General\DownloadMissingImages::class,
 		Command\General\MigrationHelper::class,
+		Command\General\MediumMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
