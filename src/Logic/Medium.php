@@ -1049,6 +1049,11 @@ class Medium {
 					continue;
 				}
 
+				// check if the display name is an email.
+				if ( str_contains( $display_name, '@' ) ) {
+					$display_name = explode( '@', $display_name )[0];
+				}
+
 				// Get avatar.
 				$avatar = $xpath->query( '//img[contains(concat(" ", normalize-space(@class), " "), " u-photo")]' )->item( 0 );
 
@@ -1072,7 +1077,7 @@ class Medium {
 
 				$email = str_replace( 'Email address: ', '', $email->textContent );
 
-				$user_login = sanitize_title( $display_name );
+				$user_login = sanitize_user( $display_name, true );
 
 				$this->author = [
 					'user_login'   => $user_login,
