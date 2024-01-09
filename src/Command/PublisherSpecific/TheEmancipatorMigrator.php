@@ -210,15 +210,26 @@ EOT
 	public function cmd_find_authors_in_text( array $pos_args, array $assoc_args ): void {
 		$found_authors_in_text      = 0;
 		$posts_with_italicized_text = [];
-		foreach ( $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args ) as $post ) {
-			$post_blocks = parse_blocks( $post->post_content );
 
-			$last_block = end( $post_blocks );
-			if ( 'core/paragraph' !== $last_block['blockName'] || ! str_starts_with( $last_block['innerHTML'], '<p><i>' ) ) {
-				continue;
+		$post_id = $assoc_args['post-id'] ?? false;
+		if ( $post_id ) {
+			$posts = [ get_post( $post_id ) ];
+		} else {
+			$posts = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
+		}
+		foreach ( $posts as $post ) {
+			$blocks = parse_blocks( $post->post_content );
+			foreach ( array_reverse( $blocks ) as $idx => $block ) {
+				// Only deal with a couple of paragraphs. And skip the empty ones.
+				if ( $idx > 3 || 'core/paragraph' !== $block['blockName'] || str_starts_with( $block['innerHTML'], '<p><br' ) ) {
+					continue;
+				}
+				if ( str_starts_with( $block['innerHTML'], '<p><i>' ) ) {
+					$posts_with_italicized_text[] = get_permalink( $post->ID );
+					$found_authors_in_text ++;
+					break;
+				}
 			}
-			$posts_with_italicized_text[] = get_permalink( $post->ID );
-			$found_authors_in_text ++;
 		}
 		$logfile = 'authors-in-text.log';
 		$this->logger->log( $logfile, 'Posts with italicized text:' );
