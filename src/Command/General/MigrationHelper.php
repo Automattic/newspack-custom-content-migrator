@@ -131,7 +131,7 @@ class MigrationHelper implements InterfaceCommand {
 			WP_CLI::out( self::get_batch_string( $start_arg_name, $end_arg_name, $batch_start, $batch_end )  );
 
 			if ( $iterm_trigger ) {
-				WP_CLI::line( sprintf( ' && echo "MigrationHelper says:___(%s)___"', $batch_info ) );
+				WP_CLI::line( sprintf( ' && echo "MigrationHelper says:___%s___"', $batch_info ) );
 			} else {
 				WP_CLI::line( '' ); // Just to add a newline for ease of copypasta
 			}

@@ -21,6 +21,8 @@ use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
@@ -1003,6 +1005,23 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					...$update_migrated_articles_synopsis,
 				),
 			)
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-set-category-restriction-for-guest-author',
+			[ $this, 'cmd_set_category_restriction_for_guest_author' ],
+			[
+				'shortdesc' => 'Set category restriction for guest author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-file-path',
+						'description' => 'Full path for CSV File pointing to category restrictions.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
 		);
 
 		WP_CLI::add_command(
@@ -2517,6 +2536,113 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 
 			$this->insert_user_meta( $user_id, $meta );
+		}
+	}
+
+	/**
+	 * This function handles a custom CSV file provided by the publisher which details which Guest Authors
+	 * should be restricted to certain categories. It relies on the Restrict Author Categories plugin.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception
+	 */
+	public function cmd_set_category_restriction_for_guest_author( $args, $assoc_args ) {
+		$csv_file_path = $assoc_args['csv-file-path'];
+		$iterator      = ( new FileImportFactory() )->get_file( $csv_file_path )->getIterator();
+
+		foreach ( $iterator as $row ) {
+			ConsoleColor::white( 'Processing email:' )->underlined_white( $row['email'] )->output();
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_email( $row['email'] );
+
+			if ( ! $guest_author ) {
+				$user = get_user_by( 'email', $row['email'] );
+
+				if ( $user ) {
+					$guest_author_id = $this->coauthorsplus_logic->create_guest_author_from_wp_user( $user->ID );
+					if ( is_wp_error( $guest_author_id ) ) {
+						$guest_author_login = sanitize_title( $user->display_name );
+						if ( empty( $user->display_name ) ) {
+							$guest_author_login = sanitize_title( $user->first_name . ' ' . $user->last_name );
+						}
+
+						ConsoleColor::white( 'Error creating Guest Author:' )->underlined_white( $row['email'] )->output();
+						ConsoleColor::yellow( 'Possible duplicate user_login' )->underlined_yellow( $guest_author_login )->output();
+						continue;
+					}
+					$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id );
+				} else {
+					ConsoleColor::bright_red( 'Guest Author not found:' )->underlined_bright_red( $row['email'] )->output();
+					continue;
+				}
+			}
+
+			if ( ! empty( $row['update_email'] ) ) {
+				$this->coauthorsplus_logic->update_guest_author( $guest_author->ID, [ 'user_email' => $row['update_email'] ] );
+			}
+
+			if ( empty( $guest_author->linked_account ) ) {
+				ConsoleColor::yellow( 'Guest Author does not have a linked account:' )->underlined_yellow( $row['email'] )->output();
+				$user_by_email = get_user_by( 'email', $guest_author->user_email );
+
+				if ( $user_by_email ) {
+					ConsoleColor::cyan( 'Found user by email, linking to Guest Author' )->output();
+					$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $user_by_email );
+					$guest_author->linked_account = $user_by_email->user_login;
+				} else {
+					ConsoleColor::green( 'Creating user and linking to Guest Author' )->output();
+					$user_id = wp_insert_user(
+						[
+							'user_login'    => substr( $guest_author->user_email, 0, strpos( $guest_author->user_email, '@' ) ),
+							'user_email'    => $guest_author->user_email,
+							'display_name'  => $guest_author->display_name,
+							'user_nicename' => str_replace( 'cap-', '', $guest_author->user_login ),
+							'user_pass'     => wp_generate_password( 24 ),
+							'role'          => 'contributor',
+						]
+					);
+
+					$new_user = get_user_by( 'id', $user_id );
+					$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $new_user );
+					$guest_author->linked_account = $new_user->user_login;
+				}
+			}
+
+			$user = get_user_by( 'login', $guest_author->linked_account );
+
+			if ( ! $user ) {
+				ConsoleColor::bright_red( 'User not found:' )->underlined_bright_red( $guest_author->linked_account )->output();
+				continue;
+			}
+
+			$category_columns = [
+				$row['category_3'],
+				$row['category_2'],
+				$row['category_1'],
+			];
+
+			foreach ( $category_columns as $category_name ) {
+				if ( empty( $category_name ) ) {
+					continue;
+				}
+
+				$category = get_term_by( 'name', $category_name, 'category' );
+
+				if ( ! $category ) {
+					ConsoleColor::bright_red( 'Category not found:' )->underlined_bright_red( $category_name )->output();
+					continue;
+				}
+
+				resautcat_db_set_user( $user->ID, 'true' );
+				resautcat_db_set_term( $user->ID, $category->term_id, 'true' );
+
+				while ( $category->parent ) {
+					$category = get_term_by( 'id', $category->parent, 'category' );
+					resautcat_db_set_term( $user->ID, $category->term_id, 'true' );
+				}
+			}
 		}
 	}
 
