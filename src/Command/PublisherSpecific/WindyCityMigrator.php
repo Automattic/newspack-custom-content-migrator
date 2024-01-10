@@ -126,7 +126,7 @@ class WindyCityMigrator implements InterfaceCommand {
 		$this->logger->log( self::LOG_FILE, sprintf( 'Migrating %d entries.', $total_entries ) );
 
 		foreach ( $entries as $index => $entry ) {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating entry %d/%d.', $index + 1, $total_entries ), Logger::LINE );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating entry %d/%d.', $index + 1, $batch_args['end'] ), Logger::LINE );
 
 			// Check if post exists.
 			if ( in_array( $entry['GUID'], $existing_original_ids ) ) {
