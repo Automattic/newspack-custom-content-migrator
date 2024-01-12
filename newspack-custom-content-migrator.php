@@ -61,6 +61,7 @@ PluginSetup::register_migrators(
 		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
 		Command\General\ProfilePress::class,
+		Command\General\Ras::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
