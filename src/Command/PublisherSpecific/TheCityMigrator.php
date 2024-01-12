@@ -4,9 +4,11 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\General\ChorusCmsMigrator;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use \WP_CLI;
 
@@ -42,6 +44,11 @@ class TheCityMigrator implements InterfaceCommand {
 	private $gutenberg_blocks;
 
 	/**
+	 * @var CoAuthorPlus $cap_logic CoAuthorPlus instance.
+	 */
+	private $cap_logic;
+
+	/**
 	 * Logger instance.
 	 *
 	 * @var Logger Logger instance.
@@ -52,10 +59,11 @@ class TheCityMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts = new PostsLogic();
+		$this->posts              = new PostsLogic();
 		$this->wpblockmanipulator = new WpBlockManipulator();
-		$this->gutenberg_blocks = new GutenbergBlockGenerator();
-		$this->logger = new Logger();
+		$this->gutenberg_blocks   = new GutenbergBlockGenerator();
+		$this->cap_logic          = new CoAuthorPlus();
+		$this->logger             = new Logger();
 	}
 
 	/**
@@ -129,6 +137,15 @@ class TheCityMigrator implements InterfaceCommand {
 		WP_CLI::add_command(
 			'newspack-content-migrator thecity-postlaunch-update-subtitles',
 			[ $this, 'cmd_postlaunch_update_subtitles' ],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator thecity-postlaunch-reset-guest-author-bylines',
+			[ $this, 'cmd_reset_guest_author_bylines' ],
+			[
+				'shortdesc' => 'TheCity has a customized version of CAP which supports displaying custom bylines. This command will migrate existing bylines to the new format.',
+				'synopsis'  => [],
+			]
 		);
 	}
 
@@ -558,5 +575,158 @@ HTML;
 		}
 
 		wp_cache_flush();
+	}
+
+	/**
+	 * This function will handle updating the bylines for all posts which do not already have the custom RT byline set.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments
+	 *
+	 * @return void
+	 */
+	public function cmd_reset_guest_author_bylines( $args, $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_without_updated_byline = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_name, post_content 
+				FROM $wpdb->posts 
+				WHERE ID NOT IN (
+					SELECT DISTINCT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value <> ''
+				) AND post_type = %s AND post_status = %s AND post_content LIKE %s ORDER BY ID ASC",
+				'_the_city_features_post_meta',
+				'post',
+				'publish',
+				'%' . $wpdb->esc_like( 'p-additional-reporters' ) . '%'
+			)
+		);
+
+		/*$posts_without_updated_byline = $wpdb->get_results(
+			"SELECT ID, post_name, post_content FROM $wpdb->posts WHERE ID = 11554"
+		);*/
+
+		foreach ( $posts_without_updated_byline as $post ) {
+			echo "\n\n\n";
+			ConsoleColor::white( 'Processing Post ID:' )
+						->bright_white( $post->ID )
+						->white( 'Post Name:' )
+						->bright_white( $post->post_name )
+						->white( 'Link:' )
+						->bright_white( get_site_url() . '/?p=' . $post->ID )
+						->output();
+			$guest_authors    = $this->cap_logic->get_guest_authors_for_post( $post->ID );
+			$guest_author_ids = array_map(
+				function( $guest_author ) {
+					return $guest_author->ID;
+				},
+				$guest_authors
+			);
+
+			$additional_contributor_meta  = get_post_meta( $post->ID, 'newspack_chorus_additional_contributor_ga_id' );
+			$additional_contributor_meta  = array_filter(
+				$additional_contributor_meta,
+				function( $meta_data ) {
+					return is_numeric( $meta_data ); // There are WP_Error classes which were saved as additional contributors.
+				}
+			);
+			$additional_contributor_meta  = array_unique( $additional_contributor_meta );
+			$additional_contributor_meta  = array_diff( $additional_contributor_meta, $guest_author_ids );
+			$additional_guest_author_objs = [];
+			foreach ( $additional_contributor_meta as $key => $guest_author_id ) {
+				$additional_contributor = $this->cap_logic->get_guest_author_by_id( $guest_author_id );
+
+				if ( $additional_contributor ) {
+					$additional_guest_author_objs[] = $additional_contributor;
+				} else {
+					unset( $additional_contributor_meta[ $key ] );
+				}
+			}
+
+			$all_guest_authors = array_merge( $guest_author_ids, $additional_contributor_meta );
+			$all_guest_authors = array_unique( $all_guest_authors );
+
+			$this->cap_logic->assign_guest_authors_to_post( $all_guest_authors, $post->ID );
+
+			$byline = '';
+
+			$last_guest_author = array_pop( $guest_authors );
+
+			if ( $last_guest_author ) { // Ensure we have at least 1 author for the main part of the byline.
+				$byline = '<p>By ';
+
+				if ( empty( $guest_authors ) ) {
+					$byline .= $this->get_guest_author_byline_html( $last_guest_author );
+				} else {
+					foreach ( $guest_authors as $guest_author ) {
+						$byline .= $this->get_guest_author_byline_html( $guest_author ) . ', ';
+					}
+
+					$byline .= 'and ' . $this->get_guest_author_byline_html( $last_guest_author );
+				}
+
+				$byline .= '</p>';
+			}
+
+			$last_additional_guest_author = array_pop( $additional_guest_author_objs );
+
+			if ( $last_additional_guest_author ) { // Same as above, but for the additional reporting section.
+				if ( empty( $additional_guest_author_objs ) ) {
+					$byline .= '<p>Additional reporting by ' . $this->get_guest_author_byline_html( $last_additional_guest_author ) . '</p>';
+				} else {
+					$byline .= '<p>Additional reporting by ';
+
+					foreach ( $additional_guest_author_objs as $additional_guest_author ) {
+						$byline .= $this->get_guest_author_byline_html( $additional_guest_author ) . ', ';
+					}
+
+					$byline .= 'and ' . $this->get_guest_author_byline_html( $last_additional_guest_author ) . '</p>';
+				}
+			}
+
+			ConsoleColor::white( '----Byline----' )->output();
+			ConsoleColor::bright_white( $byline )->output();
+			ConsoleColor::white( '--------------' )->output();
+
+			$post_content = $post->post_content;
+			if ( str_contains( $post_content, '<!-- wp:paragraph {"className":"p-additional-reporters"} -->' ) ) {
+				// @see https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Command/General/ChorusCmsMigrator.php#L437
+				$double_new_line_pos = strpos( $post_content, "\n\n", strpos( $post_content, '<!-- wp:paragraph {"className":"p-additional-reporters"} -->' ) );
+
+				if ( false === $double_new_line_pos ) {
+					ConsoleColor::yellow( 'Could not find double new line' );
+					continue;
+				}
+
+				$post_content = substr( $post_content, $double_new_line_pos + 2 );
+			}
+
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $post_content,
+				]
+			);
+
+			update_post_meta( $post->ID, '_the_city_features_post_meta', $byline );
+		}
+	}
+
+	/**
+	 * Convenience method for getting the valid RT Camp HTML for a guest author byline.
+	 *
+	 * @param object $guest_author Guest author object.
+	 *
+	 * @return string
+	 */
+	private function get_guest_author_byline_html( object $guest_author ) {
+		$href = site_url() . '/author/' . $guest_author->user_nicename;
+
+		if ( ! empty( $guest_author->website ) ) {
+			$href = $guest_author->website;
+		}
+
+		return "<a data-author-id='{$guest_author->user_nicename}' href='{$href}'>{$guest_author->display_name}</a>";
 	}
 }
