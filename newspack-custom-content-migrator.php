@@ -20,8 +20,8 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 }
 
 require_once ABSPATH . 'wp-settings.php';
-
-PluginSetup::configure_error_reporting();
+$error_reporting_level = false !== defined( 'NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL' ) ? NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL : 'dev';
+PluginSetup::configure_error_reporting( $error_reporting_level );
 PluginSetup::register_ticker();
 PluginSetup::register_migrators(
 	array(
