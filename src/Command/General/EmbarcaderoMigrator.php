@@ -234,6 +234,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'skip-post-media',
+						'description' => 'Skip refreshing the post media in content.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -466,6 +473,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-helper-validate-csv-file',
+			array( $this, 'cmd_embarcadero_helper_validate_csv_file' ),
+			[
+				'shortdesc' => 'A helper command which validates a CSV file and outputs rows with issues.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-file-input',
+						'description' => 'Full path to CSV file which is having issues being read by filecsv( $file, null, "\t" ).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-dates',
 			array( $this, 'cmd_fix_post_times' ),
 			[
@@ -502,6 +526,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$index_to                          = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 		$refresh_content                   = isset( $assoc_args['refresh-content'] ) ? true : false;
 		$skip_post_content                 = isset( $assoc_args['skip-post-content'] ) ? true : false;
+		$skip_post_media                   = isset( $assoc_args['skip-post-media'] ) ? true : false;
 		$update_post_content               = ( $refresh_content && ! $skip_post_content ) || ! $refresh_content;
 
 		// Validate co-authors plugin is active.
@@ -614,7 +639,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// phpcs:ignore
 			$post_content         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
 			$updated_post_content = $update_post_content
-			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items )
+			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_media )
 			: $post_content;
 
 			// Set the original ID.
@@ -1353,7 +1378,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$tsv_array   = fgetcsv( $tsv_file, null, "\t" );
 			$tsv_headers = array_map( 'trim', $tsv_array );
 
-
 			// Read TSV until a faulty row is found, and then set $fixed to false and stop.
 			while (
 				( ( $tsv_row = fgetcsv( $tsv_file, null, "\t" ) ) !== false )
@@ -1406,6 +1430,50 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		if ( true === $fixes_made ) {
 			rename( $file_tmp, $file_output );
 			WP_CLI::success( 'Fixed file saved to: ' . $file_output );
+		}
+	}
+
+	public function cmd_embarcadero_helper_validate_csv_file( $pos_args, $assoc_args ) {
+		$file_input  = $assoc_args['csv-file-input'];
+
+		if ( ! file_exists( $file_input ) ) {
+			WP_CLI::error( 'File does not exist: ' . $file_input );
+		}
+		$csv_file = fopen( $file_input, 'r' );
+		if ( false === $csv_file ) {
+			WP_CLI::error( 'Could not open file: ' . $file_input );
+		}
+		$csv_headers = fgetcsv( $csv_file );
+		if ( false === $csv_headers ) {
+			WP_CLI::error( 'Could not read TSV headers from file: ' . $file_input );
+		}
+
+		do {
+			$fixed = true;
+
+			$tsv_array   = fgetcsv( $csv_file );
+			$csv_headers = array_map( 'trim', $tsv_array );
+
+			$wrong_rows = 0;
+
+			// Read TSV until a faulty row is found, and then set $fixed to false and stop.
+			while (
+				( ( $tsv_row = fgetcsv( $csv_file ) ) !== false )
+			) {
+				if ( count( $tsv_row ) !== count( $csv_headers ) ) {
+					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<' , substr( $tsv_row[0], 0, 50 ) ) );
+					$wrong_rows ++;
+				}
+			}
+
+		} while ( true !== $fixed );
+
+		fclose( $csv_file );
+
+		if ( $wrong_rows > 0 ) {
+			WP_CLI::error( sprintf( "Detected %d wrong rows. Fix them before continuing.", $wrong_rows ) );
+		} else {
+			WP_CLI::success( "No wrong rows detected." );
 		}
 	}
 
@@ -1566,14 +1634,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param string $story_photos_dir_path Path to the directory containing the stories\'s photos files to import.
 	 * @param array  $media Array of media data.
 	 * @param array  $carousel_items Array of carousel items data.
+	 * @param bool   $skip_post_media Whether to skip post media in content.
 	 *
 	 * @return string Migrated post content.
 	 */
-	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items ) {
+	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_media ) {
 		// Story text contains different shortcodes in the format: {shorcode meta meta ...}.
-		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
-		$story_text = $this->migrate_photos( $wp_post_id, $story_text, $photos, $story_photos_dir_path );
+		if ( ! $skip_post_media ) {
+			$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
+			$story_text = $this->migrate_photos( $wp_post_id, $story_text, $photos, $story_photos_dir_path );
+		}
+
 		$story_text = $this->migrate_links( $story_text );
+		$story_text = $this->migrate_links( $story_text );
+		$story_text = $this->migrate_text_styling( $story_text );
 		return $story_text;
 	}
 
@@ -1891,7 +1965,24 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private function migrate_links( $story_text ) {
 		// Links can be in the content in the format [https://www.xyz.com/2023/01/30/abc Example].
 		// We need to convert them to <a href="https://www.xyz.com/2023/01/30/abc">Example</a>.
-		return preg_replace( '/\[(?<url>(http|www)[^\s]+) (?<text>[^\]]+)\]/', '<a href="${1}">${2}</a>', $story_text );
+		return preg_replace( '/\[(?<url>https?:\/\/[^\s\]]+)(\s+(?<text>[^\]]+))?\]/', '<a href="${1}">${2}</a>', $story_text );
+	}
+
+	/**
+	 * Migrate text styling in content.
+	 *
+	 * @param string $story_text Post content.
+	 * @return string Migrated post content.
+	 */
+	private function migrate_text_styling( $story_text ) {
+		// The content contain some styling in the format ==I whatever text here should be italic==.
+		// We need to convert them to <em>whatever text here should be italic</em>.
+		$story_text = preg_replace( '/==I\s+(.*?)==/', '<em>${1}</em>', $story_text );
+		// Same goes for bold.
+		$story_text = preg_replace( '/==B\s+(.*?)==/', '<strong>${1}</strong>', $story_text );
+		// Same goes for italic and bold text at the same time.
+		$story_text = preg_replace( '/==BI\s+(.*?)==/', '<strong><em>${1}</em></strong>', $story_text );
+		return $story_text;
 	}
 
 	/**
