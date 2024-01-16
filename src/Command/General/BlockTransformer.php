@@ -14,7 +14,7 @@ class BlockTransformer implements InterfaceCommand {
 	private GutenbergBlockGenerator $block_generator;
 
 	private function __construct() {
-		$this->posts_logic = new Posts();
+		$this->posts_logic     = new Posts();
 		$this->block_generator = new GutenbergBlockGenerator();
 
 	}
@@ -52,18 +52,24 @@ class BlockTransformer implements InterfaceCommand {
 	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
 		$all_posts = $this->get_all_wp_posts( [ 'publish' ], $assoc_args );
 		foreach ( $all_posts as $post ) {
-			$content = $post->post_content;
-			if ( ! str_contains( $content, '[BT:' ) ) {
-				continue;
+			$content        = $post->post_content;
+			$blocks         = parse_blocks( $content );
+			$encoded_blocks = array_filter( $blocks, function ( $block ) {
+				if ( empty( $block['blockName'] ) || 'core/paragraph' !== $block['blockName'] || empty( $block['innerHTML'] ) ) {
+					return false;
+				}
+
+				return str_contains( $block['innerHTML'], '[BASE64]' );
+			} );
+
+			foreach ( $encoded_blocks as $idx => $encoded ) {
+				$decoded = $this->decode_block( $encoded['innerHTML'] );
+				if ( ! empty( $decoded ) ) {
+					$blocks[ $idx ] = $decoded;
+				}
 			}
-			preg_match_all( '/\\[BT:([A-Za-z0-9+\\/=]+)\\]/', $content, $matches );
-			if ( empty( $matches[0] ) ) {
-				continue;
-			}
-			foreach ( $matches[0] as $match ) {
-				$decoded = $this->decode_block( $match );
-				$content = str_replace( '[BT:' . $match . ']', $decoded, $content );
-			}
+
+			$content = serialize_blocks( $blocks );
 			wp_update_post( [ 'ID' => $post->ID, 'post_content' => $content ] );
 		}
 	}
@@ -77,7 +83,7 @@ class BlockTransformer implements InterfaceCommand {
 			if ( empty( $actual_blocks ) ) {
 				continue;
 			}
-			$encoded_blocks = array_map( fn( $block ) => $this->get_dud_block( $this->encode_block( $block ) ), $actual_blocks );
+			$encoded_blocks = array_map( fn( $block ) => $this->encode_block( $block ), $actual_blocks );
 			foreach ( $encoded_blocks as $idx => $encoded ) {
 				$blocks[ $idx ] = $encoded;
 			}
@@ -86,16 +92,20 @@ class BlockTransformer implements InterfaceCommand {
 		}
 	}
 
-	private function encode_block( array $block ): string {
+	private function encode_block( array $block ): array {
 		$as_string = serialize_block( $block );
 
-		return '[BT:' . base64_encode( $as_string ) . ']';
+		return $this->block_generator->get_paragraph( '[BASE64]' . base64_encode( $as_string ) );// Can't use class names - NCC strips them.
 	}
 
-	public function decode_block( string $encoded_block ): string {
-		$base64 = substr( $encoded_block, 4, - 1 );
+	public function decode_block( string $encoded_block ): array {
+		$base64 = substr( trim( $encoded_block ), 11, - 4 );
+		$parsed = parse_blocks( base64_decode( $base64, true ) );
+		if ( ! empty( $parsed[0]['blockName'] ) ) {
+			return $parsed[0];
+		}
 
-		return "\n" . base64_decode( $base64, true ) . "\n";
+		return [];
 	}
 
 	private function get_dud_block( string $content ) {
