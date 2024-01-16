@@ -473,6 +473,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-helper-validate-csv-file',
+			array( $this, 'cmd_embarcadero_helper_validate_csv_file' ),
+			[
+				'shortdesc' => 'A helper command which validates a CSV file and outputs rows with issues.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-file-input',
+						'description' => 'Full path to CSV file which is having issues being read by filecsv( $file, null, "\t" ).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-dates',
 			array( $this, 'cmd_fix_post_times' ),
 			[
@@ -1361,7 +1378,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$tsv_array   = fgetcsv( $tsv_file, null, "\t" );
 			$tsv_headers = array_map( 'trim', $tsv_array );
 
-
 			// Read TSV until a faulty row is found, and then set $fixed to false and stop.
 			while (
 				( ( $tsv_row = fgetcsv( $tsv_file, null, "\t" ) ) !== false )
@@ -1414,6 +1430,50 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		if ( true === $fixes_made ) {
 			rename( $file_tmp, $file_output );
 			WP_CLI::success( 'Fixed file saved to: ' . $file_output );
+		}
+	}
+
+	public function cmd_embarcadero_helper_validate_csv_file( $pos_args, $assoc_args ) {
+		$file_input  = $assoc_args['csv-file-input'];
+
+		if ( ! file_exists( $file_input ) ) {
+			WP_CLI::error( 'File does not exist: ' . $file_input );
+		}
+		$csv_file = fopen( $file_input, 'r' );
+		if ( false === $csv_file ) {
+			WP_CLI::error( 'Could not open file: ' . $file_input );
+		}
+		$csv_headers = fgetcsv( $csv_file );
+		if ( false === $csv_headers ) {
+			WP_CLI::error( 'Could not read TSV headers from file: ' . $file_input );
+		}
+
+		do {
+			$fixed = true;
+
+			$tsv_array   = fgetcsv( $csv_file );
+			$csv_headers = array_map( 'trim', $tsv_array );
+
+			$wrong_rows = 0;
+
+			// Read TSV until a faulty row is found, and then set $fixed to false and stop.
+			while (
+				( ( $tsv_row = fgetcsv( $csv_file ) ) !== false )
+			) {
+				if ( count( $tsv_row ) !== count( $csv_headers ) ) {
+					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<' , substr( $tsv_row[0], 0, 50 ) ) );
+					$wrong_rows ++;
+				}
+			}
+
+		} while ( true !== $fixed );
+
+		fclose( $csv_file );
+
+		if ( $wrong_rows > 0 ) {
+			WP_CLI::error( sprintf( "Detected %d wrong rows. Fix them before continuing.", $wrong_rows ) );
+		} else {
+			WP_CLI::success( "No wrong rows detected." );
 		}
 	}
 
