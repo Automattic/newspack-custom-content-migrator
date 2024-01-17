@@ -1074,8 +1074,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$index_from                   = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to                     = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 
-		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$sections = $this->get_data_from_csv_or_tsv( $story_sections_csv_file_path );
+		$posts       = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$sections    = $this->get_data_from_csv_or_tsv( $story_sections_csv_file_path );
+		$section_ids = array_column( $sections, 'section_id' );
 
 		// Get selected posts.
 		if ( -1 !== $index_to ) {
@@ -1098,7 +1099,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Set categories from sections data.
 			$imported_category  = '';
-			$post_section_index = array_search( $post['section_id'], array_column( $sections, 'section_id' ) );
+			$post_section_index = array_search( $post['section_id'], $section_ids );
 			if ( false === $post_section_index ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for post %s', $post['section_id'], $post['headline'] ), Logger::WARNING );
 			} else {
