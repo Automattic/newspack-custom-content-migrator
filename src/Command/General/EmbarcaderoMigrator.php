@@ -335,6 +335,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-more-posts-block',
+			array( $this, 'cmd_embarcadero_fix_more_posts_block' ),
+			[
+				'shortdesc' => 'Fix Embarcadero\s post "more posts" block.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-media-file-path',
+						'description' => 'Path to the CSV file containing the stories\'s media to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-images',
 			array( $this, 'cmd_embarcadero_migrate_images' ),
 			[
@@ -992,10 +1016,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$more_posts_blocks[] = $this->gutenberg_block_generator->get_paragraph( '<strong><a href="' . $more_stories_item['more_link'] . '">' . $more_stories_item['more_headline'] . '</a></strong><br>' . $more_stories_item['more_blurb'] );
 				}
 
+				$more_posts_block_group = $this->gutenberg_block_generator->get_group_constrained( $more_posts_blocks, [ 'more-stories', 'alignright' ], [ 'align' => 'right' ] );
+
 				preg_match( '/(?<shortcode>{(?<type>more_stories)(\s+(?<width>(\d|\w)+)?)?(\s+(?<id>\d+)?)?})/', $wp_post->post_content, $match );
 
 				if ( array_key_exists( 'shortcode', $match ) ) {
-					$content = str_replace( $match['shortcode'], serialize_blocks( $more_posts_blocks ), $wp_post->post_content );
+					$content = str_replace( $match['shortcode'], serialize_block( $more_posts_block_group ), $wp_post->post_content );
 
 					wp_update_post(
 						[
@@ -1011,6 +1037,118 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			update_post_meta( $wp_post_id, self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY, $post['story_id'] );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-fix-more-posts-block".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_fix_more_posts_block( $args, $assoc_args ) {
+		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
+		$story_media_csv_file_path = $assoc_args['story-media-file-path'];
+
+		$posts                 = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$media_list            = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
+		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+
+		// Get only posts with already migrated more posts block.
+		$posts = array_values(
+			array_filter(
+				$posts,
+				function( $post ) use ( $imported_original_ids ) {
+					return in_array( $post['story_id'], $imported_original_ids );
+				}
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			$wp_post = get_post( $wp_post_id );
+
+			if ( ! str_contains( $post['story_text'], '{more_stories' ) ) {
+				continue;
+			}
+
+			$more_stories_media = array_values(
+				array_filter(
+					$media_list,
+					function( $media_item ) use ( $post ) {
+						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
+					}
+				)
+			);
+
+			if ( ! empty( $more_stories_media ) ) {
+				$content_blocks    = parse_blocks( $wp_post->post_content );
+				$more_posts_blocks = [ $this->gutenberg_block_generator->get_heading( 'More stories' ) ];
+
+				foreach ( $more_stories_media as $more_stories_item ) {
+					$more_posts_blocks[] = $this->gutenberg_block_generator->get_paragraph( '<strong><a href="' . $more_stories_item['more_link'] . '">' . $more_stories_item['more_headline'] . '</a></strong><br>' . $more_stories_item['more_blurb'] );
+				}
+
+				$more_posts_block_group = $this->gutenberg_block_generator->get_group_constrained( $more_posts_blocks, [ 'more-stories', 'alignright' ], [ 'align' => 'right' ] );
+
+				// Check if the post contains more than one "More stories" block.
+				if ( 1 < substr_count( $wp_post->post_content, '>More stories<' ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Post %d with the ID %d contains more than one "More stories" block.', $post['story_id'], $wp_post_id ), Logger::WARNING );
+					continue;
+				}
+
+				// Find the 'More stories' heading block index.
+				$more_stories_heading_block_index = array_search(
+					$this->gutenberg_block_generator->get_heading( 'More stories' )['innerHTML'],
+					array_column( $content_blocks, 'innerHTML' ),
+					true
+				);
+
+				// Check if the post contains the "More stories" heading block.
+				if ( false === $more_stories_heading_block_index ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Post %d with the ID %d does not contain the "More stories" heading block.', $post['story_id'], $wp_post_id ), Logger::WARNING );
+					continue;
+				}
+
+				$indexes_to_remove = [ $more_stories_heading_block_index ];
+
+				$blocks_count = count( $content_blocks );
+				for ( $i = $more_stories_heading_block_index + 1; $i < $blocks_count; $i++ ) {
+					if (
+						'core/paragraph' === $content_blocks[ $i ]['blockName']
+						&& str_starts_with( $content_blocks[ $i ]['innerHTML'], '<p><strong><a href="' )
+						 ) {
+						$indexes_to_remove[] = $i;
+					} else {
+						break;
+					}
+				}
+
+				// Delete the blocks.
+				foreach ( $indexes_to_remove as $index_to_remove ) {
+					unset( $content_blocks[ $index_to_remove ] );
+				}
+
+				// Insert the new block.
+				array_splice( $content_blocks, $more_stories_heading_block_index, 0, [ $more_posts_block_group ] );
+
+				wp_update_post(
+					[
+						'ID'           => $wp_post_id,
+						'post_content' => serialize_blocks( $content_blocks ),
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find more_stories %s for the post %d', $post['story_id'], $wp_post_id ), Logger::WARNING );
+			}
 		}
 	}
 
@@ -1527,7 +1665,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_embarcadero_helper_validate_csv_file( $pos_args, $assoc_args ) {
-		$file_input  = $assoc_args['csv-file-input'];
+		$file_input = $assoc_args['csv-file-input'];
 
 		if ( ! file_exists( $file_input ) ) {
 			WP_CLI::error( 'File does not exist: ' . $file_input );
@@ -1554,19 +1692,18 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				( ( $tsv_row = fgetcsv( $csv_file ) ) !== false )
 			) {
 				if ( count( $tsv_row ) !== count( $csv_headers ) ) {
-					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<' , substr( $tsv_row[0], 0, 50 ) ) );
+					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<', substr( $tsv_row[0], 0, 50 ) ) );
 					$wrong_rows ++;
 				}
 			}
-
 		} while ( true !== $fixed );
 
 		fclose( $csv_file );
 
 		if ( $wrong_rows > 0 ) {
-			WP_CLI::error( sprintf( "Detected %d wrong rows. Fix them before continuing.", $wrong_rows ) );
+			WP_CLI::error( sprintf( 'Detected %d wrong rows. Fix them before continuing.', $wrong_rows ) );
 		} else {
-			WP_CLI::success( "No wrong rows detected." );
+			WP_CLI::success( 'No wrong rows detected.' );
 		}
 	}
 
