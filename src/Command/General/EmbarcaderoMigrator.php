@@ -1062,7 +1062,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 					$content = str_replace( $match['shortcode'], $photo_block_html, $content );
 				} else {
-					$this->logger->log( self::LOG_FILE, sprintf( 'Could not find mediafor the timeline %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not find media for the timeline %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
 					continue;
 				}
 			}
