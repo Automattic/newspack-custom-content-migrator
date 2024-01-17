@@ -32,17 +32,19 @@ class BlockTransformer implements InterfaceCommand {
 			'synopsis' => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--min-post-id=<post-id>]',
 		];
 
-		WP_CLI::add_command( 'newspack-content-migrator transform-blocks-encode',
+		WP_CLI::add_command(
+			'newspack-content-migrator transform-blocks-encode',
 			[ $this, 'cmd_blocks_encode' ],
 			[
-				'shortdesc' => '"Obfuscate" blocks in posts by encoding them as base64.', //TODO
+				'shortdesc' => '"Obfuscate" blocks in posts by encoding them as base64.',
 				...$generic_args,
 			]
 		);
-		WP_CLI::add_command( 'newspack-content-migrator transform-blocks-decode',
+		WP_CLI::add_command(
+			'newspack-content-migrator transform-blocks-decode',
 			[ $this, 'cmd_blocks_decode' ],
 			[
-				'shortdesc' => '"Un-obfuscate" blocks in posts by decoding them.', //TODO
+				'shortdesc' => '"Un-obfuscate" blocks in posts by decoding them.',
 				...$generic_args,
 			]
 		);
@@ -68,7 +70,12 @@ class BlockTransformer implements InterfaceCommand {
 			}
 
 			$content = serialize_blocks( $blocks );
-			wp_update_post( [ 'ID' => $post->ID, 'post_content' => $content ] );
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $content,
+				]
+			);
 			WP_CLI::log( sprintf( 'Decoded %d blocks in post %d', count( $encoded_blocks ), $post->ID ) );
 		}
 	}
@@ -87,7 +94,12 @@ class BlockTransformer implements InterfaceCommand {
 				$blocks[ $idx ] = $encoded;
 			}
 			$content = serialize_blocks( $blocks );
-			wp_update_post( [ 'ID' => $post->ID, 'post_content' => $content ] );
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $content,
+				]
+			);
 		}
 	}
 
