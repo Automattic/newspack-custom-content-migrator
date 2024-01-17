@@ -61,6 +61,7 @@ PluginSetup::register_migrators(
 		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
 		Command\General\ProfilePress::class,
+		Command\General\Ras::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
@@ -68,6 +69,7 @@ PluginSetup::register_migrators(
 		Command\General\LedeMigrator::class,
 		Command\General\DownloadMissingImages::class,
 		Command\General\MigrationHelper::class,
+		Command\General\MediumMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\GadisMigrator::class,
@@ -98,5 +100,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BlockClubChicagoMigrator::class,
 		Command\PublisherSpecific\BaristanetMigrator::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
+		Command\PublisherSpecific\WindyCityMigrator::class,
+		Command\PublisherSpecific\InjusticeWatchMigrator::class,
 	)
 );
