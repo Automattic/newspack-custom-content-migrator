@@ -74,6 +74,111 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY    = '_newspack_media_import_id';
 	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
+	const ALLOWED_CATEGORIES = [
+		'a&e',
+		'alameda county',
+		'alamo',
+		'atherton',
+		'belle haven',
+		'blackhawk',
+		'business',
+		'city government',
+		'city politics',
+		'coastside',
+		'community',
+		'community leaders',
+		'contra costa county',
+		'courts',
+		'cover story',
+		'covid',
+		'crime',
+		'danville',
+		'dublin',
+		'east palo alto',
+		'editorial',
+		'education ',
+		'election',
+		'enterprise story',
+		'environment',
+		'family/lifestyle',
+		'fire/wildfire',
+		'food',
+		'guest opinion',
+		'health',
+		'health care',
+		'housing',
+		'investigative story',
+		'ladera',
+		'land use',
+		'livermore',
+		'los altos',
+		'los altos hills',
+		'menlo park',
+		'mountain view',
+		'neighborhood',
+		'north fair oaks',
+		'obituary',
+		'outdoor recreation',
+		'palo alto',
+		'peninsula',
+		'pleasanton',
+		'police',
+		'portola valley',
+		'poverty',
+		'profile',
+		'real estate',
+		'redwood city',
+		'regional politics',
+		'san carlos',
+		'san mateo county',
+		'san ramon',
+		'san ramon valley',
+		'santa clara county',
+		'seniors',
+		'social justice',
+		'social services',
+		'sports',
+		'stanford',
+		'stanford university',
+		'state',
+		'sunol',
+		'technology',
+		'traffic',
+		'transportation',
+		'tri-valley',
+		'video',
+		'woodside',
+		'youth',
+		'top stories',
+		'palo alto news',
+		'around the region',
+		'palo alto people',
+		'palo alto city',
+		'palo alto schools',
+		'editorials',
+		'guest opinion',
+		'letters to the editor',
+		'news',
+		'roundup',
+		'feature',
+		'profile',
+		'features',
+		'meet the artist',
+		'news & events',
+		'coming up',
+		'arts',
+		'home improvement',
+		'neighborhoods',
+		'home sales',
+		'diablo',
+		'walnut creek',
+		'pet of the week',
+		'community leaders',
+		'city limits',
+		'triumph',
+		'community kindness',
+	];
+
 	/**
 	 * Instance.
 	 *
@@ -553,6 +658,44 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-rearrange-categories',
+			array( $this, 'cmd_embarcadero_rearrange_categories' ),
+			[
+				'shortdesc' => 'Import Embarcadero\'s post content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-from',
+						'description' => 'Start importing from this index in the CSV file.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-to',
+						'description' => 'Import till this index in the CSV file.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-sections-file-path',
+						'description' => 'Path to the CSV file containing the stories\'s sections (categories) to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -763,8 +906,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			if ( false === $post_section_index ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for post %s', $post['section_id'], $post['headline'] ), Logger::WARNING );
 			} else {
-				$section     = $sections[ $post_section_index ];
-				$category_id = $this->get_or_create_category( $section['section'] );
+				$section = $sections[ $post_section_index ];
+
+				if ( ! in_array( strtolower( $section['section'] ), self::ALLOWED_CATEGORIES ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Section %s is not allowed for post %s', $section['section'], $post['headline'] ), Logger::WARNING );
+					// Create and set "General" as the post category.
+					$category_id = $this->get_or_create_category( 'General' );
+				} else {
+					$category_id = $this->get_or_create_category( $section['section'] );
+				}
 
 				if ( $category_id ) {
 					wp_set_post_categories( $wp_post_id, [ $category_id ] );
@@ -914,7 +1064,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	/**
 	 * Get a date string with site timezone from a timestamp.
 	 *
-	 * @param int $timestamp
+	 * @param int $timestamp Timestamp.
 	 *
 	 * @return string Date in format Y-m-d H:i:s in the site timezone.
 	 */
@@ -928,8 +1078,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	/**
 	 * Fixes dates on posts to match the site timezone.
 	 *
-	 * @param array $args
-	 * @param array $assoc_args
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
 	 *
 	 * @return void
 	 */
@@ -957,6 +1107,68 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$this->logger->log( $log_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
 			}
 			$this->logger->log( $log_file, sprintf( 'Fixed date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-rearrange-categories".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_rearrange_categories( $args, $assoc_args ) {
+		$story_csv_file_path          = $assoc_args['story-csv-file-path'];
+		$story_sections_csv_file_path = $assoc_args['story-sections-file-path'];
+		$index_from                   = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
+		$index_to                     = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
+
+		$posts       = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$sections    = $this->get_data_from_csv_or_tsv( $story_sections_csv_file_path );
+		$section_ids = array_column( $sections, 'section_id' );
+
+		// Get selected posts.
+		if ( -1 !== $index_to ) {
+			$posts = array_slice( $posts, $index_from, $index_to - $index_from + 1 );
+		}
+
+		foreach ( $posts as $post_index => $post ) {
+			// Get the post.
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log(
+					self::LOG_FILE,
+					sprintf( 'Entry not found %s.', $post['story_id'] ),
+					$this->logger::WARNING
+				);
+
+				continue;
+			}
+
+			// Set categories from sections data.
+			$imported_category  = '';
+			$post_section_index = array_search( $post['section_id'], $section_ids );
+			if ( false === $post_section_index ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for post %s', $post['section_id'], $post['headline'] ), Logger::WARNING );
+			} else {
+				$section = $sections[ $post_section_index ];
+
+				if ( ! in_array( strtolower( $section['section'] ), self::ALLOWED_CATEGORIES ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Section %s is not allowed for post %s', $section['section'], $post['headline'] ), Logger::WARNING );
+					// Create and set "General" as the post category.
+					$category_id       = $this->get_or_create_category( 'General' );
+					$imported_category = 'General';
+				} else {
+					$category_id       = $this->get_or_create_category( $section['section'] );
+					$imported_category = $section['section'];
+				}
+
+				if ( $category_id ) {
+					wp_set_post_categories( $wp_post_id, [ $category_id ] );
+				}
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( '(%d/%d) Post %d category: %s', $post_index + 1, count( $posts ), $wp_post_id, $imported_category ), Logger::SUCCESS );
 		}
 	}
 
