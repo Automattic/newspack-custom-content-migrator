@@ -29,7 +29,7 @@ class BlockTransformer implements InterfaceCommand {
 
 	public function register_commands(): void {
 		$generic_args = [
-			'synopsis' => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--min-post-id=<post-id>]',
+			'synopsis' => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--min-post-id=<post-id>] [--max-post-id=<post-id>]',
 		];
 
 		WP_CLI::add_command(
@@ -85,7 +85,7 @@ class BlockTransformer implements InterfaceCommand {
 		foreach ( $all_posts as $post ) {
 			$content       = $post->post_content;
 			$blocks        = parse_blocks( $content );
-			$actual_blocks = array_filter( $blocks, fn( $block ) => ! empty( $block['blockName'] ) );
+			$actual_blocks = array_filter( $blocks, fn( $block ) => ! empty( $block['blockName'] ) && ! str_contains( $block['innerHTML'], '[BLOCK-TRANSFORMER:' ) );
 			if ( empty( $actual_blocks ) ) {
 				continue;
 			}
@@ -126,15 +126,20 @@ class BlockTransformer implements InterfaceCommand {
 		return [];
 	}
 
-	private function get_all_wp_posts( array $post_statuses = [ 'publish' ], array $assoc_args = [], bool $log_progress = false ): iterable {
+	private function get_all_wp_posts( array $post_statuses = [ 'publish' ], array $assoc_args = [], bool $log_progress = true ): iterable {
 		if ( ! empty( $assoc_args['post-id'] ) ) {
 			$all_ids = [ $assoc_args['post-id'] ];
+		} elseif ( ! empty( $assoc_args['min-post-id'] ) || ! empty( $assoc_args['max-post-id'] ) ) {
+			$low = $assoc_args['min-post-id'] ?? 0;
+			$high = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
+			$all_ids = $this->posts_logic->get_post_ids_in_range( $low, $high, [ 'post' ], $post_statuses );
 		} else {
 			$all_ids = $this->posts_logic->get_all_posts_ids( 'post', $post_statuses );
-			if ( ! empty( $assoc_args['num-items'] ) ) {
-				$all_ids = array_slice( $all_ids, 0, $assoc_args['num-items'] );
-			}
 		}
+		if ( ! empty( $assoc_args['num-items'] ) ) {
+			$all_ids = array_slice( $all_ids, 0, $assoc_args['num-items'] );
+		}
+
 		$total_posts = count( $all_ids );
 		$home_url    = home_url();
 		$counter     = 0;
