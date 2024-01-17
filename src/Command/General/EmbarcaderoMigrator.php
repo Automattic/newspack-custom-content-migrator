@@ -311,6 +311,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-timeline-block',
+			array( $this, 'cmd_embarcadero_migrate_timeline_block' ),
+			[
+				'shortdesc' => 'Import Embarcadero\s post "timeline" block.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-media-file-path',
+						'description' => 'Path to the CSV file containing the stories\'s media to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-images',
 			array( $this, 'cmd_embarcadero_migrate_images' ),
 			[
@@ -987,6 +1011,75 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			update_post_meta( $wp_post_id, self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY, $post['story_id'] );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-timeline-block".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_timeline_block( $args, $assoc_args ) {
+		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
+		$story_media_csv_file_path = $assoc_args['story-media-file-path'];
+
+		$posts      = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$media_list = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
+
+		foreach ( $posts as $post_index => $post ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Importing timeline for the post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
+
+			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
+
+			if ( ! $wp_post_id ) {
+				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			$wp_post = get_post( $wp_post_id );
+
+			if ( ! str_contains( $post['story_text'], '{timeline' ) ) {
+				continue;
+			}
+
+			// Timeline can be in the content in the format {timeline 40 25877}
+			// where 40 is the percentage of the column and 25877 is the media ID.
+			$content = $wp_post->post_content;
+			preg_match_all( '/(?<shortcode>{timeline (?<width>(\d|\w)+) (?<id>\d+)})/', $content, $matches, PREG_SET_ORDER );
+
+			foreach ( $matches as $match ) {
+				$media_index = array_search( $match['id'], array_column( $media_list, 'media_id' ) );
+				if ( false !== $media_index ) {
+					$timeline_media = $media_list[ $media_index ];
+
+					if ( ! str_starts_with( $timeline_media['media_link'], '<iframe' ) ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find iframe code for the post %d', $wp_post_id ), Logger::WARNING );
+						continue;
+					}
+
+					$photo_block_html = serialize_block( $this->gutenberg_block_generator->get_html( $timeline_media['media_link'] ) );
+
+					$content = str_replace( $match['shortcode'], $photo_block_html, $content );
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not find media for the timeline %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
+					continue;
+				}
+			}
+
+			if ( $content !== $wp_post->post_content ) {
+				$content = str_replace( '<p><!-- wp:html -->', '<!-- wp:html -->', $content );
+				$content = str_replace( '<!-- /wp:html --></p>', '<!-- /wp:html -->', $content );
+
+				wp_update_post(
+					[
+						'ID'           => $wp_post_id,
+						'post_content' => $content,
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
+			}
 		}
 	}
 
