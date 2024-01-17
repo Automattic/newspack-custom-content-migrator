@@ -16,10 +16,9 @@ class BlockTransformer implements InterfaceCommand {
 	private function __construct() {
 		$this->posts_logic     = new Posts();
 		$this->block_generator = new GutenbergBlockGenerator();
-
 	}
 
-	public static function get_instance() {
+	public static function get_instance(): self {
 		static $instance;
 		if ( null === $instance ) {
 			$instance = new self();
@@ -28,11 +27,11 @@ class BlockTransformer implements InterfaceCommand {
 		return $instance;
 	}
 
-	public function register_commands() {
+	public function register_commands(): void {
 		$generic_args = [
 			'synopsis' => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--min-post-id=<post-id>]',
-//			'before_invoke' => [ $this, 'check_requirements' ], TODO? Maybe, maybe not.
 		];
+
 		WP_CLI::add_command( 'newspack-content-migrator transform-blocks-encode',
 			[ $this, 'cmd_blocks_encode' ],
 			[
@@ -54,23 +53,23 @@ class BlockTransformer implements InterfaceCommand {
 		foreach ( $all_posts as $post ) {
 			$content        = $post->post_content;
 			$blocks         = parse_blocks( $content );
-			$encoded_blocks = array_filter( $blocks, function ( $block ) {
-				if ( empty( $block['blockName'] ) || 'core/paragraph' !== $block['blockName'] || empty( $block['innerHTML'] ) ) {
-					return false;
-				}
+			$encoded_blocks = array_filter( $blocks, fn( $block ) => str_contains( $block['innerHTML'], '[BLOCK-TRANSFORMER:' ) );
 
-				return str_contains( $block['innerHTML'], '[BASE64]' );
-			} );
-
+			if ( empty( $encoded_blocks ) ) {
+				continue;
+			}
 			foreach ( $encoded_blocks as $idx => $encoded ) {
 				$decoded = $this->decode_block( $encoded['innerHTML'] );
 				if ( ! empty( $decoded ) ) {
 					$blocks[ $idx ] = $decoded;
+				} else {
+					WP_CLI::log( sprintf( 'Failed to decode block %d in post %d', $idx, $post->ID ) );
 				}
 			}
 
 			$content = serialize_blocks( $blocks );
 			wp_update_post( [ 'ID' => $post->ID, 'post_content' => $content ] );
+			WP_CLI::log( sprintf( 'Decoded %d blocks in post %d', count( $encoded_blocks ), $post->ID ) );
 		}
 	}
 
@@ -95,12 +94,19 @@ class BlockTransformer implements InterfaceCommand {
 	private function encode_block( array $block ): array {
 		$as_string = serialize_block( $block );
 
-		return $this->block_generator->get_paragraph( '[BASE64]' . base64_encode( $as_string ) );// Can't use class names - NCC strips them.
+		$anchor = '[BLOCK-TRANSFORMER:' . base64_encode( $as_string ) . ']';
+
+		return $this->block_generator->get_paragraph( $anchor );// Can't use class names - NCC strips them.
 	}
 
 	public function decode_block( string $encoded_block ): array {
-		$base64 = substr( trim( $encoded_block ), 11, - 4 );
-		$parsed = parse_blocks( base64_decode( $base64, true ) );
+		// See https://base64.guru/learn/base64-characters for chars in base64.
+		preg_match( '/\[BLOCK-TRANSFORMER:([A-Za-z0-9+\\/=]+)\]/', $encoded_block, $matches );
+		if ( empty( $matches[1] ) ) {
+			return [];
+		}
+
+		$parsed = parse_blocks( base64_decode( $matches[1], true ) );
 		if ( ! empty( $parsed[0]['blockName'] ) ) {
 			return $parsed[0];
 		}
@@ -108,22 +114,13 @@ class BlockTransformer implements InterfaceCommand {
 		return [];
 	}
 
-	private function get_dud_block( string $content ) {
-		return [
-			'blockName'    => null,
-			'attrs'        => [],
-			'innerHTML'    => $content,
-			'innerContent' => [ $content ],
-		];
-	}
-
-	private function get_all_wp_posts( array $post_statuses = [ 'publish' ], array $args = [], bool $log_progress = true ): iterable {
-		if ( ! empty( $args['post-id'] ) ) {
-			$all_ids = [ $args['post-id'] ];
+	private function get_all_wp_posts( array $post_statuses = [ 'publish' ], array $assoc_args = [], bool $log_progress = false ): iterable {
+		if ( ! empty( $assoc_args['post-id'] ) ) {
+			$all_ids = [ $assoc_args['post-id'] ];
 		} else {
 			$all_ids = $this->posts_logic->get_all_posts_ids( 'post', $post_statuses );
-			if ( ! empty( $args['num-posts'] ) ) {
-				$all_ids = array_slice( $all_ids, 0, $args['num-posts'] );
+			if ( ! empty( $assoc_args['num-items'] ) ) {
+				$all_ids = array_slice( $all_ids, 0, $assoc_args['num-items'] );
 			}
 		}
 		$total_posts = count( $all_ids );
