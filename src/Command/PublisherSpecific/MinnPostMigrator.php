@@ -12,6 +12,7 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use stdClass;
 use \WP_CLI;
 use \WP_Query;
 use \WP_User_Query;
@@ -80,6 +81,18 @@ class MinnPostMigrator implements InterfaceCommand {
 		WP_CLI::add_command(
 			'newspack-content-migrator minnpost-set-authors-by-subtitle-byline',
 			[ $this, 'cmd_set_authors_by_subtitle_byline' ],
+			[
+				'shortdesc' => 'Convert old post meta to CAP GAs (or matching WP User) and assign to Post.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Run the code without making any changes to the database.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
 		);
 
 		WP_CLI::add_command(
@@ -93,26 +106,40 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		global $wpdb;
 
+		$dry_run = ( isset( $assoc_args['dry-run'] ) );
 		$log_file = 'minnpost_set_authors_by_subtitle_byline.txt';
-		$byline_meta_key = '_mp_subtitle_settings_byline';
-		$result_meta_key = 'newspack_minnpost_subtitle_byline_result';
+		
+		$meta_key_byline = '_mp_subtitle_settings_byline';
+		$meta_key_result = 'newspack_minnpost_subtitle_byline_result';
+		
 		$allowed_wp_user_roles = array( 'administrator', 'editor', 'author', 'contributor', 'staff' );
 
+		$result_types = new stdClass();
+		$result_types->already_exists_on_post = 'already_exists_on_post';
+		$result_types->assigned_existing_ga_to_post = 'assigned_existing_ga_to_post';
+
+		$report = array();
+		$report_add = function( $key ) use( &$report ) {
+			if( empty( $report[$key] ) ) $report[$key] = 0;
+			$report[$key]++;
+		};
+
+		// start
 		$this->logger->log( $log_file, 'Setting authors by subtitle byline.' );
-		
-		// select posts with byline subtitle meta
+
+		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
-			'posts_per_page' => 1,
+			'posts_per_page' => -1,
 			// 'p'			=> 78790, // multiple authors without match
 			// 'p' 			=> 38325, // single author with match
 			'fields'		=> 'ids',
 			'meta_query'    => [
 				[
-					'key'     => $byline_meta_key,
+					'key'     => $meta_key_byline,
 					'compare' => 'EXISTS',
 				],
 				[
-					'key'     => $result_meta_key,
+					'key'     => $meta_key_result,
 					'compare' => 'NOT EXISTS',
 				],
 			]
@@ -124,25 +151,51 @@ class MinnPostMigrator implements InterfaceCommand {
 			
 			$this->logger->log( $log_file, '-- Post ID: ' . $post_id  );
 
-			$byline = get_post_meta( $post_id, $byline_meta_key, true );
+			// get byline
+			$byline = get_post_meta( $post_id, $meta_key_byline, true );
 			$this->logger->log( $log_file, 'Byline (raw): ' . $byline  );
 
-			// clean byline
-			$byline = preg_replace( '/^By\s{1}/', '', $byline );
+			// remove starting "By "
+			$byline = preg_replace( '/^By\s+/', '', $byline );
+			$byline = trim( $byline );
+
+			// skip for now: commas, "and", &, etc.
+			$byline_arr = preg_split( '/(,|&|and)/', $byline, -1, PREG_SPLIT_DELIM_CAPTURE );
+			if( 1 !== count( $byline_arr ) ) {
+				$this->logger->log( $log_file, 'Skipping difficult bylines for now.', $this->logger::WARNING );
+				$report_add('skipping difficult');
+				continue;
+			}
+
+			// skip for now: if it's not normal firstname lastname
+			if( ! preg_match( '/^[A-Za-z]+ [A-Za-z]+$/', $byline ) ) {
+				$this->logger->log( $log_file, 'Skipping non first last for now.', $this->logger::WARNING );
+				$report_add('skipping non first last for now');
+				continue;
+			}
+
+			// cleaned byline
 			$this->logger->log( $log_file, 'Byline (cleaned): ' . $byline  );
 
-			// check if author already exists
+			$report_add('normal name');
+
+			// check if author already exists on this post
 			$exists = ( function () use ( $post_id, $byline, $log_file ) {
 				foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
-					$this->logger->log( $log_file, 'Author type: ' . get_class( $author ) );
-					$this->logger->log( $log_file, 'Author display name: ' . $author->display_name );
+					// $this->logger->log( $log_file, 'Author type: ' . get_class( $author ) );
+					// $this->logger->log( $log_file, 'Author display name: ' . $author->display_name );
 					if( $byline === $author->display_name ) return true;
 				}
 			} )(); // call function
 
+//todo: what if existing author on post is already "Beth Smith, Phd" but the byline is "Beth Smith"?
+
 			if( $exists ) {
 				$this->logger->log( $log_file, 'Author already exists on post.', $this->logger::SUCCESS );
-				update_post_meta( $post_id, $result_meta_key, 'aleady_exists_on_post' );
+				if( ! $dry_run ) {
+					update_post_meta( $post_id, $meta_key_result, $result_types->already_exists_on_post );
+				}
+				$report_add('author already exists on post');
 				continue;
 			}
 
@@ -152,16 +205,18 @@ class MinnPostMigrator implements InterfaceCommand {
 			// multiple GAs found?
 			if( is_array( $guest_author ) && count( $guest_author ) > 1 ) {
 				$this->logger->log( $log_file, 'Mutliple GAs were found for display name?', $this->logger::WARNING );
+				$report_add('multiple gas');
 				continue;
 			}
 
 			// if single object (not array), then assign to post
 			if( is_object( $guest_author ) ) {
-
-				$this->coauthorsplus->assign_guest_authors_to_post( array( $guest_author->ID ), $post_id );
-				update_post_meta( $post_id, $result_meta_key, 'assigned_existing_guest_author' );
-
-				$this->logger->log( $log_file, 'Assigned existing guest author to post.', $this->logger::SUCCESS );
+				$this->logger->log( $log_file, 'Assigned existing GA to post.', $this->logger::SUCCESS );
+				if( ! $dry_run ) {
+					$this->coauthorsplus->assign_guest_authors_to_post( array( $guest_author->ID ), $post_id );
+					update_post_meta( $post_id, $meta_key_result, $result_types->assigned_existing_ga_to_post );
+				}
+				$report_add('assigned existing ga to post');
 				continue;
 			}
 
@@ -174,7 +229,8 @@ class MinnPostMigrator implements InterfaceCommand {
 			
 			// multiple matching wp_users?
 			if( $wp_user_query->get_total() > 1 ) {
-				$this->logger->log( $log_file, 'Mutliple WP_Users were found for display name?', $this->logger::WARNING );
+				$this->logger->log( $log_file, 'Mutliple WP_Users matched display name?', $this->logger::WARNING );
+				$report_add('mutliple wp users');
 				continue;
 			} 
 
@@ -185,7 +241,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 				// sanity check incase wp_user_query "search" wasn't exact match, perform exact match here
 				if( 0 !== strcmp( $wp_user->display_name, $byline ) ) {
-					$this->logger->log( $log_file, 'Found WP_User not exact display name?', $this->logger::WARNING );
+					$this->logger->log( $log_file, 'Found WP_User not exact match display name?', $this->logger::WARNING );
+					$report_add('found wp_user does not match name');
 					continue;	
 				}
 
@@ -200,15 +257,21 @@ class MinnPostMigrator implements InterfaceCommand {
 				// }
 
 				echo "need to assign wp user to post";
+				echo "is ! dry run";
 				exit();
 				
 	
 			}
 
-			// create a guest author and assign to post?
+			echo "are you sure the wp user didn't return any results?????";
 
+			// create a guest author and assign to post
+			$this->logger->log( $log_file, 'create a guest author and assign to post' );
+			$report_add('todo: create guest ga and assign');
 
 		} // foreach
+
+		print_r($report);
 
 		wp_cache_flush();
 
