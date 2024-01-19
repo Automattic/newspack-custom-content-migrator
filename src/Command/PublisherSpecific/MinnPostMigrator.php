@@ -101,7 +101,9 @@ class MinnPostMigrator implements InterfaceCommand {
 		// enum for meta values
 		$result_types = new stdClass();
 		$result_types->already_exists_on_post = 'already_exists_on_post';
-		$result_types->assign_to_existing_ga = 'assign_to_existing_ga';
+		$result_types->assigned_to_existing_ga = 'assigned_to_existing_ga';
+		$result_types->assigned_to_existing_wp_user = 'assigned_to_existing_wp_user';
+		$result_types->assigned_to_new_ga = 'assigned_to_new_ga';
 		$result_types->maybe_exists_on_post = 'maybe_exists_on_post';
 		$result_types->maybe_ga_exists = 'maybe_ga_exists';
 		$result_types->skipping_non_first_last = 'skipping_non_first_last';
@@ -113,11 +115,23 @@ class MinnPostMigrator implements InterfaceCommand {
 			$report[$key]++;
 		};
 
+		// allowed wp users to assign posts to 
+		$allowed_wp_users = ( function() {
+			$wp_user_query = new WP_User_Query( [
+				'role__in' => array( 'administrator', 'editor', 'author', 'contributor', 'staff' ),
+			]);
+			$users = [];
+			foreach( $wp_user_query->get_results() as $user ) {
+				$users[$user->ID] = $user->display_name;
+			}
+			return $users;
+		})(); // run function
+	
 		// start
 		$this->logger->log( $log_file, 'Setting authors by subtitle byline.' );
 
 		// do while rows exist (ie: return value is true)
-		while( $this->set_authors_by_subtitle_byline( $log_file, $result_types, $report_add ) ) {
+		while( $this->set_authors_by_subtitle_byline( $log_file, $result_types, $report_add, $allowed_wp_users ) ) {
 			$this->logger->log( $log_file, print_r( $report, true ) );
 		}
 
@@ -157,25 +171,20 @@ class MinnPostMigrator implements InterfaceCommand {
 		wp_cache_flush();
 	}
 
-	private function set_authors_by_subtitle_byline( $log_file, $result_types, $report_add ) {
+	private function set_authors_by_subtitle_byline( $log_file, $result_types, $report_add, $allowed_wp_users ) {
 
 		global $wpdb;
 
 		// meta keys for main query and reporting		
 		$meta_key_byline = '_mp_subtitle_settings_byline';
 		$meta_key_result = 'newspack_minnpost_subtitle_byline_result';
-		
-		// limit assigning post to these wp roles if a wp user was found
-		$allowed_wp_user_roles = array( 'administrator', 'editor', 'author', 'contributor', 'staff' );
 
 		// start
 		$this->logger->log( $log_file, '---- New batch.' );
 
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
-			'posts_per_page' => 10,
-			// 'p'			=> 78790, // multiple authors without match
-			// 'p' 			=> 38325, // single author with match
+			'posts_per_page' => 100,
 			'fields'		=> 'ids',
 			'meta_query'    => [
 				[
@@ -230,7 +239,7 @@ class MinnPostMigrator implements InterfaceCommand {
 						&& false !== strpos( $author->display_name, $name_parts[2] ) 
 					) return 'maybe';
 				}
-			})(); // call function
+			})(); // run function
 
 			if( 'yes' === $exists ) {
 				update_post_meta( $post_id, $meta_key_result, $result_types->already_exists_on_post );
@@ -264,16 +273,14 @@ class MinnPostMigrator implements InterfaceCommand {
 
 				// if an exact match was in the query
 				foreach( $gas as $ga ) {
-					if( $ga->display_name === $byline ) return $ga->ID;
+					if( $ga->display_name === $byline ) return (int) $ga->ID;
 				}
 
 				// something was returned from the query, just not an exact match
 				return 'maybe';
 
-			})(); // call function
+			})(); // run function
 
-			echo $ga_exists;
-			
 			if( 'maybe' === $ga_exists ) {
 				update_post_meta( $post_id, $meta_key_result, $result_types->maybe_ga_exists );
 				$this->logger->log( $log_file, $result_types->maybe_ga_exists, $this->logger::WARNING );
@@ -284,66 +291,30 @@ class MinnPostMigrator implements InterfaceCommand {
 			// if ga ID, then assign to post
 			if( is_int( $ga_exists ) && $ga_exists > 0 ) {
 				$this->coauthorsplus->assign_guest_authors_to_post( array( $ga_exists ), $post_id );
-				update_post_meta( $post_id, $meta_key_result, $result_types->assign_to_existing_ga );
-				$this->logger->log( $log_file, $result_types->assign_to_existing_ga, $this->logger::SUCCESS );
-				$report_add( $result_types->assign_to_existing_ga );
+				update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_ga );
+				$this->logger->log( $log_file, $result_types->assigned_to_existing_ga, $this->logger::SUCCESS );
+				$report_add( $result_types->assigned_to_existing_ga );
 				continue;
 			}
 
-			exit();
-
-			// attempt to assign to a wp user
-			$wp_user_query = new WP_User_Query([
-				'role__in' => $allowed_wp_user_roles,
-				'search' => $byline,
-				'search_columns' => array( 'display_name' ),
-			]);
-			
-			// multiple matching wp_users?
-			if( $wp_user_query->get_total() > 1 ) {
-				$this->logger->log( $log_file, 'Mutliple WP_Users matched display name?', $this->logger::WARNING );
-				exit();
-			} 
-
-			// if single user, then set as author
-			if( 1 === $wp_user_query->get_total() ) {
-
-				$this->logger->log( $log_file, 'WP_Users matched!?', $this->logger::WARNING );
-				exit();
-
-				$wp_user = $wp_user_query->get_results()[0]; 
-
-				// sanity check incase wp_user_query "search" wasn't exact match, perform exact match here
-				if( 0 !== strcmp( $wp_user->display_name, $byline ) ) {
-					$this->logger->log( $log_file, 'Found WP_User not exact match display name?', $this->logger::WARNING );
-					$report_add('found wp_user does not match name');
-					continue;	
-				}
-
-				echo "HERE: need to test user roles.";
-				print_r( $wp_user );
-				exit();
-
-				// sanity check just to abolutely make sure user is in an allowed role
-				// if(  ) {
-				// 	$this->logger->log( $log_file, 'Found WP_User not exact display name?', $this->logger::WARNING );
-				// 	continue;	
-				// }
-
-				echo "need to assign wp user to post";
-				echo "is ! dry run";
-				exit();
-				
-	
+			// get user ID by exact match
+			// doing "maybe" matches at this point does not make sense because all allowed_users at this time are only "First Last"
+			// see print_r( $allowed_wp_users );
+			$wp_user_exists = array_search( $byline, $allowed_wp_users );
+			if( is_int( $wp_user_exists ) && $wp_user_exists > 0 ) {
+				$this->coauthorsplus->assign_authors_to_post( array( get_user_by('id', $wp_user_exists ) ), $post_id );
+				update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_wp_user );
+				$this->logger->log( $log_file, $result_types->assigned_to_existing_wp_user, $this->logger::SUCCESS );
+				$report_add( $result_types->assigned_to_existing_wp_user );
+				continue;
 			}
 
-			echo "are you sure the wp user didn't return any results?????";
-
 			// create a guest author and assign to post
-			$this->logger->log( $log_file, 'create a guest author and assign to post' );
-			$report_add('todo: create guest ga and assign');
-
-			exit();
+			$coauthor_id = $this->coauthorsplus->create_guest_author( array( 'display_name' => $byline ) );
+			$this->coauthorsplus->assign_guest_authors_to_post( array( $coauthor_id ), $post_id );
+			update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_new_ga );
+			$this->logger->log( $log_file, $result_types->assigned_to_new_ga, $this->logger::SUCCESS );
+			$report_add( $result_types->assigned_to_new_ga );
 
 		} // foreach
 
