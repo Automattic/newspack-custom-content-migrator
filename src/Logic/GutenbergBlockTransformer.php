@@ -1,17 +1,42 @@
 <?php
+/**
+ * Gutenberg Block Transformer.
+ *
+ * Methods for encoding and decoding blocks in posts as base64.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Logic;
 
 use WP_CLI;
 
+/**
+ * Class GutenbergBlockTransformer.
+ *
+ * Encodes blocks in posts as base64, so they don't get mangled by converting blocks from classic.
+ */
 class GutenbergBlockTransformer {
 
+	/**
+	 * GutenbergBlockGenerator instance.
+	 *
+	 * @var GutenbergBlockGenerator
+	 */
 	private GutenbergBlockGenerator $block_generator;
 
+	/**
+	 * Constructor private to ensure singleton.
+	 */
 	private function __construct() {
 		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
+	/**
+	 * Get singleton instance.
+	 *
+	 * @return self
+	 */
 	public static function get_instance(): self {
 		static $instance = null;
 		if ( null === $instance ) {
@@ -21,6 +46,13 @@ class GutenbergBlockTransformer {
 		return $instance;
 	}
 
+	/**
+	 * Encode blocks in posts as base64.
+	 *
+	 * @param string $post_content The post content to encode.
+	 *
+	 * @return string The post content with all blocks base64 encoded.
+	 */
 	public function encode_post_content( string $post_content ): string {
 		$blocks        = parse_blocks( $post_content );
 		$actual_blocks = array_filter( $blocks, fn( $block ) => ! empty( $block['blockName'] ) && ! str_contains( $block['innerHTML'], '[BLOCK-TRANSFORMER:' ) );
@@ -37,6 +69,13 @@ class GutenbergBlockTransformer {
 		return serialize_blocks( $blocks );
 	}
 
+	/**
+	 * Encode a block's content as base64 string inside a paragraph block.
+	 *
+	 * @param array $block block to encode.
+	 *
+	 * @return array Paragraph block with the encoded block as innerHTML.
+	 */
 	public function encode_block( array $block ): array {
 		$as_string = serialize_block( $block );
 
@@ -45,6 +84,13 @@ class GutenbergBlockTransformer {
 		return $this->block_generator->get_paragraph( $anchor );// Can't use class names - NCC strips them.
 	}
 
+	/**
+	 * Decode blocks in posts from base64.
+	 *
+	 * @param string $post_content Post content to decode.
+	 *
+	 * @return string The post content with all blocks decoded.
+	 */
 	public function decode_post_content( string $post_content ): string {
 		$blocks         = parse_blocks( $post_content );
 		$encoded_blocks = array_filter( $blocks, fn( $block ) => str_contains( $block['innerHTML'], '[BLOCK-TRANSFORMER:' ) );
@@ -64,6 +110,13 @@ class GutenbergBlockTransformer {
 		return serialize_blocks( $blocks );
 	}
 
+	/**
+	 * Decode a block from base64.
+	 *
+	 * @param string $encoded_block Block to decode.
+	 *
+	 * @return array The decoded block.
+	 */
 	public function decode_block( string $encoded_block ): array {
 		// See https://base64.guru/learn/base64-characters for chars in base64.
 		preg_match( '/\[BLOCK-TRANSFORMER:([A-Za-z0-9+\\/=]+)\]/', $encoded_block, $matches );
