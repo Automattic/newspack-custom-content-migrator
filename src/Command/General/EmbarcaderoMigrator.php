@@ -1103,17 +1103,18 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 
 
-		$posts       = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$log_file    = 'fix-post-times.log';
-		$total_posts = count( $posts );
+		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$log_file = 'fix-post-times.log';
 
 		// Get selected posts.
 		if ( -1 !== $index_to ) {
 			$posts = array_slice( $posts, $index_from, $index_to - $index_from + 1 );
 		}
 
+		$total_posts = count( $posts );
+
 		foreach ( $posts as $post_index => $post ) {
-			$this->logger->log( $log_file, sprintf( 'Importing post %d/%d: %d', $index_from + $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+			$this->logger->log( $log_file, sprintf( 'Fixing timezone for the post %d/%d: %d', $index_from + $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
 
 			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
 
