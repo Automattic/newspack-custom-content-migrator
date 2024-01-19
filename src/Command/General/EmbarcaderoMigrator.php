@@ -731,7 +731,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$index_to                          = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 		$refresh_content                   = isset( $assoc_args['refresh-content'] ) ? true : false;
 		$skip_post_content                 = isset( $assoc_args['skip-post-content'] ) ? true : false;
-		$skip_post_media                   = isset( $assoc_args['skip-post-media'] ) ? true : false;
+		$skip_post_photos                  = isset( $assoc_args['skip-post-photos'] ) ? true : false;
 		$update_post_content               = ( $refresh_content && ! $skip_post_content ) || ! $refresh_content;
 
 		// Validate co-authors plugin is active.
@@ -778,9 +778,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Get the post slug.
 			$post_name = $this->migrate_post_slug( $post['seo_link'] );
 
+			// phpcs:ignore
+			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
+
+
 			$post_data = [
 				'post_title'   => $post['headline'],
-				'post_content' => $post['story_text'],
+				'post_content' => $story_text,
 				'post_excerpt' => $post['front_paragraph'],
 				'post_status'  => 'Yes' === $post['approved'] ? 'publish' : 'draft',
 				'post_type'    => 'post',
@@ -833,18 +837,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				: "Fetched post ID $wp_post_id for {$post['seo_link']}"
 			);
 
-			if ( $refresh_content && ! $post_created ) {
-				// Update post data.
-				$post_data['ID']   = $wp_post_id;
-				$updated_post_data = $update_post_content ? $post_data : array_diff_key( $post_data, [ 'post_content' => '' ] );
-				wp_update_post( $updated_post_data );
-			}
-
 			// Migrate post content shortcodes.
-			// phpcs:ignore
-			$post_content         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
+			$post_content = get_post_field( 'post_content', $wp_post_id );
+
 			$updated_post_content = $update_post_content
-			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_media )
+			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_photos )
 			: $post_content;
 
 			// Set the original ID.
@@ -2100,17 +2097,17 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param string $story_photos_dir_path Path to the directory containing the stories\'s photos files to import.
 	 * @param array  $media Array of media data.
 	 * @param array  $carousel_items Array of carousel items data.
-	 * @param bool   $skip_post_media Whether to skip post media in content.
+	 * @param bool   $skip_post_photos Whether to skip post media in content.
 	 *
 	 * @return string Migrated post content.
 	 */
-	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_media ) {
+	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_photos ) {
 		// Story text contains different shortcodes in the format: {shorcode meta meta ...}.
-		if ( ! $skip_post_media ) {
-			$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
+		if ( ! $skip_post_photos ) {
 			$story_text = $this->migrate_photos( $wp_post_id, $story_text, $photos, $story_photos_dir_path );
 		}
 
+		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
 		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_text_styling( $story_text );
