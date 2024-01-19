@@ -104,20 +104,16 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	public function cmd_set_authors_by_subtitle_byline( $pos_args, $assoc_args ) {
 
-		global $wpdb;
-
+		// cli vars
 		$dry_run = ( isset( $assoc_args['dry-run'] ) );
 		$log_file = 'minnpost_set_authors_by_subtitle_byline.txt';
 		
-		$meta_key_byline = '_mp_subtitle_settings_byline';
-		$meta_key_result = 'newspack_minnpost_subtitle_byline_result';
-		
-		$allowed_wp_user_roles = array( 'administrator', 'editor', 'author', 'contributor', 'staff' );
-
+		// enum for meta values
 		$result_types = new stdClass();
 		$result_types->already_exists_on_post = 'already_exists_on_post';
 		$result_types->assigned_existing_ga_to_post = 'assigned_existing_ga_to_post';
 
+		// reporting
 		$report = array();
 		$report_add = function( $key ) use( &$report ) {
 			if( empty( $report[$key] ) ) $report[$key] = 0;
@@ -127,9 +123,62 @@ class MinnPostMigrator implements InterfaceCommand {
 		// start
 		$this->logger->log( $log_file, 'Setting authors by subtitle byline.' );
 
+		// do while rows exist (ie: return value is true)
+		while( $this->set_authors_by_subtitle_byline( $dry_run, $log_file, $result_types, $report_add ) ) {
+			$this->logger->log( $log_file, print_r( $report, true ) );
+		}
+
+		$this->logger->log( $log_file, 'Done.', $this->logger::SUCCESS );
+
+	}
+
+	public function cmd_set_featured_images( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( '%d (%d/%d)', $post_id, $key_post_id + 1, count( $post_ids ) ) );
+
+			// Get and validate current thumb ID.
+			$thumb_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_mp_post_thumbnail_image_id'", $post_id ) );
+			if ( ! $thumb_id ) {
+				continue;
+			}
+			$valid_thumb_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID = %d and post_type = 'attachment'", $thumb_id ) );
+			if ( ! $valid_thumb_id ) {
+				$this->logger->log( 'minnpost_err.txt', sprintf( 'Invalid _mp_post_thumbnail_image_id %d for post %d', $thumb_id, $post_id ), $this->logger::WARNING );
+				continue;
+			}
+
+			// Set thumb ID as featured image.
+			$thumb_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d and meta_key = '_thumbnail_id'", $post_id ) );
+			if ( $thumb_exists ) {
+				$wpdb->update( $wpdb->postmeta, [ 'meta_value' => $thumb_id ], [ 'post_id' => $post_id, 'meta_key' => '_thumbnail_id' ] );
+			} else {
+				$wpdb->insert( $wpdb->postmeta, [ 'post_id' => $post_id, 'meta_key' => '_thumbnail_id', 'meta_value' => $thumb_id ] );
+			}
+
+			$this->logger->log( 'minnpost_success.txt', sprintf( 'post_id %d thumb_id %d', $post_id, $thumb_id ), $this->logger::SUCCESS );
+		}
+
+		wp_cache_flush();
+	}
+
+	private function set_authors_by_subtitle_byline( $dry_run, $log_file, $result_types, $report_add ) {
+
+		// meta keys for main query and reporting		
+		$meta_key_byline = '_mp_subtitle_settings_byline';
+		$meta_key_result = 'newspack_minnpost_subtitle_byline_result';
+		
+		// limit assigning post to these wp roles if a wp user was found
+		$allowed_wp_user_roles = array( 'administrator', 'editor', 'author', 'contributor', 'staff' );
+
+		// start
+		$this->logger->log( $log_file, '---- New batch.' );
+
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
-			'posts_per_page' => -1,
+			'posts_per_page' => 10,
 			// 'p'			=> 78790, // multiple authors without match
 			// 'p' 			=> 38325, // single author with match
 			'fields'		=> 'ids',
@@ -147,6 +196,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		$this->logger->log( $log_file, 'Post count: ' . $query->post_count  );
 
+		if( 0 == $query->post_count ) return false;
+
 		foreach ( $query->posts as $post_id ) {
 			
 			$this->logger->log( $log_file, '-- Post ID: ' . $post_id  );
@@ -157,17 +208,11 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			// remove starting "By "
 			$byline = preg_replace( '/^By\s+/', '', $byline );
-			$byline = trim( $byline );
+			// trim and replace multiple spaces with single space
+			$byline = preg_replace( '/\s{2,}/', ' ', trim( $byline ) );
 
+			// skip for now: if it's not a normal firstname lastname
 			// skip for now: commas, "and", &, etc.
-			$byline_arr = preg_split( '/(,|&|and)/', $byline, -1, PREG_SPLIT_DELIM_CAPTURE );
-			if( 1 !== count( $byline_arr ) ) {
-				$this->logger->log( $log_file, 'Skipping difficult bylines for now.', $this->logger::WARNING );
-				$report_add('skipping difficult');
-				continue;
-			}
-
-			// skip for now: if it's not normal firstname lastname
 			if( ! preg_match( '/^[A-Za-z]+ [A-Za-z]+$/', $byline ) ) {
 				$this->logger->log( $log_file, 'Skipping non first last for now.', $this->logger::WARNING );
 				$report_add('skipping non first last for now');
@@ -181,21 +226,36 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			// check if author already exists on this post
 			$exists = ( function () use ( $post_id, $byline, $log_file ) {
-				foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
-					// $this->logger->log( $log_file, 'Author type: ' . get_class( $author ) );
-					// $this->logger->log( $log_file, 'Author display name: ' . $author->display_name );
-					if( $byline === $author->display_name ) return true;
+				$authors = $this->coauthorsplus->get_all_authors_for_post( $post_id );
+				$authors_in_a_string = '';
+				foreach( $authors as $author ) {
+					$authors_in_a_string .= $author->display_name;
+					$this->logger->log( $log_file, 'Author type: ' . get_class( $author ) );
+					$this->logger->log( $log_file, 'Author display name: ' . $author->display_name );
+					// exact match return yes
+					if( $byline === $author->display_name ) return 'yes';
 				}
+				// maybe a match still? is firstname found and lastname found?
+				// the byline could be "Jim Nash" but the display name is "Jim Nash, Phd"
+				$name_parts = explode( ' ', $byline );
+				if( false !== strpos( $authors_in_a_string, $name_parts[0] ) && false !== strpos( $authors_in_a_string, $name_parts[1] ) ) {
+					return 'maybe';
+				} 
+
 			} )(); // call function
 
-//todo: what if existing author on post is already "Beth Smith, Phd" but the byline is "Beth Smith"?
-
-			if( $exists ) {
+			if( 'yes' === $exists ) {
 				$this->logger->log( $log_file, 'Author already exists on post.', $this->logger::SUCCESS );
 				if( ! $dry_run ) {
 					update_post_meta( $post_id, $meta_key_result, $result_types->already_exists_on_post );
 				}
 				$report_add('author already exists on post');
+				continue;
+			}
+
+			if( 'maybe' === $exists ) {
+				$this->logger->log( $log_file, 'Author might already exist on post.', $this->logger::WARNING );
+				$report_add('author might already exists on post');
 				continue;
 			}
 
@@ -271,42 +331,10 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		} // foreach
 
-		print_r($report);
-
 		wp_cache_flush();
 
-	}
+		return true;
 
-	public function cmd_set_featured_images( $pos_args, $assoc_args ) {
-		global $wpdb;
-
-		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::line( sprintf( '%d (%d/%d)', $post_id, $key_post_id + 1, count( $post_ids ) ) );
-
-			// Get and validate current thumb ID.
-			$thumb_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_mp_post_thumbnail_image_id'", $post_id ) );
-			if ( ! $thumb_id ) {
-				continue;
-			}
-			$valid_thumb_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID = %d and post_type = 'attachment'", $thumb_id ) );
-			if ( ! $valid_thumb_id ) {
-				$this->logger->log( 'minnpost_err.txt', sprintf( 'Invalid _mp_post_thumbnail_image_id %d for post %d', $thumb_id, $post_id ), $this->logger::WARNING );
-				continue;
-			}
-
-			// Set thumb ID as featured image.
-			$thumb_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d and meta_key = '_thumbnail_id'", $post_id ) );
-			if ( $thumb_exists ) {
-				$wpdb->update( $wpdb->postmeta, [ 'meta_value' => $thumb_id ], [ 'post_id' => $post_id, 'meta_key' => '_thumbnail_id' ] );
-			} else {
-				$wpdb->insert( $wpdb->postmeta, [ 'post_id' => $post_id, 'meta_key' => '_thumbnail_id', 'meta_value' => $thumb_id ] );
-			}
-
-			$this->logger->log( 'minnpost_success.txt', sprintf( 'post_id %d thumb_id %d', $post_id, $thumb_id ), $this->logger::SUCCESS );
-		}
-
-		wp_cache_flush();
 	}
 
 }
