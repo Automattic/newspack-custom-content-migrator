@@ -95,6 +95,10 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	public function cmd_set_authors_by_subtitle_byline( $pos_args, $assoc_args ) {
 
+		if ( ! $this->coauthorsplus->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+		}
+
 		// cli vars
 		$log_file = 'minnpost_set_authors_by_subtitle_byline.txt';
 		
