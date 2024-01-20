@@ -184,6 +184,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
+			// 'p' => 2069483, // test: Stephanie Hemphill (contains "+" in CAP GA email/user-login)
 			'posts_per_page' => 100,
 			'fields'		=> 'ids',
 			'meta_query'    => [
@@ -215,9 +216,18 @@ class MinnPostMigrator implements InterfaceCommand {
 			// trim and replace multiple spaces with single space
 			$byline = preg_replace( '/\s{2,}/', ' ', trim( $byline ) );
 
-			// skip for now: if it's not a normal firstname lastname
+			$skip_for_now = false;
+
 			// skip for now: commas, "and", &, etc.
-			if( ! preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) {
+			if( preg_match( '/( and )|&|,/', $byline ) ) $skip_for_now = true;
+
+			// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
+			if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
+			
+			// skip for now: if it's not a normal firstname lastname
+			if( ! preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) $skip_for_now = true;
+			
+			if( $skip_for_now ) {
 				update_post_meta( $post_id, $meta_key_result, $result_types->skipping_non_first_last );
 				$this->logger->log( $log_file, $result_types->skipping_non_first_last, $this->logger::WARNING );
 				$report_add( $result_types->skipping_non_first_last );
