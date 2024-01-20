@@ -72,6 +72,7 @@ PluginSetup::register_migrators(
 		Command\General\MediumMigrator::class,
 
 		// Publisher specific, remove when launched.
+		Command\PublisherSpecific\HipertextualMigrator::class,
 		Command\PublisherSpecific\GadisMigrator::class,
 		Command\PublisherSpecific\BethesdaMagMigrator::class,
 		Command\PublisherSpecific\SearchLightNMMigrator::class,
