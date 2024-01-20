@@ -341,7 +341,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'flag',
-						'name'        => 'skip-post-media',
+						'name'        => 'skip-post-photos',
 						'description' => 'Skip refreshing the post media in content.',
 						'optional'    => true,
 						'repeating'   => false,
