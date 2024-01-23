@@ -186,8 +186,12 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
-			// 'p' => 2069483, // test: Stephanie Hemphill (contains "+" in CAP GA email/user-login)
-			'p' => 32178, // test: Minnov8 (single word byline)
+			// 'p' => 2069483, // test: cap author contains "+" in CAP GA email/user-login
+			// 'p' => 32178, // test: single word byline
+			// 'p' => 30933, // test: first last 
+			// 'p' => 95265, // test: comma
+			'p' => 95332, // test 1, 2 and 3
+			// 'p' => 94141, // test fist last, publication, and first last, publication
 			'posts_per_page' => 1,
 			'fields'		=> 'ids',
 			'meta_query'    => [
@@ -214,7 +218,11 @@ class MinnPostMigrator implements InterfaceCommand {
 			$byline = get_post_meta( $post_id, $meta_key_byline, true );
 			$this->logger->log( $log_file, 'Byline (raw): ' . $byline  );
 
-			$skip_for_now = false;
+			// store all sets that need to be run into an array, this will make it easier for "and" authors
+			$name_sets = [];
+
+			// skip for now, unless regex is favorable
+			$skip_for_now = true;
 
 			// convert utf8 spaces to normal spaces
 			$byline = trim( str_replace("\xc2\xa0", "\x20", $byline) );
@@ -225,23 +233,50 @@ class MinnPostMigrator implements InterfaceCommand {
 			// trim and replace multiple spaces with single space
 			$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
 
-			// // skip for now: commas, "and", &, etc.
-			if( preg_match( '/( and )|&|,/', $byline ) ) $skip_for_now = true;
-
 			// // skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-			else if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
-			
-			// keep: test if it's a single word byline with no spaces
-			else if( false === strpos( $byline, ' ') ) {
-				$name_parts = array( '', $byline, '' ); // 1 based array
+			if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
+
+			// assess "and", &
+			else if( preg_match( '/ and |,and |&/', $byline ) ) {
+
+				$skip_for_now = false;
+				foreach( preg_split( '/,| and |&/', $byline ) as $temp_name ) {
+					$temp_name = trim( $temp_name );
+					if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $temp_name, $name_parts ) ) {
+						$name_sets[] = array( 'byline' => $temp_name, 'name_parts' => $name_parts);
+					}
+					// if any match isn't perfect, don't run for now
+					else {
+						$skip_for_now = true;
+						break;
+					}
+				}				
 			}
 			
-			// skip for now: if it's not a normal firstname lastname
-			else if( ! preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) $skip_for_now = true;
+			// assess commas
+			else if( preg_match( '/^([^,]+),(.*)/', $byline, $comma_parts ) ) {
+				$this->logger->log( 'minnpost_set_authors_by_subtitle_byline_comma_parts.txt', print_r( $comma_parts, true ) );
+				if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $comma_parts[1], $name_parts ) ) {
+					$name_sets[] = array( 'byline' => $comma_parts[1], 'name_parts' => $name_parts);
+					$skip_for_now = false;
+				}
+			}
+
+			// keep: test if it's a single word byline with no spaces
+			else if( false === strpos( $byline, ' ') ) {
+				$skip_for_now = false;
+				$name_sets[] = array( 'byline' => $byline, 'name_parts' => array( '', $byline, '' ) );
+			}
+			
+			//  if it a normal firstname lastname
+			else if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) {
+				$name_sets[] = array( 'byline' => $byline, 'name_parts' => $name_parts);
+				$skip_for_now = false;
+			}
 			
 			if( $skip_for_now ) {
 				update_post_meta( $post_id, $meta_key_result, $result_types->skipping_non_first_last );
-				$this->logger->log( $log_file, $result_types->skipping_non_first_last, $this->logger::WARNING );
+				$this->logger->log( $log_file, $result_types->skipping_non_first_last );
 				$report_add( $result_types->skipping_non_first_last );
 				continue;
 			}
@@ -249,21 +284,29 @@ class MinnPostMigrator implements InterfaceCommand {
 			// cleaned byline
 			$this->logger->log( $log_file, 'Byline (cleaned): ' . $byline  );
 
-			// set author using first last
-			$append_to_existing_users = false;
-			$type = $this->set_authors_by_subtitle_byline_first_last( 
-				$log_file, $result_types, $report_add, $allowed_wp_users,
-				$meta_key_result,
-				$post_id, $byline, $name_parts,
-				$append_to_existing_users
-			);
+			// loop through each name set with an $i counter
+			for( $i = 0; $i < count( $name_sets ); $i++ ) {
 
-			// set append_to_existing to TRUE to try when it's the second, third, etc author for "and" cases...
-			// keep in mind the first author should be false to clear out past authors...
-			// need to test if the first author fails, then we should NOT add additional authors!
-			// test $type to see if additional authors in an "and" set should be added?
-			// ...what if first author was "already" on post, but so were random people, should we continue to pack in more authors from "and" group?
+				// set the first author to clear the existing authors
+				if( 0 == $i) $append_to_existing_users = false;
+				// append additional authors $i > 0 to the post
+				else $append_to_existing_users = true;
 
+				// set author using first last
+				$result_type = $this->set_authors_by_subtitle_byline_first_last( 
+					$log_file, $result_types, $report_add, $allowed_wp_users,
+					$meta_key_result,
+					$post_id, $byline, $name_parts,
+					$append_to_existing_users
+				);
+	
+				// allow multiple post metas incase multiple authors per post_id
+				add_post_meta( $post_id, $meta_key_result, $result_type, true );
+				$this->logger->log( $log_file, $result_type );
+				$report_add( $result_type );
+
+			} // for loop
+			
 		} // foreach
 
 		return true;
@@ -286,16 +329,10 @@ class MinnPostMigrator implements InterfaceCommand {
 		})(); // run function
 
 		if( 'yes' === $exists ) {
-			update_post_meta( $post_id, $meta_key_result, $result_types->already_exists_on_post );
-			$this->logger->log( $log_file, $result_types->already_exists_on_post, $this->logger::SUCCESS );
-			$report_add( $result_types->already_exists_on_post );
 			return $result_types->already_exists_on_post;
 		}
 
 		if( 'maybe' === $exists ) {
-			update_post_meta( $post_id, $meta_key_result, $result_types->maybe_exists_on_post );
-			$this->logger->log( $log_file, $result_types->maybe_exists_on_post, $this->logger::WARNING );
-			$report_add( $result_types->maybe_exists_on_post );
 			return $result_types->maybe_exists_on_post;
 		}
 
@@ -328,18 +365,12 @@ class MinnPostMigrator implements InterfaceCommand {
 		})(); // run function
 
 		if( 'maybe' === $ga_exists ) {
-			update_post_meta( $post_id, $meta_key_result, $result_types->maybe_ga_exists );
-			$this->logger->log( $log_file, $result_types->maybe_ga_exists, $this->logger::WARNING );
-			$report_add( $result_types->maybe_ga_exists );
 			return $result_types->maybe_ga_exists;
 		}
 
 		// if ga ID, then assign to post
 		if( is_int( $ga_exists ) && $ga_exists > 0 ) {
 			$this->coauthorsplus->assign_guest_authors_to_post( array( $ga_exists ), $post_id, $append_to_existing_users );
-			update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_ga );
-			$this->logger->log( $log_file, $result_types->assigned_to_existing_ga, $this->logger::SUCCESS );
-			$report_add( $result_types->assigned_to_existing_ga );
 			return $result_types->assigned_to_existing_ga;
 		}
 
@@ -349,18 +380,12 @@ class MinnPostMigrator implements InterfaceCommand {
 		$wp_user_exists = array_search( $byline, $allowed_wp_users );
 		if( is_int( $wp_user_exists ) && $wp_user_exists > 0 ) {
 			$this->coauthorsplus->assign_authors_to_post( array( get_user_by('id', $wp_user_exists ) ), $post_id, $append_to_existing_users );
-			update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_wp_user );
-			$this->logger->log( $log_file, $result_types->assigned_to_existing_wp_user, $this->logger::SUCCESS );
-			$report_add( $result_types->assigned_to_existing_wp_user );
 			return $result_types->assigned_to_existing_wp_user;
 		}
 
 		// create a guest author and assign to post
 		$coauthor_id = $this->coauthorsplus->create_guest_author( array( 'display_name' => $byline ) );
 		$this->coauthorsplus->assign_guest_authors_to_post( array( $coauthor_id ), $post_id, $append_to_existing_users );
-		update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_new_ga );
-		$this->logger->log( $log_file, $result_types->assigned_to_new_ga, $this->logger::SUCCESS );
-		$report_add( $result_types->assigned_to_new_ga );
 		return $result_types->assigned_to_new_ga;
 
 	}
