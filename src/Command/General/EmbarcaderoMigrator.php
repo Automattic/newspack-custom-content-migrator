@@ -3,11 +3,14 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
+use DOMDocument;
+use DOMNode;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use \WP_CLI;
 
 /**
@@ -704,6 +707,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'story-sections-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s sections (categories) to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-import-six-fifty-content',
+			[ $this, 'cmd_migrate_six_fifty_content' ],
+			[
+				'shortdesc' => 'Six Fifty content needs to be merged into Embarcadero sites.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -1937,6 +1964,238 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( 'Detected %d wrong rows. Fix them before continuing.', $wrong_rows ) );
 		} else {
 			WP_CLI::success( 'No wrong rows detected.' );
+		}
+	}
+
+	/**
+	 * This command will process the XML export files form Six Fifty and import the content into the site where
+	 * this is executed.
+	 *
+	 * @param array $args Positional argumemnts.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException When the command fails.
+	 */
+	public function cmd_migrate_six_fifty_content( $args, $assoc_args ) {
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		$media_xml_path = $assoc_args['media-xml-path'];
+		$posts_xml_path = $assoc_args['posts-xml-path'];
+		$xml            = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $media_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		$posts   = [];
+		$authors = get_users( [ 'role__in' => [ 'administrator', 'editor', 'author', 'contributor' ] ] );
+		foreach ( $authors as $key => $author ) {
+			$authors[ $author->user_login ] = $author;
+			$modded_user_login              = strtolower( substr( $author->first_name, 0, 1 ) . $author->last_name );
+			$authors[ $modded_user_login ]  = $author;
+			unset( $authors[ $key ] );
+		}
+		$attachments = [];
+
+		WP_CLI::line( 'Processing Media XML items' );
+		foreach ( $media_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author                         = WordPressXMLHandler::get_or_create_author( $child );
+				$authors[ $author->user_login ] = $author;
+			}
+		}
+		WP_CLI::line( 'Got authors...' );
+
+		foreach ( $media_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors );
+				if ( isset( $data['post'] ) ) {
+					$old_post_id = $data['post']['ID'];
+					unset( $data['post']['ID'] );
+					unset( $data['post']['post_parent'] );
+					$result = wp_insert_attachment( $data['post'] );
+
+					if ( is_wp_error( $result ) ) {
+						WP_CLI::warning( sprintf( 'Could not import attachment %d: %s', $old_post_id, $result->get_error_message() ) );
+						continue;
+					}
+
+					$attachments[ $old_post_id ] = $result;
+
+					$this->process_meta(
+						$result,
+						array_map(
+							function ( $meta ) {
+
+								if ( '_wp_attachment_metadata' === $meta['meta_key'] ) {
+									// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+									$meta['meta_value'] = maybe_unserialize( $meta['meta_value'] );
+								}
+
+								return $meta;
+							},
+							$data['post']['meta']
+						)
+					);
+
+					$this->process_six_fifty_categories_and_tags( $result, $data['categories'], $data['tags'] );
+				}
+			}
+		}
+
+		for ( $i = 0; $i < 5; $i++ ) {
+			echo "\n";
+		}
+
+		$xml = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $posts_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		WP_CLI::line( 'Processing Post XML items' );
+		foreach ( $media_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author                         = WordPressXMLHandler::get_or_create_author( $child );
+				$authors[ $author->user_login ] = $author;
+			}
+		}
+		WP_CLI::line( 'Got second set of authors...' );
+
+		$six_fifty_tag_exists = tag_exists( 'The Six Fifty' );
+		$six_fifty_tag_id     = null;
+		if ( null !== $six_fifty_tag_exists ) {
+			$six_fifty_tag_id = (int) $six_fifty_tag_exists['term_id'];
+		} else {
+			$six_fifty_tag_id = (int) wp_insert_term( 'The Six Fifty', 'post_tag' )['term_id'];
+		}
+
+		foreach ( $media_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors );
+				WP_CLI::line( sprintf( 'Old ID: %d, Post Name: %s', $data['post']['ID'], $data['post']['post_name'] ) );
+
+				if ( isset( $data['post'] ) ) {
+					$old_post_id = $data['post']['ID'];
+					unset( $data['post']['ID'] );
+
+					if ( isset( $data['post']['post_parent'] ) && array_key_exists( $data['post']['post_parent'], $posts ) ) {
+						$data['post']['post_parent'] = $posts[ $data['post']['post_parent'] ];
+					} else {
+						unset( $data['post']['post_parent'] );
+					}
+
+					$result = wp_insert_post( $data['post'] );
+
+					if ( is_wp_error( $result ) ) {
+						WP_CLI::warning( sprintf( 'Could not import post %d: %s', $old_post_id, $result->get_error_message() ) );
+						continue;
+					}
+
+					$posts[ $old_post_id ] = $result;
+
+					$this->process_meta(
+						$result,
+						array_map(
+							function ( $meta ) use ( $attachments ) {
+
+								if ( '_thumbnail_id' === $meta['meta_key'] ) {
+									if ( array_key_exists( $meta['meta_value'], $attachments ) ) {
+										// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+										$meta['meta_value'] = $attachments[ $meta['meta_value'] ];
+									}
+								}
+
+								return $meta;
+							},
+							$data['post']['meta']
+						)
+					);
+
+					$this->process_six_fifty_categories_and_tags( $result, $data['categories'], $data['tags'] );
+					if ( null !== $six_fifty_tag_id ) {
+						wp_set_post_tags( $result, [ $six_fifty_tag_id ], true );
+					}
+				}
+			}
+		}
+		// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	}
+
+	/**
+	 * Function to save a post's meta data.
+	 *
+	 * @param int   $post_id The post ID.
+	 * @param array $meta The meta data.
+	 *
+	 * @return void
+	 */
+	private function process_meta( int $post_id, array $meta ) {
+		foreach ( $meta as $data ) {
+			update_post_meta( $post_id, $data['meta_key'], $data['meta_value'] );
+		}
+	}
+
+	/**
+	 * This function handles the custom logic necessary to associate categories to posts for The Six Fifty.
+	 *
+	 * @param int   $post_id The Post ID.
+	 * @param array $categories The categories which were set for the post.
+	 * @param array $tags The tags which were set for the post.
+	 *
+	 * @return array|false|mixed[]|\WP_Error
+	 */
+	private function process_six_fifty_categories_and_tags( int $post_id, array $categories, array $tags ) {
+		$allowed_category_list = [];
+		foreach ( array_merge( $categories, $tags ) as $item ) {
+			$category_or_tag_name = strtolower( $item['name'] );
+			if ( array_key_exists( $category_or_tag_name, $allowed_category_list ) ) {
+				continue;
+			}
+
+			if ( ! in_array( $category_or_tag_name, self::ALLOWED_CATEGORIES, true ) ) {
+				WP_CLI::line( sprintf( 'Category: `%s` is not allowed.', $category_or_tag_name ) );
+				continue;
+			}
+
+			$allowed_category_list[ $category_or_tag_name ] = $item;
+		}
+
+		foreach ( $allowed_category_list as $name => &$item ) {
+			$exists = category_exists( $name );
+
+			if ( null !== $exists ) {
+				WP_CLI::line( sprintf( 'Category already exists: %s', $name ) );
+				$item = (int) $exists;
+			} else {
+				WP_CLI::line( sprintf( 'Creating category: %s', $item['name'] ) );
+				$result = wp_insert_category(
+					[
+						'cat_name'          => $item['name'],
+						'category_nicename' => $item['slug'],
+					]
+				);
+
+				if ( is_int( $result ) && $result > 0 ) {
+					$item = $result;
+				} else {
+					WP_CLI::line( 'ERROR CREATING CATEGORY' );
+				}
+			}
+		}
+
+		if ( ! empty( $allowed_category_list ) ) {
+			return wp_set_post_terms( $post_id, array_values( $allowed_category_list ), 'category' );
+		} else {
+			return false;
 		}
 	}
 
