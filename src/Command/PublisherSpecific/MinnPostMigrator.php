@@ -190,9 +190,9 @@ class MinnPostMigrator implements InterfaceCommand {
 			// 'p' => 32178, // test: single word byline
 			// 'p' => 30933, // test: first last 
 			// 'p' => 95265, // test: comma
-			'p' => 95332, // test 1, 2 and 3
+			// 'p' => 95332, // test 1, 2 and 3
 			// 'p' => 94141, // test fist last, publication, and first last, publication
-			'posts_per_page' => 1,
+			'posts_per_page' => 100,
 			'fields'		=> 'ids',
 			'meta_query'    => [
 				[
@@ -227,11 +227,11 @@ class MinnPostMigrator implements InterfaceCommand {
 			// convert utf8 spaces to normal spaces
 			$byline = trim( str_replace("\xc2\xa0", "\x20", $byline) );
 
-			// remove starting "By "
-			$byline = trim( preg_replace( '/^By\s+/', '', $byline ) );
-
 			// trim and replace multiple spaces with single space
 			$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
+
+			// remove starting "By "
+			$byline = trim( preg_replace( '/^By\s+/', '', $byline ) );
 
 			// // skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
 			if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
@@ -255,10 +255,10 @@ class MinnPostMigrator implements InterfaceCommand {
 			
 			// assess commas
 			else if( preg_match( '/^([^,]+),(.*)/', $byline, $comma_parts ) ) {
-				$this->logger->log( 'minnpost_set_authors_by_subtitle_byline_comma_parts.txt', print_r( $comma_parts, true ) );
+				$this->logger->log( 'minnpost_set_authors_by_subtitle_byline_comma_parts.txt', implode( "\t", $comma_parts ) );
 				if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $comma_parts[1], $name_parts ) ) {
-					$name_sets[] = array( 'byline' => $comma_parts[1], 'name_parts' => $name_parts);
 					$skip_for_now = false;
+					$name_sets[] = array( 'byline' => $comma_parts[1], 'name_parts' => $name_parts);
 				}
 			}
 
@@ -270,8 +270,8 @@ class MinnPostMigrator implements InterfaceCommand {
 			
 			//  if it a normal firstname lastname
 			else if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) {
-				$name_sets[] = array( 'byline' => $byline, 'name_parts' => $name_parts);
 				$skip_for_now = false;
+				$name_sets[] = array( 'byline' => $byline, 'name_parts' => $name_parts);
 			}
 			
 			if( $skip_for_now ) {
@@ -296,12 +296,12 @@ class MinnPostMigrator implements InterfaceCommand {
 				$result_type = $this->set_authors_by_subtitle_byline_first_last( 
 					$log_file, $result_types, $report_add, $allowed_wp_users,
 					$meta_key_result,
-					$post_id, $byline, $name_parts,
+					$post_id, $name_sets[$i]['byline'], $name_sets[$i]['name_parts'],
 					$append_to_existing_users
 				);
 	
 				// allow multiple post metas incase multiple authors per post_id
-				add_post_meta( $post_id, $meta_key_result, $result_type, true );
+				add_post_meta( $post_id, $meta_key_result, $result_type );
 				$this->logger->log( $log_file, $result_type );
 				$report_add( $result_type );
 
@@ -324,8 +324,9 @@ class MinnPostMigrator implements InterfaceCommand {
 		$exists = ( function () use ( $post_id, $byline, $name_parts ) {
 			foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
 				$exists = $this->yes_or_maybe_byline_match( $byline, $author->display_name, $name_parts );
-				if( null != $exists ) return $exists;
+				if( ! empty( $exists ) ) return $exists;
 			}
+			return null;
 		})(); // run function
 
 		if( 'yes' === $exists ) {
@@ -352,7 +353,7 @@ class MinnPostMigrator implements InterfaceCommand {
 				'%' . $wpdb->esc_like( $name_parts[2] ) . '%',
 			));
 
-			if( ! ( count( $gas ) > 0 ) ) return 'no';
+			if( ! ( count( $gas ) > 0 ) ) return null;
 
 			// if an exact match was in the query
 			foreach( $gas as $ga ) {
