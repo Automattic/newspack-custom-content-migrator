@@ -363,12 +363,13 @@ class CoAuthorPlus {
 	/**
 	 * Returns the Guest Author object which has a linked WP_User with given $user_login_of_linked_wpuser account.
 	 *
-	 * @param int $user_login_of_linked_wpuser user_login of linked WP_User account.
+	 * @param int  $user_login_of_linked_wpuser user_login of linked WP_User account.
+	 * @param bool $force Force a new query.
 	 *
 	 * @return ?object Guest Author object or null.
 	 */
-	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser ) {
-		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser );
+	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser, $force = false ) {
+		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser, $force );
 
 		if ( false === $ga ) {
 			return null;
@@ -751,13 +752,13 @@ class CoAuthorPlus {
 
 		$records = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
+				"SELECT
 	                object_id
-				FROM $wpdb->term_relationships 
-				WHERE term_taxonomy_id = ( 
-				    SELECT 
-				           term_taxonomy_id 
-				    FROM $wpdb->term_relationships 
+				FROM $wpdb->term_relationships
+				WHERE term_taxonomy_id = (
+				    SELECT
+				           term_taxonomy_id
+				    FROM $wpdb->term_relationships
 				    WHERE object_id = %d )",
 				$ga_id
 			)

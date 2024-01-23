@@ -260,12 +260,13 @@ class GutenbergBlockGenerator {
 			$size = 'full';
 		}
 
-		$caption_tag = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
-		$image_alt   = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
-		$image_url   = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$caption_tag   = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
+		$image_alt     = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
+		$image_url     = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$attachment_id = intval( $attachment_post->ID );
 
 		$attrs = [
-			'id'       => $attachment_post->ID,
+			'id'       => $attachment_id,
 			'sizeSlug' => $size,
 		];
 
@@ -287,7 +288,7 @@ class GutenbergBlockGenerator {
 
 		$figure_class = 'wp-block-image size-' . $size . ( $classname ? " $classname" : '' ) . ( $align ? " align$align" : '' );
 
-		$content = '<figure class="' . $figure_class . '">' . $a_opening_tag . '<img src="' . $image_url . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_post->ID . '"/>' . $a_closing_tag . $caption_tag . '</figure>';
+		$content = '<figure class="' . $figure_class . '">' . $a_opening_tag . '<img src="' . $image_url . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_id . '"/>' . $a_closing_tag . $caption_tag . '</figure>';
 
 		return [
 			'blockName'    => 'core/image',
@@ -306,8 +307,8 @@ class GutenbergBlockGenerator {
 	 * @return array
 	 */
 	public function get_video( WP_Post $attachment_post ): array {
-		$video_url   = wp_get_attachment_url( $attachment_post->ID);
-		$content = <<<VIDEO
+		$video_url = wp_get_attachment_url( $attachment_post->ID );
+		$content   = <<<VIDEO
 <figure class="wp-block-video"><video controls src="$video_url"></video></figure>
 VIDEO;
 		return [
@@ -674,6 +675,7 @@ VIDEO;
 	 *
 	 * @param array $inner_blocks   Inner blocks.
 	 * @param array $custom_classes Custom classes to be added to the group block.
+	 * @param array $attrs          Attributes to be added to the group block.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
@@ -741,17 +743,44 @@ VIDEO;
 	/**
 	 * Generate a Youtube block -- uses core/embed.
 	 *
-	 * @param string $src     YT src.
-	 * @param string $caption Optional.
+	 * @param string $src     YT src or YT ID.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
-	public function get_youtube( $src, $caption = '' ) {
-		// Remove GET params from $src, otherwise the embed might not work.
-		$src_parsed  = wp_parse_url( $src );
-		$src_cleaned = $src_parsed['scheme'] . '://' . $src_parsed['host'] . $src_parsed['path'];
+	public function get_youtube( $src ) {
+		// Check if the $src is a URL.
+		if ( filter_var( $src, FILTER_VALIDATE_URL ) ) {
+			return $this->youtube_block_from_src( $src );
+		}
 
-		return $this->get_core_embed( $src_cleaned, $caption );
+		// If the $src is not a URL, it's probably a YT ID.
+		return $this->youtube_block_from_src( 'https://www.youtube.com/watch?v=' . $src );
+	}
+
+	/**
+	 * Generate a Youtube block from a YouTube URL.
+	 *
+	 * @param string $youtube_video_url YT youtube_video_url.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	private function youtube_block_from_src( $youtube_video_url ) {
+		$inner_html = '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+		' . $youtube_video_url . '
+		</div></figure>';
+		return [
+			'blockName'    => 'core/embed',
+			'attrs'        => [
+				'url'              => $youtube_video_url,
+				'type'             => 'video',
+				'providerNameSlug' => 'youtube',
+				'responsive'       => true,
+				'className'        => 'wp-embed-aspect-16-9 wp-has-aspect-ratio',
+			],
+			'innerBlocks'  => [],
+			'innerHTML'    => $inner_html,
+			'innerContent' => [ $inner_html ],
+		];
 	}
 
 	/**
@@ -979,7 +1008,7 @@ VIDEO;
 	/**
 	 * Generate a Newspack Homepage Articles Block with specific posts.
 	 *
-	 * @param array $category_ids array of post IDs.
+	 * @param array $post_ids array of post IDs.
 	 * @param array $args args to pass to the block.
 	 *
 	 * @return array
@@ -989,6 +1018,9 @@ VIDEO;
 			return [];
 		}
 		$args['specificPosts'] = $post_ids;
+		if ( is_array( $args['className'] ?? false ) ) {
+			$args['className'] = implode( ' ', $args['className'] );
+		}
 
 		if ( empty( $args['postsToShow'] ) ) {
 			// Enforce a sane default if the value is not passed.

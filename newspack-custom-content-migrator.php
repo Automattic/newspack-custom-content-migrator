@@ -61,6 +61,7 @@ PluginSetup::register_migrators(
 		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
 		Command\General\ProfilePress::class,
+		Command\General\Ras::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
@@ -69,6 +70,7 @@ PluginSetup::register_migrators(
 		Command\General\DownloadMissingImages::class,
 		Command\General\MigrationHelper::class,
 		Command\General\MolonguiAutorship::class,
+		Command\General\MediumMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\RetroReportMigrator::class,
@@ -81,5 +83,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
+		Command\PublisherSpecific\WindyCityMigrator::class,
+		Command\PublisherSpecific\InjusticeWatchMigrator::class,
 	)
 );
