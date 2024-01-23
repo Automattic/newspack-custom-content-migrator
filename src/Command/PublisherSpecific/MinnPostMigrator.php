@@ -177,8 +177,6 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	private function set_authors_by_subtitle_byline( $log_file, $result_types, $report_add, $allowed_wp_users ) {
 
-		global $wpdb;
-
 		// meta keys for main query and reporting		
 		$meta_key_byline = '_mp_subtitle_settings_byline';
 		$meta_key_result = 'newspack_minnpost_subtitle_byline_result';
@@ -189,6 +187,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
 			// 'p' => 2069483, // test: Stephanie Hemphill (contains "+" in CAP GA email/user-login)
+			'p' => 32178, // test: Minnov8 (single word byline)
 			'posts_per_page' => 100,
 			'fields'		=> 'ids',
 			'meta_query'    => [
@@ -215,21 +214,30 @@ class MinnPostMigrator implements InterfaceCommand {
 			$byline = get_post_meta( $post_id, $meta_key_byline, true );
 			$this->logger->log( $log_file, 'Byline (raw): ' . $byline  );
 
-			// remove starting "By "
-			$byline = preg_replace( '/^By\s+/', '', $byline );
-			// trim and replace multiple spaces with single space
-			$byline = preg_replace( '/\s{2,}/', ' ', trim( $byline ) );
-
 			$skip_for_now = false;
 
-			// skip for now: commas, "and", &, etc.
+			// convert utf8 spaces to normal spaces
+			$byline = trim( str_replace("\xc2\xa0", "\x20", $byline) );
+
+			// remove starting "By "
+			$byline = trim( preg_replace( '/^By\s+/', '', $byline ) );
+
+			// trim and replace multiple spaces with single space
+			$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
+
+			// // skip for now: commas, "and", &, etc.
 			if( preg_match( '/( and )|&|,/', $byline ) ) $skip_for_now = true;
 
-			// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-			if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
+			// // skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
+			else if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
+			
+			// keep: test if it's a single word byline with no spaces
+			else if( false === strpos( $byline, ' ') ) {
+				$name_parts = array( $byline, '' );
+			}
 			
 			// skip for now: if it's not a normal firstname lastname
-			if( ! preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) $skip_for_now = true;
+			else if( ! preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) $skip_for_now = true;
 			
 			if( $skip_for_now ) {
 				update_post_meta( $post_id, $meta_key_result, $result_types->skipping_non_first_last );
@@ -241,100 +249,130 @@ class MinnPostMigrator implements InterfaceCommand {
 			// cleaned byline
 			$this->logger->log( $log_file, 'Byline (cleaned): ' . $byline  );
 
-			$report_add('normal name');
 
-			// check if author already exists on this post
-			$exists = ( function () use ( $post_id, $byline, $name_parts ) {
-				foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
-					// exact match return yes
-					if( $byline === $author->display_name ) return 'yes';
-					// not exact, but byline is within display name?  "Beth Smith": "Beth Smith, Phd" or "Beth J. Smith"
-					if( false !== strpos( $author->display_name, $name_parts[1] ) 
-						&& false !== strpos( $author->display_name, $name_parts[2] ) 
-					) return 'maybe';
-				}
-			})(); // run function
+			// set author using first last
+			$append_to_existing_users = false;
+			$type = $this->set_authors_by_subtitle_byline_first_last( 
+				$log_file, $result_types, $report_add, $allowed_wp_users,
+				$meta_key_result,
+				$post_id, $byline, $name_parts,
+				$append_to_existing_users
+			);
 
-			if( 'yes' === $exists ) {
-				update_post_meta( $post_id, $meta_key_result, $result_types->already_exists_on_post );
-				$this->logger->log( $log_file, $result_types->already_exists_on_post, $this->logger::SUCCESS );
-				$report_add( $result_types->already_exists_on_post );
-				continue;
-			}
+			// set append_to_existing to TRUE to try when it's the second, third, etc author for "and" cases...
+			// keep in mind the first author should be false to clear out past authors...
+			// need to test if the first author fails, then we should NOT add additional authors!
+			// test $type to see if additional authors in an "and" set should be added?
+			// ...what if first author was "already" on post, but so were random people, should we continue to pack in more authors from "and" group?
 
-			if( 'maybe' === $exists ) {
-				update_post_meta( $post_id, $meta_key_result, $result_types->maybe_exists_on_post );
-				$this->logger->log( $log_file, $result_types->maybe_exists_on_post, $this->logger::WARNING );
-				$report_add( $result_types->maybe_exists_on_post );
-				continue;
-			}
-
-			// check if an there is an existing GA by display name
-			$ga_exists = ( function() use( $wpdb, $byline, $name_parts ) {
-
-				$gas = $wpdb->get_results( $wpdb->prepare("
-					SELECT ID, post_title as display_name
-					FROM {$wpdb->posts}
-					WHERE post_type = 'guest-author'
-					AND post_title LIKE %s
-					AND post_title LIKE %s
-					",  
-					'%' . $wpdb->esc_like( $name_parts[1] ) . '%',
-					'%' . $wpdb->esc_like( $name_parts[2] ) . '%',
-				));
-
-				if( ! ( count( $gas ) > 0 ) ) return 'no';
-
-				// if an exact match was in the query
-				foreach( $gas as $ga ) {
-					if( $ga->display_name === $byline ) return (int) $ga->ID;
-				}
-
-				// something was returned from the query, just not an exact match
-				return 'maybe';
-
-			})(); // run function
-
-			if( 'maybe' === $ga_exists ) {
-				update_post_meta( $post_id, $meta_key_result, $result_types->maybe_ga_exists );
-				$this->logger->log( $log_file, $result_types->maybe_ga_exists, $this->logger::WARNING );
-				$report_add( $result_types->maybe_ga_exists );
-				continue;
-			}
-
-			// if ga ID, then assign to post
-			if( is_int( $ga_exists ) && $ga_exists > 0 ) {
-				$this->coauthorsplus->assign_guest_authors_to_post( array( $ga_exists ), $post_id );
-				update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_ga );
-				$this->logger->log( $log_file, $result_types->assigned_to_existing_ga, $this->logger::SUCCESS );
-				$report_add( $result_types->assigned_to_existing_ga );
-				continue;
-			}
-
-			// get user ID by exact match
-			// doing "maybe" matches at this point does not make sense because all allowed_users at this time are only "First Last"
-			// see print_r( $allowed_wp_users );
-			$wp_user_exists = array_search( $byline, $allowed_wp_users );
-			if( is_int( $wp_user_exists ) && $wp_user_exists > 0 ) {
-				$this->coauthorsplus->assign_authors_to_post( array( get_user_by('id', $wp_user_exists ) ), $post_id );
-				update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_wp_user );
-				$this->logger->log( $log_file, $result_types->assigned_to_existing_wp_user, $this->logger::SUCCESS );
-				$report_add( $result_types->assigned_to_existing_wp_user );
-				continue;
-			}
-
-			// create a guest author and assign to post
-			$coauthor_id = $this->coauthorsplus->create_guest_author( array( 'display_name' => $byline ) );
-			$this->coauthorsplus->assign_guest_authors_to_post( array( $coauthor_id ), $post_id );
-			update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_new_ga );
-			$this->logger->log( $log_file, $result_types->assigned_to_new_ga, $this->logger::SUCCESS );
-			$report_add( $result_types->assigned_to_new_ga );
+			echo "did function work as planned?";
+			exit();
 
 		} // foreach
 
-		wp_cache_flush();
-
 		return true;
+
+	}
+
+	private function set_authors_by_subtitle_byline_first_last(		
+		$log_file, $result_types, $report_add, $allowed_wp_users,
+		$meta_key_result,
+		$post_id, $byline, $name_parts,
+		$append_to_existing_users
+	) {
+
+		// check if author already exists on this post
+		$exists = ( function () use ( $post_id, $byline, $name_parts ) {
+			foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
+				// exact match return yes
+				if( $byline === $author->display_name ) return 'yes';
+				// not exact, but byline is within display name?  "Beth Smith": "Beth Smith, Phd" or "Beth J. Smith"
+				// check first name or single name for single word byline
+				$maybe = ( false !== strpos( $author->display_name, $name_parts[1] ) );
+				// if first name was match, check the second name (assuming it's not a one word byline)
+				if( $maybe && ! empty( $name_parts[2]) ) $maybe = ( false !== strpos( $author->display_name, $name_parts[2] ) );
+				// if maybe is true, return
+				if( $maybe ) return 'maybe';
+			}
+		})(); // run function
+
+		if( 'yes' === $exists ) {
+			update_post_meta( $post_id, $meta_key_result, $result_types->already_exists_on_post );
+			$this->logger->log( $log_file, $result_types->already_exists_on_post, $this->logger::SUCCESS );
+			$report_add( $result_types->already_exists_on_post );
+			return $result_types->already_exists_on_post;
+		}
+
+		if( 'maybe' === $exists ) {
+			update_post_meta( $post_id, $meta_key_result, $result_types->maybe_exists_on_post );
+			$this->logger->log( $log_file, $result_types->maybe_exists_on_post, $this->logger::WARNING );
+			$report_add( $result_types->maybe_exists_on_post );
+			return $result_types->maybe_exists_on_post;
+		}
+
+		// check if an there is an existing GA by display name
+		$ga_exists = ( function() use( $byline, $name_parts ) {
+			
+			global $wpdb;
+
+			$gas = $wpdb->get_results( $wpdb->prepare("
+				SELECT ID, post_title as display_name
+				FROM {$wpdb->posts}
+				WHERE post_type = 'guest-author'
+				AND post_title LIKE %s
+				AND post_title LIKE %s
+				",  
+				'%' . $wpdb->esc_like( $name_parts[1] ) . '%',
+				'%' . $wpdb->esc_like( $name_parts[2] ) . '%',
+			));
+
+			if( ! ( count( $gas ) > 0 ) ) return 'no';
+
+			// if an exact match was in the query
+			foreach( $gas as $ga ) {
+				if( $ga->display_name === $byline ) return (int) $ga->ID;
+			}
+
+			// something was returned from the query, just not an exact match
+			return 'maybe';
+
+		})(); // run function
+
+		if( 'maybe' === $ga_exists ) {
+			update_post_meta( $post_id, $meta_key_result, $result_types->maybe_ga_exists );
+			$this->logger->log( $log_file, $result_types->maybe_ga_exists, $this->logger::WARNING );
+			$report_add( $result_types->maybe_ga_exists );
+			return $result_types->maybe_ga_exists;
+		}
+
+		// if ga ID, then assign to post
+		if( is_int( $ga_exists ) && $ga_exists > 0 ) {
+			$this->coauthorsplus->assign_guest_authors_to_post( array( $ga_exists ), $post_id, $append_to_existing_users );
+			update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_ga );
+			$this->logger->log( $log_file, $result_types->assigned_to_existing_ga, $this->logger::SUCCESS );
+			$report_add( $result_types->assigned_to_existing_ga );
+			return $result_types->assigned_to_existing_ga;
+		}
+
+		// get user ID by exact match
+		// doing "maybe" matches at this point does not make sense because all allowed_users at this time are only "First Last"
+		// see print_r( $allowed_wp_users );
+		$wp_user_exists = array_search( $byline, $allowed_wp_users );
+		if( is_int( $wp_user_exists ) && $wp_user_exists > 0 ) {
+			$this->coauthorsplus->assign_authors_to_post( array( get_user_by('id', $wp_user_exists ) ), $post_id, $append_to_existing_users );
+			update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_existing_wp_user );
+			$this->logger->log( $log_file, $result_types->assigned_to_existing_wp_user, $this->logger::SUCCESS );
+			$report_add( $result_types->assigned_to_existing_wp_user );
+			return $result_types->assigned_to_existing_wp_user;
+		}
+
+		// create a guest author and assign to post
+		$coauthor_id = $this->coauthorsplus->create_guest_author( array( 'display_name' => $byline ) );
+		$this->coauthorsplus->assign_guest_authors_to_post( array( $coauthor_id ), $post_id, $append_to_existing_users );
+		update_post_meta( $post_id, $meta_key_result, $result_types->assigned_to_new_ga );
+		$this->logger->log( $log_file, $result_types->assigned_to_new_ga, $this->logger::SUCCESS );
+		$report_add( $result_types->assigned_to_new_ga );
+		return $result_types->assigned_to_new_ga;
 
 	}
 
