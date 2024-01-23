@@ -187,7 +187,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
 			// 'p' => 2069483, // test: Stephanie Hemphill (contains "+" in CAP GA email/user-login)
-			// 'p' => 32178, // test: Minnov8 (single word byline)
+			'p' => 32178, // test: Minnov8 (single word byline)
 			'posts_per_page' => 1,
 			'fields'		=> 'ids',
 			'meta_query'    => [
