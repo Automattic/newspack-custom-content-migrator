@@ -187,8 +187,8 @@ class MinnPostMigrator implements InterfaceCommand {
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
 			// 'p' => 2069483, // test: Stephanie Hemphill (contains "+" in CAP GA email/user-login)
-			'p' => 32178, // test: Minnov8 (single word byline)
-			'posts_per_page' => 100,
+			// 'p' => 32178, // test: Minnov8 (single word byline)
+			'posts_per_page' => 1,
 			'fields'		=> 'ids',
 			'meta_query'    => [
 				[
@@ -233,7 +233,7 @@ class MinnPostMigrator implements InterfaceCommand {
 			
 			// keep: test if it's a single word byline with no spaces
 			else if( false === strpos( $byline, ' ') ) {
-				$name_parts = array( $byline, '' );
+				$name_parts = array( '', $byline, '' ); // 1 based array
 			}
 			
 			// skip for now: if it's not a normal firstname lastname
@@ -249,7 +249,6 @@ class MinnPostMigrator implements InterfaceCommand {
 			// cleaned byline
 			$this->logger->log( $log_file, 'Byline (cleaned): ' . $byline  );
 
-
 			// set author using first last
 			$append_to_existing_users = false;
 			$type = $this->set_authors_by_subtitle_byline_first_last( 
@@ -264,9 +263,6 @@ class MinnPostMigrator implements InterfaceCommand {
 			// need to test if the first author fails, then we should NOT add additional authors!
 			// test $type to see if additional authors in an "and" set should be added?
 			// ...what if first author was "already" on post, but so were random people, should we continue to pack in more authors from "and" group?
-
-			echo "did function work as planned?";
-			exit();
 
 		} // foreach
 
@@ -284,15 +280,8 @@ class MinnPostMigrator implements InterfaceCommand {
 		// check if author already exists on this post
 		$exists = ( function () use ( $post_id, $byline, $name_parts ) {
 			foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
-				// exact match return yes
-				if( $byline === $author->display_name ) return 'yes';
-				// not exact, but byline is within display name?  "Beth Smith": "Beth Smith, Phd" or "Beth J. Smith"
-				// check first name or single name for single word byline
-				$maybe = ( false !== strpos( $author->display_name, $name_parts[1] ) );
-				// if first name was match, check the second name (assuming it's not a one word byline)
-				if( $maybe && ! empty( $name_parts[2]) ) $maybe = ( false !== strpos( $author->display_name, $name_parts[2] ) );
-				// if maybe is true, return
-				if( $maybe ) return 'maybe';
+				$exists = $this->yes_or_maybe_byline_match( $byline, $author->display_name, $name_parts );
+				if( null != $exists ) return $exists;
 			}
 		})(); // run function
 
@@ -374,6 +363,26 @@ class MinnPostMigrator implements InterfaceCommand {
 		$report_add( $result_types->assigned_to_new_ga );
 		return $result_types->assigned_to_new_ga;
 
+	}
+
+	private function yes_or_maybe_byline_match( $byline, $display_name, $name_parts ) {
+
+		// exact match return yes
+		if( $byline === $display_name ) return 'yes';
+
+		// maybe byline (name parts) are within display name?  "Beth Smith": "Beth Smith, Phd" or "Beth J. Smith"
+
+		// check first name (or single name for single word byline)
+		$maybe = ( false !== strpos( $display_name, $name_parts[1] ) );
+		
+		// if first name was match, check the second name (assuming it's not a one word byline)
+		if( $maybe && ! empty( $name_parts[2]) ) $maybe = ( false !== strpos( $display_name, $name_parts[2] ) );
+		
+		// if maybe is true, return
+		if( $maybe ) return 'maybe';
+
+		return null;
+		
 	}
 
 }
