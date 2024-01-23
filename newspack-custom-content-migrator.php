@@ -100,6 +100,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BlockClubChicagoMigrator::class,
 		Command\PublisherSpecific\BaristanetMigrator::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
+		Command\PublisherSpecific\MinnPostMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
 		Command\PublisherSpecific\InjusticeWatchMigrator::class,
 	)
