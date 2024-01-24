@@ -1,4 +1,9 @@
 <?php
+/**
+ * Newspack Custom Content Migrator CAP logic class.
+ *
+ * @package NewspackCustomContentMigrator.
+ */
 
 namespace NewspackCustomContentMigrator\Logic;
 
@@ -83,7 +88,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Creates Guest Authors from their full names.
+	 * Gets existing GA by display_name, or creates a new Guest Author if it doesn't exist.
 	 *
 	 * @param array $args {
 	 *     The $args param for the \CoAuthors_Guest_Authors::create method.
@@ -115,7 +120,7 @@ class CoAuthorPlus {
 			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
 			 * CAP saves and then retrieves it.
 			 *
-			 * see \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
+			 * See \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
 			 *   - because they do:
 			 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
 			 *
@@ -131,16 +136,69 @@ class CoAuthorPlus {
 			 *      - while description will contain "6-20386e-15"
 			 */
 			$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
+
+			// If user_login is the same as existing WP_User.username, CAP will allow it to be created, but it will not allow it to be edited:
+			// "There is a WordPress user with the same username as this guest author, please go back and link them in order to update."
+			// So let's prevent that by giving it a unique user_login which is not used by WP_User. That way, we can keep the GA and WP_User separate.
+			// or link them afterwards, both options will work fine.
+			// Check if $args['user_login'] is used by WP_User.username.
+			$args['user_login'] = $this->get_unique_user_login( $args['user_login'] );
 		}
 
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args['user_login'] );
-		if ( false === $guest_author ) {
+		$guest_author = $this->get_guest_author_by_display_name( $args['display_name'] );
+		if ( is_null( $guest_author ) ) {
 			$coauthor_id = $this->coauthors_guest_authors->create( $args );
 		} else {
 			$coauthor_id = $guest_author->ID;
 		}
 
 		return $coauthor_id;
+	}
+
+	/**
+	 * Gets a unique user_login for a new Guest Author, making sure that WP_User.username is not using it.
+	 * If $user_login is already used, will return a unique one with appended "_{random_string}" to it.
+	 *
+	 * @param string $user_login User login.
+	 *
+	 * @return string Unique user_login.
+	 */
+	public function get_unique_user_login( string $user_login ): string {
+		global $wpdb;
+
+		// Return this $user_login if it doesn't exist as WP_User.user_login or CAP postmeta 'cap-user_login'.
+		// phpcs:disable -- Allow querying users table.
+		$wpuser_login_exists  = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE user_login = %s", $user_login ) );
+		// phpcs:enable
+		$capuser_login_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'cap-user_login' AND meta_value = %s", $user_login ) );
+		if ( ! $wpuser_login_exists && ! $capuser_login_exists ) {
+			return $user_login;
+		}
+
+		// Create a unique user_login one and return that if it's not taken.
+		$unique_user_login           = sprintf( '%s_%s', $user_login, $this->generate_random_string() );
+		// phpcs:disable -- Allow querying users table.
+		$unique_wpuser_login_exists  = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE user_login = %s", $unique_user_login ) );
+		// phpcs:ensable
+		$unique_capuser_login_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'cap-user_login' AND meta_value = %s", $unique_user_login ) );
+		if ( ! $unique_wpuser_login_exists && ! $unique_capuser_login_exists ) {
+			return $unique_user_login;
+		}
+
+		// Recursively call until returns a unique user_login.
+		return $this->get_unique_user_login( $user_login );
+	}
+
+	/**
+	 * Generates a random string.
+	 *
+	 * @param int $length Length of the random string to generate.
+	 *
+	 * @return string Random string.
+	 */
+	public function generate_random_string( int $length = 5 ): string {
+		$characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
+		return substr( str_shuffle( str_repeat( $characters, $length ) ), 0, $length );
 	}
 
 	/**
@@ -380,7 +438,7 @@ class CoAuthorPlus {
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
+	 * @return null|object|array Null, a single Guest Author object, or an array of multiple Guest Author objects.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
@@ -405,6 +463,10 @@ class CoAuthorPlus {
 
 		if ( 1 === count( $post_ids_results ) ) {
 			return $gas[0];
+		}
+
+		if ( 0 === count( $gas ) ) {
+			return null;
 		}
 
 		return $gas;
@@ -761,7 +823,7 @@ class CoAuthorPlus {
 	 * Convenience function to help validate a WP User object. If passed a User ID,
 	 * it will convert it to a WP User object.
 	 *
-	 * @param \WP_User|int $wp_user
+	 * @param \WP_User|int $wp_user WP User object or ID.
 	 *
 	 * @return false|mixed|\WP_User
 	 */
