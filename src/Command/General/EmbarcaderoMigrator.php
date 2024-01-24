@@ -761,6 +761,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-content-styling',
+			array( $this, 'cmd_embarcadero_fix_content_styling' ),
+			[
+				'shortdesc' => 'Import Embarcadero\'s post content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -1241,6 +1265,56 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			$this->logger->log( self::LOG_FILE, sprintf( '(%d/%d) Post %d category: %s', $post_index + 1, count( $posts ), $wp_post_id, $imported_category ), Logger::SUCCESS );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-fix-content-styling".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_fix_content_styling( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+			]
+		);
+
+		$posts       = $query->get_posts();
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			\WP_CLI::line( sprintf( 'Post %d/%d (%d)', $index + 1, $total_posts, $post->ID ) );
+
+			$new_content = $this->migrate_text_styling( $post->post_content );
+
+			if ( $new_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $new_content,
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $index + 1, $post->ID ), Logger::SUCCESS );
+			}
 		}
 	}
 
@@ -2301,11 +2375,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 				$post = $wpdb->get_row(
 					$wpdb->prepare(
-						"SELECT * FROM $wpdb->posts p 
-    						INNER JOIN $wpdb->term_relationships tr ON p.ID = tr.object_id 
-         				WHERE p.post_title = %s 
-         				  AND p.post_date = %s 
-         				  AND p.post_name LIKE %s 
+						"SELECT * FROM $wpdb->posts p
+    						INNER JOIN $wpdb->term_relationships tr ON p.ID = tr.object_id
+         				WHERE p.post_title = %s
+         				  AND p.post_date = %s
+         				  AND p.post_name LIKE %s
          				  AND tr.term_taxonomy_id = %d",
 						$data['post_title'],
 						$data['post_date'],
@@ -2918,6 +2992,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_text = preg_replace( '/==B\s+(.*?)==/', '<strong>${1}</strong>', $story_text );
 		// Same goes for italic and bold text at the same time.
 		$story_text = preg_replace( '/==BI\s+(.*?)==/', '<strong><em>${1}</em></strong>', $story_text );
+		// Same goes for sub header.
+		$story_text = preg_replace( '/==SH\s+(.*?)==/', '<h3>${1}</h3>', $story_text );
+
+
+		// The content contain some styling in the format ==I whatever text here should be italic\n.
+		// We need to convert them to <em>whatever text here should be italic</em>.
+		$story_text = preg_replace( '/==I\s+(.*?)\n/', '<em>${1}</em>', $story_text );
+		// Same goes for bold.
+		$story_text = preg_replace( '/==B\s+(.*?)\n/', '<strong>${1}</strong>', $story_text );
+		// Same goes for italic and bold text at the same time.
+		$story_text = preg_replace( '/==BI\s+(.*?)\n/', '<strong><em>${1}</em></strong>', $story_text );
+		// Same goes for sub header.
+		$story_text = preg_replace( '/==SH\s+(.*?)\n/', '<h3>${1}</h3>', $story_text );
+
 		return $story_text;
 	}
 
