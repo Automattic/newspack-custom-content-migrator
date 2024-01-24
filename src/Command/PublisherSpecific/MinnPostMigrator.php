@@ -83,6 +83,15 @@ class MinnPostMigrator implements InterfaceCommand {
 			[ $this, 'cmd_set_authors_by_subtitle_byline' ],
 			[
 				'shortdesc' => 'Convert old post meta to CAP GAs (or matching WP User) and assign to Post.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'flag',
+						'name'        => 'test-regex',
+						'description' => 'If used, all bylines from postmeta will be run though regex. (No db updates).',
+						'optional'    => true,
+						'repeating'   => false,
+					),
+				),
 			]
 		);
 
@@ -94,6 +103,11 @@ class MinnPostMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_set_authors_by_subtitle_byline( $pos_args, $assoc_args ) {
+
+		// test only if set
+		if( isset( $assoc_args['test-regex']) ) {
+			return $this->byline_test_regex();
+		}
 
 		if ( ! $this->coauthorsplus->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
@@ -174,6 +188,10 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 	}
+
+	/**
+	 * BYLINE FUNCTIONS
+	 */
 
 	private function set_authors_by_subtitle_byline( $log_file, $result_types, $report_add, $allowed_wp_users ) {
 
@@ -410,5 +428,140 @@ class MinnPostMigrator implements InterfaceCommand {
 		return null;
 		
 	}
+
+	private function byline_regex( $byline ) {
+
+		// convert utf8 spaces to normal spaces
+		$byline = trim( str_replace("\xc2\xa0", "\x20", $byline) );
+
+		// trim and replace multiple spaces with single space
+		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
+
+		// remove starting "By "
+		$byline = trim( preg_replace( '/^By\s+/', '', $byline ) );
+
+		// skip for now: 
+		// Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
+		// Abdulrahman Bindamnan - utf8 character
+		if( preg_match( '/(Stephanie Hemphill|Abdulrahman Bindamnan)/', $byline ) ) return null;
+
+
+		By Jesse Eisinger and Paul Kiel, ProPublica
+		By Jenny Gold and Kate Steadman, Kaiser Health News
+
+		
+
+
+		By Walter F. Mondale with Dave Hage
+
+		Text by Sharon Schmickle, videos by Steve Date
+
+		By Laurie and Joel Kramer
+
+		By Joel and Laurie Kramer
+
+		the Rev. Victoria Safford
+
+		By Hugh and Elizabeth McCutcheon
+By Sarah and Todd Palin
+
+
+
+		// skip for now: anything with ";" (6 rows) - do by hand
+		if( preg_match( '/;/', $byline ) ) return null;
+
+		// assess "and", &
+		if( preg_match( '/ and |&/', $byline ) ) {
+
+			// todo:
+			// capture no comma with and then a comma
+			// if( preg_match( '/^([^,]+) and (.*?),(.*?)$/', $byline, $matches ) ) {
+
+			// todo:
+			// capture comma and then a comma
+			// if( preg_match( '/^(.*?),(.*?) and (.*?),(.*?)$/', $byline, $matches ) ) {
+
+			return array_map( 'trim', preg_split( '/, and | and | & |,/', $byline ) );
+
+		}
+
+		// assess commas now that "and" have been captured above
+		if( preg_match( '/^([^,]+),(.*)/', $byline, $comma_parts ) ) {
+			return array( $comma_parts[1] );
+		}
+
+		return array( $byline );
+
+	}
+
+	private function byline_test_regex(  ) {
+
+		$csv_out_file = fopen( 'minnpost_byline_test_regex_report.csv', 'w' );
+
+		$report = [
+			'posts_fixed' => 0,
+			'posts_failed' => 0,
+		];
+
+		global $wpdb;
+
+		// get bylines group by number of posts byline affects
+		$results = $wpdb->get_results("
+			select meta_value as byline, count(*) as post_count
+			from {$wpdb->postmeta}
+			where meta_key = '_mp_subtitle_settings_byline'
+			group by meta_value
+			order by post_count desc
+		");
+
+		foreach ( $results as $result ) {
+
+			// set short var name for less confusion
+			$byline = $result->byline;
+
+			// setup CSV output line
+			$csv_line = array( 
+				$result->post_count,
+				$byline
+			);
+
+			// test regex for resulting byline(s) ( "and" cases product multiple ) ( single byline will be an array of one array)
+			$bylines = $this->byline_regex( $byline );
+
+			// if no match this is an error byline, set match count to 0
+			if( empty( $bylines ) ) {
+				
+				$csv_line[] = 0;
+				$csv_line[] = 'ERROR_NO_MATCHES';
+				
+				// set all these posts as failed
+				$report['posts_failed'] += $result->post_count;
+
+			}
+			// matches exist
+			else {
+				
+				// store match count
+				$csv_line[] = count( $bylines );
+				
+				// and each match byline
+				array_push( $csv_line, ...$bylines );
+
+				// set all these posts as fixed
+				$report['posts_fixed'] += $result->post_count;
+
+			}
+			
+			// write output to csv
+			\WP_CLI\Utils\write_csv( $csv_out_file, array( $csv_line ) ); // array within array
+
+		} // foreach
+
+		print_r( $report );
+		
+		WP_CLI::success( 'Done' );
+
+	}
+
 
 }
