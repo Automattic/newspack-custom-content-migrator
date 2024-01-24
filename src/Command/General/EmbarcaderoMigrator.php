@@ -737,6 +737,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-six-fifty-missing-authors',
+			[ $this, 'cmd_fix_six_fifty_missing_authors' ],
+			[
+				'shortdesc' => 'Fixes missing authors for Six Fifty content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -2003,8 +2027,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		foreach ( $media_channel_children as $child ) {
 			// Process only the authors first.
 			if ( 'wp:author' === $child->nodeName ) {
-				$author                         = WordPressXMLHandler::get_or_create_author( $child );
-				$authors[ $author->user_login ] = $author;
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
 			}
 		}
 		WP_CLI::line( 'Got authors...' );
@@ -2057,14 +2084,17 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
 
-		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
+		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
 
 		WP_CLI::line( 'Processing Post XML items' );
-		foreach ( $media_channel_children as $child ) {
+		foreach ( $posts_channel_children as $child ) {
 			// Process only the authors first.
 			if ( 'wp:author' === $child->nodeName ) {
-				$author                         = WordPressXMLHandler::get_or_create_author( $child );
-				$authors[ $author->user_login ] = $author;
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
 			}
 		}
 		WP_CLI::line( 'Got second set of authors...' );
@@ -2128,6 +2158,190 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 		}
 		// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	}
+
+	/**
+	 * This command addresses a bug that was introduced in the Six Fifty migration where the authors were not
+	 * properly set for the posts.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException Halts if an author is not properly found.
+	 */
+	public function cmd_fix_six_fifty_missing_authors( $args, $assoc_args ) {
+		$six_fifty_tag_exists = tag_exists( 'The Six Fifty' );
+		$six_fifty_tag_id     = null;
+		if ( null !== $six_fifty_tag_exists ) {
+			$six_fifty_tag_id = (int) $six_fifty_tag_exists['term_id'];
+		} else {
+			WP_CLI::error( 'The Six Fifty tag was not found.' );
+		}
+
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		$media_xml_path = $assoc_args['media-xml-path'];
+		$posts_xml_path = $assoc_args['posts-xml-path'];
+		$xml            = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $media_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		$authors = get_users( [ 'role__in' => [ 'administrator', 'editor', 'author', 'contributor', 'site_editor' ] ] );
+		foreach ( $authors as $key => $author ) {
+			$authors[ $author->user_login ] = $author;
+			$modded_user_login              = strtolower( substr( $author->first_name, 0, 1 ) . $author->last_name );
+			$authors[ $modded_user_login ]  = $author;
+			unset( $authors[ $key ] );
+		}
+
+		WP_CLI::line( 'Processing Media XML items' );
+		foreach ( $media_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
+			}
+		}
+		WP_CLI::line( 'Got authors...' );
+
+		$xml = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $posts_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		WP_CLI::line( 'Processing Post XML items' );
+		foreach ( $posts_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
+			}
+		}
+		WP_CLI::line( 'Got second set of authors...' );
+
+		global $wpdb;
+
+		foreach ( $media_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				echo "\n\n";
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors )['post'];
+				WP_CLI::line( sprintf( 'Post %s ( OLD ID: %d )', $data['post_name'], $data['ID'] ) );
+
+				if ( 0 === $data['post_author'] ) {
+					WP_CLI::warning( 'Post does not have an author' );
+					WP_CLI::halt( 1 );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->posts p
+         				WHERE p.post_title = %s AND p.post_date = %s AND p.post_name LIKE %s",
+						$data['post_title'],
+						$data['post_date'],
+						$wpdb->esc_like( $data['post_name'] ) . '%',
+					)
+				);
+
+				if ( ! $post ) {
+					WP_CLI::warning( sprintf( 'Could not find post with the name %s', $data['post_name'] ) );
+					continue;
+				}
+
+				if ( 0 !== intval( $post->post_author ) ) {
+					WP_CLI::warning( 'Post already has an author' );
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_author' => $data['post_author'],
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					WP_CLI::success( 'Updated' );
+				} else {
+					WP_CLI::line( 'NOT UPDATED' );
+				}
+			}
+		}
+
+		foreach ( $posts_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				echo "\n\n";
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors )['post'];
+				WP_CLI::line( sprintf( 'Post %s ( OLD ID: %d )', $data['post_name'], $data['ID'] ) );
+
+				if ( 0 === $data['post_author'] ) {
+					WP_CLI::warning( 'Post does not have an author' );
+					WP_CLI::halt( 1 );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->posts p 
+    						INNER JOIN $wpdb->term_relationships tr ON p.ID = tr.object_id 
+         				WHERE p.post_title = %s 
+         				  AND p.post_date = %s 
+         				  AND p.post_name LIKE %s 
+         				  AND tr.term_taxonomy_id = %d",
+						$data['post_title'],
+						$data['post_date'],
+						$wpdb->esc_like( $data['post_name'] ) . '%',
+						$six_fifty_tag_id
+					)
+				);
+
+				if ( ! $post ) {
+					WP_CLI::warning( sprintf( 'Could not find post with the name %s', $data['post_name'] ) );
+					continue;
+				}
+
+				if ( 0 !== intval( $post->post_author ) ) {
+					WP_CLI::warning( 'Post already has an author' );
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_author' => $data['post_author'],
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					WP_CLI::success( 'Updated' );
+				} else {
+					WP_CLI::line( 'NOT UPDATED' );
+				}
+			}
+		}
 	}
 
 	/**
