@@ -71,6 +71,7 @@ PluginSetup::register_migrators(
 		Command\General\MigrationHelper::class,
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
+		Command\General\BlockTransformerCommand::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\RetroReportMigrator::class,
