@@ -277,7 +277,7 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 
 				}, array_map( 'trim', explode( '|', $row['Tags-NEW'] ) ) );
 				$new_tag_ids   = array_map( fn( $tag_name ) => get_term_by( 'name', $tag_name, 'post_tag' )->term_id, $new_tag_names );
-				wp_set_post_tags( $post_id, $new_tag_ids );
+				wp_set_post_tags( $post_id, $new_tag_ids, true );
 				$this->logger->log( 'tag_reshuffle.log', sprintf( 'Updated tags on %s to %s', get_category( $post_id ), implode( ',', $new_tag_names ) ), Logger::SUCCESS );
 			}
 
@@ -309,7 +309,7 @@ class InjusticeWatchMigrator implements InterfaceCommand {
 				wp_set_post_categories( $post_id, $new_cat_ids );
 				// Use the first of the categories as the primary category.
 				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $new_cat_ids[0] );
-				$this->logger->log( 'category_reshuffle.log', sprintf( 'Updated categories on %s to %s', get_category( $post_id ), implode( ',', $new_cat_names ) ),
+				$this->logger->log( 'category_reshuffle.log', sprintf( 'Updated categories on %s to %s', get_permalink( $post_id ), implode( ',', $new_cat_names ) ),
 					Logger::SUCCESS );
 			}
 		}
