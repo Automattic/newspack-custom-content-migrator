@@ -445,28 +445,6 @@ class MinnPostMigrator implements InterfaceCommand {
 		// Abdulrahman Bindamnan - utf8 character
 		if( preg_match( '/(Stephanie Hemphill|Abdulrahman Bindamnan)/', $byline ) ) return null;
 
-
-		By Jesse Eisinger and Paul Kiel, ProPublica
-		By Jenny Gold and Kate Steadman, Kaiser Health News
-
-		
-
-
-		By Walter F. Mondale with Dave Hage
-
-		Text by Sharon Schmickle, videos by Steve Date
-
-		By Laurie and Joel Kramer
-
-		By Joel and Laurie Kramer
-
-		the Rev. Victoria Safford
-
-		By Hugh and Elizabeth McCutcheon
-By Sarah and Todd Palin
-
-
-
 		// skip for now: anything with ";" (6 rows) - do by hand
 		if( preg_match( '/;/', $byline ) ) return null;
 
