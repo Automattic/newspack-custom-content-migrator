@@ -3,11 +3,14 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
+use DOMDocument;
+use DOMNode;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use \WP_CLI;
 
 /**
@@ -341,7 +344,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'flag',
-						'name'        => 'skip-post-media',
+						'name'        => 'skip-post-photos',
 						'description' => 'Skip refreshing the post media in content.',
 						'optional'    => true,
 						'repeating'   => false,
@@ -655,6 +658,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-from',
+						'description' => 'Start importing from this index in the CSV file.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-to',
+						'description' => 'Import till this index in the CSV file.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -696,6 +713,78 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-import-six-fifty-content',
+			[ $this, 'cmd_migrate_six_fifty_content' ],
+			[
+				'shortdesc' => 'Six Fifty content needs to be merged into Embarcadero sites.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-six-fifty-missing-authors',
+			[ $this, 'cmd_fix_six_fifty_missing_authors' ],
+			[
+				'shortdesc' => 'Fixes missing authors for Six Fifty content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-xml-path',
+						'description' => 'Path to the CSV file containing the stories to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-content-styling',
+			array( $this, 'cmd_embarcadero_fix_content_styling' ),
+			[
+				'shortdesc' => 'Import Embarcadero\'s post content.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -717,7 +806,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$index_to                          = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 		$refresh_content                   = isset( $assoc_args['refresh-content'] ) ? true : false;
 		$skip_post_content                 = isset( $assoc_args['skip-post-content'] ) ? true : false;
-		$skip_post_media                   = isset( $assoc_args['skip-post-media'] ) ? true : false;
+		$skip_post_photos                  = isset( $assoc_args['skip-post-photos'] ) ? true : false;
 		$update_post_content               = ( $refresh_content && ! $skip_post_content ) || ! $refresh_content;
 
 		// Validate co-authors plugin is active.
@@ -764,9 +853,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Get the post slug.
 			$post_name = $this->migrate_post_slug( $post['seo_link'] );
 
+			// phpcs:ignore
+			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
+
+
 			$post_data = [
 				'post_title'   => $post['headline'],
-				'post_content' => $post['story_text'],
+				'post_content' => $story_text,
 				'post_excerpt' => $post['front_paragraph'],
 				'post_status'  => 'Yes' === $post['approved'] ? 'publish' : 'draft',
 				'post_type'    => 'post',
@@ -819,18 +912,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				: "Fetched post ID $wp_post_id for {$post['seo_link']}"
 			);
 
-			if ( $refresh_content && ! $post_created ) {
-				// Update post data.
-				$post_data['ID']   = $wp_post_id;
-				$updated_post_data = $update_post_content ? $post_data : array_diff_key( $post_data, [ 'post_content' => '' ] );
-				wp_update_post( $updated_post_data );
-			}
-
 			// Migrate post content shortcodes.
-			// phpcs:ignore
-			$post_content         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
+			$post_content = get_post_field( 'post_content', $wp_post_id );
+
 			$updated_post_content = $update_post_content
-			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_media )
+			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_photos )
 			: $post_content;
 
 			// Set the original ID.
@@ -1085,12 +1171,22 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	public function cmd_fix_post_times( array $args, array $assoc_args ): void {
 		$story_csv_file_path = $assoc_args['story-csv-file-path'];
+		$index_from          = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
+		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 
-		$posts       = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$log_file    = 'fix-post-times.log';
+
+		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$log_file = 'fix-post-times.log';
+
+		// Get selected posts.
+		if ( -1 !== $index_to ) {
+			$posts = array_slice( $posts, $index_from, $index_to - $index_from + 1 );
+		}
+
 		$total_posts = count( $posts );
+
 		foreach ( $posts as $post_index => $post ) {
-			$this->logger->log( $log_file, sprintf( 'Importing post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+			$this->logger->log( $log_file, sprintf( 'Fixing timezone for the post %d/%d: %d', $index_from + $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
 
 			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
 
@@ -1169,6 +1265,56 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			$this->logger->log( self::LOG_FILE, sprintf( '(%d/%d) Post %d category: %s', $post_index + 1, count( $posts ), $wp_post_id, $imported_category ), Logger::SUCCESS );
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-fix-content-styling".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_fix_content_styling( $args, $assoc_args ) {
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+			]
+		);
+
+		$posts       = $query->get_posts();
+		$total_posts = count( $posts );
+
+		foreach ( $posts as $index => $post ) {
+			\WP_CLI::line( sprintf( 'Post %d/%d (%d)', $index + 1, $total_posts, $post->ID ) );
+
+			$new_content = $this->migrate_text_styling( $post->post_content );
+
+			if ( $new_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $new_content,
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $index + 1, $post->ID ), Logger::SUCCESS );
+			}
 		}
 	}
 
@@ -1920,6 +2066,428 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * This command will process the XML export files form Six Fifty and import the content into the site where
+	 * this is executed.
+	 *
+	 * @param array $args Positional argumemnts.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException When the command fails.
+	 */
+	public function cmd_migrate_six_fifty_content( $args, $assoc_args ) {
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		$media_xml_path = $assoc_args['media-xml-path'];
+		$posts_xml_path = $assoc_args['posts-xml-path'];
+		$xml            = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $media_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		$posts   = [];
+		$authors = get_users( [ 'role__in' => [ 'administrator', 'editor', 'author', 'contributor' ] ] );
+		foreach ( $authors as $key => $author ) {
+			$authors[ $author->user_login ] = $author;
+			$modded_user_login              = strtolower( substr( $author->first_name, 0, 1 ) . $author->last_name );
+			$authors[ $modded_user_login ]  = $author;
+			unset( $authors[ $key ] );
+		}
+		$attachments = [];
+
+		WP_CLI::line( 'Processing Media XML items' );
+		foreach ( $media_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
+			}
+		}
+		WP_CLI::line( 'Got authors...' );
+
+		foreach ( $media_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors );
+				if ( isset( $data['post'] ) ) {
+					$old_post_id = $data['post']['ID'];
+					unset( $data['post']['ID'] );
+					unset( $data['post']['post_parent'] );
+					$result = wp_insert_attachment( $data['post'] );
+
+					if ( is_wp_error( $result ) ) {
+						WP_CLI::warning( sprintf( 'Could not import attachment %d: %s', $old_post_id, $result->get_error_message() ) );
+						continue;
+					}
+
+					$attachments[ $old_post_id ] = $result;
+
+					$this->process_meta(
+						$result,
+						array_map(
+							function ( $meta ) {
+
+								if ( '_wp_attachment_metadata' === $meta['meta_key'] ) {
+									// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+									$meta['meta_value'] = maybe_unserialize( $meta['meta_value'] );
+								}
+
+								return $meta;
+							},
+							$data['post']['meta']
+						)
+					);
+
+					$this->process_six_fifty_categories_and_tags( $result, $data['categories'], $data['tags'] );
+				}
+			}
+		}
+
+		for ( $i = 0; $i < 5; $i++ ) {
+			echo "\n";
+		}
+
+		$xml = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $posts_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		WP_CLI::line( 'Processing Post XML items' );
+		foreach ( $posts_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
+			}
+		}
+		WP_CLI::line( 'Got second set of authors...' );
+
+		$six_fifty_tag_exists = tag_exists( 'The Six Fifty' );
+		$six_fifty_tag_id     = null;
+		if ( null !== $six_fifty_tag_exists ) {
+			$six_fifty_tag_id = (int) $six_fifty_tag_exists['term_id'];
+		} else {
+			$six_fifty_tag_id = (int) wp_insert_term( 'The Six Fifty', 'post_tag' )['term_id'];
+		}
+
+		foreach ( $media_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors );
+				WP_CLI::line( sprintf( 'Old ID: %d, Post Name: %s', $data['post']['ID'], $data['post']['post_name'] ) );
+
+				if ( isset( $data['post'] ) ) {
+					$old_post_id = $data['post']['ID'];
+					unset( $data['post']['ID'] );
+
+					if ( isset( $data['post']['post_parent'] ) && array_key_exists( $data['post']['post_parent'], $posts ) ) {
+						$data['post']['post_parent'] = $posts[ $data['post']['post_parent'] ];
+					} else {
+						unset( $data['post']['post_parent'] );
+					}
+
+					$result = wp_insert_post( $data['post'] );
+
+					if ( is_wp_error( $result ) ) {
+						WP_CLI::warning( sprintf( 'Could not import post %d: %s', $old_post_id, $result->get_error_message() ) );
+						continue;
+					}
+
+					$posts[ $old_post_id ] = $result;
+
+					$this->process_meta(
+						$result,
+						array_map(
+							function ( $meta ) use ( $attachments ) {
+
+								if ( '_thumbnail_id' === $meta['meta_key'] ) {
+									if ( array_key_exists( $meta['meta_value'], $attachments ) ) {
+										// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+										$meta['meta_value'] = $attachments[ $meta['meta_value'] ];
+									}
+								}
+
+								return $meta;
+							},
+							$data['post']['meta']
+						)
+					);
+
+					$this->process_six_fifty_categories_and_tags( $result, $data['categories'], $data['tags'] );
+					if ( null !== $six_fifty_tag_id ) {
+						wp_set_post_tags( $result, [ $six_fifty_tag_id ], true );
+					}
+				}
+			}
+		}
+		// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	}
+
+	/**
+	 * This command addresses a bug that was introduced in the Six Fifty migration where the authors were not
+	 * properly set for the posts.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException Halts if an author is not properly found.
+	 */
+	public function cmd_fix_six_fifty_missing_authors( $args, $assoc_args ) {
+		$six_fifty_tag_exists = tag_exists( 'The Six Fifty' );
+		$six_fifty_tag_id     = null;
+		if ( null !== $six_fifty_tag_exists ) {
+			$six_fifty_tag_id = (int) $six_fifty_tag_exists['term_id'];
+		} else {
+			WP_CLI::error( 'The Six Fifty tag was not found.' );
+		}
+
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		$media_xml_path = $assoc_args['media-xml-path'];
+		$posts_xml_path = $assoc_args['posts-xml-path'];
+		$xml            = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $media_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		$authors = get_users( [ 'role__in' => [ 'administrator', 'editor', 'author', 'contributor', 'site_editor' ] ] );
+		foreach ( $authors as $key => $author ) {
+			$authors[ $author->user_login ] = $author;
+			$modded_user_login              = strtolower( substr( $author->first_name, 0, 1 ) . $author->last_name );
+			$authors[ $modded_user_login ]  = $author;
+			unset( $authors[ $key ] );
+		}
+
+		WP_CLI::line( 'Processing Media XML items' );
+		foreach ( $media_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
+			}
+		}
+		WP_CLI::line( 'Got authors...' );
+
+		$xml = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $posts_xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
+
+		WP_CLI::line( 'Processing Post XML items' );
+		foreach ( $posts_channel_children as $child ) {
+			// Process only the authors first.
+			if ( 'wp:author' === $child->nodeName ) {
+				$author = WordPressXMLHandler::get_or_create_author( $child );
+
+				if ( ! array_key_exists( $author->user_login, $authors ) ) {
+					$authors[ $author->user_login ] = $author;
+				}
+			}
+		}
+		WP_CLI::line( 'Got second set of authors...' );
+
+		global $wpdb;
+
+		foreach ( $media_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				echo "\n\n";
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors )['post'];
+				WP_CLI::line( sprintf( 'Post %s ( OLD ID: %d )', $data['post_name'], $data['ID'] ) );
+
+				if ( 0 === $data['post_author'] ) {
+					WP_CLI::warning( 'Post does not have an author' );
+					WP_CLI::halt( 1 );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->posts p
+         				WHERE p.post_title = %s AND p.post_date = %s AND p.post_name LIKE %s",
+						$data['post_title'],
+						$data['post_date'],
+						$wpdb->esc_like( $data['post_name'] ) . '%',
+					)
+				);
+
+				if ( ! $post ) {
+					WP_CLI::warning( sprintf( 'Could not find post with the name %s', $data['post_name'] ) );
+					continue;
+				}
+
+				if ( 0 !== intval( $post->post_author ) ) {
+					WP_CLI::warning( 'Post already has an author' );
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_author' => $data['post_author'],
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					WP_CLI::success( 'Updated' );
+				} else {
+					WP_CLI::line( 'NOT UPDATED' );
+				}
+			}
+		}
+
+		foreach ( $posts_channel_children as $child ) {
+			if ( 'item' === $child->nodeName ) {
+				echo "\n\n";
+				WP_CLI::line( 'Processing item...' );
+				$data = WordPressXMLHandler::get_parsed_data( $child, $authors )['post'];
+				WP_CLI::line( sprintf( 'Post %s ( OLD ID: %d )', $data['post_name'], $data['ID'] ) );
+
+				if ( 0 === $data['post_author'] ) {
+					WP_CLI::warning( 'Post does not have an author' );
+					WP_CLI::halt( 1 );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->posts p
+    						INNER JOIN $wpdb->term_relationships tr ON p.ID = tr.object_id
+         				WHERE p.post_title = %s
+         				  AND p.post_date = %s
+         				  AND p.post_name LIKE %s
+         				  AND tr.term_taxonomy_id = %d",
+						$data['post_title'],
+						$data['post_date'],
+						$wpdb->esc_like( $data['post_name'] ) . '%',
+						$six_fifty_tag_id
+					)
+				);
+
+				if ( ! $post ) {
+					WP_CLI::warning( sprintf( 'Could not find post with the name %s', $data['post_name'] ) );
+					continue;
+				}
+
+				if ( 0 !== intval( $post->post_author ) ) {
+					WP_CLI::warning( 'Post already has an author' );
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$result = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_author' => $data['post_author'],
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				if ( $result ) {
+					WP_CLI::success( 'Updated' );
+				} else {
+					WP_CLI::line( 'NOT UPDATED' );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Function to save a post's meta data.
+	 *
+	 * @param int   $post_id The post ID.
+	 * @param array $meta The meta data.
+	 *
+	 * @return void
+	 */
+	private function process_meta( int $post_id, array $meta ) {
+		foreach ( $meta as $data ) {
+			update_post_meta( $post_id, $data['meta_key'], $data['meta_value'] );
+		}
+	}
+
+	/**
+	 * This function handles the custom logic necessary to associate categories to posts for The Six Fifty.
+	 *
+	 * @param int   $post_id The Post ID.
+	 * @param array $categories The categories which were set for the post.
+	 * @param array $tags The tags which were set for the post.
+	 *
+	 * @return array|false|mixed[]|\WP_Error
+	 */
+	private function process_six_fifty_categories_and_tags( int $post_id, array $categories, array $tags ) {
+		$allowed_category_list = [];
+		foreach ( array_merge( $categories, $tags ) as $item ) {
+			$category_or_tag_name = strtolower( $item['name'] );
+			if ( array_key_exists( $category_or_tag_name, $allowed_category_list ) ) {
+				continue;
+			}
+
+			if ( ! in_array( $category_or_tag_name, self::ALLOWED_CATEGORIES, true ) ) {
+				WP_CLI::line( sprintf( 'Category: `%s` is not allowed.', $category_or_tag_name ) );
+				continue;
+			}
+
+			$allowed_category_list[ $category_or_tag_name ] = $item;
+		}
+
+		foreach ( $allowed_category_list as $name => &$item ) {
+			$exists = category_exists( $name );
+
+			if ( null !== $exists ) {
+				WP_CLI::line( sprintf( 'Category already exists: %s', $name ) );
+				$item = (int) $exists;
+			} else {
+				WP_CLI::line( sprintf( 'Creating category: %s', $item['name'] ) );
+				$result = wp_insert_category(
+					[
+						'cat_name'          => $item['name'],
+						'category_nicename' => $item['slug'],
+					]
+				);
+
+				if ( is_int( $result ) && $result > 0 ) {
+					$item = $result;
+				} else {
+					WP_CLI::line( 'ERROR CREATING CATEGORY' );
+				}
+			}
+		}
+
+		if ( ! empty( $allowed_category_list ) ) {
+			return wp_set_post_terms( $post_id, array_values( $allowed_category_list ), 'category' );
+		} else {
+			return false;
+		}
+	}
+
+	/**
 	 * Get data from CSV file.
 	 *
 	 * @param string $story_csv_file_path Path to the CSV file containing the stories to import.
@@ -2076,17 +2644,17 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param string $story_photos_dir_path Path to the directory containing the stories\'s photos files to import.
 	 * @param array  $media Array of media data.
 	 * @param array  $carousel_items Array of carousel items data.
-	 * @param bool   $skip_post_media Whether to skip post media in content.
+	 * @param bool   $skip_post_photos Whether to skip post media in content.
 	 *
 	 * @return string Migrated post content.
 	 */
-	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_media ) {
+	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_photos ) {
 		// Story text contains different shortcodes in the format: {shorcode meta meta ...}.
-		if ( ! $skip_post_media ) {
-			$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
+		if ( ! $skip_post_photos ) {
 			$story_text = $this->migrate_photos( $wp_post_id, $story_text, $photos, $story_photos_dir_path );
 		}
 
+		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
 		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_text_styling( $story_text );
@@ -2424,6 +2992,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_text = preg_replace( '/==B\s+(.*?)==/', '<strong>${1}</strong>', $story_text );
 		// Same goes for italic and bold text at the same time.
 		$story_text = preg_replace( '/==BI\s+(.*?)==/', '<strong><em>${1}</em></strong>', $story_text );
+		// Same goes for sub header.
+		$story_text = preg_replace( '/==SH\s+(.*?)==/', '<h3>${1}</h3>', $story_text );
+
+
+		// The content contain some styling in the format ==I whatever text here should be italic\n.
+		// We need to convert them to <em>whatever text here should be italic</em>.
+		$story_text = preg_replace( '/==I\s+(.*?)\n/', '<em>${1}</em>', $story_text );
+		// Same goes for bold.
+		$story_text = preg_replace( '/==B\s+(.*?)\n/', '<strong>${1}</strong>', $story_text );
+		// Same goes for italic and bold text at the same time.
+		$story_text = preg_replace( '/==BI\s+(.*?)\n/', '<strong><em>${1}</em></strong>', $story_text );
+		// Same goes for sub header.
+		$story_text = preg_replace( '/==SH\s+(.*?)\n/', '<h3>${1}</h3>', $story_text );
+
 		return $story_text;
 	}
 
