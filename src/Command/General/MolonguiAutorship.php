@@ -113,26 +113,25 @@ class MolonguiAutorship implements InterfaceCommand {
 		$table_prefix_mologui = esc_sql( $assoc_args['table-prefix-mologui-data'] );
 		$dry_run              = $assoc_args['dry-run'] ?? false;
 
-		// Get Molongui authors.
+		// Stamp log.
+		$this->log( $dry_run, self::LOG, sprintf( 'Molongui to CAP migration started at %s', gmdate( 'Y-m-d H:i:s' ) ), Logger::LINE, false );
+
+		// Used for dry runs.
+		$dry_run_mologui_to_gas = [];
+		
+		// Get all Molongui authors designations.
 		$molongui_authors_values = $wpdb->get_col( "select distinct meta_value from {$wpdb->postmeta} where meta_key = '_molongui_author';" );
 		if ( ! $molongui_authors_values ) {
 			WP_CLI::warning( 'No authors found.' );
 			return;
 		}
 		
-		// Timestamp log.
-		$this->logger->log( self::LOG, sprintf( 'Molongui to CAP migration started at %s', gmdate( 'Y-m-d H:i:s' ) ), Logger::LINE, false );
-
-		// Used for dry runs.
-		$dry_run_mologui_to_gas = [];
-
 		/**
 		 * Convert all Mologui authors to CAP GAs.
 		 */
-		$this->logger->log( self::LOG, 'Converting all Mologui authors to CAP GAs...', Logger::LINE );
+		$this->log( $dry_run, self::LOG, 'Converting all Mologui authors to CAP GAs...', Logger::LINE );
 		foreach ( $molongui_authors_values as $key_molongui_author_value => $molongui_author_value ) {
-			WP_CLI::line();
-			$this->logger->log( self::LOG, sprintf( '%d/%d %s', $key_molongui_author_value + 1, count( $molongui_authors_values ), $molongui_author_value ), Logger::LINE );
+			$this->log( $dry_run, self::LOG, sprintf( '%d/%d %s', $key_molongui_author_value + 1, count( $molongui_authors_values ), $molongui_author_value ), Logger::LINE );
 
 			/**
 			 * Mologui uses an existing WP_User which it extends with custom meta.
@@ -146,7 +145,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				// phpcs:enable
 				if ( ! $author_wpuser_row ) {
 					$msg = sprintf( 'WP_User with ID %d not found in %s table (referenced by postmeta key `user-%s`).', $wpuser_id, $table_prefix_mologui . 'users', $wpuser_id );
-					$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
+					$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 					continue;
 				}
 
@@ -169,7 +168,7 @@ class MolonguiAutorship implements InterfaceCommand {
 					add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
 				}
 
-				$this->logger->log( self::LOG, sprintf( "Created GA ID %s '%s' from original ID '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
+				$this->log( $dry_run, self::LOG, sprintf( "Created GA ID %s '%s' from original ID '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
 
 			} elseif ( 0 === strpos( $molongui_author_value, 'guest-' ) ) {
 
@@ -182,7 +181,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
 					$msg = sprintf( 'Guest author with ID %d not found in %s table (referenced by postmeta key: `guest-%s`).', $guest_id, $table_prefix_mologui . 'posts', $guest_id );
-					$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
+					$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 					continue;
 				}
 
@@ -205,10 +204,10 @@ class MolonguiAutorship implements InterfaceCommand {
 					add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
 				}
 
-				$this->logger->log( self::LOG, sprintf( "Created GA ID %s '%s' from original ID '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
+				$this->log( $dry_run, self::LOG, sprintf( "Created GA ID %s '%s' from original ID '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
 
 			} else {
-				$this->logger->log( self::LOG, sprintf( 'Unsupported Molongui author type in postmeta key: %s. Add support for this type then rerun command.', $cap_args['display_name'] ), Logger::ERROR, true );
+				$this->log( $dry_run, self::LOG, sprintf( 'Unsupported Molongui author type in postmeta key: %s. Add support for this type then rerun command.', $cap_args['display_name'] ), Logger::ERROR, true );
 			}
 		}
 
@@ -216,11 +215,11 @@ class MolonguiAutorship implements InterfaceCommand {
 		/**
 		 * Assign GAs to posts.
 		 */
-		$this->logger->log( self::LOG, 'Assigning GAs to all Posts...', Logger::LINE );
+		$this->log( $dry_run, self::LOG, 'Assigning GAs to all Posts...', Logger::LINE );
 		$post_ids                         = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 		$cached_mologui_authors_to_ga_ids = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			$this->logger->log( self::LOG, sprintf( '%d/%d Post ID %s', $key_post_id + 1, count( $post_ids ), $post_id ), Logger::LINE );
+			$this->log( $dry_run, self::LOG, sprintf( '%d/%d Post ID %s', $key_post_id + 1, count( $post_ids ), $post_id ), Logger::LINE );
 
 			// Get Mologui authors for this post.
 			$molongui_authors_rows = $wpdb->get_results( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_author';", $post_id ), ARRAY_A );
@@ -251,7 +250,7 @@ class MolonguiAutorship implements InterfaceCommand {
 					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value ) );
 					if ( ! $ga_id ) {
 						$msg = sprintf( 'Error fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author_value, $post_id );
-						$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
+						$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 						continue;
 					}
 					$cached_mologui_authors_to_ga_ids[ $molongui_author_value ] = $ga_id;
@@ -271,7 +270,9 @@ class MolonguiAutorship implements InterfaceCommand {
 			\WP_CLI::warning( sprintf( 'There were errors. See %s.', self::LOG ) );
 		}
 
-		$this->logger->log( self::LOG, 'Done.', Logger::LINE );
+		$msg = $dry_run ? 'Dry run complete.' : 'Done.';
+		$this->log( $dry_run, self::LOG, $msg, Logger::SUCCESS );
+		
 		wp_cache_flush();
 	}
 
@@ -737,5 +738,37 @@ class MolonguiAutorship implements InterfaceCommand {
 		}
 
 		return $cap_args;
+	}
+
+	/**
+	 * Undocumented function
+	 *
+	 * @param bool   $dry_run       Dry run.
+	 * @param string $log           Log name.
+	 * @param string $msg           Message to log.
+	 * @param string $level         Log level.
+	 * @param bool   $exit_on_error Exit on error.
+	 * @return void
+	 */
+	private function log( $dry_run, $log, $msg, $level = 'line', bool $exit_on_error = false ): void {
+		if ( $dry_run ) {
+			switch ( $level ) {
+				case ( $this->logger::SUCCESS ):
+					WP_CLI::success( $msg );
+					break;
+				case ( $this->logger::WARNING ):
+					\WP_CLI::warning( $msg );
+					break;
+				case ( $this->logger::ERROR ):
+					\WP_CLI::error( $msg, $exit_on_error );
+					break;
+				case ( $this->logger::LINE ):
+				default:
+					\WP_CLI::line( $msg );
+					break;
+			}
+		} else {
+			$this->logger->log( $log, $msg, $level, $exit_on_error );
+		}
 	}
 }
