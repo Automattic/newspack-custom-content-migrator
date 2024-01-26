@@ -158,36 +158,74 @@ class MinnPostMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_set_featured_images( $pos_args, $assoc_args ) {
-		global $wpdb;
-
+	
 		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::line( sprintf( '%d (%d/%d)', $post_id, $key_post_id + 1, count( $post_ids ) ) );
+			
+			WP_CLI::line( sprintf( '%d (%d of %d)', $post_id, $key_post_id + 1, count( $post_ids ) ) );
 
-			// Get and validate current thumb ID.
-			$thumb_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_mp_post_thumbnail_image_id'", $post_id ) );
-			if ( ! $thumb_id ) {
-				continue;
-			}
-			$valid_thumb_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID = %d and post_type = 'attachment'", $thumb_id ) );
-			if ( ! $valid_thumb_id ) {
-				$this->logger->log( 'minnpost_err.txt', sprintf( 'Invalid _mp_post_thumbnail_image_id %d for post %d', $thumb_id, $post_id ), $this->logger::WARNING );
-				continue;
-			}
+			// Attempt to set the main image.
+			if( $this->set_featured_image( $post_id, '_mp_post_main_image_id' ) ) continue;
 
-			// Set thumb ID as featured image.
-			$thumb_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d and meta_key = '_thumbnail_id'", $post_id ) );
-			if ( $thumb_exists ) {
-				$wpdb->update( $wpdb->postmeta, [ 'meta_value' => $thumb_id ], [ 'post_id' => $post_id, 'meta_key' => '_thumbnail_id' ] );
-			} else {
-				$wpdb->insert( $wpdb->postmeta, [ 'post_id' => $post_id, 'meta_key' => '_thumbnail_id', 'meta_value' => $thumb_id ] );
-			}
+			// Otherwise, attempt to set the thumbnail image.
+			if( $this->set_featured_image( $post_id, '_mp_post_thumbnail_image_id' ) ) continue;
 
-			$this->logger->log( 'minnpost_success.txt', sprintf( 'post_id %d thumb_id %d', $post_id, $thumb_id ), $this->logger::SUCCESS );
+			// Worst case, just log unable to update post.
+			$this->logger->log( 'minnpost_err.txt', sprintf( 
+				'Unable to set featured image for post %d', 
+				$post_id
+			), $this->logger::WARNING );
+
 		}
 
 		wp_cache_flush();
 	}
+
+
+	private function set_featured_image( $post_id, $meta_key ) {
+
+		global $wpdb;
+
+		// Attempt to get the image id by meta_key.
+		$thumb_id = $wpdb->get_var( $wpdb->prepare( 
+			"SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", 
+			$post_id, $meta_key
+		));
+
+		if( ! is_numeric( $thumb_id ) ) return false;
+
+		// Verify the image is actually an attachment in the Media Libary.
+		$image_exists = $wpdb->get_var( $wpdb->prepare( 
+			"SELECT 'yes' FROM {$wpdb->posts} WHERE ID = %d and post_type = 'attachment'",
+			$thumb_id
+		));
+
+		if ( 'yes' !== $image_exists ) {
+			
+			// Log these cases where id was found, but didn't match to a real attachment.
+			$this->logger->log( 'minnpost_err.txt', sprintf( 
+				'Invalid image_id %d for post %d and size %s', 
+				$thumb_id, $post_id, $meta_key 
+			), $this->logger::WARNING );
+			
+			return false;
+
+		}
+
+		// Set the thumbnail.
+
+		update_post_meta( $post_id, '_thumbnail_id', $thumb_id );
+
+		$this->logger->log( 'minnpost_success.txt', sprintf( 
+			'post_id %d thumb_id %d size %s', 
+			$post_id, $thumb_id, $meta_key
+		), $this->logger::SUCCESS );
+
+		return true;
+
+	}
+
 
 	/**
 	 * BYLINE FUNCTIONS
