@@ -110,7 +110,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	public function cmd_molongui_to_cap( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
-		$table_prefix_mologui = $assoc_args['table-prefix-mologui-data'];
+		$table_prefix_mologui = esc_sql( $assoc_args['table-prefix-mologui-data'] );
 		$dry_run              = $assoc_args['dry-run'] ?? false;
 
 		// Get Molongui authors.
