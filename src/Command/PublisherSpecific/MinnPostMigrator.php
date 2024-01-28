@@ -22,6 +22,8 @@ use \WP_User_Query;
  */
 class MinnPostMigrator implements InterfaceCommand {
 
+	const OLD_SITE_URL = 'https://www.minnpost.com/';
+
 	/**
 	 * Instance of MinnPostMigrator.
 	 *
@@ -98,6 +100,11 @@ class MinnPostMigrator implements InterfaceCommand {
 		WP_CLI::add_command(
 			'newspack-content-migrator minnpost-set-featured-images',
 			[ $this, 'cmd_set_featured_images' ],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator minnpost-set-primary-category',
+			[ $this, 'cmd_set_primary_category' ],
 		);
 
 	}
@@ -182,6 +189,125 @@ class MinnPostMigrator implements InterfaceCommand {
 		wp_cache_flush();
 	}
 
+	public function cmd_set_primary_category( $pos_args, $assoc_args ) {
+
+		$fn_category_id_by_remote_url = function ( $post_id ) {			
+
+			$response = wp_remote_request( self::OLD_SITE_URL . '?p=' . $post_id, [ 'method' => 'HEAD' ] );
+			if ( is_wp_error( $response ) ) return null;
+			
+			$headers = wp_remote_retrieve_headers( $response );
+			if( ! isset( $headers['location'] ) ) return null;
+			
+			$url_parts = explode( '/', parse_url( $headers['location'], PHP_URL_PATH ) );
+			if( ! isset( $url_parts[1] ) ) return null;
+			
+			$category = get_category_by_slug( $url_parts[1] );
+			if( ! isset( $category->term_id ) ) return null;
+			
+			return $category->term_id;
+		
+		};
+	
+
+		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
+		
+		$post_ids_count = count( $post_ids );
+		
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			
+			WP_CLI::line( sprintf( '%d ( %d of %d )', $post_id, $key_post_id + 1, $post_ids_count ) );
+
+			$old_category_permalink = get_post_meta( $post_id, '_category_permalink', true );
+
+			if( ! isset( $old_category_permalink['category'] ) ) {
+
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Old meta value not array for %d %s', 
+					$post_id, json_encode( $old_category_permalink )
+				), $this->logger::WARNING );
+				
+				continue;
+
+			}
+
+			$old_category_value = $old_category_permalink['category'];
+
+			if( ! preg_match( '/^\d+$/', $old_category_value ) ) {
+
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Old meta is non-numeric for %d', 
+					$post_id
+				), $this->logger::WARNING );
+				
+				continue;
+
+			}
+
+			$old_category_int = (int) $old_category_value;
+
+			if( ! ( $old_category_int > 0 ) ) {
+
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Old value not gt 0 for %d', 
+					$post_id
+				), $this->logger::WARNING );
+				
+				continue;
+			}
+
+			$old_category =  get_category( $old_category_int );
+
+			if( ! isset( $old_category->term_id ) ) {
+
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'No old category object for %d', 
+					$post_id
+				), $this->logger::WARNING );
+				
+				$old_site_cat_id_by_url = $fn_category_id_by_remote_url( $post_id );	
+
+				if( $old_site_cat_id_by_url > 0 ) {
+
+					$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+						'Found via remote url %d category_id %d', 
+						$post_id, $old_site_cat_id_by_url
+					), $this->logger::SUCCESS );
+
+					// update_post_meta( $post_id, '_yoast_wpseo_primary_category', $old_site_cat_id_by_url );
+
+					if( ! has_category( $old_site_cat_id_by_url, $post_id ) ) {
+
+						$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+							'Primary category is not on post %d category_id %d', 
+							$post_id, $old_site_cat_id_by_url
+						), $this->logger::WARNING );
+	
+						// wp_set_post_categories( $post_id, (int) $old_site_cat_id_by_url, true );
+
+
+					}
+		
+				}
+
+			}
+
+
+
+			
+
+			exit();
+
+
+		}
+
+		wp_cache_flush();
+	}
+
+
+	/**
+	 * FEATURED IMAGE FUNCTIONS
+	 */
 
 	private function set_featured_image( $post_id, $meta_key ) {
 
