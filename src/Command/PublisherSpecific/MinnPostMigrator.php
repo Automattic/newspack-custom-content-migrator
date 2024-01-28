@@ -469,25 +469,63 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	private function byline_regex( $byline ) {
 
-		// convert utf8 spaces to normal spaces
-		$byline = trim( str_replace("\xc2\xa0", "\x20", $byline) );
+
+// change these to preg_replace?
+
+		// Replace UTF-8 encoded line separator (E2 80 A8) with nothing so it's "trimed"
+		$byline = trim( str_replace("\xE2\x80\xA8", "", $byline) );
+
+		// Replace UTF-8 left-to-right mark (U200E) with nothing so it's trimmed
+		$byline = trim( str_replace( "\xE2\x80\x8E", " ", $byline ) );
+
+// Narrow No-Break Space (U+202F)
+		
+
+		// Replace UTF-8 encoded non-breaking space (C2 A0) or zero width space (U+200B) with a regular space
+		$byline = trim( str_replace( "\xC2\xA0|\x{200B}", " ", $byline ) );
+
+		// Replace UTF-8 encoded zero width space (\xE2\x80\x8B) (U+200B) with a regular space
+		$byline = trim( str_replace( "\xE2\x80\x8B", " ", $byline ) );
+
+
+		// if( ! mb_check_encoding( $byline, 'ascii') {
+		// 	echo $byline;
+		// 	exit();
+
+		// }
+
+		// if( preg_match('/[^\p{L}\w\s\p{S}\p{P}]/u', $byline) ) {
+
+		// 	echo $byline;
+		// 	exit();
+		// }
+
 
 		// trim and replace multiple spaces with single space
 		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
 
-		// remove starting "By "
-		$byline = trim( preg_replace( '/^By\s+/', '', $byline ) );
+		// remove starting "By" with any spaces (case insensitive)
+		$byline = trim( preg_replace( '/^By\s+/i', '', $byline ) );
+
+
+
 
 		// skip for now: 
 		// Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-		// Abdulrahman Bindamnan - utf8 character
-		if( preg_match( '/(Stephanie Hemphill|Abdulrahman Bindamnan)/', $byline ) ) return null;
+		if( preg_match( '/(Stephanie Hemphill)/', $byline ) ) return null;
 
 		// skip for now: anything with ";" (6 rows) - do by hand
 		if( preg_match( '/;/', $byline ) ) return null;
 
 		// assess "and", &
+
+
+		// use \b around and \b
 		if( preg_match( '/ and |&/', $byline ) ) {
+
+			return null;
+
+			return array( "todo: " . $byline );
 
 			// todo:
 			// capture no comma with and then a comma
@@ -501,11 +539,43 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		}
 
+
+/*
+preg_split(',') {
+	for( $i = count() -1; $i >0; $i++ ) {
+		log comma trimmed except first entity
+	}
+}
+*/
+
+
 		// assess commas now that "and" have been captured above
 		if( preg_match( '/^([^,]+),(.*)/', $byline, $comma_parts ) ) {
+			
+			return null;
+
+			return array( "todo: " . $byline );
+
+			$this->logger->log( 'minnpost_byline_test_regex_commas_report.txt', sprintf( 
+				'Unable to set featured image for post %d', 
+				$post_id
+			), $this->logger::WARNING );
+
+
+
 			return array( $comma_parts[1] );
 		}
 
+		// assess commas now that "and" have been captured above
+		if( preg_match( '/,/', $byline, $comma_parts ) ) {
+	
+			return null;
+
+			return array( "todo: " . $byline );
+
+		}
+
+					
 		return array( $byline );
 
 	}
@@ -529,6 +599,8 @@ class MinnPostMigrator implements InterfaceCommand {
 			group by meta_value
 			order by post_count desc
 		");
+
+		$max = 0;
 
 		foreach ( $results as $result ) {
 
@@ -570,6 +642,10 @@ class MinnPostMigrator implements InterfaceCommand {
 			
 			// write output to csv
 			\WP_CLI\Utils\write_csv( $csv_out_file, array( $csv_line ) ); // array within array
+
+			
+			$max++;
+			// if( $max >= 4319 ) return;
 
 		} // foreach
 
