@@ -23,6 +23,12 @@ use \WP_User_Query;
 class MinnPostMigrator implements InterfaceCommand {
 
 	const OLD_SITE_URL = 'https://www.minnpost.com/';
+	
+	const CATEGORIES_TO_TAGS_CONVERT = array( 
+		'arts-culture' => 'Arts & Culture',
+		'news' => 'News', 
+		'opinion' => 'Opinion', 
+	);
 
 	/**
 	 * Instance of MinnPostMigrator.
@@ -81,6 +87,14 @@ class MinnPostMigrator implements InterfaceCommand {
 	public function register_commands() {
 
 		WP_CLI::add_command(
+			'newspack-content-migrator minnpost-convert-categories-to-tags',
+			[ $this, 'cmd_convert_categories_to_tags' ],
+			[
+				'shortdesc' => 'Convert selected categories to tags.  Update post terms.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator minnpost-set-authors-by-subtitle-byline',
 			[ $this, 'cmd_set_authors_by_subtitle_byline' ],
 			[
@@ -106,6 +120,68 @@ class MinnPostMigrator implements InterfaceCommand {
 			'newspack-content-migrator minnpost-set-primary-category',
 			[ $this, 'cmd_set_primary_category' ],
 		);
+
+	}
+
+	public function cmd_convert_categories_to_tags( $pos_args, $assoc_args ) {
+
+		// each category to convert.
+		foreach( array_keys( self::CATEGORIES_TO_TAGS_CONVERT ) as $category_slug ) {
+			
+			// get category.
+			$category = get_category_by_slug( $category_slug );
+			if( empty( $category->term_id ) ) {
+				$this->logger->log( 
+					'minnpost_convert_categories_to_tags.txt', 
+					sprintf( 'Skipping %s category. Not found.', $category_slug ),
+					$this->logger::WARNING
+				);
+				continue;
+			}
+
+			// get posts in category
+			$post_ids = $this->posts->get_all_posts_ids_in_category( $category->term_id, 'post', [ 'publish' ] );
+			$post_ids_count = count( $post_ids );
+
+			$this->logger->log( 
+				'minnpost_convert_categories_to_tags.txt', 
+				sprintf( 'Processing %s category: %d post count.', $category_slug, $post_ids_count )
+			);
+
+			foreach( $post_ids as $key_post_id => $post_id ) {
+
+				$this->logger->log( 
+					'minnpost_convert_categories_to_tags.txt', 
+					sprintf( '%d (%d of %d)', $post_id, $key_post_id + 1, $post_ids_count )
+				);
+
+				// save live url incase needed for redirects in future.
+				update_post_meta( $post_id, 'newspack_minnpost_live_site_url', $this->get_remote_url_by_rest_api( $post_id ) );
+				
+				// remove category and let WordPress/Yoast just pick a new url even if that means "uncategorized".
+				// specify $category->term_id int type else term might match a category based on string match instead
+				wp_remove_object_terms( $post_id, (int) $category->term_id, 'category' );
+
+				// add tag
+				wp_set_post_tags( $post_id, self::CATEGORIES_TO_TAGS_CONVERT[$category_slug], true );
+
+				$this->logger->log( 
+					'minnpost_convert_categories_to_tags.txt', 
+					sprintf( 'Converted post %d', $post_id ),
+					$this->logger::SUCCESS
+				);
+
+			} // foreach post id
+
+			wp_cache_flush();
+
+			$this->logger->log( 
+				'minnpost_convert_categories_to_tags.txt', 
+				sprintf( 'Category processed: %s', $category_slug ),
+				$this->logger::SUCCESS
+			);
+
+		} // foreach category
 
 	}
 
@@ -631,6 +707,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			// special cases
 			if( preg_match( '/^(Laurie|Joel) and (Laurie|Joel) Kramer$/i', $byline ) ) return array( 'Laurie Kramer', 'Joel Kramer' );
+
+/*
 			By Hugh and Elizabeth McCutcheon
 			By Sarah and Todd Palin
 
@@ -651,7 +729,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 
 			By Jesse Eisinger and Paul Kiel, ProPublica
-
+*/
 
 			// todo:
 			// capture no comma with and then a comma
@@ -1079,5 +1157,39 @@ class MinnPostMigrator implements InterfaceCommand {
 		return false;
 		
 	}
+
+	/**
+	 * REQUEST FUNCTIONS
+	 */
+
+	private function get_remote_url_by_redirect_location( $post_id ) {
+
+		$response = wp_remote_request( self::OLD_SITE_URL . '?p=' . $post_id, [ 'method' => 'HEAD' ] );
+		if ( is_wp_error( $response ) ) return null;
+		
+		$headers = wp_remote_retrieve_headers( $response );
+		if( ! isset( $headers['location'] ) ) return null;
+
+		return $headers['location'];
+	
+	}
+
+	private function get_remote_url_by_rest_api( $post_id ) {
+
+		$response = wp_remote_request( self::OLD_SITE_URL . 'wp-json/wp/v2/posts/' . $post_id );
+		if ( is_wp_error( $response ) ) return null;
+
+		$body = wp_remote_retrieve_body( $response );
+		if( empty( $body ) ) return null;
+
+		$json = @json_decode( $body );
+		if( empty( $json->link ) ) return null;
+
+		return $json->link;
+
+	}
+
+
+
 
 }
