@@ -607,21 +607,14 @@ class MinnPostMigrator implements InterfaceCommand {
 		// remove starting "By" with any spaces (case insensitive)
 		$byline = trim( preg_replace( '/^By\s+/i', '', $byline ) );
 
-		// Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-		if( preg_match( '/(Stephanie Hemphill)/', $byline ) ) return null;
+		// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
+		if( preg_match( '/(Stephanie Hemphill)/i', $byline ) ) return null;
 
-		// skip for now: anything with ";" (6 rows) - do by hand
-		if( preg_match( '/;/', $byline ) ) return null;
+		// skip for now: anything with "|", ";", "by" (not already stripped from front), "with" - review/do by hand
+		if( preg_match( '/([\|]|;|\bby\b|\bwith\b)/i', $byline ) ) return null;
 
-		// assess "and", &
-
-
-		// use \b around and \b
-		if( preg_match( '/ and |&/', $byline ) ) {
-
-			return null;
-
-			return array( "todo: " . $byline );
+		// parse "and" case
+		if( preg_match( '/\band\b|&/i', $byline ) ) {
 
 			// todo:
 			// capture no comma with and then a comma
@@ -631,47 +624,65 @@ class MinnPostMigrator implements InterfaceCommand {
 			// capture comma and then a comma
 			// if( preg_match( '/^(.*?),(.*?) and (.*?),(.*?)$/', $byline, $matches ) ) {
 
-			return array_map( 'trim', preg_split( '/, and | and | & |,/', $byline ) );
+			// split into elements
+			return array_map( 'trim', preg_split( '/\band\b|&|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
 
 		}
 
-
-/*
-preg_split(',') {
-	for( $i = count() -1; $i >0; $i++ ) {
-		log comma trimmed except first entity
-	}
-}
-*/
-
-
-		// assess commas now that "and" have been captured above
-		if( preg_match( '/^([^,]+),(.*)/', $byline, $comma_parts ) ) {
+		// parse commas now that "and with commas" above have been captured
+		if( preg_match( '/,/', $byline ) ) {
 			
+			$splits = array_map( 'trim', preg_split( '/,/', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
+
+			// name, publication/suffix:
+			if( 3 == count( $splits ) ) {
+				
+				// if it's a multiple value suffix to remove
+				if( $this->byline_is_suffix_to_trim( $splits[1] . ', ' . $splits[2] ) ) {
+					return array( $splits[0] );
+				}
+
+				// save new publications/suffixes for review and return null
+				$this->logger->log( 'minnpost_regex_possible_publications_or_suffix.txt', 
+					$byline . "\t" . $splits[1]. "\t" . $splits[2], 
+					$this->logger::WARNING
+				);
+				return null;
+				
+			}
+
+			// name, publication/suffix:
+			if( 2 == count( $splits ) ) {
+				
+				// if it's a suffix to keep
+				if( $this->byline_is_suffix_to_keep( $splits[1] ) ) {
+					return array( $splits[0] . ', ' . $splits[1] );
+				}
+
+				// if it's a suffix to remove
+				if( $this->byline_is_suffix_to_trim( $splits[1] ) ) {
+					return array( $splits[0] );
+				}
+
+				// save new publications/suffixes for review and return null
+				$this->logger->log( 'minnpost_regex_possible_publications_or_suffix.txt', 
+					$byline . "\t" . $splits[1], 
+					$this->logger::WARNING
+				);
+				return null;
+				
+			}
+
+			// save new publications/suffixes for review and return null
+			$this->logger->log( 'minnpost_regex_possible_publications_or_suffix.txt',
+				$byline,
+				$this->logger::WARNING
+			);
 			return null;
 
-			return array( "todo: " . $byline );
-
-			$this->logger->log( 'minnpost_byline_test_regex_commas_report.txt', sprintf( 
-				'Unable to set featured image for post %d', 
-				$post_id
-			), $this->logger::WARNING );
-
-
-
-			return array( $comma_parts[1] );
 		}
 
-		// assess commas now that "and" have been captured above
-		if( preg_match( '/,/', $byline, $comma_parts ) ) {
-	
-			return null;
-
-			return array( "todo: " . $byline );
-
-		}
-
-					
+		// normal byline
 		return array( $byline );
 
 	}
@@ -709,7 +720,7 @@ preg_split(',') {
 				$byline
 			);
 
-			// test regex for resulting byline(s) ( "and" cases product multiple ) ( single byline will be an array of one array)
+			// regex for resulting byline(s): "and" cases return multiple elements, single byline will be an array of one array
 			$bylines = $this->byline_regex( $byline, true );
 
 			// if no match this is an error byline, set match count to 0
@@ -753,26 +764,230 @@ preg_split(',') {
 
 	private function byline_error_if_unknown_chars( $byline ) {
 		
-		// unicode letters, ’ (U+2019), ” (U+201D), “ (U+201C), ascii letters and digits, special characters, ("u" modifier)
+		// known characters: unicode letters, ’ (U+2019), ” (U+201D), “ (U+201C), ascii letters and digits, special characters, ("u" modifier)
 		$byline_cleaned = trim( preg_replace( '/[\p{L}\x{2019}\x{201D}\x{201C}\w\/.,\'"-:;\|`]/u', '', $byline ) );
 
 		if( ! empty( $byline_cleaned ) ) {
 			WP_CLI::line( $byline );
 			WP_CLI::line( $byline_cleaned );
-			WP_CLI::error( 'Byline has unknown characters.' );
+			WP_CLI::error( 'Byline has unknown characters. Either add to known list or replace with non-unicode.' );
 		}
 
 	}
 
 	private function byline_replace_hidden_chars( $byline ) {
 
-		// Replace UTF-8 encoded line breaks, left-to-right, with nothing, ("u" modifier)
+		// Replace UTF-8 encoded line breaks, left-to-right, with nothing so they are trimmed, ("u" modifier)
 		$byline = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $byline ) );
 
 		// Replace UTF-8 encoded spaces with normal space, ("u" modifier)
 		$byline = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}/u', ' ', $byline ) );
 
 		return $byline;
+
+	}
+
+	private function byline_is_suffix_to_trim( $str ) {
+
+		$arr = [
+			'Afton',
+			'Albuquerque',
+			'Annandale',
+			'Apple Valley',
+			'Appleton',
+			'Associated Press',
+			'Bemidji',
+			'Bentonville, Arkansas',
+			'Blaine',
+			'Bloomington',
+			'Borderless Magazine',
+			'Brooklyn Park',
+			'Burnsville',
+			'California Healthline',
+			'Center for Public Integrity',
+			'Chalkbeat',
+			'Champlin',
+			'Chanhassen',
+			'Chaska',
+			'Chrisitan Science Monitor',
+			'Christian Science Monitor',
+			'Christian Science Monitor Correspondent',
+			'Circle of Blue',
+			'Collegeville',
+			'Columbia Heights',
+			'Coon Rapids',
+			'Dallas',
+			'DCDecoder',
+			'Duluth',
+			'Eagan',
+			'Eagan High School',
+			'Eden Prairie',
+			'Edina',
+			'Ely',
+			'Energy News Network',
+			'Ensia',
+			'ENTER',
+			'Fair School of Arts',
+			'Fair Warning',
+			'FairWarning',
+			'Falcon Heights',
+			'Fargo',
+			'Fargo, N.D.',
+			'Fergus Falls',
+			'for Wisconsin Watch',
+			'Frederick, Md.',
+			'Fridley',
+			'Global Post',
+			'Gloria Goodale',
+			'Golden Valley',
+			'Grand Rapids',
+			'Grist',
+			'Hales Corners, Wisconsin',
+			'Ham Lake',
+			'Hastings',
+			'Hechinger Report',
+			'Hechinger Report/HuffPost',
+			'Homeschool',
+			'Hopkins',
+			'Hudson',
+			'Indiana University',
+			'Inside Climate News',
+			'Inside Science',
+			'Inside Science News Service',
+			'Interim CEO',
+			'Inver Grove Heights',
+			'Irondale High School',
+			'Jordan',
+			'Kaiser Health News',
+			'KFF Health News',
+			'KHN',
+			'KHN/USA Today',
+			'KQED',
+			'Lafayette',
+			'Lake City',
+			'Lake Park',
+			'Lakeville',
+			'Lancaster',
+			'Lancaster, Pennsylvania',
+			'Lauderdale',
+			'Little Falls',
+			'LiveScience',
+			'LiveScience Staff Writer',
+			'Los Angeles',
+			'Lynnell Mickelsen',
+			'Mankato',
+			'Maple Grove',
+			'Maple Lake',
+			'Maplewood',
+			'Maranatha Christian Academy',
+			'Marthasville, Mo.',
+			'McClatchy Newspapers',
+			'Mendota Heights',
+			'Michigan Radio',
+			'Midwest Energy News',
+			'Milwaukee Journal Sentinel',
+			'Minneapolis',
+			'Minnehaha Academy',
+			'Minnetonka',
+			'Minnetonka Middle School East',
+			'Minnneapolis',
+			'Nashville Public Radio',
+			'New Milford, N.J.',
+			'New Lenox, Illinois',
+			'News21',
+			'Newsweek/DailyBeast',
+			'North Branch',
+			'North Community High School',
+			'Northfield',
+			'Nova Classical Academy',
+			'Oakdale',
+			'Oak Creek, Wisconsin',
+			'Pine City',
+			'Plymouth',
+			'Prior Lake',
+			'Project Optimist',
+			'ProPublica',
+			'Providence, R.I.',
+			'Quito, Ecuador',
+			'Red Wing',
+			'Reveal',
+			'Richfield',
+			'Rochester',
+			'Rosemount',
+			'Rosemount High School',
+			'Roseville',
+			'Saint Paul',
+			'Salon',
+			'Shoreview',
+			'South High School',
+			'South St. Paul',
+			'Southwest High School',
+			'SPACE.com staff writer',
+			'SPACE.com\'s Space Insider Columnist',
+			'Sparta',
+			'St Louis Park',
+			'St. Louis, Mo.',
+			'St. Louis Park',
+			'St. Louis Public Radio',
+			'St. Michael',
+			'St Paul',
+			'St. Paul',
+			'St. Peter',
+			'St.Cloud area',
+			'Stateline',
+			'Sunfish Lake',
+			'Texas Tribune',
+			'The 19th',
+			'The 74',
+			'The Cap Times',
+			'The Cedar Rapids Gazette',
+			'The Center for Public Integrity',
+			'The Conversation',
+			'The Daily Memphian',
+			'The Daily Yonder',
+			'The Gazette',
+			'The Hechinger Report',
+			'The Lens',
+			'The Line',
+			'The Loft Literary Center',
+			'The Minneapolis Foundation',
+			'The Nevada Independent',
+			'The Trace',
+			'Tufts University',
+			'Twin Cities Business',
+			'University of California, Riverside',
+			'University of Minnesota',
+			'University of South Carolina',
+			'Votebeat',
+			'Wadena',
+			'Washington',
+			'Washington, D.C.',
+			'Wayzata',
+			'WBUR',
+			'West St. Paul',
+			'Willmar',
+			'Winona',
+			'Wisconsin Public Radio',
+			'Wisconsin Watch',
+			'WisconsinWatch',
+			'WisconsinWatch.org',
+			'Woodbury',
+			'WPLN',
+			'WPR/Wisconsin Watch',
+		];
+
+		// case insensitive
+		if( in_array( strtolower( $str ), array_map('strtolower', $arr ) ) ) return true;
+
+		return false;
+		
+	}
+
+	private function byline_is_suffix_to_keep( $str ) {
+
+		if( preg_match( '/^(Jr|Sr)[.]?$/i', $str ) ) return true;
+
+		return false;
 
 	}
 
