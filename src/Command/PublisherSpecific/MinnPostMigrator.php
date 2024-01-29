@@ -593,39 +593,13 @@ class MinnPostMigrator implements InterfaceCommand {
 		
 	}
 
-	private function byline_regex( $byline ) {
+	private function byline_regex( $byline, $error_on_unknown_char = false ) {
 
+		// remove/replace hidden chars
+		$byline = $this->byline_replace_hidden_chars( $byline );
 
-// change these to preg_replace?
-
-		// Replace UTF-8 encoded line separator (E2 80 A8) with nothing so it's "trimed"
-		$byline = trim( str_replace("\xE2\x80\xA8", "", $byline) );
-
-		// Replace UTF-8 left-to-right mark (U200E) with nothing so it's trimmed
-		$byline = trim( str_replace( "\xE2\x80\x8E", " ", $byline ) );
-
-// Narrow No-Break Space (U+202F)
-		
-
-		// Replace UTF-8 encoded non-breaking space (C2 A0) or zero width space (U+200B) with a regular space
-		$byline = trim( str_replace( "\xC2\xA0|\x{200B}", " ", $byline ) );
-
-		// Replace UTF-8 encoded zero width space (\xE2\x80\x8B) (U+200B) with a regular space
-		$byline = trim( str_replace( "\xE2\x80\x8B", " ", $byline ) );
-
-
-		// if( ! mb_check_encoding( $byline, 'ascii') {
-		// 	echo $byline;
-		// 	exit();
-
-		// }
-
-		// if( preg_match('/[^\p{L}\w\s\p{S}\p{P}]/u', $byline) ) {
-
-		// 	echo $byline;
-		// 	exit();
-		// }
-
+		// if error mode true, test for new hidden/unknown chars
+		if( $error_on_unknown_char ) $this->byline_error_if_unknown_chars( $byline );
 
 		// trim and replace multiple spaces with single space
 		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
@@ -633,10 +607,6 @@ class MinnPostMigrator implements InterfaceCommand {
 		// remove starting "By" with any spaces (case insensitive)
 		$byline = trim( preg_replace( '/^By\s+/i', '', $byline ) );
 
-
-
-
-		// skip for now: 
 		// Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
 		if( preg_match( '/(Stephanie Hemphill)/', $byline ) ) return null;
 
@@ -740,7 +710,7 @@ preg_split(',') {
 			);
 
 			// test regex for resulting byline(s) ( "and" cases product multiple ) ( single byline will be an array of one array)
-			$bylines = $this->byline_regex( $byline );
+			$bylines = $this->byline_regex( $byline, true );
 
 			// if no match this is an error byline, set match count to 0
 			if( empty( $bylines ) ) {
@@ -781,5 +751,29 @@ preg_split(',') {
 
 	}
 
+	private function byline_error_if_unknown_chars( $byline ) {
+		
+		// unicode letters, ’ (U+2019), ” (U+201D), “ (U+201C), ascii letters and digits, special characters, ("u" modifier)
+		$byline_cleaned = trim( preg_replace( '/[\p{L}\x{2019}\x{201D}\x{201C}\w\/.,\'"-:;\|`]/u', '', $byline ) );
+
+		if( ! empty( $byline_cleaned ) ) {
+			WP_CLI::line( $byline );
+			WP_CLI::line( $byline_cleaned );
+			WP_CLI::error( 'Byline has unknown characters.' );
+		}
+
+	}
+
+	private function byline_replace_hidden_chars( $byline ) {
+
+		// Replace UTF-8 encoded line breaks, left-to-right, with nothing, ("u" modifier)
+		$byline = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $byline ) );
+
+		// Replace UTF-8 encoded spaces with normal space, ("u" modifier)
+		$byline = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}/u', ' ', $byline ) );
+
+		return $byline;
+
+	}
 
 }
