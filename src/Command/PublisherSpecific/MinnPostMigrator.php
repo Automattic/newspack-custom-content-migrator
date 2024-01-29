@@ -601,20 +601,57 @@ class MinnPostMigrator implements InterfaceCommand {
 		// if error mode true, test for new hidden/unknown chars
 		if( $error_on_unknown_char ) $this->byline_error_if_unknown_chars( $byline );
 
+		// remove starting "By" with any spaces (case insensitive)
+		$byline = trim( preg_replace( '/^By[:]?\s+/i', '', $byline ) );
+
+		// remove other "by" in text
+		$byline = trim( preg_replace( '/\b(Analysis|Commentary|Designed|Editorial|Embedded|Interview|Satire|Text|Videos)\s+by\b/i', '', $byline ) );
+
+		// remove string match job titles
+		$byline = trim( preg_replace( '/\bStaff writer\b/i', '', $byline ) );
+
+		// remove comma on Jr/Sr at end of byline (todo: fix for "and" cases?)
+		$byline = trim( preg_replace( '/, (Jr|Sr)[\.]$/i', " $1", $byline ) );
+
+		// standardize commas with one space
+		$byline = trim( preg_replace( '/\s*,\s*/', ', ', $byline ) );
+
 		// trim and replace multiple spaces with single space
 		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
 
-		// remove starting "By" with any spaces (case insensitive)
-		$byline = trim( preg_replace( '/^By\s+/i', '', $byline ) );
-
 		// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-		if( preg_match( '/(Stephanie Hemphill)/i', $byline ) ) return null;
-
-		// skip for now: anything with "|", ";", "by" (not already stripped from front), "with" - review/do by hand
-		if( preg_match( '/([\|]|;|\bby\b|\bwith\b)/i', $byline ) ) return null;
+		if( preg_match( '/Stephanie Hemphill/i', $byline ) ) return null;
+		if( preg_match( '/Hugh Macleod and a reporter in Syria/i', $byline ) ) return null;
+		
+		// skip for now: anything with "|", ";", "by" (not already stripped)
+		if( preg_match( '/([\|]|;|\bby\b)/i', $byline ) ) return null;
 
 		// parse "and" case
-		if( preg_match( '/\band\b|&/i', $byline ) ) {
+		if( preg_match( '/\band\b|&|\bwith\b/i', $byline ) ) {
+
+			// special cases
+			if( preg_match( '/^(Laurie|Joel) and (Laurie|Joel) Kramer$/i', $byline ) ) return array( 'Laurie Kramer', 'Joel Kramer' );
+			By Hugh and Elizabeth McCutcheon
+			By Sarah and Todd Palin
+
+			By Jenny Gold and Kate Steadman, Kaiser Health News
+			By Mike Faulk and and Sara Miller Llana
+			By Lindsey Dyer, Librarian with Dakota County Library
+
+			By Phil Schewe and Devin Powell, Inside Science News Service
+
+			By Mike Lucibella and Eric Betz, Inside Science News Service
+
+			By Shashank Bengali and Mohammed al Dulaimy, McClatchy Newspapers
+			By Jonathan S. Landay and Saeed Shah, McClatchy newspapers
+			By Sebastian Jones and Marcus Stern, ProPublica
+			By Shashank Bengali and Mohammed El Dulaimy, McClatchy Newspapers
+
+			By Bianca Virnig and five others
+
+
+			By Jesse Eisinger and Paul Kiel, ProPublica
+
 
 			// todo:
 			// capture no comma with and then a comma
@@ -625,7 +662,10 @@ class MinnPostMigrator implements InterfaceCommand {
 			// if( preg_match( '/^(.*?),(.*?) and (.*?),(.*?)$/', $byline, $matches ) ) {
 
 			// split into elements
-			return array_map( 'trim', preg_split( '/\band\b|&|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
+			$splits = array_map( 'trim', preg_split( '/\band\b|&|\bwith\b|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
+
+			return $splits;
+
 
 		}
 
@@ -635,6 +675,19 @@ class MinnPostMigrator implements InterfaceCommand {
 			$splits = array_map( 'trim', preg_split( '/,/', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
 
 			// name, publication/suffix:
+			if( 2 == count( $splits ) ) {
+				
+				// special cases
+				if( preg_match( '/^becky Bock, Carlos$/i', $byline ) ) return null;
+
+				// if it's a suffix to remove
+				if( $this->byline_is_suffix_to_trim( $splits[1] ) ) {
+					return array( $splits[0] );
+				}
+				
+			}
+
+			// name, publication/suffix:
 			if( 3 == count( $splits ) ) {
 				
 				// if it's a multiple value suffix to remove
@@ -642,43 +695,33 @@ class MinnPostMigrator implements InterfaceCommand {
 					return array( $splits[0] );
 				}
 
-				// save new publications/suffixes for review and return null
-				$this->logger->log( 'minnpost_regex_possible_publications_or_suffix.txt', 
-					$byline . "\t" . $splits[1]. "\t" . $splits[2], 
-					$this->logger::WARNING
-				);
-				return null;
-				
-			}
-
-			// name, publication/suffix:
-			if( 2 == count( $splits ) ) {
-				
-				// if it's a suffix to keep
-				if( $this->byline_is_suffix_to_keep( $splits[1] ) ) {
-					return array( $splits[0] . ', ' . $splits[1] );
-				}
-
-				// if it's a suffix to remove
-				if( $this->byline_is_suffix_to_trim( $splits[1] ) ) {
+				// if both should be removed
+				if( $this->byline_is_suffix_to_trim( $splits[1] ) &&  $this->byline_is_suffix_to_trim( $splits[2] ) ) {
 					return array( $splits[0] );
 				}
 
-				// save new publications/suffixes for review and return null
-				$this->logger->log( 'minnpost_regex_possible_publications_or_suffix.txt', 
-					$byline . "\t" . $splits[1], 
-					$this->logger::WARNING
-				);
-				return null;
-				
 			}
 
-			// save new publications/suffixes for review and return null
-			$this->logger->log( 'minnpost_regex_possible_publications_or_suffix.txt',
-				$byline,
-				$this->logger::WARNING
-			);
-			return null;
+			// remaining cases
+			$splits_count = count( $splits );
+			for( $i=0; $i < $splits_count; $i++ ) {
+				
+				// remove any publications, suffixes, etc
+				if( $this->byline_is_suffix_to_trim( $splits[$i] ) ) {
+					unset( $splits[$i] );
+					continue;
+				}
+
+				// if not in allowed names, save for review and return null
+				if( ! $this->byline_is_name_ok( $splits[$i] ) ) {
+					$this->logger->log( 'minnpost_regex_warnings.txt', $byline, $this->logger::WARNING );
+					return null;
+				}
+
+			}
+
+			// return clean and ordered names
+			return array_values( $splits );
 
 		}
 
@@ -827,6 +870,9 @@ class MinnPostMigrator implements InterfaceCommand {
 			'Energy News Network',
 			'Ensia',
 			'ENTER',
+			'et al',
+			'et al.',
+			'et. al.',
 			'Fair School of Arts',
 			'Fair Warning',
 			'FairWarning',
@@ -870,6 +916,7 @@ class MinnPostMigrator implements InterfaceCommand {
 			'Lancaster',
 			'Lancaster, Pennsylvania',
 			'Lauderdale',
+			'LICSW',
 			'Little Falls',
 			'LiveScience',
 			'LiveScience Staff Writer',
@@ -882,6 +929,7 @@ class MinnPostMigrator implements InterfaceCommand {
 			'Maranatha Christian Academy',
 			'Marthasville, Mo.',
 			'McClatchy Newspapers',
+			'MD',
 			'Mendota Heights',
 			'Michigan Radio',
 			'Midwest Energy News',
@@ -891,6 +939,7 @@ class MinnPostMigrator implements InterfaceCommand {
 			'Minnetonka',
 			'Minnetonka Middle School East',
 			'Minnneapolis',
+			'MSW',
 			'Nashville Public Radio',
 			'New Milford, N.J.',
 			'New Lenox, Illinois',
@@ -904,6 +953,10 @@ class MinnPostMigrator implements InterfaceCommand {
 			'Oak Creek, Wisconsin',
 			'Pine City',
 			'Plymouth',
+			'Phd',
+			'Phd.',
+			'Ph.d',
+			'Ph.D.',
 			'Prior Lake',
 			'Project Optimist',
 			'ProPublica',
@@ -912,6 +965,7 @@ class MinnPostMigrator implements InterfaceCommand {
 			'Red Wing',
 			'Reveal',
 			'Richfield',
+			'RN',
 			'Rochester',
 			'Rosemount',
 			'Rosemount High School',
@@ -922,6 +976,7 @@ class MinnPostMigrator implements InterfaceCommand {
 			'South High School',
 			'South St. Paul',
 			'Southwest High School',
+			'SPACE.com',
 			'SPACE.com staff writer',
 			'SPACE.com\'s Space Insider Columnist',
 			'Sparta',
@@ -983,12 +1038,46 @@ class MinnPostMigrator implements InterfaceCommand {
 		
 	}
 
-	private function byline_is_suffix_to_keep( $str ) {
+	private function byline_is_name_ok( $str ) {
 
-		if( preg_match( '/^(Jr|Sr)[.]?$/i', $str ) ) return true;
+		$arr = [
+			'Alex Mierjeski',
+			'Alisa Mysliu',
+			'Amy Klobuchar',
+			'Ayantu Ayana',
+			'Ben Arnoldy',
+			'David Brauer',
+			'Gabriela Delova',
+			'Heather Silsbee',
+			'Jamie Millard',
+			'Joshua Kaplan',
+			'Julia Nekessa Opoti',
+			'Justin Elliott',
+			'Kadra Abdi',
+			'Kenneth Kaplan',
+			'Kristen Ingle',
+			'Kristina Ozimec',
+			'Magda Munteanu',
+			'Mark Guarino',
+			'Meghan Murphy',
+			'Mitch Pearlstein',
+			'Mohamed H. Mohamed',
+			'Ramla Bile',
+			'Sara Miller Llana',
+			'Sharon Schmickle',
+			'Sharon Schmickle',
+			'State Rep. Loren Solberg',
+			'State Rep. Morrie Lanning',
+			'State Sen. Julie Rosen',
+			'State Sen. Tom Bakk',
+			'Steve Date',
+		];
+
+		// case insensitive
+		if( in_array( strtolower( $str ), array_map('strtolower', $arr ) ) ) return true;
 
 		return false;
-
+		
 	}
 
 }
