@@ -30,6 +30,9 @@ class MinnPostMigrator implements InterfaceCommand {
 		'opinion' => 'Opinion', 
 	);
 
+	private $byline_known_names = null;
+	private $byline_known_suffixes = null;
+
 	/**
 	 * Instance of MinnPostMigrator.
 	 *
@@ -99,15 +102,29 @@ class MinnPostMigrator implements InterfaceCommand {
 			[ $this, 'cmd_set_authors_by_subtitle_byline' ],
 			[
 				'shortdesc' => 'Convert old post meta to CAP GAs (or matching WP User) and assign to Post.',
-				'synopsis'  => array(
-					array(
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-names',
+						'description' => 'Known names CSV file. Relative to uploads folder: --csv-file="2024/01/names.csv"',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-suffixes',
+						'description' => 'Known suffixes CSV file. Relative to uploads folder: --csv-file="2024/01/suffixes.csv"',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'test-regex',
 						'description' => 'If used, all bylines from postmeta will be run though regex. (No db updates).',
 						'optional'    => true,
 						'repeating'   => false,
-					),
-				),
+					],
+				],
 			]
 		);
 
@@ -187,11 +204,24 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	public function cmd_set_authors_by_subtitle_byline( $pos_args, $assoc_args ) {
 
+		// load csv file		
+		$this->byline_known_names = $this->load_from_csv( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'csv-names' ] );
+		if( empty( $this->byline_known_names ) ) {
+			WP_CLI::error( 'CSV Names is empty.' );
+		}
+
+		// load csv file		
+		$this->byline_known_suffixes = $this->load_from_csv( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'csv-suffixes' ] );
+		if( empty( $this->byline_known_suffixes ) ) {
+			WP_CLI::error( 'CSV Suffixes is empty.' );
+		}
+
 		// test only if set
 		if( isset( $assoc_args['test-regex']) ) {
 			return $this->byline_test_regex();
 		}
 
+		// needs coauthors plus plugin
 		if ( ! $this->coauthorsplus->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
@@ -669,7 +699,10 @@ class MinnPostMigrator implements InterfaceCommand {
 		
 	}
 
+	// return: string|array|null
 	private function byline_regex( $byline, $error_on_unknown_char = false ) {
+
+		// -- REPLACEMENTS ---------------------------------------------------------------
 
 		// remove/replace hidden chars
 		$byline = $this->byline_replace_hidden_chars( $byline );
@@ -684,10 +717,11 @@ class MinnPostMigrator implements InterfaceCommand {
 		$byline = trim( preg_replace( '/\b(Analysis|Commentary|Designed|Editorial|Embedded|Interview|Satire|Text|Videos)\s+by\b/i', '', $byline ) );
 
 		// remove string match job titles
-		$byline = trim( preg_replace( '/\bStaff writer\b/i', '', $byline ) );
+		// $byline = trim( preg_replace( '/\bLibrarian with Dakota County Library\b/i', '', $byline ) );
+		// $byline = trim( preg_replace( '/\bStaff writer\b/i', '', $byline ) );
 
 		// remove comma on Jr/Sr at end of byline (todo: fix for "and" cases?)
-		$byline = trim( preg_replace( '/, (Jr|Sr)[\.]$/i', " $1", $byline ) );
+		// $byline = trim( preg_replace( '/, (Jr|Sr)[\.]$/i', " $1", $byline ) );
 
 		// standardize commas with one space
 		$byline = trim( preg_replace( '/\s*,\s*/', ', ', $byline ) );
@@ -695,57 +729,24 @@ class MinnPostMigrator implements InterfaceCommand {
 		// trim and replace multiple spaces with single space
 		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
 
+		// -- MATCHES ----------------------------------------------------------------------
+
 		// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-		if( preg_match( '/Stephanie Hemphill/i', $byline ) ) return null;
-		if( preg_match( '/Hugh Macleod and a reporter in Syria/i', $byline ) ) return null;
+		// if( preg_match( '/Stephanie Hemphill/i', $byline ) ) return null;
+		// if( preg_match( '/Hugh Macleod and a reporter in Syria/i', $byline ) ) return null;
 		
 		// skip for now: anything with "|", ";", "by" (not already stripped)
-		if( preg_match( '/([\|]|;|\bby\b)/i', $byline ) ) return null;
+		// if( preg_match( '/([\|]|;|\bby\b)/i', $byline ) ) return null;
 
-		// parse "and" case
+		// parse "and" / "with" case
 		if( preg_match( '/\band\b|&|\bwith\b/i', $byline ) ) {
 
-			// special cases
-			if( preg_match( '/^(Laurie|Joel) and (Laurie|Joel) Kramer$/i', $byline ) ) return array( 'Laurie Kramer', 'Joel Kramer' );
-
-/*
-			By Hugh and Elizabeth McCutcheon
-			By Sarah and Todd Palin
-
-			By Jenny Gold and Kate Steadman, Kaiser Health News
-			By Mike Faulk and and Sara Miller Llana
-			By Lindsey Dyer, Librarian with Dakota County Library
-
-			By Phil Schewe and Devin Powell, Inside Science News Service
-
-			By Mike Lucibella and Eric Betz, Inside Science News Service
-
-			By Shashank Bengali and Mohammed al Dulaimy, McClatchy Newspapers
-			By Jonathan S. Landay and Saeed Shah, McClatchy newspapers
-			By Sebastian Jones and Marcus Stern, ProPublica
-			By Shashank Bengali and Mohammed El Dulaimy, McClatchy Newspapers
-
-			By Bianca Virnig and five others
-
-
-			By Jesse Eisinger and Paul Kiel, ProPublica
-*/
-
-			// todo:
-			// capture no comma with and then a comma
-			// if( preg_match( '/^([^,]+) and (.*?),(.*?)$/', $byline, $matches ) ) {
-
-			// todo:
-			// capture comma and then a comma
-			// if( preg_match( '/^(.*?),(.*?) and (.*?),(.*?)$/', $byline, $matches ) ) {
-
-			// split into elements
-			$splits = array_map( 'trim', preg_split( '/\band\b|&|\bwith\b|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
-
-			return $splits;
-
-
+			return $this->bylines_do_and_case( $byline );
 		}
+
+		return 'bypass';
+
+
 
 		// parse commas now that "and with commas" above have been captured
 		if( preg_match( '/,/', $byline ) ) {
@@ -760,7 +761,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 				// if it's a suffix to remove
 				if( $this->byline_is_suffix_to_trim( $splits[1] ) ) {
-					return array( $splits[0] );
+					return $splits[0];
 				}
 				
 			}
@@ -770,12 +771,12 @@ class MinnPostMigrator implements InterfaceCommand {
 				
 				// if it's a multiple value suffix to remove
 				if( $this->byline_is_suffix_to_trim( $splits[1] . ', ' . $splits[2] ) ) {
-					return array( $splits[0] );
+					return $splits[0];
 				}
 
 				// if both should be removed
 				if( $this->byline_is_suffix_to_trim( $splits[1] ) &&  $this->byline_is_suffix_to_trim( $splits[2] ) ) {
-					return array( $splits[0] );
+					return $splits[0];
 				}
 
 			}
@@ -791,8 +792,7 @@ class MinnPostMigrator implements InterfaceCommand {
 				}
 
 				// if not in allowed names, save for review and return null
-				if( ! $this->byline_is_name_ok( $splits[$i] ) ) {
-					$this->logger->log( 'minnpost_regex_warnings.txt', $byline, $this->logger::WARNING );
+				if( ! in_array( $splits[$i], $this->byline_known_names ) ) {
 					return null;
 				}
 
@@ -804,11 +804,11 @@ class MinnPostMigrator implements InterfaceCommand {
 		}
 
 		// normal byline
-		return array( $byline );
+		return $byline;
 
 	}
 
-	private function byline_test_regex(  ) {
+	private function byline_test_regex() {
 
 		$csv_out_file = fopen( 'minnpost_byline_test_regex_report.csv', 'w' );
 
@@ -841,12 +841,16 @@ class MinnPostMigrator implements InterfaceCommand {
 				$byline
 			);
 
-			// regex for resulting byline(s): "and" cases return multiple elements, single byline will be an array of one array
+			// string|array|null
 			$bylines = $this->byline_regex( $byline, true );
+
+			if( 'bypass' == $bylines ) continue;
 
 			// if no match this is an error byline, set match count to 0
 			if( empty( $bylines ) ) {
 				
+				$this->logger->log( 'minnpost_regex_warnings.txt', $byline, $this->logger::WARNING );
+
 				$csv_line[] = 0;
 				$csv_line[] = 'ERROR_NO_MATCHES';
 				
@@ -857,6 +861,8 @@ class MinnPostMigrator implements InterfaceCommand {
 			// matches exist
 			else {
 				
+				if( ! is_array( $bylines ) ) $bylines = array( $bylines );
+
 				// store match count
 				$csv_line[] = count( $bylines );
 				
@@ -873,6 +879,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			
 			$max++;
+			
 			// if( $max >= 4319 ) return;
 
 		} // foreach
@@ -908,255 +915,125 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	}
 
-	private function byline_is_suffix_to_trim( $str ) {
+	private function bylines_do_and_case( $byline ) {
 
-		$arr = [
-			'Afton',
-			'Albuquerque',
-			'Annandale',
-			'Apple Valley',
-			'Appleton',
-			'Associated Press',
-			'Bemidji',
-			'Bentonville, Arkansas',
-			'Blaine',
-			'Bloomington',
-			'Borderless Magazine',
-			'Brooklyn Park',
-			'Burnsville',
-			'California Healthline',
-			'Center for Public Integrity',
-			'Chalkbeat',
-			'Champlin',
-			'Chanhassen',
-			'Chaska',
-			'Chrisitan Science Monitor',
-			'Christian Science Monitor',
-			'Christian Science Monitor Correspondent',
-			'Circle of Blue',
-			'Collegeville',
-			'Columbia Heights',
-			'Coon Rapids',
-			'Dallas',
-			'DCDecoder',
-			'Duluth',
-			'Eagan',
-			'Eagan High School',
-			'Eden Prairie',
-			'Edina',
-			'Ely',
-			'Energy News Network',
-			'Ensia',
-			'ENTER',
-			'et al',
-			'et al.',
-			'et. al.',
-			'Fair School of Arts',
-			'Fair Warning',
-			'FairWarning',
-			'Falcon Heights',
-			'Fargo',
-			'Fargo, N.D.',
-			'Fergus Falls',
-			'for Wisconsin Watch',
-			'Frederick, Md.',
-			'Fridley',
-			'Global Post',
-			'Gloria Goodale',
-			'Golden Valley',
-			'Grand Rapids',
-			'Grist',
-			'Hales Corners, Wisconsin',
-			'Ham Lake',
-			'Hastings',
-			'Hechinger Report',
-			'Hechinger Report/HuffPost',
-			'Homeschool',
-			'Hopkins',
-			'Hudson',
-			'Indiana University',
-			'Inside Climate News',
-			'Inside Science',
-			'Inside Science News Service',
-			'Interim CEO',
-			'Inver Grove Heights',
-			'Irondale High School',
-			'Jordan',
-			'Kaiser Health News',
-			'KFF Health News',
-			'KHN',
-			'KHN/USA Today',
-			'KQED',
-			'Lafayette',
-			'Lake City',
-			'Lake Park',
-			'Lakeville',
-			'Lancaster',
-			'Lancaster, Pennsylvania',
-			'Lauderdale',
-			'LICSW',
-			'Little Falls',
-			'LiveScience',
-			'LiveScience Staff Writer',
-			'Los Angeles',
-			'Lynnell Mickelsen',
-			'Mankato',
-			'Maple Grove',
-			'Maple Lake',
-			'Maplewood',
-			'Maranatha Christian Academy',
-			'Marthasville, Mo.',
-			'McClatchy Newspapers',
-			'MD',
-			'Mendota Heights',
-			'Michigan Radio',
-			'Midwest Energy News',
-			'Milwaukee Journal Sentinel',
-			'Minneapolis',
-			'Minnehaha Academy',
-			'Minnetonka',
-			'Minnetonka Middle School East',
-			'Minnneapolis',
-			'MSW',
-			'Nashville Public Radio',
-			'New Milford, N.J.',
-			'New Lenox, Illinois',
-			'News21',
-			'Newsweek/DailyBeast',
-			'North Branch',
-			'North Community High School',
-			'Northfield',
-			'Nova Classical Academy',
-			'Oakdale',
-			'Oak Creek, Wisconsin',
-			'Pine City',
-			'Plymouth',
-			'Phd',
-			'Phd.',
-			'Ph.d',
-			'Ph.D.',
-			'Prior Lake',
-			'Project Optimist',
-			'ProPublica',
-			'Providence, R.I.',
-			'Quito, Ecuador',
-			'Red Wing',
-			'Reveal',
-			'Richfield',
-			'RN',
-			'Rochester',
-			'Rosemount',
-			'Rosemount High School',
-			'Roseville',
-			'Saint Paul',
-			'Salon',
-			'Shoreview',
-			'South High School',
-			'South St. Paul',
-			'Southwest High School',
-			'SPACE.com',
-			'SPACE.com staff writer',
-			'SPACE.com\'s Space Insider Columnist',
-			'Sparta',
-			'St Louis Park',
-			'St. Louis, Mo.',
-			'St. Louis Park',
-			'St. Louis Public Radio',
-			'St. Michael',
-			'St Paul',
-			'St. Paul',
-			'St. Peter',
-			'St.Cloud area',
-			'Stateline',
-			'Sunfish Lake',
-			'Texas Tribune',
-			'The 19th',
-			'The 74',
-			'The Cap Times',
-			'The Cedar Rapids Gazette',
-			'The Center for Public Integrity',
-			'The Conversation',
-			'The Daily Memphian',
-			'The Daily Yonder',
-			'The Gazette',
-			'The Hechinger Report',
-			'The Lens',
-			'The Line',
-			'The Loft Literary Center',
-			'The Minneapolis Foundation',
-			'The Nevada Independent',
-			'The Trace',
-			'Tufts University',
-			'Twin Cities Business',
-			'University of California, Riverside',
-			'University of Minnesota',
-			'University of South Carolina',
-			'Votebeat',
-			'Wadena',
-			'Washington',
-			'Washington, D.C.',
-			'Wayzata',
-			'WBUR',
-			'West St. Paul',
-			'Willmar',
-			'Winona',
-			'Wisconsin Public Radio',
-			'Wisconsin Watch',
-			'WisconsinWatch',
-			'WisconsinWatch.org',
-			'Woodbury',
-			'WPLN',
-			'WPR/Wisconsin Watch',
-		];
+		// split into elements
+		$splits = array_map( 'trim', preg_split( '/\band\b|&|\bwith\b|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
+				
+		// first person only has first name
+		if( false === strpos( $splits[0], ' ' ) ) {
+			
+			if( $byline == 'Friends and colleagues of Babak Armajani' ) return $byline;
+			if( $byline == 'MinnPost and Minneapolis Voices' ) return array( 'MinnPost', 'Minneapolis Voices' );
 
-		// case insensitive
-		if( in_array( strtolower( $str ), array_map('strtolower', $arr ) ) ) return true;
+			// try to remove suffix
+			if( 3 == count( $splits ) && $this->byline_is_suffix( $splits[2] ) ) {
+				unset( $splits[2] );
+			}
 
-		return false;
+			// check both names
+			if( 2 == count( $splits ) 
+				&& $this->byline_is_name_ok( $splits[0] . preg_replace( '/^.*?\s/', ' ', $splits[1] ) )
+				&& $this->byline_is_name_ok( $splits[1] )
+			){
+				return $splits;
+			}
+
+			return null;
+		}
+
+		// if 3 values and last one is suffix
+		if( 3 == count( $splits ) && $this->byline_is_suffix( $splits[2] ) 
+				&& $this->byline_is_name_ok( $splits[0] )
+				&& $this->byline_is_name_ok( $splits[1] )
+			) {
+				return $splits;
+			} else return null;
 		
+
+		if( 2 == count( $splits ) 
+				&& $this->byline_is_name_ok( $splits[0] )
+				&& $this->byline_is_name_ok( $splits[1] )
+		) {
+			return $splits;
+		} else return null;
+		
+
+
+		return null;
+		return 'bypass';
+
+		// check names
+		$found = 0;
+		foreach( $splits as $split ) {
+			if( in_array( $split, $this->byline_known_names ) 
+				&& in_array( $split, $this->byline_known_suffixes ) ) $found++;
+		}
+		if( $found == count( $splits ) ) return $splits;
+		
+
+		return null;
+		return 'bypass';
+
+		// special cases
+		// if( preg_match( '/^(Laurie|Joel) and (Laurie|Joel) Kramer$/i', $byline ) ) return array( 'Laurie Kramer', 'Joel Kramer' );
+
+
+
+	/*
+		By Jenny Gold and Kate Steadman, Kaiser Health News
+		By Mike Faulk and and Sara Miller Llana
+		By Lindsey Dyer, Librarian with Dakota County Library
+
+		By Phil Schewe and Devin Powell, Inside Science News Service
+
+		By Mike Lucibella and Eric Betz, Inside Science News Service
+
+		By Shashank Bengali and Mohammed al Dulaimy, McClatchy Newspapers
+		By Jonathan S. Landay and Saeed Shah, McClatchy newspapers
+		By Sebastian Jones and Marcus Stern, ProPublica
+		By Shashank Bengali and Mohammed El Dulaimy, McClatchy Newspapers
+
+		By Bianca Virnig and five others
+
+
+		By Jesse Eisinger and Paul Kiel, ProPublica
+	*/
+
+		// todo:
+		// capture no comma with and then a comma
+		// if( preg_match( '/^([^,]+) and (.*?),(.*?)$/', $byline, $matches ) ) {
+
+		// todo:
+		// capture comma and then a comma
+		// if( preg_match( '/^(.*?),(.*?) and (.*?),(.*?)$/', $byline, $matches ) ) {
+
+
+		return $splits;
+
 	}
 
 	private function byline_is_name_ok( $str ) {
 
-		$arr = [
-			'Alex Mierjeski',
-			'Alisa Mysliu',
-			'Amy Klobuchar',
-			'Ayantu Ayana',
-			'Ben Arnoldy',
-			'David Brauer',
-			'Gabriela Delova',
-			'Heather Silsbee',
-			'Jamie Millard',
-			'Joshua Kaplan',
-			'Julia Nekessa Opoti',
-			'Justin Elliott',
-			'Kadra Abdi',
-			'Kenneth Kaplan',
-			'Kristen Ingle',
-			'Kristina Ozimec',
-			'Magda Munteanu',
-			'Mark Guarino',
-			'Meghan Murphy',
-			'Mitch Pearlstein',
-			'Mohamed H. Mohamed',
-			'Ramla Bile',
-			'Sara Miller Llana',
-			'Sharon Schmickle',
-			'Sharon Schmickle',
-			'State Rep. Loren Solberg',
-			'State Rep. Morrie Lanning',
-			'State Sen. Julie Rosen',
-			'State Sen. Tom Bakk',
-			'Steve Date',
-		];
-
-		// case insensitive
-		if( in_array( strtolower( $str ), array_map('strtolower', $arr ) ) ) return true;
+		if( in_array( $str, $this->byline_known_names ) 
+			&& ! in_array( $str, $this->byline_known_suffixes ) 
+		) {
+			return true;
+		}
 
 		return false;
-		
 	}
+
+
+	private function byline_is_suffix( $str ) {
+
+		if( in_array( $str, $this->byline_known_suffixes ) ) {
+			return true;
+		}
+
+		return false;
+	}
+
 
 	/**
 	 * REQUEST FUNCTIONS
@@ -1190,6 +1067,59 @@ class MinnPostMigrator implements InterfaceCommand {
 	}
 
 
+	/**
+	 * FILE FUNCTIONS
+	 */
 
+	 private function load_from_csv( $csv_path, $column_count = 1, $format = '' ) {
+
+		// set path to file
+		if( ! is_file( $csv_path ) ) {
+			WP_CLI::error( 'Could not find CSV at path: ' . $csv_path );
+		}
+		
+		// read
+		$handle = fopen( $csv_path, 'r' );
+		if ( $handle == FALSE ) {
+			WP_CLI::error( 'Could not fopen CSV at path: ' . $csv_path );
+		}
+
+		$output = array();
+
+		while ( ( $row = fgetcsv( $handle ) ) !== FALSE ) {
+
+			// csv data integrity
+			if( $column_count != count( $row ) ) {
+				WP_CLI::error( 'Error row column count mismatch: ' . print_r( $row, true ) );
+			}
+
+			// put data into a lookup based on first column
+			if( 'lookup_column_1' == $format ) {
+				$output[$row[0]] = array_slice( $row, 1 ); 
+			}
+			else if( 'lookup_column_1_multiple' == $format ) {
+				if( empty( $output[$row[0]] ) ) $output[$row[0]] = array();
+				$output[$row[0]][] = array_slice( $row, 1 ); 
+			}
+			else if( 'lookup_column_4' == $format ) {
+				$output[$row[3]] = array_slice( $row, 0, 3 ); 
+			}
+			else if( 'max_datetime_3' == $format ) {
+				if( empty( $output['max'] ) ) $output['max'] = 0;
+				if( strtotime( $row[2] ) > $output['max'] ) $output['max'] = strtotime( $row[2] );
+			}
+			// default case: simple lookup list
+			else {
+				$output[] = $row[0];
+			}
+
+		}
+
+		// close
+		fclose($handle);
+
+		return $output;
+
+	}
 
 }
