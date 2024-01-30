@@ -299,6 +299,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	public function cmd_set_primary_category( $pos_args, $assoc_args ) {
 			
+		$excluded_primary_cats = array_keys( self::CATEGORIES_TO_TAGS_CONVERT );
+
 		$remote_failures_in_a_row = 0;
 
 		// select posts where yoast not already set
@@ -374,6 +376,18 @@ class MinnPostMigrator implements InterfaceCommand {
 				
 				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
 					'Parsed url not category. Post id: %d url: %s', 
+					$post_id, $live_url
+				), $this->logger::WARNING );
+				
+				continue;
+
+			}
+
+			// make sure it's a local category
+			if( in_array( $category->slug, $excluded_primary_cats ) ) {
+				
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Parsed url is in an excluded category. Post id: %d url: %s', 
 					$post_id, $live_url
 				), $this->logger::WARNING );
 				
