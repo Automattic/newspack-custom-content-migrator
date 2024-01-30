@@ -172,15 +172,17 @@ class MinnPostMigrator implements InterfaceCommand {
 					sprintf( '%d (%d of %d)', $post_id, $key_post_id + 1, $post_ids_count )
 				);
 
-				// save live url incase needed for redirects in future.
-				update_post_meta( $post_id, 'newspack_minnpost_live_site_url', $this->get_remote_url_by_rest_api( $post_id ) );
-				
-				// remove category and let WordPress/Yoast just pick a new url even if that means "uncategorized".
-				// specify $category->term_id int type else term might match a category based on string match instead
-				wp_remove_object_terms( $post_id, (int) $category->term_id, 'category' );
+				// save removed categtory incase needed for future reference
+				// might be multiple categories
+				add_post_meta( $post_id, 'newspack_minnpost_removed_category', $category_slug );
 
 				// add tag
 				wp_set_post_tags( $post_id, self::CATEGORIES_TO_TAGS_CONVERT[$category_slug], true );
+
+				// remove category and let WordPress/Yoast just pick a new url even if that means "uncategorized".
+				// original live url that contains primary category will be saved via the yoast primary category cli
+				// specify $category->term_id int type else term might match a category based on string match instead
+				wp_remove_object_terms( $post_id, (int) $category->term_id, 'category' );
 
 				$this->logger->log( 
 					'minnpost_convert_categories_to_tags.txt', 
@@ -296,119 +298,143 @@ class MinnPostMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_set_primary_category( $pos_args, $assoc_args ) {
+			
+		// select posts where yoast not already set
+		$query = new WP_Query ( [
+			'posts_per_page' => -1,
+			'post_type'     => 'post',
+			'post_status'   => 'publish',
+			'fields'		=> 'ids',
+			'meta_query'    => [
+				[
+					'key'     => '_yoast_wpseo_primary_category',
+					'compare' => 'NOT EXISTS',
+				],
+			]
+		]);
 
-		$fn_category_id_by_remote_url = function ( $post_id ) {			
+		$post_ids_count = $query->post_count;
 
-			$response = wp_remote_request( self::OLD_SITE_URL . '?p=' . $post_id, [ 'method' => 'HEAD' ] );
-			if ( is_wp_error( $response ) ) return null;
-			
-			$headers = wp_remote_retrieve_headers( $response );
-			if( ! isset( $headers['location'] ) ) return null;
-			
-			$url_parts = explode( '/', parse_url( $headers['location'], PHP_URL_PATH ) );
-			if( ! isset( $url_parts[1] ) ) return null;
-			
-			$category = get_category_by_slug( $url_parts[1] );
-			if( ! isset( $category->term_id ) ) return null;
-			
-			return $category->term_id;
-		
-		};
-	
+		$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+			'Processing post count: %d', 
+			$post_ids_count
+		));
 
-		$post_ids = $this->posts->get_all_posts_ids( 'post', [ 'publish' ] );
-		
-		$post_ids_count = count( $post_ids );
-		
-		foreach ( $post_ids as $key_post_id => $post_id ) {
+		foreach ( $query->posts as $key_post_id => $post_id ) {
 			
 			WP_CLI::line( sprintf( '%d ( %d of %d )', $post_id, $key_post_id + 1, $post_ids_count ) );
 
-			$old_category_permalink = get_post_meta( $post_id, '_category_permalink', true );
+			// get else set the remote url
+			$live_url = get_post_meta( $post_id, 'newspack_minnpost_live_site_url', true );
 
-			if( ! isset( $old_category_permalink['category'] ) ) {
+			if( empty ( $live_url) ) {
 
-				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
-					'Old meta value not array for %d %s', 
-					$post_id, json_encode( $old_category_permalink )
-				), $this->logger::WARNING );
-				
-				continue;
+				$live_url = $this->get_remote_url_by_rest_api( $post_id );
 
-			}
-
-			$old_category_value = $old_category_permalink['category'];
-
-			if( ! preg_match( '/^\d+$/', $old_category_value ) ) {
-
-				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
-					'Old meta is non-numeric for %d', 
-					$post_id
-				), $this->logger::WARNING );
-				
-				continue;
-
-			}
-
-			$old_category_int = (int) $old_category_value;
-
-			if( ! ( $old_category_int > 0 ) ) {
-
-				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
-					'Old value not gt 0 for %d', 
-					$post_id
-				), $this->logger::WARNING );
-				
-				continue;
-			}
-
-			$old_category =  get_category( $old_category_int );
-
-			if( ! isset( $old_category->term_id ) ) {
-
-				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
-					'No old category object for %d', 
-					$post_id
-				), $this->logger::WARNING );
-				
-				$old_site_cat_id_by_url = $fn_category_id_by_remote_url( $post_id );	
-
-				if( $old_site_cat_id_by_url > 0 ) {
+				if( empty( $live_url ) ) {
 
 					$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
-						'Found via remote url %d category_id %d', 
-						$post_id, $old_site_cat_id_by_url
-					), $this->logger::SUCCESS );
+						'Remote get error. Possibly IP blocked. Try again later. Post id: %d', 
+						$post_id
+					), $this->logger::ERROR );
 
-					// update_post_meta( $post_id, '_yoast_wpseo_primary_category', $old_site_cat_id_by_url );
-
-					if( ! has_category( $old_site_cat_id_by_url, $post_id ) ) {
-
-						$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
-							'Primary category is not on post %d category_id %d', 
-							$post_id, $old_site_cat_id_by_url
-						), $this->logger::WARNING );
-	
-						// wp_set_post_categories( $post_id, (int) $old_site_cat_id_by_url, true );
-
-
-					}
-		
 				}
+
+				update_post_meta( $post_id, 'newspack_minnpost_live_site_url', $live_url );
 
 			}
 
+			// parse out category slug
+			$url_parts = explode( '/', parse_url( $live_url, PHP_URL_PATH ) );
+			if( ! isset( $url_parts[1] ) ) {
+				
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Live url not parseable. Post id: %d url: %s', 
+					$post_id, $live_url
+				), $this->logger::ERROR );
 
-
+			}
 			
+			// make sure it's a local category
+			$category = get_category_by_slug( $url_parts[1] );
+			if( ! isset( $category->term_id ) ) {
+				
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Parsed url not category. Post id: %d url: %s', 
+					$post_id, $live_url
+				), $this->logger::WARNING );
+				
+				continue;
 
+			}
+
+			// make sure this category is already assigned to the post
+			if( ! has_category( $category->term_id, $post_id ) ) {
+
+				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+					'Primary category is not on post %d category_id %d', 
+					$post_id, $category->term_id
+				), $this->logger::WARNING );
+
+				continue;
+
+			}
+
+			// set yoast
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category->term_id );
+			
 			exit();
-
 
 		}
 
 		wp_cache_flush();
+		
 	}
+
+	/**
+	 * PERMALINK FUNCTIONS
+	 */
+
+	private function get_old_permalink_category( $post_id ) {
+
+		// _category_permalink is unreliable
+		return null;
+
+		$post_categories = wp_get_post_categories( $post_id );
+
+		// if there is only 1 category for the post, return it now
+		if( ! empty( $post_categories ) && is_array( $post_categories ) && 1 === count( $post_categories ) ) {
+			return get_category( (int) $post_categories[0] );
+		}
+		
+		// get the old post meta
+		$old_category_permalink = get_post_meta( $post_id, '_category_permalink', true );
+		$old_category_id = 0;
+
+		// db value like: a:1:{s:8:"category";s:5:"55567";}
+		if( isset( $old_category_permalink['category'] ) ) $old_category_id = $old_category_permalink['category'];
+		// just an integer like: 12345
+		else if( preg_match( '/^\d+$/', $old_category_permalink ) ) $old_category_id = $old_category_permalink;
+
+		// if it matches to a real category, return it
+		$old_category = get_category( (int) $old_category_id );
+		if( isset( $old_category->term_id ) ) {
+			return $old_category;
+		}
+
+		// at this point, the old category is not found and the post has multiple categories...
+		// maybe the old site had some additional logic like a look up / priority table or just alphabetical?
+		
+		// log error
+		$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+			'Old category not found for post %d', 
+			$post_id
+		), $this->logger::ERROR );
+
+		return null;
+
+	 }
+
 
 
 	/**
