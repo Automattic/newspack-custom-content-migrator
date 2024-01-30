@@ -299,6 +299,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	public function cmd_set_primary_category( $pos_args, $assoc_args ) {
 			
+		$remote_failures_in_a_row = 0;
+
 		// select posts where yoast not already set
 		$query = new WP_Query ( [
 			'posts_per_page' => -1,
@@ -322,12 +324,15 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		foreach ( $query->posts as $key_post_id => $post_id ) {
 			
-			WP_CLI::line( sprintf( '%d ( %d of %d )', $post_id, $key_post_id + 1, $post_ids_count ) );
+			$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
+				'%d ( %d of %d )',
+				$post_id, $key_post_id + 1, $post_ids_count
+			));
 
 			// get else set the remote url
 			$live_url = get_post_meta( $post_id, 'newspack_minnpost_live_site_url', true );
 
-			if( empty ( $live_url) ) {
+			if( empty ( $live_url ) ) {
 
 				$live_url = $this->get_remote_url_by_rest_api( $post_id );
 
@@ -336,9 +341,17 @@ class MinnPostMigrator implements InterfaceCommand {
 					$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
 						'Remote get error. Possibly IP blocked. Try again later. Post id: %d', 
 						$post_id
-					), $this->logger::ERROR );
+					), $this->logger::WARNING );
+					
+					// stop if remote keeps failing
+					$remote_failures_in_a_row++;
+					if( $remote_failures_in_a_row >= 10 ) return;
+
+					continue;
 
 				}
+
+				$remote_failures_in_a_row = 0;
 
 				update_post_meta( $post_id, 'newspack_minnpost_live_site_url', $live_url );
 
@@ -351,7 +364,7 @@ class MinnPostMigrator implements InterfaceCommand {
 				$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
 					'Live url not parseable. Post id: %d url: %s', 
 					$post_id, $live_url
-				), $this->logger::ERROR );
+				), $this->logger::ERROR, true );
 
 			}
 			
@@ -383,8 +396,6 @@ class MinnPostMigrator implements InterfaceCommand {
 			// set yoast
 			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category->term_id );
 			
-			exit();
-
 		}
 
 		wp_cache_flush();
@@ -429,7 +440,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		$this->logger->log( 'minnpost_set_primary_category.txt', sprintf( 
 			'Old category not found for post %d', 
 			$post_id
-		), $this->logger::ERROR );
+		), $this->logger::ERROR, true );
 
 		return null;
 
