@@ -120,16 +120,14 @@ class MigrationHelper implements InterfaceCommand {
 			$command_string = $command . " \\\n" . $command_args . " \\\n";
 		}
 
-		if ( $begin_at > 0 ) {
-			$total_items = $total_items - $begin_at;
-		}
-		$num_batches = ceil( $total_items / $batch_size );
+		$total_batched_items = $begin_at > 0 ? $total_items - $begin_at : $total_items;
+		$num_batches         = ceil( $total_batched_items / $batch_size );
 
 		for ( $batch = 0; $batch < $num_batches; $batch ++ ) {
 			$batch_start = ( $batch * $batch_size ) + $begin_at;
 			$batch_end   = $batch_start + $batch_size;
 			if ( $batch_end > $total_items ) {
-				$batch_end = 0;
+				$batch_end = $total_items + 1;
 			}
 			$batch_info = sprintf( 'Batch %d of %d', $batch + 1, $num_batches );
 			WP_CLI::line( sprintf( PHP_EOL . '# MigrationHelper: %s', $batch_info ) );
