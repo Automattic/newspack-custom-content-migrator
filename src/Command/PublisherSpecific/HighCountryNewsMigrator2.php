@@ -72,6 +72,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		'optional'    => true,
 	];
 
+	private array $min_post_id = [
+		'type'        => 'assoc',
+		'name'        => 'min-post-id',
+		'description' => 'When selecting or processing wp posts any post with an id less than this will be skipped',
+		'optional'    => true,
+	];
+
 	private array $refresh_existing = [
 		'type'        => 'flag',
 		'name'        => 'refresh-existing',
@@ -365,6 +372,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						'optional'    => true,
 					],
 					BatchLogic::$num_items,
+					$this->min_post_id,
 				],
 			]
 		);
@@ -604,13 +612,15 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$log_file = __FUNCTION__ . '.log';
 
 		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
+		$min_post_id = $assoc_args['min-post-id'] ?? 0;
+
 		$post_ids  = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
 		if ( ! $post_ids ) {
 			global $wpdb;
 			$post_ids = $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[RELATED:%' ORDER BY ID DESC LIMIT %d",
-					[ $num_items ]
+					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND ID >= %d AND post_content LIKE '%[RELATED:%' ORDER BY ID DESC LIMIT %d",
+					[ $min_post_id, $num_items ]
 				)
 			);
 		}
@@ -647,8 +657,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			if ( $row_number % 500 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
 			$row_number ++;
-			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number, $batch_args['total'], $row->username ) );
 
 			if ( empty( $row->email ) ) {
 				continue; // Nope. No email, no user.
@@ -685,9 +697,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			);
 
 			if ( is_wp_error( $result ) ) {
-				WP_CLI::log( $result->get_error_message() );
+				$this->logger->log( 'failed-users.log', sprintf( 'Failed to create user %s', $row->email ), Logger::ERROR );
 			} else {
-				WP_CLI::success( "User $row->email created." );
+				$this->logger->log( 'new-users.log', sprintf( 'Created new user %s', $row->email ), Logger::SUCCESS );
 			}
 		}
 	}
@@ -724,7 +736,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $issues_json, $assoc_args );
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $issues_json, $batch_args['start'], $batch_args['end'] ) as $issue ) {
-			WP_CLI::log( sprintf( 'Processing issue (%d of %d): %s', ++ $row_number, $batch_args['total'], $issue->{'@id'} ) );
+			if ( $row_number % 500 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
+			$row_number ++;
+
 			$alias = false;
 
 			$slug = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
@@ -896,7 +912,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
-			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
+			if ( $row_number % 10 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
+			++ $row_number;
 
 			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
@@ -904,7 +923,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
 
 			if ( $existing_id && ! $refresh ) {
-				$this->logger->log( $log_file, 'Image already imported. Skipping.' );
 				continue;
 			}
 
@@ -1012,6 +1030,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( $existing_id && ! $refresh_existing ) {
 				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
 				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+				continue;
 			}
 
 			$post_date_string     = $row->effective ?? $row->created;
@@ -1184,7 +1203,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline, bool $force_all_images_fetch = false ): string {
 		// The force fetch is a desperate measure to get the images for the inline galleries. Should only be used in
 		// runs where we are trying to fix the inline galleries.
-		$fetch_all_img = $is_inline || $force_all_images_fetch;
+		$fetch_all_img  = $is_inline || $force_all_images_fetch;
 		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $fetch_all_img );
 
 		if ( $fetch_all_img ) {
@@ -1209,7 +1228,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			preg_match_all( $regex, $text, $gallery_matches );
 
 			foreach ( $gallery_matches[0] as $idx => $gallery_anchor ) {
-				$gallery_id = $gallery_matches[1][ $idx ] ?? false;
+				$gallery_id              = $gallery_matches[1][ $idx ] ?? false;
 				$images_for_this_gallery = $gallery_images;
 				if ( false !== $gallery_id ) {
 					// Grab only the ones with the given gallery id.

@@ -82,6 +82,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\InsightCrimeMigrator::class,
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\TheEmancipatorMigrator::class,
+		Command\PublisherSpecific\HighCountryNewsMigrator2::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
