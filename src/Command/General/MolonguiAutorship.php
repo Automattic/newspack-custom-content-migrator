@@ -18,7 +18,7 @@ use WP_CLI;
  */
 class MolonguiAutorship implements InterfaceCommand {
 
-	const LOG                            = 'molongui-to-cap_ERR.txt';
+	const LOG                            = 'molongui-to-cap_ERR.log';
 	const POSTMETA_ORIGINAL_MOLOGUI_USER = 'newspack_molongui_original_user';
 
 	/**
@@ -131,11 +131,18 @@ class MolonguiAutorship implements InterfaceCommand {
 		 */
 		$this->log( $dry_run, self::LOG, 'Converting all Mologui authors to CAP GAs...', Logger::LINE );
 		foreach ( $molongui_authors_values as $key_molongui_author_value => $molongui_author_value ) {
-			$this->log( $dry_run, self::LOG, sprintf( '%d/%d %s', $key_molongui_author_value + 1, count( $molongui_authors_values ), $molongui_author_value ), Logger::LINE );
 
 			/**
-			 * Mologui uses an existing WP_User which it extends with custom meta.
-			 * In this case, the postmeta key_value is 'user-{ID}' (where meta_key = '_molongui_author').
+			 * Mologui works with two types of users:
+			 *      - either existing WP_Users which it extends with custom meta,
+			 *      - or its own Custom Post Type, "guest authors", which don't have Dashboard access.
+			 */ 
+			$this->log( $dry_run, self::LOG, sprintf( 'Creating CAP GA %d/%d %s', $key_molongui_author_value + 1, count( $molongui_authors_values ), $molongui_author_value ), Logger::LINE );
+			$cap_args = null;
+			
+
+			/**
+			 * 1/2 Convert WP_User authors to GAs (where meta_key = '_molongui_author' and key_value = 'user-{ID}').
 			 */
 			if ( 0 === strpos( $molongui_author_value, 'user-' ) ) {
 
@@ -144,112 +151,103 @@ class MolonguiAutorship implements InterfaceCommand {
 				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}users where ID = %d;", $wpuser_id ), ARRAY_A );
 				// phpcs:enable
 				if ( ! $author_wpuser_row ) {
-					$msg = sprintf( 'WP_User with ID %d not found in %s table (referenced by postmeta key `user-%s`).', $wpuser_id, $table_prefix_mologui . 'users', $wpuser_id );
+					$msg = sprintf( 'ERROR WP_User with ID %d not found in %s table (referenced by postmeta key `user-%s`).', $wpuser_id, $table_prefix_mologui . 'users', $wpuser_id );
 					$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 					continue;
 				}
 
-				// Create CAP GA.
+				// Get CAP GA creation arguments.
 				$cap_args = $this->get_cap_creation_args_for_mologui_wpuser( $table_prefix_mologui, $wpuser_id );
-
-				if ( $dry_run ) {
-					$cap_id = '{DRY_RUN}';
-					$dry_run_mologui_to_gas[ $molongui_author_value ] = $cap_args['display_name'];
-				} else {
-					$cap_id = $this->cap->create_guest_author( $cap_args );
-					if ( is_wp_error( $cap_id ) ) {
-						$msg = sprintf( 'Error creating CAP GA for Molongui user %s: %s', 'user-' . $wpuser_id, $cap_id->get_error_message() );
-						$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
-						continue;
-					}
-	
-					// Save custom postmeta to GA saying which Molongui user this was.
-					// There could be both a WP_User and a guest author with the same email, so we need to save both of them, i.e. add_post_meta, not update.
-					add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
-				}
-
-				$this->log( $dry_run, self::LOG, sprintf( "Created GA ID %s '%s' from original ID '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
 
 			} elseif ( 0 === strpos( $molongui_author_value, 'guest-' ) ) {
 
 				/**
-				 * Molongui has a Guest type user without Dashboard access.
-				 * In this case, the postmeta key_value is 'guest-{ID}' (where meta_key = '_molongui_author').
+				 * 2/2 Convert Molongui "guest" authors to GAs (where meta_key = '_molongui_author' and key_value = 'guest-{ID}').
 				 */
 				$guest_id = (int) str_replace( 'guest-', '', $molongui_author_value );
 				// phpcs:Ignore -- $wpdb->prepare is used.
 				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
-					$msg = sprintf( 'Guest author with ID %d not found in %s table (referenced by postmeta key: `guest-%s`).', $guest_id, $table_prefix_mologui . 'posts', $guest_id );
+					$msg = sprintf( 'ERROR Guest author with ID %d not found in %s table (referenced by postmeta key: `guest-%s`).', $guest_id, $table_prefix_mologui . 'posts', $guest_id );
 					$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 					continue;
 				}
 
-				// Create CAP GA.
+				// Get CAP GA creation arguments.
 				$cap_args = $this->get_cap_creation_args_for_mologui_guestauthor( $table_prefix_mologui, $guest_id );
 
-				if ( $dry_run ) {
-					$cap_id = '{DRY_RUN}';
-					$dry_run_mologui_to_gas[ $molongui_author_value ] = $cap_args['display_name'];
-				} else {
-					$cap_id = $this->cap->create_guest_author( $cap_args );
-					if ( is_wp_error( $cap_id ) ) {
-						$msg = sprintf( 'Error creating CAP GA for Molongui user %s: %s', 'guest-' . $guest_id, $cap_id->get_error_message() );
-						$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
-						continue;
-					}
-	
-					// Save custom postmeta to GA saying which Molongui user this was.
-					// There could be both a WP_User and a guest author with the same email, so we need to save both of them, i.e. add_post_meta, not update.
-					add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
+			} else {
+				$this->log( $dry_run, self::LOG, sprintf( 'ERROR Unsupported Molongui author type in postmeta key: %s. Add support for this type then rerun command. Exiting.', $molongui_author_value ), Logger::ERROR, true );
+			}
+			
+			// Error getting CAP GA array.
+			if ( is_null( $cap_args ) ) {
+				$this->log( $dry_run, self::LOG, sprintf( 'ERROR Unable to create $cap_args for Mologui user %s.', $molongui_author_value ), Logger::ERROR, false );
+				continue;
+			}
+
+
+			/**
+			 * Create a CAP GA.
+			 */
+			if ( $dry_run ) {
+				$cap_id = 'n/a';
+				$dry_run_mologui_to_gas[ $molongui_author_value ] = $cap_args['display_name'];
+			} else {
+				$cap_id = $this->cap->create_guest_author( $cap_args );
+				if ( is_wp_error( $cap_id ) || ! $cap_id ) {
+					$msg = sprintf( 'ERROR creating CAP GA for Molongui user %s, error message: "%s", $cap_args: "%s".', $molongui_author_value, is_wp_error( $cap_id ) ? $cap_id->get_error_message() : 'n/a', json_encode( $cap_args ) );
+					$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
+					continue;
 				}
 
-				$this->log( $dry_run, self::LOG, sprintf( "Created GA ID %s '%s' from original ID '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
-
-			} else {
-				$this->log( $dry_run, self::LOG, sprintf( 'Unsupported Molongui author type in postmeta key: %s. Add support for this type then rerun command.', $cap_args['display_name'] ), Logger::ERROR, true );
+				// Save custom postmeta to GA saying which Molongui user this was.
+				update_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
 			}
+			
+			$this->log( $dry_run, self::LOG, sprintf( "Created/fetched GA ID %s '%s' from '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
 		}
 
 
 		/**
-		 * Assign GAs to posts.
+		 * Assign CAP GAs to posts.
 		 */
 		$this->log( $dry_run, self::LOG, 'Assigning GAs to all Posts...', Logger::LINE );
 		$post_ids                         = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 		$cached_mologui_authors_to_ga_ids = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-			$this->log( $dry_run, self::LOG, sprintf( '%d/%d Post ID %s', $key_post_id + 1, count( $post_ids ), $post_id ), Logger::LINE );
-
+			$this->log( $dry_run, self::LOG, sprintf( 'Assigning CAP GAs to Post %d/%d Post ID %s', $key_post_id + 1, count( $post_ids ), $post_id ), Logger::LINE );
+			
 			// Get Mologui authors for this post.
 			$molongui_authors_rows = $wpdb->get_results( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_author';", $post_id ), ARRAY_A );
 			if ( ! $molongui_authors_rows ) {
+				$this->log( $dry_run, self::LOG, sprintf( 'No Molongui authors used on Post ID %s , skipping.', $post_id ), Logger::LINE );
 				continue;
 			}
-
+			
+			// Get GA IDs for these Molongui authors.
 			$ga_ids = [];
 			foreach ( $molongui_authors_rows as $molongui_author_row ) {
-
 				$molongui_author_value = $molongui_author_row['meta_value'];
 
-				// For dry run, just display authors that will be assigned to this post and continue.
+				// If dry run, just display authors that will be assigned to this post and continue.
 				if ( $dry_run ) {
 					$dry_run_author_name = $dry_run_mologui_to_gas[ $molongui_author_value ] ?? null;
 					if ( $dry_run_author_name ) {
 						\WP_CLI::success( sprintf( "Post ID %d , assigning GA '%s'", $post_id, $dry_run_author_name ) );
 					} else {
-						\WP_CLI::error( sprintf( "ERROR -- Post ID %d , not found GA for Molongui author '%s'", $post_id, $molongui_author_value ) );
+						\WP_CLI::error( sprintf( "ERROR -- Post ID %d , Molongui author is '%s' but no GA found.", $post_id, $molongui_author_value ) );
 					}
 					continue;
 				}
 
-				// Get GA IDs for this Mologui author.
+				// Get GA IDs for this Mologui author (simple caching for speed).
 				if ( isset( $cached_mologui_authors_to_ga_ids[ $molongui_author_value ] ) ) {
 					$ga_id = $cached_mologui_authors_to_ga_ids[ $molongui_author_value ];
 				} else {
 					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value ) );
 					if ( ! $ga_id ) {
-						$msg = sprintf( 'Error fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author_value, $post_id );
+						$msg = sprintf( 'ERROR fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author_value, $post_id );
 						$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 						continue;
 					}
@@ -258,21 +256,24 @@ class MolonguiAutorship implements InterfaceCommand {
 
 				$ga_ids[] = $ga_id;
 			}
-			
+
 			// Assign GAs to Post.
 			if ( ! $dry_run ) {
+				// Log WARNING if no GAs were found for this post, and continue.
+				if ( empty( $ga_ids ) ) {
+					$this->log( $dry_run, self::LOG, sprintf( 'ERROR no GAs found for Post ID %d but they should be found because there are Mologui authors assigned', $post_id ), Logger::ERROR, false );
+					continue;
+				}
+				
+				// Assign GAs to Post.
 				$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
 			}
 		}
 
 
-		if ( file_exists( self::LOG ) ) {
-			\WP_CLI::warning( sprintf( 'There were errors. See %s.', self::LOG ) );
-		}
-
-		$msg = $dry_run ? 'Dry run complete.' : 'Done.';
-		$this->log( $dry_run, self::LOG, $msg, Logger::SUCCESS );
-		
+		$msg  = $dry_run ? 'Dry run complete.' : 'Done.';
+		$msg .= sprintf( ' See %s for details -- search "ERROR"s and "WARNING"s.', self::LOG );
+		$this->log( $dry_run, self::LOG, $msg, Logger::SUCCESS );       
 		wp_cache_flush();
 	}
 
@@ -302,18 +303,21 @@ class MolonguiAutorship implements InterfaceCommand {
 		// Basic info.
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$display_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_display_name';", $guest_id ) );
-		if ( $display_name ) {
-			$cap_args['display_name'] = $display_name;
+		if ( $display_name && trim( $display_name ) ) {
+			$cap_args['display_name'] = trim( $display_name );
+// $cap_args['display_name'] = $display_name;
 		}
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_first_name';", $guest_id ) );
-		if ( $first_name ) {
-			$cap_args['first_name'] = $first_name;
+		if ( $first_name && trim( $first_name ) ) {
+			$cap_args['first_name'] = trim( $first_name );
+// $cap_args['first_name'] = $first_name;
 		}
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_last_name';", $guest_id ) );
-		if ( $last_name ) {
-			$cap_args['last_name'] = $last_name;
+		if ( $last_name && trim( $last_name ) ) {
+			$cap_args['last_name'] = trim( $last_name );
+// $cap_args['last_name'] = $last_name;
 		}
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$email = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
@@ -741,7 +745,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	}
 
 	/**
-	 * Undocumented function
+	 * Logging helper. If dry run, logs to WP_CLI, otherwise to file.
 	 *
 	 * @param bool   $dry_run       Dry run.
 	 * @param string $log           Log name.
