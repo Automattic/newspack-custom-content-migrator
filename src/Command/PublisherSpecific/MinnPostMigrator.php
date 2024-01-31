@@ -105,15 +105,15 @@ class MinnPostMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'csv-names',
-						'description' => 'Known names CSV file. Relative to uploads folder: --csv-file="2024/01/names.csv"',
+						'name'        => 'txt-names',
+						'description' => 'Known names TXT file. Relative to uploads folder: --txt-names="2024/01/names.txt"',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'csv-suffixes',
-						'description' => 'Known suffixes CSV file. Relative to uploads folder: --csv-file="2024/01/suffixes.csv"',
+						'name'        => 'txt-suffixes',
+						'description' => 'Known suffixes TXT file. Relative to uploads folder: --txt-suffixes="2024/01/suffixes.txt"',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -207,15 +207,15 @@ class MinnPostMigrator implements InterfaceCommand {
 	public function cmd_set_authors_by_subtitle_byline( $pos_args, $assoc_args ) {
 
 		// load csv file		
-		$this->byline_known_names = $this->load_from_csv( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'csv-names' ] );
+		$this->byline_known_names = $this->load_from_txt( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'txt-names' ] );
 		if( empty( $this->byline_known_names ) ) {
-			WP_CLI::error( 'CSV Names is empty.' );
+			WP_CLI::error( 'TXT Names is empty.' );
 		}
 
 		// load csv file		
-		$this->byline_known_suffixes = $this->load_from_csv( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'csv-suffixes' ] );
+		$this->byline_known_suffixes = $this->load_from_txt( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'txt-suffixes' ] );
 		if( empty( $this->byline_known_suffixes ) ) {
-			WP_CLI::error( 'CSV Suffixes is empty.' );
+			WP_CLI::error( 'TXT Suffixes is empty.' );
 		}
 
 		// test only if set
@@ -750,115 +750,6 @@ class MinnPostMigrator implements InterfaceCommand {
 		
 	}
 
-	// return: string|array|null
-	private function byline_regex( $byline, $error_on_unknown_char = false ) {
-
-		// -- REPLACEMENTS ---------------------------------------------------------------
-
-		// remove/replace hidden chars
-		$byline = $this->byline_replace_hidden_chars( $byline );
-
-		// if error mode true, test for new hidden/unknown chars
-		if( $error_on_unknown_char ) $this->byline_error_if_unknown_chars( $byline );
-
-		// remove starting "By" with any spaces (case insensitive)
-		$byline = trim( preg_replace( '/^By[:]?\s+/i', '', $byline ) );
-
-		// remove other "by" in text
-		$byline = trim( preg_replace( '/\b(Analysis|Commentary|Designed|Editorial|Embedded|Interview|Satire|Text|Videos)\s+by\b/i', '', $byline ) );
-
-		// remove string match job titles
-		// $byline = trim( preg_replace( '/\bLibrarian with Dakota County Library\b/i', '', $byline ) );
-		// $byline = trim( preg_replace( '/\bStaff writer\b/i', '', $byline ) );
-
-		// remove comma on Jr/Sr at end of byline (todo: fix for "and" cases?)
-		// $byline = trim( preg_replace( '/, (Jr|Sr)[\.]$/i', " $1", $byline ) );
-
-		// standardize commas with one space
-		$byline = trim( preg_replace( '/\s*,\s*/', ', ', $byline ) );
-
-		// trim and replace multiple spaces with single space
-		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
-
-		// -- MATCHES ----------------------------------------------------------------------
-
-		// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-		// if( preg_match( '/Stephanie Hemphill/i', $byline ) ) return null;
-		// if( preg_match( '/Hugh Macleod and a reporter in Syria/i', $byline ) ) return null;
-		
-		// skip for now: anything with "|", ";", "by" (not already stripped)
-		// if( preg_match( '/([\|]|;|\bby\b)/i', $byline ) ) return null;
-
-		// parse "and" / "with" case
-		if( preg_match( '/\band\b|&|\bwith\b/i', $byline ) ) {
-
-			return $this->bylines_do_and_case( $byline );
-		}
-
-		return 'bypass';
-
-
-
-		// parse commas now that "and with commas" above have been captured
-		if( preg_match( '/,/', $byline ) ) {
-			
-			$splits = array_map( 'trim', preg_split( '/,/', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
-
-			// name, publication/suffix:
-			if( 2 == count( $splits ) ) {
-				
-				// special cases
-				if( preg_match( '/^becky Bock, Carlos$/i', $byline ) ) return null;
-
-				// if it's a suffix to remove
-				if( $this->byline_is_suffix_to_trim( $splits[1] ) ) {
-					return $splits[0];
-				}
-				
-			}
-
-			// name, publication/suffix:
-			if( 3 == count( $splits ) ) {
-				
-				// if it's a multiple value suffix to remove
-				if( $this->byline_is_suffix_to_trim( $splits[1] . ', ' . $splits[2] ) ) {
-					return $splits[0];
-				}
-
-				// if both should be removed
-				if( $this->byline_is_suffix_to_trim( $splits[1] ) &&  $this->byline_is_suffix_to_trim( $splits[2] ) ) {
-					return $splits[0];
-				}
-
-			}
-
-			// remaining cases
-			$splits_count = count( $splits );
-			for( $i=0; $i < $splits_count; $i++ ) {
-				
-				// remove any publications, suffixes, etc
-				if( $this->byline_is_suffix_to_trim( $splits[$i] ) ) {
-					unset( $splits[$i] );
-					continue;
-				}
-
-				// if not in allowed names, save for review and return null
-				if( ! in_array( $splits[$i], $this->byline_known_names ) ) {
-					return null;
-				}
-
-			}
-
-			// return clean and ordered names
-			return array_values( $splits );
-
-		}
-
-		// normal byline
-		return $byline;
-
-	}
-
 	private function byline_test_regex() {
 
 		$csv_out_file = fopen( 'minnpost_byline_test_regex_report.csv', 'w' );
@@ -900,8 +791,6 @@ class MinnPostMigrator implements InterfaceCommand {
 			// if no match this is an error byline, set match count to 0
 			if( empty( $bylines ) ) {
 				
-				$this->logger->log( 'minnpost_regex_warnings.txt', $byline, $this->logger::WARNING );
-
 				$csv_line[] = 0;
 				$csv_line[] = 'ERROR_NO_MATCHES';
 				
@@ -966,108 +855,334 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	}
 
+	private function byline_cleaner( $byline, $error_on_unknown_char = false ) {
+
+		// remove/replace hidden chars
+		$byline = $this->byline_replace_hidden_chars( $byline );
+
+		// if error mode true, test for new hidden/unknown chars
+		if( $error_on_unknown_char ) $this->byline_error_if_unknown_chars( $byline );
+
+		// remove starting "By" with any spaces (case insensitive)
+		$byline = trim( preg_replace( '/^By[:]?\s+/i', '', $byline ) );
+
+		// remove other "by" in text
+		$byline = trim( preg_replace( '/\b(Analysis|Commentary|Designed|Editorial|Embedded|Interview|Satire|Text|Videos)\s+by\b/i', '', $byline ) );
+
+		// clean up ands
+		$byline = trim( preg_replace( '/ and and /i', ' and ', $byline ) );
+		$byline = trim( preg_replace( '/, and /i', ' and ', $byline ) );
+		$byline = trim( preg_replace( '/, with /i', ' with ', $byline ) );
+
+		// clean up special chars
+		$byline = trim( preg_replace( '/[\|\/;]/i', ',', $byline ) );
+		
+		// standardize commas with one space
+		$byline = trim( preg_replace( '/\s*,\s*/', ', ', $byline ) );
+
+		// trim and replace multiple spaces with single space
+		$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
+
+		return $byline;
+
+	}
+
+	// return: string|array|null
+	private function byline_regex( $byline ) {
+
+		$byline = $this->byline_cleaner( $byline );
+
+		// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
+		if( preg_match( '/Stephanie Hemphill/i', $byline ) ) return null;
+		
+		// skip for now: anything with "|", ";", "by" (not already cleaned)
+		if( preg_match( '/([:]|\bby\b)/i', $byline ) ) {
+			return $this->byline_do_special_chars( $byline );
+		}
+
+		// parse "and"/"with"/etc case
+		if( preg_match( '/\band\b|&|\bwith\b/i', $byline ) ) {
+			return $this->bylines_do_and_case( $byline );
+		}
+
+		// parse commas now that "and with commas" above have been captured
+		if( preg_match( '/,/', $byline ) ) {
+			return $this->bylines_do_comma_case( $byline );
+		}
+
+		// simple string cases
+		return $this->bylines_do_simple_string_case( $byline );
+
+	}
+
+	private function byline_do_special_chars( $byline ) {
+
+		$specials = [
+			'Reuben Saltzman:' => 'Reuben Saltzman',
+			'Eric Black but really by Brent Cunningham' => array(),
+		];
+
+		if( isset( $specials[$byline] ) ) return $specials[$byline];
+
+		$this->logger->log( 'minnpost_regex_warnings.txt', 'SPECIAL CHARS: ' . $byline, $this->logger::WARNING );
+		return null;
+
+	}
+
 	private function bylines_do_and_case( $byline ) {
 
-		// split into elements
+		$specials = [
+			'Bennet Goldstein, Wisconsin Watch, Sarah Whites-Koditschek and Dennis Pillion, AL.com' => array( 'Bennet Goldstein', 'Sarah Whites-Koditschek', 'Dennis Pillion'),
+			'Bianca Virnig and five others' => array(),
+			'Dennis Schulstad, Harry Sieben, Jr. and Bertrand Weber' => array( 'Dennis Schulstad', 'Harry Sieben, Jr.', 'Bertrand Weber' ),
+			'Eloisa James, The Barnes & Noble Review' => 'Eloisa James',
+			'Friends and colleagues of Babak Armajani' => 'Friends and colleagues of Babak Armajani',
+			'Girish Gupta and the Global Post News Desk' => array( 'Girish Gupta', 'The Global Post News Desk' ),
+			'Hugh Macleod and a reporter in Damascus' => array( 'Hugh Macleod', 'A reporter in Damascus' ),
+			'Hugh Macleod and a reporter in Syria' => array( 'Hugh Macleod', 'A reporter in Syria' ),
+			'James Forest and The Conversation' => array( 'James Forest', 'The Conversation' ),
+			'Jay Hancock, Kaiser Health News, and Beth Schwartzapfel, The Marshall Project' => array( 'Jay Hancock', 'Beth Schwartzapfel' ),
+			'Lindsey Dyer, Librarian with Dakota County Library' => 'Lindsey Dyer',
+			'Logan Jaffe, Mary Hudetz and Ash Ngu, ProPublica and Graham Lee Brewer, NBC News' => array( 'Logan Jaffe', 'Mary Hudetz', 'Ash Ngu', 'Graham Lee Brewer' ),
+			'Mary Harris, Fred Mogul, Louise Ma, Jenny Ye and John Keefe, WNYC' => array( 'Mary Harris', 'Fred Mogul', 'Louise Ma', 'Jenny Ye', 'John Keefe' ),
+			'Maureen Scallen Failor and four others' => array(),
+			'Minnesota State Colleges & Universities Magazine' => 'Minnesota State Colleges & Universities Magazine',
+			'Minnesota State Colleges and Universities' => 'Minnesota State Colleges and Universities',
+			'MinnPost and Minneapolis Voices' => array( 'MinnPost', 'Minneapolis Voices' ),
+			'Olga Pierce, Jeff Larson and Lois Beckett ProPublica' => array( 'Olga Pierce', 'Jeff Larson', 'Lois Beckett' ),
+			'Rachel Widome and 8 co-authors' => array(),
+			'Ryan Allen, Jack DeWaard, Erika Lee, Christopher Levesque and 3 others' => array(),
+			'Sara Miller Llana Staff writer and Dheepthi Namasivayam' => array( 'Sara Miller Llana', 'Dheepthi Namasivayam' ),
+			'Sydney Lupkin, Kaiser Health News and Anna Maria Barry-Jester' => array( 'Sydney Lupkin,', 'Anna Maria Barry-Jester' ),
+			'T. Christian Miller and Ryan Gabrielson, ProPublica and Ramon Antonio Vargas and John Simerman, The New Orleans Advocate' => array( 'T. Christian Miller', 'Ryan Gabrielson', 'Ramon Antonio Vargas', 'John Simerman' ),	
+			'John Keefe and Louise Ma, WNYC, Chris Amico, Glass Eye Media and Steve Melendez, Alan Palazzolo' => array( 'John Keefe', 'Louise Ma', 'Chris Amico', 'Steve Melendez', 'Alan Palazzolo'),
+			'Kyle Stokes and Greta Kaul, MinnPost, Melody Hoffmann and Charlie Rybak, Minneapolis Voices' => array( 'Kyle Stokes', 'Greta Kaul', 'Melody Hoffmann', 'Charlie Rybak'),
+			'Marty Hobe, TMJ4 News, and Bram Sable-Smith, Wisconsin Watch, WPR' => array( 'Marty Hobe', 'Bram Sable-Smith'),			
+		];
+
+		if( isset( $specials[$byline] ) ) return $specials[$byline];
+
 		$splits = array_map( 'trim', preg_split( '/\band\b|&|\bwith\b|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
 				
 		// first person only has first name
 		if( false === strpos( $splits[0], ' ' ) ) {
 			
-			if( $byline == 'Friends and colleagues of Babak Armajani' ) return $byline;
-			if( $byline == 'MinnPost and Minneapolis Voices' ) return array( 'MinnPost', 'Minneapolis Voices' );
-
 			// try to remove suffix
-			if( 3 == count( $splits ) && $this->byline_is_suffix( $splits[2] ) ) {
+			if( 3 == count( $splits ) ) {
+
+				// if third is not suffix, error
+				if( ! $this->byline_is_suffix( $splits[2] ) ) {
+
+					$this->logger->log( 'minnpost_regex_warnings.txt', 'AND FIRSTNAME 3: ' . $byline, $this->logger::WARNING );
+					return null;
+
+				}
+
+				// remove suffix
 				unset( $splits[2] );
 			}
 
-			// check both names
+			// add last name to first person
+			$splits[0] = $splits[0] . preg_replace( '/^.*?\s/', ' ', $splits[1] );
+
+			// check both names are in the known names and NOT in the suffix list
 			if( 2 == count( $splits ) 
-				&& $this->byline_is_name_ok( $splits[0] . preg_replace( '/^.*?\s/', ' ', $splits[1] ) )
+				&& $this->byline_is_name_ok( $splits[0] )
 				&& $this->byline_is_name_ok( $splits[1] )
 			){
 				return $splits;
 			}
 
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'AND FIRSTNAME 2: ' . $byline, $this->logger::WARNING );
 			return null;
 		}
 
-		// if 3 values and last one is suffix
-		if( 3 == count( $splits ) && $this->byline_is_suffix( $splits[2] ) 
-				&& $this->byline_is_name_ok( $splits[0] )
-				&& $this->byline_is_name_ok( $splits[1] )
-			) {
-				return $splits;
-			} else return null;
-		
-
-		if( 2 == count( $splits ) 
-				&& $this->byline_is_name_ok( $splits[0] )
-				&& $this->byline_is_name_ok( $splits[1] )
-		) {
-			return $splits;
-		} else return null;
-		
-
-
-		return null;
-		return 'bypass';
-
-		// check names
-		$found = 0;
+		// try all matches to names
+		$name_matches = 0;
 		foreach( $splits as $split ) {
-			if( in_array( $split, $this->byline_known_names ) 
-				&& in_array( $split, $this->byline_known_suffixes ) ) $found++;
+			if( $this->byline_is_name_ok( $split ) ) $name_matches++;
 		}
-		if( $found == count( $splits ) ) return $splits;
+
+		if( $name_matches == count( $splits ) ) {
+			return $splits;
+		}
 		
+		// two names
+		if( 2 == count( $splits ) ) {
 
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_name_ok( $splits[1] ) ){
+				return $splits;
+			}
+
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'AND 2: ' . $byline, $this->logger::WARNING );
+			return null;
+
+		}
+
+		// if 3 values
+		if( 3 == count( $splits ) ) {
+
+			// 3 names
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_name_ok( $splits[2] ) ){
+				return $splits;
+			} 
+
+			// 2 names, one suffix
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
+				return array( $splits[0], $splits[1] );
+			} 
+
+			// 1 name, 2 suffix
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
+				return $splits[0];
+			} 
+
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'AND 3: ' . $byline, $this->logger::WARNING );
+			return null;
+
+		}
+
+		if( 4 == count( $splits ) ) {
+
+			if( $this->byline_is_name_ok_alone( $splits[0] )
+				&& $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_name_ok( $splits[2])
+				&& $this->byline_is_suffix( $splits[3])
+			) {
+				return [ $splits[0], $splits[1], $splits[2] ];
+			}
+
+			if( $this->byline_is_name_ok_alone( $splits[0] )
+				&& $this->byline_is_suffix( $splits[1] ) && $this->byline_is_name_ok( $splits[2])
+				&& $this->byline_is_suffix( $splits[3])
+			) {
+				return [ $splits[0], $splits[2] ];
+			}
+
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'AND 4: ' . $byline, $this->logger::WARNING );
+			return null;
+				
+		}
+
+		if( 5 == count( $splits ) ) {
+
+			if( $this->byline_is_name_ok_alone( $splits[0] )
+				&& $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_name_ok( $splits[2]) && $this->byline_is_name_ok( $splits[3])
+				&& $this->byline_is_suffix( $splits[4])
+			) {
+				return [ $splits[0], $splits[1], $splits[2], $split[3] ];
+			}
+
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'AND 5: ' . $byline, $this->logger::WARNING );
+			return null;
+				
+		}
+
+		$this->logger->log( 'minnpost_regex_warnings.txt', 'AND: ' . $byline, $this->logger::WARNING );
 		return null;
-		return 'bypass';
-
-		// special cases
-		// if( preg_match( '/^(Laurie|Joel) and (Laurie|Joel) Kramer$/i', $byline ) ) return array( 'Laurie Kramer', 'Joel Kramer' );
-
-
-
-	/*
-		By Jenny Gold and Kate Steadman, Kaiser Health News
-		By Mike Faulk and and Sara Miller Llana
-		By Lindsey Dyer, Librarian with Dakota County Library
-
-		By Phil Schewe and Devin Powell, Inside Science News Service
-
-		By Mike Lucibella and Eric Betz, Inside Science News Service
-
-		By Shashank Bengali and Mohammed al Dulaimy, McClatchy Newspapers
-		By Jonathan S. Landay and Saeed Shah, McClatchy newspapers
-		By Sebastian Jones and Marcus Stern, ProPublica
-		By Shashank Bengali and Mohammed El Dulaimy, McClatchy Newspapers
-
-		By Bianca Virnig and five others
-
-
-		By Jesse Eisinger and Paul Kiel, ProPublica
-	*/
-
-		// todo:
-		// capture no comma with and then a comma
-		// if( preg_match( '/^([^,]+) and (.*?),(.*?)$/', $byline, $matches ) ) {
-
-		// todo:
-		// capture comma and then a comma
-		// if( preg_match( '/^(.*?),(.*?) and (.*?),(.*?)$/', $byline, $matches ) ) {
-
-
-		return $splits;
 
 	}
 
-	private function byline_is_name_ok( $str ) {
+	private function bylines_do_comma_case( $byline ) {
 
-		if( in_array( $str, $this->byline_known_names ) 
-			&& ! in_array( $str, $this->byline_known_suffixes ) 
+		// special cases
+		$specials = [			
+			'a correspondent, Christian Science Monitor' => 'A Correspondent at Christian Science Monitor',
+			'Albert Turner Goins, Sr.' => 'Albert Turner Goins, Sr.',
+			'Amy Klobuchar, Mitch Pearlstein, et al' => array( 'Amy Klobuchar', 'Mitch Pearlstein' ),
+			'B w, Burnsville' => 'B W, Burnsville',
+			'becky Bock, Carlos' => array(),
+			'Becky Lourey, Lynnell Mickelsen' => array( 'Becky Lourey', 'Lynnell Mickelsen'),
+			'Daniel B. Wood, Gloria Goodale' => array( 'Daniel B. Wood', 'Gloria Goodale'),
+			'Ely, Cook, Tower Timberjay' => array(),
+			'Erik Hare, Friday, Dec. 10, 2010' => 'Erik Hare',
+			'G.R. Anderson, Jr.' => 'G.R. Anderson, Jr.',
+			'Gaa-ozhibii’ang Cynthia Boyd, Gaa-anishinaabewisidood Anton Treuer' => array( 'Cynthia Boyd', 'Anton Treuer'),
+			'Heather Silsbee, Kristen Ingle, et al.' => array( 'Heather Silsbee', 'Kristen Ingle' ),
+			'Jamie Millard, Meghan Murphy' => array( 'Jamie Millard', 'Meghan Murphy'),
+			'Justin Elliott, Joshua Kaplan, Alex Mierjeski, ProPublica' => array( 'Justin Elliott', 'Joshua Kaplan', 'Alex Mierjeski' ),
+			'Kadra Abdi, Ayantu Ayana, Ramla Bile, Mohamed H. Mohamed, Julia Nekessa Opoti' => array( 'Kadra Abdi', 'Ayantu Ayana', 'Ramla Bile', 'Mohamed H. Mohamed', 'Julia Nekessa Opoti' ),
+			'Kay kessel, Richfield' => 'Kay Kessel',
+			'Kenneth Kaplan Staff writer, Mark Guarino Staff writer' => array( 'Kenneth Kaplan', 'Mark Guarino'),
+			'Magda Munteanu, Kristina Ozimec, Gabriela Delova, Alisa Mysliu' => array( 'Magda Munteanu', 'Kristina Ozimec', 'Gabriela Delova', 'Alisa Mysliu' ),
+			'Minneapolis, St. Paul Business Journal' => 'Minneapolis/St. Paul Business Journal',
+			'Neal Kielar, Tuesday, June 8, 2010' => 'Neal Kielar',
+			'Robert "Again" Carney, Jr.' => 'Robert "Again" Carney, Jr.',
+			'Sara Miller Llana, Ben Arnoldy' => array( 'Sara Miller Llana', 'Ben Arnoldy'),
+			'Sharon Schmickle, David Brauer' => array( 'Sharon Schmickle', 'David Brauer'),
+			'State Sen. Tom Bakk, State Rep. Morrie Lanning, State Sen. Julie Rosen, State Rep. Loren Solberg' => array( 'State Sen. Tom Bakk', 'State Rep. Morrie Lanning', 'State Sen. Julie Rosen', 'State Rep. Loren Solberg' ),
+			'Steven Melendez, Dave Smith, Louise Ma, John Keefe, WNYC, Alan Palazzolo' => array( 'Steven Melendez', 'Dave Smith', 'Louise Ma', 'John Keefe', 'Alan Palazzolo'),
+			'The Forum of Fargo, Moorhead' => 'The Forum of Fargo/Moorhead',
+			'Tower, Ely, Cook Timberjay' => array(),
+		];
+
+		if( isset( $specials[$byline] ) ) return $specials[$byline];
+
+		$splits = array_map( 'trim', preg_split( '/,/', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
+
+		// name, publication/suffix:
+		if( 2 == count( $splits ) ) {
+		
+			// name and suffix
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) ) {
+				return $splits[0];
+			}
+
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'COMMA 2: ' . $byline, $this->logger::WARNING );
+			return null;
+
+		}
+
+		// name, publication/suffix that might have a comma
+		if( 3 == count( $splits ) ) {
+			
+			// if it's a multiple value suffix to remove
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] . ', ' . $splits[2] ) ) {
+				return $splits[0];
+			}
+			
+			// if both should be removed
+			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) &&  $this->byline_is_suffix( $splits[2] ) ) {
+				return $splits[0];
+			}
+
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'COMMA 3: ' . $byline, $this->logger::WARNING );
+			return null;
+
+		}
+
+		$this->logger->log( 'minnpost_regex_warnings.txt', 'COMMA: ' . $byline, $this->logger::WARNING );
+		return null;
+
+	}
+
+	private function bylines_do_simple_string_case( $byline ) {
+
+		$specials = [
+			'Liz Marlantes DCDecoder' => 'Liz Marlantes',
+			'Kadra Abdi et al' => 'Kadra Abdi',
+			'Ian MacDougall for ProPublica' => 'Ian MacDougall',
+			'Jack Kelly for Wisconsin Watch' => 'Jack Kelly',
+			'dou' => '',
+			'Global' => '',
+			'jay' => '',
+		];
+
+		if( isset( $specials[$byline] ) ) return $specials[$byline];
+
+		// normal byline - don't filter out suffixes since these don't have commas
+		if( $this->byline_is_name_ok_alone( $byline ) ) {
+			return $byline;
+		}
+
+		$this->logger->log( 'minnpost_regex_warnings.txt', 'STRING: ' . $byline, $this->logger::WARNING );
+		return null;
+
+	}
+
+	private function byline_is_name_ok( $name ) {
+
+		if( in_array( $name, $this->byline_known_names ) 
+			&& ! in_array( $name, $this->byline_known_suffixes ) 
 		) {
 			return true;
 		}
@@ -1075,10 +1190,18 @@ class MinnPostMigrator implements InterfaceCommand {
 		return false;
 	}
 
+	private function byline_is_name_ok_alone( $name ) {
 
-	private function byline_is_suffix( $str ) {
+		if( in_array( $name, $this->byline_known_names ) ) {
+			return true;
+		}
 
-		if( in_array( $str, $this->byline_known_suffixes ) ) {
+		return false;
+	}
+
+	private function byline_is_suffix( $suffix ) {
+
+		if( in_array( $suffix, $this->byline_known_suffixes ) ) {
 			return true;
 		}
 
@@ -1173,4 +1296,13 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	}
 
+	private function load_from_txt( $path ) {
+
+		if( ! is_file( $path ) ) {
+			WP_CLI::error( 'Could not find file at path: ' . $path );
+		}
+
+		return array_map( 'trim', file( $path ) );
+		
+	}
 }
