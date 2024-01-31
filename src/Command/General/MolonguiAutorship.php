@@ -267,6 +267,7 @@ class MolonguiAutorship implements InterfaceCommand {
 				
 				// Assign GAs to Post.
 				$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+				$this->log( $dry_run, self::LOG, sprintf( 'Assigned %d GA IDs %s to Post ID %d', count( $ga_ids ), implode( ',', $ga_ids ), $post_id ), Logger::SUCCESS );
 			}
 		}
 
@@ -305,19 +306,16 @@ class MolonguiAutorship implements InterfaceCommand {
 		$display_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_display_name';", $guest_id ) );
 		if ( $display_name && trim( $display_name ) ) {
 			$cap_args['display_name'] = trim( $display_name );
-// $cap_args['display_name'] = $display_name;
 		}
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_first_name';", $guest_id ) );
 		if ( $first_name && trim( $first_name ) ) {
 			$cap_args['first_name'] = trim( $first_name );
-// $cap_args['first_name'] = $first_name;
 		}
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_last_name';", $guest_id ) );
 		if ( $last_name && trim( $last_name ) ) {
 			$cap_args['last_name'] = trim( $last_name );
-// $cap_args['last_name'] = $last_name;
 		}
 		// phpcs:Ignore -- $wpdb->prepare is used.
 		$email = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
