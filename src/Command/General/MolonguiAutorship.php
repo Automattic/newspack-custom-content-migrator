@@ -190,6 +190,7 @@ class MolonguiAutorship implements InterfaceCommand {
 			/**
 			 * Create a CAP GA.
 			 */
+			$cap_id = null;
 			if ( $dry_run ) {
 				$cap_id = 'n/a';
 				$dry_run_mologui_to_gas[ $molongui_author_value ] = $cap_args['display_name'];
@@ -201,8 +202,14 @@ class MolonguiAutorship implements InterfaceCommand {
 					continue;
 				}
 
-				// Save custom postmeta to GA saying which Molongui user this was.
-				update_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
+				/**
+				 * Save custom postmeta to GA saying which Molongui user this was.
+				 * Since there could be multiple Molongui users pointing to the same CAP GA, multiple metas are allowed.
+				 */
+				$meta_exists = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where post_id = %d and meta_key = %s and meta_value = %s;", $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value ) );
+				if ( ! $meta_exists ) {
+					add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
+				}
 			}
 			
 			$this->log( $dry_run, self::LOG, sprintf( "Created/fetched GA ID %s '%s' from '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
