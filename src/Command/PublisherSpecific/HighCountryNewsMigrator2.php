@@ -1030,6 +1030,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( $existing_id && ! $refresh_existing ) {
 				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
 				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+				continue;
 			}
 
 			$post_date_string     = $row->effective ?? $row->created;
