@@ -115,7 +115,8 @@ class MigrationHelper implements InterfaceCommand {
 			}
 			$command        = $matches[1];
 			$command_args   = trim( str_replace( $command, '', $command_string ) );
-			$command_args   = trim( preg_replace( '/\s+/', " \\\n", $command_args ), '\\' );
+			$command_args   = \WP_CLI\Utils\parse_str_to_argv( $command_args );
+			$command_args   = implode( " \\\n", $command_args );
 			$command_string = $command . " \\\n" . $command_args . " \\\n";
 		}
 
