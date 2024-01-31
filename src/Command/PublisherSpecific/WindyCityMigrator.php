@@ -93,6 +93,12 @@ class WindyCityMigrator implements InterfaceCommand {
 					...BatchLogic::get_batch_args(),
 					[
 						'type'        => 'assoc',
+						'name'        => 'pdf-folder-path',
+						'description' => 'Path to PDF folder.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'default-author-display-name',
 						'description' => 'Default author display name.',
 						'optional'    => false,
@@ -125,6 +131,7 @@ class WindyCityMigrator implements InterfaceCommand {
 		$csv_file_path               = $assoc_args[ $this->csv_input_file['name'] ];
 		$default_author_display_name = $assoc_args['default-author-display-name'];
 		$default_author_email        = $assoc_args['default-author-email'];
+		$pdf_folder_path             = $assoc_args['pdf-folder-path'];
 		$refresh_content             = isset( $assoc_args['refresh-content'] ) ? true : false;
 		$batch_args                  = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
 		$total_entries               = $this->csv_iterator->count_csv_file_entries( $csv_file_path, ',' );
@@ -205,6 +212,9 @@ class WindyCityMigrator implements InterfaceCommand {
 				$post_content = $this->migrate_embed( $post_content, $entry['EMBED'] );
 			}
 
+			// PDFs.
+			$post_content = $this->migrate_pdfs( $post_id, $post_content, $pdf_folder_path );
+
 			// Update post content.
 			wp_update_post(
 				[
@@ -242,7 +252,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				$attachment_id = $this->attachments_logic->import_external_file( $entry['FEATURED'], $entry['TITLE'], $entry['FEATURED_CAPTION'], null, null, $post_id );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment: ' . $attachment_id->get_error_message(), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $entry['FEATURED'] . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
 				} else {
 					set_post_thumbnail( $post_id, $attachment_id );
 				}
@@ -255,7 +265,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				$attachment_id = $this->attachments_logic->import_external_file( $first_image, $entry['TITLE'], null, null, null, $post_id );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment: ' . $attachment_id->get_error_message(), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $first_image . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
 				} else {
 					set_post_thumbnail( $post_id, $attachment_id );
 				}
@@ -407,7 +417,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$attachment_id = $this->attachments_logic->import_external_file( $image_url, null, $caption, null, null, $post_id );
 
 			if ( is_wp_error( $attachment_id ) ) {
-				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment: ' . $attachment_id->get_error_message(), Logger::WARNING );
+				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $image_url . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
 				continue;
 			}
 
@@ -469,6 +479,50 @@ class WindyCityMigrator implements InterfaceCommand {
 		return $post_content . serialize_block(
 			$this->gutenberg_block_generator->get_iframe( $iframe_src )
 		);
+	}
+
+	/**
+	 * Migrate PDFs.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $post_content Post content.
+	 * @param string $pdf_folder_path PDF folder path.
+	 * @return string Post content.
+	 */
+	private function migrate_pdfs( $post_id, $post_content, $pdf_folder_path ) {
+		// The PDF links are hardcoded in the post content in the format (https://)?windycitytimes.com/pdf/1stWardAldProcoMoreno.pdf.
+		// We need to extract the PDF file name from the link and then find the file in the PDF folder.
+		// And Replace the URL with the filename linked to the PDF file.
+		$pattern = '/(?P<pdf_link>(https?:\/\/)?windycitytimes.com\/pdf\/(?P<pdf_file_name>(.*?)\.pdf))/im';
+		preg_match_all( $pattern, $post_content, $matches );
+
+		if ( empty( $matches['pdf_file_name'] ) ) {
+			return $post_content;
+		}
+
+		foreach ( $matches['pdf_file_name'] as $match_index => $pdf_file_name ) {
+			$pdf_file_path = $pdf_folder_path . '/' . $pdf_file_name;
+
+			if ( ! file_exists( $pdf_file_path ) ) {
+				$this->logger->log( self::LOG_FILE, ' -- PDF file does not exist: ' . $pdf_file_path, Logger::WARNING );
+				continue;
+			}
+
+			$attachment_id = $this->attachments_logic->import_external_file( $pdf_file_path, null, null, null, null, $post_id );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $pdf_file_path . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, ' -- Imported PDF with ID: ' . $attachment_id, Logger::LINE );
+
+			// Replace the URL with the filename linked to the PDF file.
+			$html_link    = '<a href="' . wp_get_attachment_url( $attachment_id ) . '">' . $pdf_file_name . '</a>';
+			$post_content = str_replace( $matches['pdf_link'][ $match_index ], $html_link, $post_content );
+		}
+
+		return $post_content;
 	}
 
 	/**
