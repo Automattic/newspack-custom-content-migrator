@@ -1,4 +1,9 @@
 <?php
+/**
+ * Command for fixing attachments with filenames that are incompatible with Subsizes.
+ *
+ * @package newspack-custom-content-converter
+ */
 
 namespace NewspackCustomContentMigrator\Command\General;
 
@@ -6,6 +11,9 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \WP_CLI;
 
+/**
+ * Fixes for attachments with filenames that are incompatible with Subsizes.
+ */
 class AttachmentsImagesSubsizesMigrator implements InterfaceCommand {
 
 	/**
