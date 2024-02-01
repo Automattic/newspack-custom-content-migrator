@@ -923,7 +923,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			}
 			++ $row_number;
 
-			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) && $row->legacyPath ) {
+			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
 			}
 			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
