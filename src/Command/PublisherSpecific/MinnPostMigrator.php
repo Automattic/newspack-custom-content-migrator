@@ -233,14 +233,10 @@ class MinnPostMigrator implements InterfaceCommand {
 		
 		// enum for meta values
 		$result_types = new stdClass();
-		$result_types->already_exists_on_post = 'already_exists_on_post';
 		$result_types->assigned_to_existing_ga = 'assigned_to_existing_ga';
 		$result_types->assigned_to_existing_wp_user = 'assigned_to_existing_wp_user';
 		$result_types->assigned_to_new_ga = 'assigned_to_new_ga';
-		$result_types->maybe_exists_on_post = 'maybe_exists_on_post';
-		$result_types->maybe_ga_exists = 'maybe_ga_exists';
-		$result_types->skipping_non_first_last = 'skipping_non_first_last';
-
+		
 		// reporting
 		$report = array();
 		$report_add = function( $key ) use( &$report ) {
@@ -525,13 +521,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		// select posts with byline subtitle meta, and not already processed
 		$query = new WP_Query ( [
-			// 'p' => 2069483, // test: cap author contains "+" in CAP GA email/user-login
-			// 'p' => 32178, // test: single word byline
-			// 'p' => 30933, // test: first last 
-			// 'p' => 95265, // test: comma
-			// 'p' => 95332, // test 1, 2 and 3
-			// 'p' => 94141, // test fist last, publication, and first last, publication
-			'posts_per_page' => 100,
+			'posts_per_page' => 1000,
 			'fields'		=> 'ids',
 			'meta_query'    => [
 				[
@@ -554,206 +544,94 @@ class MinnPostMigrator implements InterfaceCommand {
 			$this->logger->log( $log_file, '-- Post ID: ' . $post_id  );
 
 			// get byline
-			$byline = get_post_meta( $post_id, $meta_key_byline, true );
-			$this->logger->log( $log_file, 'Byline (raw): ' . $byline  );
+			$byline_uncleaned_from_db = get_post_meta( $post_id, $meta_key_byline, true );
 
+			$this->logger->log( $log_file, 'Byline (raw db value): ' . $byline_uncleaned_from_db  );
 
-			echo "NEED NEW REGEX with cleaner";
-			exit();
-
-
-
-			// store all sets that need to be run into an array, this will make it easier for "and" authors
-			$name_sets = [];
-
-			// skip for now, unless regex is favorable
-			$skip_for_now = true;
-
-			// convert utf8 spaces to normal spaces
-			$byline = trim( str_replace("\xc2\xa0", "\x20", $byline) );
-
-			// trim and replace multiple spaces with single space
-			$byline = trim( preg_replace( '/\s{2,}/', ' ', $byline ) );
-
-			// remove starting "By "
-			$byline = trim( preg_replace( '/^By\s+/', '', $byline ) );
-
-			// // skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
-			if( preg_match( '/Stephanie Hemphill/', $byline ) ) $skip_for_now = true;
-
-			// assess "and", &
-			else if( preg_match( '/ and |,and |&/', $byline ) ) {
-
-				$skip_for_now = false;
-				foreach( preg_split( '/,| and |&/', $byline ) as $temp_name ) {
-					$temp_name = trim( $temp_name );
-					if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $temp_name, $name_parts ) ) {
-						$name_sets[] = array( 'byline' => $temp_name, 'name_parts' => $name_parts);
-					}
-					// if any match isn't perfect, don't run for now
-					else {
-						$skip_for_now = true;
-						break;
-					}
-				}				
-			}
+			// clean the db value
+			// I left in the case to "error if unicode is found". so we don't end up with unicode in the new GA author names.
+			// possibly need to refactor this into a warning in the log file with a "continue" instead...
+			// but...if error: need to add replacement character to function: $this->byline_replace_hidden_chars
+			$byline_cleaned = $this->byline_cleaner( $byline_uncleaned_from_db, true );
 			
-			// assess commas
-			else if( preg_match( '/^([^,]+),(.*)/', $byline, $comma_parts ) ) {
-				$this->logger->log( 'minnpost_set_authors_by_subtitle_byline_comma_parts.txt', implode( "\t", $comma_parts ) );
-				if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $comma_parts[1], $name_parts ) ) {
-					$skip_for_now = false;
-					$name_sets[] = array( 'byline' => $comma_parts[1], 'name_parts' => $name_parts);
-				}
-			}
-
-			// keep: test if it's a single word byline with no spaces
-			else if( false === strpos( $byline, ' ') ) {
-				$skip_for_now = false;
-				$name_sets[] = array( 'byline' => $byline, 'name_parts' => array( '', $byline, '' ) );
-			}
-			
-			//  if it a normal firstname lastname
-			else if( preg_match( '/^([A-Za-z]+) ([A-Za-z]+)$/', $byline, $name_parts ) ) {
-				$skip_for_now = false;
-				$name_sets[] = array( 'byline' => $byline, 'name_parts' => $name_parts);
-			}
-			
-			if( $skip_for_now ) {
-				update_post_meta( $post_id, $meta_key_result, $result_types->skipping_non_first_last );
-				$this->logger->log( $log_file, $result_types->skipping_non_first_last );
-				$report_add( $result_types->skipping_non_first_last );
-				continue;
-			}
-
 			// cleaned byline
-			$this->logger->log( $log_file, 'Byline (cleaned): ' . $byline  );
+			$this->logger->log( $log_file, 'Byline (cleaned): ' . $byline_cleaned  );
+
+			// get the matches
+			// return will be string|array|null
+			$found_bylines = $this->byline_regex( $byline_cleaned, $byline_uncleaned_from_db );
+
+			if( empty( $found_bylines ) ) {
+			
+				$this->logger->log( $log_file, 'Skip: No matches found.'  );
+				continue;
+
+			}
+
+			// make single string value into array for the loop
+			if( is_string( $found_bylines ) ) $found_bylines = array( $found_bylines );
 
 			// loop through each name set with an $i counter
-			for( $i = 0; $i < count( $name_sets ); $i++ ) {
+			for( $i = 0; $i < count( $found_bylines ); $i++ ) {
 
-				// set the first author to clear the existing authors
+				// set the first author to clear any existing authors when CAP assigns author to the post
 				if( 0 == $i) $append_to_existing_users = false;
 				// append additional authors $i > 0 to the post
 				else $append_to_existing_users = true;
 
-				// set author using first last
-				$result_type = $this->set_authors_by_subtitle_byline_first_last( 
-					$log_file, $result_types, $report_add, $allowed_wp_users,
-					$meta_key_result,
-					$post_id, $name_sets[$i]['byline'], $name_sets[$i]['name_parts'],
-					$append_to_existing_users
-				);
+				// do the DB update
+				$result_type = $this->set_authors_by_subtitle_byline_in_db( $result_types, $allowed_wp_users, $post_id, $found_bylines[$i], $append_to_existing_users );
 	
+				// log the result in postmeta
 				// allow multiple post metas incase multiple authors per post_id
 				add_post_meta( $post_id, $meta_key_result, $result_type );
 				$this->logger->log( $log_file, $result_type );
 				$report_add( $result_type );
 
-			} // for loop
+			} // for loop bylines
 			
-		} // foreach
+			return false;
+
+		} // foreach query post
 
 		return true;
 
 	}
 
-	private function set_authors_by_subtitle_byline_first_last(		
-		$log_file, $result_types, $report_add, $allowed_wp_users,
-		$meta_key_result,
-		$post_id, $byline, $name_parts,
-		$append_to_existing_users
-	) {
+	private function set_authors_by_subtitle_byline_in_db( $result_types, $allowed_wp_users, $post_id, $byline, $append_to_existing_users ) {
 
-		// check if author already exists on this post
-		$exists = ( function () use ( $post_id, $byline, $name_parts ) {
-			foreach( $this->coauthorsplus->get_all_authors_for_post( $post_id ) as $author ) {
-				$exists = $this->yes_or_maybe_byline_match( $byline, $author->display_name, $name_parts );
-				if( ! empty( $exists ) ) return $exists;
-			}
-			return null;
-		})(); // run function
-
-		if( 'yes' === $exists ) {
-			return $result_types->already_exists_on_post;
-		}
-
-		if( 'maybe' === $exists ) {
-			return $result_types->maybe_exists_on_post;
-		}
+		global $wpdb;
 
 		// check if an there is an existing GA by display name
-		$ga_exists = ( function() use( $byline, $name_parts ) {
-			
-			global $wpdb;
+		// limit to the first match found incase multiple matching display names
+		$ga_id = $wpdb->get_var( $wpdb->prepare("
+			SELECT ID
+			FROM {$wpdb->posts}
+			WHERE post_type = 'guest-author'
+			AND post_title = %s
+			LIMIT 1
+			",  
+			$byline,
+		));
 
-			$gas = $wpdb->get_results( $wpdb->prepare("
-				SELECT ID, post_title as display_name
-				FROM {$wpdb->posts}
-				WHERE post_type = 'guest-author'
-				AND post_title LIKE %s
-				AND post_title LIKE %s
-				",  
-				'%' . $wpdb->esc_like( $name_parts[1] ) . '%',
-				'%' . $wpdb->esc_like( $name_parts[2] ) . '%',
-			));
-
-			if( ! ( count( $gas ) > 0 ) ) return null;
-
-			// if an exact match was in the query
-			foreach( $gas as $ga ) {
-				if( $ga->display_name === $byline ) return (int) $ga->ID;
-			}
-
-			// something was returned from the query, just not an exact match
-			return 'maybe';
-
-		})(); // run function
-
-		if( 'maybe' === $ga_exists ) {
-			return $result_types->maybe_ga_exists;
-		}
-
-		// if ga ID, then assign to post
-		if( is_int( $ga_exists ) && $ga_exists > 0 ) {
-			$this->coauthorsplus->assign_guest_authors_to_post( array( $ga_exists ), $post_id, $append_to_existing_users );
+		// if ga ID exists, then assign to post
+		if( is_numeric( $ga_id ) && $ga_id > 0 ) {
+			$this->coauthorsplus->assign_guest_authors_to_post( array( $ga_id ), $post_id, $append_to_existing_users );
 			return $result_types->assigned_to_existing_ga;
 		}
 
-		// get user ID by exact match
-		// doing "maybe" matches at this point does not make sense because all allowed_users at this time are only "First Last"
-		// see print_r( $allowed_wp_users );
-		$wp_user_exists = array_search( $byline, $allowed_wp_users );
-		if( is_int( $wp_user_exists ) && $wp_user_exists > 0 ) {
-			$this->coauthorsplus->assign_authors_to_post( array( get_user_by('id', $wp_user_exists ) ), $post_id, $append_to_existing_users );
+		// try get to an existing wp user
+		$wp_user_id = array_search( $byline, $allowed_wp_users );
+		if( is_numeric( $wp_user_id ) && $wp_user_id > 0 ) {
+			$this->coauthorsplus->assign_authors_to_post( array( get_user_by( 'id', $wp_user_id ) ), $post_id, $append_to_existing_users );
 			return $result_types->assigned_to_existing_wp_user;
 		}
 
-		// create a guest author and assign to post
+		// if no matches above, create a new guest author and assign to post
 		$coauthor_id = $this->coauthorsplus->create_guest_author( array( 'display_name' => $byline ) );
 		$this->coauthorsplus->assign_guest_authors_to_post( array( $coauthor_id ), $post_id, $append_to_existing_users );
 		return $result_types->assigned_to_new_ga;
 
-	}
-
-	private function yes_or_maybe_byline_match( $byline, $display_name, $name_parts ) {
-
-		// exact match return yes
-		if( $byline === $display_name ) return 'yes';
-
-		// maybe byline (name parts) are within display name?  "Beth Smith": "Beth Smith, Phd" or "Beth J. Smith"
-
-		// check first name (or single name for single word byline)
-		$maybe = ( false !== strpos( $display_name, $name_parts[1] ) );
-		
-		// if first name was match, check the second name (assuming it's not a one word byline)
-		if( $maybe && ! empty( $name_parts[2]) ) $maybe = ( false !== strpos( $display_name, $name_parts[2] ) );
-		
-		// if maybe is true, return
-		if( $maybe ) return 'maybe';
-
-		return null;
-		
 	}
 
 	private function byline_test_regex() {
@@ -778,9 +656,15 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		foreach ( $results as $result ) {
 
-			// string|array|null
-			$byline_cleaned = $this->byline_cleaner( $result->byline, true );
-			$found_bylines = $this->byline_regex( $byline_cleaned, $result->byline );
+			// set the db value as "uncleaned"
+			$byline_uncleaned_from_db = $result->byline;
+
+			// clean the db value and error if unicode issues
+			$byline_cleaned = $this->byline_cleaner( $byline_uncleaned_from_db, true );
+			
+			// get the matches
+			// return will be string|array|null
+			$found_bylines = $this->byline_regex( $byline_cleaned, $byline_uncleaned_from_db );
 
 			// if no match this is an error byline, set match count to 0
 			if( empty( $found_bylines ) ) {
@@ -792,7 +676,7 @@ class MinnPostMigrator implements InterfaceCommand {
 				\WP_CLI\Utils\write_csv( $csv_out_file, array( array( 
 					$result->post_count,
 					'ERROR_NO_MATCHES',
-					$result->byline,
+					$byline_uncleaned_from_db,
 					$byline_cleaned,
 				) ) ); // array within array
 
@@ -803,7 +687,7 @@ class MinnPostMigrator implements InterfaceCommand {
 				// set all these posts as fixed
 				$report['posts_fixed'] += $result->post_count;
 
-				// make string into array
+				// make single string into array
 				if( is_string( $found_bylines ) ) $found_bylines = array( $found_bylines );
 
 				foreach( $found_bylines as $found_byline ) {
@@ -811,7 +695,7 @@ class MinnPostMigrator implements InterfaceCommand {
 					// how could this case happen?  a blank value or only 1 character?
 					// - fix when it was a split of 5...but leave this block here incase it comes back...
 					if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 2 ) {
-						WP_CLI::line( $result->byline );
+						WP_CLI::line( $byline_uncleaned_from_db );
 						WP_CLI::line( $byline_cleaned );
 						print_r($found_bylines);
 						exit();
@@ -821,7 +705,7 @@ class MinnPostMigrator implements InterfaceCommand {
 					\WP_CLI\Utils\write_csv( $csv_out_file, array( array( 
 						$result->post_count,
 						$found_byline,
-						$result->byline,
+						$byline_uncleaned_from_db,
 						$byline_cleaned,
 					) ) ); // array within array
 
