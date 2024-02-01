@@ -236,6 +236,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		$result_types->assigned_to_existing_ga = 'assigned_to_existing_ga';
 		$result_types->assigned_to_existing_wp_user = 'assigned_to_existing_wp_user';
 		$result_types->assigned_to_new_ga = 'assigned_to_new_ga';
+		$result_types->skip_error = 'skip_error';
 		
 		// reporting
 		$report = array();
@@ -561,9 +562,11 @@ class MinnPostMigrator implements InterfaceCommand {
 			// return will be string|array|null
 			$found_bylines = $this->byline_regex( $byline_cleaned, $byline_uncleaned_from_db );
 
+			// if empty value, skip this post
 			if( empty( $found_bylines ) ) {
-			
-				$this->logger->log( $log_file, 'Skip: No matches found.'  );
+				add_post_meta( $post_id, $meta_key_result, $result_types->skip_error );
+				$this->logger->log( $log_file, $result_types->skip_error );
+				$report_add( $result_types->skip_error );
 				continue;
 
 			}
@@ -644,11 +647,12 @@ class MinnPostMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// get bylines group by number of posts byline affects
+		// group by case sensitive values. Known_names.txt is case senstive (at least at this point in time...)
 		$results = $wpdb->get_results("
-			select meta_value as byline, count(*) as post_count
+			select distinct binary(meta_value) as case_senstive_meta_value, meta_value as byline, count(*) as post_count
 			from {$wpdb->postmeta}
 			where meta_key = '_mp_subtitle_settings_byline'
-			group by meta_value
+			group by case_senstive_meta_value, meta_value
 			order by post_count desc
 		");
 
@@ -659,7 +663,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			// clean the db value and error if unicode issues
 			$byline_cleaned = $this->byline_cleaner( $byline_uncleaned_from_db, true );
-			
+				
 			// get the matches
 			// return will be string|array|null
 			$found_bylines = $this->byline_regex( $byline_cleaned, $byline_uncleaned_from_db );
