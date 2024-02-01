@@ -808,12 +808,14 @@ class MinnPostMigrator implements InterfaceCommand {
 
 				foreach( $found_bylines as $found_byline ) {
 
-if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
-	WP_CLI::line( $result->byline );
-	WP_CLI::line( $byline_cleaned );
-	print_r($found_bylines);
-	// exit();
-}
+					// how could this case happen?  a blank value or only 1 character?
+					// - fix when it was a split of 5...but leave this block here incase it comes back...
+					if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 2 ) {
+						WP_CLI::line( $result->byline );
+						WP_CLI::line( $byline_cleaned );
+						print_r($found_bylines);
+						exit();
+					}
 
 					// write output to csv
 					\WP_CLI\Utils\write_csv( $csv_out_file, array( array( 
@@ -908,11 +910,10 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 			'Becky Lourey, Lynnell Mickelsen' => array( 'Becky Lourey', 'Lynnell Mickelsen'),
 			'Bennet Goldstein, Wisconsin Watch, Sarah Whites-Koditschek and Dennis Pillion, AL.com' => array( 'Bennet Goldstein', 'Sarah Whites-Koditschek', 'Dennis Pillion'),
 			'Bianca Virnig and five others' => array(),
-			'By Donovan Slack, Dennis Wagner, Kevin McCoy and Jay Hancock, USA Today' => array( 'Donovan Slack', 'Dennis Wagner', 'Kevin McCoy', 'Jay Hancock'),
 			'Daniel B. Wood, Gloria Goodale' => array( 'Daniel B. Wood', 'Gloria Goodale'),
 			'Dennis Schulstad, Harry Sieben, Jr. and Bertrand Weber' => array( 'Dennis Schulstad', 'Harry Sieben, Jr.', 'Bertrand Weber' ),
 			'Derek Wallbank`' => 'Derek Wallbank',
-// 'Dr. Edward P. Ehlinger Dr. Janelle Palacios and Dr. Magda Peck' => array( 'Dr. Edward P. Ehlinger', 'Dr. Janelle Palacios', 'Dr. Magda Peck' ),
+			'Dr. Edward P. Ehlinger Dr. Janelle Palacios and Dr. Magda Peck' => array( 'Dr. Edward P. Ehlinger', 'Dr. Janelle Palacios', 'Dr. Magda Peck' ),
 			'dou' => '',
 			'Eloisa James, The Barnes & Noble Review' => 'Eloisa James',
 			'Ely, Cook, Tower Timberjay' => array(),
@@ -932,8 +933,6 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 			'Jamie Millard, Meghan Murphy' => array( 'Jamie Millard', 'Meghan Murphy'),
 			'Jay Hancock, Kaiser Health News, and Beth Schwartzapfel, The Marshall Project' => array( 'Jay Hancock', 'Beth Schwartzapfel' ),
 			'jay' => '',
-//Jeff Hargarten, Forrest Burnson, Bonnie Campo and Chase Cook, News21
-//Jeff Ernsthausen, James Bandler, Justin Elliott and Patricia Callahan, ProPublica		
 			'John Keefe and Louise Ma, WNYC, Chris Amico, Glass Eye Media and Steve Melendez, Alan Palazzolo' => array( 'John Keefe', 'Louise Ma', 'Chris Amico', 'Steve Melendez', 'Alan Palazzolo'),
 			'Justin Elliott, Joshua Kaplan, Alex Mierjeski, ProPublica' => array( 'Justin Elliott', 'Joshua Kaplan', 'Alex Mierjeski' ),
 			'Kadra Abdi et al' => 'Kadra Abdi',
@@ -965,7 +964,7 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 			'Steven Melendez, Dave Smith, Louise Ma, John Keefe, WNYC, Alan Palazzolo' => array( 'Steven Melendez', 'Dave Smith', 'Louise Ma', 'John Keefe', 'Alan Palazzolo'),
 			'Sydney Lupkin, Kaiser Health News and Anna Maria Barry-Jester' => array( 'Sydney Lupkin,', 'Anna Maria Barry-Jester' ),
 			'T. Christian Miller and Ryan Gabrielson, ProPublica and Ramon Antonio Vargas and John Simerman, The New Orleans Advocate' => array( 'T. Christian Miller', 'Ryan Gabrielson', 'Ramon Antonio Vargas', 'John Simerman' ),	
-// 'Test your knowledge of the official State MN Symbols' => '',
+			'Test your knowledge of the official State MN Symbols' => '',
 			'The Forum of Fargo, Moorhead' => 'The Forum of Fargo/Moorhead',
 			'Timothy Brennan et al.' => array(),
 			'Tower, Ely, Cook Timberjay' => array(),
@@ -1031,8 +1030,8 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 
 			// check both names are in the known names and NOT in the suffix list
 			if( 2 == count( $splits ) 
-				&& $this->byline_is_name_not_suffix( $splits[0] )
-				&& $this->byline_is_name_not_suffix( $splits[1] )
+				&& $this->byline_is_name_and_not_suffix( $splits[0] )
+				&& $this->byline_is_name_and_not_suffix( $splits[1] )
 			){
 				return $splits;
 			}
@@ -1044,7 +1043,7 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 		// try all matches to names
 		$name_matches = 0;
 		foreach( $splits as $split ) {
-			if( $this->byline_is_name_not_suffix( $split ) ) $name_matches++;
+			if( $this->byline_is_name_and_not_suffix( $split ) ) $name_matches++;
 		}
 
 		if( $name_matches == count( $splits ) ) {
@@ -1054,7 +1053,7 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 		// two names
 		if( 2 == count( $splits ) ) {
 
-			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_not_suffix( $splits[1] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_and_not_suffix( $splits[1] ) ){
 				return $splits;
 			}
 
@@ -1067,12 +1066,12 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 		if( 3 == count( $splits ) ) {
 
 			// 3 names
-			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_and_not_suffix( $splits[1] ) && $this->byline_is_name_and_not_suffix( $splits[2] ) ){
 				return $splits;
 			} 
 
 			// 2 names, one suffix
-			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_and_not_suffix( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
 				return array( $splits[0], $splits[1] );
 			} 
 
@@ -1089,14 +1088,14 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 		if( 4 == count( $splits ) ) {
 
 			if( $this->byline_is_name( $splits[0] )
-				&& $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2])
+				&& $this->byline_is_name_and_not_suffix( $splits[1] ) && $this->byline_is_name_and_not_suffix( $splits[2])
 				&& $this->byline_is_suffix( $splits[3])
 			) {
 				return [ $splits[0], $splits[1], $splits[2] ];
 			}
 
 			if( $this->byline_is_name( $splits[0] )
-				&& $this->byline_is_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2])
+				&& $this->byline_is_suffix( $splits[1] ) && $this->byline_is_name_and_not_suffix( $splits[2])
 				&& $this->byline_is_suffix( $splits[3])
 			) {
 				return [ $splits[0], $splits[2] ];
@@ -1110,10 +1109,10 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 		if( 5 == count( $splits ) ) {
 
 			if( $this->byline_is_name( $splits[0] )
-				&& $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2]) && $this->byline_is_name_not_suffix( $splits[3])
-				&& $this->byline_is_suffix( $splits[4])
+				&& $this->byline_is_name_and_not_suffix( $splits[1] ) && $this->byline_is_name_and_not_suffix( $splits[2] ) && $this->byline_is_name_and_not_suffix( $splits[3] )
+				&& $this->byline_is_suffix( $splits[4] )
 			) {
-				return [ $splits[0], $splits[1], $splits[2], $split[3] ];
+				return [ $splits[0], $splits[1], $splits[2], $splits[3] ];
 			}
 
 			$this->logger->log( 'minnpost_regex_warnings.txt', 'AND 5: ' . $byline, $this->logger::WARNING );
@@ -1188,7 +1187,7 @@ if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
 		return false;
 	}
 
-	private function byline_is_name_not_suffix( $name ) {
+	private function byline_is_name_and_not_suffix( $name ) {
 
 		// make sure its in Known names, and not in Suffixes
 		if( $this->byline_is_name( $name ) && ! $this->byline_is_suffix( $name ) ) {
