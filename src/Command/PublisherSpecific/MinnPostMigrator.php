@@ -590,8 +590,6 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			} // for loop bylines
 			
-			return false;
-
 		} // foreach query post
 
 		return true;
