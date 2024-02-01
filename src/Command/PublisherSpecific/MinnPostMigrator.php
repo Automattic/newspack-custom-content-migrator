@@ -106,21 +106,21 @@ class MinnPostMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'txt-names',
-						'description' => 'Known names TXT file. Relative to uploads folder: --txt-names="2024/01/names.txt"',
+						'description' => 'Known names TXT file. --txt-names="path/names.txt"',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'txt-suffixes',
-						'description' => 'Known suffixes TXT file. Relative to uploads folder: --txt-suffixes="2024/01/suffixes.txt"',
+						'description' => 'Known suffixes TXT file. --txt-suffixes="path/suffixes.txt"',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'flag',
 						'name'        => 'test-regex',
-						'description' => 'If used, all bylines from postmeta will be run though regex. (No db updates).',
+						'description' => 'If used, all bylines from postmeta will be run though regex, without db updates.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -207,13 +207,13 @@ class MinnPostMigrator implements InterfaceCommand {
 	public function cmd_set_authors_by_subtitle_byline( $pos_args, $assoc_args ) {
 
 		// load csv file		
-		$this->byline_known_names = $this->load_from_txt( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'txt-names' ] );
+		$this->byline_known_names = $this->load_from_txt( $assoc_args[ 'txt-names' ] );
 		if( empty( $this->byline_known_names ) ) {
 			WP_CLI::error( 'TXT Names is empty.' );
 		}
 
 		// load csv file		
-		$this->byline_known_suffixes = $this->load_from_txt( wp_upload_dir()['basedir'] . '/' . $assoc_args[ 'txt-suffixes' ] );
+		$this->byline_known_suffixes = $this->load_from_txt( $assoc_args[ 'txt-suffixes' ] );
 		if( empty( $this->byline_known_suffixes ) ) {
 			WP_CLI::error( 'TXT Suffixes is empty.' );
 		}
@@ -557,6 +557,12 @@ class MinnPostMigrator implements InterfaceCommand {
 			$byline = get_post_meta( $post_id, $meta_key_byline, true );
 			$this->logger->log( $log_file, 'Byline (raw): ' . $byline  );
 
+
+			echo "NEED NEW REGEX with cleaner";
+			exit();
+
+
+
 			// store all sets that need to be run into an array, this will make it easier for "and" authors
 			$name_sets = [];
 
@@ -770,57 +776,56 @@ class MinnPostMigrator implements InterfaceCommand {
 			order by post_count desc
 		");
 
-		$max = 0;
-
 		foreach ( $results as $result ) {
 
-			// set short var name for less confusion
-			$byline = $result->byline;
-
-			// setup CSV output line
-			$csv_line = array( 
-				$result->post_count,
-				$byline
-			);
-
 			// string|array|null
-			$bylines = $this->byline_regex( $byline, true );
-
-			if( 'bypass' == $bylines ) continue;
+			$byline_cleaned = $this->byline_cleaner( $result->byline, true );
+			$found_bylines = $this->byline_regex( $byline_cleaned, $result->byline );
 
 			// if no match this is an error byline, set match count to 0
-			if( empty( $bylines ) ) {
-				
-				$csv_line[] = 0;
-				$csv_line[] = 'ERROR_NO_MATCHES';
-				
+			if( empty( $found_bylines ) ) {
+
 				// set all these posts as failed
 				$report['posts_failed'] += $result->post_count;
+
+				// write output to csv
+				\WP_CLI\Utils\write_csv( $csv_out_file, array( array( 
+					$result->post_count,
+					'ERROR_NO_MATCHES',
+					$result->byline,
+					$byline_cleaned,
+				) ) ); // array within array
 
 			}
 			// matches exist
 			else {
-				
-				if( ! is_array( $bylines ) ) $bylines = array( $bylines );
-
-				// store match count
-				$csv_line[] = count( $bylines );
-				
-				// and each match byline
-				array_push( $csv_line, ...$bylines );
 
 				// set all these posts as fixed
 				$report['posts_fixed'] += $result->post_count;
 
-			}
-			
-			// write output to csv
-			\WP_CLI\Utils\write_csv( $csv_out_file, array( $csv_line ) ); // array within array
+				// make string into array
+				if( is_string( $found_bylines ) ) $found_bylines = array( $found_bylines );
 
-			
-			$max++;
-			
-			// if( $max >= 4319 ) return;
+				foreach( $found_bylines as $found_byline ) {
+
+if( empty( $found_byline) || strlen(trim( $found_byline ) ) < 3 ) {
+	WP_CLI::line( $result->byline );
+	WP_CLI::line( $byline_cleaned );
+	print_r($found_bylines);
+	// exit();
+}
+
+					// write output to csv
+					\WP_CLI\Utils\write_csv( $csv_out_file, array( array( 
+						$result->post_count,
+						$found_byline,
+						$result->byline,
+						$byline_cleaned,
+					) ) ); // array within array
+
+				} // foreach
+		
+			} // else
 
 		} // foreach
 
@@ -874,7 +879,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		$byline = trim( preg_replace( '/, and /i', ' and ', $byline ) );
 		$byline = trim( preg_replace( '/, with /i', ' with ', $byline ) );
 
-		// clean up special chars
+		// replace special chars with comma
 		$byline = trim( preg_replace( '/[\|\/;]/i', ',', $byline ) );
 		
 		// standardize commas with one space
@@ -888,16 +893,100 @@ class MinnPostMigrator implements InterfaceCommand {
 	}
 
 	// return: string|array|null
-	private function byline_regex( $byline ) {
+	private function byline_regex( $byline, $byline_uncleaned_from_db ) {
 
-		$byline = $this->byline_cleaner( $byline );
+		// Add to this list to specify the return values for a byline
+		// the key value should be the "clean byline" but if the key is set to the postmeta/database byline, 
+		// then try to make sure not to copy hidden Unicode characters into the code below (see byline_replace_hidden_chars )
+		// if you want a byline to return null (ie: don't do any replacements), then set it's value to an empty array() or '' string
+		$overrides = [
+			'a correspondent, Christian Science Monitor' => 'A Correspondent at Christian Science Monitor',
+			'Albert Turner Goins, Sr.' => 'Albert Turner Goins, Sr.',
+			'Amy Klobuchar, Mitch Pearlstein, et al' => array( 'Amy Klobuchar', 'Mitch Pearlstein' ),
+			'B w, Burnsville' => 'B W, Burnsville',
+			'becky Bock, Carlos' => array(),
+			'Becky Lourey, Lynnell Mickelsen' => array( 'Becky Lourey', 'Lynnell Mickelsen'),
+			'Bennet Goldstein, Wisconsin Watch, Sarah Whites-Koditschek and Dennis Pillion, AL.com' => array( 'Bennet Goldstein', 'Sarah Whites-Koditschek', 'Dennis Pillion'),
+			'Bianca Virnig and five others' => array(),
+			'By Donovan Slack, Dennis Wagner, Kevin McCoy and Jay Hancock, USA Today' => array( 'Donovan Slack', 'Dennis Wagner', 'Kevin McCoy', 'Jay Hancock'),
+			'Daniel B. Wood, Gloria Goodale' => array( 'Daniel B. Wood', 'Gloria Goodale'),
+			'Dennis Schulstad, Harry Sieben, Jr. and Bertrand Weber' => array( 'Dennis Schulstad', 'Harry Sieben, Jr.', 'Bertrand Weber' ),
+			'Derek Wallbank`' => 'Derek Wallbank',
+// 'Dr. Edward P. Ehlinger Dr. Janelle Palacios and Dr. Magda Peck' => array( 'Dr. Edward P. Ehlinger', 'Dr. Janelle Palacios', 'Dr. Magda Peck' ),
+			'dou' => '',
+			'Eloisa James, The Barnes & Noble Review' => 'Eloisa James',
+			'Ely, Cook, Tower Timberjay' => array(),
+			'Eric Black but really by Brent Cunningham' => array(),
+			'Erik Hare, Friday, Dec. 10, 2010' => 'Erik Hare',
+			'Friends and colleagues of Babak Armajani' => 'Friends and colleagues of Babak Armajani',
+			'G.R. Anderson, Jr.' => 'G.R. Anderson, Jr.',
+			'Gaa-ozhibii’ang Cynthia Boyd, Gaa-anishinaabewisidood Anton Treuer' => array( 'Cynthia Boyd', 'Anton Treuer'),
+			'Girish Gupta and the Global Post News Desk' => array( 'Girish Gupta', 'The Global Post News Desk' ),
+			'Global' => '',
+			'Heather Silsbee, Kristen Ingle, et al.' => array( 'Heather Silsbee', 'Kristen Ingle' ),
+			'Hugh Macleod and a reporter in Damascus' => array( 'Hugh Macleod', 'A reporter in Damascus' ),
+			'Hugh Macleod and a reporter in Syria' => array( 'Hugh Macleod', 'A reporter in Syria' ),
+			'Ian MacDougall for ProPublica' => 'Ian MacDougall',
+			'Jack Kelly for Wisconsin Watch' => 'Jack Kelly',
+			'James Forest and The Conversation' => array( 'James Forest', 'The Conversation' ),
+			'Jamie Millard, Meghan Murphy' => array( 'Jamie Millard', 'Meghan Murphy'),
+			'Jay Hancock, Kaiser Health News, and Beth Schwartzapfel, The Marshall Project' => array( 'Jay Hancock', 'Beth Schwartzapfel' ),
+			'jay' => '',
+//Jeff Hargarten, Forrest Burnson, Bonnie Campo and Chase Cook, News21
+//Jeff Ernsthausen, James Bandler, Justin Elliott and Patricia Callahan, ProPublica		
+			'John Keefe and Louise Ma, WNYC, Chris Amico, Glass Eye Media and Steve Melendez, Alan Palazzolo' => array( 'John Keefe', 'Louise Ma', 'Chris Amico', 'Steve Melendez', 'Alan Palazzolo'),
+			'Justin Elliott, Joshua Kaplan, Alex Mierjeski, ProPublica' => array( 'Justin Elliott', 'Joshua Kaplan', 'Alex Mierjeski' ),
+			'Kadra Abdi et al' => 'Kadra Abdi',
+			'Kadra Abdi, Ayantu Ayana, Ramla Bile, Mohamed H. Mohamed, Julia Nekessa Opoti' => array( 'Kadra Abdi', 'Ayantu Ayana', 'Ramla Bile', 'Mohamed H. Mohamed', 'Julia Nekessa Opoti' ),
+			'Kay kessel, Richfield' => 'Kay Kessel',
+			'Kenneth Kaplan Staff writer, Mark Guarino Staff writer' => array( 'Kenneth Kaplan', 'Mark Guarino'),
+			'Kyle Stokes and Greta Kaul, MinnPost, Melody Hoffmann and Charlie Rybak, Minneapolis Voices' => array( 'Kyle Stokes', 'Greta Kaul', 'Melody Hoffmann', 'Charlie Rybak'),
+			'Lindsey Dyer, Librarian with Dakota County Library' => 'Lindsey Dyer',
+			'Liz Marlantes DCDecoder' => 'Liz Marlantes',
+			'Logan Jaffe, Mary Hudetz and Ash Ngu, ProPublica and Graham Lee Brewer, NBC News' => array( 'Logan Jaffe', 'Mary Hudetz', 'Ash Ngu', 'Graham Lee Brewer' ),
+			'Magda Munteanu, Kristina Ozimec, Gabriela Delova, Alisa Mysliu' => array( 'Magda Munteanu', 'Kristina Ozimec', 'Gabriela Delova', 'Alisa Mysliu' ),
+			'Marty Hobe, TMJ4 News, and Bram Sable-Smith, Wisconsin Watch, WPR' => array( 'Marty Hobe', 'Bram Sable-Smith'),			
+			'Mary Harris, Fred Mogul, Louise Ma, Jenny Ye and John Keefe, WNYC' => array( 'Mary Harris', 'Fred Mogul', 'Louise Ma', 'Jenny Ye', 'John Keefe' ),
+			'Maureen Scallen Failor and four others' => array(),
+			'Minneapolis, St. Paul Business Journal' => 'Minneapolis/St. Paul Business Journal',
+			'Minnesota State Colleges & Universities Magazine' => 'Minnesota State Colleges & Universities Magazine',
+			'Minnesota State Colleges and Universities' => 'Minnesota State Colleges and Universities',
+			'MinnPost and Minneapolis Voices' => array( 'MinnPost', 'Minneapolis Voices' ),
+			'Neal Kielar, Tuesday, June 8, 2010' => 'Neal Kielar',
+			'Olga Pierce, Jeff Larson and Lois Beckett ProPublica' => array( 'Olga Pierce', 'Jeff Larson', 'Lois Beckett' ),
+			'Rachel Widome and 8 co-authors' => array(),
+			'Reuben Saltzman:' => 'Reuben Saltzman',
+			'Robert "Again" Carney, Jr.' => 'Robert "Again" Carney, Jr.',
+			'Ryan Allen, Jack DeWaard, Erika Lee, Christopher Levesque and 3 others' => array(),
+			'Sara Miller Llana Staff writer and Dheepthi Namasivayam' => array( 'Sara Miller Llana', 'Dheepthi Namasivayam' ),
+			'Sara Miller Llana, Ben Arnoldy' => array( 'Sara Miller Llana', 'Ben Arnoldy'),
+			'Sharon Schmickle, David Brauer' => array( 'Sharon Schmickle', 'David Brauer'),
+			'State Sen. Tom Bakk, State Rep. Morrie Lanning, State Sen. Julie Rosen, State Rep. Loren Solberg' => array( 'State Sen. Tom Bakk', 'State Rep. Morrie Lanning', 'State Sen. Julie Rosen', 'State Rep. Loren Solberg' ),
+			'Steven Melendez, Dave Smith, Louise Ma, John Keefe, WNYC, Alan Palazzolo' => array( 'Steven Melendez', 'Dave Smith', 'Louise Ma', 'John Keefe', 'Alan Palazzolo'),
+			'Sydney Lupkin, Kaiser Health News and Anna Maria Barry-Jester' => array( 'Sydney Lupkin,', 'Anna Maria Barry-Jester' ),
+			'T. Christian Miller and Ryan Gabrielson, ProPublica and Ramon Antonio Vargas and John Simerman, The New Orleans Advocate' => array( 'T. Christian Miller', 'Ryan Gabrielson', 'Ramon Antonio Vargas', 'John Simerman' ),	
+// 'Test your knowledge of the official State MN Symbols' => '',
+			'The Forum of Fargo, Moorhead' => 'The Forum of Fargo/Moorhead',
+			'Timothy Brennan et al.' => array(),
+			'Tower, Ely, Cook Timberjay' => array(),
+			'various authors' => '',
+		];
 
-		// skip for now: Stephanie Hemphill (bug in CAP plugin is failing on asisgning to post due to "+" in email (?))
+		// check cleaned byline first
+		if( isset( $overrides[$byline] ) ) return $overrides[$byline];
+		
+		// check if key was copied directly form the postmeta db
+		if( isset( $overrides[$byline_uncleaned_from_db] ) ) return $overrides[$byline_uncleaned_from_db];
+
+		// skip: Stephanie Hemphill (multiple rows)
+		// there is a bug in CAP plugin is failing on asisgning GA to post due to "+" in GA's postmeta email
+		// todo: do by hand later
 		if( preg_match( '/Stephanie Hemphill/i', $byline ) ) return null;
 		
-		// skip for now: anything with "|", ";", "by" (not already cleaned)
+		// skip for now: remaining special chars and "by" (not already cleaned)
 		if( preg_match( '/([:]|\bby\b)/i', $byline ) ) {
-			return $this->byline_do_special_chars( $byline );
+			$this->logger->log( 'minnpost_regex_warnings.txt', 'SPECIAL CHARS: ' . $byline, $this->logger::WARNING );
+			return null;	
 		}
 
 		// parse "and"/"with"/etc case
@@ -915,52 +1004,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	}
 
-	private function byline_do_special_chars( $byline ) {
-
-		$specials = [
-			'Reuben Saltzman:' => 'Reuben Saltzman',
-			'Eric Black but really by Brent Cunningham' => array(),
-		];
-
-		if( isset( $specials[$byline] ) ) return $specials[$byline];
-
-		$this->logger->log( 'minnpost_regex_warnings.txt', 'SPECIAL CHARS: ' . $byline, $this->logger::WARNING );
-		return null;
-
-	}
-
 	private function bylines_do_and_case( $byline ) {
-
-		$specials = [
-			'Bennet Goldstein, Wisconsin Watch, Sarah Whites-Koditschek and Dennis Pillion, AL.com' => array( 'Bennet Goldstein', 'Sarah Whites-Koditschek', 'Dennis Pillion'),
-			'Bianca Virnig and five others' => array(),
-			'Dennis Schulstad, Harry Sieben, Jr. and Bertrand Weber' => array( 'Dennis Schulstad', 'Harry Sieben, Jr.', 'Bertrand Weber' ),
-			'Eloisa James, The Barnes & Noble Review' => 'Eloisa James',
-			'Friends and colleagues of Babak Armajani' => 'Friends and colleagues of Babak Armajani',
-			'Girish Gupta and the Global Post News Desk' => array( 'Girish Gupta', 'The Global Post News Desk' ),
-			'Hugh Macleod and a reporter in Damascus' => array( 'Hugh Macleod', 'A reporter in Damascus' ),
-			'Hugh Macleod and a reporter in Syria' => array( 'Hugh Macleod', 'A reporter in Syria' ),
-			'James Forest and The Conversation' => array( 'James Forest', 'The Conversation' ),
-			'Jay Hancock, Kaiser Health News, and Beth Schwartzapfel, The Marshall Project' => array( 'Jay Hancock', 'Beth Schwartzapfel' ),
-			'Lindsey Dyer, Librarian with Dakota County Library' => 'Lindsey Dyer',
-			'Logan Jaffe, Mary Hudetz and Ash Ngu, ProPublica and Graham Lee Brewer, NBC News' => array( 'Logan Jaffe', 'Mary Hudetz', 'Ash Ngu', 'Graham Lee Brewer' ),
-			'Mary Harris, Fred Mogul, Louise Ma, Jenny Ye and John Keefe, WNYC' => array( 'Mary Harris', 'Fred Mogul', 'Louise Ma', 'Jenny Ye', 'John Keefe' ),
-			'Maureen Scallen Failor and four others' => array(),
-			'Minnesota State Colleges & Universities Magazine' => 'Minnesota State Colleges & Universities Magazine',
-			'Minnesota State Colleges and Universities' => 'Minnesota State Colleges and Universities',
-			'MinnPost and Minneapolis Voices' => array( 'MinnPost', 'Minneapolis Voices' ),
-			'Olga Pierce, Jeff Larson and Lois Beckett ProPublica' => array( 'Olga Pierce', 'Jeff Larson', 'Lois Beckett' ),
-			'Rachel Widome and 8 co-authors' => array(),
-			'Ryan Allen, Jack DeWaard, Erika Lee, Christopher Levesque and 3 others' => array(),
-			'Sara Miller Llana Staff writer and Dheepthi Namasivayam' => array( 'Sara Miller Llana', 'Dheepthi Namasivayam' ),
-			'Sydney Lupkin, Kaiser Health News and Anna Maria Barry-Jester' => array( 'Sydney Lupkin,', 'Anna Maria Barry-Jester' ),
-			'T. Christian Miller and Ryan Gabrielson, ProPublica and Ramon Antonio Vargas and John Simerman, The New Orleans Advocate' => array( 'T. Christian Miller', 'Ryan Gabrielson', 'Ramon Antonio Vargas', 'John Simerman' ),	
-			'John Keefe and Louise Ma, WNYC, Chris Amico, Glass Eye Media and Steve Melendez, Alan Palazzolo' => array( 'John Keefe', 'Louise Ma', 'Chris Amico', 'Steve Melendez', 'Alan Palazzolo'),
-			'Kyle Stokes and Greta Kaul, MinnPost, Melody Hoffmann and Charlie Rybak, Minneapolis Voices' => array( 'Kyle Stokes', 'Greta Kaul', 'Melody Hoffmann', 'Charlie Rybak'),
-			'Marty Hobe, TMJ4 News, and Bram Sable-Smith, Wisconsin Watch, WPR' => array( 'Marty Hobe', 'Bram Sable-Smith'),			
-		];
-
-		if( isset( $specials[$byline] ) ) return $specials[$byline];
 
 		$splits = array_map( 'trim', preg_split( '/\band\b|&|\bwith\b|,/i', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
 				
@@ -987,8 +1031,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 			// check both names are in the known names and NOT in the suffix list
 			if( 2 == count( $splits ) 
-				&& $this->byline_is_name_ok( $splits[0] )
-				&& $this->byline_is_name_ok( $splits[1] )
+				&& $this->byline_is_name_not_suffix( $splits[0] )
+				&& $this->byline_is_name_not_suffix( $splits[1] )
 			){
 				return $splits;
 			}
@@ -1000,7 +1044,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		// try all matches to names
 		$name_matches = 0;
 		foreach( $splits as $split ) {
-			if( $this->byline_is_name_ok( $split ) ) $name_matches++;
+			if( $this->byline_is_name_not_suffix( $split ) ) $name_matches++;
 		}
 
 		if( $name_matches == count( $splits ) ) {
@@ -1010,7 +1054,7 @@ class MinnPostMigrator implements InterfaceCommand {
 		// two names
 		if( 2 == count( $splits ) ) {
 
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_name_ok( $splits[1] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_not_suffix( $splits[1] ) ){
 				return $splits;
 			}
 
@@ -1023,17 +1067,17 @@ class MinnPostMigrator implements InterfaceCommand {
 		if( 3 == count( $splits ) ) {
 
 			// 3 names
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_name_ok( $splits[2] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2] ) ){
 				return $splits;
 			} 
 
 			// 2 names, one suffix
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
 				return array( $splits[0], $splits[1] );
 			} 
 
 			// 1 name, 2 suffix
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) && $this->byline_is_suffix( $splits[2] ) ){
 				return $splits[0];
 			} 
 
@@ -1044,15 +1088,15 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		if( 4 == count( $splits ) ) {
 
-			if( $this->byline_is_name_ok_alone( $splits[0] )
-				&& $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_name_ok( $splits[2])
+			if( $this->byline_is_name( $splits[0] )
+				&& $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2])
 				&& $this->byline_is_suffix( $splits[3])
 			) {
 				return [ $splits[0], $splits[1], $splits[2] ];
 			}
 
-			if( $this->byline_is_name_ok_alone( $splits[0] )
-				&& $this->byline_is_suffix( $splits[1] ) && $this->byline_is_name_ok( $splits[2])
+			if( $this->byline_is_name( $splits[0] )
+				&& $this->byline_is_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2])
 				&& $this->byline_is_suffix( $splits[3])
 			) {
 				return [ $splits[0], $splits[2] ];
@@ -1065,8 +1109,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 		if( 5 == count( $splits ) ) {
 
-			if( $this->byline_is_name_ok_alone( $splits[0] )
-				&& $this->byline_is_name_ok( $splits[1] ) && $this->byline_is_name_ok( $splits[2]) && $this->byline_is_name_ok( $splits[3])
+			if( $this->byline_is_name( $splits[0] )
+				&& $this->byline_is_name_not_suffix( $splits[1] ) && $this->byline_is_name_not_suffix( $splits[2]) && $this->byline_is_name_not_suffix( $splits[3])
 				&& $this->byline_is_suffix( $splits[4])
 			) {
 				return [ $splits[0], $splits[1], $splits[2], $split[3] ];
@@ -1084,46 +1128,13 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	private function bylines_do_comma_case( $byline ) {
 
-		// special cases
-		$specials = [			
-			'a correspondent, Christian Science Monitor' => 'A Correspondent at Christian Science Monitor',
-			'Albert Turner Goins, Sr.' => 'Albert Turner Goins, Sr.',
-			'Amy Klobuchar, Mitch Pearlstein, et al' => array( 'Amy Klobuchar', 'Mitch Pearlstein' ),
-			'B w, Burnsville' => 'B W, Burnsville',
-			'becky Bock, Carlos' => array(),
-			'Becky Lourey, Lynnell Mickelsen' => array( 'Becky Lourey', 'Lynnell Mickelsen'),
-			'Daniel B. Wood, Gloria Goodale' => array( 'Daniel B. Wood', 'Gloria Goodale'),
-			'Ely, Cook, Tower Timberjay' => array(),
-			'Erik Hare, Friday, Dec. 10, 2010' => 'Erik Hare',
-			'G.R. Anderson, Jr.' => 'G.R. Anderson, Jr.',
-			'Gaa-ozhibii’ang Cynthia Boyd, Gaa-anishinaabewisidood Anton Treuer' => array( 'Cynthia Boyd', 'Anton Treuer'),
-			'Heather Silsbee, Kristen Ingle, et al.' => array( 'Heather Silsbee', 'Kristen Ingle' ),
-			'Jamie Millard, Meghan Murphy' => array( 'Jamie Millard', 'Meghan Murphy'),
-			'Justin Elliott, Joshua Kaplan, Alex Mierjeski, ProPublica' => array( 'Justin Elliott', 'Joshua Kaplan', 'Alex Mierjeski' ),
-			'Kadra Abdi, Ayantu Ayana, Ramla Bile, Mohamed H. Mohamed, Julia Nekessa Opoti' => array( 'Kadra Abdi', 'Ayantu Ayana', 'Ramla Bile', 'Mohamed H. Mohamed', 'Julia Nekessa Opoti' ),
-			'Kay kessel, Richfield' => 'Kay Kessel',
-			'Kenneth Kaplan Staff writer, Mark Guarino Staff writer' => array( 'Kenneth Kaplan', 'Mark Guarino'),
-			'Magda Munteanu, Kristina Ozimec, Gabriela Delova, Alisa Mysliu' => array( 'Magda Munteanu', 'Kristina Ozimec', 'Gabriela Delova', 'Alisa Mysliu' ),
-			'Minneapolis, St. Paul Business Journal' => 'Minneapolis/St. Paul Business Journal',
-			'Neal Kielar, Tuesday, June 8, 2010' => 'Neal Kielar',
-			'Robert "Again" Carney, Jr.' => 'Robert "Again" Carney, Jr.',
-			'Sara Miller Llana, Ben Arnoldy' => array( 'Sara Miller Llana', 'Ben Arnoldy'),
-			'Sharon Schmickle, David Brauer' => array( 'Sharon Schmickle', 'David Brauer'),
-			'State Sen. Tom Bakk, State Rep. Morrie Lanning, State Sen. Julie Rosen, State Rep. Loren Solberg' => array( 'State Sen. Tom Bakk', 'State Rep. Morrie Lanning', 'State Sen. Julie Rosen', 'State Rep. Loren Solberg' ),
-			'Steven Melendez, Dave Smith, Louise Ma, John Keefe, WNYC, Alan Palazzolo' => array( 'Steven Melendez', 'Dave Smith', 'Louise Ma', 'John Keefe', 'Alan Palazzolo'),
-			'The Forum of Fargo, Moorhead' => 'The Forum of Fargo/Moorhead',
-			'Tower, Ely, Cook Timberjay' => array(),
-		];
-
-		if( isset( $specials[$byline] ) ) return $specials[$byline];
-
 		$splits = array_map( 'trim', preg_split( '/,/', $byline, -1, PREG_SPLIT_NO_EMPTY ) );
 
 		// name, publication/suffix:
 		if( 2 == count( $splits ) ) {
 		
 			// name and suffix
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) ) {
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) ) {
 				return $splits[0];
 			}
 
@@ -1136,12 +1147,12 @@ class MinnPostMigrator implements InterfaceCommand {
 		if( 3 == count( $splits ) ) {
 			
 			// if it's a multiple value suffix to remove
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] . ', ' . $splits[2] ) ) {
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_suffix( $splits[1] . ', ' . $splits[2] ) ) {
 				return $splits[0];
 			}
 			
 			// if both should be removed
-			if( $this->byline_is_name_ok_alone( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) &&  $this->byline_is_suffix( $splits[2] ) ) {
+			if( $this->byline_is_name( $splits[0] ) && $this->byline_is_suffix( $splits[1] ) &&  $this->byline_is_suffix( $splits[2] ) ) {
 				return $splits[0];
 			}
 
@@ -1157,20 +1168,8 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	private function bylines_do_simple_string_case( $byline ) {
 
-		$specials = [
-			'Liz Marlantes DCDecoder' => 'Liz Marlantes',
-			'Kadra Abdi et al' => 'Kadra Abdi',
-			'Ian MacDougall for ProPublica' => 'Ian MacDougall',
-			'Jack Kelly for Wisconsin Watch' => 'Jack Kelly',
-			'dou' => '',
-			'Global' => '',
-			'jay' => '',
-		];
-
-		if( isset( $specials[$byline] ) ) return $specials[$byline];
-
 		// normal byline - don't filter out suffixes since these don't have commas
-		if( $this->byline_is_name_ok_alone( $byline ) ) {
+		if( $this->byline_is_name( $byline ) ) {
 			return $byline;
 		}
 
@@ -1179,20 +1178,20 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	}
 
-	private function byline_is_name_ok( $name ) {
+	private function byline_is_name( $name ) {
 
-		if( in_array( $name, $this->byline_known_names ) 
-			&& ! in_array( $name, $this->byline_known_suffixes ) 
-		) {
+		// make sure it's in known names
+		if( in_array( $name, $this->byline_known_names ) ) {
 			return true;
 		}
 
 		return false;
 	}
 
-	private function byline_is_name_ok_alone( $name ) {
+	private function byline_is_name_not_suffix( $name ) {
 
-		if( in_array( $name, $this->byline_known_names ) ) {
+		// make sure its in Known names, and not in Suffixes
+		if( $this->byline_is_name( $name ) && ! $this->byline_is_suffix( $name ) ) {
 			return true;
 		}
 
@@ -1201,6 +1200,7 @@ class MinnPostMigrator implements InterfaceCommand {
 
 	private function byline_is_suffix( $suffix ) {
 
+		// check if it's a suffix (publication name, date, etc)
 		if( in_array( $suffix, $this->byline_known_suffixes ) ) {
 			return true;
 		}
