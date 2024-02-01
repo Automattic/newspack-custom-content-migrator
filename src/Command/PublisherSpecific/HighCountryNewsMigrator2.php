@@ -611,10 +611,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
 		$log_file = __FUNCTION__ . '.log';
 
-		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
+		$num_items   = $assoc_args['num-items'] ?? PHP_INT_MAX;
 		$min_post_id = $assoc_args['min-post-id'] ?? 0;
 
-		$post_ids  = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
+		$post_ids = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
 		if ( ! $post_ids ) {
 			global $wpdb;
 			$post_ids = $wpdb->get_col(
@@ -808,10 +808,16 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$image_id = 0;
 			if ( ! empty( $issue->image ) ) {
-				$blob_file_path      = $blobs_folder . $issue->image->blob_path;
+
+				if ( ! empty( $issue->image->download ) ) {
+					$path = $issue->image->download;
+				} elseif ( ! empty( $issue->image->blob_path ) ) {
+					$path = $blobs_folder . $issue->image->blob_path;
+				}
+
 				$image_attachment_id = $this->attachments->import_attachment_for_post(
 					$post_id,
-					$blob_file_path,
+					$path,
 					'Magazine cover: ' . $issue_name,
 					[],
 					$issue->image->filename
@@ -957,7 +963,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
 			];
 
-			if ( ! empty( $row->image->blob_path ) ) {
+			if ( ! empty( $row->image->download ) ) {
+				$path     = $row->image->download;
+				$filename = $row->image->filename;
+			} elseif ( ! empty( $row->image->blob_path ) ) {
 				$path     = $blobs_path . '/' . $row->image->blob_path;
 				$filename = $row->image->filename;
 			} else {
