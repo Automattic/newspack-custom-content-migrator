@@ -72,6 +72,7 @@ PluginSetup::register_migrators(
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
 		Command\General\BlockTransformerCommand::class,
+		Command\General\AttachmentsImagesSubsizesMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\RetroReportMigrator::class,
