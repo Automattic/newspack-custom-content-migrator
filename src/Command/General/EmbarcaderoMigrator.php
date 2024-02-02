@@ -4,14 +4,13 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
 use DOMDocument;
-use DOMNode;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * This class implements the logic for migrating content from Embarcadero custom CMS.
@@ -863,7 +862,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$posts = array_values(
 				array_filter(
 					$posts,
-					function( $post ) use ( $imported_original_ids ) {
+					function ( $post ) use ( $imported_original_ids ) {
 						return ! in_array( $post['story_id'], $imported_original_ids );
 					}
 				)
@@ -886,7 +885,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// phpcs:ignore
 			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
-
 
 			$post_data = [
 				'post_title'   => $post['headline'],
@@ -981,7 +979,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					);
 				} else {
 					$co_author_nicenames = array_map(
-						function( $co_author_user ) {
+						function ( $co_author_user ) {
 							return $co_author_user->user_nicename;
 						},
 						$co_author_users
@@ -1129,7 +1127,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$featured_photos = array_values(
 			array_filter(
 				$photos,
-				function( $photo ) use ( $imported_original_ids ) {
+				function ( $photo ) use ( $imported_original_ids ) {
 					return 'yes' === $photo['feature'] && ! in_array( $photo['photo_id'], $imported_original_ids );
 				}
 			)
@@ -1204,7 +1202,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_csv_file_path = $assoc_args['story-csv-file-path'];
 		$index_from          = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
-
 
 		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
 		$log_file = 'fix-post-times.log';
@@ -1549,7 +1546,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$posts = array_values(
 			array_filter(
 				$posts,
-				function( $post ) use ( $imported_original_ids ) {
+				function ( $post ) use ( $imported_original_ids ) {
 					return ! in_array( $post['story_id'], $imported_original_ids );
 				}
 			)
@@ -1574,7 +1571,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$more_stories_media = array_values(
 				array_filter(
 					$media_list,
-					function( $media_item ) use ( $post ) {
+					function ( $media_item ) use ( $post ) {
 						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
@@ -1629,7 +1626,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$posts = array_values(
 			array_filter(
 				$posts,
-				function( $post ) use ( $imported_original_ids ) {
+				function ( $post ) use ( $imported_original_ids ) {
 					return in_array( $post['story_id'], $imported_original_ids );
 				}
 			)
@@ -1652,7 +1649,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$more_stories_media = array_values(
 				array_filter(
 					$media_list,
-					function( $media_item ) use ( $post ) {
+					function ( $media_item ) use ( $post ) {
 						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
@@ -1694,7 +1691,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					if (
 						'core/paragraph' === $content_blocks[ $i ]['blockName']
 						&& str_starts_with( $content_blocks[ $i ]['innerHTML'], '<p><strong><a href="' )
-						 ) {
+						) {
 						$indexes_to_remove[] = $i;
 					} else {
 						break;
@@ -1857,7 +1854,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$comments = array_values(
 			array_filter(
 				$comments,
-				function( $comment ) use ( $imported_original_ids ) {
+				function ( $comment ) use ( $imported_original_ids ) {
 					return ! in_array( $comment['comment_id'], $imported_original_ids );
 				}
 			)
@@ -1908,7 +1905,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$wp_user = get_user_by( 'id', $wp_user_id );
 				}
 			}
-
 
 			$comment_data = [
 				'comment_post_ID'      => $wp_post_id,
@@ -2042,8 +2038,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
 			}
 
-
-
 			$post_content = serialize_blocks( $post_content_blocks );
 
 			wp_update_post(
@@ -2098,7 +2092,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$stories = array_values(
 			array_filter(
 				$stories,
-				function( $story ) use ( $imported_original_ids ) {
+				function ( $story ) use ( $imported_original_ids ) {
 					return ! in_array( $story['story_id'], $imported_original_ids );
 				}
 			)
@@ -2264,7 +2258,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			) {
 				if ( count( $tsv_row ) !== count( $csv_headers ) ) {
 					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<', substr( $tsv_row[0], 0, 50 ) ) );
-					$wrong_rows ++;
+					++$wrong_rows;
 				}
 			}
 		} while ( true !== $fixed );
@@ -2821,7 +2815,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			);
 		}
 
-
 		return $wp_user_id;
 	}
 
@@ -3046,7 +3039,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 						$media_carousel_items = array_filter(
 							$carousel_items,
-							function( $carousel_item ) use ( $media ) {
+							function ( $carousel_item ) use ( $media ) {
 								return $carousel_item['carousel_media_id'] === $media['media_id'];
 							}
 						);
@@ -3054,7 +3047,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						// order $media_carousel_items by sort_order column.
 						usort(
 							$media_carousel_items,
-							function( $a, $b ) {
+							function ( $a, $b ) {
 								return intval( $a['sort_order'] ) <=> intval( $b['sort_order'] );
 							}
 						);
@@ -3062,7 +3055,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$carousel_attachments_items = array_values(
 							array_filter(
 								array_map(
-									function( $carousel_item ) use ( $wp_post_id, $photos, $story_photos_dir_path ) {
+									function ( $carousel_item ) use ( $wp_post_id, $photos, $story_photos_dir_path ) {
 										$photo_index = array_search( $carousel_item['photo_id'], array_column( $photos, 'photo_id' ) );
 										if ( false !== $photo_index ) {
 											$photo         = $photos[ $photo_index ];
@@ -3075,8 +3068,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 												return null;
 											}
 										}
-
-
 									},
 									$media_carousel_items
 								)
@@ -3171,7 +3162,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find video %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
 					}
 					break;
-					break;
 				case 'pull_quote':
 					// pull quotes are in the format: {pull_quote  659}.
 					$media_index = array_search( intval( $match['width'] ), array_column( $media_list, 'media_id' ) );
@@ -3219,7 +3209,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_text = preg_replace( '/==BI\s+(.*?)==/', '<strong><em>${1}</em></strong>', $story_text );
 		// Same goes for sub header.
 		$story_text = preg_replace( '/==SH\s+(.*?)==/', '<h3>${1}</h3>', $story_text );
-
 
 		// The content contain some styling in the format ==I whatever text here should be italic\n.
 		// We need to convert them to <em>whatever text here should be italic</em>.
