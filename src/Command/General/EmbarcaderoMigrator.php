@@ -4,14 +4,13 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
 use DOMDocument;
-use DOMNode;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * This class implements the logic for migrating content from Embarcadero custom CMS.
@@ -785,6 +784,44 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-post-launch-qa',
+			array( $this, 'cmd_embarcadero_post_launch_qa' ),
+			[
+				'shortdesc' => 'Check for migration issues after the launch.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-file-paths',
+						'description' => 'Path to the CSV files separated by a comma containing the stories to import (e.g. export/file1.csv,export/file2.csv).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-file-paths',
+						'description' => 'Path to the CSV files separated by a comma containing the stories\'s photos to import (e.g. export/file1.csv,export/file2.csv).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-media-file-paths',
+						'description' => 'Path to the CSV files separated by a comma containing the stories\'s media to import (e.g. export/file1.csv,export/file2.csv).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-carousel-items-dir-paths',
+						'description' => 'Path to the CSV files separated by a comma containing the stories\'s carousel items to import (e.g. export/file1.csv,export/file2.csv).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -832,7 +869,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$posts = array_values(
 				array_filter(
 					$posts,
-					function( $post ) use ( $imported_original_ids ) {
+					function ( $post ) use ( $imported_original_ids ) {
 						return ! in_array( $post['story_id'], $imported_original_ids );
 					}
 				)
@@ -855,7 +892,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// phpcs:ignore
 			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
-
 
 			$post_data = [
 				'post_title'   => $post['headline'],
@@ -950,7 +986,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					);
 				} else {
 					$co_author_nicenames = array_map(
-						function( $co_author_user ) {
+						function ( $co_author_user ) {
 							return $co_author_user->user_nicename;
 						},
 						$co_author_users
@@ -1098,7 +1134,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$featured_photos = array_values(
 			array_filter(
 				$photos,
-				function( $photo ) use ( $imported_original_ids ) {
+				function ( $photo ) use ( $imported_original_ids ) {
 					return 'yes' === $photo['feature'] && ! in_array( $photo['photo_id'], $imported_original_ids );
 				}
 			)
@@ -1173,7 +1209,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_csv_file_path = $assoc_args['story-csv-file-path'];
 		$index_from          = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
-
 
 		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
 		$log_file = 'fix-post-times.log';
@@ -1319,6 +1354,237 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for "newspack-content-migrator embarcadero-post-launch-qa".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_post_launch_qa( $args, $assoc_args ) {
+		global $wpdb;
+
+		$story_csv_file_paths           = $assoc_args['story-csv-file-paths'];
+		$story_photos_csv_file_paths    = $assoc_args['story-photos-file-paths'];
+		$story_media_csv_file_paths     = $assoc_args['story-media-file-paths'];
+		$story_carousel_items_dir_paths = $assoc_args['story-carousel-items-dir-paths'];
+
+		$stories = array_reduce(
+			explode( ',', $story_csv_file_paths ),
+			function ( $carry, $item ) {
+				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
+			},
+			[]
+		);
+
+		$photos = array_reduce(
+			explode( ',', $story_photos_csv_file_paths ),
+			function ( $carry, $item ) {
+				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
+			},
+			[]
+		);
+
+		$media = array_reduce(
+			explode( ',', $story_media_csv_file_paths ),
+			function ( $carry, $item ) {
+				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
+			},
+			[]
+		);
+
+		$carousel_items = array_reduce(
+			explode( ',', $story_carousel_items_dir_paths ),
+			function ( $carry, $item ) {
+				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
+			},
+			[]
+		);
+
+		// QA broken links.
+		$posts = $wpdb->get_results(
+			"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE '%>http</a>%'"
+		);
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d posts with broken links', count( $posts ) ), Logger::INFO );
+
+		foreach ( $posts as $post ) {
+			$story_id             = get_post_meta( $post->ID, self::EMBARCADERO_ORIGINAL_ID_META_KEY, true );
+			$original_story_index = array_search( $story_id, array_column( $stories, 'story_id' ) );
+
+			if ( false !== $original_story_index ) {
+				$story = $stories[ $original_story_index ];
+				// phpcs:ignore
+				$story_text = str_replace( "\n", "</p>\n<p>", '<p>' . $story['story_text'] . '</p>' );
+
+				$fixed_content = $this->migrate_post_content_shortcodes( $story_id, $post->ID, $story_text, $photos, '/tmp', $media, $carousel_items, false );
+
+				preg_match_all( '/>http<\/a>/', $fixed_content, $matches );
+
+				if ( ! empty( $matches[0] ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the broken links', $post->ID ), Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the broken links', $post->ID ), Logger::SUCCESS );
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => $fixed_content,
+						]
+					);
+				}
+			} else {
+				$this->logger->log(
+					self::LOG_FILE,
+					sprintf( 'Could not find the story with the original ID %d for the post with the ID %d', $story_id, $post->ID ),
+					Logger::WARNING
+				);
+			}
+		}
+
+		// QA Content Styling.
+		$content_styling_shortcodes = [ '==I', '==B', '==BI', '==SH' ];
+
+		// Get all the posts with the content styling shortcodes.
+		foreach ( $content_styling_shortcodes as $shortcode ) {
+			$posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE %s",
+					'%' . $shortcode . '%'
+				)
+			);
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found %d posts with the shortcode "%s"', count( $posts ), $shortcode ), Logger::INFO );
+
+			foreach ( $posts as $post ) {
+				$regex = '/(?<shortcode>(' . $shortcode . '\s+(.*?)==)|(' . $shortcode . '\s+(.*?)\n))/';
+				preg_match_all( $regex, $post->post_content, $matches );
+
+				if ( ! empty( $matches['shortcode'] ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Trying to fix post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::INFO );
+					$fixed_content = $this->migrate_text_styling( $post->post_content );
+
+					preg_match_all( $regex, $fixed_content, $after_fix_matches );
+
+					if ( ! empty( $after_fix_matches['shortcode'] ) ) {
+						$matches_per_line = array_reduce(
+							$after_fix_matches[0],
+							function ( $carry, $item ) {
+								return $carry . "\n" . $item;
+							},
+							''
+						);
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the shortcode "%s": %s', $post->ID, $shortcode, $matches_per_line ), Logger::ERROR );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::SUCCESS );
+						wp_update_post(
+							[
+								'ID'           => $post->ID,
+								'post_content' => $fixed_content,
+							]
+						);
+					}
+				} else {
+					// Probably a false positive.
+					$highlighted_results = $this->highlight_text( $post->post_content, $shortcode );
+
+					foreach ( $highlighted_results as $result ) {
+						$this->logger->log( self::LOG_FILE, "Found a false positive for the shortcode '$shortcode' in the post with the ID {$post->ID}: $result", Logger::WARNING );
+					}
+				}
+			}
+		}
+
+		// QA Content Shortcodes.
+		$content_shortcodes = [ 'carousel', 'flour', 'map', 'more_stories', 'pull_quote', 'timeline', 'video' ];
+		foreach ( $content_shortcodes as $shortcode ) {
+			$posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE %s",
+					'%{' . $shortcode . '%'
+				)
+			);
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found %d posts with the shortcode "%s"', count( $posts ), $shortcode ), Logger::INFO );
+
+			foreach ( $posts as $post ) {
+				$regex = '/(?<shortcode>{(?<type>' . $shortcode . ')(\s+(?<width>(\d|\w)+)?)?(\s+(?<id>\d+)?)?})/';
+				preg_match_all( $regex, $post->post_content, $matches );
+
+				if ( ! empty( $matches['shortcode'] ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Trying to fix post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::INFO );
+
+					$story_id      = get_post_meta( $post->ID, self::EMBARCADERO_ORIGINAL_ID_META_KEY, true );
+					$fixed_content = $this->migrate_media( $post->ID, $story_id, $post->post_content, $media, $photos, '/tmp', $carousel_items );
+
+					preg_match_all( $regex, $fixed_content, $after_fix_matches );
+
+					if ( ! empty( $after_fix_matches['shortcode'] ) ) {
+						$matches_per_line = array_reduce(
+							$after_fix_matches[0],
+							function ( $carry, $item ) {
+								return $carry . "\n" . $item;
+							},
+							''
+						);
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the shortcode "%s": %s', $post->ID, $shortcode, $matches_per_line ), Logger::ERROR );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::SUCCESS );
+						wp_update_post(
+							[
+								'ID'           => $post->ID,
+								'post_content' => $fixed_content,
+							]
+						);
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Search for a string in a text and highlight the results.
+	 *
+	 * @param string $text Text to search in.
+	 * @param string $search String to search for.
+	 * @param int    $chars_to_show Number of characters to show before and after the search text.
+	 *
+	 * @return array Array of highlighted results.
+	 */
+	private function highlight_text( $text, $search, $chars_to_show = 10 ) {
+		$position = 0;
+		$results  = [];
+
+		$search_length = strlen( $search );
+
+		// Loop through all occurrences of the search text.
+		while ( ( $position = strpos( $text, $search, $position ) ) !== false ) {
+			// Calculate start position to show few chars before the search text.
+			$start = $position - $chars_to_show;
+			if ( $start < 0 ) {
+				$start = 0;
+			}
+
+			// Calculate the length to show search text + few chars after.
+			$length = $chars_to_show + $search_length + $chars_to_show;
+
+			// Extract the substring.
+			$extracted = substr( $text, $start, $length );
+
+			// Highlight the search text.
+			$color               = '%G';
+			$colorized_shortcode = \cli\Colors::colorize( "$color$search%n" );
+			$highlighted         = str_replace( $search, $colorized_shortcode, trim( preg_replace( '/\s+/', ' ', $extracted ) ) );
+
+			// Save the result.
+			$results[] = $highlighted;
+
+			// Move position forward to find next occurrence.
+			$position = $position + $search_length;
+		}
+
+		// Return highlighted results.
+		return $results;
+	}
+
+	/**
 	 * Callable for "newspack-content-migrator embarcadero-migrate-more-posts-block".
 	 *
 	 * @param array $args array Command arguments.
@@ -1336,7 +1602,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$posts = array_values(
 			array_filter(
 				$posts,
-				function( $post ) use ( $imported_original_ids ) {
+				function ( $post ) use ( $imported_original_ids ) {
 					return ! in_array( $post['story_id'], $imported_original_ids );
 				}
 			)
@@ -1361,7 +1627,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$more_stories_media = array_values(
 				array_filter(
 					$media_list,
-					function( $media_item ) use ( $post ) {
+					function ( $media_item ) use ( $post ) {
 						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
@@ -1416,7 +1682,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$posts = array_values(
 			array_filter(
 				$posts,
-				function( $post ) use ( $imported_original_ids ) {
+				function ( $post ) use ( $imported_original_ids ) {
 					return in_array( $post['story_id'], $imported_original_ids );
 				}
 			)
@@ -1439,7 +1705,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$more_stories_media = array_values(
 				array_filter(
 					$media_list,
-					function( $media_item ) use ( $post ) {
+					function ( $media_item ) use ( $post ) {
 						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
@@ -1481,7 +1747,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					if (
 						'core/paragraph' === $content_blocks[ $i ]['blockName']
 						&& str_starts_with( $content_blocks[ $i ]['innerHTML'], '<p><strong><a href="' )
-						 ) {
+						) {
 						$indexes_to_remove[] = $i;
 					} else {
 						break;
@@ -1644,7 +1910,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$comments = array_values(
 			array_filter(
 				$comments,
-				function( $comment ) use ( $imported_original_ids ) {
+				function ( $comment ) use ( $imported_original_ids ) {
 					return ! in_array( $comment['comment_id'], $imported_original_ids );
 				}
 			)
@@ -1695,7 +1961,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$wp_user = get_user_by( 'id', $wp_user_id );
 				}
 			}
-
 
 			$comment_data = [
 				'comment_post_ID'      => $wp_post_id,
@@ -1829,8 +2094,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
 			}
 
-
-
 			$post_content = serialize_blocks( $post_content_blocks );
 
 			wp_update_post(
@@ -1885,7 +2148,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$stories = array_values(
 			array_filter(
 				$stories,
-				function( $story ) use ( $imported_original_ids ) {
+				function ( $story ) use ( $imported_original_ids ) {
 					return ! in_array( $story['story_id'], $imported_original_ids );
 				}
 			)
@@ -2051,7 +2314,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			) {
 				if ( count( $tsv_row ) !== count( $csv_headers ) ) {
 					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<', substr( $tsv_row[0], 0, 50 ) ) );
-					$wrong_rows ++;
+					++$wrong_rows;
 				}
 			}
 		} while ( true !== $fixed );
@@ -2608,7 +2871,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			);
 		}
 
-
 		return $wp_user_id;
 	}
 
@@ -2655,7 +2917,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		}
 
 		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
-		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_text_styling( $story_text );
 		return $story_text;
@@ -2833,7 +3094,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 						$media_carousel_items = array_filter(
 							$carousel_items,
-							function( $carousel_item ) use ( $media ) {
+							function ( $carousel_item ) use ( $media ) {
 								return $carousel_item['carousel_media_id'] === $media['media_id'];
 							}
 						);
@@ -2841,7 +3102,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						// order $media_carousel_items by sort_order column.
 						usort(
 							$media_carousel_items,
-							function( $a, $b ) {
+							function ( $a, $b ) {
 								return intval( $a['sort_order'] ) <=> intval( $b['sort_order'] );
 							}
 						);
@@ -2849,7 +3110,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$carousel_attachments_items = array_values(
 							array_filter(
 								array_map(
-									function( $carousel_item ) use ( $wp_post_id, $photos, $story_photos_dir_path ) {
+									function ( $carousel_item ) use ( $wp_post_id, $photos, $story_photos_dir_path ) {
 										$photo_index = array_search( $carousel_item['photo_id'], array_column( $photos, 'photo_id' ) );
 										if ( false !== $photo_index ) {
 											$photo         = $photos[ $photo_index ];
@@ -2862,8 +3123,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 												return null;
 											}
 										}
-
-
 									},
 									$media_carousel_items
 								)
@@ -2911,11 +3170,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 						$content = str_replace( $match['shortcode'], $media_content, $content );
 					} else {
-						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find map %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find map %s for the post %d', ( $match['id'] ?? '' ), $wp_post_id ), Logger::WARNING );
 					}
 					break;
 				case 'timeline':
-					$this->logger->log( self::LOG_FILE, sprintf( 'Timeline shortcode found for the post %d', $wp_post_id ), Logger::WARNING );
+					$media_index = array_search( $match['id'], array_column( $media_list, 'media_id' ) );
+					if ( false !== $media_index ) {
+						$timeline_media = $media_list[ $media_index ];
+
+						if ( str_starts_with( $timeline_media['media_link'], '<iframe' ) ) {
+							$photo_block_html = serialize_block( $this->gutenberg_block_generator->get_html( $timeline_media['media_link'] ) );
+							$content          = str_replace( $match['shortcode'], $photo_block_html, $content );
+						} else {
+							$this->logger->log( self::LOG_FILE, sprintf( 'Could not find iframe code for the post %d', $wp_post_id ), Logger::WARNING );
+						}
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find media for the timeline %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
+					}
 					break;
 				case 'video':
 					$media_index = array_search( $match['id'], array_column( $media_list, 'media_id' ) );
@@ -2945,7 +3216,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					} else {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find video %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
 					}
-					break;
 					break;
 				case 'pull_quote':
 					// pull quotes are in the format: {pull_quote  659}.
@@ -2994,7 +3264,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_text = preg_replace( '/==BI\s+(.*?)==/', '<strong><em>${1}</em></strong>', $story_text );
 		// Same goes for sub header.
 		$story_text = preg_replace( '/==SH\s+(.*?)==/', '<h3>${1}</h3>', $story_text );
-
 
 		// The content contain some styling in the format ==I whatever text here should be italic\n.
 		// We need to convert them to <em>whatever text here should be italic</em>.
@@ -3118,7 +3387,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return string YouTube block HTML.
 	 */
 	private function generate_youtube_block( $video_id, $post_id ) {
-		$this->logger->log( self::LOG_FILE, sprintf( 'Generating YouTube block for video %s for the post %d, please resave the post.', $video_id, $post_id ), Logger::SUCCESS );
 		return '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=' . $video_id . '","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
 		<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
 		https://www.youtube.com/watch?v=' . $video_id . '
