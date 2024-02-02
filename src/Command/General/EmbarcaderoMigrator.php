@@ -2915,7 +2915,19 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					}
 					break;
 				case 'timeline':
-					$this->logger->log( self::LOG_FILE, sprintf( 'Timeline shortcode found for the post %d', $wp_post_id ), Logger::WARNING );
+					$media_index = array_search( $match['id'], array_column( $media_list, 'media_id' ) );
+					if ( false !== $media_index ) {
+						$timeline_media = $media_list[ $media_index ];
+
+						if ( str_starts_with( $timeline_media['media_link'], '<iframe' ) ) {
+							$photo_block_html = serialize_block( $this->gutenberg_block_generator->get_html( $timeline_media['media_link'] ) );
+							$content          = str_replace( $match['shortcode'], $photo_block_html, $content );
+						} else {
+							$this->logger->log( self::LOG_FILE, sprintf( 'Could not find iframe code for the post %d', $wp_post_id ), Logger::WARNING );
+						}
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find media for the timeline %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
+					}
 					break;
 				case 'video':
 					$media_index = array_search( $match['id'], array_column( $media_list, 'media_id' ) );
