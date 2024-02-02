@@ -3170,7 +3170,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 						$content = str_replace( $match['shortcode'], $media_content, $content );
 					} else {
-						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find map %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find map %s for the post %d', ( $match['id'] ?? '' ), $wp_post_id ), Logger::WARNING );
 					}
 					break;
 				case 'timeline':
