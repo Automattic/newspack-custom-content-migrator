@@ -793,6 +793,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
+						'name'        => 'story-csv-file-paths',
+						'description' => 'Path to the CSV files separated by a comma containing the stories to import (e.g. export/file1.csv,export/file2.csv).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'story-photos-file-paths',
 						'description' => 'Path to the CSV files separated by a comma containing the stories\'s photos to import (e.g. export/file1.csv,export/file2.csv).',
 						'optional'    => false,
@@ -1355,9 +1362,18 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_post_launch_qa( $args, $assoc_args ) {
 		global $wpdb;
 
+		$story_csv_file_paths           = $assoc_args['story-csv-file-paths'];
 		$story_photos_csv_file_paths    = $assoc_args['story-photos-file-paths'];
 		$story_media_csv_file_paths     = $assoc_args['story-media-file-paths'];
 		$story_carousel_items_dir_paths = $assoc_args['story-carousel-items-dir-paths'];
+
+		$stories = array_reduce(
+			explode( ',', $story_csv_file_paths ),
+			function ( $carry, $item ) {
+				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
+			},
+			[]
+		);
 
 		$photos = array_reduce(
 			explode( ',', $story_photos_csv_file_paths ),
@@ -1382,6 +1398,46 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			},
 			[]
 		);
+
+		// QA broken links.
+		$posts = $wpdb->get_results(
+			"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE '%>http</a>%'"
+		);
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d posts with broken links', count( $posts ) ), Logger::INFO );
+
+		foreach ( $posts as $post ) {
+			$story_id             = get_post_meta( $post->ID, self::EMBARCADERO_ORIGINAL_ID_META_KEY, true );
+			$original_story_index = array_search( $story_id, array_column( $stories, 'story_id' ) );
+
+			if ( false !== $original_story_index ) {
+				$story = $stories[ $original_story_index ];
+				// phpcs:ignore
+				$story_text = str_replace( "\n", "</p>\n<p>", '<p>' . $story['story_text'] . '</p>' );
+
+				$fixed_content = $this->migrate_post_content_shortcodes( $story_id, $post->ID, $story_text, $photos, '/tmp', $media, $carousel_items, false );
+
+				preg_match_all( '/>http<\/a>/', $fixed_content, $matches );
+
+				if ( ! empty( $matches[0] ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the broken links', $post->ID ), Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the broken links', $post->ID ), Logger::SUCCESS );
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => $fixed_content,
+						]
+					);
+				}
+			} else {
+				$this->logger->log(
+					self::LOG_FILE,
+					sprintf( 'Could not find the story with the original ID %d for the post with the ID %d', $story_id, $post->ID ),
+					Logger::WARNING
+				);
+			}
+		}
 
 		// QA Content Styling.
 		$content_styling_shortcodes = [ '==I', '==B', '==BI', '==SH' ];
@@ -2862,7 +2918,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
 		$story_text = $this->migrate_links( $story_text );
-		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_text_styling( $story_text );
 		return $story_text;
 	}
@@ -3332,7 +3387,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return string YouTube block HTML.
 	 */
 	private function generate_youtube_block( $video_id, $post_id ) {
-		$this->logger->log( self::LOG_FILE, sprintf( 'Generating YouTube block for video %s for the post %d, please resave the post.', $video_id, $post_id ), Logger::SUCCESS );
 		return '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=' . $video_id . '","type":"video","providerNameSlug":"youtube","responsive":true,"className":"wp-embed-aspect-16-9 wp-has-aspect-ratio"} -->
 		<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
 		https://www.youtube.com/watch?v=' . $video_id . '
