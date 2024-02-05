@@ -4,14 +4,13 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
 use DOMDocument;
-use DOMNode;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * This class implements the logic for migrating content from Embarcadero custom CMS.
@@ -77,7 +76,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY    = '_newspack_media_import_id';
 	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
-	const ALLOWED_CATEGORIES = [
+	const ALLOWED_CATEGORIES = array(
 		'a&e',
 		'alameda county',
 		'alamo',
@@ -180,7 +179,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'city limits',
 		'triumph',
 		'community kindness',
-	];
+	);
 
 	/**
 	 * Instance.
@@ -255,566 +254,566 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-import-posts-content',
 			array( $this, 'cmd_embarcadero_import_posts_content' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\'s post content.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'index-from',
 						'description' => 'Start importing from this index in the CSV file.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'index-to',
 						'description' => 'Import till this index in the CSV file.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'email-domain',
 						'description' => 'Domain to use for the email address of the users that don\'t have an email address in the CSV file.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-byline-email-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s bylines emails to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-sections-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s sections (categories) to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s photos to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-dir-path',
 						'description' => 'Path to the directory containing the stories\'s photos files to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-media-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s media to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-carousel-items-dir-path',
 						'description' => 'Path to the CSV file containing the stories\'s carousel items to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'flag',
 						'name'        => 'refresh-content',
 						'description' => 'Refresh the content of the posts that were already imported.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'flag',
 						'name'        => 'skip-post-content',
 						'description' => 'Skip refreshing the post content. Useful when you want to refresh only the post meta.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'flag',
 						'name'        => 'skip-post-photos',
 						'description' => 'Skip refreshing the post media in content.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-post-tags',
 			array( $this, 'cmd_embarcadero_migrate_post_tags' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\s post tags.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-tags-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories tags to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-posts-featured-image',
 			array( $this, 'cmd_embarcadero_migrate_posts_featured_image' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\s post featured image.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s photos to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-dir-path',
 						'description' => 'Path to the directory containing the stories\'s photos files to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-more-posts-block',
 			array( $this, 'cmd_embarcadero_migrate_more_posts_block' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\s post "more posts" block.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-media-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s media to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-timeline-block',
 			array( $this, 'cmd_embarcadero_migrate_timeline_block' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\s post "timeline" block.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-media-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s media to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-more-posts-block',
 			array( $this, 'cmd_embarcadero_fix_more_posts_block' ),
-			[
+			array(
 				'shortdesc' => 'Fix Embarcadero\s post "more posts" block.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-media-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s media to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-images',
 			array( $this, 'cmd_embarcadero_migrate_images' ),
-			[
+			array(
 				'shortdesc' => 'Migrate images that we missed by the import-posts-content command.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s photos to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-dir-path',
 						'description' => 'Path to the directory containing the stories\'s photos files to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-comments',
 			array( $this, 'cmd_embarcadero_migrate_comments' ),
-			[
+			array(
 				'shortdesc' => 'Migrate comments that we missed by the import-posts-content command.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'comments-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s comments to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'comments-zones-file-path',
 						'description' => 'Path to the CSV file containing the comments\'s zones to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'users-file-path',
 						'description' => 'Path to the CSV file containing the comments\'s users to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-print-issues',
 			array( $this, 'cmd_embarcadero_migrate_print_issues' ),
-			[
+			array(
 				'shortdesc' => 'Migrate print issues that we missed by the import-posts-content command.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'publication-name',
 						'description' => 'Publication name to use for the print issues.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'publication-email',
 						'description' => 'Publication email to use for the print issues.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'pdf-section-suffix',
 						'description' => 'Suffix to add to the PDF section name to create the PDF file name. Example: if the file name is "2006_05_19.mvv.section1.pdf" the suffix would be "mvv".',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'print-issues-csv-file-path',
 						'description' => 'Path to the CSV file containing print issues to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'print-sections-csv-file-path',
 						'description' => 'Path to the CSV file containing print sections to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'print-pdf-dir-path',
 						'description' => 'Path to the directory containing the print issues PDF files to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'print-cover-dir-path',
 						'description' => 'Path to the directory containing the print issues cover files to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-post-slugs',
 			array( $this, 'cmd_embarcadero_migrate_post_slugs' ),
-			[
+			array(
 				'shortdesc' => 'Migrate Embarcadero\'s post slugs.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-tsv-file',
 			array( $this, 'cmd_embarcadero_helper_fix_tsv_file' ),
-			[
+			array(
 				'shortdesc' => 'A helper command which takes a TSV file and tries to fix the ambiguous \"" and \" escaping.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'tsv-file-input',
 						'description' => 'Full path to TSV file which is having issues being read by filecsv( $file, null, "\t" ).',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'tsv-file-output',
 						'description' => 'Where to save the new (hopefully fixed) content. Full file path.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-validate-csv-file',
 			array( $this, 'cmd_embarcadero_helper_validate_csv_file' ),
-			[
+			array(
 				'shortdesc' => 'A helper command which validates a CSV file and outputs rows with issues.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'csv-file-input',
 						'description' => 'Full path to CSV file which is having issues being read by filecsv( $file, null, "\t" ).',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-dates',
 			array( $this, 'cmd_fix_post_times' ),
-			[
+			array(
 				'shortdesc' => 'Fix post dates to match timezone.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'index-from',
 						'description' => 'Start importing from this index in the CSV file.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'index-to',
 						'description' => 'Import till this index in the CSV file.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-rearrange-categories',
 			array( $this, 'cmd_embarcadero_rearrange_categories' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\'s post content.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'index-from',
 						'description' => 'Start importing from this index in the CSV file.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'index-to',
 						'description' => 'Import till this index in the CSV file.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-csv-file-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-sections-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s sections (categories) to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-import-six-fifty-content',
-			[ $this, 'cmd_migrate_six_fifty_content' ],
-			[
+			array( $this, 'cmd_migrate_six_fifty_content' ),
+			array(
 				'shortdesc' => 'Six Fifty content needs to be merged into Embarcadero sites.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'media-xml-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'posts-xml-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-six-fifty-missing-authors',
-			[ $this, 'cmd_fix_six_fifty_missing_authors' ],
-			[
+			array( $this, 'cmd_fix_six_fifty_missing_authors' ),
+			array(
 				'shortdesc' => 'Fixes missing authors for Six Fifty content.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'media-xml-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'posts-xml-path',
 						'description' => 'Path to the CSV file containing the stories to import.',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-content-styling',
 			array( $this, 'cmd_embarcadero_fix_content_styling' ),
-			[
+			array(
 				'shortdesc' => 'Import Embarcadero\'s post content.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'batch',
 						'description' => 'Batch to start from.',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'posts-per-batch',
 						'description' => 'Posts to import per batch',
 						'optional'    => true,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-post-launch-qa',
 			array( $this, 'cmd_embarcadero_post_launch_qa' ),
-			[
+			array(
 				'shortdesc' => 'Check for migration issues after the launch.',
-				'synopsis'  => [
-					[
+				'synopsis'  => array(
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-photos-file-paths',
 						'description' => 'Path to the CSV files separated by a comma containing the stories\'s photos to import (e.g. export/file1.csv,export/file2.csv).',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-media-file-paths',
 						'description' => 'Path to the CSV files separated by a comma containing the stories\'s media to import (e.g. export/file1.csv,export/file2.csv).',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
+					),
+					array(
 						'type'        => 'assoc',
 						'name'        => 'story-carousel-items-dir-paths',
 						'description' => 'Path to the CSV files separated by a comma containing the stories\'s carousel items to import (e.g. export/file1.csv,export/file2.csv).',
 						'optional'    => false,
 						'repeating'   => false,
-					],
-				],
-			]
+					),
+				),
+			)
 		);
 	}
 
@@ -863,7 +862,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$posts = array_values(
 				array_filter(
 					$posts,
-					function( $post ) use ( $imported_original_ids ) {
+					function ( $post ) use ( $imported_original_ids ) {
 						return ! in_array( $post['story_id'], $imported_original_ids );
 					}
 				)
@@ -888,7 +887,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
 
 
-			$post_data = [
+			$post_data = array(
 				'post_title'   => $post['headline'],
 				'post_content' => $story_text,
 				'post_excerpt' => $post['front_paragraph'],
@@ -896,7 +895,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'post_type'    => 'post',
 				'post_date'    => $this->get_post_date_from_timestamp( $post['date_epoch'] ),
 				'post_author'  => $wp_contributor_id,
-			];
+			);
 
 			if ( ! empty( $post_name ) ) {
 				$post_data['post_name'] = $post_name;
@@ -974,14 +973,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				if ( 1 === count( $co_author_users ) ) {
 					$author_user = current( $co_author_users );
 					wp_update_post(
-						[
+						array(
 							'ID'          => $wp_post_id,
 							'post_author' => $author_user->ID,
-						]
+						)
 					);
 				} else {
 					$co_author_nicenames = array_map(
-						function( $co_author_user ) {
+						function ( $co_author_user ) {
 							return $co_author_user->user_nicename;
 						},
 						$co_author_users
@@ -1011,10 +1010,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Update post content if needed.
 			if ( $update_post_content && ( $updated_post_content !== $post['story_text'] ) ) {
 				wp_update_post(
-					[
+					array(
 						'ID'           => $wp_post_id,
 						'post_content' => $updated_post_content,
-					]
+					)
 				);
 			}
 
@@ -1034,7 +1033,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				}
 
 				if ( $category_id ) {
-					wp_set_post_categories( $wp_post_id, [ $category_id ] );
+					wp_set_post_categories( $wp_post_id, array( $category_id ) );
 				}
 			}
 
@@ -1079,7 +1078,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$tags                  = $this->get_data_from_csv_or_tsv( $story_tags_csv_file_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_TAG_META_KEY );
 
-		$grouped_tags = [];
+		$grouped_tags = array();
 
 		foreach ( $tags as $item ) {
 			$tag_name = $item['tag'];
@@ -1091,7 +1090,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			if ( ! isset( $grouped_tags[ $story_id ] ) ) {
-				$grouped_tags[ $story_id ] = [];
+				$grouped_tags[ $story_id ] = array();
 			}
 
 			$grouped_tags[ $story_id ][] = $tag_name;
@@ -1129,7 +1128,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$featured_photos = array_values(
 			array_filter(
 				$photos,
-				function( $photo ) use ( $imported_original_ids ) {
+				function ( $photo ) use ( $imported_original_ids ) {
 					return 'yes' === $photo['feature'] && ! in_array( $photo['photo_id'], $imported_original_ids );
 				}
 			)
@@ -1168,10 +1167,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					array_shift( $blocks );
 					$post_content = trim( serialize_blocks( $blocks ) );
 					wp_update_post(
-						[
+						array(
 							'ID'           => $wp_post_id,
 							'post_content' => $post_content,
-						]
+						)
 					);
 				}
 			}
@@ -1225,10 +1224,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
 				continue;
 			}
-			$post_data = [
+			$post_data = array(
 				'ID'        => $wp_post_id,
 				'post_date' => $this->get_post_date_from_timestamp( $post['date_epoch'] ),
-			];
+			);
 			$result    = wp_update_post( $post_data );
 			if ( is_wp_error( $result ) ) {
 				$this->logger->log( $log_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
@@ -1291,7 +1290,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				}
 
 				if ( $category_id ) {
-					wp_set_post_categories( $wp_post_id, [ $category_id ] );
+					wp_set_post_categories( $wp_post_id, array( $category_id ) );
 				}
 			}
 
@@ -1310,22 +1309,22 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
 
 		$total_query = new \WP_Query(
-			[
+			array(
 				'posts_per_page' => -1,
 				'post_type'      => 'post',
 				'fields'         => 'ids',
 				'no_found_rows'  => true,
-			]
+			)
 		);
 
 		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
 
 		$query = new \WP_Query(
-			[
+			array(
 				'post_type'      => 'post',
 				'paged'          => $batch,
 				'posts_per_page' => $posts_per_batch,
-			]
+			)
 		);
 
 		$posts       = $query->get_posts();
@@ -1338,10 +1337,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			if ( $new_content !== $post->post_content ) {
 				wp_update_post(
-					[
+					array(
 						'ID'           => $post->ID,
 						'post_content' => $new_content,
-					]
+					)
 				);
 
 				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $index + 1, $post->ID ), Logger::SUCCESS );
@@ -1367,7 +1366,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			function ( $carry, $item ) {
 				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
 			},
-			[]
+			array()
 		);
 
 		$media = array_reduce(
@@ -1375,7 +1374,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			function ( $carry, $item ) {
 				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
 			},
-			[]
+			array()
 		);
 
 		$carousel_items = array_reduce(
@@ -1383,11 +1382,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			function ( $carry, $item ) {
 				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
 			},
-			[]
+			array()
 		);
 
 		// QA Content Styling.
-		$content_styling_shortcodes = [ '==I', '==B', '==BI', '==SH' ];
+		$content_styling_shortcodes = array( '==I', '==B', '==BI', '==SH' );
 
 		// Get all the posts with the content styling shortcodes.
 		foreach ( $content_styling_shortcodes as $shortcode ) {
@@ -1422,10 +1421,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					} else {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::SUCCESS );
 						wp_update_post(
-							[
+							array(
 								'ID'           => $post->ID,
 								'post_content' => $fixed_content,
-							]
+							)
 						);
 					}
 				} else {
@@ -1440,7 +1439,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		}
 
 		// QA Content Shortcodes.
-		$content_shortcodes = [ 'carousel', 'flour', 'map', 'more_stories', 'pull_quote', 'timeline', 'video' ];
+		$content_shortcodes = array( 'carousel', 'flour', 'map', 'more_stories', 'pull_quote', 'timeline', 'video' );
 		foreach ( $content_shortcodes as $shortcode ) {
 			$posts = $wpdb->get_results(
 				$wpdb->prepare(
@@ -1475,10 +1474,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					} else {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::SUCCESS );
 						wp_update_post(
-							[
+							array(
 								'ID'           => $post->ID,
 								'post_content' => $fixed_content,
-							]
+							)
 						);
 					}
 				}
@@ -1497,7 +1496,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	private function highlight_text( $text, $search, $chars_to_show = 10 ) {
 		$position = 0;
-		$results  = [];
+		$results  = array();
 
 		$search_length = strlen( $search );
 
@@ -1549,7 +1548,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$posts = array_values(
 			array_filter(
 				$posts,
-				function( $post ) use ( $imported_original_ids ) {
+				function ( $post ) use ( $imported_original_ids ) {
 					return ! in_array( $post['story_id'], $imported_original_ids );
 				}
 			)
@@ -1574,20 +1573,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$more_stories_media = array_values(
 				array_filter(
 					$media_list,
-					function( $media_item ) use ( $post ) {
+					function ( $media_item ) use ( $post ) {
 						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
 			);
 
 			if ( ! empty( $more_stories_media ) ) {
-				$more_posts_blocks = [ $this->gutenberg_block_generator->get_heading( 'More stories' ) ];
+				$more_posts_blocks = array( $this->gutenberg_block_generator->get_heading( 'More stories' ) );
 
 				foreach ( $more_stories_media as $more_stories_item ) {
 					$more_posts_blocks[] = $this->gutenberg_block_generator->get_paragraph( '<strong><a href="' . $more_stories_item['more_link'] . '">' . $more_stories_item['more_headline'] . '</a></strong><br>' . $more_stories_item['more_blurb'] );
 				}
 
-				$more_posts_block_group = $this->gutenberg_block_generator->get_group_constrained( $more_posts_blocks, [ 'more-stories', 'alignright' ], [ 'align' => 'right' ] );
+				$more_posts_block_group = $this->gutenberg_block_generator->get_group_constrained( $more_posts_blocks, array( 'more-stories', 'alignright' ), array( 'align' => 'right' ) );
 
 				preg_match( '/(?<shortcode>{(?<type>more_stories)(\s+(?<width>(\d|\w)+)?)?(\s+(?<id>\d+)?)?})/', $wp_post->post_content, $match );
 
@@ -1595,10 +1594,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$content = str_replace( $match['shortcode'], serialize_block( $more_posts_block_group ), $wp_post->post_content );
 
 					wp_update_post(
-						[
+						array(
 							'ID'           => $wp_post_id,
 							'post_content' => $content,
-						]
+						)
 					);
 
 					$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
@@ -1629,7 +1628,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$posts = array_values(
 			array_filter(
 				$posts,
-				function( $post ) use ( $imported_original_ids ) {
+				function ( $post ) use ( $imported_original_ids ) {
 					return in_array( $post['story_id'], $imported_original_ids );
 				}
 			)
@@ -1652,7 +1651,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$more_stories_media = array_values(
 				array_filter(
 					$media_list,
-					function( $media_item ) use ( $post ) {
+					function ( $media_item ) use ( $post ) {
 						return $media_item['story_id'] === $post['story_id'] && 'more_stories' === $media_item['media_type'];
 					}
 				)
@@ -1660,13 +1659,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			if ( ! empty( $more_stories_media ) ) {
 				$content_blocks    = parse_blocks( $wp_post->post_content );
-				$more_posts_blocks = [ $this->gutenberg_block_generator->get_heading( 'More stories' ) ];
+				$more_posts_blocks = array( $this->gutenberg_block_generator->get_heading( 'More stories' ) );
 
 				foreach ( $more_stories_media as $more_stories_item ) {
 					$more_posts_blocks[] = $this->gutenberg_block_generator->get_paragraph( '<strong><a href="' . $more_stories_item['more_link'] . '">' . $more_stories_item['more_headline'] . '</a></strong><br>' . $more_stories_item['more_blurb'] );
 				}
 
-				$more_posts_block_group = $this->gutenberg_block_generator->get_group_constrained( $more_posts_blocks, [ 'more-stories', 'alignright' ], [ 'align' => 'right' ] );
+				$more_posts_block_group = $this->gutenberg_block_generator->get_group_constrained( $more_posts_blocks, array( 'more-stories', 'alignright' ), array( 'align' => 'right' ) );
 
 				// Check if the post contains more than one "More stories" block.
 				if ( 1 < substr_count( $wp_post->post_content, '>More stories<' ) ) {
@@ -1687,14 +1686,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					continue;
 				}
 
-				$indexes_to_remove = [ $more_stories_heading_block_index ];
+				$indexes_to_remove = array( $more_stories_heading_block_index );
 
 				$blocks_count = count( $content_blocks );
 				for ( $i = $more_stories_heading_block_index + 1; $i < $blocks_count; $i++ ) {
 					if (
 						'core/paragraph' === $content_blocks[ $i ]['blockName']
 						&& str_starts_with( $content_blocks[ $i ]['innerHTML'], '<p><strong><a href="' )
-						 ) {
+						) {
 						$indexes_to_remove[] = $i;
 					} else {
 						break;
@@ -1707,13 +1706,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				}
 
 				// Insert the new block.
-				array_splice( $content_blocks, $more_stories_heading_block_index, 0, [ $more_posts_block_group ] );
+				array_splice( $content_blocks, $more_stories_heading_block_index, 0, array( $more_posts_block_group ) );
 
 				wp_update_post(
-					[
+					array(
 						'ID'           => $wp_post_id,
 						'post_content' => serialize_blocks( $content_blocks ),
-					]
+					)
 				);
 
 				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
@@ -1781,10 +1780,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$content = str_replace( '<!-- /wp:html --></p>', '<!-- /wp:html -->', $content );
 
 				wp_update_post(
-					[
+					array(
 						'ID'           => $wp_post_id,
 						'post_content' => $content,
-					]
+					)
 				);
 
 				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
@@ -1826,10 +1825,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			if ( $updated_content !== $wp_post->post_content ) {
 				wp_update_post(
-					[
+					array(
 						'ID'           => $wp_post_id,
 						'post_content' => $updated_content,
-					]
+					)
 				);
 
 				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d with more posts block.', $post['story_id'], $wp_post_id ), Logger::SUCCESS );
@@ -1857,7 +1856,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$comments = array_values(
 			array_filter(
 				$comments,
-				function( $comment ) use ( $imported_original_ids ) {
+				function ( $comment ) use ( $imported_original_ids ) {
 					return ! in_array( $comment['comment_id'], $imported_original_ids );
 				}
 			)
@@ -1910,7 +1909,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 
-			$comment_data = [
+			$comment_data = array(
 				'comment_post_ID'      => $wp_post_id,
 				'comment_approved'     => 'no' === $comment['hide'],
 				'user_id'              => $wp_user ? $wp_user->ID : '',
@@ -1920,8 +1919,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'comment_author_IP'    => $comment['ip_address'] ?? '',
 				'comment_content'      => $comment['comment'] ?? '',
 				'comment_date'         => $this->get_post_date_from_timestamp( $comment['posted_epoch'] ),
-				'comment_meta'         => [],
-			];
+				'comment_meta'         => array(),
+			);
 
 			// Get user zone.
 			$zone_index = array_search( $comment['zone_id'], array_column( $zones, 'zone_id' ) );
@@ -1978,7 +1977,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$pdf_files_paths = [];
+			$pdf_files_paths = array();
 
 			for ( $i = 1; $i <= 12; $i++ ) {
 				$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.' . $pdf_section_suffix . '.section' . $i . '.pdf';
@@ -2002,14 +2001,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$wp_issue_post_id = $this->get_or_create_post(
 				$print_issue['issue_number'],
 				self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY,
-				[
+				array(
 					'post_type'    => 'post',
 					'post_title'   => $print_issue['seo_link'],
 					'post_status'  => 'publish',
 					'post_author'  => $author_id,
 					'post_date'    => "$year-$month-$day",
 					'post_content' => '',
-				]
+				)
 			);
 
 			if ( is_wp_error( $wp_issue_post_id ) ) {
@@ -2026,7 +2025,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$section_name = $print_sections[ $section_index ]['section_title'];
 			}
 
-			$post_content_blocks = [];
+			$post_content_blocks = array();
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
 				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
@@ -2047,10 +2046,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$post_content = serialize_blocks( $post_content_blocks );
 
 			wp_update_post(
-				[
+				array(
 					'ID'           => $wp_issue_post_id,
 					'post_content' => $post_content,
-				]
+				)
 			);
 
 			// Handle post cover.
@@ -2074,7 +2073,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$print_edition_category_id = $this->get_or_create_category( 'Print Edition' );
 			$year_category_id          = $this->get_or_create_category( $year, $print_edition_category_id );
 
-			wp_set_post_categories( $wp_issue_post_id, [ $print_edition_category_id, $year_category_id ] );
+			wp_set_post_categories( $wp_issue_post_id, array( $print_edition_category_id, $year_category_id ) );
 
 			update_post_meta( $wp_issue_post_id, self::EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY, $print_issue['issue_number'] );
 
@@ -2098,7 +2097,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$stories = array_values(
 			array_filter(
 				$stories,
-				function( $story ) use ( $imported_original_ids ) {
+				function ( $story ) use ( $imported_original_ids ) {
 					return ! in_array( $story['story_id'], $imported_original_ids );
 				}
 			)
@@ -2127,10 +2126,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			wp_update_post(
-				[
+				array(
 					'ID'        => $wp_issue_post_id,
 					'post_name' => $slug,
-				]
+				)
 			);
 
 			update_post_meta( $wp_issue_post_id, self::EMBARCADERO_MIGRATED_POST_SLUG_META_KEY, $story['story_id'] );
@@ -2264,7 +2263,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			) {
 				if ( count( $tsv_row ) !== count( $csv_headers ) ) {
 					WP_CLI::warning( sprintf( 'Can not read CSV row beginning with >>> %s <<<', substr( $tsv_row[0], 0, 50 ) ) );
-					$wrong_rows ++;
+					++$wrong_rows;
 				}
 			}
 		} while ( true !== $fixed );
@@ -2300,15 +2299,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
 
-		$posts   = [];
-		$authors = get_users( [ 'role__in' => [ 'administrator', 'editor', 'author', 'contributor' ] ] );
+		$posts   = array();
+		$authors = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'contributor' ) ) );
 		foreach ( $authors as $key => $author ) {
 			$authors[ $author->user_login ] = $author;
 			$modded_user_login              = strtolower( substr( $author->first_name, 0, 1 ) . $author->last_name );
 			$authors[ $modded_user_login ]  = $author;
 			unset( $authors[ $key ] );
 		}
-		$attachments = [];
+		$attachments = array();
 
 		WP_CLI::line( 'Processing Media XML items' );
 		foreach ( $media_channel_children as $child ) {
@@ -2439,7 +2438,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 					$this->process_six_fifty_categories_and_tags( $result, $data['categories'], $data['tags'] );
 					if ( null !== $six_fifty_tag_id ) {
-						wp_set_post_tags( $result, [ $six_fifty_tag_id ], true );
+						wp_set_post_tags( $result, array( $six_fifty_tag_id ), true );
 					}
 				}
 			}
@@ -2477,7 +2476,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		$media_channel_children = $rss->childNodes->item( 1 )->childNodes;
 
-		$authors = get_users( [ 'role__in' => [ 'administrator', 'editor', 'author', 'contributor', 'site_editor' ] ] );
+		$authors = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'contributor', 'site_editor' ) ) );
 		foreach ( $authors as $key => $author ) {
 			$authors[ $author->user_login ] = $author;
 			$modded_user_login              = strtolower( substr( $author->first_name, 0, 1 ) . $author->last_name );
@@ -2557,12 +2556,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 				$result = $wpdb->update(
 					$wpdb->posts,
-					[
+					array(
 						'post_author' => $data['post_author'],
-					],
-					[
+					),
+					array(
 						'ID' => $post->ID,
-					]
+					)
 				);
 
 				if ( $result ) {
@@ -2614,12 +2613,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 				$result = $wpdb->update(
 					$wpdb->posts,
-					[
+					array(
 						'post_author' => $data['post_author'],
-					],
-					[
+					),
+					array(
 						'ID' => $post->ID,
-					]
+					)
 				);
 
 				if ( $result ) {
@@ -2655,7 +2654,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return array|false|mixed[]|\WP_Error
 	 */
 	private function process_six_fifty_categories_and_tags( int $post_id, array $categories, array $tags ) {
-		$allowed_category_list = [];
+		$allowed_category_list = array();
 		foreach ( array_merge( $categories, $tags ) as $item ) {
 			$category_or_tag_name = strtolower( $item['name'] );
 			if ( array_key_exists( $category_or_tag_name, $allowed_category_list ) ) {
@@ -2679,10 +2678,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			} else {
 				WP_CLI::line( sprintf( 'Creating category: %s', $item['name'] ) );
 				$result = wp_insert_category(
-					[
+					array(
 						'cat_name'          => $item['name'],
 						'category_nicename' => $item['slug'],
-					]
+					)
 				);
 
 				if ( is_int( $result ) && $result > 0 ) {
@@ -2707,7 +2706,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return array Array of data.
 	 */
 	private function get_data_from_csv_or_tsv( $story_csv_file_path ) {
-		$data = [];
+		$data = array();
 
 		// Reading CSV or TSV.
 		$separator = ',';
@@ -2811,13 +2810,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Set WP User display name.
 			wp_update_user(
-				[
+				array(
 					'ID'            => $wp_user_id,
 					'display_name'  => $full_name,
 					'first_name'    => current( explode( ' ', $full_name ) ),
 					'last_name'     => join( ' ', array_slice( explode( ' ', $full_name ), 1 ) ),
 					'user_nicename' => sanitize_title( $full_name ),
-				]
+				)
 			);
 		}
 
@@ -2883,12 +2882,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private function get_co_authors_from_bylines( $byline ) {
 		// If byline is empty set a default author.
 		if ( empty( $byline ) || '-' === $byline ) {
-			return [ self::DEFAULT_AUTHOR_NAME ];
+			return array( self::DEFAULT_AUTHOR_NAME );
 		}
 
 		// Split co-authors by ' and '.
 		$coauthors                = explode( ' and ', $byline );
-		$false_positive_coauthors = [ 'Ph.D', 'M.D.', 'DVM' ];
+		$false_positive_coauthors = array( 'Ph.D', 'M.D.', 'DVM' );
 
 		foreach ( $coauthors as $coauthor ) {
 			// Clean up the byline.
@@ -2924,7 +2923,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return array Array of co-authors users.
 	 */
 	private function get_generate_coauthor_users( $coauthors, $all_contributors, $email_domain ) {
-		$coauthor_users = [];
+		$coauthor_users = array();
 		foreach ( $coauthors as $coauthor ) {
 			$contributor_index = array_search( $coauthor, array_column( $all_contributors, 'full_name' ) );
 
@@ -2956,7 +2955,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			return $term->term_id;
 		}
 
-		$args = [];
+		$args = array();
 
 		if ( $parent_id ) {
 			$args['parent'] = $parent_id;
@@ -3046,7 +3045,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 						$media_carousel_items = array_filter(
 							$carousel_items,
-							function( $carousel_item ) use ( $media ) {
+							function ( $carousel_item ) use ( $media ) {
 								return $carousel_item['carousel_media_id'] === $media['media_id'];
 							}
 						);
@@ -3054,7 +3053,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						// order $media_carousel_items by sort_order column.
 						usort(
 							$media_carousel_items,
-							function( $a, $b ) {
+							function ( $a, $b ) {
 								return intval( $a['sort_order'] ) <=> intval( $b['sort_order'] );
 							}
 						);
@@ -3062,7 +3061,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$carousel_attachments_items = array_values(
 							array_filter(
 								array_map(
-									function( $carousel_item ) use ( $wp_post_id, $photos, $story_photos_dir_path ) {
+									function ( $carousel_item ) use ( $wp_post_id, $photos, $story_photos_dir_path ) {
 										$photo_index = array_search( $carousel_item['photo_id'], array_column( $photos, 'photo_id' ) );
 										if ( false !== $photo_index ) {
 											$photo         = $photos[ $photo_index ];
@@ -3075,8 +3074,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 												return null;
 											}
 										}
-
-
 									},
 									$media_carousel_items
 								)
@@ -3177,7 +3174,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$media_index = array_search( intval( $match['width'] ), array_column( $media_list, 'media_id' ) );
 					if ( false !== $media_index ) {
 						$media                 = $media_list[ $media_index ];
-						$citation              = implode( ', ', [ $media['pull_quote_name'], $media['pull_quote_citation'] ] );
+						$citation              = implode( ', ', array( $media['pull_quote_name'], $media['pull_quote_citation'] ) );
 						$pull_quote_block_html = serialize_block( $this->gutenberg_block_generator->get_quote( $media['pull_quote_text'], $citation ) );
 						$content               = str_replace( $match['shortcode'], $pull_quote_block_html, $content );
 					} else {
@@ -3267,9 +3264,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$wp_post_id,
 					$media_path,
 					$media['caption'],
-					[
+					array(
 						'post_excerpt' => $media['caption'],
-					]
+					)
 				);
 				if ( is_wp_error( $attachment_id ) ) {
 					$this->logger->log(
