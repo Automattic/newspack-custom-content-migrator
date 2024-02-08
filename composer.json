@@ -31,8 +31,8 @@
     "mustache/mustache": "^2.14"
   },
   "require-dev": {
-    "automattic/vipwpcs": "^2.0",
-    "wp-coding-standards/wpcs": "^2.1",
+    "automattic/vipwpcs": "^3.0",
+    "wp-coding-standards/wpcs": "^3.0",
     "phpcompatibility/phpcompatibility-wp": "^2.1",
     "composer/installers": "^1.7",
     "dealerdirect/phpcodesniffer-composer-installer": "^0.7.0",
