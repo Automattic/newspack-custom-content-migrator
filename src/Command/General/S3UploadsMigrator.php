@@ -7,10 +7,10 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \WP_CLI;
-use \WP_Error;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Posts;
+use WP_CLI;
+use WP_Error;
 
 /**
  * S3UploadsMigrator.
@@ -155,20 +155,20 @@ class S3UploadsMigrator implements InterfaceCommand {
 			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
 			[
 				'shortdesc' => '1. Save list of all files from local folder to a --local-log file, run this year by year, e.g for year 2009: ' .
-							   'find 2009 -type f > 2009_local.txt ; ' .
-							   '' .
-							   '2. Save list of all files from S3 to --s3-log file, run this for same years, year by year: ' .
-							   "aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
-							   '' .
-							   '3. Notice what the path to this folder is on S3 and use it as --path-to-this-folder-on-s3=wp-content/uploads/ ' .
-							   '' .
-							   '4. Then run the command like this: ' .
-							   '  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
-							   '    --local-log=2009_local.txt \ ' .
-							   '    --s3-log=2009_s3.txt \ ' .
-							   '    --path-to-this-folder-on-s3=wp-content/uploads/ ' .
-							   '' .
-							   'and files which are missing on S3 will be detected and saved to log.',
+								'find 2009 -type f > 2009_local.txt ; ' .
+								'' .
+								'2. Save list of all files from S3 to --s3-log file, run this for same years, year by year: ' .
+								"aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
+								'' .
+								'3. Notice what the path to this folder is on S3 and use it as --path-to-this-folder-on-s3=wp-content/uploads/ ' .
+								'' .
+								'4. Then run the command like this: ' .
+								'  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
+								'    --local-log=2009_local.txt \ ' .
+								'    --s3-log=2009_s3.txt \ ' .
+								'    --path-to-this-folder-on-s3=wp-content/uploads/ ' .
+								'' .
+								'and files which are missing on S3 will be detected and saved to log.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -188,9 +188,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'path-to-this-folder-on-s3',
 						'description' => "Path to the folder that's being examined on S3," .
-										 "E.g. one -- if we're examining 2009 in s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ , " .
-										 'value for this flag is `wp-content/uploads/`. ' .
-										 "E.g. two -- if we're examining folder 01 inside 2009, s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/01/ , ",
+										"E.g. one -- if we're examining 2009 in s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ , " .
+										'value for this flag is `wp-content/uploads/`. ' .
+										"E.g. two -- if we're examining folder 01 inside 2009, s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/01/ , ",
 						'value for this flag is `wp-content/uploads/2009/` .' .
 						'optional'    => false,
 						'repeating'   => false,
@@ -203,7 +203,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 			'newspack-content-migrator s3uploads-download-all-image-sizes-from-atomic',
 			[ $this, 'cmd_download_all_image_sizes_from_atomic' ],
 			[
-				'shortdesc' => "Downloads missing intermediate image sizes from given Atomic server which are not present on local disk.",
+				'shortdesc' => 'Downloads missing intermediate image sizes from given Atomic server which are not present on local disk.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -215,7 +215,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'attachment-ids',
-						'description' => "Run only for these attachment ids, CSV. Otherwise, will run for all attachments.",
+						'description' => 'Run only for these attachment ids, CSV. Otherwise, will run for all attachments.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -229,7 +229,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'run-only-for-sizes-csv',
-						'description' => "Run only for the sizes listed in this, CSV. E.g. --run-only-for-sizes-csv=1200x900,150x55",
+						'description' => 'Run only for the sizes listed in this, CSV. E.g. --run-only-for-sizes-csv=1200x900,150x55',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -355,7 +355,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 			// Add file to batch, or upload the batch.
 			if ( 0 !== count( $batch ) && 0 === ( count( $batch ) % self::UPLOAD_FILES_LIMIT ) ) {
 				// Upload batch.
-				$i_current_batch++;
+				++$i_current_batch;
 				WP_CLI::log( sprintf( 'Uploading %s -- batch #%d, files from %s to %s...', $directory_path, $i_current_batch, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
 				$this->upload_a_batch_of_files( $batch, $cli_s3_uploads_destination );
 
@@ -368,7 +368,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		// Upload remaining files.
 		if ( ! empty( $batch ) ) {
-			$i_current_batch++;
+			++$i_current_batch;
 			WP_CLI::log( sprintf( 'Uploading %s -- batch #%d, files from %s to %s...', $directory_path, $i_current_batch, str_replace( $directory_path . '/', '', $batch[0] ), str_replace( $directory_path . '/', '', $batch[ count( $batch ) - 1 ] ) ) );
 			$this->upload_a_batch_of_files( $batch, $cli_s3_uploads_destination );
 		}
@@ -462,7 +462,6 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 			$this->confirmed_first_upload = true;
 		}
-
 	}
 
 	/**
@@ -626,16 +625,16 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_download_all_image_sizes_from_atomic( $pos_args, $assoc_args ) {
 
-		$remote_host     = $assoc_args['remote-host'];
-		$attachment_ids  = $assoc_args['attachment-ids'] ?? null;
-		$extra_sizes_csv = $assoc_args['add-extra-sizes-csv'] ?? null;
+		$remote_host        = $assoc_args['remote-host'];
+		$attachment_ids     = $assoc_args['attachment-ids'] ?? null;
+		$extra_sizes_csv    = $assoc_args['add-extra-sizes-csv'] ?? null;
 		$only_use_sizes_csv = $assoc_args['run-only-for-sizes-csv'] ?? null;
-		if ( ! is_null($extra_sizes_csv) && ! is_null($only_use_sizes_csv) ) {
+		if ( ! is_null( $extra_sizes_csv ) && ! is_null( $only_use_sizes_csv ) ) {
 			WP_CLI::error( 'Cannot use both --add-extra-sizes-csv and --run-only-for-sizes-csv at the same time.' );
 		}
 
 		$local_host = gethostname();
-
+		return;
 		/**
 		 * Get all the sizes which this command will fix&download.
 		 */
@@ -650,17 +649,17 @@ class S3UploadsMigrator implements InterfaceCommand {
 			// Merge with extra sizes provided.
 			if ( $extra_sizes_csv ) {
 				$extra_sizes = $this->explode_csv_sizes( $extra_sizes_csv );
-				$sizes = $this->merge_sizes( $sizes, $extra_sizes );
+				$sizes       = $this->merge_sizes( $sizes, $extra_sizes );
 			}
 		}
 		
 		/**
 		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
 		 */
-		if ( is_null($attachment_ids) ) {
+		if ( is_null( $attachment_ids ) ) {
 			$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
 		}
-		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id) {
+		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id ) {
 			WP_CLI::line( sprintf( '(%d/%d) Attachment ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
 
 			// Skip if attachment is not image.
@@ -674,7 +673,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 			if ( false === $local_path ) {
 				WP_CLI::error( sprintf( 'ERROR Attachment ID %d has no local path.', $attachment_id ) );
 			}
-			$url_local  = wp_get_attachment_url( $attachment_id );
+			$url_local = wp_get_attachment_url( $attachment_id );
 			if ( false === $url_local ) {
 				WP_CLI::error( sprintf( 'ERROR Attachment ID %d has no local URL.', $attachment_id ) );
 			}
@@ -685,25 +684,25 @@ class S3UploadsMigrator implements InterfaceCommand {
 			if ( file_exists( $local_path ) ) {
 				WP_CLI::line( sprintf( "- 'original' file found %s", $local_path ) );
 			} else {
+				$url_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local );
 				WP_CLI::line( sprintf( "- 'original' file not found %s, downloading %s", $local_path, $url_remote ) );
 				
-				$url_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local );
 				$downloaded = $this->download_url_to_file( $url_remote, $local_path );
-				if ( is_wp_error($downloaded) || ! $downloaded ) {
-					$err_msg = is_wp_error($downloaded) ? $downloaded->get_error_message() : 'n/a';
-					WP_CLI::warning( sprintf("ERROR downloading att. ID %d 'original' %s : %s", $attachment_id, $url_remote, $err_msg ) );
+				if ( is_wp_error( $downloaded ) || ! $downloaded ) {
+					$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
+					WP_CLI::warning( sprintf( "ERROR downloading att. ID %d 'original' %s : %s", $attachment_id, $url_remote, $err_msg ) );
 				}
 			}
 
 			/**
 			 * Download '-scaled' if it exists on remote. WP automatically scales an image if it's larger than the threshold:
-			 * 	https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
+			 *  https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
 			 */
 			$local_path_scaled = $this->append_suffix_to_file( $local_path, '-scaled' );
-			if ( file_exists( $local_path_scaled ) )  {
+			if ( file_exists( $local_path_scaled ) ) {
 				WP_CLI::line( sprintf( "+ '-scaled' file found %s, skipping", $local_path_scaled ) );
 			} else {
-				$url_scaled_local = $this->append_suffix_to_file( $url_local, '-scaled' );
+				$url_scaled_local  = $this->append_suffix_to_file( $url_local, '-scaled' );
 				$url_scaled_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_scaled_local );
 				
 				// If $url_scaled_remote responds with 200, download it.
@@ -711,9 +710,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$response = wp_remote_head( $url_scaled_remote );
 				if ( 200 == wp_remote_retrieve_response_code( $response ) ) {
 					$downloaded = $this->download_url_to_file( $url_scaled_remote, $local_path_scaled );
-					if ( is_wp_error($downloaded) || ! $downloaded ) {
-						$err_msg = is_wp_error($downloaded) ? $downloaded->get_error_message() : 'n/a';
-						WP_CLI::warning( sprintf("ERROR downloading att. ID %d '-scaled' %s : %s", $attachment_id, $url_scaled_remote, $err_msg ) );
+					if ( is_wp_error( $downloaded ) || ! $downloaded ) {
+						$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
+						WP_CLI::warning( sprintf( "ERROR downloading att. ID %d '-scaled' %s : %s", $attachment_id, $url_scaled_remote, $err_msg ) );
 					}
 				}
 			}
@@ -722,46 +721,58 @@ class S3UploadsMigrator implements InterfaceCommand {
 			 * Download all subsizes.
 			 */
 			foreach ( $sizes as $key_size => $size ) {
-				$height = $size['height'];
-				$width = $size['width'];
+				$height    = $size['height'];
+				$width     = $size['width'];
 				$size_name = $height . 'x' . $width;
-				WP_CLI::line( sprintf( 'Size (%d/%d) %s', $key_size + 1, count($sizes), $size_name ) );
+				WP_CLI::line( sprintf( 'Size (%d/%d) %s', $key_size + 1, count( $sizes ), $size_name ) );
 
 				$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
-				if ( file_exists( $local_path_size ) )  {
-					WP_CLI::line( sprintf( "+ %s file found %s, skipping", $size_name, $local_path_size ) );
+				if ( file_exists( $local_path_size ) ) {
+					WP_CLI::line( sprintf( '+ %s file found %s, skipping', $size_name, $local_path_size ) );
 				} else {
-					$url_size_local = $this->append_suffix_to_file( $url_local, '-' . $size_name );
+					$url_size_local  = $this->append_suffix_to_file( $url_local, '-' . $size_name );
 					$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
 					
 					$downloaded = $this->download_url_to_file( $url_size_remote, $local_path_size );
-					if ( is_wp_error($downloaded) || ! $downloaded ) {
-						$err_msg = is_wp_error($downloaded) ? $downloaded->get_error_message() : 'n/a';
-						WP_CLI::warning( sprintf("ERROR downloading att. ID %d size %s %s : %s", $attachment_id, $size_name, $url_size_remote, $err_msg ) );
+					if ( is_wp_error( $downloaded ) || ! $downloaded ) {
+						$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
+						WP_CLI::warning( sprintf( 'ERROR downloading att. ID %d size %s %s : %s', $attachment_id, $size_name, $url_size_remote, $err_msg ) );
 					}
 				}
-			}
-
+			}       
 		}
 
 		// TODO: Log all the things, handle errors.
-
 	}
 
-	public function append_suffix_to_file( string $path_or_url, string $suffix): string {
+	/**
+	 * Appends a suffix to a file path or URL.
+	 *
+	 * @param string $path_or_url File path or URL.
+	 * @param string $suffix    Suffix to append.
+	 * @return string New path or URL with appended suffix to the file name.
+	 */
+	public function append_suffix_to_file( string $path_or_url, string $suffix ): string {
 
-		$filename = basename($path_or_url);
-		$directory = dirname($path_or_url);
-		$extension = pathinfo($filename, PATHINFO_EXTENSION);
-		$filename_without_extension = pathinfo($filename, PATHINFO_FILENAME);
+		$filename                   = basename( $path_or_url );
+		$directory                  = dirname( $path_or_url );
+		$extension                  = pathinfo( $filename, PATHINFO_EXTENSION );
+		$filename_without_extension = pathinfo( $filename, PATHINFO_FILENAME );
 	
-		$new_filename = $filename_without_extension . $suffix . '.' . $extension;
+		$new_filename    = $filename_without_extension . $suffix . '.' . $extension;
 		$new_path_or_url = $directory . '/' . $new_filename;
 	
 		return $new_path_or_url;
 	}
 
-	public function download_url_to_file( string $url, string $path ): true|WP_Error {
+	/**
+	 * Downloads a file from a URL and saves it to a specified path.
+	 *
+	 * @param string $url URL of the file to download.
+	 * @param string $path Path to save the file to.
+	 * @return boolean|WP_Error True on success, WP_Error on failure.
+	 */
+	public function download_url_to_file( string $url, string $path ): bool|WP_Error {
 		
 		// Download.
 		$tmp_path = download_url( $url );
@@ -788,6 +799,14 @@ class S3UploadsMigrator implements InterfaceCommand {
 		return true;
 	}
 
+	/**
+	 * Checks if a size exists in an array of sizes.
+	 *
+	 * @param array   $sizes Array of sizes.
+	 * @param integer $width Width.
+	 * @param integer $height Height.
+	 * @return boolean True if the size exists, false if not.
+	 */
 	public function does_size_exist( array $sizes, int $width, int $height ): bool {
 		foreach ( $sizes as $size ) {
 			if ( $size['width'] == $width && $size['height'] == $height ) {
@@ -797,10 +816,17 @@ class S3UploadsMigrator implements InterfaceCommand {
 		return false;
 	}
 
+	/**
+	 * Merges two arrays of sizes, keeping only unique sizes.
+	 *
+	 * @param array $sizes1 Array of sizes.
+	 * @param array $sizes2 Array of sizes.
+	 * @return array Merged array of sizes.
+	 */
 	public function merge_sizes( array $sizes1, array $sizes2 ): array {
 		$sizes = $sizes1;
 		foreach ( $sizes2 as $size2 ) {
-			if ( ! $this->does_size_exist($sizes, $size2['width'], $size2['height']) ) {
+			if ( ! $this->does_size_exist( $sizes, $size2['width'], $size2['height'] ) ) {
 				$sizes[] = $size2;
 			}
 		}
@@ -811,7 +837,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	/**
 	 * Explodes a CSV of sizes strings and returns an array.
 	 *
-	 * @param string $sizes_csv
+	 * @param string $sizes_csv CSV of sizes strings.
 	 * @return array {
 	 *    @type string width
 	 *    @type string height
@@ -822,12 +848,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		$sizes = [];
 		foreach ( explode( ',', $sizes_csv ) as $size_string ) {
-			$size_exploded = explode( 'x', strtolower($size_string) );
+			$size_exploded = explode( 'x', strtolower( $size_string ) );
 			if ( count( $size_exploded ) != 2 ) {
 				WP_CLI::error( 'Invalid size string ' . $size_string );
 			}
 
-			$width = $size_exploded[0];
+			$width  = $size_exploded[0];
 			$height = $size_exploded[1];
 			if ( $this->does_size_exist( $sizes, $width, $height ) ) {
 				WP_CLI::warning( 'explode_csv_sizes: additional size is already registered and will be fixed ' . $size_string );
@@ -844,19 +870,30 @@ class S3UploadsMigrator implements InterfaceCommand {
 		return $sizes;
 	}
 
+	/**
+	 * Gets all registered image sizes.
+	 *
+	 * @return array {
+	 *   @type string width
+	 *   @type string height
+	 *   @type bool   crop
+	 * }
+	 */
 	public function get_all_image_sizes(): array {
 		
 		global $_wp_additional_image_sizes;
 		$default_sizes = [ 'thumbnail', 'medium', 'medium_large', 'large' ];
+		// Get names of all registered sizes.
+		// phpcs:ignore -- Not intended to run on VIP infrastructure.
 		$sizes_names = get_intermediate_image_sizes();
 	
 		$sizes = [];
 		foreach ( $sizes_names as $size_name ) {
 			// Get default sizes from options.
 			if ( in_array( $size_name, $default_sizes ) ) {
-				$width  = get_option( $size_name . '_size_w' );
-				$height = get_option( $size_name . '_size_h' );
-				$crop   = (bool) get_option( $size_name . '_crop' );
+				$width               = get_option( $size_name . '_size_w' );
+				$height              = get_option( $size_name . '_size_h' );
+				$crop                = (bool) get_option( $size_name . '_crop' );
 				$sizes[ $size_name ] = [
 					'width'  => $width,
 					'height' => $height,
@@ -864,9 +901,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 				];
 			} elseif ( isset( $_wp_additional_image_sizes[ $size_name ] ) ) {
 				// Get additional sizes from the global.
-				$width  = $_wp_additional_image_sizes[ $size_name ]['width'];
-				$height = $_wp_additional_image_sizes[ $size_name ]['height'];
-				$crop   = $_wp_additional_image_sizes[ $size_name ]['crop'];
+				$width               = $_wp_additional_image_sizes[ $size_name ]['width'];
+				$height              = $_wp_additional_image_sizes[ $size_name ]['height'];
+				$crop                = $_wp_additional_image_sizes[ $size_name ]['crop'];
 				$sizes[ $size_name ] = [
 					'width'  => $width,
 					'height' => $height,
