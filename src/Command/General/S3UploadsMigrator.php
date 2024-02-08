@@ -8,7 +8,9 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use \NewspackCustomContentMigrator\Logic\Posts;
 use \WP_CLI;
+use \WP_Error;
 
 /**
  * S3UploadsMigrator.
@@ -52,6 +54,13 @@ class S3UploadsMigrator implements InterfaceCommand {
 	private $skip_prompt_before_first_upload = false;
 
 	/**
+	 * Posts logic
+	 *
+	 * @var Posts $posts Posts logic.
+	 */
+	private $posts;
+
+	/**
 	 * Singleton instance.
 	 *
 	 * @var null|InterfaceCommand $instance Instance.
@@ -62,6 +71,8 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
+
+		$this->posts = new Posts();
 
 		// Function \readline() has gone missing from Atomic, so here's it is back.
 		if ( ! function_exists( 'readline' ) ) {
@@ -182,6 +193,44 @@ class S3UploadsMigrator implements InterfaceCommand {
 										 "E.g. two -- if we're examining folder 01 inside 2009, s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/01/ , ",
 						'value for this flag is `wp-content/uploads/2009/` .' .
 						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator s3uploads-download-all-image-sizes-from-atomic',
+			[ $this, 'cmd_download_all_image_sizes_from_atomic' ],
+			[
+				'shortdesc' => "Downloads missing intermediate image sizes from given Atomic server which are not present on local disk.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'remote-host',
+						'description' => "Download missing intermediate images (sizes not present on this local) from this remote (i.e. Atomic) hostname, e.g. 'publisher.com'",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachment-ids',
+						'description' => "Run only for these attachment ids, CSV. Otherwise, will run for all attachments.",
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'add-extra-sizes-csv',
+						'description' => 'Manually add extra sizes to the list of registered image sizes, CSV. E.g. --add-extra-sizes-csv=1200x900,150x55',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'run-only-for-sizes-csv',
+						'description' => "Run only for the sizes listed in this, CSV. E.g. --run-only-for-sizes-csv=1200x900,150x55",
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -567,6 +616,266 @@ class S3UploadsMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator s3uploads-get-registered-image-sizes`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_download_all_image_sizes_from_atomic( $pos_args, $assoc_args ) {
+
+		$remote_host     = $assoc_args['remote-host'];
+		$attachment_ids  = $assoc_args['attachment-ids'] ?? null;
+		$extra_sizes_csv = $assoc_args['add-extra-sizes-csv'] ?? null;
+		$only_use_sizes_csv = $assoc_args['run-only-for-sizes-csv'] ?? null;
+		if ( ! is_null($extra_sizes_csv) && ! is_null($only_use_sizes_csv) ) {
+			WP_CLI::error( 'Cannot use both --add-extra-sizes-csv and --run-only-for-sizes-csv at the same time.' );
+		}
+
+		$local_host = gethostname();
+
+		/**
+		 * Get all the sizes which this command will fix&download.
+		 */
+		$sizes = [];
+		if ( $only_use_sizes_csv ) {
+			// Running this command only on some specifically provided sizes sizes.
+			$sizes = $this->explode_csv_sizes( $only_use_sizes_csv );
+		} else {
+			// Use all registered sizes.
+			$sizes = $this->get_all_image_sizes();
+			
+			// Merge with extra sizes provided.
+			if ( $extra_sizes_csv ) {
+				$extra_sizes = $this->explode_csv_sizes( $extra_sizes_csv );
+				$sizes = $this->merge_sizes( $sizes, $extra_sizes );
+			}
+		}
+		
+		/**
+		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
+		 */
+		if ( is_null($attachment_ids) ) {
+			$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
+		}
+		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id) {
+			WP_CLI::line( sprintf( '(%d/%d) Attachment ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
+
+			// Skip if attachment is not image.
+			if ( ! wp_attachment_is_image( $attachment_id ) ) {
+				WP_CLI::line( sprintf( 'Not an image, skipping.' ) );
+				continue;
+			}
+
+			// Get attachment local path and URL.
+			$local_path = get_attached_file( $attachment_id );
+			if ( false === $local_path ) {
+				WP_CLI::error( sprintf( 'ERROR Attachment ID %d has no local path.', $attachment_id ) );
+			}
+			$url_local  = wp_get_attachment_url( $attachment_id );
+			if ( false === $url_local ) {
+				WP_CLI::error( sprintf( 'ERROR Attachment ID %d has no local URL.', $attachment_id ) );
+			}
+
+			/**
+			 * Download original image file.
+			 */
+			if ( file_exists( $local_path ) ) {
+				WP_CLI::line( sprintf( "- 'original' file found %s", $local_path ) );
+			} else {
+				WP_CLI::line( sprintf( "- 'original' file not found %s, downloading %s", $local_path, $url_remote ) );
+				
+				$url_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local );
+				$downloaded = $this->download_url_to_file( $url_remote, $local_path );
+				if ( is_wp_error($downloaded) || ! $downloaded ) {
+					$err_msg = is_wp_error($downloaded) ? $downloaded->get_error_message() : 'n/a';
+					WP_CLI::warning( sprintf("ERROR downloading att. ID %d 'original' %s : %s", $attachment_id, $url_remote, $err_msg ) );
+				}
+			}
+
+			/**
+			 * Download '-scaled' if it exists on remote. WP automatically scales an image if it's larger than the threshold:
+			 * 	https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
+			 */
+			$local_path_scaled = $this->append_suffix_to_file( $local_path, '-scaled' );
+			if ( file_exists( $local_path_scaled ) )  {
+				WP_CLI::line( sprintf( "+ '-scaled' file found %s, skipping", $local_path_scaled ) );
+			} else {
+				$url_scaled_local = $this->append_suffix_to_file( $url_local, '-scaled' );
+				$url_scaled_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_scaled_local );
+				
+				// If $url_scaled_remote responds with 200, download it.
+				WP_CLI::line( sprintf( "Checking if '-scaled' exists on remote %s ...", $url_scaled_remote ) );
+				$response = wp_remote_head( $url_scaled_remote );
+				if ( 200 == wp_remote_retrieve_response_code( $response ) ) {
+					$downloaded = $this->download_url_to_file( $url_scaled_remote, $local_path_scaled );
+					if ( is_wp_error($downloaded) || ! $downloaded ) {
+						$err_msg = is_wp_error($downloaded) ? $downloaded->get_error_message() : 'n/a';
+						WP_CLI::warning( sprintf("ERROR downloading att. ID %d '-scaled' %s : %s", $attachment_id, $url_scaled_remote, $err_msg ) );
+					}
+				}
+			}
+
+			/**
+			 * Download all subsizes.
+			 */
+			foreach ( $sizes as $key_size => $size ) {
+				$height = $size['height'];
+				$width = $size['width'];
+				$size_name = $height . 'x' . $width;
+				WP_CLI::line( sprintf( 'Size (%d/%d) %s', $key_size + 1, count($sizes), $size_name ) );
+
+				$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
+				if ( file_exists( $local_path_size ) )  {
+					WP_CLI::line( sprintf( "+ %s file found %s, skipping", $size_name, $local_path_size ) );
+				} else {
+					$url_size_local = $this->append_suffix_to_file( $url_local, '-' . $size_name );
+					$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
+					
+					$downloaded = $this->download_url_to_file( $url_size_remote, $local_path_size );
+					if ( is_wp_error($downloaded) || ! $downloaded ) {
+						$err_msg = is_wp_error($downloaded) ? $downloaded->get_error_message() : 'n/a';
+						WP_CLI::warning( sprintf("ERROR downloading att. ID %d size %s %s : %s", $attachment_id, $size_name, $url_size_remote, $err_msg ) );
+					}
+				}
+			}
+
+		}
+
+		// TODO: Log all the things, handle errors.
+
+	}
+
+	public function append_suffix_to_file( string $path_or_url, string $suffix): string {
+
+		$filename = basename($path_or_url);
+		$directory = dirname($path_or_url);
+		$extension = pathinfo($filename, PATHINFO_EXTENSION);
+		$filename_without_extension = pathinfo($filename, PATHINFO_FILENAME);
+	
+		$new_filename = $filename_without_extension . $suffix . '.' . $extension;
+		$new_path_or_url = $directory . '/' . $new_filename;
+	
+		return $new_path_or_url;
+	}
+
+	public function download_url_to_file( string $url, string $path ): true|WP_Error {
+		
+		// Download.
+		$tmp_path = download_url( $url );
+		if ( is_wp_error( $tmp_path ) ) {
+			return $tmp_path;
+		}
+		if ( filesize( $tmp_path ) < 1 ) {
+			return new WP_Error( sprintf( 'File %s was empty', $path ) );
+		}
+
+		// Rename file from $tmpfname to $path.
+		$renamed = rename( $tmp_path, $path );
+		if ( ! $renamed ) {
+			$error = new WP_Error( sprintf( 'Error renaming downloaded file %s from %s to %s', $url, $tmp_path, $path ) );
+			
+			// Clean up and delete the tmp file.
+			if ( file_exists( $tmp_path ) ) {
+				unlink( $tmp_path );
+			}
+			
+			return $error;
+		}
+
+		return true;
+	}
+
+	public function does_size_exist( array $sizes, int $width, int $height ): bool {
+		foreach ( $sizes as $size ) {
+			if ( $size['width'] == $width && $size['height'] == $height ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function merge_sizes( array $sizes1, array $sizes2 ): array {
+		$sizes = $sizes1;
+		foreach ( $sizes2 as $size2 ) {
+			if ( ! $this->does_size_exist($sizes, $size2['width'], $size2['height']) ) {
+				$sizes[] = $size2;
+			}
+		}
+
+		return $sizes;
+	}
+
+	/**
+	 * Explodes a CSV of sizes strings and returns an array.
+	 *
+	 * @param string $sizes_csv
+	 * @return array {
+	 *    @type string width
+	 *    @type string height
+	 *    @type bool   crop
+	 * }
+	 */
+	public function explode_csv_sizes( string $sizes_csv ): array {
+
+		$sizes = [];
+		foreach ( explode( ',', $sizes_csv ) as $size_string ) {
+			$size_exploded = explode( 'x', strtolower($size_string) );
+			if ( count( $size_exploded ) != 2 ) {
+				WP_CLI::error( 'Invalid size string ' . $size_string );
+			}
+
+			$width = $size_exploded[0];
+			$height = $size_exploded[1];
+			if ( $this->does_size_exist( $sizes, $width, $height ) ) {
+				WP_CLI::warning( 'explode_csv_sizes: additional size is already registered and will be fixed ' . $size_string );
+				continue;
+			}
+
+			$sizes[ $size_string ] = [
+				'width'  => $width,
+				'height' => $height,
+				'crop'   => false,
+			];
+		}
+
+		return $sizes;
+	}
+
+	public function get_all_image_sizes(): array {
+		
+		global $_wp_additional_image_sizes;
+		$default_sizes = [ 'thumbnail', 'medium', 'medium_large', 'large' ];
+		$sizes_names = get_intermediate_image_sizes();
+	
+		$sizes = [];
+		foreach ( $sizes_names as $size_name ) {
+			// Get default sizes from options.
+			if ( in_array( $size_name, $default_sizes ) ) {
+				$width  = get_option( $size_name . '_size_w' );
+				$height = get_option( $size_name . '_size_h' );
+				$crop   = (bool) get_option( $size_name . '_crop' );
+				$sizes[ $size_name ] = [
+					'width'  => $width,
+					'height' => $height,
+					'crop'   => $crop,
+				];
+			} elseif ( isset( $_wp_additional_image_sizes[ $size_name ] ) ) {
+				// Get additional sizes from the global.
+				$width  = $_wp_additional_image_sizes[ $size_name ]['width'];
+				$height = $_wp_additional_image_sizes[ $size_name ]['height'];
+				$crop   = $_wp_additional_image_sizes[ $size_name ]['crop'];
+				$sizes[ $size_name ] = [
+					'width'  => $width,
+					'height' => $height,
+					'crop'   => $crop,
+				];
+			}
+		}
+	
+		return $sizes;
 	}
 
 	/**
