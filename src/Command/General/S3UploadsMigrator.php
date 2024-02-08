@@ -634,7 +634,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 		}
 
 		$local_host = gethostname();
-		return;
+
 		/**
 		 * Get all the sizes which this command will fix&download.
 		 */
@@ -784,12 +784,14 @@ class S3UploadsMigrator implements InterfaceCommand {
 		}
 
 		// Rename file from $tmpfname to $path.
+		// phpcs:ignore -- Renaming is intended.
 		$renamed = rename( $tmp_path, $path );
 		if ( ! $renamed ) {
 			$error = new WP_Error( sprintf( 'Error renaming downloaded file %s from %s to %s', $url, $tmp_path, $path ) );
 			
 			// Clean up and delete the tmp file.
 			if ( file_exists( $tmp_path ) ) {
+				// phpcs:ignore -- Will not run on VIP infrastructure.
 				unlink( $tmp_path );
 			}
 			
@@ -927,6 +929,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 		if ( $to_cli ) {
 			WP_CLI::line( $message );
 		}
+		// phpcs:ignore -- Logging is intended.
 		file_put_contents( $file, $message, FILE_APPEND );
 	}
 }
