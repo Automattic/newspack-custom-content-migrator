@@ -228,8 +228,8 @@ class S3UploadsMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'run-only-for-sizes-csv',
-						'description' => 'Run only for the sizes listed in this, CSV. E.g. --run-only-for-sizes-csv=1200x900,150x55',
+						'name'        => 'only-use-sizes',
+						'description' => 'Run only for the sizes listed in this, CSV. E.g. --only-use-sizes=1200x900,150x55',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -628,9 +628,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 		$remote_host        = $assoc_args['remote-host'];
 		$attachment_ids     = $assoc_args['attachment-ids'] ?? null;
 		$extra_sizes_csv    = $assoc_args['add-extra-sizes-csv'] ?? null;
-		$only_use_sizes_csv = $assoc_args['run-only-for-sizes-csv'] ?? null;
+		$only_use_sizes_csv = $assoc_args['only-use-sizes'] ?? null;
 		if ( ! is_null( $extra_sizes_csv ) && ! is_null( $only_use_sizes_csv ) ) {
-			WP_CLI::error( 'Cannot use both --add-extra-sizes-csv and --run-only-for-sizes-csv at the same time.' );
+			WP_CLI::error( 'Cannot use both --add-extra-sizes-csv and --only-use-sizes at the same time.' );
 		}
 
 		$local_host = gethostname();
@@ -652,7 +652,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$sizes       = $this->merge_sizes( $sizes, $extra_sizes );
 			}
 		}
-		
+
 		/**
 		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
 		 */
