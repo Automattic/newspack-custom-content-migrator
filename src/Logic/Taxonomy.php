@@ -37,33 +37,47 @@ class Taxonomy {
 	}
 
 	/**
-	 * Reassigns all content from one category to a different category.
+	 * Reassigns all content from one taxonomy to a different taxonomy.
 	 *
-	 * @param int $source_term_id      Source term_id.
-	 * @param int $destination_term_id Destination term_id.
+	 * @param string $taxonomy     Source taxonomy, e.g. 'category'.
+	 * @param int    $source_term_id      Source term_id.
+	 * @param int    $destination_term_id Destination term_id.
 	 *
 	 * @return void
 	 */
-	public function reassign_all_content_from_one_category_to_another( int $source_term_id, int $destination_term_id ): void {
-		$source_term_taxonomy_id      = $this->get_term_taxonomy_id_by_term_id( $source_term_id );
-		$destination_term_taxonomy_id = $this->get_term_taxonomy_id_by_term_id( $destination_term_id );
+	public function reassign_all_content_from_one_taxonomy_to_another( string $taxonomy, int $source_term_id, int $destination_term_id ): void {
+		// Get post IDs with both terms.
+		$posts_with_both_terms = get_posts(
+			[
+				'fields'           => 'ids',
+				'posts_per_page'   => -1,
+				'post_type'        => 'any',
+				'post_status'      => 'any',
+				'suppress_filters' => true,
+				'tax_query'        => [
+					'relation' => 'AND',
+					[
+						'taxonomy' => $taxonomy,
+						'field'    => 'term_taxonomy_id',
+						'terms'    => [ $source_term_id ],
+					],
+					[
+						'taxonomy' => $taxonomy,
+						'field'    => 'term_taxonomy_id',
+						'terms'    => [ $destination_term_id ],
+					],
+				],
+			]
+		);
 
-		$this->update_object_relational_mapping_term_taxonomy_id( $source_term_taxonomy_id, $destination_term_taxonomy_id );
+		// Delete the source term from these posts.
+		if ( ! empty( $posts_with_both_terms ) ) {
+			$this->delete_object_relational_mapping_term_taxonomy_id( $source_term_id, $posts_with_both_terms );
+		}
 
-		$this->fix_taxonomy_term_counts( 'category' );
-	}
+		$this->update_object_relational_mapping_term_taxonomy_id( $source_term_id, $destination_term_id );
 
-	/**
-	 * Gets term_taxonomy_id of a term_id.
-	 *
-	 * @param int $term_id Term_id.
-	 *
-	 * @return string|null Return from $wpdb::get_var().
-	 */
-	public function get_term_taxonomy_id_by_term_id( $term_id ) {
-		global $wpdb;
-
-		return $wpdb->get_var( $wpdb->prepare( "SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy} WHERE term_id = %d;", $term_id ) );
+		$this->fix_taxonomy_term_counts( $taxonomy );
 	}
 
 	/**
@@ -77,7 +91,23 @@ class Taxonomy {
 	public function update_object_relational_mapping_term_taxonomy_id( $old_term_taxonomy_id, $new_term_taxonomy_id ) {
 		global $wpdb;
 
-		return $wpdb->get_var( $wpdb->prepare( "UPDATE {$wpdb->term_relationships} SET term_taxonomy_id = %d WHERE term_taxonomy_id = %d ;", $new_term_taxonomy_id, $old_term_taxonomy_id ) );
+		return $wpdb->update( $wpdb->term_relationships, [ 'term_taxonomy_id' => $new_term_taxonomy_id ], [ 'term_taxonomy_id' => $old_term_taxonomy_id ] );
+	}
+
+	/**
+	 * Runs a direct DB DELETE on wp_term_relationships table and deletes all rows with a given term_taxonomy_id and post_ids.
+	 *
+	 * @param int   $term_taxonomy_id Term_taxonomy_id.
+	 * @param array $post_ids          Post IDs.
+	 *
+	 * @return string|null Return from $wpdb::query().
+	 */
+	public function delete_object_relational_mapping_term_taxonomy_id( $term_taxonomy_id, $post_ids ) {
+		global $wpdb;
+
+		$object_id_placeholders = implode( ', ', array_fill( 0, count( $post_ids ), '%d' ) );
+
+		return $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->term_relationships} WHERE object_id IN( $object_id_placeholders ) and term_taxonomy_id = %d", array_merge( $post_ids, [ $term_taxonomy_id ] ) ) ); //phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
 
 	/**
@@ -93,9 +123,9 @@ class Taxonomy {
 	public function get_term_id_by_taxonmy_name_and_parent( string $taxonomy, string $name, int $parent_term_id = 0 ) {
 		global $wpdb;
 
-		$query_prepare = "select t.term_id 
+		$query_prepare = "select t.term_id
 			from {$wpdb->terms} t
-			join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+			join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id
 			where tt.taxonomy = %s and t.name = %s and tt.parent = %d;";
 
 		// First try with converting name chars to HTML entities.
@@ -153,9 +183,9 @@ class Taxonomy {
 		if ( 0 != $cat_parent_id ) {
 			$existing_cat_parent_id = $wpdb->get_var(
 				$wpdb->prepare(
-					"select t.term_id 
+					"select t.term_id
 						from {$wpdb->terms} t
-						join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id 
+						join {$wpdb->term_taxonomy} tt on tt.term_id = t.term_id
 						where tt.taxonomy = 'category' and tt.term_id = %d;",
 					$cat_parent_id
 				)
@@ -185,12 +215,12 @@ class Taxonomy {
 		global $wpdb;
 
 		return $wpdb->get_results(
-			"SELECT 
-			t.slug, 
+			"SELECT
+			t.slug,
 			GROUP_CONCAT( DISTINCT tt.taxonomy ORDER BY tt.taxonomy SEPARATOR ', ' ) as taxonomies,
-			GROUP_CONCAT( 
-			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy ) 
-			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  ' 
+			GROUP_CONCAT(
+			    CONCAT( tt.term_id, ':', tt.term_taxonomy_id, ':', tt.taxonomy )
+			    ORDER BY t.term_id, tt.term_taxonomy_id ASC SEPARATOR '  |  '
 			    ) as 'term_id:term_taxonomy_id:taxonomy',
 			COUNT( DISTINCT tt.term_taxonomy_id ) as term_taxonomy_id_count
 			FROM $wpdb->terms t
@@ -212,13 +242,13 @@ class Taxonomy {
 	public function get_terms_and_taxonomies_by_slug( string $slug, array $taxonomies = [ 'category', 'post_tag' ] ) {
 		global $wpdb;
 
-		$query = "SELECT 
-	                t.term_id, 
-	                t.name, t.slug, 
-	                tt.term_taxonomy_id, 
-	                tt.taxonomy, 
-	                tt.parent, 
-	                tt.count 
+		$query = "SELECT
+	                t.term_id,
+	                t.name, t.slug,
+	                tt.term_taxonomy_id,
+	                tt.taxonomy,
+	                tt.parent,
+	                tt.count
 				FROM $wpdb->terms t
 				INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 				WHERE t.slug = %s";

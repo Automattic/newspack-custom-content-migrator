@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use cli\Streams;
+use cli\Table;
 use DateTime;
 use DateTimeZone;
 use DOMDocument;
@@ -20,10 +21,13 @@ use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
+use WP_Http;
 use WP_Term;
 use WP_User;
 
@@ -1004,6 +1008,23 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-set-category-restriction-for-guest-author',
+			[ $this, 'cmd_set_category_restriction_for_guest_author' ],
+			[
+				'shortdesc' => 'Set category restriction for guest author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-file-path',
+						'description' => 'Full path for CSV File pointing to category restrictions.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-vacia-set-featured-images-for-detector-de-mentiras',
 			array( $this, 'cmd_set_featured_images_for_detector_de_mentiras' ),
 			array(
@@ -1332,6 +1353,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-validate-guest-authors',
+			array( $this, 'cmd_validate_guest_authors' ),
+			array(
+				'shortdesc' => 'Go through current Guest Authors and validate their data',
+				'synopsis'  => array(),
+			)
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-vacia-fix-loose-author-terms',
 			array( $this, 'cmd_fix_loose_author_terms' ),
 			array(
@@ -1458,6 +1488,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				]
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-fix-missing-author-guest-author-link',
+			[ $this, 'cmd_fix_missing_author_guest_author_link' ],
+			[
+				'shortdesc' => 'This command will pull a list of authors which seem to be missing a linkage to a guest author',
+				'synopsis'  => [],
 			]
 		);
 
@@ -2497,6 +2536,113 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 
 			$this->insert_user_meta( $user_id, $meta );
+		}
+	}
+
+	/**
+	 * This function handles a custom CSV file provided by the publisher which details which Guest Authors
+	 * should be restricted to certain categories. It relies on the Restrict Author Categories plugin.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception
+	 */
+	public function cmd_set_category_restriction_for_guest_author( $args, $assoc_args ) {
+		$csv_file_path = $assoc_args['csv-file-path'];
+		$iterator      = ( new FileImportFactory() )->get_file( $csv_file_path )->getIterator();
+
+		foreach ( $iterator as $row ) {
+			ConsoleColor::white( 'Processing email:' )->underlined_white( $row['email'] )->output();
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_email( $row['email'] );
+
+			if ( ! $guest_author ) {
+				$user = get_user_by( 'email', $row['email'] );
+
+				if ( $user ) {
+					$guest_author_id = $this->coauthorsplus_logic->create_guest_author_from_wp_user( $user->ID );
+					if ( is_wp_error( $guest_author_id ) ) {
+						$guest_author_login = sanitize_title( $user->display_name );
+						if ( empty( $user->display_name ) ) {
+							$guest_author_login = sanitize_title( $user->first_name . ' ' . $user->last_name );
+						}
+
+						ConsoleColor::white( 'Error creating Guest Author:' )->underlined_white( $row['email'] )->output();
+						ConsoleColor::yellow( 'Possible duplicate user_login' )->underlined_yellow( $guest_author_login )->output();
+						continue;
+					}
+					$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id );
+				} else {
+					ConsoleColor::bright_red( 'Guest Author not found:' )->underlined_bright_red( $row['email'] )->output();
+					continue;
+				}
+			}
+
+			if ( ! empty( $row['update_email'] ) ) {
+				$this->coauthorsplus_logic->update_guest_author( $guest_author->ID, [ 'user_email' => $row['update_email'] ] );
+			}
+
+			if ( empty( $guest_author->linked_account ) ) {
+				ConsoleColor::yellow( 'Guest Author does not have a linked account:' )->underlined_yellow( $row['email'] )->output();
+				$user_by_email = get_user_by( 'email', $guest_author->user_email );
+
+				if ( $user_by_email ) {
+					ConsoleColor::cyan( 'Found user by email, linking to Guest Author' )->output();
+					$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $user_by_email );
+					$guest_author->linked_account = $user_by_email->user_login;
+				} else {
+					ConsoleColor::green( 'Creating user and linking to Guest Author' )->output();
+					$user_id = wp_insert_user(
+						[
+							'user_login'    => substr( $guest_author->user_email, 0, strpos( $guest_author->user_email, '@' ) ),
+							'user_email'    => $guest_author->user_email,
+							'display_name'  => $guest_author->display_name,
+							'user_nicename' => str_replace( 'cap-', '', $guest_author->user_login ),
+							'user_pass'     => wp_generate_password( 24 ),
+							'role'          => 'contributor',
+						]
+					);
+
+					$new_user = get_user_by( 'id', $user_id );
+					$this->coauthorsplus_logic->link_guest_author_to_wp_user( $guest_author->ID, $new_user );
+					$guest_author->linked_account = $new_user->user_login;
+				}
+			}
+
+			$user = get_user_by( 'login', $guest_author->linked_account );
+
+			if ( ! $user ) {
+				ConsoleColor::bright_red( 'User not found:' )->underlined_bright_red( $guest_author->linked_account )->output();
+				continue;
+			}
+
+			$category_columns = [
+				$row['category_3'],
+				$row['category_2'],
+				$row['category_1'],
+			];
+
+			foreach ( $category_columns as $category_name ) {
+				if ( empty( $category_name ) ) {
+					continue;
+				}
+
+				$category = get_term_by( 'name', $category_name, 'category' );
+
+				if ( ! $category ) {
+					ConsoleColor::bright_red( 'Category not found:' )->underlined_bright_red( $category_name )->output();
+					continue;
+				}
+
+				resautcat_db_set_user( $user->ID, 'true' );
+				resautcat_db_set_term( $user->ID, $category->term_id, 'true' );
+
+				while ( $category->parent ) {
+					$category = get_term_by( 'id', $category->parent, 'category' );
+					resautcat_db_set_term( $user->ID, $category->term_id, 'true' );
+				}
+			}
 		}
 	}
 
@@ -4484,6 +4630,100 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will pull a list of users which have matching email addresses with Guest Authors, but missing
+	 * cap-linked_account meta data. If the accounts should be linked, then the user_login will be used to
+	 * update the meta data field.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_missing_author_guest_author_link( $args, $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$users_in_question = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM (
+					SELECT 
+					    u.ID as user_id, 
+					    cap_emails.post_id as email_post_id,
+					    u.user_email, 
+					    cap_emails.meta_value as guest_author_email
+					FROM $wpdb->users u 
+					    LEFT JOIN (
+					    	SELECT pm.* FROM wp_postmeta pm
+					    	    INNER JOIN wp_posts p ON pm.post_id = p.ID
+					    	WHERE p.post_type = 'guest-author' AND pm.meta_key = 'cap-user_email'
+					    ) as cap_emails 
+					        ON u.user_email = cap_emails.meta_value 
+					WHERE cap_emails.meta_value IS NOT NULL
+				) as emails
+					LEFT JOIN (
+						SELECT 
+						    post_id, 
+						    meta_value 
+						FROM wp_postmeta 
+						WHERE meta_key = 'cap-linked_account'
+					) as linked_accounts 
+					    ON emails.email_post_id = linked_accounts.post_id
+				WHERE linked_accounts.meta_value = '' 
+				   OR linked_accounts.meta_value IS NULL 
+				ORDER BY emails.email_post_id"
+			)
+		);
+
+		foreach ( $users_in_question as $user ) {
+			$this->output_users_as_table( [ $user->user_id ] );
+			$this->output_post_table( [ $user->email_post_id ] );
+			$this->output_postmeta_table( $user->email_post_id );
+			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
+
+			$this->output_terms_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ) );
+
+			if ( 1 === count( $author_taxonomies ) ) {
+				$this->fix_author_term_data_from_guest_author( intval( $user->email_post_id ), $author_taxonomies[0], get_user_by( 'id', $user->user_id ), false );
+			}
+		}
+	}
+
+	/**
+	 * This function will retrieve any associated term rows for a given guest author ID.
+	 *
+	 * @param int $guest_author_id Guest Author ID.
+	 *
+	 * @return array
+	 */
+	private function get_author_term_from_guest_author_id( int $guest_author_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
+    				t.term_id,
+    				tt.term_taxonomy_id,
+    				t.name,
+    				t.slug,
+    				tt.taxonomy,
+    				tt.description,
+    				tt.count,
+    				tt.parent
+				FROM $wpdb->term_relationships tr 
+				    LEFT JOIN $wpdb->term_taxonomy as tt
+				    	ON tr.term_taxonomy_id = tt.term_taxonomy_id
+					LEFT JOIN $wpdb->terms t 
+					    ON t.term_id = tt.term_id
+					INNER JOIN $wpdb->posts p 
+					    ON tr.object_id = p.ID
+				WHERE tt.taxonomy = 'author' AND p.post_type = 'guest-author' AND tr.object_id = %d",
+				$guest_author_id
+			)
+		);
+	}
+
 	public function cmd_resolve_damaged_author_guest_author_relationships( $args, $assoc_args ) {
 		global $wpdb;
 
@@ -4536,7 +4776,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			foreach ( $connected_guest_author_terms as $connected_guest_author_term ) {
 				$term_ids          = array_filter( $term_ids, fn( $term_id ) => $term_id != $connected_guest_author_term->term_id );
-				$guest_author_post = $this->get_guest_author_post_from_term_id(
+				$guest_author_post = $this->get_guest_author_post_from_term_taxonomy_id(
 					$connected_guest_author_term->term_taxonomy_id
 				);
 
@@ -4806,7 +5046,38 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function output_postmeta_table( array $identifiers ) {
+	/**
+	 * This function will output a table to terminal with the postmeta results for a given Post ID.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array
+	 */
+	public function output_postmeta_table( int $post_id ) {
+		global $wpdb;
+
+		$postmeta_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE post_id = %d ORDER BY meta_key ASC",
+				$post_id
+			)
+		);
+
+		echo WP_CLI::colorize( "%BPostmeta Table (%n%W$post_id%n%B)%n\n" );
+		WP_CLI\Utils\format_items(
+			'table',
+			$postmeta_rows,
+			array(
+				'meta_id',
+				'meta_key',
+				'meta_value',
+			)
+		);
+
+		return $postmeta_rows;
+	}
+
+	public function output_postmeta_data_table( array $identifiers ) {
 		global $wpdb;
 
 		$base_query = "SELECT * FROM $wpdb->postmeta WHERE ";
@@ -4821,7 +5092,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			echo WP_CLI::colorize( "%BPostmeta's Table (%n%W$meta_key%n%B)%n\n" );
+			echo WP_CLI::colorize( "%BPostmeta Data (%n%W$meta_key%n%B)%n\n" );
 			WP_CLI\Utils\format_items(
 				'table',
 				$postmeta_rows,
@@ -4897,11 +5168,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		} elseif ( ! empty( $user->first_name ) && ! empty( $user->last_name ) ) {
 			$user_login = sanitize_title( $user->first_name . ' ' . $user->last_name );
 		} else {
-			$user_login = $user->user_login;
+			if ( is_email( $user->user_login ) ) {
+				$user_login = substr( $user->user_email, 0, strpos( $user->user_email, '@' ) );
+			} else {
+				$user_login = $user->user_login;
+			}
 		}
 
 		if ( $user_login == $user->user_nicename ) {
-			echo WP_CLI::colorize( "%wGuest Author user_login%n%W($user_login)%n %wand user_nicename%n%W($user->user_nicename)%n are equal. Updating user_login to%n " );
+			echo WP_CLI::colorize( "%wPotential Guest Author user_login%n%W($user_login)%n %wand user_nicename%n%W($user->user_nicename)%n are equal. Updating user_login to%n " );
 			$user_login = "cap-$user_login";
 			echo WP_CLI::colorize( "%Y$user_login%n\n" );
 		}
@@ -4909,28 +5184,272 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return $user_login;
 	}
 
-	private function get_user_nicename( WP_User $user ) {
-		if ( ! empty( $user->display_name ) ) {
-			return sanitize_title( $user->display_name );
+	/**
+	 * This is a convenience function that allows for immediate feedback on whether the chosen slug is unique.
+	 *
+	 * @param string $slug This is the unique author slug, which should nearly match the user_nicename (e.g. slug = <user_nicename> or slug = cap-<user_nicename>).
+	 * @param int    $term_taxonomy_id Existing term_taxonomy_id to exclude from search result.
+	 *
+	 * @return string
+	 */
+	private function prompt_for_unique_author_slug( string $slug, int $term_taxonomy_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$existing_slugs = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT t.term_id, tt.term_taxonomy_id, t.slug, tt.description 
+					FROM $wpdb->terms t 
+    					LEFT JOIN $wpdb->term_taxonomy tt 
+    					    ON t.term_id = tt.term_id 
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+				$term_taxonomy_id,
+				$slug
+			)
+		);
+
+		if ( ! empty( $existing_slugs ) ) {
+			echo WP_CLI::colorize( "%YExisting slugs found%n\n" );
+			foreach ( $existing_slugs as $record ) {
+				$this->output_terms_table( [ intval( $record->term_id ) ] );
+				$description_id = $this->extract_id_from_description( $record->description );
+				$guest_author_record = $this->get_guest_author_post_from_term_taxonomy_id( $record->term_taxonomy_id );
+
+				if ( null === $guest_author_record ) {
+					echo WP_CLI::colorize( "%Yterm_taxonomy_id (%n%W$record->term_taxonomy_id%n%Y) not connected to Guest Author%n\n" );
+					$guest_author_record = new \stdClass();
+					$guest_author_record->ID = $description_id;
+				}
+
+				$post_ids = array_unique( [ $description_id, $guest_author_record->ID ] );
+
+				foreach ( $post_ids as $post_id ) {
+					$this->output_post_table( [ $post_id ] );
+					$this->output_postmeta_table( $post_id );
+				}
+			}
+			
+			$prompt = $this->ask_prompt( 'What would become the author slug for this GA already exists. Would you like to (u)pdate it, or (h)alt execution?' );
+
+			if ( 'u' === $prompt ) {
+				$user_provided_slug = $this->ask_prompt( 'Please enter a unique slug' );
+
+				if ( ! str_starts_with( $user_provided_slug, 'cap-' ) ) {
+					$user_provided_slug = "cap-$user_provided_slug";
+				}
+
+				return $this->prompt_for_unique_author_slug( $user_provided_slug, $term_taxonomy_id );
+
+			} elseif ( 'h' === $prompt ) {
+				die();
+			}
 		}
 
-		if ( ! empty( $user->first_name ) && ! empty( $user->last_name ) ) {
-			return sanitize_title( $user->first_name . '-' . $user->last_name );
+		return $slug;
+	}
+
+	/**
+	 * Performs a validation to ensure that a user's login, nicename, and display name fields are correctly set.
+	 *
+	 * @param WP_User $user
+	 *
+	 * @return WP_User
+	 */
+	public function validate_user_name_fields( WP_User $user, bool $confirm = false ) {
+		$clone = new WP_User( clone $user->data );
+
+		if ( empty( $clone->user_login ) || is_email( $clone->user_login ) ) {
+			$user_login_first_attempt = substr( $clone->user_email, 0, strpos( $clone->user_email, '@' ) );
+			$user_login          = $user_login_first_attempt;
+			$user_login          = $this->obtain_unique_user_field(
+				'user_login',
+				$user_login,
+				function ( $value ) {
+					return $value . '-' . substr( md5( mt_rand() ), 0, 5 );
+				},
+				$clone->ID,
+				1,
+				1
+			);
+
+			if ( null === $user_login ) {
+				if ( $confirm ) {
+					$user_login = $this->ask_prompt( 'Unable to create a unique user_login. Please (s)et a user_login, or (h)alt execution' );
+
+					if ( 's' === $user_login ) {
+						$user_login = $this->ask_prompt( 'Enter user_login' );
+
+						if ( ! $this->is_unique_user_field( 'user_login', $user_login, $clone->ID ) ) {
+							echo WP_CLI::colorize( "%RThat user_login is not unique. Please review the database. Halting further execution.%n\n" );
+							die();
+						}
+					} else {
+						// Stop execution on any other input.
+						die();
+					}
+				} else {
+					$user_login = $this->obtain_unique_user_field(
+						'user_login',
+						$user_login_first_attempt,
+						function ( $value ) {
+							return $value . '-' . substr( md5( mt_rand() ), 0, 5 );
+						},
+						$clone->ID,
+						1,
+						2
+					);
+
+					if ( null === $user_login ) {
+						echo WP_CLI::colorize( "%RUnable to create a unique user_login. Please review the database. Halting further execution.%n\n" );
+						die();
+					}
+				}
+			}
+
+			$clone->user_login = $user_login;
 		}
 
-		$user_nicename = $this->ask_prompt( 'No display name found. Would you like to (u)pdate user_nicename, (s)et a display_name, or (h)alt execution: ' );
+		if ( ! empty( $clone->display_name ) && ! is_email( $clone->display_name ) ) {
+			$user_nicename_first_attempt = sanitize_title( $clone->display_name );
+			$clone->user_nicename        = $this->obtain_unique_user_nicename( $user_nicename_first_attempt, $clone->ID, $confirm );
+			return $clone;
+		}
+
+		if ( ! empty( $clone->first_name ) && ! empty( $clone->last_name ) ) {
+			// At this point we know that $clone->display_name is either empty or an email, so it should be set/updated.
+			$clone->display_name  = "$clone->first_name $clone->last_name";
+			$clone->user_nicename = $this->obtain_unique_user_nicename( sanitize_title( $clone->first_name . '-' . $clone->last_name ), $clone->ID );
+			return $clone;
+		}
+
+		$user_nicename = $this->ask_prompt( 'No display name found for WP_User. Please (s)et a display_name, or (h)alt execution' );
 
 		if ( 's' === $user_nicename ) {
-			$user->display_name = $this->ask_prompt( 'Enter display name: ' );
-			return $this->get_user_nicename( $user );
+			$clone->display_name = $this->ask_prompt( 'Enter display name' );
+			return $this->validate_user_name_fields( $clone );
 		}
 
-		if ( 'u' === $user_nicename ) {
-			return $this->ask_prompt( 'Enter user_nicename: ' );
-		}
-
-		if ( 'h' === $user_nicename || ! in_array( strtolower( $user_nicename ), array( 's', 'u' ) ) ) {
+		if ( 'h' === $user_nicename || ! in_array( $user_nicename, array( 's' ), true ) ) {
 			die();
+		}
+
+		return $clone;
+	}
+
+
+	/**
+	 * This is a convenience function to help with checking whether a particular user_login or user_nicename
+	 * are unique.
+	 *
+	 * @param string $field The wp_user column to check for uniqueness.
+	 * @param string $value The value to check for uniqueness.
+	 * @param int    $exclude_user_id This user_id should be excluded from the results.
+	 *
+	 * @return bool
+	 */
+	private function is_unique_user_field( string $field, string $value, int $exclude_user_id = 0 ): bool {
+		global $wpdb;
+
+		$field_escaped = esc_sql( $field );
+		$sql_escaped = esc_sql( sprintf( "SELECT ID FROM $wpdb->users WHERE $field_escaped = %s", $value ) );
+
+		if ( $exclude_user_id ) {
+			$sql_escaped = esc_sql( sprintf( "$sql_escaped AND ID <> %d", $exclude_user_id ) );
+		}
+
+		$exists = $wpdb->get_var( $sql_escaped );
+
+		return null === $exists;
+	}
+
+	/**
+	 * This function helps with obtaining a unique user_login or user_nicename. It is a recursive function
+	 * that will make a variable amount of attempts to generate a unique value.
+	 *
+	 * @param string $field The wp_user column to check for uniqueness.
+	 * @param string $value The value to check for uniqueness.
+	 * @param callable $appender A function that will append a value to the $value parameter.
+	 * @param int $attempt The current attempt number.
+	 * @param int $total_attempts The total number of attempts to make.
+	 *
+	 * @return string|null
+	 */
+	private function obtain_unique_user_field( string $field, string $value, $appender, int $exclude_user_id = 0, int $attempt = 1, int $total_attempts = 3 ) {
+		if ( $attempt > $total_attempts ) {
+			return null;
+		}
+
+		if ( ! $this->is_unique_user_field( $field, $value, $exclude_user_id ) ) {
+			$new_value = $appender( $value );
+
+			return $this->obtain_unique_user_field( $field, $new_value, $appender, $exclude_user_id, $attempt + 1, $total_attempts );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Resuable function to facilitate obtaining a unique user_nicename.
+	 *
+	 * @param string $user_nicename_first_attempt The first attempt at creating a unique user_nicename.
+	 * @param int    $exclude_user_id The user_id to exclude from the search.
+	 * @param bool   $confirm Whether to prompt the user for input.
+	 *
+	 * @return string|void|null
+	 */
+	private function obtain_unique_user_nicename( string $user_nicename_first_attempt, int $exclude_user_id = 0, bool $confirm = false ) {
+		$user_nicename = $user_nicename_first_attempt;
+		$user_nicename = $this->obtain_unique_user_field(
+			'user_nicename',
+			$user_nicename,
+			function ( $value ) {
+				return $value . '-' . 1;
+			},
+			$exclude_user_id,
+			1,
+			1
+		);
+
+		if ( null === $user_nicename ) {
+			if ( $confirm ) {
+				$user_nicename = $this->ask_prompt( 'Unable to create a unique user_nicename. Please (s)et a user_nicename, or (h)alt execution' );
+
+				if ( 's' === $user_nicename ) {
+					$user_nicename = $this->ask_prompt( 'Enter user_nicename' );
+
+					if ( ! $this->is_unique_user_field( 'user_nicename', $user_nicename, $exclude_user_id ) ) {
+						echo WP_CLI::colorize( "%RThat user_nicename is not unique. Please review the database. Halting further execution.%n\n" );
+						die();
+					}
+				} else {
+					// Stop execution on any other input.
+					die();
+				}
+			} else {
+				global $wpdb;
+
+				$no_of_similar_nicenames = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT COUNT(*) FROM $wpdb->users WHERE user_nicename LIKE %s",
+						$user_nicename_first_attempt . '-%'
+					)
+				);
+
+				$user_nicename = $this->obtain_unique_user_field(
+					'user_nicename',
+					$user_nicename_first_attempt,
+					function ( $value ) use ( $no_of_similar_nicenames ) {
+						$no_of_similar_nicenames++;
+						return $value . '-' . ( $no_of_similar_nicenames );
+					},
+					$exclude_user_id
+				);
+
+				if ( null === $user_nicename ) {
+					echo WP_CLI::colorize( "%RUnable to create a unique user_nicename. Please review the database. Halting further execution.%n\n" );
+					die();
+				}
+			}
 		}
 
 		return $user_nicename;
@@ -4941,7 +5460,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$keys = array_keys( array_merge( $left_set, $right_set ) );
 		}
 
-		$table = new \cli\Table();
+		$table = new Table();
 		$table->setHeaders(
 			array(
 				'',
@@ -5008,7 +5527,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$keys = array_keys( array_merge( ...$arrays ) );
 		}
 
-		$table = new \cli\Table();
+		$table = new Table();
 		$table->setHeaders(
 			array(
 				'',
@@ -5031,7 +5550,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$table->display();
 	}
 
-	private function get_guest_author_post_from_term_id( int $term_taxonomy_id ) {
+	private function get_guest_author_post_from_term_taxonomy_id( int $term_taxonomy_id ) {
 		echo WP_CLI::colorize( "%BGetting Guest Author Record%n\n" );
 		$this->high_contrast_output( 'Term Taxonomy ID', $term_taxonomy_id );
 		global $wpdb;
@@ -5129,7 +5648,29 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		foreach ( $this->get_cap_fields( $guest_author_post_id ) as $author_cap_field ) {
 			if ( in_array( $author_cap_field['meta_key'], $keys, true ) ) {
-				$filtered_author_cap_fields[ $author_cap_field['meta_key'] ] = $author_cap_field['meta_value'];
+				if ( array_key_exists( $author_cap_field['meta_key'], $filtered_author_cap_fields ) ) {
+					// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					$filtered_author_cap_fields[ $author_cap_field['meta_key'] ] = array(
+						$filtered_author_cap_fields[ $author_cap_field['meta_key'] ],
+						$author_cap_field['meta_value'],
+					);
+				} else {
+					// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					$filtered_author_cap_fields[ $author_cap_field['meta_key'] ] = $author_cap_field['meta_value'];
+				}
+			}
+		}
+
+		foreach ( $filtered_author_cap_fields as $key => $filtered_author_cap_field ) {
+			if ( is_array( $filtered_author_cap_field ) ) {
+
+				unset( $filtered_author_cap_fields[ $key ] );
+
+				foreach ( $this->get_cap_fields( $guest_author_post_id ) as $author_cap_field ) {
+					if ( $author_cap_field['meta_key'] === $key ) {
+						$filtered_author_cap_fields[ $author_cap_field['meta_key'] ][ $author_cap_field['meta_id' ] ] = $author_cap_field['meta_value'];
+					}
+				}
 			}
 		}
 
@@ -5158,7 +5699,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
 
-		$cap_user_login = $this->get_guest_author_user_login( $user );
+//		$cap_user_login = $this->get_guest_author_user_login( $user );
 
 		echo WP_CLI::colorize( "%BWP_User vs wp_postmeta fields%n\n" );
 		$comparison = $this->output_value_comparison_table(
@@ -5279,7 +5820,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->fix_author_term_data_from_guest_author( $guest_author_id, $term, $user );
 	}
 
-	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user ) {
+	private function fix_author_term_data_from_guest_author( $guest_author_id, $term, $user, $confirm = true ) {
 		global $wpdb;
 
 		$guest_author_record        = $this->get_guest_author_post_by_id( $guest_author_id );
@@ -5290,30 +5831,95 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			'cap-display_name',
 		);
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields( $guest_author_id, $cap_fields );
+		$filtered_author_cap_fields = $this->ensure_important_cap_meta_fields_exist( $guest_author_id, $filtered_author_cap_fields );
 
-		$user_display_name         = $user->display_name;
+		$user_display_name = $user->display_name;
+		if ( is_email( $user_display_name ) ) {
+			$user_display_name = '';
+		}
+
+		if ( empty( $user_display_name ) && ! empty( $user->first_name ) && ! empty( $user->last_name ) ) {
+			$user_display_name = "$user->first_name $user->last_name";
+		}
+
 		$post_meta_display_name    = $filtered_author_cap_fields['cap-display_name'] ?? '';
 		$guest_author_display_name = $post_meta_display_name;
 
 		if ( empty( $post_meta_display_name ) && ! empty( $user_display_name ) ) {
 			$guest_author_display_name = $user_display_name;
-		} elseif ( $user_display_name !== $guest_author_display_name ) {
-			$this->high_contrast_output( 'User Display Name', $user_display_name );
-			$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
-			$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (c)ontinue or (h)alt execution' );
+		} elseif ( empty( $user_display_name ) && ! empty( $post_meta_display_name ) ) {
+			$user->display_name = $post_meta_display_name;
+		} elseif ( $user_display_name !== $post_meta_display_name ) {
+			if ( $confirm ) {
+				$this->high_contrast_output( 'User Display Name', $user_display_name );
+				$this->high_contrast_output( 'Guest Author Display Name', $post_meta_display_name );
+				$prompt = $this->ask_prompt( 'Which display name would you like me to use? (u)ser, (g)uest author, (gu) guest author and update user display name, or (h)alt execution' );
 
-			if ( 'u' === $prompt ) {
-				$guest_author_display_name = $user_display_name;
-			} if ( 'g' === $prompt ) {
+				if ( 'u' === $prompt ) {
+					$guest_author_display_name = $user_display_name;
+				} elseif ( 'g' === $prompt || 'gu' === $prompt ) {
+					$user->display_name = $post_meta_display_name;
+
+					if ( 'gu' === $prompt ) {
+						$update = $wpdb->update(
+							$wpdb->users,
+							[
+								'display_name' => $user->display_name,
+							],
+							[
+								'ID' => $user->ID,
+							]
+						);
+					}
+				} else {
+					die();
+				}
+			} else {
 				$user->display_name = $post_meta_display_name;
-			} elseif ( 'h' === $prompt ) {
-				die();
+				$wpdb->update(
+					$wpdb->users,
+					[
+						'display_name' => $user->display_name,
+					],
+					[
+						'ID' => $user->ID,
+					]
+				);
+			}
+		}
+
+		$this->update_relevant_user_fields_if_necessary( $user );
+
+		$cap_user_login = $this->get_guest_author_user_login( $user );
+
+		// Ensure that $cap_user_login is unique, since it will ultimately become the slug for the author term.
+		$cap_user_login = $this->prompt_for_unique_author_slug( $cap_user_login, $term->term_taxonomy_id );
+
+		$capless_user_login = str_replace( 'cap-', '', $cap_user_login );
+		if ( $capless_user_login !== $user->user_nicename ) {
+			echo WP_CLI::colorize( "%wUpdating user_nicename%n %W($user->user_nicename)%n to %G%U($capless_user_login)%n %wso that it conforms with cap-user_login%n %W({$capless_user_login})%n%w:%n " );
+			$user->user_nicename = $capless_user_login;
+
+			$user_update = $wpdb->update(
+				$wpdb->users,
+				array(
+					'user_nicename' => $user->user_nicename,
+				),
+				array(
+					'ID' => $user->ID,
+				)
+			);
+
+			if ( false === $user_update ) {
+				echo WP_CLI::colorize( "%RFailed%n\n" );
+			} else {
+				echo WP_CLI::colorize( "%GSuccess%n\n" );
 			}
 		}
 
 		$insert_guest_author_term_rel_result = $this->insert_guest_author_term_relationship( $guest_author_id, $term->term_taxonomy_id );
 
-		if ( null === $insert_guest_author_term_rel_result ) {
+		if ( null === $insert_guest_author_term_rel_result && $confirm ) {
 			$prompt = $this->ask_prompt( 'Would you like to (u)se that one, allow to (s)kip, or (h)alt execution?' );
 
 			if ( 'h' === $prompt ) {
@@ -5360,7 +5966,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$wpdb->update(
 					$wpdb->posts,
 					array(
-						'post_title' => $value['Display Name'],
+						$key => $value['Display Name'],
 					),
 					array(
 						'ID' => $guest_author_id,
@@ -5368,10 +5974,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				);
 			}
 		}
-
-		$this->update_user_nicename_if_necessary( $user );
-
-		$cap_user_login = $this->get_guest_author_user_login( $user );
 
 		echo WP_CLI::colorize( "%BGuest Author vs wp_postmeta field%n\n" );
 		$comparison = $this->output_value_comparison_table(
@@ -5441,7 +6043,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
-		$this->fix_user_login_and_nicename( $user );
+		//$this->fix_user_login_and_nicename( $user );
 
 		echo WP_CLI::colorize( "%Bwp_postmeta vs User Fields%n\n" );
 		$comparison = $this->output_value_comparison_table(
@@ -5454,7 +6056,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				'cap-linked_account' => $user->user_login,
 			),
 			array(
-				'cap-user_email'     => $filtered_author_cap_fields['cap-user_email'],
+				'cap-user_email'     => $filtered_author_cap_fields['cap-user_email'] ?? '',
 				'cap-linked_account' => $filtered_author_cap_fields['cap-linked_account'] ?? '',
 			),
 			true,
@@ -5480,6 +6082,49 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		$this->update_author_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+	}
+
+	/**
+	 * This function will insert a row into wp_postmeta for guest authors with a missing cap-linked_account or cap-user_email field.
+	 * This field needs to be in the DB so that it can be properly updated when necessary.
+	 *
+	 * @param int   $guest_author_id Guest Author ID.
+	 * @param array $filtered_author_cap_fields Filtered Author Cap Fields.
+	 *
+	 * @return array
+	 * @throws WP_CLI\ExitException Thorws an exception if the insert fails.
+	 */
+	private function ensure_important_cap_meta_fields_exist( int $guest_author_id, array $filtered_author_cap_fields ) {
+		global $wpdb;
+
+		$important_keys = [
+			'cap-linked_account',
+			'cap-user_email',
+		];
+
+		foreach ( $important_keys as $key ) {
+			if ( ! array_key_exists( $key, $filtered_author_cap_fields ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+				$result = $wpdb->insert(
+					$wpdb->postmeta,
+					[
+						'post_id'    => $guest_author_id,
+						'meta_key'   => $key,
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+						'meta_value' => '',
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+					]
+				);
+
+				if ( false === $result ) {
+					WP_CLI::error( "Failed to insert $key postmeta" );
+				}
+
+				$filtered_author_cap_fields[$key] = '';
+			}
+		}
+
+		return $filtered_author_cap_fields;
 	}
 
 	private function procure_unique_user_login( $user_login ) {
@@ -5527,7 +6172,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		$this->high_contrast_output( 'user_login', $user->user_login );
-		$this->update_user_nicename_if_necessary( $user );
+		$this->update_relevant_user_fields_if_necessary( $user );
 
 		$comparison = $this->output_value_comparison_table(
 			array(
@@ -5641,8 +6286,9 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$display_name = ucwords( $this->ask_prompt( 'Enter display_name' ) );
 		}
 
+		//TODO user_login should not collide with other cap-user_login records. It should also not be similar to any existing user_nicename.
 		$sanitized_display_name                   = sanitize_title( $display_name );
-		$use_sanitized_display_name_as_user_login = $this->ask_prompt( "Use '$sanitized_display_name' as user_login? (y/n)" );
+		$use_sanitized_display_name_as_user_login = $this->ask_prompt( "Use '$sanitized_display_name' as basis for slug? (y/n)" );
 		$use_sanitized_display_name_as_user_login = strtolower( $use_sanitized_display_name_as_user_login );
 		if ( 'y' === $use_sanitized_display_name_as_user_login ) {
 			$user_login = $sanitized_display_name;
@@ -6030,6 +6676,668 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
+	/**
+	 * This function will pull the entire list of guest authors in the database, and check that all their
+	 * data is correct. From post_title, to post_name, to all the necessary CAP related meta fields,
+	 * and finally ensuring that the author taxonomy is set up correctly and not colliding
+	 * with other authors.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_validate_guest_authors( $args, $assoc_args ) {
+		global $wpdb;
+
+		$date                   = date( 'Y-m-d' );
+		$job_status_key_name    = 'validate_guest_authors_job_status';
+		$job_details_key_name   = 'validate_guest_authors_job_details';
+		$job_status_option_key  = "{$date}_{$job_status_key_name}"; // Started, Completed, Cancelled.
+		$job_details_option_key = "{$date}_{$job_details_key_name}";
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$current_job_status = $wpdb->get_var(
+			$wpdb->prepare( "SELECT option_value FROM $wpdb->options WHERE option_name = %s",
+				$job_status_option_key
+			)
+		);
+		$current_job_details = [
+			'total'                          => 0,
+			'completed'                      => 0,
+			'not_validated'                  => 0,
+			'next_guest_author_id'           => 0,
+			'completed_guest_author_ids'     => [],
+			'not_validated_guest_author_ids' => [],
+		];
+
+		if ( 'COMPLETED' === $current_job_status ) {
+			// Update keys in DB to append a run number.
+			$no_of_completed_jobs = intval(
+				$wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$wpdb->prepare(
+					"SELECT COUNT(*) FROM $wpdb->options WHERE option_name LIKE %s AND option_value = 'COMPLETED'",
+					$wpdb->esc_like( $job_status_option_key ) . '%'
+					)
+				)
+			);
+			$completed_job_number             = max( $no_of_completed_jobs, 1 );
+			$completed_job_status_option_key  = "{$job_status_option_key}_{$completed_job_number}";
+			$completed_job_details_option_key = "{$job_details_option_key}_{$completed_job_number}";
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update(
+				$wpdb->options,
+				[
+					'option_name' => $completed_job_status_option_key,
+				],
+				[
+					'option_name' => $job_status_option_key,
+				]
+			);
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update(
+				$wpdb->options,
+				[
+					'option_name' => $completed_job_details_option_key,
+				],
+				[
+					'option_name' => $job_details_option_key,
+				]
+			);
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update(
+				$wpdb->postmeta,
+				[
+					'meta_key' => $completed_job_status_option_key,
+				],
+				[
+					'meta_key' => $job_status_option_key,
+				]
+			);
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$wpdb->insert(
+				$wpdb->options,
+				[
+					'option_name'  => $job_status_option_key,
+					'option_value' => 'STARTED',
+					'autoload'     => 'no'
+				]
+			);
+			$current_job_status = 'STARTED';
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$wpdb->insert(
+				$wpdb->options,
+				[
+					'option_name'  => $job_details_option_key,
+					'option_value' => serialize( $current_job_details ),
+					'autoload'     => 'no',
+				]
+			);
+		} elseif ( 'STARTED' === $current_job_status ) {
+			$current_job_details = maybe_unserialize(
+				$wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$wpdb->prepare(
+						"SELECT option_value FROM $wpdb->options WHERE option_name = %s",
+						$job_details_option_key
+					)
+				)
+			);
+		} else {
+			// Start a new job.
+			update_option( $job_status_option_key, 'STARTED', false );
+			$current_job_status = 'STARTED';
+			update_option( $job_details_option_key, $current_job_details, false );
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE $wpdb->options SET option_value = 'CANCELLED' WHERE option_name NOT LIKE %s AND option_value = 'STARTED'",
+				$wpdb->esc_like( $job_status_option_key ) . '%'
+			)
+		);
+
+		// TODO add a param to process skipped records. The query would need an update for the postmeta to find only skipped records.
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$guest_author_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT p.ID FROM $wpdb->posts p 
+    				LEFT JOIN (SELECT * FROM $wpdb->postmeta WHERE meta_key = %s) pm 
+    					ON p.ID = pm.post_id 
+            	WHERE p.post_type = 'guest-author'
+            	  AND pm.meta_value IS NULL 
+            	ORDER BY p.ID",
+				$job_status_option_key,
+			)
+		);
+
+		if ( 0 === $current_job_details['total'] ) {
+			$current_job_details['total'] = count( $guest_author_ids );
+		}
+		$current_job_details['next_guest_author_id'] = $guest_author_ids[0];
+		update_option( $job_details_option_key, $current_job_details, false );
+
+//		$guest_author_ids = array_slice( $guest_author_ids, 0, 50 );
+
+		foreach ( $guest_author_ids as $key => $guest_author_id ) {
+			if ( array_key_exists( $guest_author_id, $current_job_details['not_validated_guest_author_ids'] ) ) {
+				continue;
+			}
+			$number = $current_job_details['completed'] + $current_job_details['not_validated'] + 1;
+			echo "\n\n\n\n$number out of {$current_job_details['total']}\n\n";
+			$current_job_details['next_guest_author_id'] = $guest_author_ids[ $key + 1 ] ?? null;
+			update_option( $job_details_option_key, $current_job_details, false );
+			$validated = true;
+			$validation_issues = [];
+
+			$this->output_post_table( array( $guest_author_id ) );
+			$meta_data = $this->output_postmeta_table( $guest_author_id );
+			$cap_fields = $this->get_filtered_cap_fields( $guest_author_id, array_column( $meta_data, 'meta_key' ) );
+
+			// Search for email in users table.
+			$user_by_email = null;
+			if ( isset( $cap_fields['cap-user_email'] ) ) {
+				if ( is_array( $cap_fields['cap-user_email'] ) ) {
+					echo WP_CLI::colorize( "%rMultiple emails found for Guest Author ID: $guest_author_id%n\n" );
+					$validated = false;
+					$validation_issues[] = [
+						'description' => 'Multiple emails found',
+						'data' => $cap_fields['cap-user_email']
+					];
+				} else {
+					$user_by_email = get_user_by( 'email', $cap_fields['cap-user_email'] );
+				}
+			} else {
+				echo WP_CLI::colorize( "%rNo email found for Guest Author ID: $guest_author_id%n\n" );
+				$validated = false;
+				$validation_issues[] = [
+					'description' => 'No email found.',
+					'data' => null,
+				];
+			}
+
+			// Search for user_login in users table.
+			$user_by_login = null;
+			if ( isset( $cap_fields['cap-linked_account'] ) ) {
+				if ( is_array( $cap_fields['cap-linked_account'] ) ) {
+					echo WP_CLI::colorize( "%MMultiple linked_accounts found for Guest Author ID: $guest_author_id%n\n" );
+
+					foreach ( $cap_fields['cap-linked_account'] as $meta_id => $cap_linked_account_value ) {
+						if ( empty( $cap_linked_account_value ) ) {
+							$delete = $wpdb->delete(
+								$wpdb->postmeta,
+								[
+									'meta_id' => $meta_id,
+								]
+							);
+
+							if ( false === $delete ) {
+								echo WP_CLI::colorize( "%rFailed to delete duplicate and empty cap-linked_account meta_id: $meta_id%n\n" );
+							} else {
+								echo WP_CLI::colorize( "%yDeleted duplicate and empty cap-linked_account meta_id: $meta_id%n\n" );
+								unset( $cap_fields['cap-linked_account'][ $meta_id ] );
+							}
+						}
+					}
+
+					$extra_cap_linked_accounts = array_diff_assoc( $cap_fields['cap-linked_account'], array_unique( $cap_fields['cap-linked_account'] ) );
+
+					foreach ( $extra_cap_linked_accounts as $meta_id => $extra_cap_linked_account ) {
+						$delete = $wpdb->delete(
+							$wpdb->postmeta,
+							[
+								'meta_id' => $meta_id,
+							]
+						);
+
+						if ( false === $delete ) {
+							echo WP_CLI::colorize( "%rFailed to delete duplicate cap-linked_account meta_id: $meta_id%n\n" );
+						} else {
+							echo WP_CLI::colorize( "%yDeleted duplicate cap-linked_account meta_id: $meta_id%n\n" );
+							unset( $cap_fields['cap-linked_account'][ $meta_id ] );
+						}
+					}
+
+					if ( count( $cap_fields['cap-linked_account'] ) > 1 ) {
+						$validated           = false;
+						$validation_issues[] = [
+							'description' => 'Multiple linked_accounts found',
+							'data'        => $cap_fields['cap-linked_account'],
+						];
+					} else {
+						WP_CLI::colorize( "%cResolved duplicate linked_accounts%n\n" );
+						$user_by_login = get_user_by( 'login', $cap_fields['cap-linked_account'][0] );
+					}
+				} else {
+					$user_by_login = get_user_by( 'login', $cap_fields['cap-linked_account'] );
+				}
+			} else {
+				echo WP_CLI::colorize( "%yNo cap-linked_account field found.%n\n" );
+			}
+
+			$user = $this->choose_between_users( $user_by_login, $user_by_email, 'Linked Account' );
+
+			if ( $user instanceof WP_User ) {
+				$this->output_users_as_table( [ $user ] );
+			}
+
+			$author_terms = $this->get_author_term_from_guest_author_id( $guest_author_id );
+
+			if ( empty( $author_terms ) && isset( $cap_fields['cap-user_login'] ) && ! is_array( $cap_fields['cap-user_login'] ) ) {
+				// Search for corresponding Author Term using cap-user_login.
+				$author_terms = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+							t.term_id, 
+							t.name, 
+							t.slug, 
+							tt.term_taxonomy_id,
+							tt.taxonomy, 
+							tt.description
+							FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE t.slug = %s OR tt.description LIKE %s",
+						$cap_fields['cap-user_login'],
+						'%' . $wpdb->esc_like( $cap_fields['cap-user_login'] ) . '%'
+					)
+				);
+
+				if ( ! empty( $author_terms ) && 1 === count( $author_terms ) ) {
+					WP_CLI\Utils\format_items(
+						'table',
+						$author_terms,
+						array_keys( (array) $author_terms[0] )
+					);
+
+					$link_exists = $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT * FROM $wpdb->term_relationships tr LEFT JOIN $wpdb->posts p ON tr.object_id = p.ID WHERE p.post_type = 'guest-author' AND tr.term_taxonomy_id = %d",
+							$author_terms[0]->term_taxonomy_id
+						)
+					);
+
+					if ( $link_exists ) {
+						echo WP_CLI::colorize( "%yAuthor Term is already linked to a Guest Author.%n\n" );
+						$author_terms = [];
+					} else {
+						$choice = Streams::choose( 'Should this term be linked to the Guest Author?',
+							array( 'y', 'n' ),
+							'y' );
+
+						if ( 'y' === $choice ) {
+							$author_term = $author_terms[0];
+							$wpdb->insert(
+								$wpdb->term_relationships,
+								array(
+									'object_id' => $guest_author_id,
+									'term_taxonomy_id' => $author_term->term_taxonomy_id,
+								)
+							);
+						}
+					}
+				}
+			}
+
+
+			if ( empty( $author_terms ) ) {
+				echo WP_CLI::colorize( "%rNo linked author term found for Guest Author ID: $guest_author_id%n\n" );
+				$validated = false;
+				$validation_issues[] = [
+					'description' => 'No linked author term found',
+					'data' => null,
+				];
+
+				$email = $cap_fields['cap-user_email'] ?? $user->user_email ?? null;
+				$terms = [];
+				if ( $email ) {
+					// Do a like search on taxonomy.description using email.
+					$terms = $wpdb->get_results(
+						$wpdb->prepare(
+							"SELECT 
+							t.term_id, 
+							t.name, 
+							t.slug, 
+							tt.term_taxonomy_id,
+							tt.taxonomy, 
+							tt.description
+							FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE tt.description LIKE %s OR t.name LIKE %s",
+							'%' . $wpdb->esc_like( $email ) . '%',
+							'%' . $wpdb->esc_like( $email ) . '%'
+						)
+					);
+				}
+
+				if ( ! empty( $terms ) ) {
+					foreach ( $terms as $term ) {
+						$termmeta_key = $wpdb->get_var(
+							$wpdb->prepare(
+								"SELECT meta_key FROM $wpdb->termmeta WHERE term_id = %d",
+								$term->term_id
+							)
+						);
+
+						$term->meta_key = $termmeta_key;
+					}
+
+					echo WP_CLI::colorize( "%BFound Possible Author Terms Based on Like Search%n\n" );
+					WP_CLI\Utils\format_items(
+						'table',
+						$terms,
+						array_keys( (array) $terms[0] )
+					);
+				}
+
+			} else {
+				echo WP_CLI::colorize( "%BAuthor Terms Table%n\n" );
+				if ( count( $author_terms ) > 1 ) {
+					$validated = false;
+					$validation_issues[] = [
+						'description' => 'Multiple author terms found',
+						'data' => $author_terms,
+					];
+				}
+
+				WP_CLI\Utils\format_items(
+					'table',
+					$author_terms,
+					array_keys( (array) $author_terms[0] )
+				);
+			}
+
+			if ( isset( $cap_fields['cap-linked_account'] ) && ! is_array( $cap_fields['cap-linked_account'] ) ) {
+				if ( $user instanceof WP_User ) {
+					if ( $user->user_login !== $cap_fields['cap-linked_account'] ) {
+						echo WP_CLI::colorize( "%rMismatch between cap-linked_account and user_login for Guest Author ID: $guest_author_id%n\n" );
+						$validated = false;
+						$validation_issues[] = [
+							'description' => 'Mismatch between cap-linked_account and user_login',
+							'data' => [
+								'cap-linked_account' => $cap_fields['cap-linked_account'],
+								'user_login' => $user->user_login,
+							],
+						];
+					}
+				}
+			} elseif ( $user instanceof WP_User && ! isset( $cap_fields['cap-linked_account'] ) ) {
+				// Update cap-linked_account
+				$choice = Streams::choose( 'Link User to Guest Author', array( 'y', 'n' ), 'y' );
+				if ( 'y' === $choice ) {
+					update_post_meta( $guest_author_id, 'cap-linked_account', $user->user_login );
+				}
+			}
+
+			if ( empty( $cap_fields['cap-user_login'] ) ) {
+				$validated = false;
+				$validation_issues[] = [
+					'description' => 'cap-user_login is not set',
+					'data' => $cap_fields['cap-user_login'],
+				];
+			} elseif ( isset( $cap_fields['cap-user_login'] ) && is_array( $cap_fields['cap-user_login'] ) ) {
+				$validated = false;
+				$validation_issues[] = [
+					'description' => 'Multiple cap-user_login fields found.',
+					'data' => $cap_fields['cap-user_login'],
+				];
+			} elseif ( isset( $cap_fields['cap-user_login'] ) && is_email( $cap_fields['cap-user_login'] ) ) {
+				$validated = false;
+				$validation_issues[] = [
+					'description' => 'cap-user_login is an email address',
+					'data' => $cap_fields['cap-user_login'],
+				];
+			}
+
+			$post = get_post( $guest_author_id );
+
+			if ( isset( $cap_fields['cap-user_login'] ) && ! is_array( $cap_fields['cap-user_login'] ) ) {
+				$term_slug = '';
+
+				if ( ! empty( $author_terms ) && 1 === count( $author_terms ) ) {
+					$term_slug = $author_terms[0]->slug;
+				}
+
+				$this->output_comparison_table(
+					[],
+					[
+						'cap-user_login' => $cap_fields['cap-user_login'],
+						'post_name'      => $post->post_name,
+						'term_slug'      => $term_slug,
+					]
+				);
+
+				if ( $post->post_name !== $term_slug ) {
+					$validated = false;
+					$validation_issues[] = [
+						'description' => 'post_name does not match author term slug',
+						'data' => [
+							'post_name' => $post->post_name,
+							'term_slug' => $term_slug,
+						],
+					];
+				} else {
+					// Here we know that wp_post.post_name and wp_terms.slug are equal.
+					// So only need to verify that one of those are equal with cap-user_login.
+					// It also doesn't matter if cap-user_login begins with `cap-` or not,
+					// so we'll remove it from both strings before comparing.
+					$cap_user_login = $cap_fields['cap-user_login'];
+					$cap_user_login = str_replace( 'cap-', '', $cap_user_login );
+					$post_name      = $post->post_name;
+					$post_name	    = str_replace( 'cap-', '', $post_name );
+
+					if ( $cap_user_login !== $post_name ) {
+						$validated           = false;
+						$validation_issues[] = [
+							'description' => 'cap-user_login, post_name, and author term slug do not match (when `cap-` is removed)',
+							'data'        => [
+								'cap-user_login' => $cap_fields['cap-user_login'],
+								'post_name'      => $post_name,
+								'term_slug'      => $term_slug,
+							],
+						];
+					}
+				}
+			}
+
+
+			if ( $validated ) {
+				if ( $user ) {
+					// Here we have a GA and a User who are properly linked.
+					// Now we just want to confirm there hasn't been a false-positive in terms of validation.
+
+					if ( is_email( $user->user_nicename ) ) {
+						$validated = false;
+						$validation_issues[] = [
+							'description' => 'user_nicename is an email address',
+							'data' => $user->user_nicename,
+						];
+					}
+
+					//Confirm User Nicename is correct
+					$validated_user = $this->validate_user_name_fields( $user );
+
+					if ( $validated_user->user_login !== $user->user_login ) {
+						$validated = false;
+						$validation_issues[] = [
+							'description' => 'user_login likely needs to be updated.',
+							'data' => [
+								'validated_user' => $validated_user->data,
+								'user' => $user->data,
+							],
+						];
+					}
+
+					$response = wp_remote_get( "https://www.lasillavacia.com/author/{$post->post_name}/" );
+					$author_page_exists = ! str_contains( $response['body'], '<h1 class="page-title">Archivos:</h1>' );
+					if ( $author_page_exists ) {
+						// The page does not contain archivos, but let's also make sure it doesn't contain this
+						// custom 404 message.
+						$author_page_exists = ! str_contains( strtolower( $response['body'] ), '¡vaya! no se puede encontrar esa' );
+					}
+
+					if ( ! $author_page_exists && $validated_user->user_nicename !== $user->user_nicename ) {
+						$validated           = false;
+						$validation_issues[] = [
+							'description' => 'user_nicename likely needs to be updated.',
+							'data'        => [
+								'validated_user' => $validated_user->data,
+								'user'           => $user->data,
+							],
+						];
+					}
+
+					// This check is not really necessary if the author page exists and does not lead to an archive page.
+					// This is because the main things that need to be equal, term_slug and post_name, are already equal.
+					if ( ! $author_page_exists ) {
+						$cap_user_login = $this->get_guest_author_user_login( $validated_user );
+
+						if ( $cap_user_login !== $cap_fields['cap-user_login'] ) {
+							$validated = false;
+							$validation_issues[] = [
+								'description' => 'cap-user_login likely needs to be updated to correspond to a WP_User which may or may not be linked.',
+								'data' => [
+									'cap_user_login' => $cap_user_login,
+									'cap_fields' => $cap_fields,
+								],
+							];
+						}
+					}
+
+//					if ( $validated ) {
+						$existing_slugs = $wpdb->get_results(
+							$wpdb->prepare(
+								"SELECT t.term_id, tt.term_taxonomy_id, t.slug, tt.description 
+					FROM $wpdb->terms t 
+    					LEFT JOIN $wpdb->term_taxonomy tt 
+    					    ON t.term_id = tt.term_id 
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+								$author_terms[0]->term_taxonomy_id,
+								$cap_user_login
+							)
+						);
+
+						if ( ! empty( $existing_slugs ) ) {
+							$validated = false;
+							$validation_issues[] = [
+								'description' => 'cap-user_login is already in use.',
+								'data' => [
+									'existing_slugs' => $existing_slugs,
+									'cap_fields' => $cap_fields,
+								],
+							];
+						}
+//					}
+
+//					if ( $validated ) {
+						if ( $cap_fields['cap-display_name'] !== $post->post_title ) {
+							$validated = false;
+							$validation_issues[] = [
+								'description' => 'cap-display_name does not match post_title',
+								'data' => [
+									'cap_display_name' => $cap_fields['cap-display_name'],
+									'post_title' => $post->post_title,
+								],
+							];
+						}
+//					}
+
+					if ( $cap_fields['cap-user_email'] !== $validated_user->user_email ) {
+						$validated = false;
+						$validation_issues[] = [
+							'description' => 'cap-user_email does not match user_email',
+							'data' => [
+								'cap_user_email' => $cap_fields['cap-user_email'],
+								'user_email' => $validated_user->user_email,
+							],
+						];
+					}
+
+					if ( ! isset( $cap_fields['cap-linked_account'] ) ) {
+						$validated = false;
+						$validation_issues[] = [
+							'description' => 'cap-linked_account is not set even though a WP_User exists which is likely related',
+							'data' => null,
+						];
+					} elseif ( $cap_fields['cap-linked_account'] !== $validated_user->user_login ) {
+						$validated = false;
+						$validation_issues[] = [
+							'description' => 'cap-linked_account does not match user_login',
+							'data' => [
+								'cap_linked_account' => $cap_fields['cap-linked_account'],
+								'user_login' => $validated_user->user_login,
+							],
+						];
+					}
+
+				} else {
+
+//					if ( $validated ) {
+
+						if ( $cap_fields['cap-display_name'] !== $post->post_title ) {
+							$validated = false;
+							$validation_issues[] = [
+								'description' => 'cap-display_name does not match post_title',
+								'data' => [
+									'cap_display_name' => $cap_fields['cap-display_name'],
+									'post_title' => $post->post_title,
+								],
+							];
+						}
+
+						/*if ( $post->post_title !== $author_terms[0]->name ) {
+							$validated = false;
+							$validation_issues[] = [
+								'description' => 'post_title does not match author term name',
+								'data' => [
+									'post_title' => $post->post_title,
+									'author_term_name' => $author_terms[0]->name,
+								],
+							];
+						}*/
+//					}
+				}
+			}
+
+			if ( $validated ) {
+				update_post_meta( $guest_author_id, $job_status_option_key, 'validated' );
+				if ( ! array_key_exists( $guest_author_id, $current_job_details['completed_guest_author_ids'] ) ) {
+					$current_job_details['completed']++;
+					$current_job_details['completed_guest_author_ids'][$guest_author_id] = $guest_author_id;
+				}
+
+				if ( array_key_exists( $guest_author_id, $current_job_details['not_validated_guest_author_ids'] ) ) {
+					unset( $current_job_details['not_validated_guest_author_ids'][$guest_author_id] );
+					$current_job_details['not_validated']--;
+				}
+				update_option( $job_details_option_key, $current_job_details, false );
+				echo WP_CLI::colorize( "%GVALIDATED%n\n" );
+			} else {
+				echo WP_CLI::colorize( "%rNOT VALIDATED%n\n" );
+				if ( ! array_key_exists( $guest_author_id, $current_job_details['not_validated_guest_author_ids'] ) ) {
+					$current_job_details['not_validated']++;
+					$current_job_details['not_validated_guest_author_ids'][$guest_author_id] = $guest_author_id;
+				}
+
+				if ( array_key_exists( $guest_author_id, $current_job_details['completed_guest_author_ids'] ) ) {
+					unset( $current_job_details['completed_guest_author_ids'][$guest_author_id] );
+					$current_job_details['completed']--;
+				}
+
+				update_post_meta( $guest_author_id, $job_details_option_key, wp_json_encode( $validation_issues ) );
+
+				foreach ( $validation_issues as $issue ) {
+					echo WP_CLI::colorize( "%r{$issue['description']}%n\n" );
+					if ( $issue['data'] ) {
+						var_dump( $issue['data'] );
+					}
+				}
+			}
+		}
+
+		update_option( $job_status_option_key, 'COMPLETED', false );
+	}
+
 	private function get_user_from_possible_identifiers( int $user_id, string $user_email ) {
 		$user_by_id    = get_user_by( 'id', $user_id );
 		$user_by_email = get_user_by( 'email', $user_email );
@@ -6107,26 +7415,41 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 	}
 
-	private function update_user_nicename_if_necessary( WP_User $user ) {
+	/**
+	 * This function handles validating whether a User's user_nicename, display_name, and user_login
+	 * fields are correctly set. If they are not, then it will update the fields accordingly.
+	 *
+	 * @param WP_User $user
+	 *
+	 * @return void
+	 */
+	private function update_relevant_user_fields_if_necessary( WP_User $user ) {
 		global $wpdb;
 
-		$user_nicename = $this->get_user_nicename( $user );
-		$this->high_contrast_output( 'user_nicename', $user_nicename );
+		$validated_user = $this->validate_user_name_fields( $user );
+		$comparison = $this->output_value_comparison_table(
+			[],
+			$user->to_array(),
+			$validated_user->to_array(),
+			true,
+			'Original User',
+			'Validated User'
+		);
 
-		if ( $user_nicename !== $user->user_nicename ) {
-			echo WP_CLI::colorize( '%wUpdating user_nicename%n: ' );
-			$user->user_nicename = $user_nicename;
-			$user_updated        = $wpdb->update(
+		foreach ( $comparison['different'] as $key => $value ) {
+			echo WP_CLI::colorize( "%wUpdating%n %W$key%n %wfrom%n %C{$user->$key}%n %wto%n %C%U{$validated_user->$key}%n:  " );
+			$user->$key = $validated_user->$key;
+			$update = $wpdb->update(
 				$wpdb->users,
-				array(
-					'user_nicename' => $user_nicename,
-				),
-				array(
+				[
+					$key => $value['Validated User'],
+				],
+				[
 					'ID' => $user->ID,
-				)
+				]
 			);
 
-			if ( false === $user_updated ) {
+			if ( false === $update ) {
 				echo WP_CLI::colorize( "%RFailed%n\n" );
 			} else {
 				echo WP_CLI::colorize( "%GSuccess%n\n" );
@@ -6201,12 +7524,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
     			t.slug, 
     			tt.taxonomy, 
     			tt.term_taxonomy_id
-			FROM wp_terms t
-			         LEFT JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id
+			FROM $wpdb->terms t
+			         LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 			WHERE SUBSTR( t.slug, 1, 4 ) = 'cap-' 
 			  AND tt.term_taxonomy_id IS NULL
 			  AND t.term_id NOT IN (
-			      SELECT term_id FROM $wpdb->termmeta WHERE meta_key = 'updated_by_loose_terms_script'
+			      SELECT term_id FROM $wpdb->termmeta WHERE meta_key IN ( 'updated_by_loose_terms_script', 'skipped_by_loose_terms_script' )
 			  )"
 		);
 
@@ -6227,6 +7550,27 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			);
 
 			$guest_author = $this->get_guest_author_from_post_name( $loose_author_term->slug );
+
+			// There might be a Guest Author that has different post_name somehow, but is tied to an email.
+			if ( is_email( $loose_author_term->name ) ) {
+				$potentially_same_guest_authors = $this->get_guest_authors_using_email( $loose_author_term->name );
+				if ( null !== $guest_author ) {
+					$potentially_same_guest_authors = array_filter(
+						$potentially_same_guest_authors,
+						function ( $psga ) use ( $guest_author ) {
+							return $psga->post_id !== $guest_author->ID;
+						}
+					);
+				}
+
+				if ( ! empty( $potentially_same_guest_authors ) ) {
+					echo WP_CLI::colorize( "%YFound%n %C" . count( $potentially_same_guest_authors ) . "%n %Ypotentially same Guest Authors.%n\n" );
+					foreach ( $potentially_same_guest_authors as $psga ) {
+						$this->output_post_table( [ $psga->post_id ] );
+						$this->output_postmeta_table( $psga->post_id );
+					}
+				}
+			}
 
 			if ( null !== $guest_author ) {
 				$this->output_post_table( array( $guest_author->ID ) );
@@ -6388,11 +7732,11 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							echo WP_CLI::colorize( "%BUser by login%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
 							$this->output_users_as_table( array( $user_by_login ) );
 
-							$user_by_email = false;
 							if ( is_email( $terms[0]->name ) ) {
-								$user_by_email = get_user_by( 'email', $terms[0]->name );
+								$user_by_email_taxonomy = get_user_by( 'email', $terms[0]->name );
 								echo WP_CLI::colorize( "%BUser by email%n %w(%n%W{$terms[0]->name}%n%w)%n\n" );
-								$this->output_users_as_table( array( $user_by_email ) );
+								$this->output_users_as_table( array( $user_by_email_taxonomy ) );
+								$user_by_email = $this->choose_between_users( $user_by_email, $user_by_email_taxonomy, 'Email', 'Taxonomy-Email' );
 							}
 
 							if ( $single_taxonomy && 'author' == $taxonomy_record->taxonomy ) {
@@ -6456,7 +7800,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_email->ID;
 				$user_emails[] = $user_by_email->user_email;
 				$this->output_users_as_table( array( $user_by_email ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_email->user_login,
 					)
@@ -6472,7 +7816,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_ids[]    = $user_by_login->ID;
 				$user_emails[] = $user_by_login->user_email;
 				$this->output_users_as_table( array( $user_by_login ) );
-				$postmeta_records = $this->output_postmeta_table(
+				$postmeta_records = $this->output_postmeta_data_table(
 					array(
 						'cap-linked_account' => $user_by_login->user_login,
 					)
@@ -6485,7 +7829,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$user = $this->choose_between_users( $user_by_login, $user_by_email );
 
-			$postmeta_records = $this->output_postmeta_table(
+			$postmeta_records = $this->output_postmeta_data_table(
 				array(
 					'cap-user_email' => $loose_author_term->name,
 					'cap-user_login' => $loose_author_term->slug,
@@ -6595,7 +7939,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 
 				$command = "$standalone_command --guest-author-id=$post_ids[0] ";
-				$prompt  = 'Run the following command? (y/n/h) ';
+				$prompt  = 'Run the following command? (y/n/s/h) ';
 				if ( 1 === count( $term_taxonomy_ids_from_post_id_relationships ) && 1 === count( $term_taxonomy_ids ) ) {
 					if ( $term_taxonomy_ids_from_post_id_relationships[0] === $term_taxonomy_ids[0] ) {
 						$taxonomy_description = $wpdb->get_var(
@@ -6642,6 +7986,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 							continue;
 						} elseif ( 'h' === $response ) {
 							die();
+						} elseif ( 's' === $response ) {
+							$wpdb->insert(
+								$wpdb->termmeta,
+								array(
+									'term_id'    => $loose_author_term->term_id,
+									'meta_key'   => 'skipped_by_loose_terms_script',
+									'meta_value' => 1,
+								)
+							);
+							continue;
 						} else {
 							continue;
 						}
@@ -6753,6 +8107,31 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 	}
 
+	/**
+	 * Attempts to find Guest Authors by leveraging cap-user_email and cap-user_login postmeta fields.
+	 *
+	 * @param string $email
+	 *
+	 * @return array
+	 */
+	private function get_guest_authors_using_email( string $email ) {
+		global $wpdb;
+
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				DISTINCT pm.post_id 
+				FROM $wpdb->postmeta pm 
+				    INNER JOIN $wpdb->posts p 
+				        ON p.ID = pm.post_id 
+				WHERE p.post_type = 'guest-author' 
+				  AND (pm.meta_key = 'cap-user_email' OR pm.meta_key = 'cap-user_login') 
+				  AND pm.meta_value = %s",
+				$email
+			)
+		);
+	}
+
 	private function get_guest_author_from_post_name( string $post_name ) {
 		global $wpdb;
 
@@ -6838,6 +8217,18 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return $user;
 	}
 
+	private function ask_for_confirmation_to_proceed( ) {
+		return Streams::menu(
+			[
+				'continue',
+				'halt execution',
+				'skip this item',
+			],
+			'continue',
+			'Continue, halt execution, or skip this item?'
+		);
+	}
+	
 	private function confirm_ok_to_proceed( int $term_id, bool $delete = false ) {
 		global $wpdb;
 
@@ -6847,6 +8238,14 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( 'h' === $prompt ) {
 			die();
 		} elseif ( 's' === $prompt ) {
+			$wpdb->insert(
+				$wpdb->termmeta,
+				array(
+					'term_id' => $term_id,
+					'meta_key' => 'skipped_by_loose_terms_script',
+					'meta_value' => 1,
+				)
+			);
 			return false;
 		} else {
 			if ( $delete ) {
@@ -7403,6 +8802,14 @@ BLOCK;
 	/**
 	 * @param $args
 	 * @param $assoc_args
+
+	/**
+	 * This function will address post_content containing the text `lasilla.com`. In all cases,
+	 * this was added during the migration process to identify media that needed to be updated.
+	 * However, it was also added erroneously to links that shouldn't have been updated.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 * @return void
 	 */
 	public function cmd_update_post_content_that_has_specific_url( $args, $assoc_args ) {
@@ -7417,14 +8824,19 @@ BLOCK;
 
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
-    				sub.ID, 
-    				sub.post_content 
+				"
+				SELECT 
+				* 
 				FROM (
-				    SELECT ID, post_content FROM $wpdb->posts 
-				    WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
-				) AS sub
-				WHERE sub.ID > %d",
+					SELECT 
+    					*
+					FROM (
+				    	SELECT ID, post_content FROM $wpdb->posts 
+				    	WHERE post_type = 'post' AND post_content LIKE %s ORDER BY ID
+					) AS sub
+					ORDER BY sub.ID
+				) AS subber
+				WHERE subber.ID > %d",
 				'%' . $wpdb->esc_like( 'lasilla.com' ) . '%',
 				$after_post_id
 			)
@@ -7437,6 +8849,7 @@ BLOCK;
 			// Can't seem to trust the system to maintain a carbon copy of the post_content before update, so saving it as postmeta.
 			$this->handle_saving_post_content_as_meta( $post->post_content, $post->ID );
 
+			echo WP_CLI::colorize( "%BHANDLING IMAGES%n\n" );
 			$image_urls = $this->attachments->get_images_sources_from_content( $post->post_content );
 			foreach ( $image_urls as $image_url ) {
 				$this->high_contrast_output( 'Original URL', $image_url );
@@ -7453,6 +8866,7 @@ BLOCK;
 					$this->high_contrast_output( 'Replaced URL', $new_image_url );
 
 					if ( ! str_contains( $new_image_url, 'lasilla.com' ) ) {
+						echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
 						$attachment_id  = $this->attachments->import_external_file( $new_image_url, null, null, null, null, $post->ID );
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
@@ -7461,11 +8875,12 @@ BLOCK;
 					}
 				}
 
-				$exploded = explode( '/', $image_url );
-				$filename = array_pop( $exploded );
+				$exploded            = explode( '/', $image_url );
+				$filename            = array_pop( $exploded );
+				$filename            = urldecode( $filename );
 				$question_mark_index = strpos( $filename, '?' );
 
-				if ( $question_mark_index !== false ) {
+				if ( false !== $question_mark_index ) {
 					$filename = substr( $filename, 0, $question_mark_index );
 				}
 
@@ -7481,11 +8896,16 @@ BLOCK;
 				if ( $possible_attachment_id ) {
 					$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
-				} else {
-					$post->post_content = str_replace( $image_url, "https://lasillavacia.com/$filename", $post->post_content );
+				} elseif ( $file_exists ) {
+					echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
+					$attachment_id  = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+					$attachment_url = wp_get_attachment_url( $attachment_id );
+
+					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
 				}
 			}
 
+			echo WP_CLI::colorize( "%BHANDLING VIDEO URLs%n\n" );
 			preg_match_all( '/<video[^>]+(?:src)="([^">]+)"/', $post->post_content, $video_sources_match );
 			if ( array_key_exists( 1, $video_sources_match ) && ! empty( $video_sources_match[1] ) ) {
 				foreach ( $video_sources_match[1] as $match ) {
@@ -7507,21 +8927,16 @@ BLOCK;
 						if ( $possible_attachment_id ) {
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
-						} else {
-							$post->post_content = str_replace( $match, "https://lasillavacia.com/$filename", $post->post_content );
 						}
 					}
 				}
 			}
 
-			preg_match_all( '/<a[^>]+(?:href)="([^">]+)"/', $post->post_content, $document_sources_match );
-			if ( array_key_exists( 1, $document_sources_match ) && ! empty( $document_sources_match[1] ) ) {
-				foreach ( $document_sources_match[1] as $match ) {
-					if ( ! str_contains( $match, 'lasilla.com' ) ) {
-						continue;
-					}
-
-					$this->high_contrast_output( 'Doc URL', $match );
+			echo WP_CLI::colorize( "%BHANDLING IFRAME URLs%n\n" );
+			preg_match_all( '/<iframe[^>]+(?:src)="([^">]+)"/', $post->post_content, $iframe_source_matches );
+			if ( array_key_exists( 1, $iframe_source_matches ) && ! empty( $iframe_source_matches[1] ) ) {
+				foreach ( $iframe_source_matches[1] as $match ) {
+					$this->high_contrast_output( 'iFrame URL', $match );
 					$filename = WP_CLI\Utils\basename( $match );
 					$this->high_contrast_output( 'Basename filename', $filename );
 					$full_filename_path = $full_path( $filename );
@@ -7540,7 +8955,53 @@ BLOCK;
 							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
 							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 						} else {
-							continue;
+							// Only attempt to correct URL if it contains lasilla.com.
+							// Otherwise, the URL should be fine and/or we shouldn't be touching it.
+							if ( str_contains( $match, 'lasilla.com' ) ) {
+								$url = $this->attempt_to_get_correct_url( $match, $post->ID );
+
+								if ( $url !== null ) {
+									$post->post_content = str_replace( $match, $url, $post->post_content );
+								}
+							}
+						}
+					}
+				}
+			}
+
+			echo WP_CLI::colorize( "%BHANDLING DOCUMENT URLs%n\n" );
+			preg_match_all( '/<a[^>]+(?:href)="([^">]+)"/', $post->post_content, $document_sources_match );
+			if ( array_key_exists( 1, $document_sources_match ) && ! empty( $document_sources_match[1] ) ) {
+				foreach ( $document_sources_match[1] as $match ) {
+					if ( ! str_contains( $match, 'lasilla.com' ) ) {
+						continue;
+					}
+
+					$this->high_contrast_output( 'Doc URL', $match );
+					$filename = WP_CLI\Utils\basename( $match );
+					$this->high_contrast_output( 'Basename filename', $filename );
+					$full_filename_path = $full_path( $filename );
+					$file_exists        = file_exists( $full_filename_path );
+					$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
+
+					if ( $file_exists ) {
+						WP_CLI::success('File exists');
+						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+						$attachment_url     = wp_get_attachment_url( $attachment_id );
+						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
+					} else {
+						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+						$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
+
+						if ( $possible_attachment_id ) {
+							$attachment_url     = wp_get_attachment_url( $possible_attachment_id );
+							$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
+						} else {
+							$url = $this->attempt_to_get_correct_url( $match, $post->ID );
+
+							if ( null !== $url ) {
+								$post->post_content = str_replace( $match, $url, $post->post_content );
+							}
 						}
 					}
 				}
@@ -7552,6 +9013,75 @@ BLOCK;
 					'ID'           => $post->ID,
 				)
 			);
+		}
+	}
+
+	/**
+	 * This function will attempt to find the correct URL for URL's containing lasilla.com in them.
+	 *
+	 * @param string $original_url The original URL that needs to be checked.
+	 * @param int    $post_id The post ID where the original URL was found.
+	 *
+	 * @return string|null
+	 */
+	private function attempt_to_get_correct_url( $original_url, $post_id ) {
+		$http        = new WP_Http();
+		$moved_codes = [ $http::MOVED_PERMANENTLY, $http::FOUND ];
+
+		$modified_url = str_replace( 'https://lasilla.com', '/media', $original_url );
+		$this->high_contrast_output( 'Modified URL', $modified_url );
+
+		if ( false === wp_http_validate_url( $modified_url ) ) {
+			echo WP_CLI::colorize( "%YInvalid URL%n\n" );
+			return null;
+		}
+
+		$response = $http->request( $modified_url, [ 'method' => 'HEAD' ] );
+
+		if ( is_wp_error( $response ) ) {
+			// Log error and keep it moving.
+			$this->file_logger( $response->get_error_message() );
+			return null;
+		}
+
+		$response_code = $response['response']['code'];
+
+		if ( in_array( $response_code, $moved_codes, true ) ) {
+			// Getting 302 might indicate that the page was legitimately moved.
+			// So requesting the URL again, this time with GET method, to see what code we get.
+			$response = $http->request( $modified_url, [ 'timeout' => 10, 'redirection' => 5 ] );
+
+			if ( is_wp_error( $response ) ) {
+				// Log error and keep it moving.
+				$this->file_logger( $response->get_error_message() );
+				return null;
+			}
+
+			$response_code = $response['response']['code'];
+		}
+
+		if ( $http::NOT_FOUND === $response_code ) {
+			// Try one more variation to the link.
+			$modified_url = str_replace( 'https://lasilla.com', '/media/docs', $original_url );
+			$response     = $http->request( $modified_url, [ 'timeout' => 10, 'redirection' => 5 ] );
+
+			if ( is_wp_error( $response ) ) {
+				// Log error and keep it moving.
+				$this->file_logger( $response->get_error_message() );
+				return null;
+			}
+
+			$response_code = $response['response']['code'];
+		}
+
+		if ( $http::OK === $response_code ) {
+			// Page was found, so update the post_content with the new URL.
+			echo WP_CLI::colorize( "%gReplacement URL found!%n\n" );
+			return $modified_url;
+		} else {
+			// Page was moved or not found. Log the link and move on.
+			$this->file_logger( "Post ID: $post_id\nOriginal URL:\n$original_url\nModified URL:\n$modified_url\nResponse Code: $response_code\n", true );
+			return null;
 		}
 	}
 
