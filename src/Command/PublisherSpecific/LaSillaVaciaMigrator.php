@@ -5547,9 +5547,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					FROM $wpdb->terms t 
     					LEFT JOIN $wpdb->term_taxonomy tt 
     					    ON t.term_id = tt.term_id 
-         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND (t.slug = %s OR t.slug = %s)",
 				$term_taxonomy_id,
-				$slug
+				$slug,
+				"cap-$slug"
 			)
 		);
 
@@ -5603,7 +5604,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	public function validate_user_name_fields( WP_User $user, bool $confirm = false ) {
 		$clone = new WP_User( clone $user->data );
 
-		if ( empty( $clone->user_login ) || is_email( $clone->user_login ) ) {
+		if ( empty( $clone->user_login ) || is_email( $clone->user_login ) || ! $this->is_unique_user_field( 'user_login', $clone->user_login, $clone->ID ) ) {
 			$user_login_first_attempt = substr( $clone->user_email, 0, strpos( $clone->user_email, '@' ) );
 			$user_login          = $user_login_first_attempt;
 			$user_login          = $this->obtain_unique_user_field(
@@ -5696,13 +5697,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		$field_escaped = esc_sql( $field );
-		$sql_escaped = esc_sql( sprintf( "SELECT ID FROM $wpdb->users WHERE $field_escaped = %s", $value ) );
+		$sql_prepared = $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE $field_escaped = %s", $value );
 
 		if ( $exclude_user_id ) {
-			$sql_escaped = esc_sql( sprintf( "$sql_escaped AND ID <> %d", $exclude_user_id ) );
+			$sql_prepared = $wpdb->prepare( "$sql_prepared AND ID <> %d", $exclude_user_id );
 		}
 
-		$exists = $wpdb->get_var( $sql_escaped );
+		$exists = $wpdb->get_var( $sql_prepared );
 
 		return null === $exists;
 	}
@@ -5721,6 +5722,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 */
 	private function obtain_unique_user_field( string $field, string $value, $appender, int $exclude_user_id = 0, int $attempt = 1, int $total_attempts = 3 ) {
 		if ( $attempt > $total_attempts ) {
+			if ( $this->is_unique_user_field( $field, $value, $exclude_user_id ) ) {
+				return $value;
+			}
+
 			return null;
 		}
 
@@ -5754,6 +5759,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			1,
 			1
 		);
+		// TODO needs to take wp_terms.slug into account.
 
 		if ( null === $user_nicename ) {
 			if ( $confirm ) {
@@ -6233,15 +6239,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
+		$cloned_user = new WP_User( clone $user->data );
+		// TODO to avoid the recursiveness potential on line 6171, perhaps we should check that user_nicename is unique across wp_terms.slug and wp_postmeta.meta_value (cap-user_login)
 		$this->update_relevant_user_fields_if_necessary( $user );
 
-		$cap_user_login = $this->get_guest_author_user_login( $user );
+		if ( $cloned_user->user_nicename !== $user->user_nicename ) {
+			$cap_user_login = $user->user_nicename;
+		} else {
+			$cap_user_login = $this->get_guest_author_user_login( $user );
+		}
 
 		// Ensure that $cap_user_login is unique, since it will ultimately become the slug for the author term.
 		$cap_user_login = $this->prompt_for_unique_author_slug( $cap_user_login, $term->term_taxonomy_id );
 
 		$capless_user_login = str_replace( 'cap-', '', $cap_user_login );
 		if ( $capless_user_login !== $user->user_nicename ) {
+			// TODO this could get recursive here. Need to ensure that if $capless_user_login doesn't equal $user_nicename, that it is unique before updating it.
 			echo WP_CLI::colorize( "%wUpdating user_nicename%n %W($user->user_nicename)%n to %G%U($capless_user_login)%n %wso that it conforms with cap-user_login%n %W({$capless_user_login})%n%w:%n " );
 			$user->user_nicename = $capless_user_login;
 
@@ -6490,7 +6503,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	}
 
 
-	private function fix_standalone_wp_user_author_term_data( WP_User $user, $term ) {
+	public function fix_standalone_wp_user_author_term_data( WP_User $user, $term ) {
 		echo WP_CLI::colorize( "%BWP_User vs Author Term Fields%n\n" );
 		global $wpdb;
 
@@ -6794,7 +6807,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return implode( ' ', $values );
 	}
 
-	private function update_author_description( $user, $term ) {
+	public function update_author_description( $user, $term ) {
 		$description = $this->get_author_term_description( $user );
 
 		global $wpdb;
@@ -7768,7 +7781,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	private function update_relevant_user_fields_if_necessary( WP_User $user ) {
+	public function update_relevant_user_fields_if_necessary( WP_User $user ) {
 		global $wpdb;
 
 		$validated_user = $this->validate_user_name_fields( $user );
