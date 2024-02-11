@@ -5547,9 +5547,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					FROM $wpdb->terms t 
     					LEFT JOIN $wpdb->term_taxonomy tt 
     					    ON t.term_id = tt.term_id 
-         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND t.slug = %s",
+         			WHERE tt.taxonomy = 'author' AND tt.term_taxonomy_id <> %d AND (t.slug = %s OR t.slug = %s)",
 				$term_taxonomy_id,
-				$slug
+				$slug,
+				"cap-$slug"
 			)
 		);
 
