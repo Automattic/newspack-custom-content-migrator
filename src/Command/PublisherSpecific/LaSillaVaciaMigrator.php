@@ -6503,7 +6503,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	}
 
 
-	private function fix_standalone_wp_user_author_term_data( WP_User $user, $term ) {
+	public function fix_standalone_wp_user_author_term_data( WP_User $user, $term ) {
 		echo WP_CLI::colorize( "%BWP_User vs Author Term Fields%n\n" );
 		global $wpdb;
 
@@ -6807,7 +6807,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		return implode( ' ', $values );
 	}
 
-	private function update_author_description( $user, $term ) {
+	public function update_author_description( $user, $term ) {
 		$description = $this->get_author_term_description( $user );
 
 		global $wpdb;
@@ -7781,7 +7781,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	private function update_relevant_user_fields_if_necessary( WP_User $user ) {
+	public function update_relevant_user_fields_if_necessary( WP_User $user ) {
 		global $wpdb;
 
 		$validated_user = $this->validate_user_name_fields( $user );
