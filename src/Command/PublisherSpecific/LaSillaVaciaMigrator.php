@@ -5722,6 +5722,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 */
 	private function obtain_unique_user_field( string $field, string $value, $appender, int $exclude_user_id = 0, int $attempt = 1, int $total_attempts = 3 ) {
 		if ( $attempt > $total_attempts ) {
+			if ( $this->is_unique_user_field( $field, $value, $exclude_user_id ) ) {
+				return $value;
+			}
+
 			return null;
 		}
 
