@@ -5697,13 +5697,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		$field_escaped = esc_sql( $field );
-		$sql_escaped = esc_sql( sprintf( "SELECT ID FROM $wpdb->users WHERE $field_escaped = %s", $value ) );
+		$sql_prepared = $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE $field_escaped = %s", $value );
 
 		if ( $exclude_user_id ) {
-			$sql_escaped = esc_sql( sprintf( "$sql_escaped AND ID <> %d", $exclude_user_id ) );
+			$sql_prepared = $wpdb->prepare( "$sql_prepared AND ID <> %d", $exclude_user_id );
 		}
 
-		$exists = $wpdb->get_var( $sql_escaped );
+		$exists = $wpdb->get_var( $sql_prepared );
 
 		return null === $exists;
 	}
