@@ -23,6 +23,7 @@ use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
@@ -1451,6 +1452,38 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-sync-author-guest-author-to-posts',
+			[ $this, 'cmd_sync_author_guest_author_to_posts' ],
+			[
+				'shortdesc' => 'This command will process a file provided by the LSV team which tells us which Author should be assigned to which Post',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'author-json-path',
+						'description' => 'Path to media directory',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'author-posts-json-path',
+						'description' => 'Path to media directory',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+
+					[
+						'type'        => 'assoc',
+						'name'        => 'after-original-article-id',
+						'description' => 'Process only after this original article ID',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-vacia-upload-missing-publicaciones-images',
 			[ $this, 'cmd_upload_missing_publicaciones_images' ],
 			[
@@ -2477,6 +2510,318 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( ! empty( $unmigrated_users ) ) {
 			$this->file_logger( 'Writing unmigrated users to file.' );
 			file_put_contents( $unmigrated_users_file_path, json_encode( $unmigrated_users ) );
+		}
+	}
+
+	/**
+	 * This command will use an export provided by the LSV team which contains all the author => post
+	 * bylines they'd like to sync to the site.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_sync_author_guest_author_to_posts( $args, $assoc_args ) {
+		$author_posts_json_path    = $assoc_args['author-posts-json-path'];
+		$authors_json_path         = $assoc_args['author-json-path'];
+		$after_original_article_id = $assoc_args['after-original-article-id'] ?? 0;
+
+		$author_posts = wp_json_file_decode( $author_posts_json_path );
+		$authors      = wp_json_file_decode( $authors_json_path );
+
+		$authors_by_id = [];
+		foreach ( $authors as $author ) {
+			$author = (array) $author;
+			if ( ! array_key_exists( $author['id'], $authors_by_id ) ) {
+				$authors_by_id[ $author['id'] ] = $author;
+			} else {
+				WP_CLI::line( 'Duplicate author ID' );
+				$authors_by_id[ $author['id'] ] = array_merge( $authors_by_id[ $author['id'] ], $author );
+			}
+		}
+
+		$author_posts_by_original_article_id = [];
+		foreach ( $author_posts as $author_post ) {
+			$author_post = (array) $author_post;
+
+			if ( ! array_key_exists( $author_post['section_id'], $author_posts_by_original_article_id ) ) {
+				$author_post['user_ids'] = array_unique( array_map( 'intval', $author_post['user_ids'] ) );
+
+				$author_posts_by_original_article_id[ $author_post['section_id'] ] = $author_post;
+			}
+		}
+		$target_original_article_ids             = array_keys( $author_posts_by_original_article_id );
+		$target_original_article_id_placeholders = implode( ',', array_fill( 0, count( $target_original_article_ids ), '%d' ) );
+
+		global $wpdb;
+
+		// Need uncached data, and $target_original_article_id_placeholders is a safe value.
+		// phpcs:disable
+		$imported_posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT post_id, meta_value 
+				FROM $wpdb->postmeta WHERE meta_key IN ('original_article_id','original_post_id','newspack_original_article_id')
+				AND meta_value IN ( $target_original_article_id_placeholders )",
+				...$target_original_article_ids
+			)
+		);
+		// phpcs:enable
+
+		$imported_posts_by_original_article_id = [];
+		foreach ( $imported_posts as $post ) {
+			if ( ! array_key_exists( $post->meta_value, $imported_posts_by_original_article_id ) ) {
+				$imported_posts_by_original_article_id[ $post->meta_value ] = get_post( $post->post_id );
+			} else {
+				ConsoleColor::red( 'Duplicate Original Article ID' )->output();
+				( new ConsoleTable() )->output_comparison(
+					[],
+					[
+						'original_article_id' => $post->meta_value,
+						'POST_ID'             => $post->post_id,
+						'Current Post'        => $imported_posts_by_original_article_id[ $post->meta_value ],
+					]
+				);
+			}
+		}
+
+		ksort( $author_posts_by_original_article_id );
+
+		foreach ( $author_posts_by_original_article_id as $original_article_id => $value ) {
+			if ( $original_article_id < $after_original_article_id ) {
+				unset( $author_posts_by_original_article_id[ $original_article_id ] );
+			} else {
+				break;
+			}
+		}
+
+		$total_posts = count( $author_posts_by_original_article_id );
+		$counter     = 1;
+		foreach ( $author_posts_by_original_article_id as $original_article_id => $value ) {
+			echo "\n\n";
+			WP_CLI::line( sprintf( 'Processing %d of %d', $counter, $total_posts ) );
+			$post = $imported_posts_by_original_article_id[ $original_article_id ] ?? null;
+
+			if ( null === $post ) {
+				ConsoleColor::white( 'Post not found' )
+							->white( 'Original Article ID' )
+							->underlined_white( $original_article_id )
+							->white( 'Original Post ID' )
+							->underlined_white( $value['slug'] )
+							->output();
+
+				++$counter;
+				continue;
+			}
+
+			$output_data = [
+				'Post ID' => $post->ID,
+				'OAID'    => $original_article_id,
+				'DB Post' => $post->post_name,
+				'File'    => $value['slug'],
+			];
+			( new ConsoleTable() )->output_data( [ $output_data ], array_keys( $output_data ) );
+
+			$reset_authors = [];
+			foreach ( $value['user_ids'] as $original_author_id ) {
+				if ( ! array_key_exists( $original_author_id, $authors_by_id ) ) {
+					ConsoleColor::yellow( 'Original Author ID not found in authors_by_id:' )->bright_yellow( $original_author_id )->output();
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$user = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->users WHERE ID = (SELECT user_id FROM $wpdb->usermeta WHERE meta_key = 'original_user_id' AND meta_value = %d)",
+						$original_author_id
+					)
+				);
+
+				$possible_user = null;
+				if ( ! empty( $user ) ) {
+					if ( count( $user ) > 1 ) {
+						ConsoleColor::magenta( 'Multiple Users Found' )->output();
+						( new ConsoleTable() )->output_comparison(
+							[],
+							$authors_by_id[ $original_author_id ],
+							...$user,
+						);
+						$user_menu = [];
+						foreach ( $user as $u ) {
+							$user_menu[ $u->ID ] = $u->user_email;
+						}
+						$user_menu[] = 'None of the above';
+
+						$choice = Streams::menu( $user_menu, null, 'Choose a user' );
+
+						if ( 'None of the above' === $user_menu[ $choice ] ) {
+							continue;
+						}
+
+						$user = get_user_by( 'id', $user_menu[ $choice ] );
+					} else {
+						$user = get_user_by( 'id', $user[0]->ID );
+
+						if ( $user->user_email !== $authors_by_id[ $original_author_id ]['email'] ) {
+							ConsoleColor::bright_yellow( 'Email Mismatch, going to try and find GA' )->output();
+							( new ConsoleTable() )->output_comparison(
+								[],
+								$authors_by_id[ $original_author_id ],
+								(array) $user->data,
+							);
+
+							$possible_user = new WP_User( clone $user->data );
+							$user          = [];
+						}
+					}
+				}
+
+				if ( empty( $user ) ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$guest_author_ids = $wpdb->get_results(
+						$wpdb->prepare(
+							"SELECT DISTINCT post_id FROM $wpdb->postmeta WHERE meta_key IN ('original_user_id', 'newspack_original_post_author') AND meta_value = %d",
+							$original_author_id
+						)
+					);
+
+					if ( empty( $guest_author_ids ) ) {
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$guest_author_ids = $wpdb->get_results(
+							$wpdb->prepare(
+								"SELECT post_id FROM $wpdb->postmeta WHERE meta_key LIKE %s AND meta_value = %s",
+								$wpdb->esc_like( 'cap-' ) . '%',
+								$authors_by_id[ $original_author_id ]['email']
+							)
+						);
+					}
+
+					if ( empty( $guest_author_ids ) ) {
+						ConsoleColor::magenta( 'No Guest Author Found' )
+									->white( 'Original Author ID:' )
+									->underlined_white( $original_author_id )
+									->output();
+						( new ConsoleTable() )->output_comparison(
+							[],
+							$authors_by_id[ $original_author_id ]
+						);
+
+						continue;
+					} elseif ( count( $guest_author_ids ) > 1 ) {
+						foreach ( $guest_author_ids as $key => $guest_author_id ) {
+							$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id->post_id );
+							if ( is_bool( $guest_author ) ) {
+								ConsoleColor::magenta( 'Guest Author results in Bool' )
+											->white( 'Original Author ID' )
+											->underlined_white( $original_author_id )
+											->white( 'Guest Author ID' )
+											->underlined_white( $guest_author_id )
+											->output();
+
+								( new ConsoleTable() )->output_data( [ $guest_author_ids ], array_keys( $guest_author_ids ), 'Guest Author IDs' );
+								( new ConsoleTable() )->output_comparison(
+									[],
+									$authors_by_id[ $original_author_id ]
+								);
+								continue 2;
+							}
+
+							$guest_author_ids[ $guest_author_id->post_id ] = $guest_author;
+							unset( $guest_author_ids[ $key ] );
+						}
+
+						ConsoleColor::yellow( "Multiple GA's" )->output();
+						( new ConsoleTable() )->output_comparison(
+							[],
+							array_values( array_map( fn( $ga ) => $ga->user_email, $guest_author_ids ) )
+						);
+						( new ConsoleTable() )->output_comparison(
+							[],
+							$authors_by_id[ $original_author_id ]
+						);
+						$user_menu = [];
+						foreach ( $guest_author_ids as $ga ) {
+							$user_menu[ $ga->ID ] = $ga->user_email;
+						}
+						$user_menu[] = 'None of the above';
+
+						$choice = Streams::menu( $user_menu, null, 'Choose a GA' );
+
+						if ( 'None of the above' === $user_menu[ $choice ] ) {
+							continue;
+						}
+
+						$user = $guest_author_ids[ $choice ];
+					} else {
+						$user = $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_ids[0]->post_id );
+						if ( is_bool( $user ) ) {
+							ConsoleColor::magenta_with_white_background( 'Guest Author results in Bool' )
+										->white( 'Original Author ID' )
+										->underlined_white( $original_author_id )
+										->output();
+
+							( new ConsoleTable() )->output_data( [ $guest_author_ids ], array_keys( $guest_author_ids ), 'Guest Author IDs' );
+							( new ConsoleTable() )->output_comparison(
+								[],
+								$authors_by_id[ $original_author_id ]
+							);
+							continue;
+						}
+					}
+				}
+
+				if ( empty( $user ) && $possible_user ) {
+					$reset_authors[] = $possible_user;
+				} else {
+					$reset_authors[] = $user;
+				}
+			}
+
+			$prepared_assigned_authors_query = $wpdb->prepare(
+				"SELECT 
+    						t.term_id,
+    						tt.term_taxonomy_id,
+    						t.name,
+    						t.slug,
+    						tt.taxonomy
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt 
+						        ON t.term_id = tt.term_id 
+						    LEFT JOIN $wpdb->term_relationships tr 
+						        ON tt.term_taxonomy_id = tr.term_taxonomy_id 
+						WHERE tt.taxonomy = 'author'
+						  AND tr.object_id = %d",
+				$post->ID
+			);
+
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$currently_assigned_authors = $wpdb->get_results( $prepared_assigned_authors_query );
+
+			$this->coauthorsplus_logic->assign_authors_to_post( $reset_authors, $post->ID );
+
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$assigned_authors_check = $wpdb->get_results( $prepared_assigned_authors_query );
+
+			$term_taxonomy_id_cb = fn( $assigned_author_term ) => intval( $assigned_author_term->term_taxonomy_id );
+			$different_authors   = array_diff(
+				array_map(
+					$term_taxonomy_id_cb,
+					$assigned_authors_check
+				),
+				array_map(
+					$term_taxonomy_id_cb,
+					$currently_assigned_authors
+				)
+			);
+
+			if ( ! empty( $different_authors ) ) {
+				ConsoleColor::cyan( 'Old Authors' )->output();
+				( new ConsoleTable() )->output_comparison( [], ...array_map( fn( $record ) => (array) $record, $currently_assigned_authors ) );
+				ConsoleColor::underlined_cyan( 'New Authors' )->output();
+				( new ConsoleTable() )->output_comparison( [], ...array_map( fn( $record ) => (array) $record, $assigned_authors_check ) );
+			}
+
+			++$counter;
 		}
 	}
 
