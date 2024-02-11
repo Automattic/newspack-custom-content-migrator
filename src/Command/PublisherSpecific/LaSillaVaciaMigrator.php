@@ -5604,7 +5604,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	public function validate_user_name_fields( WP_User $user, bool $confirm = false ) {
 		$clone = new WP_User( clone $user->data );
 
-		if ( empty( $clone->user_login ) || is_email( $clone->user_login ) ) {
+		if ( empty( $clone->user_login ) || is_email( $clone->user_login ) || ! $this->is_unique_user_field( 'user_login', $clone->user_login, $clone->ID ) ) {
 			$user_login_first_attempt = substr( $clone->user_email, 0, strpos( $clone->user_email, '@' ) );
 			$user_login          = $user_login_first_attempt;
 			$user_login          = $this->obtain_unique_user_field(
