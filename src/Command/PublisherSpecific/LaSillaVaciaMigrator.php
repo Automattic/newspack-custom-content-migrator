@@ -6239,15 +6239,22 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
+		$cloned_user = new WP_User( clone $user->data );
+		// TODO to avoid the recursiveness potential on line 6171, perhaps we should check that user_nicename is unique across wp_terms.slug and wp_postmeta.meta_value (cap-user_login)
 		$this->update_relevant_user_fields_if_necessary( $user );
 
-		$cap_user_login = $this->get_guest_author_user_login( $user );
+		if ( $cloned_user->user_nicename !== $user->user_nicename ) {
+			$cap_user_login = $user->user_nicename;
+		} else {
+			$cap_user_login = $this->get_guest_author_user_login( $user );
+		}
 
 		// Ensure that $cap_user_login is unique, since it will ultimately become the slug for the author term.
 		$cap_user_login = $this->prompt_for_unique_author_slug( $cap_user_login, $term->term_taxonomy_id );
 
 		$capless_user_login = str_replace( 'cap-', '', $cap_user_login );
 		if ( $capless_user_login !== $user->user_nicename ) {
+			// TODO this could get recursive here. Need to ensure that if $capless_user_login doesn't equal $user_nicename, that it is unique before updating it.
 			echo WP_CLI::colorize( "%wUpdating user_nicename%n %W($user->user_nicename)%n to %G%U($capless_user_login)%n %wso that it conforms with cap-user_login%n %W({$capless_user_login})%n%w:%n " );
 			$user->user_nicename = $capless_user_login;
 
