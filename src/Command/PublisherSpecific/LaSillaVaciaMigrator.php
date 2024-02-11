@@ -2718,7 +2718,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 											->underlined_white( $guest_author_id )
 											->output();
 
-
 								( new ConsoleTable() )->output_data( [ $guest_author_ids ], array_keys( $guest_author_ids ), 'Guest Author IDs' );
 								( new ConsoleTable() )->output_comparison(
 									[],
