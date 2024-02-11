@@ -5759,6 +5759,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			1,
 			1
 		);
+		// TODO needs to take wp_terms.slug into account.
 
 		if ( null === $user_nicename ) {
 			if ( $confirm ) {
