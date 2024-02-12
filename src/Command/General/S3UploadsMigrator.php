@@ -9,7 +9,6 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\PHP;
 use WP_CLI;
 use WP_Error;
@@ -63,13 +62,6 @@ class S3UploadsMigrator implements InterfaceCommand {
 	private $posts;
 	
 	/**
-	 * Logger.
-	 *
-	 * @var Logger $logger Logger.
-	 */
-	private $logger;
-
-	/**
 	 * Singleton instance.
 	 *
 	 * @var null|InterfaceCommand $instance Instance.
@@ -81,8 +73,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 
-		$this->posts = new Posts();
-		$this->logger = new Logger();
+		$this->posts  = new Posts();
 
 		// Function \readline() has gone missing from Atomic, so here's it is back.
 		if ( ! function_exists( 'readline' ) ) {
@@ -649,7 +640,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		// Get local hostname.
 		$parsed_site_url = parse_url( site_url() );
-		$local_host = $parsed_site_url['host'];
+		$local_host      = $parsed_site_url['host'];
 
 		/**
 		 * Get all the sizes which this command will fix&download.
@@ -668,9 +659,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$sizes       = $this->merge_sizes( $sizes, $extra_sizes );
 			}
 		}
-		$this->log( $log, "Sizes which will be downloaded:" );
+		$this->log( $log, 'Sizes which will be downloaded:' );
 		foreach ( $sizes as $size ) {
-			$this->log( $log, sprintf( "- %sx%s", $size['width'], $size['height'] ) );
+			$this->log( $log, sprintf( '- %sx%s', $size['width'], $size['height'] ) );
 		}
 		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nAdd more sizes by using associative arguments.\nContinue downloading these %d sizes? ", count( $sizes ) ) );
 		if ( 'y' != $input ) {
@@ -688,7 +679,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 			// Skip if attachment is not an image.
 			if ( ! wp_attachment_is_image( $attachment_id ) ) {
-				$this->log( $log, "Not an image, skipping." );
+				$this->log( $log, 'Not an image, skipping.' );
 				continue;
 			}
 
@@ -705,9 +696,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 			}
 
 			// Check if $local_path filename ends in '-scaled'.
-			$attachment_filename = basename($local_path);
-			$attachment_filename_without_extension = pathinfo($attachment_filename, PATHINFO_FILENAME);
-			$attachment_filename_is_scaled = substr($attachment_filename_without_extension, -7) === '-scaled';
+			$attachment_filename                   = basename( $local_path );
+			$attachment_filename_without_extension = pathinfo( $attachment_filename, PATHINFO_FILENAME );
+			$attachment_filename_is_scaled         = substr( $attachment_filename_without_extension, -7 ) === '-scaled';
 
 			/**
 			 * Download original image file.
@@ -778,7 +769,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 						$this->log( $log, sprintf( '+ downloaded %s', $local_path_size ) );
 					}
 				}
-				$i++;
+				++$i;
 			}       
 		}
 
