@@ -24,8 +24,6 @@ use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
-use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
