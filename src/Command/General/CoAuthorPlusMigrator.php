@@ -1247,6 +1247,68 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Use this function to ensure you are getting a wholly unique user_login. It can be used for either a WP_User
+	 * or a Guest Author. It will prompt the user for a new user_login if the one they entered already exists.
+	 *
+	 * @param string $user_login The user_login to check.
+	 * @param int    $exclude_guest_author_id The ID of the Guest Author to exclude from the check.
+	 * @param int    $exclude_user_id The ID of the WP_User to exclude from the check.
+	 *
+	 * @return string
+	 * @throws WP_CLI\ExitException Script halts whenever it detects data that is not valid.
+	 */
+	public function prompt_for_unique_user_login( string $user_login, int $exclude_guest_author_id = 0, int $exclude_user_id = 0 ) {
+		$capless_user_login = str_replace( 'cap-', '', $user_login );
+		$capped_user_login  = 'cap-' . $capless_user_login;
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$exists_in_users_table = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, user_login, user_nicename FROM $wpdb->users WHERE ID != %d AND (user_login = %s OR user_nicename = %s)",
+				$exclude_user_id,
+				$capless_user_login,
+				$capless_user_login
+			)
+		);
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$exists_in_postmeta_table = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT meta_id, meta_value FROM $wpdb->postmeta WHERE post_id != %d AND meta_key = 'cap-user_login' AND meta_value IN (%s, %s)",
+				$exclude_guest_author_id,
+				$capless_user_login,
+				$capped_user_login
+			)
+		);
+
+		if ( ! empty( $exists_in_users_table ) || ! empty( $exists_in_postmeta_table ) ) {
+			ConsoleTable::output_comparison(
+				[
+					'Unique in wp_users?',
+					'Unique in wp_postmeta?',
+				],
+				[
+					'Unique in wp_users?'    => empty( $exists_in_users_table ) ? '✅' : ConsoleColor::yellow( count( $exists_in_users_table ) )->get(),
+					'Unique in wp_postmeta?' => empty( $exists_in_postmeta_table ) ? '✅' : ConsoleColor::yellow( count( $exists_in_postmeta_table ) )->get(),
+				]
+			);
+
+			$bright_user_login = ! empty( $exists_in_users_table ) ?
+				ConsoleColor::bright_white( $capless_user_login )->get() :
+				ConsoleColor::bright_white( $capped_user_login )->get();
+			$prompt            = Streams::prompt( "User login '$bright_user_login' already exists. Please enter a new user_login, or (h)alt execution" );
+
+			if ( 'h' === $prompt ) {
+				WP_CLI::halt( 1 );
+			}
+
+			return $this->prompt_for_unique_user_login( $prompt, $exclude_guest_author_id, $exclude_user_id );
+		}
+
+		return $user_login;
+	}
 
 	/**
 	 * This function facilitates the process of checking if a field exists and has a correct value, and if it doesn't
