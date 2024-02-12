@@ -1247,6 +1247,78 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
+
+	/**
+	 * This function facilitates the process of checking if a field exists and has a correct value, and if it doesn't
+	 * asking the user if they would like to set it.
+	 *
+	 * @param string            $field_name The name of the field to check.
+	 * @param array|string|null $field The value of the field to check.
+	 *
+	 * @return string
+	 * @throws WP_CLI\ExitException Script halts whenever it detects data that is not valid.
+	 */
+	private function get_or_prompt_for_field( string $field_name, $field ): string {
+		if ( null === $field ) {
+			$prompt = Streams::prompt( "This Guest Author has an empty $field_name. Would you like to set one? (y/h)" );
+
+			if ( 'y' === $prompt ) {
+				$field = Streams::prompt( "Please enter a $field_name" );
+				$field = ucwords( $field );
+			} else {
+				WP_CLI::halt( 1 );
+			}
+		} elseif ( is_array( $field ) ) {
+			// Unique values obtained, meta_id as array key is maintained.
+			// This makes it convenient to delete the non-selected values.
+			$unique_field_values = array_unique( $field );
+
+			if ( count( $unique_field_values ) > 1 ) {
+
+				$unique_field_values[] = 'None of the above';// $prompt will be the meta_id that was selected.
+				$prompt                = Streams::menu( $unique_field_values, '', "Please select the $field_name you would like to use (the others will be deleted)" );
+				if ( 'None of the above' === $unique_field_values[ $prompt ] ) {
+					$prompt = Streams::prompt( "Understood, first please enter a $field_name" );
+
+					if ( empty( $prompt ) ) {
+						WP_CLI::halt( 1 );
+					}
+
+					$prompt = ucwords( $prompt );
+
+					foreach ( $field as $meta_id => $meta_value ) {
+						delete_metadata_by_mid( 'post', $meta_id );
+					}
+
+					$field = $prompt;
+				} elseif ( empty( $prompt ) ) {
+					WP_CLI::halt( 1 );
+				} else {
+					foreach ( $field as $meta_id => $meta_value ) {
+						if ( $meta_id !== $prompt ) {
+							delete_metadata_by_mid( 'post', $meta_id );
+						}
+					}
+
+					$field = $unique_field_values[ $prompt ];
+				}
+			} else {
+				$field = reset( $unique_field_values );
+			}
+		} else {
+			$prompt_value = ConsoleColor::bright_white( $field )->get();
+			$prompt       = Streams::prompt( "Use '{$prompt_value}' as $field_name? (y/n)", 'y' );
+
+			if ( 'n' === $prompt ) {
+				$field = Streams::prompt( "Ok then, please provide a $field_name" );
+				$field = ucwords( $field );
+			}
+		}
+
+		return $field;
+	}
+
+	/**
 	 * Taken from https://gist.github.com/sepehr/3371339.
 	 *
 	 * @param int $length Length of string.
