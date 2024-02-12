@@ -6161,7 +6161,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
-		$this->update_author_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+		$this->coauthorsplus_logic->update_author_term_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
 	}
 
 	/**
@@ -6287,7 +6287,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
-		$this->update_author_description( $user, $term );
+		$this->coauthorsplus_logic->update_author_term_description( $user, $term );
 	}
 
 	public function cmd_fix_standalone_guest_author_term_data( $args, $assoc_args ) {
@@ -6483,7 +6483,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
-		$this->update_author_description(
+		$this->coauthorsplus_logic->update_author_term_description(
 			$this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ),
 			$term
 		);
@@ -6502,53 +6502,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$wpdb->term_relationships,
 				array(
 					'object_id'        => $guest_author_id,
-					'term_taxonomy_id' => $term->term_taxonomy_id,
-				)
-			);
-		}
-	}
-
-	private function get_author_term_description( $author ) {
-		// @see https://github.com/Automattic/Co-Authors-Plus/blob/e9e76afa767bc325123c137df3ad7af169401b1f/php/class-coauthors-plus.php#L1623
-		$fields = array(
-			'display_name',
-			'first_name',
-			'last_name',
-			'user_login',
-			'ID',
-			'user_email',
-		);
-
-		$values = array();
-		foreach ( $fields as $field ) {
-			$values[] = $author->$field;
-		}
-
-		return implode( ' ', $values );
-	}
-
-	public function update_author_description( $user, $term ) {
-		$description = $this->get_author_term_description( $user );
-
-		global $wpdb;
-
-		if ( ! isset( $term->description ) ) {
-			$term->description = $wpdb->get_var(
-				$wpdb->prepare(
-					"SELECT description FROM $wpdb->term_taxonomy WHERE term_taxonomy_id = %d",
-					$term->term_taxonomy_id
-				)
-			);
-		}
-
-		if ( $description !== $term->description ) {
-			echo WP_CLI::colorize( "%wUpdating%n %Wwp_term_taxonomy.description%n from %C{$term->description}%n to %G%U{$description}%n\n" );
-			$wpdb->update(
-				$wpdb->term_taxonomy,
-				array(
-					'description' => $description,
-				),
-				array(
 					'term_taxonomy_id' => $term->term_taxonomy_id,
 				)
 			);
@@ -7574,7 +7527,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			array(
 				'term_id'     => $term_id,
 				'taxonomy'    => 'author',
-				'description' => $this->get_author_term_description( $author ),
+				'description' => $this->coauthorsplus_logic->get_author_term_description( $author ),
 				'parent'      => 0,
 				'count'       => 0,
 			)

@@ -1060,6 +1060,52 @@ class CoAuthorPlus {
 	}
 
 	/**
+	 * This function will obtain the CAP description format for an author term and
+	 * update the wp_term_taxonomy.description column with it.
+	 *
+	 * @param object $author The WP_User or Guest Author Object.
+	 * @param object $term The term object.
+	 *
+	 * @return bool|null
+	 */
+	public function update_author_term_description( object $author, object $term ) {
+		$description = $this->get_author_term_description( $author );
+
+		global $wpdb;
+
+		if ( ! isset( $term->description ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$term->description = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT description FROM $wpdb->term_taxonomy WHERE term_taxonomy_id = %d",
+					$term->term_taxonomy_id
+				)
+			);
+		}
+
+		if ( $description !== $term->description ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$update = (bool) $wpdb->update(
+				$wpdb->term_taxonomy,
+				[
+					'description' => $description,
+				],
+				[
+					'term_taxonomy_id' => $term->term_taxonomy_id,
+				]
+			);
+
+			if ( $update ) {
+				$term->description = $description;
+			}
+
+			return $update;
+		}
+
+		return null;
+	}
+
+	/**
 	 * This function will check a Guest Author's user_email, user_login, and linked_account CAP related fields
 	 * against all WP_User's to see if there are any matches. If there are, false is returned because
 	 * this means that the Guest Author is not standalone.
