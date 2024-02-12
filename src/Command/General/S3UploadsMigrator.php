@@ -73,7 +73,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 
-		$this->posts  = new Posts();
+		$this->posts = new Posts();
 
 		// Function \readline() has gone missing from Atomic, so here's it is back.
 		if ( ! function_exists( 'readline' ) ) {
@@ -217,6 +217,20 @@ class S3UploadsMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'attachment-ids',
 						'description' => 'Run only for these attachment ids, CSV. Otherwise, will run for all attachments.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachment-ids-range-from',
+						'description' => 'Run only for these attachment ids, also required attachment-ids-range-to.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'attachment-ids-range-to',
+						'description' => 'Run only for these attachment ids, also required attachment-ids-range-from.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -626,8 +640,18 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_download_all_image_sizes_from_atomic( $pos_args, $assoc_args ) {
 
-		$remote_host        = $assoc_args['remote-host'];
-		$attachment_ids     = isset( $assoc_args['attachment-ids'] ) && ! empty( $assoc_args['attachment-ids'] ) ? explode( ',', $assoc_args['attachment-ids'] ) : null;
+		global $wpdb;
+
+		$remote_host         = $assoc_args['remote-host'];
+		$attachment_ids      = isset( $assoc_args['attachment-ids'] ) && ! empty( $assoc_args['attachment-ids'] ) ? explode( ',', $assoc_args['attachment-ids'] ) : null;
+		$attachment_ids_from = $assoc_args['attachment-ids-range-from'] ?? null;
+		$attachment_ids_to   = $assoc_args['attachment-ids-range-to'] ?? null;
+		if ( ( ! is_null( $attachment_ids_from ) && is_null( $attachment_ids_to ) ) || ( is_null( $attachment_ids_from ) && ! is_null( $attachment_ids_to ) ) ) {
+			WP_CLI::error( 'Must provide both --attachment-ids-range-from and --attachment-ids-range-to at the same time.' );
+		}
+		if ( ! is_null( $attachment_ids_from ) && ! is_null( $attachment_ids ) ) {
+			WP_CLI::error( 'Either provide specific attachments with --attachment-ids or define ID range with --attachment-ids-range-from and --attachment-ids-range-to.' );
+		}
 		$extra_sizes_csv    = $assoc_args['add-extra-sizes'] ?? null;
 		$only_use_sizes_csv = $assoc_args['only-use-sizes'] ?? null;
 		if ( ! is_null( $extra_sizes_csv ) && ! is_null( $only_use_sizes_csv ) ) {
@@ -668,12 +692,16 @@ class S3UploadsMigrator implements InterfaceCommand {
 			exit;
 		}
 
+		// Get attachment IDs.
+		if ( ! is_null( $attachment_ids_from ) && ! is_null( $attachment_ids_to ) ) {
+			$attachment_ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_type = 'attachment' AND ID BETWEEN %d AND %d ORDER BY ID ASC", $attachment_ids_from, $attachment_ids_to ) );
+		} elseif ( is_null( $attachment_ids ) ) {
+			$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
+		}
+
 		/**
 		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
 		 */
-		if ( is_null( $attachment_ids ) ) {
-			$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
-		}
 		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id ) {
 			$this->log( $log, sprintf( '(%d/%d) Attachment ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
 
