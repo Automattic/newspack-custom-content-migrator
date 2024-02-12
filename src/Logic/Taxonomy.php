@@ -338,8 +338,6 @@ class Taxonomy {
 		);
 	}
 
-
-
 	/**
 	 * Retrieves and outputs a table of terms and taxonomies, based on a given array of term_ids or term_taxonomy_ids.
 	 *
@@ -461,5 +459,45 @@ class Taxonomy {
 		);
 
 		return $taxonomies;
+	}
+
+	/**
+	 * Creates a record in wp_term_relationships table for the given object_id and term_taxonomy_id
+	 * if it doesn't already exist. Returns true if the record was created, false if there
+	 * was an error during insertion, and null if the record already existed.
+	 *
+	 * @param int $object_id Object ID.
+	 * @param int $term_taxonomy_id Term Taxonomy ID.
+	 *
+	 * @return bool|null
+	 */
+	public function insert_relationship_if_not_exists( int $object_id, int $term_taxonomy_id ): ?bool {
+		global $wpdb;
+
+		$relationship = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->term_relationships WHERE object_id = %d AND term_taxonomy_id = %d",
+				$object_id,
+				$term_taxonomy_id
+			)
+		);
+
+		if ( empty( $relationship ) ) { // Bummer.
+			$insertion = $wpdb->insert(
+				$wpdb->term_relationships,
+				[
+					'object_id'        => $object_id,
+					'term_taxonomy_id' => $term_taxonomy_id,
+				]
+			);
+
+			if ( false !== $insertion ) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+
+		return null;
 	}
 }
