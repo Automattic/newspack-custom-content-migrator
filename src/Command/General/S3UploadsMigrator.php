@@ -652,6 +652,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$sizes       = $this->merge_sizes( $sizes, $extra_sizes );
 			}
 		}
+		WP_CLI::line( sprintf( 'Sizes which will be downloaded:' ) );
+		foreach ( $sizes as $size ) {
+			WP_CLI::line( sprintf( '- %s', $size['width'] . 'x' . $size['height'] ) );
+		}
+		WP_CLI::confirm( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nAdd more sizes by using associative arguments.\nContinue downloading these %d sizes?", count( $sizes ) ) );
+
 
 		/**
 		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
@@ -662,7 +668,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id ) {
 			WP_CLI::line( sprintf( '(%d/%d) Attachment ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
 
-			// Skip if attachment is not image.
+			// Skip if attachment is not an image.
 			if ( ! wp_attachment_is_image( $attachment_id ) ) {
 				WP_CLI::line( sprintf( 'Not an image, skipping.' ) );
 				continue;
