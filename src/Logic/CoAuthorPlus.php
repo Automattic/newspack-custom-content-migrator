@@ -977,6 +977,11 @@ class CoAuthorPlus {
 			if ( 1 === count( $author_taxonomy ) ) {
 				// This term already seems to have the appropriate author taxonomy connected to it.
 
+				$this->taxonomy_logic->insert_relationship_if_not_exists(
+					$author->ID,
+					$author_taxonomy[0]->term_taxonomy_id
+				);
+
 				return $author_taxonomy[0]->term_taxonomy_id;
 			}
 
@@ -1012,6 +1017,8 @@ class CoAuthorPlus {
 				]
 			);
 		}
+
+		$this->taxonomy_logic->insert_relationship_if_not_exists( $author->ID, $insert );
 
 		return $this->get_guest_author_taxonomy( $term_id )[0]->term_taxonomy_id;
 	}
