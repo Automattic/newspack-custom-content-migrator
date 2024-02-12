@@ -2,13 +2,18 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use cli\Streams;
 use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use \NewspackCustomContentMigrator\PluginSetup;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use \NewspackCustomContentMigrator\Utils\PHP;
 use \WP_CLI;
+use WP_Error;
 use \WP_Query;
 use WP_User_Query;
 
@@ -46,11 +51,19 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	private $posts_logic;
 
 	/**
+	 * Taxonomy logic.
+	 *
+	 * @var Taxonomy $taxonomy_logic Taxonomy logic.
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
 		$this->posts_logic         = new Posts();
+		$this->taxonomy_logic = new Taxonomy();
 	}
 
 	/**
@@ -390,6 +403,30 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 					],
 				],
 			],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-set-standalone-guest-author-data',
+			[ $this, 'cmd_set_standalone_guest_author_data' ],
+			[
+				'shortdesc' => 'Fixes data for a Standalone Guest Author (i.e. one that is NOT linked to a WP_User)',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'guest-author-id',
+						'description' => 'Guest Author ID, (wp_posts.ID)',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'term-id',
+						'description' => 'Term ID, (wp_terms.term_id) that links to a taxonomy, which may need linking to the GA',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
 		);
 	}
 
@@ -1214,6 +1251,381 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		WP_CLI::success( 'Done' );
+	}
+
+	/**
+	 * This function will correct all data associated with a given Guest Author, including their Term data.
+	 * This Guest Author MUST NOT be one that is connected to a WP_User. Use this function only when
+	 * you are 100% sure that you'd like to connect a Guest Author and provided Term ID. If you
+	 * are unsure, first use the `newspack-content-migrator co-authors-validate-guest-author-data` command.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException Script halts whenever it detects data that is not valid.
+	 */
+	public function cmd_set_standalone_guest_author_data( array $args, array $assoc_args ) {
+		$guest_author_id = $assoc_args['guest-author-id'];
+		$term_id         = $assoc_args['term-id'];
+
+		if ( ! $this->coauthorsplus_logic->is_guest_author_standalone( $guest_author_id ) ) {
+			ConsoleColor::red( 'This is not a Standalone Guest Author' )->output();
+			WP_CLI::halt( 1 );
+		}
+
+		global $wpdb;
+
+		$term = $this->taxonomy_logic->get_term_record( $term_id );
+
+		if ( null === $term ) {
+			ConsoleColor::red( "No $wpdb->terms record found for term_id:" )->white( $term_id )->output();
+			WP_CLI::halt( 1 );
+		}
+
+		$author_term_taxonomy = $this->coauthorsplus_logic->get_guest_author_taxonomy( $term_id );
+
+		if ( count( $author_term_taxonomy ) > 1 ) {
+			// TODO Guest-Author-Validation-Refactor - We could prompt to see which record should be used, and whether the other ones should be eliminated.
+			$this->taxonomy_logic->output_term_taxonomy_table(
+				array_map( fn( $row ) => $row->term_taxonomy_id, $author_term_taxonomy ),
+				ConsoleColor::red( 'More than one author term-taxonomy found for term_id:' )->white( $term_id )->get()
+			);
+			WP_CLI::halt( 1 );
+		}
+
+		if ( empty( $author_term_taxonomy ) ) {
+			// Here we know that there is no wp_term_taxonomy row that is linked to the given term_id.
+			$result = $this->coauthorsplus_logic->attempt_to_relate_standalone_guest_author_and_term(
+				$guest_author_id,
+				$term_id
+			);
+
+			if ( is_numeric( $result ) ) {
+				$term->term_taxonomy_id = $result;
+				$author_term_taxonomy   = [ $term ];
+			} elseif ( $result instanceof WP_Error ) {
+				if ( 'existing_slugs' === $result->get_error_code() ) {
+					ConsoleTable::output_data(
+						$result->get_error_data()['existing_slugs'],
+						[],
+						ConsoleColor::yellow( 'This slug is already being used by other terms:' )
+									->underlined_bright_white( $result->get_error_data()['slug'] )
+									->get()
+					);
+				} elseif ( 'multiple-author-taxonomies' === $result->get_error_code() ) {
+					$this->taxonomy_logic->output_term_taxonomy_table(
+						$result->get_error_data()['author_taxonomy_ids'],
+						ConsoleColor::title( 'Author Taxonomies' )
+									->white( '(' )
+									->bright_white( $result->get_error_data()['term_id'] )
+									->white( ')' )
+									->get()
+					);
+				} elseif ( 'insert-failed' === $result->get_error_code() ) {
+					ConsoleColor::red( 'Unable to insert new wp_term_taxonomy record.' )->output();
+					ConsoleTable::output_comparison(
+						[],
+						$result->get_error_data()['insert_data']
+					);
+				} else {
+					ConsoleColor::red( $result->get_error_message() )->output();
+				}
+			} else {
+				ConsoleColor::red( 'Unable to relate Guest Author to Term.' )->output();
+				WP_CLI::halt( 1 );
+			}
+		}
+
+		$this->set_standalone_guest_author_data( $guest_author_id, $author_term_taxonomy[0] );
+	}
+
+	/**
+	 * This function will correct all data associated with a given Guest Author, including their Term data. This Guest
+	 * Author MUST NOT be one that is connected to a WP_User. Use this function only when you are 100% sure that
+	 * you'd like to connect a Guest Author and Term ID. Reference the `@see` tag below if you're not.
+	 *
+	 * @param int    $guest_author_id WP_Post ID of the Guest Author.
+	 * @param object $term Term object.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException Stops execution on invalid input, or if user wants to stop.
+	 *
+	 * @see CoAuthorPlus::is_guest_author_standalone() to give you a confidence check, and if you
+	 * want to play it safe, first use the `newspack-content-migrator co-authors-validate-guest-author-data` command.
+	 */
+	public function set_standalone_guest_author_data( int $guest_author_id, object $term ): void {
+		$this->posts_logic->output_table( [ $guest_author_id ], [], 'Guest Author Record' );
+		$post_guest_author = get_post( $guest_author_id );
+		$this->taxonomy_logic->output_term_and_term_taxonomy_table( [ $term->term_id ], Taxonomy::TERM_ID, 'Author Term' );
+		$filtered_author_cap_fields = $this->coauthorsplus_logic->get_filtered_cap_fields(
+			$guest_author_id,
+			[
+				'cap-user_login',
+				'cap-user_email',
+				'cap-linked_account',
+				'cap-display_name',
+			]
+		);
+
+		ConsoleColor::title_output( 'Post Meta Fields' );
+		ConsoleTable::output_comparison( [], $filtered_author_cap_fields );
+
+		// TODO check to see if there are multiple cap-user_logins.
+
+		// Do I have a display name? If not, then I need to ask for one. If I do, confirm that it's ok to use that one.
+		$display_name = $this->get_or_prompt_for_field(
+			'display_name',
+			$filtered_author_cap_fields['cap-display_name'] ?? null
+		);
+		// If multiple CAP Display Name were found, they might have been deleted at this point.
+		// So we'll get the values from the DB again.
+		$filtered_author_cap_fields['cap-display_name'] =
+			$this->coauthorsplus_logic->get_filtered_cap_fields( $guest_author_id, [ 'cap-display_name' ] )['cap-display_name'];
+		$sanitized_display_name                         = sanitize_title( $display_name );
+
+		$prompt_for_user_login = true;
+		if ( isset( $filtered_author_cap_fields['cap-user_login'] ) && is_string( $filtered_author_cap_fields['cap-user_login'] ) ) {
+			// Skip the prompt for checking if basis for user_login is ok if $sanitized_display_name already matches the cap-user_login.
+			$needles               = [
+				"cap-$sanitized_display_name",
+				$sanitized_display_name,
+			];
+			$prompt_for_user_login = ! empty( str_replace( $needles, '', $filtered_author_cap_fields['cap-user_login'] ) );
+		}
+
+		$slug_login_basis = $sanitized_display_name;
+		$user_login       = "cap-$slug_login_basis";
+
+		if ( ! $prompt_for_user_login && is_email( $filtered_author_cap_fields['cap-user_login'] ) ) {
+			$slug_login_basis      = substr(
+				$filtered_author_cap_fields['cap-user_login'],
+				0,
+				strpos( $filtered_author_cap_fields['cap-user_login'], '@' )
+			);
+			$prompt_for_user_login = true;
+		}
+
+		if ( $prompt_for_user_login ) {
+			$prompt_msg                               = 'Use \'' . ConsoleColor::bright_white( $slug_login_basis )->get() . '\' as basis for cap-user_login and slug? (y/n)';
+			$use_sanitized_display_name_as_user_login = Streams::prompt( $prompt_msg, 'y' );
+
+			if ( 'n' === $use_sanitized_display_name_as_user_login ) {
+				$user_login = Streams::prompt( 'Ok, please enter a new user_login' );
+				$user_login = sanitize_title( strtolower( $user_login ) );
+
+				if ( empty( $user_login ) || is_email( $user_login ) ) {
+					WP_CLI::halt( 1 );
+				}
+
+				$user_login = "cap-$user_login";
+			} else {
+				$user_login = "cap-$slug_login_basis";
+			}
+		}
+
+		// Does $user_login match any existing cap-user_login records or any existing wp_user.user_nicename records?
+		$user_login = $this->prompt_for_unique_user_login( $user_login, $guest_author_id );
+
+		ConsoleColor::title_output( 'Proposed vs Current CAP User Login and Display Name' );
+		$left       = 'Proposed Values';
+		$right      = 'Existing CAP Values';
+		$comparison = ConsoleTable::output_value_comparison(
+			[
+				'cap-user_login',
+				'cap-display_name',
+			],
+			[
+				'cap-user_login'   => $user_login,
+				'cap-display_name' => $display_name,
+			],
+			[
+				'cap-user_login'   => $filtered_author_cap_fields['cap-user_login'] ?? '',
+				'cap-display_name' => $filtered_author_cap_fields['cap-display_name'] ?? '',
+			],
+			true,
+			$left,
+			$right
+		);
+
+		global $wpdb;
+
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+				// Updating $key from $value[ $right ] to $value[ $left ].
+				ConsoleColor::white( 'Updating' )
+							->bright_white( "$key" )
+							->from( 'from' )
+							->bright_cyan( $value[ $right ] )
+							->white( 'to' )
+							->underlined_bright_green( $value[ $left ] )
+							->output();
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$update = $wpdb->update(
+					$wpdb->postmeta,
+					[
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+						'meta_value' => $value[ $left ],
+					],
+					[
+						'meta_key' => $key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+						'post_id'  => $guest_author_id,
+					]
+				);
+
+				if ( $update ) {
+					$filtered_author_cap_fields[ $key ] = $value[ $left ];
+				} else {
+					ConsoleColor::red( 'Unable to update' )->white( $key )->output();
+
+					if ( 'n' === Streams::prompt( 'Continue with script execution? (y/n)', 'n' ) ) {
+						WP_CLI::halt( 1 );
+					}
+				}
+			}
+		}
+
+		ConsoleColor::title_output( 'Name and Title vs WP_Post Name and Title' );
+		$comparison = ConsoleTable::output_value_comparison(
+			[
+				'post_name',
+				'post_title',
+			],
+			[
+				'post_name'  => $filtered_author_cap_fields['cap-user_login'],
+				'post_title' => $display_name,
+			],
+			[
+				'post_name'  => $post_guest_author->post_name,
+				'post_title' => $post_guest_author->post_title,
+			]
+		);
+
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+				// Updating $key from $value[ $right ] to $value[ $left ].
+				ConsoleColor::white( 'Updating' )
+							->bright_white( "$key" )
+							->white( 'from' )
+							->bright_cyan( $value[ $right ] )
+							->white( 'to' )
+							->underlined_bright_green( $value[ $left ] )
+							->output();
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$update = $wpdb->update(
+					$wpdb->posts,
+					[
+						$key => $value['left'],
+					],
+					[
+						'id' => $guest_author_id,
+					]
+				);
+
+				if ( $update ) {
+					$post_guest_author->$key = $value['left'];
+				} else {
+					ConsoleColor::red( 'Unable to update' )->white( $key )->output();
+
+					if ( 'n' === Streams::prompt( 'Continue with script execution? (y/n)', 'n' ) ) {
+						WP_CLI::halt( 1 );
+					}
+				}
+			}
+		}
+
+		ConsoleColor::title_output( 'CAP Display Name and Login vs Author Term' );
+		$comparison = ConsoleTable::output_value_comparison(
+			[
+				'name',
+				'slug',
+			],
+			[
+				'name' => $post_guest_author->post_title,
+				'slug' => $filtered_author_cap_fields['cap-user_login'],
+			],
+			[
+				'name' => $term->name,
+				'slug' => $term->slug,
+			]
+		);
+
+		if ( ! empty( $comparison['different'] ) ) {
+			foreach ( $comparison['different'] as $key => $value ) {
+				// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+				// Updating $key from $value[ $right ] to $value[ $left ].
+				ConsoleColor::white( 'Updating' )
+							->bright_white( "$key" )
+							->white( 'from' )
+							->bright_cyan( $value['RIGHT'] )
+							->white( 'to' )
+							->underlined_bright_green( $value['LEFT'] )
+							->output();
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$update = $wpdb->update(
+					$wpdb->terms,
+					[
+						$key => $value['LEFT'],
+					],
+					[
+						'term_id' => $term->term_id,
+					]
+				);
+
+				if ( $update ) {
+					$term->$key = $value['LEFT'];
+				} else {
+					ConsoleColor::red( 'Unable to update' )->white( $key )->output();
+
+					if ( 'n' === Streams::prompt( 'Continue with script execution? (y/n)', 'n' ) ) {
+						WP_CLI::halt( 1 );
+					}
+				}
+			}
+		}
+
+		wp_cache_flush();
+
+		$current_description = $term->description;
+		$description_result  = $this->coauthorsplus_logic->update_author_term_description(
+			$this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ),
+			$term
+		);
+
+		if ( null !== $description_result ) {
+			if ( $description_result ) {
+				// Updating wp_term_taxonomy.description from $current_description to (updated) $term->description.
+				ConsoleColor::white( 'Updated' )
+							->bright_white( 'wp_term_taxonomy.description' )
+							->white( 'from' )
+							->bright_cyan( $current_description )
+							->white( 'to' )
+							->underlined_bright_green( $term->description )
+							->output();
+			} else {
+				ConsoleColor::red( 'Unable to update wp_term_taxonomy.description.' )->output();
+			}
+		}
+
+		$relationship_result = $this->taxonomy_logic->insert_relationship_if_not_exists( $guest_author_id, $term->term_taxonomy_id );
+
+		if ( null !== $relationship_result ) {
+			if ( $relationship_result ) {
+				ConsoleColor::yellow( 'wp_term_relationship record did not exist, so one was created (object_id:' )
+							->bright_yellow( $guest_author_id )
+							->yellow( ', term_taxonomy_id:' )
+							->bright_yellow( $term->term_taxonomy_id )
+							->yellow( ')' )
+							->output();
+			} else {
+				ConsoleColor::red( 'Unable to create wp_term_relationship record.' )->output();
+			}
+		}
 	}
 
 	/**
