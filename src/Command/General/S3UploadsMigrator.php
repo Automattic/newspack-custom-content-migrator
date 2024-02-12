@@ -775,12 +775,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 			/**
 			 * Download all subsizes.
 			 */
-			$i = 0;
+			$i_size = 0;
 			foreach ( $sizes as $size_name => $size ) {
 				$height    = $size['height'];
 				$width     = $size['width'];
 				$size_name = $height . 'x' . $width;
-				$this->log( $log, sprintf( 'Size (%d/%d) %s', $i + 1, count( $sizes ), $size_name ) );
+				$this->log( $log, sprintf( 'Size (%d/%d) %s', $i_size + 1, count( $sizes ), $size_name ) );
 
 				$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
 				if ( file_exists( $local_path_size ) ) {
@@ -797,7 +797,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 						$this->log( $log, sprintf( '+ downloaded %s', $local_path_size ) );
 					}
 				}
-				++$i;
+				++$i_size;
 			}       
 		}
 
