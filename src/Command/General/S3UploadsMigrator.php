@@ -696,6 +696,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		// Get attachment IDs.
 		if ( ! is_null( $attachment_ids_from ) && ! is_null( $attachment_ids_to ) ) {
+			// phpcs:ignore -- Prepared statement.
 			$attachment_ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_type = 'attachment' AND ID BETWEEN %d AND %d ORDER BY ID ASC", $attachment_ids_from, $attachment_ids_to ) );
 		} elseif ( is_null( $attachment_ids ) ) {
 			$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
@@ -730,6 +731,18 @@ class S3UploadsMigrator implements InterfaceCommand {
 			$attachment_filename_without_extension = pathinfo( $attachment_filename, PATHINFO_FILENAME );
 			$attachment_filename_is_scaled         = substr( $attachment_filename_without_extension, -7 ) === '-scaled';
 
+			// If it's a scaled image, get the original filename path (without the '-scaled' suffix).
+			$local_path_original = null;
+			$url_local_original  = null;
+			if ( $attachment_filename_is_scaled ) {
+				$attachment_metadata          = wp_get_attachment_metadata( $attachment_id );
+				$original_attachment_filename = $attachment_metadata['original_image'] ?? null;
+				if ( ! is_null( $original_attachment_filename ) ) {
+					$local_path_original = str_replace( '/' . $attachment_filename, '/' . $original_attachment_filename, $local_path );
+					$url_local_original  = str_replace( '/' . $attachment_filename, '/' . $original_attachment_filename, $url_local );
+				}
+			}
+			
 			/**
 			 * Download original image file.
 			 */
@@ -782,12 +795,24 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$width     = $size['width'];
 				$size_name = $height . 'x' . $width;
 				$this->log( $log, sprintf( 'Size (%d/%d) %s', $i_size + 1, count( $sizes ), $size_name ) );
-
-				$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
+				
+				// Get size filename. If image was scaled, we need to use the original filename and append size suffix to it.
+				if ( ! $attachment_filename_is_scaled ) {
+					$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
+				} elseif ( $attachment_filename_is_scaled && $original_attachment_filename ) {
+					$local_path_size = $this->append_suffix_to_file( $local_path_original, '-' . $size_name );
+				}
+				
 				if ( file_exists( $local_path_size ) ) {
 					$this->log( $log, sprintf( '+ %s file found %s, skipping', $size_name, $local_path_size ) );
 				} else {
-					$url_size_local  = $this->append_suffix_to_file( $url_local, '-' . $size_name );
+
+					// Get URL of size. If image was scaled, we need to use the original's URL and append size suffix to it.
+					if ( ! $attachment_filename_is_scaled ) {
+						$url_size_local = $this->append_suffix_to_file( $url_local, '-' . $size_name );
+					} else {
+						$url_size_local = $this->append_suffix_to_file( $url_local_original, '-' . $size_name );
+					}
 					$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
 					
 					$downloaded = $this->download_url_to_file( $url_size_remote, $local_path_size );
