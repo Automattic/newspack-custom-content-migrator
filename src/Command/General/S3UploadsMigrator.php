@@ -732,7 +732,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 			 * Download original image file.
 			 */
 			if ( file_exists( $local_path ) ) {
-				$this->log( $log, sprintf( "- 'original' file found %s, skipping", $local_path ) );
+				$this->log( $log, sprintf( "+ 'original' file found %s, skipping", $local_path ) );
 			} else {
 				$url_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local );
 				$this->log( $log, sprintf( "- 'original' file not found %s, downloading %s", $local_path, $url_remote ) );
@@ -745,7 +745,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 			}
 
 			/**
-			 * Download '-scaled' if it exists on remote. WP automatically scales an image if it's larger than the threshold:
+			 * Download '-scaled' if it exists on remote. WP automatically creates a scaled image if it's larger than the threshold:
 			 *  https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
 			 */
 			// If the filename already ends in '-scaled', skip downloading it.
