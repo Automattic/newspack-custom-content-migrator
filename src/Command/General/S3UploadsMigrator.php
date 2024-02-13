@@ -251,6 +251,14 @@ class S3UploadsMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator s3uploads-discover-image-sizes-used-in-post-content',
+			[ $this, 'cmd_discover_image_sizes_used_in_post_content' ],
+			[
+				'shortdesc' => 'Loops through all published Posts and Pages and discovers which image sizes might have been used in Posts and Pages.',
+			]
+		);
 	}
 
 	/**
@@ -633,7 +641,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator s3uploads-get-registered-image-sizes`.
+	 * Callable for `newspack-content-migrator s3uploads-download-all-image-sizes-from-atomic`.
 	 *
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
@@ -689,7 +697,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 		foreach ( $sizes as $size ) {
 			$this->log( $log, sprintf( '- %sx%s', $size['width'], $size['height'] ) );
 		}
-		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nAdd more sizes by using --add-extra-sizes.\nContinue downloading these %d sizes? ", count( $sizes ) ) );
+		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nDiscover which sizes may have been used in post_content with `s3uploads-discover-image-sizes-used-in-post-content` command.\nAdd more sizes by using --add-extra-sizes.\nContinue downloading these %d sizes? ", count( $sizes ) ) );
 		if ( 'y' != $input ) {
 			exit;
 		}
@@ -828,6 +836,93 @@ class S3UploadsMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'All done! 🙌 See log %s for full details.', $log ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator s3uploads-discover-image-sizes-used-in-post-content`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_discover_image_sizes_used_in_post_content( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		// Timestamp the log.
+		$log = 's3uploads-discover-image-sizes-used-in-post-content.log';
+		$this->log( $log, sprintf( 'Starting %s.', gmdate( 'Y-m-d h:i:s a', time() ) ) );
+
+		// Get local hostname.
+		$parsed_site_url = parse_url( site_url() );
+		$local_host      = $parsed_site_url['host'];
+
+		// WP supported image extensions.
+		$image_extensions = [ 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'ico', 'webp', 'svg', 'heic', 'heif' ];
+
+		// Loop through all published Posts and Pages and find all potential Subsizes' sizes in <img> src.
+		$image_sizes_data = [];
+		$post_ids         = $this->posts->get_all_posts_ids( [ 'post', 'page' ], [ 'publish' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::log( sprintf( '(%d/%d) Post ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			
+			// Get post_content.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+			if ( empty( $post_content ) ) {
+				continue;
+			}
+			
+			// Find <img>s.
+			$dom = new \DOMDocument();
+			// phpcs:ignore -- Allow ignoring bad HTML syntax.
+			@$dom->loadHTML( $post_content );
+			$img_tags = $dom->getElementsByTagName( 'img' );
+			foreach ( $img_tags as $img ) {
+				
+				// Get src.
+				$src = $img->getAttribute( 'src' );
+				if ( empty( $src ) ) {
+					continue;
+				}
+
+				// Only continue if the src hostname is $local_host or if the URL is relative.
+				$parsed_src      = parse_url( $src );
+				$is_relative_url = ! isset( $parsed_src['host'] );
+				$is_local_host   = isset( $parsed_src['host'] ) && ( $local_host == $parsed_src['host'] );
+				if ( ! $is_local_host && ! $is_relative_url ) {
+					continue;
+				}
+
+				// Only continue if src filename is an image.
+				$filename       = basename( $src );
+				$file_extension = strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) );
+				if ( ! in_array( $file_extension, $image_extensions ) ) {
+					continue;
+				}
+
+				// Only continue if src filename ends in "-\d+x\d+" size suffix.
+				$filename_without_extension = pathinfo( $filename, PATHINFO_FILENAME );
+				if ( 1 !== preg_match( '/-(\d+x\d+)$/', $filename_without_extension, $matches ) ) {
+					continue;
+				}
+				$size_name = $matches[1];
+
+				// Store image sizes and post IDs.
+				$image_sizes_data[ $size_name ][] = [
+					'post_id' => $post_id,
+					'src'     => $src,
+				];
+			}       
+		}
+
+		// Log.
+		$this->log( $log, sprintf( 'Found %d potential image sizes referenced in post_content: %s', count( $image_sizes_data ), implode( ',', array_keys( $image_sizes_data ) ) ), false );
+		foreach ( $image_sizes_data as $size_name => $data ) {
+			foreach ( $data as $datum ) {
+				$this->log( $log, sprintf( 'size:%s post_id:%d src:%s', $size_name, $datum['post_id'], $datum['src'] ), false );
+			}
+		}
+
+		// Done.
+		WP_CLI::log( sprintf( 'All done! 🙌  Found %d potential image sizes. See %s log for URLs and post IDs.', count( $image_sizes_data ), $log ) );
 	}
 
 	/**
