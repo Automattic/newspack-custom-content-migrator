@@ -642,6 +642,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		global $wpdb;
 
+		// Arguments.
 		$remote_host         = $assoc_args['remote-host'];
 		$attachment_ids      = isset( $assoc_args['attachment-ids'] ) && ! empty( $assoc_args['attachment-ids'] ) ? explode( ',', $assoc_args['attachment-ids'] ) : null;
 		$attachment_ids_from = $assoc_args['attachment-ids-range-from'] ?? null;
@@ -671,7 +672,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 		 */
 		$sizes = [];
 		if ( $only_use_sizes_csv ) {
-			// Running this command only on some specifically provided sizes sizes.
+			// Use just some specifically provided sizes.
 			$sizes = $this->explode_csv_sizes( $only_use_sizes_csv );
 		} else {
 			// Use all registered sizes.
@@ -683,11 +684,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$sizes       = $this->merge_sizes( $sizes, $extra_sizes );
 			}
 		}
+		// Confirm sizes before continuing.
 		$this->log( $log, 'Sizes which will be downloaded:' );
 		foreach ( $sizes as $size ) {
 			$this->log( $log, sprintf( '- %sx%s', $size['width'], $size['height'] ) );
 		}
-		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nAdd more sizes by using associative arguments.\nContinue downloading these %d sizes? ", count( $sizes ) ) );
+		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nAdd more sizes by using --add-extra-sizes.\nContinue downloading these %d sizes? ", count( $sizes ) ) );
 		if ( 'y' != $input ) {
 			exit;
 		}
@@ -748,7 +750,6 @@ class S3UploadsMigrator implements InterfaceCommand {
 			 * Download '-scaled' if it exists on remote. WP automatically creates a scaled image if it's larger than the threshold:
 			 *  https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
 			 */
-			// If the filename already ends in '-scaled', skip downloading it.
 			if ( $attachment_filename_is_scaled ) {
 				$this->log( $log, sprintf( "+ filename is already '-scaled' so not downloading that, skipping", $local_path ) );
 			} else {
