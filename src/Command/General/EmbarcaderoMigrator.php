@@ -826,6 +826,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-report-items-dir-paths',
+						'description' => 'Path to the CSV files separated by a comma containing the stories\'s report items to import (e.g. export/file1.csv,export/file2.csv).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
