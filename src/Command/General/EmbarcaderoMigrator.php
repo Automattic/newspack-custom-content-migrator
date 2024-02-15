@@ -891,7 +891,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$post_name = $this->migrate_post_slug( $post['seo_link'] );
 
 			// phpcs:ignore
-			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
+			$story_text = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
 
 			$post_data = [
 				'post_title'   => $post['headline'],
@@ -925,8 +925,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$post_created = false;
-			if ( ! $wp_post_id ) {
+			if ( $wp_post_id ) {
+				$post_created = false;
+				// Update the post data without content, the content will be updated later.
+				$post_data['ID'] = $wp_post_id;
+				unset( $post_data['post_content'] );
+				wp_update_post( $post_data );
+			} else {
 				$wp_post_id   = wp_insert_post( $post_data );
 				$post_created = true;
 			}
@@ -1420,7 +1425,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				preg_match_all( '/>http<\/a>/', $fixed_content, $matches );
 
 				if ( ! empty( $matches[0] ) ) {
-					$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the broken links', $post->ID ), Logger::ERROR );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the story ID %d (WP ID %d) for the broken links', $story_id, $post->ID ), Logger::ERROR );
 				} else {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the broken links', $post->ID ), Logger::SUCCESS );
 					wp_update_post(
@@ -1524,7 +1529,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							},
 							''
 						);
-						$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the shortcode "%s": %s', $post->ID, $shortcode, $matches_per_line ), Logger::ERROR );
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the story ID %d (WP ID %d) for the shortcode "%s": %s', $story_id, $post->ID, $shortcode, $matches_per_line ), Logger::ERROR );
 					} else {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::SUCCESS );
 						wp_update_post(
