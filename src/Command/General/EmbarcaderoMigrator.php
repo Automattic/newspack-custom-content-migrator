@@ -328,13 +328,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 					[
-						'type'        => 'assoc',
-						'name'        => 'story-report-items-dir-path',
-						'description' => 'Path to the CSV file containing the stories\'s report items to import.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
 						'type'        => 'flag',
 						'name'        => 'refresh-content',
 						'description' => 'Refresh the content of the posts that were already imported.',
@@ -826,10 +819,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-pdfs',
+			array( $this, 'cmd_embarcadero_migrate_pdfs' ),
+			[
+				'shortdesc' => 'Check for migration issues after the launch.',
+				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'story-report-items-dir-paths',
-						'description' => 'Path to the CSV files separated by a comma containing the stories\'s report items to import (e.g. export/file1.csv,export/file2.csv).',
+						'name'        => 'story-report-items-dir-path',
+						'description' => 'Path to the CSV file containing the stories\'s report items to import.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -852,7 +855,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_dir_path             = $assoc_args['story-photos-dir-path'];
 		$story_media_csv_file_path         = $assoc_args['story-media-file-path'];
 		$story_carousel_items_dir_path     = $assoc_args['story-carousel-items-dir-path'];
-		$story_report_items_dir_path       = $assoc_args['story-report-items-dir-path'];
 		$email_domain                      = $assoc_args['email-domain'];
 		$index_from                        = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to                          = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
@@ -872,7 +874,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$photos                = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
 		$media                 = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
 		$carousel_items        = $this->get_data_from_csv_or_tsv( $story_carousel_items_dir_path );
-		$report_items          = $this->get_data_from_csv_or_tsv( $story_report_items_dir_path );
 		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_ORIGINAL_ID_META_KEY );
 
 		// Get selected posts.
@@ -907,7 +908,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$post_name = $this->migrate_post_slug( $post['seo_link'] );
 
 			// phpcs:ignore
-			$story_text = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
+			$story_text         = str_replace( "\n", "</p>\n<p>", '<p>' . $post['story_text'] . '</p>' );
 
 			$post_data = [
 				'post_title'   => $post['headline'],
@@ -941,13 +942,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			if ( $wp_post_id ) {
-				$post_created = false;
-				// Update the post data without content, the content will be updated later.
-				$post_data['ID'] = $wp_post_id;
-				unset( $post_data['post_content'] );
-				wp_update_post( $post_data );
-			} else {
+			$post_created = false;
+			if ( ! $wp_post_id ) {
 				$wp_post_id   = wp_insert_post( $post_data );
 				$post_created = true;
 			}
@@ -973,7 +969,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$post_content = get_post_field( 'post_content', $wp_post_id );
 
 			$updated_post_content = $update_post_content
-			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $report_items, $skip_post_photos )
+			? $this->migrate_post_content_shortcodes( $post['story_id'], $wp_post_id, $post_content, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_photos )
 			: $post_content;
 
 			// Set the original ID.
@@ -1387,7 +1383,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_csv_file_paths    = $assoc_args['story-photos-file-paths'];
 		$story_media_csv_file_paths     = $assoc_args['story-media-file-paths'];
 		$story_carousel_items_dir_paths = $assoc_args['story-carousel-items-dir-paths'];
-		$story_report_items_dir_paths   = $assoc_args['story-report-items-dir-paths'];
 
 		$stories = array_reduce(
 			explode( ',', $story_csv_file_paths ),
@@ -1421,14 +1416,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			[]
 		);
 
-		$report_items = array_reduce(
-			explode( ',', $story_report_items_dir_paths ),
-			function ( $carry, $item ) {
-				return array_merge( $carry, $this->get_data_from_csv_or_tsv( $item ) );
-			},
-			[]
-		);
-
 		// QA broken links.
 		$posts = $wpdb->get_results(
 			"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE '%>http</a>%'"
@@ -1445,12 +1432,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				// phpcs:ignore
 				$story_text = str_replace( "\n", "</p>\n<p>", '<p>' . $story['story_text'] . '</p>' );
 
-				$fixed_content = $this->migrate_post_content_shortcodes( $story_id, $post->ID, $story_text, $photos, '/tmp', $media, $carousel_items, $report_items, false );
+				$fixed_content = $this->migrate_post_content_shortcodes( $story_id, $post->ID, $story_text, $photos, '/tmp', $media, $carousel_items, false );
 
 				preg_match_all( '/>http<\/a>/', $fixed_content, $matches );
 
 				if ( ! empty( $matches[0] ) ) {
-					$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the story ID %d (WP ID %d) for the broken links', $story_id, $post->ID ), Logger::ERROR );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the broken links', $post->ID ), Logger::ERROR );
 				} else {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the broken links', $post->ID ), Logger::SUCCESS );
 					wp_update_post(
@@ -1554,7 +1541,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							},
 							''
 						);
-						$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the story ID %d (WP ID %d) for the shortcode "%s": %s', $story_id, $post->ID, $shortcode, $matches_per_line ), Logger::ERROR );
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not fix post with the ID %d for the shortcode "%s": %s', $post->ID, $shortcode, $matches_per_line ), Logger::ERROR );
 					} else {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Fixed post with the ID %d for the shortcode: %s', $post->ID, $shortcode ), Logger::SUCCESS );
 						wp_update_post(
@@ -1565,6 +1552,62 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						);
 					}
 				}
+			}
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-pdfs".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_pdfs( $args, $assoc_args ) {
+		global $wpdb;
+
+		$story_report_items_dir_path = $assoc_args['story-report-items-dir-path'];
+		$report_items                = $this->get_data_from_csv_or_tsv( $story_report_items_dir_path );
+
+		// Posts with the "{pdf" shorcode.
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE %s",
+				'%{pdf%'
+			)
+		);
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d posts with PDF shortcodes', count( $posts ) ), Logger::INFO );
+
+		foreach ( $posts as $post ) {
+			$content = $post->post_content;
+
+			preg_match_all( '/(?<shortcode>{pdf?(\s+(?<id>\d+)?)?})/', $post->post_content, $matches, PREG_SET_ORDER );
+			foreach ( $matches as $match ) {
+				if ( isset( $match['id'] ) ) {
+					$media_index = array_search( $match['id'], array_column( $report_items, 'report_id' ) );
+					if ( false !== $media_index ) {
+						$report = $report_items[ $media_index ];
+
+						$media_content = "<a href='https://www.paloaltoonline.com/media/reports_pdf/{$report['seo_link']}'>{$report['report_title']}</a>";
+
+						$content = str_replace( $match['shortcode'], $media_content, $content );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find report %s for the post %d', $match['id'], $post->ID ), Logger::WARNING );
+					}
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not find report ID for the shortcode %s in the post %d', $match['shortcode'], $post->ID ), Logger::WARNING );
+				}
+			}
+
+			if ( $content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $content,
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $post->ID, $post->ID ), Logger::SUCCESS );
 			}
 		}
 	}
@@ -2936,18 +2979,17 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param string $story_photos_dir_path Path to the directory containing the stories\'s photos files to import.
 	 * @param array  $media Array of media data.
 	 * @param array  $carousel_items Array of carousel items data.
-	 * @param array  $report_items Array of report items data.
 	 * @param bool   $skip_post_photos Whether to skip post media in content.
 	 *
 	 * @return string Migrated post content.
 	 */
-	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $report_items, $skip_post_photos ) {
+	private function migrate_post_content_shortcodes( $story_id, $wp_post_id, $story_text, $photos, $story_photos_dir_path, $media, $carousel_items, $skip_post_photos ) {
 		// Story text contains different shortcodes in the format: {shorcode meta meta ...}.
 		if ( ! $skip_post_photos ) {
 			$story_text = $this->migrate_photos( $wp_post_id, $story_text, $photos, $story_photos_dir_path );
 		}
 
-		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items, $report_items );
+		$story_text = $this->migrate_media( $wp_post_id, $story_id, $story_text, $media, $photos, $story_photos_dir_path, $carousel_items );
 		$story_text = $this->migrate_links( $story_text );
 		$story_text = $this->migrate_text_styling( $story_text );
 		return $story_text;
@@ -3106,16 +3148,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param array  $photos Array of photos data.
 	 * @param string $story_photos_dir_path Path to the directory containing the stories\'s photos files to import.
 	 * @param array  $carousel_items Array of carousel items data.
-	 * @param array  $report_items Array of report items data.
 	 *
 	 * @return string Migrated post content.
 	 */
-	private function migrate_media( $wp_post_id, $story_id, $content, $media_list, $photos, $story_photos_dir_path, $carousel_items, $report_items ) {
+	private function migrate_media( $wp_post_id, $story_id, $content, $media_list, $photos, $story_photos_dir_path, $carousel_items ) {
 		// Media can be in the content in the format {media_type 40 25877}
 		// where media_type can be one of the following: carousel, flour, map, more_stories, pull_quote, timeline, video.
 		// 40 is the percentage of the column and 25877 is the media ID.
 
-		preg_match_all( '/(?<shortcode>{(?<type>carousel|flour|map|more_stories|pull_quote|timeline|video|pdf)(\s+(?<width>(\d|\w)+)?)?(\s+(?<id>\d+)?)?})/', $content, $matches, PREG_SET_ORDER );
+		preg_match_all( '/(?<shortcode>{(?<type>carousel|flour|map|more_stories|pull_quote|timeline|video)(\s+(?<width>(\d|\w)+)?)?(\s+(?<id>\d+)?)?})/', $content, $matches, PREG_SET_ORDER );
 
 		foreach ( $matches as $match ) {
 			switch ( $match['type'] ) {
@@ -3259,19 +3300,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$content               = str_replace( $match['shortcode'], $pull_quote_block_html, $content );
 					} else {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find pull quote %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
-					}
-
-					break;
-				case 'pdf':
-					$media_index = array_search( $match['id'], array_column( $report_items, 'report_id' ) );
-					if ( false !== $media_index ) {
-						$report = $report_items[ $media_index ];
-
-						$media_content = "<a href='https://www.paloaltoonline.com/media/reports_pdf/{$report['seo_link']}'>{$report['report_title']}</a>";
-
-						$content = str_replace( $match['shortcode'], $media_content, $content );
-					} else {
-						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find flour %s for the post %d', $match['id'], $wp_post_id ), Logger::WARNING );
 					}
 
 					break;
