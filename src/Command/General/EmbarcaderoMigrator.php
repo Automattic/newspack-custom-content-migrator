@@ -822,6 +822,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-migrate-pdfs',
+			array( $this, 'cmd_embarcadero_migrate_pdfs' ),
+			[
+				'shortdesc' => 'Check for migration issues after the launch.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-report-items-dir-path',
+						'description' => 'Path to the CSV file containing the stories\'s report items to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -1535,6 +1552,62 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						);
 					}
 				}
+			}
+		}
+	}
+
+	/**
+	 * Callable for "newspack-content-migrator embarcadero-migrate-pdfs".
+	 *
+	 * @param array $args array Command arguments.
+	 * @param array $assoc_args array Command associative arguments.
+	 */
+	public function cmd_embarcadero_migrate_pdfs( $args, $assoc_args ) {
+		global $wpdb;
+
+		$story_report_items_dir_path = $assoc_args['story-report-items-dir-path'];
+		$report_items                = $this->get_data_from_csv_or_tsv( $story_report_items_dir_path );
+
+		// Posts with the "{pdf" shorcode.
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_content LIKE %s",
+				'%{pdf%'
+			)
+		);
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d posts with PDF shortcodes', count( $posts ) ), Logger::INFO );
+
+		foreach ( $posts as $post ) {
+			$content = $post->post_content;
+
+			preg_match_all( '/(?<shortcode>{pdf?(\s+(?<id>\d+)?)?})/', $post->post_content, $matches, PREG_SET_ORDER );
+			foreach ( $matches as $match ) {
+				if ( isset( $match['id'] ) ) {
+					$media_index = array_search( $match['id'], array_column( $report_items, 'report_id' ) );
+					if ( false !== $media_index ) {
+						$report = $report_items[ $media_index ];
+
+						$media_content = "<a href='https://www.paloaltoonline.com/media/reports_pdf/{$report['seo_link']}'>{$report['report_title']}</a>";
+
+						$content = str_replace( $match['shortcode'], $media_content, $content );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not find report %s for the post %d', $match['id'], $post->ID ), Logger::WARNING );
+					}
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not find report ID for the shortcode %s in the post %d', $match['shortcode'], $post->ID ), Logger::WARNING );
+				}
+			}
+
+			if ( $content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $content,
+					]
+				);
+
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $post->ID, $post->ID ), Logger::SUCCESS );
 			}
 		}
 	}
