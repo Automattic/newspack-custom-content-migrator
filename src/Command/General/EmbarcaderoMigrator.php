@@ -3755,6 +3755,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Only could find a thumbniail: %s for the post %d', $media_path, $wp_post_id ), Logger::WARNING );
 				}
 
+				$this->logger->log( 'imported_inages.log', sprintf( 'Imported photo %s for the post %d', $media_path, $wp_post_id ), Logger::LINE );
 				return $attachment_id;
 			}
 		}
