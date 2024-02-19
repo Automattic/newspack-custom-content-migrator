@@ -75,6 +75,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
         $this->logger->log( $log , 'Starting conversion of People CPT to GAs.' );
 
+		$cache_gas_for_posts = [];
+
 		$people = $wpdb->get_results("
 			SELECT tt.term_taxonomy_id, t.name, t.slug
 			FROM {$wpdb->term_taxonomy} tt
@@ -97,8 +99,11 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			// get or create GA
 			// note: created GA may have a different (random/unique) user_login (aka slug) then original person->slug
 			// note: distinct GAs are based on display name. The same display name but different slugs, will be merged into first created GA's display name
-			// ex: jack-copeland-by-jack-copeland, morris-pearl-2, state-senator-cesar-blanco-2
+			// examples: jack-copeland-by-jack-copeland, morris-pearl-2, state-senator-cesar-blanco-2
 			$ga_id = $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $person->name, 'user_login' => $person->slug ] );
+
+			// save into a cache for later post matching
+			$cache_gas_for_posts[$person->name] = $ga_id;
 
 			// get the ga object
 			$ga_obj = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
@@ -124,12 +129,6 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			'post_status'   => 'publish',
 			'fields'		=> 'ids',
 			'tax_query' 	=> [
-				// has people
-				[
-					'taxonomy' => 'people',
-					'field' => 'slug',
-					'operator' => 'EXISTS',
-				],
 				// coauthors not set already
 				[
 					'taxonomy' => 'author',
@@ -145,47 +144,26 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		foreach ( $query->posts as $key_post_id => $post_id ) {
 			
-			// $this->logger->log( $log , 'Post '. $post_id . ' / ' . ( $key_post_id + 1 ) . ' of ' . $post_ids_count );
+			$this->logger->log( $log , 'Post '. $post_id . ' / ' . ( $key_post_id + 1 ) . ' of ' . $post_ids_count );
 
-			// will this return them in priority order? what if theme or plugin is removed?
+			// get display names - this "should" get bylines in correct author order (if multiple)
+			// turn off old site plugin: Custom Taxonomy Order
 			$terms = wp_get_post_terms( $post_id, 'people', array( 'fields' => 'names' ) );
 
+			// if no terms, assign default GA
 			if ( count( $terms ) == 0 ) {
-				// $this->logger->log( $log , 'Assign Big Bend Sentingl GA' );
-				// exit();
+				$terms[0] = 'Big Bend Sentinel';				
 			}
 
-			if ( count( $terms ) > 1 ) {
-				echo "my counter " . ++$mycounter;
-				$this->logger->log( $log , 'Post '. $post_id . ' / ' . ( $key_post_id + 1 ) . ' of ' . $post_ids_count );
-				print_r( $terms );
-				$this->logger->log( $log , 'Multiple' );
-				continue;
-
+			// map display names to GA ids
+			$gas_for_post = [];
+			foreach( $terms as $term_display_name ) {
+				$gas_for_post[] = $cache_gas_for_posts[$term_display_name];
 			}
-
-			if ( count( $terms ) != 1 ) {
-				// $this->logger->log( $log , 'ERROR' );
-				// exit();
-
-			}
-
-			// $this->logger->log( $log , 'single' );
+			
+			$this->coauthorsplus_logic->assign_guest_authors_to_post( $gas_for_post, $post_id );
 
 		}
-
-		/*
-
-		$this->logger->log( $log, 'Assigning ' . count( $posts ) . ' posts.' );
-
-		foreach( $posts as $post ) {
-			// append to existing.
-			// since CAP is a new plugin, there wouldn't be any exisiting GAs
-			// need to append incase multiple People per post
-			// ex: /2024/01/31/la-presentacion-de-candidatos-ya-esta-abierta-para-las-elecciones-del-consejo-municipal-y-de-la-junta-escolar-local/
-			$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga_id ), $post->ID, true );
-		}
-		*/
 
 		// need to also check if post_type = attachment...
 
