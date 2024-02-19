@@ -59,6 +59,41 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 	public function cmd_convert_people_cpt( $pos_args, $assoc_args ) {
 
+		// register the taxonomy since the old site had this in their theme
+        register_taxonomy('people', ['post', 'attachment'], [
+            'labels' => [
+                'name'                          => __('Post Author'),
+                'singular_name'                 => __('Post Author'),
+                'menu_name'                     => __('Post Authors'),
+                'all_items'                     => __('All Post Authors'),
+                'edit_item'                     => __('Edit Post Author'),
+                'view_item'                     => __('View Post Author'),
+                'update_item'                   => __('Update Post Author'),
+                'add_new_item'                  => __('Add New Post Author'),
+                'new_item_name'                 => __('New Post Author Name'),
+                'parent_item'                   => __('Parent Post Author'),
+                'parent_item_colon'             => __('Parent Post Author:'),
+                'search_items'                  => __('Search Post Authors'),
+                'popular_items'                 => __('Popular Post Authors'),
+                'seperate_items_with_commas'    => __('Seperate Post Authors with commas'),
+                'add_or_remove_items'           => __('Add or remove Post Authors'),
+                'choose_from_most_used'         => __('Choose from the most used Post Authors'),
+                'not_found'                     => __('No Post Authors found.'),
+            ],
+            'public'                => true,
+            'publicly_queryable'    => true,
+            'show_ui'               => true,
+            'show_in_menu'          => true,
+            'show_in_nav_menus'     => true,
+            'show_tagcloud'         => false,
+            'show_in_quick_edit'    => true,
+            'show_admin_column'     => true,
+            'description'           => __('Post Author.'),
+            'hierarchical'          => true,
+            'query_var'             => true,
+            'rewrite'               => ['slug' => 'people', 'with_front' => false],
+        ]);
+
 		// needs coauthors plus plugin
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
