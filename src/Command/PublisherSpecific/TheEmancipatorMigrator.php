@@ -264,7 +264,12 @@ EOT
 		}
 		foreach ( $posts as $post ) {
 			$meta        = get_post_meta( $post->ID );
-			$api_content = maybe_unserialize( $meta['api_content_element'][0] ?? '' );
+			if ( empty( $meta['api_content_element'] ) ) {
+				// This post is not from the export from their site because it does not
+				// have that API element, so skip it.
+				continue;
+			}
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
 			$thumbnail_id = get_post_meta( $post->ID, '_thumbnail_id', true );
 			if ( ! empty( $thumbnail_id ) && $api_content ) {
@@ -413,6 +418,11 @@ EOT
 				continue;
 			}
 			$meta        = get_post_meta( $post->ID );
+			if ( empty( $meta['api_content_element'] ) ) {
+				// This post is not from the export from their site because it does not
+				// have that API element, so skip it.
+				continue;
+			}
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
 			// Get image info from the api content for images in the body.
@@ -552,6 +562,12 @@ EOT
 			}
 
 			$meta        = get_post_meta( $post->ID );
+			if ( empty( $meta['api_content_element'] ) ) {
+				// This post is not from the export from their site because it does not
+				// have that API element, so skip it.
+				continue;
+			}
+
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 			$subtitle    = $api_content['subheadlines']['basic'] ?? false;
 			if ( ! $dry_run && $subtitle ) {
@@ -580,6 +596,11 @@ EOT
 				continue;
 			}
 			$meta        = get_post_meta( $post->ID );
+			if ( empty( $meta['api_content_element'] ) ) {
+				// This post is not from the export from their site because it does not
+				// have that API element, so skip it.
+				continue;
+			}
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 
 			$redirect_to = $api_content['related_content']['redirect'][0]['redirect_url'] ?? false;
@@ -657,6 +678,11 @@ EOT
 				continue;
 			}
 			$meta        = get_post_meta( $post->ID );
+			if ( empty( $meta['api_content_element'] ) ) {
+				// This post is not from the export from their site because it does not
+				// have that API element, so skip it.
+				continue;
+			}
 			$api_content = maybe_unserialize( $meta['api_content_element'][0] );
 			$label_meta  = get_post_meta( $post->ID, 'label_storycard', true );
 
@@ -804,9 +830,6 @@ EOT
 	private function get_byline_from_credits( array $item ): string {
 		if ( ! empty( $item['credits']['by'][0]['byline'] ) ) {
 			return $item['credits']['by'][0]['byline'];
-		}
-		if ( ! empty( $item['credits']['by'][0]['name'] ) ) {
-			return $item['credits']['by'][0]['name'];
 		}
 
 		return '';
