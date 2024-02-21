@@ -417,6 +417,61 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			]
 		);
+
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-authors-from-json',
+			[ $this, 'fix_authors_from_json' ],
+			[
+				'shortdesc' => 'Fix authors from JSON.',
+				'synopsis'  => [
+					'synopsis' => [
+						$this->articles_json_arg,
+						...BatchLogic::get_batch_args(),
+					],
+				],
+			]
+		);
+
+	}
+
+	/**
+	 * Put the authors from the JSON on posts.
+	 *
+	 * This function can be used to repair broken authors. It can take a partial file of articles or an
+	 * entire one. A partial one could look like this:
+	 * cat HCNNewsArticle.json | jq  '.[] | select(.author|test("Some Name|Other Name|You get it"))  | {UID: .UID, author: .author}' | jq -s > authors.json
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function fix_authors_from_json( array $pos_args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			$post_id = $this->get_post_id_from_uid( $row->UID );
+			if ( empty( $post_id ) ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find post with UID %s', $row->UID ), Logger::ERROR );
+				continue;
+			}
+			$co_authors = array_map(
+				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
+				$this->parse_author_string( $row->author )
+			);
+
+			if ( empty( $co_authors ) ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find or create author %s', $row->author ), Logger::ERROR );
+			}
+
+			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $post_id );
+			$this->logger->log( $log_file, sprintf( 'Updated author(s) to %s on %s', $row->author, get_permalink( $post_id ) ), Logger::SUCCESS );
+		}
+
 	}
 
 	/**
