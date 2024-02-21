@@ -226,7 +226,7 @@ EOT
 				}
 				if ( str_starts_with( $block['innerHTML'], '<p><i>' ) ) {
 					$posts_with_italicized_text[] = get_permalink( $post->ID );
-					$found_authors_in_text ++;
+					$found_authors_in_text++;
 					break;
 				}
 			}
@@ -237,8 +237,24 @@ EOT
 		WP_CLI::success( sprintf( 'Found %d posts with italicized text. Logged them to authors-in-text.log', $found_authors_in_text ) );
 	}
 
+	/**
+	 * @throws ExitException
+	 */
+	private function maybe_ensure_featured_image_caption( int $thumbnail_id, array $api_content, bool $dry_run ): void {
+		$this->update_image_byline_and_caption(
+			$thumbnail_id,
+				$api_content['promo_items']['basic'] ?? [],
+			$dry_run
+		);
+	}
+
+	/**
+	 * @throws ExitException
+	 */
 	public function cmd_ensure_featured_images( array $pos_args, array $assoc_args ): void {
 		WP_CLI::log( 'Ensuring featured images' );
+		$dry_run = $assoc_args['dry-run'] ?? false;
+
 
 		$post_id = $assoc_args['post-id'] ?? false;
 		if ( $post_id ) {
@@ -247,8 +263,13 @@ EOT
 			$posts = $this->get_all_wp_posts( 'post', [ 'publish' ], $assoc_args );
 		}
 		foreach ( $posts as $post ) {
-			if ( ! empty( get_post_meta( $post->ID, '_thumbnail_id', true ) ) ) {
-				// This post already has a featured image.
+			$meta        = get_post_meta( $post->ID );
+			$api_content = maybe_unserialize( $meta['api_content_element'][0] ?? '' );
+
+			$thumbnail_id = get_post_meta( $post->ID, '_thumbnail_id', true );
+			if ( ! empty( $thumbnail_id ) && $api_content ) {
+				// This post already has a featured image, but ensure the caption is set.
+				$this->maybe_ensure_featured_image_caption( $thumbnail_id, $api_content, $dry_run );
 				continue;
 			}
 
@@ -260,6 +281,9 @@ EOT
 			$image = array_shift( $images );
 			update_post_meta( $post->ID, '_thumbnail_id', $image->ID );
 			update_post_meta( $post->ID, 'newspack_featured_image_position', 'hidden' );
+			if ( $api_content ) {
+				$this->maybe_ensure_featured_image_caption( $image->ID, $api_content, $dry_run );
+			}
 			WP_CLI::log( sprintf( 'Added featured image to %s', get_permalink( $post->ID ) ) );
 		}
 	}
@@ -301,7 +325,7 @@ EOT
 		$counter     = 0;
 
 		foreach ( $post_ids as $post_id ) {
-			WP_CLI::log( sprintf( '-- %d/%d --', ++ $counter, $total_posts ) );
+			WP_CLI::log( sprintf( '-- %d/%d --', ++$counter, $total_posts ) );
 			$post           = get_post( $post_id );
 			$post_permalink = get_permalink( $post );
 
@@ -411,7 +435,10 @@ EOT
 					continue;
 				}
 
-				$url        = $matches[1];
+				// Parse the URL into its components
+				$parsed_url = parse_url( $matches[1] );
+				// Rebuild the URL without the query or fragment
+				$url        = $parsed_url['scheme'] . '://' . $parsed_url['host'] . $parsed_url['path'];
 				$basename   = pathinfo( $url, PATHINFO_BASENAME );
 				$image_info = $content_img[ $basename ] ?? [];
 				$caption    = $image_info['caption'] ?? '';
@@ -421,7 +448,7 @@ EOT
 				if ( ! is_wp_error( $attachment_id ) ) {
 					if ( ! empty( $image_info ) ) {
 						// Update the byline on the newly imported image.
-						$this->update_image_byline( $attachment_id, $image_info, $dry_run );
+						$this->update_image_byline_and_caption( $attachment_id, $image_info, $dry_run );
 					}
 
 					$blocks[ $idx ]     = $this->gutenberg_block_gen->get_image(
@@ -454,7 +481,7 @@ EOT
 					if ( ! is_wp_error( $attachment_id ) ) {
 						update_post_meta( $post->ID, '_thumbnail_id', $attachment_id );
 						update_post_meta( $post->ID, 'newspack_featured_image_position', 'hidden' );
-						$this->update_image_byline( $attachment_id, $item, $dry_run );
+						$this->update_image_byline_and_caption( $attachment_id, $item, $dry_run );
 					}
 				}
 			}
@@ -714,21 +741,36 @@ EOT
 	/**
 	 * @throws ExitException
 	 */
-	private function update_image_byline( int $attachment_id, array $item, bool $dry_run ): void {
+	private function update_image_byline_and_caption( int $attachment_id, array $item, bool $dry_run ): void {
 		if ( empty( $item['type'] ) || 'image' !== $item['type'] || ! $attachment_id ) {
 			return;
 		}
 		$maybe_byline = $this->get_byline_from_credits( $item );
-		if ( $maybe_byline && ! $dry_run ) {
-			$attachment_data = array(
-				'ID'           => $attachment_id,
-				'post_excerpt' => $item['caption'] ?? '',
-			);
+		$caption      = $item['caption'] ?? '';
 
-			if ( ! wp_update_post( $attachment_data, true ) ) {
-				WP_CLI::error( sprintf( 'Failed to update attachment with ID %d', $attachment_id ) );
-			}
+		if ( $maybe_byline && ! $dry_run ) {
 			update_post_meta( $attachment_id, '_media_credit', $maybe_byline );
+			$this->logger->log(
+				'image-byline.log',
+				sprintf( 'Updated image byline on %s', home_url( "wp-admin/upload.php?item=$attachment_id" ) ),
+				Logger::SUCCESS
+			);
+		}
+
+		if ( $caption && ! $dry_run ) {
+			$attachment_data = [
+				'ID'           => $attachment_id,
+				'post_excerpt' => $caption,
+			];
+			wp_update_post( $attachment_data, true );
+			// Also set the alt-text. It's like that on the existing site and it's the
+			// best bet we have.
+			update_post_meta( $attachment_id, '_wp_attachment_image_alt', $caption );
+			$this->logger->log(
+				'image-caption.log',
+				sprintf( 'Updated image caption on %s', home_url( "wp-admin/upload.php?item=$attachment_id" ) ),
+				Logger::SUCCESS
+			);
 		}
 	}
 
@@ -789,7 +831,7 @@ EOT
 		foreach ( $all_ids as $post_id ) {
 			$post = get_post( $post_id );
 			if ( $post instanceof \WP_Post ) {
-				WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++ $counter, $total_posts, "${home_url}?p=${post_id}" ) );
+				WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++$counter, $total_posts, "${home_url}?p=${post_id}" ) );
 				yield $post;
 			}
 		}
