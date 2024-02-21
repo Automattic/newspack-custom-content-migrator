@@ -155,13 +155,19 @@ class S3UploadsMigrator implements InterfaceCommand {
 			'newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3',
 			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
 			[
-				'shortdesc' => '1. Save list of all files from local folder to a --local-log file, run this year by year, e.g for year 2009: ' .
-								'find 2009 -type f > 2009_local.txt ; ' .
+				'shortdesc' => '1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
+								'e.g for entire uploads/: ' .
+								'$ find uploads -type f > uploads_local.txt ; ' .
+								'or e.g just for year 2009: ' .
+								'$ find 2009 -type f > 2009_local.txt ; ' .
 								'' .
-								'2. Save list of all files from S3 to --s3-log file, run this for same years, year by year: ' .
-								"aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
+								'2. Save list of all files from S3 to --s3-log file, run this for the folder, ' .
+								'e.g. for entire uploads/: ' .
+								"$ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/ --recursive | awk {'print $4'} > uploads_s3.txt ; " .
+								'or e.g justfor year 2009: ' .
+								"$ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
 								'' .
-								'3. Notice what the path to this folder is on S3 and use it as --path-to-this-folder-on-s3=wp-content/uploads/ ' .
+								'3. Open the list of files on S3 from step 2. and check if there is a difference in local VS S3 paths. If S3 paths have a prefix segment that is missing from the paths of local files, provide it as an argument e.g. --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
 								'4. Then run the command like this: ' .
 								'  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
@@ -169,7 +175,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 								'    --s3-log=2009_s3.txt \ ' .
 								'    --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
-								'and files which are missing on S3 will be detected and saved to log.',
+								'which will list/log all the files that are present on local but missing on S3.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -188,12 +194,8 @@ class S3UploadsMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'path-to-this-folder-on-s3',
-						'description' => "Path to the folder that's being examined on S3," .
-										"E.g. one -- if we're examining 2009 in s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ , " .
-										'value for this flag is `wp-content/uploads/`. ' .
-										"E.g. two -- if we're examining folder 01 inside 2009, s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/01/ , ",
-						'value for this flag is `wp-content/uploads/2009/` .' .
-						'optional'    => false,
+						'description' => "An extra prefixed path segment for files on S3 as opposed to files on local.",
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -272,7 +274,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	public function cmd_compare_uploads_contents_local_with_s3( $positional_args, $assoc_args ) {
 		$local_log_path       = $assoc_args['local-log'] ?? null;
 		$s3_log_path          = $assoc_args['s3-log'] ?? null;
-		$path_to_folder_on_s3 = $assoc_args['path-to-this-folder-on-s3'] ?? null;
+		$path_to_folder_on_s3 = $assoc_args['path-to-this-folder-on-s3'] ?? '';
 
 		// Clear output results log file.
 		$notfound_log = 's3uploads-compare-files-local-w-s3.log';
