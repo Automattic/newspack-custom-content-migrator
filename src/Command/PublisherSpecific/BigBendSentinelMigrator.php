@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Gravity_Forms\Gravity_Forms\Settings\Fields\Hidden;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
@@ -102,9 +103,9 @@ class BigBendSentinelMigrator implements InterfaceCommand {
         ]);
 
 		// make sure Redirects plugin is active
-		// if( ! class_exists ( '\Red_Item' ) ) {
-		// 	WP_CLI::error( 'Redirection plugin must be active.' );
-		// }
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
 
 		global $wpdb;
 		
@@ -115,9 +116,11 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			'PRESIDIO INTERNATIONAL' => get_page_by_path( 'issues-archive-presidio-international', OBJECT, 'page'),
 		];
 		
-		$wp_user = get_user_by( 'slug', 'adminnewspack' );
+		$wp_user = get_user_by( 'slug', 'bigbendsentinel' );
 
-		$pattern = $wpdb->get_var( "select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-page-pattern'");
+		$page_pattern = $wpdb->get_var(
+			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-page-pattern'"
+		);
 
 		$log = 'bigbendsentinel_' . __FUNCTION__ . '.txt';
 
@@ -127,6 +130,11 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			SELECT t.term_id, t.name, t.slug
 			FROM {$wpdb->term_taxonomy} tt
 			join {$wpdb->terms} t on t.term_id = tt.term_id
+
+
+and t.term_id = 354
+
+
 			where tt.taxonomy = 'issue'
 			order by slug
 		");
@@ -176,36 +184,38 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			// new page title
 			$page_title = $issue_name_split[1] . ' - ' . date( "M. d, Y", strtotime( $issue_name_split[0] ) );
 
-			// check if exists
-			$existing_page = get_posts(
-				array(
-					'post_type'              => 'page',
-					'title'                  => $page_title,
-					'post_status'            => 'publish',
-					'numberposts'            => 1,
-				)
-			);
-			
-			if ( ! empty( $existing_page ) ) {
-				$this->logger->log( $log, 'Skip: page exists.', $this->logger::WARNING );
-				$this->report_add( $report, 'Skip: page exists.' );
-				continue;
-			} 
+			// get or create tag
+			$tag_term = term_exists( $issue->name, 'post_tag' );
+			if( is_wp_error( $tag_term ) || empty( $tag_term ) ) {
+				$tag_term = wp_insert_term( $issue->name, 'post_tag' );
+			}
 
-			// get term meta
-			$meta = [
-				'issue_date'   => get_term_meta( $issue->term_id, 'issue_date', true ),
-				'issue_image'  => get_term_meta( $issue->term_id, 'issue_image', true ),
-				'issue_paper'  => get_term_meta( $issue->term_id, 'issue_paper', true ),
-				'issue_pdf'    => get_term_meta( $issue->term_id, 'issue_pdf', true ),
-				'issue_volume' => get_term_meta( $issue->term_id, 'issue_volume', true ),
-			];
-			
-			// update page content from pattern
-			$pattern = str_replace(
+			// get or create PDF post
+			// NOTE: PDF Post and Issue Page share the same Title
+			$pdf_post_id = $this->get_or_create_pdf_post( $page_title, $issue, $issue_name_split[0], $wp_user, $log, $report );
+
+continue;
+exit();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+			// set page content from pattern
+			$page_pattern = str_replace(
 				'<p class="has-large-font-size"><strong>Vol. XX No. XX</strong></p>',
-				'<p class="has-large-font-size"><strong>' . $meta['issue_volume'] . '</strong></p>',
-				$pattern
+				'<p class="has-large-font-size"><strong>' . get_term_meta( $issue->term_id, 'issue_volume', true ) . '</strong></p>',
+				$page_pattern
 			);
 
 // "postsToShow":12,"includeSubcategories":false,"typeScale":3}
@@ -220,10 +230,40 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 
 
+
+
+
+
+			// check if exists
+			$existing_page = get_posts(
+				array(
+					'post_type'              => 'page',
+					'title'                  => $page_title,
+					'post_status'            => 'publish',
+					'numberposts'            => 1,
+				)
+			);
+			
+			if ( ! empty( $existing_page ) ) {
+
+
+	// don't skip, incase this was a rerun, just don't insert..
+
+				$this->logger->log( $log, 'Skip: page exists.', $this->logger::WARNING );
+				$this->report_add( $report, 'Skip: page exists.' );
+				continue;
+			} 
+
+
+
+
+
+
+
 			// create the page
 			$new_page_id = wp_insert_post( [
 				'post_author' => $wp_user->ID,
-				'post_content' => $pattern,
+				'post_content' => $page_pattern,
 				'post_date' => $issue_name_split[0],
 				'post_parent' => $parent_pages[$issue_name_split[1]]->ID,
 				'post_status' => 'publish',
@@ -242,6 +282,16 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			
 			exit();
 
+
+			// // get term meta
+			// $meta = [
+			// 	'issue_date'   => get_term_meta( $issue->term_id, 'issue_date', true ),
+			// 	'issue_image'  => get_term_meta( $issue->term_id, 'issue_image', true ),
+			// 	'issue_paper'  => get_term_meta( $issue->term_id, 'issue_paper', true ),
+			// 	'issue_pdf'    => get_term_meta( $issue->term_id, 'issue_pdf', true ),
+			// 	'issue_volume' => get_term_meta( $issue->term_id, 'issue_volume', true ),
+			// ];
+			
 
 
 			
@@ -429,12 +479,92 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 	}
 
+
+	/**
+	 * ISSUES
+	 */
+
+	private function get_or_create_pdf_post( $page_title, $issue, $issue_date, $wp_user, $log, &$report ) {
+
+		global $wpdb;
+
+		// if post already exists, return it's id
+		// NOTE: Issue Page and PDF Post have same title
+		$existing_post = get_posts([
+				'title'                  => $page_title,
+				'post_type'              => 'post',
+				'post_status'            => 'publish',
+				'numberposts'            => 1,
+		]);
+		
+		if ( ! empty( $existing_post ) ) {
+			$this->logger->log( $log, 'FYI: PDF Post already exists.', $this->logger::WARNING );
+			$this->report_add( $report, 'FYI: PDF Post already exists.' );
+			return $existing_post[0]->ID;
+		} 
+
+		// create the post using term meta values
+		$pdf_attachment_id = get_term_meta( $issue->term_id, 'issue_pdf', true );
+		$pdf_attachment = get_posts([
+				'post_type'          => 'attachment',
+				'include'            => $pdf_attachment_id,
+				'numberposts'        => 1,
+		]);
+		
+		if ( empty( $pdf_attachment ) ) {
+			$this->logger->log( $log, 'FYI: PDF attachment not exist.', $this->logger::WARNING );
+			$this->report_add( $report, 'FYI: PDF attachment not exist.' );
+			return false;
+		} 
+
+		// update pattern for content
+		$pdf_pattern = $wpdb->get_var(
+			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-pdf-post-pattern'"
+		);
+
+		$pdf_pattern = str_replace( '<!-- wp:file {"id":22408,', '<!-- wp:file {"id":' . $pdf_attachment_id . ',', $pdf_pattern );
+
+		$pdf_pattern = str_replace( '08-03-23 bbs for web', esc_attr( $pdf_attachment[0]->post_title ), $pdf_pattern );
+
+		$pdf_pattern = str_replace(
+			'https://bigbendsentinel-newspack.newspackstaging.com/wp-content/uploads/2023/08/08-03-23-bbs-for-web.pdf',
+			wp_get_attachment_url( $pdf_attachment_id ),
+			$pdf_pattern
+		);
+
+		$new_pdf_post_id = wp_insert_post( [
+			'post_author' => $wp_user->ID,
+			'post_content' => $pdf_pattern,
+			'post_date' => $issue_date,
+			'post_status' => 'publish',
+			'post_title' => $page_title,
+// tags = $tag_term
+// featured image
+
+		], true, );
+		
+		// The value 0 or WP_Error on failure.
+		var_dump( $new_pdf_post_id );
+
+		update_post_meta( $new_pdf_post_id, '_wp_page_template', 'single-feature.php' ); // 'One column'
+
+// featured image - Hidden
+
+
+	}
+
+
 	/**
 	 * REDIRECTION FUNCTIONS
 	 */
 
 	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
 
+		// make sure Redirects plugin is active
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
+		
 		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
 
 			if( $verbose ) WP_CLI::warning( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
@@ -453,6 +583,7 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		return;
 
 	}
+
 
 	/**
 	 * REPORTING
