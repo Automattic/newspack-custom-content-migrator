@@ -68,13 +68,20 @@ class BeaconSitesMigrator implements InterfaceCommand {
 			'newspack-content-migrator beacon-sites-set-brands-on-posts',
 			[ $this, 'cmd_set_brands_on_posts' ],
 			[
-				'shortdesc' => 'Sets a brand to all the posts.',
+				'shortdesc' => 'Sets a brand to all or just specific posts.',
 				'synopsis'  => [
 					[
 						'type'      => 'assoc',
 						'name'      => 'brand-name',
 						'optional'  => false,
 						'repeating' => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids-csv',
+						'description' => 'If provided, only these IDs will be affected, otherwise all posts will.',
+						'optional'    => true,
+						'repeating'   => false,
 					],
 				],
 			]
@@ -89,6 +96,7 @@ class BeaconSitesMigrator implements InterfaceCommand {
 	 */
 	public function cmd_set_brands_on_posts( $pos_args, $assoc_args ) {
 		$brand_name = $assoc_args['brand-name'];
+		$post_ids   = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
 		
 		$log_file = 'beacon-sites-set-brands-on-posts.log';
 
@@ -108,7 +116,9 @@ class BeaconSitesMigrator implements InterfaceCommand {
 			$brand_term->term_id,
 		];
 
-		$post_ids = $this->posts->get_all_posts_ids();
+		if ( is_null( $post_ids ) ) {
+			$post_ids = $this->posts->get_all_posts_ids();
+		}
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::line( sprintf( '%d/%d %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			$set = wp_set_post_terms( $post_id, $brand_ids, 'brand' );
