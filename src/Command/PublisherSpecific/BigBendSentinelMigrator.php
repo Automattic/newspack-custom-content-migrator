@@ -109,6 +109,25 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		global $wpdb;
 		
+		// set patterns
+		
+		$pattern_for_page = $wpdb->get_var(
+			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-page-pattern'"
+		);
+
+		if( ! is_string( $pattern_for_page ) || 0 == strlen( trim( $pattern_for_page ) ) ) {
+			WP_CLI::error( 'Issue Page Pattern (wp_block) is required.' );
+		}
+
+		$pattern_for_pdf_post = $wpdb->get_var(
+			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-pdf-post-pattern'"
+		);
+
+		if( ! is_string( $pattern_for_pdf_post ) || 0 == strlen( trim( $pattern_for_pdf_post ) ) ) {
+			WP_CLI::error( 'Issue PDF Post Pattern (wp_block) is required.' );
+		}
+					
+					
 		$report = [];
 
 		$parent_pages = [
@@ -205,12 +224,10 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 			// get or create PDF post
 			// NOTE: PDF Post and Issue Page share the same Title
-			$pdf_post_id = $this->get_or_create_pdf_post( $page_title, $issue, $issue_name_split[0], $wp_user, $log, $report );
+			$pdf_post_id = $this->get_or_create_pdf_post( $page_title, $issue, $issue_name_split[0], $pattern_for_pdf_post, $wp_user, $log, $report );
 
 			// set Page content from pattern
-			$page_pattern = $wpdb->get_var(
-				"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-page-pattern'"
-			);
+			$page_pattern = $pattern_for_page;
 	
 			$page_pattern = str_replace( 'Vol. XX No. XX', get_term_meta( $issue->term_id, 'issue_volume', true ), $page_pattern );
 
@@ -439,7 +456,7 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 	 * ISSUES
 	 */
 
-	private function get_or_create_pdf_post( $page_title, $issue, $issue_date, $wp_user, $log, &$report ) {
+	private function get_or_create_pdf_post( $page_title, $issue, $issue_date, $pdf_pattern, $wp_user, $log, &$report ) {
 
 		global $wpdb;
 
@@ -473,10 +490,6 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		} 
 
 		// update pattern for content
-		$pdf_pattern = $wpdb->get_var(
-			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-pdf-post-pattern'"
-		);
-
 		$pdf_pattern = str_replace( 'wp:file {"id":22408', 'wp:file {"id":' . $pdf_attachment_id, $pdf_pattern );
 		$pdf_pattern = str_replace( '08-03-23 bbs for web', esc_attr( $pdf_attachment[0]->post_title ), $pdf_pattern );
 		$pdf_pattern = str_replace(
