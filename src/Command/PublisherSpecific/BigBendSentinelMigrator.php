@@ -118,10 +118,6 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		
 		$wp_user = get_user_by( 'slug', 'bigbendsentinel' );
 
-		$page_pattern = $wpdb->get_var(
-			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-page-pattern'"
-		);
-
 		$log = 'bigbendsentinel_' . __FUNCTION__ . '.txt';
 
 		$this->logger->log( $log , 'Starting conversion of Issues Taxonomy.' );
@@ -130,11 +126,6 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			SELECT t.term_id, t.name, t.slug
 			FROM {$wpdb->term_taxonomy} tt
 			join {$wpdb->terms} t on t.term_id = tt.term_id
-
-
-and t.term_id = 354
-
-
 			where tt.taxonomy = 'issue'
 			order by slug
 		");
@@ -183,58 +174,9 @@ and t.term_id = 354
 
 			// new page title
 			$page_title = $issue_name_split[1] . ' - ' . date( "M. d, Y", strtotime( $issue_name_split[0] ) );
+			$this->logger->log( $log, 'Page title: ' . $page_title );
 
-			// get or create tag
-			$tag_term = term_exists( $issue->name, 'post_tag' );
-			if( is_wp_error( $tag_term ) || empty( $tag_term ) ) {
-				$tag_term = wp_insert_term( $issue->name, 'post_tag' );
-			}
-
-			// get or create PDF post
-			// NOTE: PDF Post and Issue Page share the same Title
-			$pdf_post_id = $this->get_or_create_pdf_post( $page_title, $issue, $issue_name_split[0], $wp_user, $log, $report );
-
-continue;
-exit();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-			// set page content from pattern
-			$page_pattern = str_replace(
-				'<p class="has-large-font-size"><strong>Vol. XX No. XX</strong></p>',
-				'<p class="has-large-font-size"><strong>' . get_term_meta( $issue->term_id, 'issue_volume', true ) . '</strong></p>',
-				$page_pattern
-			);
-
-// "postsToShow":12,"includeSubcategories":false,"typeScale":3}
-// "postsToShow":12,"includeSubcategories":false,"tags":["721"],"typeScale":3}
-
-
-// "postsToShow":1,"includeSubcategories":false,"typeScale":3,"specificMode":true} /-->
-// "postsToShow":1,"includeSubcategories":false,"specificPosts":["24410"],"typeScale":3,"specificMode":true} /-->
-
-
-
-
-
-
-
-
-
-
-			// check if exists
+			// check if Page arleady exists (ie: the code below was already run)
 			$existing_page = get_posts(
 				array(
 					'post_type'              => 'page',
@@ -245,21 +187,63 @@ exit();
 			);
 			
 			if ( ! empty( $existing_page ) ) {
-
-
-	// don't skip, incase this was a rerun, just don't insert..
-
-				$this->logger->log( $log, 'Skip: page exists.', $this->logger::WARNING );
-				$this->report_add( $report, 'Skip: page exists.' );
+				$this->logger->log( $log, 'Skip: Page already exists.', $this->logger::WARNING );
+				$this->report_add( $report, 'Skip: Page already exists.' );
 				continue;
 			} 
 
+			// get or create tag
+			$tag_term = term_exists( $issue->name, 'post_tag' );
+			if( is_wp_error( $tag_term ) || empty( $tag_term ) ) {
+				$tag_term = wp_insert_term( $issue->name, 'post_tag' );
+			}
 
+			// add tag to posts
+			foreach( $posts as $post ) {
+				wp_add_post_tags( $post->ID, $issue->name );
+			}
 
+			// get or create PDF post
+			// NOTE: PDF Post and Issue Page share the same Title
+			$pdf_post_id = $this->get_or_create_pdf_post( $page_title, $issue, $issue_name_split[0], $wp_user, $log, $report );
 
+			// set Page content from pattern
+			$page_pattern = $wpdb->get_var(
+				"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-page-pattern'"
+			);
+	
+			$page_pattern = str_replace( 'Vol. XX No. XX', get_term_meta( $issue->term_id, 'issue_volume', true ), $page_pattern );
 
+			$page_pattern = str_replace( 
+				'"postsToShow":12,"includeSubcategories":false,',
+				'"postsToShow":12,"includeSubcategories":false,"tags":["' . $tag_term['term_id']. '"],',
+				$page_pattern
+			);
 
+			// set pdf Post ID if exists
+			if( ! is_wp_error( $pdf_post_id ) && is_numeric( $pdf_post_id ) && $pdf_post_id > 0 ) {
+				
+				$page_pattern = str_replace( 
+					'"postsToShow":1,"includeSubcategories":false,',
+					'"postsToShow":1,"includeSubcategories":false,"specificPosts":["' . $pdf_post_id . '"],',
+					$page_pattern
+				);
 
+			}
+			// else Remove PDF block
+			else {
+
+				$page_pattern = str_replace( 
+					'<!-- wp:newspack-blocks/homepage-articles {"className":"is-style-borders","showExcerpt":false,"showDate":false,"showAuthor":false,"postsToShow":1,"includeSubcategories":false,"typeScale":3,"specificMode":true} /-->',
+					'',
+					$page_pattern
+				);
+
+				$this->logger->log( $log, 'FYI: PDF block removed from Page.' );
+				$this->report_add( $report, 'FYI: PDF block removed from Page.' );
+
+			}
+			
 			// create the page
 			$new_page_id = wp_insert_post( [
 				'post_author' => $wp_user->ID,
@@ -271,56 +255,27 @@ exit();
 				'post_type' => 'page',
 			], true, );
 
-			// The value 0 or WP_Error on failure.
-			var_dump( $new_page_id );
-
-
+			if( is_wp_error( $new_page_id ) || ! ( $new_page_id > 0) ) {
+				$this->logger->log( $log, 'Page insert failed.', $this->logger::WARNING );
+				$this->report_add( $report, 'Page insert failed..' );
+				continue;
+			}
+	
 			update_post_meta( $new_page_id, '_wp_page_template', 'single-feature.php' ); // 'One column'
 
-
-			// get the parent page
+			// set redirect from old Issues Custom Taxonomy urls
+			$this->set_redirect( 
+				'/issue/' . $issue->slug, 
+				str_replace( get_site_url() , '', get_permalink( $new_page_id ) ), 
+				'issues custom taxonomy', 
+			);
 			
-			exit();
-
-
-			// // get term meta
-			// $meta = [
-			// 	'issue_date'   => get_term_meta( $issue->term_id, 'issue_date', true ),
-			// 	'issue_image'  => get_term_meta( $issue->term_id, 'issue_image', true ),
-			// 	'issue_paper'  => get_term_meta( $issue->term_id, 'issue_paper', true ),
-			// 	'issue_pdf'    => get_term_meta( $issue->term_id, 'issue_pdf', true ),
-			// 	'issue_volume' => get_term_meta( $issue->term_id, 'issue_volume', true ),
-			// ];
-			
-
-
-			
-			
-			print_r($meta);
-			continue;
-
-
-			
-
-			// set the Page title
-			// $page_title = 
-
-			// set the new tag
-			// https://bigbendsentinel.com/issue/2024-02-15-big-bend-sentinel/
-
-
-			
-			// test that we didn't already do the conversion
-
-			// create a tag
-			// add new tag to posts
-
-			// create Page
-			// create PDF post
-
-			// add redirect from tag to Page
-
-
+			// set redirect from new tag to Page instead
+			$this->set_redirect( 
+				str_replace( get_site_url() , '', get_tag_link( $tag_term['term_id'] ) ), 
+				str_replace( get_site_url() , '', get_permalink( $new_page_id ) ),
+				'issues tag to page', 
+			);
 			
 		}
 
@@ -498,12 +453,12 @@ exit();
 		]);
 		
 		if ( ! empty( $existing_post ) ) {
-			$this->logger->log( $log, 'FYI: PDF Post already exists.', $this->logger::WARNING );
+			$this->logger->log( $log, 'FYI: PDF Post already exists.' );
 			$this->report_add( $report, 'FYI: PDF Post already exists.' );
 			return $existing_post[0]->ID;
 		} 
 
-		// create the post using term meta values
+		// get PDF file attachment
 		$pdf_attachment_id = get_term_meta( $issue->term_id, 'issue_pdf', true );
 		$pdf_attachment = get_posts([
 				'post_type'          => 'attachment',
@@ -512,7 +467,7 @@ exit();
 		]);
 		
 		if ( empty( $pdf_attachment ) ) {
-			$this->logger->log( $log, 'FYI: PDF attachment not exist.', $this->logger::WARNING );
+			$this->logger->log( $log, 'FYI: PDF attachment not exist.' );
 			$this->report_add( $report, 'FYI: PDF attachment not exist.' );
 			return false;
 		} 
@@ -522,35 +477,51 @@ exit();
 			"select post_content from {$wpdb->posts} where post_type = 'wp_block' and post_status = 'publish' and post_name = 'issue-pdf-post-pattern'"
 		);
 
-		$pdf_pattern = str_replace( '<!-- wp:file {"id":22408,', '<!-- wp:file {"id":' . $pdf_attachment_id . ',', $pdf_pattern );
-
+		$pdf_pattern = str_replace( 'wp:file {"id":22408', 'wp:file {"id":' . $pdf_attachment_id, $pdf_pattern );
 		$pdf_pattern = str_replace( '08-03-23 bbs for web', esc_attr( $pdf_attachment[0]->post_title ), $pdf_pattern );
-
 		$pdf_pattern = str_replace(
 			'https://bigbendsentinel-newspack.newspackstaging.com/wp-content/uploads/2023/08/08-03-23-bbs-for-web.pdf',
 			wp_get_attachment_url( $pdf_attachment_id ),
 			$pdf_pattern
 		);
 
+		// create the post
 		$new_pdf_post_id = wp_insert_post( [
 			'post_author' => $wp_user->ID,
 			'post_content' => $pdf_pattern,
 			'post_date' => $issue_date,
 			'post_status' => 'publish',
 			'post_title' => $page_title,
-// tags = $tag_term
-// featured image
-
+			'tags_input' => array( $issue->name ),
 		], true, );
 		
-		// The value 0 or WP_Error on failure.
-		var_dump( $new_pdf_post_id );
+		if( is_wp_error( $new_pdf_post_id ) || ! ( $new_pdf_post_id > 0) ) {
+			$this->logger->log( $log, 'PDF Post insert failed.', $this->logger::WARNING );
+			$this->report_add( $report, 'PDF Post insert failed..' );
+			return false;
+		}
 
 		update_post_meta( $new_pdf_post_id, '_wp_page_template', 'single-feature.php' ); // 'One column'
 
-// featured image - Hidden
+		// get PDF image
+		$pdf_featured_image_id = get_term_meta( $issue->term_id, 'issue_image', true );
+		$pdf_featured_image = get_posts([
+				'post_type'          => 'attachment',
+				'include'            => $pdf_featured_image_id,
+				'numberposts'        => 1,
+		]);
+		
+		if ( empty( $pdf_featured_image ) ) {
+			$this->logger->log( $log, 'FYI: PDF had no featured image.' );
+			$this->report_add( $report, 'FYI: PDF had no featured image.' );
+		} 
+		else {
+			set_post_thumbnail( $new_pdf_post_id, $pdf_featured_image_id );
+			update_post_meta( $new_pdf_post_id, 'newspack_featured_image_position', 'hidden' ); // don't show at top of Post
+		}
 
-
+		return $new_pdf_post_id;
+		
 	}
 
 
@@ -575,7 +546,7 @@ exit();
 		if( $verbose ) WP_CLI::line( 'Adding (' . $batch . ') redirect: ' . $url_from . ' to ' . $url_to );
 		
 		$this->redirection_logic->create_redirection_rule(
-			'Old site (' . $batch . '): ' . $url_from,
+			'Old site (' . $batch . ')',
 			$url_from,
 			$url_to
 		);
