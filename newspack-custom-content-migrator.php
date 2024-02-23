@@ -87,5 +87,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
 		Command\PublisherSpecific\InjusticeWatchMigrator::class,
+		Command\PublisherSpecific\BeaconSitesMigrator::class,
 	)
 );
