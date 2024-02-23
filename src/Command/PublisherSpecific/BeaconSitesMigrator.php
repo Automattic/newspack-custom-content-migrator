@@ -82,7 +82,7 @@ class BeaconSitesMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Extract the old avatars from Starbox options and migrate them to Simple Local Avatars.
+	 * Set brand to all posts.
 	 *
 	 * @param array $pos_args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
