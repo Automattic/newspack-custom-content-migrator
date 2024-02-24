@@ -477,6 +477,13 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		// get PDF file attachment
 		$pdf_attachment_id = get_term_meta( $issue->term_id, 'issue_pdf', true );
+
+		if ( empty( $pdf_attachment_id ) || false == is_numeric( $pdf_attachment_id ) || ! ( $pdf_attachment_id > 0 ) ) {
+			$this->logger->log( $log, 'FYI: PDF attachment ID not gt 0.' );
+			$this->report_add( $report, 'FYI: PDF attachment ID not gt 0.' );
+			return false;
+		} 
+
 		$pdf_attachment = get_posts([
 				'post_type'          => 'attachment',
 				'include'            => $pdf_attachment_id,
@@ -516,8 +523,15 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		update_post_meta( $new_pdf_post_id, '_wp_page_template', 'single-feature.php' ); // 'One column'
 
-		// get PDF image
+		// set PDF image only if exists
 		$pdf_featured_image_id = get_term_meta( $issue->term_id, 'issue_image', true );
+
+		if ( empty( $pdf_featured_image_id ) || false == is_numeric( $pdf_featured_image_id ) || ! ( $pdf_featured_image_id > 0 ) ) {
+			$this->logger->log( $log, 'FYI: PDF image ID not gt 0.' );
+			$this->report_add( $report, 'FYI: PDF image ID not gt 0.' );
+			return $new_pdf_post_id;
+		} 
+
 		$pdf_featured_image = get_posts([
 				'post_type'          => 'attachment',
 				'include'            => $pdf_featured_image_id,
@@ -527,11 +541,11 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		if ( empty( $pdf_featured_image ) ) {
 			$this->logger->log( $log, 'FYI: PDF had no featured image.' );
 			$this->report_add( $report, 'FYI: PDF had no featured image.' );
+			return $new_pdf_post_id;
 		} 
-		else {
-			set_post_thumbnail( $new_pdf_post_id, $pdf_featured_image_id );
-			update_post_meta( $new_pdf_post_id, 'newspack_featured_image_position', 'hidden' ); // don't show at top of Post
-		}
+
+		set_post_thumbnail( $new_pdf_post_id, $pdf_featured_image_id );
+		update_post_meta( $new_pdf_post_id, 'newspack_featured_image_position', 'hidden' ); // don't show at top of Post
 
 		return $new_pdf_post_id;
 		
