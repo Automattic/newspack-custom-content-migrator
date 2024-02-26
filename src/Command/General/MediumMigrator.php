@@ -99,6 +99,13 @@ class MediumMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-content',
+						'description' => 'If set, it will refresh the existing content, and import the new one.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -116,6 +123,7 @@ class MediumMigrator implements InterfaceCommand {
 		}
 
 		$articles_csv_file_path = $assoc_args['zip-archive'];
+		$refresh_content        = isset( $assoc_args['refresh-content'] ) ? true : false;
 
 		$this->logger->log( self::$log_file, 'Migrating Medium archive...', Logger::LINE );
 
@@ -131,12 +139,12 @@ class MediumMigrator implements InterfaceCommand {
 			$this->logger->log( self::$log_file, 'Processing article: ' . $article['title'], Logger::LINE );
 
 			// Check if post exists.
-			if ( in_array( $article['original_id'], $existing_original_ids ) ) {
+			if ( ! $refresh_content && in_array( $article['original_id'], $existing_original_ids ) ) {
 				$this->logger->log( self::$log_file, ' -- Article already exists: ' . $article['title'], Logger::LINE );
 				continue;
 			}
 
-			$this->process_post( $article );
+			$this->process_post( $article, $refresh_content );
 		}
 	}
 
@@ -250,8 +258,9 @@ class MediumMigrator implements InterfaceCommand {
 	 * Inserts an article into the database.
 	 *
 	 * @param array $article Article data.
+	 * @param bool  $refresh_content If set, it will refresh the existing content, and import the new one.
 	 */
-	private function process_post( $article ) {
+	private function process_post( $article, $refresh_content ) {
 		// Get/add author.
 		if ( empty( $this->medium_logic->get_author() ) ) {
 			$this->logger->log( self::$log_file, ' -- Error: Author not found: ' . $article['author'], Logger::WARNING );
@@ -264,7 +273,9 @@ class MediumMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$post_id = wp_insert_post(
+		$existing_post_id = $refresh_content ? $this->get_post_id_by_meta( $article['original_id'] ) : null;
+
+		$post_id = $existing_post_id ?? wp_insert_post(
 			[
 				'post_title'     => $article['title'],
 				'post_name'      => $article['original_slug'] ?? '',
@@ -329,5 +340,27 @@ class MediumMigrator implements InterfaceCommand {
 		update_post_meta( $post_id, self::ORIGINAL_ID_META_KEY, $article['original_id'] );
 		update_post_meta( $post_id, '_medium_post_url', $article['post_url'] );
 		update_post_meta( $post_id, 'newspack_post_subtitle', $article['subtitle'] );
+	}
+
+	/**
+	 * Get post ID by meta.
+	 *
+	 * @param string $original_id Article original ID.
+	 * @return int|null
+	 */
+	private function get_post_id_by_meta( $original_id ) {
+		global $wpdb;
+
+		if ( empty( $original_id ) ) {
+			return null;
+		}
+
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+				self::ORIGINAL_ID_META_KEY,
+				$original_id
+			)
+		);
 	}
 }
