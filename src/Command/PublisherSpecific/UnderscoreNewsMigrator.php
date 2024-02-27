@@ -71,12 +71,19 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 			'newspack-content-migrator underscorenews-import-posts',
 			[ $this, 'cmd_import_posts' ],
 			[
-				'shortdesc' => 'Imports Posts from CSV.',
+				'shortdesc' => 'Imports Posts from CSV using 3 CSVs.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'csv-posts',
 						'description' => 'CSV file: --csv-posts="path/posts.csv"',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-team',
+						'description' => 'CSV file: --csv-team="path/team.csv"',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -127,9 +134,9 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 	public function cmd_import_posts( $pos_args, $assoc_args ) {
 
 		// needs coauthors plus plugin
-		// if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-		// 	WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-		// }
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+		}
 
 		// make sure Redirects plugin is active
 		// if( ! class_exists ( '\Red_Item' ) ) {
@@ -138,6 +145,8 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 		// load csvs
 		$csv_posts = $this->get_csv_handle( $assoc_args[ 'csv-posts' ], 22 );
+		$csv_team = $this->get_csv_handle( $assoc_args[ 'csv-team' ], 12 );
+		$team = $this->csv_to_hash( $csv_team, 1, true );
 
 		global $wpdb;
 
@@ -175,8 +184,6 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 				$this->logger->log( $log, 'Post exists: ' . $post_id );
 				$this->report_add( $report, 'Post exists.' );
-
-				$post = get_post( $post_id );
 	
 			}
 			// create post
@@ -199,52 +206,61 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 				}
 
+				update_post_meta( $post_id, 'newspack_underscore_old_site_id', $columns['Item ID'] );
+
 				$this->logger->log( $log, 'Post inserted: ' . $post_id );
 				$this->report_add( $report, 'Post inserted.' );
 
-				update_post_meta( $post_id, 'newspack_underscore_old_site_id', $columns['Item ID'] );
-
-				$post = get_post( $post_id );
-
-
 			} // create post
+
+			$post = get_post( $post_id );
 
 			// parse and update images and files (PDF) in body content
 			preg_match_all( '/<(a|img) [^>]*?>/i', $post->post_content, $elements );
-			foreach( $elements[0] as $element ) {
-				if( preg_match( '/^<a /', $element ) ) $this->parse_element( $element, 'href', $post_id, $log, $report );
-				else if( preg_match( '/^<img /', $element ) ) $this->parse_element( $element, 'src', $post_id, $log, $report );
-			}
+			// foreach( $elements[0] as $element ) {
+			// 	if( preg_match( '/^<a /', $element ) ) $this->media_parse_element( $element, 'href', $post_id, $log, $report );
+			// 	else if( preg_match( '/^<img /', $element ) ) $this->media_parse_element( $element, 'src', $post_id, $log, $report );
+			// }
 	
-			// parsed post_content was updated via DB updates, so update post object
-			wp_cache_flush();
-			$post = get_post( $post_id );
-
-			continue;
-
+			// parse post_content was updated via DB updates, so update post object
+			// wp_cache_flush();
+			// $post = get_post( $post_id );
 			
-
-
 			// Attach featured image
-			if( preg_match( '/^https/', $columns['Main Image'] ) ) {
+			// if( preg_match( '/^https/', $columns['Main Image'] ) ) {
 				
-				// get existing or upload new
-				$featured_image_id = $this->attachments_logic->import_external_file( 
-					$columns['Main Image'], $columns['Main Image'], 
-					$columns['Main image alt text'], $columns['Main image alt text'], $columns['Main image alt text'], 
-					$post_id
-				);
+			// 	// get existing or upload new
+			// 	$featured_image_id = $this->attachments_logic->import_external_file( 
+			// 		$columns['Main Image'], $columns['Main Image'], 
+			// 		$columns['Main image alt text'], $columns['Main image alt text'], $columns['Main image alt text'], 
+			// 		$post_id
+			// 	);
 
-				if( is_numeric( $featured_image_id ) && $featured_image_id > 0 ) {
+			// 	if( is_numeric( $featured_image_id ) && $featured_image_id > 0 ) {
 			
-					$this->logger->log( $log, 'Featured image: ' . $featured_image_id );
-					$this->report_add( $report, 'Featured image.' );
+			// 		$this->logger->log( $log, 'Featured image: ' . $featured_image_id );
+			// 		$this->report_add( $report, 'Featured image.' );
 
-					update_post_meta( $post_id, '_thumbnail_id', $featured_image_id );
+			// 		update_post_meta( $post_id, '_thumbnail_id', $featured_image_id );
 			
-				}
+			// 	}
 
+			// }
+
+			// set CAP GAs
+			if( ! empty( $columns['Author'] ) ) {
+				
+				print_r( $team[$columns['Author']] );
+	
 			}
+
+			exit();
+
+
+
+
+
+
 
 
 // redirect:
@@ -254,7 +270,6 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 		
 			// Relationships:
-			$post['post_author'] = $columns['Author']; // these match to the Team csv
 			$post['categories'] = $columns['Category']; // these match to the Category csv
 		
 			// Post Meta:
@@ -361,15 +376,46 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		
 	}
 
+	private function csv_to_hash( $handle, $format = 0, $has_header = false ) {
+
+		$with_header = ( function( $header, $row ) {
+			$output = [];
+			for( $i = 0; $i < count( $header ); $i++ ) {
+				$output[$header[$i]] = $row[$i];
+			}
+			return $output;
+		});
+		
+		$output = array();
+		$header = null;
+		while ( ( $row = fgetcsv( $handle ) ) !== FALSE ) {
+
+			if( $has_header && null == $header ) {
+				$header = $row;
+				continue;
+			}
+
+			// formats
+			if( is_numeric( $format ) ) {
+				$output[$row[$format]] = ( $has_header ) ? $with_header( $header, $row ) : $row;
+			}
+			
+		}
+
+		return $output;
+
+	}
+
+
 	/**
-	 * HTML PARSING
+	 * MEDIA PARSING
 	 */
 
-	private function parse_element( $element, $attr, $post_id, $log, &$report ) {
+	private function media_parse_element( $element, $attr, $post_id, $log, &$report ) {
 
 		global $wpdb;
 
-		$link = $this->parse_link_from_element( $element, $attr, $log, $report );
+		$link = $this->media_parse_link( $element, $attr, $log, $report );
 		if( empty( $link ) ) return;
 
 		$this->logger->log( $log, 'Link found in element: ' . $link );
@@ -397,13 +443,12 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 			WHERE ID = %d
 		", $link, wp_get_attachment_url( $attachment_id ), $post_id ) );
 
-		
 		$this->logger->log( $log, 'Link replaced in element: ' . $link );
 		$this->report_add( $report, $attr . '_element_replaced' );
 
 	}
 
-	private function parse_link_from_element( $element, $attr, $log, &$report ) {
+	private function media_parse_link( $element, $attr, $log, &$report ) {
 
 		// test (and temporarily fix) ill formatted elements
 		$had_line_break = false;
@@ -415,7 +460,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		// parse URL from the element
 		if( ! preg_match( '/' . $attr . '=[\'"](.+?)[\'"]/', $element, $url_matches ) ) {
 			// $this->logger->log( $log, 'Null link found in element:' . $element, $this->logger::WARNING );
-			// $this->report_add( $report, $attr . '_element_null_link' );
+			$this->report_add( $report, $attr . '_element_null_link' );
 			return;
 		}
 
@@ -447,7 +492,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		// must start with http(s)://
 		if( ! preg_match( '/^https?:\/\//', $url ) ) {
 			// $this->logger->log( $log, 'Non http link not found in element:' . $element, $this->logger::WARNING );
-			// $this->report_add( $report, $attr . '_element_non_http_link' );
+			$this->report_add( $report, $attr . '_element_non_http_link' );
 			return;
 		}
 
@@ -458,37 +503,26 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		if( in_array( $ext_matches[1], array( 'asp', 'aspx', 'com', 'edu', 'htm', 'html', 'net', 'org', 'php' ) ) ) return;
 
 		// only match certain domains
-		if( ! preg_match('/^https?:\/\/(' . implode( '|', $this->data_domains() ) . ')/', $url ) ) {
+		$keep_domains = [
+			'uploads-ssl.webflow.com',
+		];
+
+		if( ! preg_match('/^https?:\/\/(' . implode( '|', $keep_domains ) . ')/', $url ) ) {
 			// $this->logger->log( $log, 'Domain link not found in element:' . $element, $this->logger::WARNING );
-			// $this->report_add( $report, $attr . '_element_non_domain_link' );
+			$this->report_add( $report, $attr . '_element_non_domain_link' );
 			return;
 		}
 
 		// todo: handle issues previously bypassed
 		if( $had_line_break || $had_leading_whitespace || $had_trailing_whitespace ) {
 			// $this->logger->log( $log, 'Whitespace link issue found in element:' . $element, $this->logger::WARNING );
-			// $this->report_add( $report, $attr . '_element_whitspace_link' );
+			$this->report_add( $report, $attr . '_element_whitspace_link' );
 			return;
 		}
 
 		return $url;
 
 	}
-
-
-	/**
-	 * DATA
-	 */
-
-	private function data_domains() {
-		
-		return [
-			'uploads-ssl.webflow.com',
-		];
-
-	}
-
-
 
 }
 
