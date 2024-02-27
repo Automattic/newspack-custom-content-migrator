@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use \NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
 
@@ -15,6 +16,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 	private static $instance = null;
 
+	private $attachments_logic;
 	private $coauthorsplus_logic;
 	private $logger;
 	private $redirection_logic;
@@ -23,6 +25,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->attachments_logic   = new AttachmentsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 		$this->logger              = new Logger();
 		$this->redirection_logic   = new RedirectionLogic();
@@ -141,6 +144,8 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		$log = 'underscorenews_' . __FUNCTION__ . '.txt';
         $this->logger->log( $log , 'Starting ...' );
 
+		$report = [];
+
 		// import categories
 		$header = null;
 		while( false !== ( $row = fgetcsv( $csv_posts ) ) ) {
@@ -152,49 +157,110 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 			}
 
 			// convert row to columns
-			$column = [];
+			$columns = [];
 			for( $i = 0; $i < count( $header ); $i++ ) {
-				$column[$header[$i]] = $row[$i];
+				$columns[$header[$i]] = $row[$i];
 			}
 
-			
-			use wxr so body images will be imported...
+			$this->logger->log( $log, 'Processing old site id: ' . $columns['Item ID'] );
+			$this->report_add( $report, 'Processing old site id' );
 
+			// check if post already exists
+			$post_id = $wpdb->get_var( $wpdb->prepare( "
+				SELECT post_id FROM {$wpdb->postmeta} where meta_key = 'newspack_underscore_old_site_id' and meta_value = %s LIMIT 1
+			", $columns['Item ID'] ));
 
+			// use existing post
+			if( is_numeric( $post_id ) && $post_id > 0 ) {
+
+				$this->logger->log( $log, 'Post exists: ' . $post_id );
+				$this->report_add( $report, 'Post exists.' );
+
+				$post = get_post( $post_id );
+	
+			}
 			// create post
-			$post_data = array(
-				'post_title'    => $column['Name'],
-				'post_content'  => $column['Post Body'],
-				'post_date_gmt' => trim( preg_replace( '(Coordinated Universal Time)', '', $column['Publish Date'] ) ),
-				'post_name'     => $column['Slug'],
-				'post_status'   => 'publish', // Set the status of the new post.
-				'post_author'   => 1, // The user ID number of the author. (Adjust as necessary)
-				'post_type'     => 'post', // Could be 'post' or 'page' or any custom post type.
-				'post_category' => array(1), // Default category. The ID of the category for the post.
-			);
-		
-			// Insert the post into the database
-			$post_id = wp_insert_post($post_data);
-		
-			// Check if post was successfully inserted
-			if (!is_wp_error($post_id)) {
-				echo "Post created successfully with ID: $post_id";
-			} else {
-				echo "Error in post creation: " . $post_id->get_error_message();
-			}			
-		
-			// Image:
-			$post['featured-image'] = $column['Main Image'];
-			$post['featured-image-alt'] = $column['Main image alt text'];
+			else {
+
+				$post_id = wp_insert_post( array(
+					'post_author'   => 1,
+					'post_content'  => $columns['Post Body'],
+					'post_date_gmt' => trim( preg_replace( '(Coordinated Universal Time)', '', $columns['Publish Date'] ) ),
+					'post_status'   => 'publish',
+					'post_title'    => $columns['Name'],
+					'post_type'     => 'post',
+				));
+			
+				if( ! is_numeric( $post_id ) || ! ( $post_id > 0 ) ) {
+
+					$this->logger->log( $log, 'SKIP: post insert failed for old site id: ' . $columns['Item ID'], $this->logger::WARNING );
+					$this->report_add( $report, 'SKIP: post insert failed for old site id' );
+					continue;
+
+				}
+
+				$this->logger->log( $log, 'Post inserted: ' . $post_id );
+				$this->report_add( $report, 'Post inserted.' );
+
+				update_post_meta( $post_id, 'newspack_underscore_old_site_id', $columns['Item ID'] );
+
+				$post = get_post( $post_id );
+
+
+			} // create post
+
+			// parse and update images and files (PDF) in body content
+			preg_match_all( '/<(a|img) [^>]*?>/i', $post->post_content, $elements );
+			foreach( $elements[0] as $element ) {
+				if( preg_match( '/^<a /', $element ) ) $this->parse_element( $element, 'href', $post_id, $log, $report );
+				else if( preg_match( '/^<img /', $element ) ) $this->parse_element( $element, 'src', $post_id, $log, $report );
+			}
+	
+			// parsed post_content was updated via DB updates, so update post object
+			wp_cache_flush();
+			$post = get_post( $post_id );
+
+			continue;
+
+			
+
+
+			// Attach featured image
+			if( preg_match( '/^https/', $columns['Main Image'] ) ) {
+				
+				// get existing or upload new
+				$featured_image_id = $this->attachments_logic->import_external_file( 
+					$columns['Main Image'], $columns['Main Image'], 
+					$columns['Main image alt text'], $columns['Main image alt text'], $columns['Main image alt text'], 
+					$post_id
+				);
+
+				if( is_numeric( $featured_image_id ) && $featured_image_id > 0 ) {
+			
+					$this->logger->log( $log, 'Featured image: ' . $featured_image_id );
+					$this->report_add( $report, 'Featured image.' );
+
+					update_post_meta( $post_id, '_thumbnail_id', $featured_image_id );
+			
+				}
+
+			}
+
+
+// redirect:
+// 'post_name'     => $columns['Slug'],
+// /reporting/, /team/, /work/
+
+
 		
 			// Relationships:
-			$post['post_author'] = $column['Author']; // these match to the Team csv
-			$post['categories'] = $column['Category']; // these match to the Category csv
+			$post['post_author'] = $columns['Author']; // these match to the Team csv
+			$post['categories'] = $columns['Category']; // these match to the Category csv
 		
 			// Post Meta:
-			$post['sub-title'] = $column['Sub-title'];
-			$post['old_id'] = $column['Item ID'];
-			$post['old_url'] = '/reporting/' . $column['Slug'];
+			$post['sub-title'] = $columns['Sub-title'];
+			$post['old_id'] = $columns['Item ID'];
+			$post['old_url'] = '/reporting/' . $columns['Slug'];
 			
 			// Ignore:
 			// Collection ID - same for all, assumed to be Site/Publiser ID
@@ -225,14 +291,13 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 	 * REDIRECTION FUNCTIONS
 	 */
 
-	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
+	 private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
 
 		// make sure Redirects plugin is active
 		if( ! class_exists ( '\Red_Item' ) ) {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
-
-		// Check if exists
+		
 		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
 
 			if( $verbose ) WP_CLI::warning( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
@@ -240,11 +305,10 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 		}
 
-		// Add new
 		if( $verbose ) WP_CLI::line( 'Adding (' . $batch . ') redirect: ' . $url_from . ' to ' . $url_to );
 		
 		$this->redirection_logic->create_redirection_rule(
-			'Old site (' . $batch . '): ' . $url_from,
+			'Old site (' . $batch . ')',
 			$url_from,
 			$url_to
 		);
@@ -252,6 +316,17 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		return;
 
 	}
+
+
+	/**
+	 * REPORTING
+	 */
+
+	private function report_add( &$report, $key ) {
+		if( empty( $report[$key] ) ) $report[$key] = 0;
+		$report[$key]++;
+	}
+	
 
 	/**
 	 * FILE FUNCTIONS
@@ -286,4 +361,134 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		
 	}
 
+	/**
+	 * HTML PARSING
+	 */
+
+	private function parse_element( $element, $attr, $post_id, $log, &$report ) {
+
+		global $wpdb;
+
+		$link = $this->parse_link_from_element( $element, $attr, $log, $report );
+		if( empty( $link ) ) return;
+
+		$this->logger->log( $log, 'Link found in element: ' . $link );
+		$this->report_add( $report, $attr . '_element_to_fix' );
+
+		// get existing or upload new
+		$attachment_id = $this->attachments_logic->import_external_file( 
+			$link, $link,
+			null, null, null, 
+			$post_id
+		);
+
+		if( !is_numeric( $attachment_id ) || ! ( $attachment_id > 0 ) ) {
+	
+			$this->logger->log( $log, 'Import element link failed: ' . $link, $this->logger::WARNING );
+			$this->report_add( $report, $attr . '_element_import_failed' );
+			return;
+
+		}
+		
+		// replace post content
+		$wpdb->query( $wpdb->prepare( "
+			UPDATE {$wpdb->posts} 
+			SET post_content = REPLACE(post_content, %s, %s)
+			WHERE ID = %d
+		", $link, wp_get_attachment_url( $attachment_id ), $post_id ) );
+
+		
+		$this->logger->log( $log, 'Link replaced in element: ' . $link );
+		$this->report_add( $report, $attr . '_element_replaced' );
+
+	}
+
+	private function parse_link_from_element( $element, $attr, $log, &$report ) {
+
+		// test (and temporarily fix) ill formatted elements
+		$had_line_break = false;
+		if( preg_match( '/\n/', $element ) ) {
+			$element = preg_replace('/\n/', '', $element );
+			$had_line_break = true;
+		}
+
+		// parse URL from the element
+		if( ! preg_match( '/' . $attr . '=[\'"](.+?)[\'"]/', $element, $url_matches ) ) {
+			// $this->logger->log( $log, 'Null link found in element:' . $element, $this->logger::WARNING );
+			// $this->report_add( $report, $attr . '_element_null_link' );
+			return;
+		}
+
+		// set easy to use variable
+		$url = $url_matches[1];
+
+		// test (and temporarily fix) ill formatted links
+		$had_leading_whitespace = false;
+		if( preg_match( '/^\s+/', $url ) ) {
+			$url = preg_replace('/^\s+/', '', $url );
+			$had_leading_whitespace = true;
+		}
+
+		// test (and temporarily fix) ill formatted links
+		$had_trailing_whitespace = false;
+		if( preg_match( '/\s+$/', $url ) ) {
+			$url = preg_replace('/\s+$/', '', $url );
+			$had_trailing_whitespace = true;
+		}
+
+		// skip known off-site urls and other anomalies
+		$skips = array(
+			'https?:\/\/(docs.google.com|player.vimeo.com|w.soundcloud.com|www.youtube.com)',
+			'mailto',
+		);
+		
+		if( preg_match( '/^(' . implode( '|', $skips ) . ')/', $url ) ) return;
+
+		// must start with http(s)://
+		if( ! preg_match( '/^https?:\/\//', $url ) ) {
+			// $this->logger->log( $log, 'Non http link not found in element:' . $element, $this->logger::WARNING );
+			// $this->report_add( $report, $attr . '_element_non_http_link' );
+			return;
+		}
+
+		// we're only looking for media (must have an extension), else skip
+		if( ! preg_match( '/\.([A-Za-z0-9]{3,4})$/', $url, $ext_matches ) ) return;
+
+		// ignore certain extensions that are not media files
+		if( in_array( $ext_matches[1], array( 'asp', 'aspx', 'com', 'edu', 'htm', 'html', 'net', 'org', 'php' ) ) ) return;
+
+		// only match certain domains
+		if( ! preg_match('/^https?:\/\/(' . implode( '|', $this->data_domains() ) . ')/', $url ) ) {
+			// $this->logger->log( $log, 'Domain link not found in element:' . $element, $this->logger::WARNING );
+			// $this->report_add( $report, $attr . '_element_non_domain_link' );
+			return;
+		}
+
+		// todo: handle issues previously bypassed
+		if( $had_line_break || $had_leading_whitespace || $had_trailing_whitespace ) {
+			// $this->logger->log( $log, 'Whitespace link issue found in element:' . $element, $this->logger::WARNING );
+			// $this->report_add( $report, $attr . '_element_whitspace_link' );
+			return;
+		}
+
+		return $url;
+
+	}
+
+
+	/**
+	 * DATA
+	 */
+
+	private function data_domains() {
+		
+		return [
+			'uploads-ssl.webflow.com',
+		];
+
+	}
+
+
+
 }
+
