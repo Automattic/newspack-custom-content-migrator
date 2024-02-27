@@ -61,7 +61,7 @@ class SettingsMigrator implements InterfaceCommand {
 					'type'        => 'assoc',
 					'name'        => 'output-dir',
 					'description' => 'Output directory full path (no ending slash).',
-					'optional'    => false,
+					'optional'    => true,
 					'repeating'   => false,
 				],
 			],
@@ -74,7 +74,7 @@ class SettingsMigrator implements InterfaceCommand {
 					'type'        => 'assoc',
 					'name'        => 'input-dir',
 					'description' => 'Input directory full path (no ending slash).',
-					'optional'    => false,
+					'optional'    => true,
 					'repeating'   => false,
 				],
 			],
@@ -87,7 +87,7 @@ class SettingsMigrator implements InterfaceCommand {
 					'type'        => 'assoc',
 					'name'        => 'output-dir',
 					'description' => 'Output directory full path (no ending slash).',
-					'optional'    => false,
+					'optional'    => true,
 					'repeating'   => false,
 				],
 			],
@@ -100,7 +100,7 @@ class SettingsMigrator implements InterfaceCommand {
 					'type'        => 'assoc',
 					'name'        => 'input-dir',
 					'description' => 'Input directory full path (no ending slash).',
-					'optional'    => false,
+					'optional'    => true,
 					'repeating'   => false,
 				],
 			],
@@ -120,9 +120,6 @@ class SettingsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_export_customize_site_identity_settings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
-		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
-			WP_CLI::error( 'Invalid output dir.' );
-		}
 
 		WP_CLI::line( sprintf( 'Exporting site identity settings...' ) );
 
@@ -143,7 +140,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 *
 	 * @return bool Success.
 	 */
-	private function export_current_theme_site_identity( $output_dir ) {
+	private function export_current_theme_site_identity( $output_dir = null ) {
 		wp_cache_flush();
 
 		// Get theme mods with IDs.
@@ -169,11 +166,16 @@ class SettingsMigrator implements InterfaceCommand {
 			return false;
 		}
 
-		// Write JSON file.
-		$file = $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
-		WP_CLI::line( 'Writing to file ' . $file );
+		// Write JSON file or send to STDOUT.
+		if ( is_null( $output_dir ) ) {
+			WP_CLI::line( json_encode( $json_data ) );
+			return true;
+		} else {
+			$file = $output_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
+			WP_CLI::line( 'Writing to file ' . $file );
+			return file_put_contents( $file, json_encode( $json_data ) );
+		}
 
-		return file_put_contents( $file, json_encode( $json_data ) );
 	}
 
 	/**
@@ -183,37 +185,51 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_import_customize_site_identity_settings( $args, $assoc_args ) {
+
+		// Accept a directory via the --input-dir argument or read from STDIN.
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
-		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
-			WP_CLI::error( 'Invalid input dir.' );
+		if ( ! is_null( $input_dir ) && is_dir( $input_dir ) ) {
+
+			// Check there is a valid input file.
+			$import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
+			if ( ! is_file( $import_file ) ) {
+				WP_CLI::error( sprintf( 'Site Identity settings file not found %s.', $import_file ) );
+			}
+
+			WP_CLI::line( 'Importing default Site Identity settings from ' . $import_file . '...'  );
+			$imported_mods_and_options = json_decode( file_get_contents( $import_file ) );
+
+		} else {
+			WP_CLI::line( 'Importing default pages settings from STDIN...'  );
+			$stdin    = fopen( 'php://stdin', 'r' );
+			if ( false === $stdin ) {
+				WP_CLI::error( 'Could not find settings in STDIN.' );
+			}
+
+			$imported_mods_and_options = json_decode( fread( $stdin, 1000000 ) );
+			fclose( $stdin );
 		}
 
-		$options_import_file = $input_dir . '/' . self::SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME;
-		if ( ! is_file( $options_import_file ) ) {
-			WP_CLI::warning( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
-			exit(1);
+		// Ensure we have valid JSON.
+		if ( is_null( $imported_mods_and_options ) ) {
+			WP_CLI::error( 'Invalid JSON input.' );
 		}
-
-		WP_CLI::line( 'Importing site identity settings from ' . $options_import_file . ' ...' );
-
-		// Update current Theme mods.
-		$imported_mods_and_options = json_decode( file_get_contents( $options_import_file ), true );
 
 		// Import and set logo.
 		$logo_id = null;
-		if ( isset( $imported_mods_and_options['custom_logo_file'] ) && ! empty( $imported_mods_and_options['custom_logo_file'] ) ) {
-			$logo_file = $imported_mods_and_options['custom_logo_file'];
+		if ( isset( $imported_mods_and_options->custom_logo_file ) && ! empty( $imported_mods_and_options->custom_logo_file ) ) {
+			$logo_file = $imported_mods_and_options->custom_logo_file;
 			if ( file_exists( $logo_file ) ) {
-				$logo_id = $this->attachments_logic->import_media_from_path( $logo_file );
+				$logo_id = $this->attachments_logic->import_external_file( $logo_file );
 			}
 		}
 
 		// Import and set footer logo.
 		$footer_logo_id = null;
-		if ( isset( $imported_mods_and_options['newspack_footer_logo_file'] ) && ! empty( $imported_mods_and_options['newspack_footer_logo_file'] ) ) {
-			$footer_logo_file = $imported_mods_and_options['newspack_footer_logo_file'];
+		if ( isset( $imported_mods_and_options->newspack_footer_logo_file ) && ! empty( $imported_mods_and_options->newspack_footer_logo_file ) ) {
+			$footer_logo_file = $imported_mods_and_options->newspack_footer_logo_file;
 			if ( file_exists( $footer_logo_file ) ) {
-				$footer_logo_id = $this->attachments_logic->import_media_from_path( $footer_logo_file );
+				$footer_logo_id = $this->attachments_logic->import_external_file( $footer_logo_file );
 			}
 		}
 
@@ -221,10 +237,10 @@ class SettingsMigrator implements InterfaceCommand {
 		$this->update_theme_mod_site_identity_post_ids( $logo_id, $footer_logo_id );
 
 		// Import and set the site icon.
-		if ( isset( $imported_mods_and_options['site_icon_file'] ) && ! empty( $imported_mods_and_options['site_icon_file'] ) ) {
-			$icon_file = $imported_mods_and_options['site_icon_file'];
+		if ( isset( $imported_mods_and_options->site_icon_file ) && ! empty( $imported_mods_and_options->site_icon_file ) ) {
+			$icon_file = $imported_mods_and_options->site_icon_file;
 			if ( file_exists( $icon_file ) ) {
-				$icon_id = $this->attachments_logic->import_media_from_path( $icon_file );
+				$icon_id = $this->attachments_logic->import_external_file( $icon_file );
 				if ( is_numeric( $icon_id ) ) {
 					update_option( 'site_icon', $icon_id );
 				}
@@ -259,13 +275,9 @@ class SettingsMigrator implements InterfaceCommand {
 	 */
 	public function cmd_export_pages_settings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
-		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
-			WP_CLI::error( 'Invalid output dir.' );
-		}
 
 		WP_CLI::line( 'Exporting default pages settings...' );
 
-		$file = $output_dir . '/' . self::PAGES_SETTINGS_FILENAME;
 		$data = array(
 			// This is the radio button setting on Customize > Homepage settings > "Your homepage displays".
 			'show_on_front' => get_option( 'show_on_front' ),
@@ -276,12 +288,19 @@ class SettingsMigrator implements InterfaceCommand {
 			// Donation page ID.
 			'newspack_donation_page_id' => get_option( 'newspack_donation_page_id' ),
 		);
-		$written = file_put_contents( $file, json_encode( $data ) );
-		if ( false === $written ) {
-			exit(1);
+
+		// Print the data to the console or write to a file.
+		if ( $output_dir ) {
+			$file = $output_dir . '/' . self::PAGES_SETTINGS_FILENAME;
+			WP_CLI::line( 'Writing to file ' . $file );
+			$written = file_put_contents( $file, json_encode( $data ) );
+			if ( false === $written ) {
+				exit(1);
+			}
+		} else {
+			echo json_encode( $data ) . PHP_EOL;
 		}
 
-		WP_CLI::line( 'Writing to file ' . $file );
 		WP_CLI::success( 'Done.' );
 		exit(0);
 	}
@@ -293,36 +312,48 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_import_pages_settings( $args, $assoc_args ) {
+
+		// Accept a directory via the --input-dir argument or read from STDIN.
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
-		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
-			WP_CLI::error( 'Invalid input dir.' );
+		if ( ! is_null( $input_dir ) && is_dir( $input_dir ) ) {
+
+			// Check there is a valid input file.
+			$import_file = $input_dir . '/' . self::PAGES_SETTINGS_FILENAME;
+			if ( ! is_file( $import_file ) ) {
+				WP_CLI::error( sprintf( 'Pages settings file not found %s.', $import_file ) );
+			}
+
+			WP_CLI::line( 'Importing default pages settings from ' . $import_file . '...'  );
+			$contents = json_decode( file_get_contents( $import_file ) );
+
+		} else {
+			WP_CLI::line( 'Importing default pages settings from STDIN...'  );
+			$stdin    = fopen( 'php://stdin', 'r' );
+			if ( false === $stdin ) {
+				WP_CLI::error( 'Could not find settings in STDIN.' );
+			}
+
+			$contents = json_decode( fread( $stdin, 1000000 ) );
+			fclose( $stdin );
 		}
 
-		$import_file = $input_dir . '/' . self::PAGES_SETTINGS_FILENAME;
-		if ( ! is_file( $import_file ) ) {
-			WP_CLI::error( sprintf( 'Pages settings file not found %s.', $import_file ) );
+		// Ensure we have valid JSON.
+		if ( is_null( $contents ) ) {
+			WP_CLI::error( 'Invalid JSON input.' );
 		}
 
-		WP_CLI::line( 'Importing default pages settings from ' . $import_file . ' ...'  );
-
-		$contents = file_get_contents( $import_file );
-		if ( false === $contents ) {
-			WP_CLI::error( 'Options contents empty.' );
-		}
-
-		$options = json_decode( $contents, true );
 		$posts_migrator = PostsMigrator::get_instance();
 
 		// Copy over these as they are.
 		$option_names = array( 'show_on_front' );
 		foreach ( $option_names as $option_name ) {
-			update_option( $option_name, $options[ $option_name ] );
+			update_option( $option_name, $contents->$option_name );
 		}
 
 		// Update IDs for these Pages saved as option values, by referring to the PostsMigrator::META_KEY_ORIGINAL_ID meta.
 		$option_names = array( 'page_on_front', 'page_for_posts', 'newspack_donation_page_id' );
 		foreach ( $option_names as $option_name ) {
-			$original_id = isset( $options[ $option_name ] ) && ! empty( $options[ $option_name ] ) ? $options[ $option_name ] : null;
+			$original_id = isset( $contents->$option_name ) && ! empty( $contents->$option_name ) ? $contents->$option_name : null;
 			if ( null !== $original_id && 0 != $original_id) {
 				$current_id = $posts_migrator->get_current_post_id_from_original_post_id( $original_id );
 				update_option( $option_name, $current_id );
