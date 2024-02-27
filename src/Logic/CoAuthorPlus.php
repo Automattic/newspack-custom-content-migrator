@@ -115,35 +115,36 @@ class CoAuthorPlus {
 		// If not provided, automatically set `user_login` from display_name.
 		if ( ! isset( $args['user_login'] ) ) {
 			$args['user_login'] = sanitize_title( $args['display_name'] );
-		} else {
-			/**
-			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
-			 * CAP saves and then retrieves it.
-			 *
-			 * See \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
-			 *   - because they do:
-			 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
-			 *
-			 *   - so for example, if create() gets 'user_login' = '3.42488E+15',
-			 *      - `post_name` will be == 'cap' + sanitize_title(            '3.42488E+15'   ) == "cap-6-20386e15"
-			 *      - but `slug` will be  == 'cap' + sanitize_title( urldecode( '3.42488E+15' ) ) == "cap-6-20386e-15"
-			 *      - which are different.
-			 *
-			 *      => And this is an edge case bug. These GAs will fail with errors if you try and assign them to Posts.
-			 *
-			 * Additionally see \CoAuthors_Plus::update_author_term where wp_insert_term() causes:
-			 *      - wp_terms.name will be == "6.20386e 15"  (comes from get_guest_author_by()'s `user_login`)
-			 *      - while description will contain "6-20386e-15"
-			 */
-			$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
-
-			// If user_login is the same as existing WP_User.username, CAP will allow it to be created, but it will not allow it to be edited:
-			// "There is a WordPress user with the same username as this guest author, please go back and link them in order to update."
-			// So let's prevent that by giving it a unique user_login which is not used by WP_User. That way, we can keep the GA and WP_User separate.
-			// or link them afterwards, both options will work fine.
-			// Check if $args['user_login'] is used by WP_User.username.
-			$args['user_login'] = $this->get_unique_user_login( $args['user_login'] );
 		}
+		
+		/**
+		 * Sanitize GA's user_login.
+		 * Use both with urldecode() and sanitize_title(), to minimize errors when CAP saves and then retrieves it.
+		 *
+		 * See \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
+		 *   - because they do:
+		 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
+		 *
+		 *   - so for example, if create() gets 'user_login' = '3.42488E+15',
+		 *      - `post_name` will be == 'cap' + sanitize_title(            '3.42488E+15'   ) == "cap-6-20386e15"
+		 *      - but `slug` will be  == 'cap' + sanitize_title( urldecode( '3.42488E+15' ) ) == "cap-6-20386e-15"
+		 *      - which are different.
+		 *
+		 *      => And this is an edge case bug. These GAs will fail with errors if you try and assign them to Posts.
+		 * Additionally see \CoAuthors_Plus::update_author_term where wp_insert_term() causes:
+		 *      - wp_terms.name will be == "6.20386e 15"  (comes from get_guest_author_by()'s `user_login`)
+		 *      - while description will contain "6-20386e-15"
+		 */
+		$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
+
+		/**
+		 * If user_login is the same as existing WP_User.username, CAP will allow it to be created, but it will not allow it to be edited:
+		 * 		"There is a WordPress user with the same username as this guest author, please go back and link them in order to update."
+		 * 
+		 * So let's prevent that by giving it a unique user_login which is not used by WP_User. That way, we can keep the GA and WP_User separate.
+		 * Or link them afterwards, both options will work fine.
+		 */
+		$args['user_login'] = $this->get_unique_user_login( $args['user_login'] );
 
 		$guest_author = $this->get_guest_author_by_display_name( $args['display_name'] );
 		if ( is_null( $guest_author ) ) {
@@ -156,8 +157,8 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Gets a unique user_login for a new Guest Author, making sure that WP_User.username is not using it.
-	 * If $user_login is already used, will return a unique one with appended "_{random_string}" to it.
+	 * Check if $args['user_login'] is used by WP_User.username, and if it is gets a unique user_login for a new Guest Author.
+	 * The new unique $user_login will have an appended "_{random_string}" to it.
 	 *
 	 * @param string $user_login User login.
 	 *

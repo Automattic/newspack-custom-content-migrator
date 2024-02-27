@@ -18,6 +18,7 @@ use WP_CLI;
  */
 class MolonguiAutorship implements InterfaceCommand {
 
+	const LOG                            = 'molongui-to-cap_ERR.log';
 	const POSTMETA_ORIGINAL_MOLOGUI_USER = 'newspack_molongui_original_user';
 
 	/**
@@ -80,7 +81,23 @@ class MolonguiAutorship implements InterfaceCommand {
 			[ $this, 'cmd_molongui_to_cap' ],
 			[
 				'shortdesc' => 'Converts Molongui authorship to CAP.',
-			]
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'table-prefix-mologui-data',
+						'description' => "Specify in which tables should the conversion script look for Mologui authorship data. Consider the case when a content refresh is performed, and that in such a scenariothe  WP_User IDs and wp_post IDs will change. After a content refresh, the local DB's Mologui postmeta might still be pointing to old IDs of Mologui's author records. To fix this old ID VS new ID discrepancy, it's easiest to import the live DB side by side with the local DB, using some prefix like `live_` then run this command feeding it this prefix. Otherwise, if you are provide the local DB prefix here, just make sure that Mologui meta is still pointing to valid local records, e.g. postmeta 'user-95' still points to correct wp_user.ID entry, and same for 'guest-xx' entries pointing to valid wp_posts rows.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Will not actually create GAs and assign them to posts, just display simulated outcomes.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			],
 		);
 	}
 
@@ -93,132 +110,178 @@ class MolonguiAutorship implements InterfaceCommand {
 	public function cmd_molongui_to_cap( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
-		$log_error = 'molongui-to-cap_ERR.txt';
+		$table_prefix_mologui = esc_sql( $assoc_args['table-prefix-mologui-data'] );
+		$dry_run              = $assoc_args['dry-run'] ?? false;
 
-		// Get Molongui authors.
-		$authors_molongui_values = $wpdb->get_col( "select distinct meta_value from wp_postmeta where meta_key = '_molongui_author';" );
-		if ( ! $authors_molongui_values ) {
+		// Stamp log.
+		$this->log( $dry_run, self::LOG, sprintf( 'Molongui to CAP migration started at %s', gmdate( 'Y-m-d H:i:s' ) ), Logger::LINE, false );
+
+		// Used for dry runs.
+		$dry_run_mologui_to_gas = [];
+		
+		// Get all Molongui authors designations.
+		$molongui_authors_values = $wpdb->get_col( "select distinct meta_value from {$wpdb->postmeta} where meta_key = '_molongui_author';" );
+		if ( ! $molongui_authors_values ) {
 			WP_CLI::warning( 'No authors found.' );
 			return;
 		}
-
+		
 		/**
-		 * Create GAs.
+		 * Convert all Mologui authors to CAP GAs.
 		 */
-		foreach ( $authors_molongui_values as $key_author_molongui_value => $author_molongui_value ) {
-			WP_CLI::line( sprintf( '%d/%d %s', $key_author_molongui_value + 1, count( $authors_molongui_values ), $author_molongui_value ) );
+		$this->log( $dry_run, self::LOG, 'Converting all Mologui authors to CAP GAs...', Logger::LINE );
+		foreach ( $molongui_authors_values as $key_molongui_author_value => $molongui_author_value ) {
 
 			/**
-			 * Convert different Mologui user types to CAP GAs.
-			 */
-			if ( 0 === strpos( $author_molongui_value, 'user-' ) ) {
+			 * Mologui works with two types of users:
+			 *      - either existing WP_Users which it extends with custom meta,
+			 *      - or its own Custom Post Type, "guest authors", which don't have Dashboard access.
+			 */ 
+			$this->log( $dry_run, self::LOG, sprintf( 'Creating CAP GA %d/%d %s', $key_molongui_author_value + 1, count( $molongui_authors_values ), $molongui_author_value ), Logger::LINE );
+			$cap_args = null;
+			
 
-				/**
-				 * Mologui uses an existing WP_User which it extends with custom meta.
-				 * In this case, the postmeta key_value is 'user-{ID}' (where meta_key = '_molongui_author').
-				 */
-				$wpuser_id         = (int) str_replace( 'user-', '', $author_molongui_value );
+			/**
+			 * 1/2 Convert WP_User authors to GAs (where meta_key = '_molongui_author' and key_value = 'user-{ID}').
+			 */
+			if ( 0 === strpos( $molongui_author_value, 'user-' ) ) {
+
+				$wpuser_id = (int) str_replace( 'user-', '', $molongui_author_value );
 				// phpcs:disable -- Allow querying users table.
-				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
+				$author_wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}users where ID = %d;", $wpuser_id ), ARRAY_A );
 				// phpcs:enable
 				if ( ! $author_wpuser_row ) {
-					$msg = sprintf( 'WP_User with ID %d not found (postmeta key: user-%s).', $wpuser_id, $wpuser_id );
-					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
+					$msg = sprintf( 'ERROR WP_User with ID %d not found in %s table (referenced by postmeta key `user-%s`).', $wpuser_id, $table_prefix_mologui . 'users', $wpuser_id );
+					$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 					continue;
 				}
 
-				// Create CAP GA.
-				$cap_args = $this->get_cap_creation_args_for_mologui_wpuser( $wpuser_id );
-				$cap_id   = $this->cap->create_guest_author( $cap_args );
-				if ( is_wp_error( $cap_id ) ) {
-					$msg = sprintf( 'Error creating CAP GA for Molongui user %s: %s', 'user-' . $wpuser_id, $cap_id->get_error_message() );
-					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
-					continue;
-				}
+				// Get CAP GA creation arguments.
+				$cap_args = $this->get_cap_creation_args_for_mologui_wpuser( $table_prefix_mologui, $wpuser_id );
 
-				// Save custom postmeta to GA saying which Molongui user this was.
-				// There could be both a WP_User and a guest author with the same email, so we need to save both of them, i.e. add_post_meta, not update.
-				add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
-
-				WP_CLI::success( sprintf( "Created GA ID %s from '%s' %s", $cap_id, 'user-' . $wpuser_id, $cap_args['display_name'] ) );
-
-			} elseif ( 0 === strpos( $author_molongui_value, 'guest-' ) ) {
+			} elseif ( 0 === strpos( $molongui_author_value, 'guest-' ) ) {
 
 				/**
-				 * Molongui uses its own Guest type user.
-				 * In this case, the postmeta key_value is 'guest-{ID}' (where meta_key = '_molongui_author').
+				 * 2/2 Convert Molongui "guest" authors to GAs (where meta_key = '_molongui_author' and key_value = 'guest-{ID}').
 				 */
-				$guest_id  = (int) str_replace( 'guest-', '', $author_molongui_value );
-				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
+				$guest_id = (int) str_replace( 'guest-', '', $molongui_author_value );
+				// phpcs:Ignore -- $wpdb->prepare is used.
+				$guest_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 				if ( ! $guest_row ) {
-					$msg = sprintf( 'Guest author with ID %d not found (postmeta key: guest-%s).', $guest_id, $guest_id );
-					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
+					$msg = sprintf( 'ERROR Guest author with ID %d not found in %s table (referenced by postmeta key: `guest-%s`).', $guest_id, $table_prefix_mologui . 'posts', $guest_id );
+					$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 					continue;
 				}
 
-				// Create CAP GA.
-				$cap_args = $this->get_cap_creation_args_for_mologui_guestauthor( $guest_id );
-				$cap_id   = $this->cap->create_guest_author( $cap_args );
-				if ( is_wp_error( $cap_id ) ) {
-					$msg = sprintf( 'Error creating CAP GA for Molongui user %s: %s', 'user-' . $wpuser_id, $cap_id->get_error_message() );
-					$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
-					continue;
-				}
-
-				// Save custom postmeta to GA saying which Molongui user this was.
-				// There could be both a WP_User and a guest author with the same email, so we need to save both of them, i.e. add_post_meta, not update.
-				add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $author_molongui_value );
-
-				WP_CLI::success( sprintf( "Created GA ID %s from '%s' %s", $cap_id, 'guest-' . $guest_id, $cap_args['display_name'] ) );
+				// Get CAP GA creation arguments.
+				$cap_args = $this->get_cap_creation_args_for_mologui_guestauthor( $table_prefix_mologui, $guest_id );
 
 			} else {
-				WP_CLI::error( sprintf( 'Unsupported Molongui author postmeta key: %s. Add support for this type then rerun command.', $cap_args['display_name'] ) );
+				$this->log( $dry_run, self::LOG, sprintf( 'ERROR Unsupported Molongui author type in postmeta key: %s. Add support for this type then rerun command. Exiting.', $molongui_author_value ), Logger::ERROR, true );
 			}
-		}
-
-		/**
-		 * Assign GAs to posts.
-		 */
-		$post_ids                         = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-		$cached_mologui_authors_to_ga_ids = [];
-		foreach ( $post_ids as $key_post_id => $post_id ) {
-			WP_CLI::line( sprintf( '%d/%d %s', $key_post_id + 1, count( $post_ids ), $post_id ) );
-
-			// Get Mologui authors for this post.
-			$molongui_authors_rows = $wpdb->get_results( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_author';", $post_id ), ARRAY_A );
-			if ( ! $molongui_authors_rows ) {
+			
+			// Error getting CAP GA array.
+			if ( is_null( $cap_args ) ) {
+				$this->log( $dry_run, self::LOG, sprintf( 'ERROR Unable to create $cap_args for Mologui user %s.', $molongui_author_value ), Logger::ERROR, false );
 				continue;
 			}
 
+
+			/**
+			 * Create a CAP GA.
+			 */
+			$cap_id = null;
+			if ( $dry_run ) {
+				$cap_id = 'n/a';
+				$dry_run_mologui_to_gas[ $molongui_author_value ] = $cap_args['display_name'];
+			} else {
+				$cap_id = $this->cap->create_guest_author( $cap_args );
+				if ( is_wp_error( $cap_id ) || ! $cap_id ) {
+					$msg = sprintf( 'ERROR creating CAP GA for Molongui user %s, error message: "%s", $cap_args: "%s".', $molongui_author_value, is_wp_error( $cap_id ) ? $cap_id->get_error_message() : 'n/a', json_encode( $cap_args ) );
+					$this->logger->log( self::LOG, $msg, $this->logger::ERROR, false );
+					continue;
+				}
+
+				/**
+				 * Save custom postmeta to GA saying which Molongui user this was.
+				 * Since there could be multiple Molongui users pointing to the same CAP GA, multiple metas are allowed.
+				 */
+				$meta_exists = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where post_id = %d and meta_key = %s and meta_value = %s;", $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value ) );
+				if ( ! $meta_exists ) {
+					add_post_meta( $cap_id, self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value );
+				}
+			}
+			
+			$this->log( $dry_run, self::LOG, sprintf( "Created/fetched GA ID %s '%s' from '%s'", $cap_id, $cap_args['display_name'], $molongui_author_value ), Logger::SUCCESS );
+		}
+
+
+		/**
+		 * Assign CAP GAs to posts.
+		 */
+		$this->log( $dry_run, self::LOG, 'Assigning GAs to all Posts...', Logger::LINE );
+		$post_ids                         = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		$cached_mologui_authors_to_ga_ids = [];
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			$this->log( $dry_run, self::LOG, sprintf( 'Assigning CAP GAs to Post %d/%d Post ID %s', $key_post_id + 1, count( $post_ids ), $post_id ), Logger::LINE );
+			
+			// Get Mologui authors for this post.
+			$molongui_authors_rows = $wpdb->get_results( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_author';", $post_id ), ARRAY_A );
+			if ( ! $molongui_authors_rows ) {
+				$this->log( $dry_run, self::LOG, sprintf( 'No Molongui authors used on Post ID %s , skipping.', $post_id ), Logger::LINE );
+				continue;
+			}
+			
+			// Get GA IDs for these Molongui authors.
 			$ga_ids = [];
 			foreach ( $molongui_authors_rows as $molongui_author_row ) {
-				$molongui_author = $molongui_author_row['meta_value'];
+				$molongui_author_value = $molongui_author_row['meta_value'];
 
-				// Get GA IDs for this Mologui author.
-				if ( isset( $cached_mologui_authors_to_ga_ids[ $molongui_author ] ) ) {
-					$ga_id = $cached_mologui_authors_to_ga_ids[ $molongui_author ];
+				// If dry run, just display authors that will be assigned to this post and continue.
+				if ( $dry_run ) {
+					$dry_run_author_name = $dry_run_mologui_to_gas[ $molongui_author_value ] ?? null;
+					if ( $dry_run_author_name ) {
+						\WP_CLI::success( sprintf( "Post ID %d , assigning GA '%s'", $post_id, $dry_run_author_name ) );
+					} else {
+						\WP_CLI::error( sprintf( "ERROR -- Post ID %d , Molongui author is '%s' but no GA found.", $post_id, $molongui_author_value ) );
+					}
+					continue;
+				}
+
+				// Get GA IDs for this Mologui author (simple caching for speed).
+				if ( isset( $cached_mologui_authors_to_ga_ids[ $molongui_author_value ] ) ) {
+					$ga_id = $cached_mologui_authors_to_ga_ids[ $molongui_author_value ];
 				} else {
-					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author ) );
+					$ga_id = $wpdb->get_var( $wpdb->prepare( "select post_id from {$wpdb->postmeta} where meta_key = %s and meta_value = %s;", self::POSTMETA_ORIGINAL_MOLOGUI_USER, $molongui_author_value ) );
 					if ( ! $ga_id ) {
-						$msg = sprintf( 'Error fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author, $post_id );
-						$this->logger->log( $log_error, $msg, $this->logger::ERROR, false );
+						$msg = sprintf( 'ERROR fetching GA for Molongui user %s and assigning it to Post ID %d', $molongui_author_value, $post_id );
+						$this->log( $dry_run, self::LOG, $msg, $this->logger::ERROR, false );
 						continue;
 					}
-					$cached_mologui_authors_to_ga_ids[ $molongui_author ] = $ga_id;
+					$cached_mologui_authors_to_ga_ids[ $molongui_author_value ] = $ga_id;
 				}
 
 				$ga_ids[] = $ga_id;
 			}
 
 			// Assign GAs to Post.
-			$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+			if ( ! $dry_run ) {
+				// Log WARNING if no GAs were found for this post, and continue.
+				if ( empty( $ga_ids ) ) {
+					$this->log( $dry_run, self::LOG, sprintf( 'ERROR no GAs found for Post ID %d but they should be found because there are Mologui authors assigned', $post_id ), Logger::ERROR, false );
+					continue;
+				}
+				
+				// Assign GAs to Post.
+				$this->cap->assign_guest_authors_to_post( $ga_ids, $post_id, false );
+				$this->log( $dry_run, self::LOG, sprintf( 'Assigned %d GA IDs %s to Post ID %d', count( $ga_ids ), implode( ',', $ga_ids ), $post_id ), Logger::SUCCESS );
+			}
 		}
 
-		if ( file_exists( $log_error ) ) {
-			WP_CLI::warning( sprintf( 'There were errors. See %s.', $log_error ) );
-		}
 
-		WP_CLI::line( 'Done.' );
+		$msg  = $dry_run ? 'Dry run complete.' : 'Done.';
+		$msg .= sprintf( ' See %s for details -- search "ERROR"s and "WARNING"s.', self::LOG );
+		$this->log( $dry_run, self::LOG, $msg, Logger::SUCCESS );       
 		wp_cache_flush();
 	}
 
@@ -226,16 +289,18 @@ class MolonguiAutorship implements InterfaceCommand {
 	 * Get CAP creation args from Molongui guest author.
 	 * Converts all Molongui Guest author meta to CAP meta.
 	 *
-	 * @param int $guest_id Mologui guest author ID.
+	 * @param string $table_prefix_mologui Mologui data table prefix.
+	 * @param int    $guest_id Mologui guest author ID.
 	 *
 	 * @return array CAP creation args, see \NewspackCustomContentMigrator\Logic\CoAuthorPlus::create_guest_author().
 	 *
 	 * @throws \UnexpectedValueException If Mologui guest author with $guest_id not found.
 	 */
-	public function get_cap_creation_args_for_mologui_guestauthor( int $guest_id ): array {
+	public function get_cap_creation_args_for_mologui_guestauthor( string $table_prefix_mologui, int $guest_id ): array {
 		global $wpdb;
 
-		$author_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->posts} where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$author_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}posts where ID = %d and post_type = 'guest_author';", $guest_id ), ARRAY_A );
 		if ( ! $author_row ) {
 			throw new \UnexpectedValueException( sprintf( 'Mologui guest user with ID %d not found.', $guest_id ) );
 		}
@@ -244,27 +309,33 @@ class MolonguiAutorship implements InterfaceCommand {
 		$cap_args = [];
 
 		// Basic info.
-		$display_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_display_name';", $guest_id ) );
-		if ( $display_name ) {
-			$cap_args['display_name'] = $display_name;
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$display_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_display_name';", $guest_id ) );
+		if ( $display_name && trim( $display_name ) ) {
+			$cap_args['display_name'] = trim( $display_name );
 		}
-		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_first_name';", $guest_id ) );
-		if ( $first_name ) {
-			$cap_args['first_name'] = $first_name;
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_first_name';", $guest_id ) );
+		if ( $first_name && trim( $first_name ) ) {
+			$cap_args['first_name'] = trim( $first_name );
 		}
-		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_last_name';", $guest_id ) );
-		if ( $last_name ) {
-			$cap_args['last_name'] = $last_name;
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_last_name';", $guest_id ) );
+		if ( $last_name && trim( $last_name ) ) {
+			$cap_args['last_name'] = trim( $last_name );
 		}
-		$email = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$email = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
 		if ( $email ) {
 			$cap_args['user_email'] = $email;
 		}
-		$description = $wpdb->get_var( $wpdb->prepare( "select post_content from {$wpdb->posts} where ID = %d;", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$description = $wpdb->get_var( $wpdb->prepare( "select post_content from {$table_prefix_mologui}posts where ID = %d;", $guest_id ) );
 		if ( $description ) {
 			$cap_args['description'] = $description;
 		}
-		$avatar = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_thumbnail_id';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$avatar = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_thumbnail_id';", $guest_id ) );
 		if ( $avatar ) {
 			$cap_args['avatar'] = $avatar;
 		}
@@ -278,7 +349,7 @@ class MolonguiAutorship implements InterfaceCommand {
 		 *      'newspack_role'
 		 *      'newspack_employer'
 		 *      'newspack_phone_number'
-		 * ... and their corresponding Molongui usermeta fields:
+		 * ... and their corresponding Molongui meta fields:
 		 *      _molongui_guest_author_web
 		 *      _molongui_guest_author_job
 		 *      _molongui_guest_author_company
@@ -288,66 +359,78 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * Save these as Newspack postmeta.
 		 */
 		// Author web -- append to description/bio.
-		$authorweb_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_web';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$authorweb_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_web';", $guest_id ) );
 		if ( $authorweb_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Web</a>', $authorweb_url );
 		}
 		// Job meta.
-		$molongui_guest_author_job = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = '_molongui_guest_author_job';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$molongui_guest_author_job = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_job';", $guest_id ) );
 		if ( $molongui_guest_author_job ) {
 			update_post_meta( $guest_id, 'newspack_job_title', $molongui_guest_author_job );
 		}
 		// Employer/company meta.
-		$molongui_guest_author_company = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = '_molongui_guest_author_company';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$molongui_guest_author_company = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_company';", $guest_id ) );
 		if ( $molongui_guest_author_company ) {
 			update_post_meta( $guest_id, 'newspack_employer', $molongui_guest_author_company );
 		}
 
 		/**
-		 * Molongui social sites usermeta fields, also appended to bio.
+		 * Molongui social sites meta fields, also appended to bio.
 		 */
 		// FB.
-		$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_facebook';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_facebook';", $guest_id ) );
 		if ( $facebook_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Facebook</a>', $facebook_url );
 		}
 		// IG.
-		$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_instagram';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_instagram';", $guest_id ) );
 		if ( $instagram_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Instagram</a>', $instagram_url );
 		}
 		// Twitter.
-		$twitter_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_twitter';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$twitter_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_twitter';", $guest_id ) );
 		if ( $twitter_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Twitter</a>', $twitter_url );
 		}
 		// Tumblr.
-		$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_tumblr';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_tumblr';", $guest_id ) );
 		if ( $tumblr_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Tumblr</a>', $tumblr_url );
 		}
 		// YouTube.
-		$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_youtube';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_youtube';", $guest_id ) );
 		if ( $youtube_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">YouTube</a>', $youtube_url );
 		}
 		// Medium.
-		$medium_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_medium';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$medium_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_medium';", $guest_id ) );
 		if ( $medium_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Medium</a>', $medium_url );
 		}
 		// Pinterest.
-		$pinterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_pinterest';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$pinterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_pinterest';", $guest_id ) );
 		if ( $pinterest_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Pinterest</a>', $pinterest_url );
 		}
 		// Soundcloud.
-		$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_soundcloud';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_soundcloud';", $guest_id ) );
 		if ( $soundcloud_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Soundcloud</a>', $soundcloud_url );
 		}
 		// Spotify.
-		$spotify_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_spotify';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$spotify_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_spotify';", $guest_id ) );
 		if ( $spotify_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Spotify</a>', $spotify_url );
 		}
@@ -356,28 +439,34 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * Skype call link and WhatsApp chat links seem way to private, like phone and email. Not adding appending these to desription for now. Not saving them anywhere, actually.
 		 */
 		// Skype.
-		$skype_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_skype';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$skype_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_skype';", $guest_id ) );
 		if ( $skype_link ) {
 			$skype_link;
 		}
 		// WhatsApp.
-		$whatsapp_chat_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_whatsapp';", $guest_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$whatsapp_chat_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_whatsapp';", $guest_id ) );
 		if ( $whatsapp_chat_link ) {
 			$whatsapp_chat_link;
 		}
 
 		/**
-		 * Other Molongui usermeta fields to be appended to description/bio, if the display box is checked.
+		 * Other Molongui meta fields to be appended to description/bio, if the display box is checked.
 		 */
 		// Mail.
-		$show_mail = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_show_meta_mail';", $guest_id ) );
-		$mail      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
+		// phpcs:disable -- $wpdb->prepare is used.
+		$show_mail = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_show_meta_mail';", $guest_id ) );
+		$mail      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_mail';", $guest_id ) );
+		// phpcs:enable
 		if ( $mail && $show_mail ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="mailto:%s">%s</a>', $mail, $mail );
 		}
 		// Phone.
-		$show_phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_show_meta_phone';", $guest_id ) );
-		$phone      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where post_id = %d and meta_key = '_molongui_guest_author_phone';", $guest_id ) );
+		// phpcs:disable -- $wpdb->prepare is used.
+		$show_phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_show_meta_phone';", $guest_id ) );
+		$phone      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}postmeta where post_id = %d and meta_key = '_molongui_guest_author_phone';", $guest_id ) );
+		// phpcs:enable
 		if ( $mail && $show_phone ) {
 			$htmls_append_to_bio[] = sprintf( 'Phone: %s', $phone );
 		}
@@ -406,17 +495,18 @@ class MolonguiAutorship implements InterfaceCommand {
 	 * Get CAP creation args from Molongui WP_User.
 	 * Converts all Molongui WP_User meta to CAP meta.
 	 *
-	 * @param int $wpuser_id WP_User ID.
+	 * @param string $table_prefix_mologui Mologui data table prefix.
+	 * @param int    $wpuser_id WP_User ID.
 	 *
 	 * @return array CAP creation args, see \NewspackCustomContentMigrator\Logic\CoAuthorPlus::create_guest_author().
 	 *
 	 * @throws \UnexpectedValueException If WP_User with $wpuser_id not found.
 	 */
-	public function get_cap_creation_args_for_mologui_wpuser( int $wpuser_id ): array {
+	public function get_cap_creation_args_for_mologui_wpuser( string $table_prefix_mologui, int $wpuser_id ): array {
 		global $wpdb;
 
 		// phpcs:disable -- Allow querying users table.
-		$wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$wpdb->users} where ID = %d;", $wpuser_id ), ARRAY_A );
+		$wpuser_row = $wpdb->get_row( $wpdb->prepare( "select * from {$table_prefix_mologui}users where ID = %d;", $wpuser_id ), ARRAY_A );
 		// phpcs:enable
 		if ( ! $wpuser_row ) {
 			throw new \UnexpectedValueException( sprintf( 'WP_User with ID %d not found.', $wpuser_id ) );
@@ -432,19 +522,23 @@ class MolonguiAutorship implements InterfaceCommand {
 		$htmls_append_to_bio = [];
 
 		// Basic info.
-		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'first_name';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$first_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'first_name';", $wpuser_id ) );
 		if ( $first_name ) {
 			$cap_args['first_name'] = $first_name;
 		}
-		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'last_name';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$last_name = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'last_name';", $wpuser_id ) );
 		if ( $last_name ) {
 			$cap_args['last_name'] = $last_name;
 		}
-		$description = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'description';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$description = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'description';", $wpuser_id ) );
 		if ( $description ) {
 			$cap_args['description'] = $description;
 		}
-		$avatar = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_image_id';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$avatar = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_image_id';", $wpuser_id ) );
 		if ( $avatar ) {
 			$cap_args['avatar'] = $avatar;
 		}
@@ -466,20 +560,26 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * first and only if it's empty also checks for postmeta. So we will save these as usermeta.
 		 */
 		// Job meta.
-		$newspack_job_title  = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_job_title';", $wpuser_id ) );
-		$molongui_author_job = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_job';", $wpuser_id ) );
+		// phpcs:disable -- $wpdb->prepare is used.
+		$newspack_job_title  = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'newspack_job_title';", $wpuser_id ) );
+		$molongui_author_job = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_job';", $wpuser_id ) );
+		// phpcs:enable
 		if ( ! $newspack_job_title && $molongui_author_job ) {
 			update_user_meta( $wpuser_id, 'newspack_job_title', $molongui_author_job );
 		}
 		// Employer/company meta.
-		$newspack_employer       = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_employer';", $wpuser_id ) );
-		$molongui_author_company = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_company';", $wpuser_id ) );
+		// phpcs:disable -- $wpdb->prepare is used.
+		$newspack_employer       = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'newspack_employer';", $wpuser_id ) );
+		$molongui_author_company = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_company';", $wpuser_id ) );
+		// phpcs:enable
 		if ( ! $newspack_employer && $molongui_author_company ) {
 			update_user_meta( $wpuser_id, 'newspack_employer', $molongui_author_company );
 		}
 		// Phone meta.
-		$newspack_phone_number = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'newspack_phone_number';", $wpuser_id ) );
-		$phone                 = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
+		// phpcs:disable -- $wpdb->prepare is used.
+		$newspack_phone_number = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'newspack_phone_number';", $wpuser_id ) );
+		$phone                 = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
+		// phpcs:enable
 		if ( ! $newspack_phone_number && $phone ) {
 			update_user_meta( $wpuser_id, 'newspack_phone_number', $phone );
 		}
@@ -488,13 +588,16 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * Other Molongui usermeta fields to be appended to description/bio.
 		 */
 		// Mail.
-		$show_mail = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_show_meta_mail';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$show_mail = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_show_meta_mail';", $wpuser_id ) );
 		if ( $wpuser_row['user_email'] && $show_mail ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="mailto:%s">%s</a>', $wpuser_row['user_email'], $wpuser_row['user_email'] );
 		}
 		// Phone.
-		$show_phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_show_meta_phone';", $wpuser_id ) );
-		$phone      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
+		// phpcs:disable -- $wpdb->prepare is used.
+		$show_phone = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_show_meta_phone';", $wpuser_id ) );
+		$phone      = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_phone';", $wpuser_id ) );
+		// phpcs:enable
 		if ( $show_phone && $phone ) {
 			$htmls_append_to_bio[] = sprintf( 'Phone: %s', $phone );
 		}
@@ -503,33 +606,40 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * Molongui social sites usermeta fields, also appended to bio.
 		 */
 		// Wiki.
-		$wikipedia_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'wikipedia';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$wikipedia_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'wikipedia';", $wpuser_id ) );
 		if ( $wikipedia_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Wikipedia</a>', $wikipedia_url );
 		}
 		// LI.
-		$linkedin_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'linkedin';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$linkedin_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'linkedin';", $wpuser_id ) );
 		if ( $linkedin_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">LinkedIn</a>', $linkedin_url );
 		}
 		// FB.
-		$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'facebook';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'facebook';", $wpuser_id ) );
 		if ( ! $facebook_url ) {
-			$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_facebook';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$facebook_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_facebook';", $wpuser_id ) );
 		}
 		if ( $facebook_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Facebook</a>', $facebook_url );
 		}
 		// IG.
-		$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'instagram';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'instagram';", $wpuser_id ) );
 		if ( ! $instagram_url ) {
-			$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_instagram';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$instagram_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_instagram';", $wpuser_id ) );
 		}
 		if ( $instagram_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Instagram</a>', $instagram_url );
 		}
 		// Twitter.
-		$twitter_with_at = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'twitter';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$twitter_with_at = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'twitter';", $wpuser_id ) );
 		// 'twitter' usermeta must begin with "@". Get handle from it.
 		$twitter_handle = null;
 		if ( $twitter_with_at && '@' == substr( $twitter_with_at, 0, 1 ) ) {
@@ -537,55 +647,67 @@ class MolonguiAutorship implements InterfaceCommand {
 			$htmls_append_to_bio[] = sprintf( '<a href="https://twitter.com/%s" target="_blank">Twitter</a>', $twitter_handle );
 		}
 		if ( ! $twitter_handle ) {
-			$twitter_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_twitter';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$twitter_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_twitter';", $wpuser_id ) );
 			if ( $twitter_url ) {
 				$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Twitter</a>', $twitter_url );
 			}
 		}
 		// Tumblr.
-		$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'tumblr';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'tumblr';", $wpuser_id ) );
 		if ( ! $tumblr_url ) {
-			$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_tumblr';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$tumblr_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_tumblr';", $wpuser_id ) );
 		}
 		if ( $tumblr_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Tumblr</a>', $tumblr_url );
 		}
 		// YT.
-		$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'youtube';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'youtube';", $wpuser_id ) );
 		if ( ! $youtube_url ) {
-			$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_youtube';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$youtube_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_youtube';", $wpuser_id ) );
 		}
 		if ( $youtube_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">YouTube</a>', $youtube_url );
 		}
 		// Medium.
-		$medium_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_medium';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$medium_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_medium';", $wpuser_id ) );
 		if ( $medium_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Medium</a>', $medium_url );
 		}
 		// Pinterest.
-		$pininterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'pinterest';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$pininterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'pinterest';", $wpuser_id ) );
 		if ( ! $pininterest_url ) {
-			$pininterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_pinterest';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$pininterest_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_pinterest';", $wpuser_id ) );
 		}
 		if ( $pininterest_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Pinterest</a>', $pininterest_url );
 		}
 		// Soundcloud.
-		$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'soundcloud';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'soundcloud';", $wpuser_id ) );
 		if ( ! $soundcloud_url ) {
-			$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_soundcloud';", $wpuser_id ) );
+			// phpcs:Ignore -- $wpdb->prepare is used.
+			$soundcloud_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_soundcloud';", $wpuser_id ) );
 		}
 		if ( $soundcloud_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Soundcloud</a>', $soundcloud_url );
 		}
 		// Spotify.
-		$spotify_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_spotify';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$spotify_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_spotify';", $wpuser_id ) );
 		if ( $spotify_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Spotify</a>', $spotify_url );
 		}
 		// Myspace.
-		$myspace_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'myspace';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$myspace_url = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'myspace';", $wpuser_id ) );
 		if ( $myspace_url ) {
 			$htmls_append_to_bio[] = sprintf( '<a href="%s" target="_blank">Myspace</a>', $myspace_url );
 		}
@@ -594,13 +716,15 @@ class MolonguiAutorship implements InterfaceCommand {
 		 * Skype call link and WhatsApp chat links seem way to private, like phone and email. Not adding appending these to desription for now. Not saving them anywhere, actually.
 		 */
 		// Skype.
-		$skype_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_skype';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$skype_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_skype';", $wpuser_id ) );
 		if ( $skype_link ) {
 			$skype_link;
 		}
 
 		// WhatsApp.
-		$whatsapp_chat_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->usermeta} where user_id = %d and meta_key = 'molongui_author_whatsapp';", $wpuser_id ) );
+		// phpcs:Ignore -- $wpdb->prepare is used.
+		$whatsapp_chat_link = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$table_prefix_mologui}usermeta where user_id = %d and meta_key = 'molongui_author_whatsapp';", $wpuser_id ) );
 		if ( $whatsapp_chat_link ) {
 			$whatsapp_chat_link;
 		}
@@ -623,5 +747,37 @@ class MolonguiAutorship implements InterfaceCommand {
 		}
 
 		return $cap_args;
+	}
+
+	/**
+	 * Logging helper. If dry run, logs to WP_CLI, otherwise to file.
+	 *
+	 * @param bool   $dry_run       Dry run.
+	 * @param string $log           Log name.
+	 * @param string $msg           Message to log.
+	 * @param string $level         Log level.
+	 * @param bool   $exit_on_error Exit on error.
+	 * @return void
+	 */
+	private function log( $dry_run, $log, $msg, $level = 'line', bool $exit_on_error = false ): void {
+		if ( $dry_run ) {
+			switch ( $level ) {
+				case ( $this->logger::SUCCESS ):
+					WP_CLI::success( $msg );
+					break;
+				case ( $this->logger::WARNING ):
+					\WP_CLI::warning( $msg );
+					break;
+				case ( $this->logger::ERROR ):
+					\WP_CLI::error( $msg, $exit_on_error );
+					break;
+				case ( $this->logger::LINE ):
+				default:
+					\WP_CLI::line( $msg );
+					break;
+			}
+		} else {
+			$this->logger->log( $log, $msg, $level, $exit_on_error );
+		}
 	}
 }
