@@ -32,6 +32,10 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 	 */
 	private $logger;
 
+	private $logs;
+
+	private $report_uid;
+
 	/**
 	 * Array of available commands
 	 * 
@@ -65,8 +69,11 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger = new Logger();
 
+		$this->logs = array();
+
 		$this->available_commands = [
 			[
+				'id'     => 'check_broken_images',
 				'name'   => 'Check broken images',
 				'method' => [ $this, 'call_check_broken_images' ],
 			],
@@ -154,6 +161,14 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::success( 'All PrelaunchQA steps were ran.' );
+
+		$report_link = $this->generate_report();
+
+		WP_CLI::log( 'You can see the report at %s.' );
+
+		$this->prompt( 'Please press enter after seeing it to delete it:' );
+
+		$this->delete_report();
 	}
 
 	/**
@@ -303,12 +318,60 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 		return $log_file_prefix;
 	}
 
+	public function generate_report() {
+		$logs_content = array();
+
+		foreach ( $this->available_commands as $command ) {
+			$command_id = $command['id'];
+
+			if ( ! isset( $this->logs[ $command_id ] ) ) {
+				continue;
+			}
+
+			$logs_prefix = $this->logs[ $command_id ];
+
+			$logs_files = glob( $logs_prefix . '*' );
+
+			$logs_content[ $command_id ] = '';
+
+			foreach( $logs_files as $log_file ) {
+				$contents = file_get_contents( $log_file ) . "\n";
+				$logs_content[ $command_id ] .= $contents;
+			}
+		}
+
+		ob_start();
+
+		include '../../Templates/qa-migrator-report.php';
+
+		$report_html = ob_get_contents();
+
+		ob_end_flush();
+
+		$this->report_uid = uniqid();
+
+		$report_file_name = sprintf( 'qa_migrator_%s.html', $this->report_uid );
+
+		file_put_contents( path_join( ABSPATH, $report_file_name ), $report_html );
+
+		return get_home_url( null, $report_file_name );
+	}
+
+	public function delete_report() {
+		$report_file_name = sprintf( 'qa_migrator_%s.html', $this->report_uid );
+
+		return unlink( path_join( ABSPATH, $report_file_name ) );
+	}
+	
+
 	/**
 	 * Wrapper function for calling the check_broken_images command
 	 */
 	public function call_check_broken_images() {
+		$log_file_name = $this->get_log_file_name( 'check_broken_images' );
+
 		$assoc_args = array(
-			'log-file-prefix' => $this->get_log_file_name( 'check_broken_images' ),
+			'log-file-prefix' => $log_file_name,
 		);
 
 		if ( $this->is_dry_run_mode() ) {
@@ -317,5 +380,7 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 
 		$attachments_migrator = AttachmentsMigrator::get_instance();
 		$attachments_migrator->cmd_check_broken_images( array(), $assoc_args );
+
+		$this->logs['check_broken_images'] = $log_file_name;
 	}
 }
