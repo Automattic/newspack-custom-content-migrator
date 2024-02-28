@@ -148,6 +148,11 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 // Featured?
 // Redirect URL => these don't look to be redirecting out, nor capturing incoming traffic
 
+// redirects:
+// /work/
+// /story-supplements/
+
+
 			$this->mylog( 'Processing old site id', $columns['Item ID'] );
 
 			// post
@@ -202,11 +207,6 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 			} // cats
 
 		} // csv post row
-
-// redirects:
-// /reporting/,
-// /work/
-// /story-supplements/
 
 		$this->mylog( 'Report', print_r( $this->report ) );
 
@@ -352,7 +352,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 			$post_id = wp_insert_post( array(
 				'post_author'   => 1,
 				'post_content'  => $this->media_parse_content( $columns['Post Body'] ),
-				'post_date_gmt' => trim( preg_replace( '(Coordinated Universal Time)', '', $columns['Publish Date'] ) ),
+				'post_date' => date( 'Y-m-d H:i:s', strtotime( str_replace( 'GMT+0000 (Coordinated Universal Time)', '', $columns['Publish Date'] ) ) ),
 				'post_status'   => 'publish',
 				'post_title'    => $columns['Name'],
 				'post_type'     => 'post',
@@ -370,28 +370,42 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		update_post_meta( $post_id, 'newspack_underscore_checksum', $checksum );
 		update_post_meta( $post_id, 'newspack_post_subtitle', $columns['Sub-title'] );
 
+		// set redirect if different slugs
+		$old_permalink = '/reporting/' . $columns['Slug'];
+		$new_permalink = str_replace( get_site_url() , '', get_permalink( $post_id ) );
+
+		if( $old_permalink != $new_permalink ) {
+			$this->set_redirect( $old_permalink, $new_permalink, 'posts' );
+		}
+		
 		return $post_id;
 
 	}
 
 	private function get_or_insert_cat_with_redirect( $cat_slug, $cat_name ) {
+
+		$term_ids = term_exists( (string) $cat_name, 'category' );
+
+		if ( ! isset( $term_ids['term_id'] ) ) {
+
+			$term_ids = wp_insert_term( (string) $cat_name, 'category' );
+
+			if ( is_wp_error( $term_ids ) || ! isset( $term_ids['term_id'] ) ) {
+				
+				$this->mylog( 'Category insert failed', $cat_slug, $this->logger::WARNING );
+				return;
+
+			}
 		
-		$inserted_term = wp_insert_term( (string) $cat_name, 'category' );
-
-		if ( is_wp_error( $inserted_term ) || ! isset( $inserted_term['term_id'] ) ) {
-			
-			$this->mylog( 'Category insert failed', $cat_slug );
-			return;
-
 		}
 
 		// get the term
-		$term = get_term( (int) $inserted_term['term_id'] );
+		$term = get_term( (int) $term_ids['term_id'] );
 
 		// add a redirect only if it was changed when inserted
 		if( $cat_slug != $term->slug ) $this->set_redirect( '/category/' . $cat_slug, '/category/' . $term->slug, 'categories' );
 
-		return $inserted_term['term_id'];
+		return $term_ids['term_id'];
 
 	}
 
@@ -504,7 +518,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		];
 
 		if( ! preg_match('/^https?:\/\/(' . implode( '|', $keep_domains ) . ')/', $url ) ) {
-			$this->mylog( $attr . ' off domain link found in element', $element, $this->logger::WARNING );
+			// $this->mylog( $attr . ' off domain link found in element', $element, $this->logger::WARNING );
 			return;
 		}
 
