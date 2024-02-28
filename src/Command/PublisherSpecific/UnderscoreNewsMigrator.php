@@ -16,11 +16,16 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 	private static $instance = null;
 
+	// logic and utils
 	private $attachments_logic;
 	private $coauthorsplus_logic;
 	private $logger;
 	private $redirection_logic;
 
+	// per-command properties
+	private $log_file;
+	private $report = [];
+	
 	/**
 	 * Constructor.
 	 */
@@ -51,27 +56,10 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 	public function register_commands() {
 
 		WP_CLI::add_command(
-			'newspack-content-migrator underscorenews-import-categories',
-			[ $this, 'cmd_import_categories' ],
-			[
-				'shortdesc' => 'Imports Categories from CSV.',
-				'synopsis'  => [
-					[
-						'type'        => 'assoc',
-						'name'        => 'csv-categories',
-						'description' => 'CSV file: --csv-categories="path/categories.csv"',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-				],
-			]
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator underscorenews-import-posts',
 			[ $this, 'cmd_import_posts' ],
 			[
-				'shortdesc' => 'Imports Posts from CSV using 3 CSVs.',
+				'shortdesc' => 'Imports Posts from CSV using 3 CSVs (posts, team, cats).',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -87,75 +75,43 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-cats',
+						'description' => 'CSV file: --csv-cats="path/cats.csv"',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
 
 	}
 
-	public function cmd_import_categories( $pos_args, $assoc_args ) {
-
-		$csv_categories = $this->get_csv_handle( $assoc_args[ 'csv-categories' ], 10 );
+	public function cmd_import_posts( $pos_args, $assoc_args ) {
 
 		global $wpdb;
 
-		$log = 'underscorenews_' . __FUNCTION__ . '.txt';
-        $this->logger->log( $log , 'Starting ...' );
-
-		// import categories
-		$header = true;
-		while( false !== ( $row = fgetcsv( $csv_categories ) ) ) {
-			
-			// skip header
-			if( $header ) {
-				$header = false;
-				continue;
-			}
-
-			// create the category based on old name and slug
-			$inserted_term = wp_insert_term( $row[0], 'category', array( 'slug' => $row[1] ) );
-
-			// Check for errors
-			if ( is_wp_error( $inserted_term ) ) {
-				
-				$this->logger->log( $log, $inserted_term->get_error_code() . ': ' . $row[0], $this->logger::WARNING );
-				continue;
-
-			}
-
-			break;
-
-		}
-
-		WP_CLI::success( "Done." );
-
-	}
-
-	public function cmd_import_posts( $pos_args, $assoc_args ) {
-
+		$this->log_file = 'underscorenews_' . __FUNCTION__ . '.txt';
+        $this->mylog( 'Starting ...' );
+		
 		// needs coauthors plus plugin
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-		// make sure Redirects plugin is active
-		// if( ! class_exists ( '\Red_Item' ) ) {
-		// 	WP_CLI::error( 'Redirection plugin must be active.' );
-		// }
+// make sure Redirects plugin is active
+// if( ! class_exists ( '\Red_Item' ) ) {
+// 	WP_CLI::error( 'Redirection plugin must be active.' );
+// }
 
 		// load csvs
 		$csv_posts = $this->get_csv_handle( $assoc_args[ 'csv-posts' ], 22 );
 		$csv_team = $this->get_csv_handle( $assoc_args[ 'csv-team' ], 12 );
 		$team = $this->csv_to_hash( $csv_team, 1, true );
+// $csv_categories = $this->get_csv_handle( $assoc_args[ 'csv-categories' ], 10 );
 
-		global $wpdb;
-
-		$log = 'underscorenews_' . __FUNCTION__ . '.txt';
-        $this->logger->log( $log , 'Starting ...' );
-
-		$report = [];
-
-		// import categories
+		// import posts
 		$header = null;
 		while( false !== ( $row = fgetcsv( $csv_posts ) ) ) {
 
@@ -171,19 +127,17 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 				$columns[$header[$i]] = $row[$i];
 			}
 
-			$this->logger->log( $log, 'Processing old site id: ' . $columns['Item ID'] );
-			$this->report_add( $report, 'Processing old site id' );
+			$this->mylog( 'Processing old site id', $columns['Item ID'] );
 
 			// check if post already exists
 			$post_id = $wpdb->get_var( $wpdb->prepare( "
-				SELECT post_id FROM {$wpdb->postmeta} where meta_key = 'newspack_underscore_old_site_id' and meta_value = %s LIMIT 1
+				SELECT post_id FROM {$wpdb->postmeta} where meta_key = 'newspack_underscore_old_item_id' and meta_value = %s LIMIT 1
 			", $columns['Item ID'] ));
 
 			// use existing post
 			if( is_numeric( $post_id ) && $post_id > 0 ) {
 
-				$this->logger->log( $log, 'Post exists: ' . $post_id );
-				$this->report_add( $report, 'Post exists.' );
+				$this->mylog( 'Post exists', $post_id );
 	
 			}
 			// create post
@@ -200,21 +154,34 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 			
 				if( ! is_numeric( $post_id ) || ! ( $post_id > 0 ) ) {
 
-					$this->logger->log( $log, 'SKIP: post insert failed for old site id: ' . $columns['Item ID'], $this->logger::WARNING );
-					$this->report_add( $report, 'SKIP: post insert failed for old site id' );
+					$this->mylog( 'SKIP: post insert failed for old site id', $columns['Item ID'], $this->logger::WARNING );
 					continue;
 
 				}
 
-				update_post_meta( $post_id, 'newspack_underscore_old_site_id', $columns['Item ID'] );
-
-				$this->logger->log( $log, 'Post inserted: ' . $post_id );
-				$this->report_add( $report, 'Post inserted.' );
+				$this->mylog( 'Post inserted', $post_id );
 
 			} // create post
 
+			// set postmeta			
+			update_post_meta( $post_id, 'newspack_underscore_old_item_id', $columns['Item ID'] );
+			update_post_meta( $post_id, 'newspack_underscore_old_slug', $columns['Slug'] );
+			update_post_meta( $post_id, 'newspack_underscore_checksum', md5( json_encode( $row ) ) );
+			update_post_meta( $post_id, 'newspack_post_subtitle', $columns['Sub-title'] );
+			
+			// set CAP GAs
+			if( ! empty( $columns['Author'] ) && isset( $team[$columns['Author']] ) ) {
+	
+				$this->set_author( $post_id, $columns['Author'], $team[$columns['Author']] );
+	
+			}
+
+			exit();
+
+			// get the new post
 			$post = get_post( $post_id );
 
+						
 			// parse and update images and files (PDF) in body content
 			preg_match_all( '/<(a|img) [^>]*?>/i', $post->post_content, $elements );
 			// foreach( $elements[0] as $element ) {
@@ -247,35 +214,34 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 			// }
 
-			// set CAP GAs
-			if( ! empty( $columns['Author'] ) ) {
-				
-				print_r( $team[$columns['Author']] );
+
+
+
+
+
+// $post['categories'] = $columns['Category']; // these match to the Category csv
+// $inserted_term = wp_insert_term( $row[0], 'category', array( 'slug' => $row[1] ) );
+
+// // Check for errors
+// if ( is_wp_error( $inserted_term ) ) {
 	
-			}
+// 	$this->logger->log( $log, $inserted_term->get_error_code() . ': ' . $row[0], $this->logger::WARNING );
+// 	continue;
 
-			exit();
-
-
-
+// }
 
 
 
+// redirects:
+// /reporting/,
+// /team/
+// /work/
+// /story-supplements/
 
-
-// redirect:
-// 'post_name'     => $columns['Slug'],
-// /reporting/, /team/, /work/
 
 
 		
-			// Relationships:
-			$post['categories'] = $columns['Category']; // these match to the Category csv
-		
-			// Post Meta:
-			$post['sub-title'] = $columns['Sub-title'];
-			$post['old_id'] = $columns['Item ID'];
-			$post['old_url'] = '/reporting/' . $columns['Slug'];
+
 			
 			// Ignore:
 			// Collection ID - same for all, assumed to be Site/Publiser ID
@@ -334,8 +300,17 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 
 	/**
-	 * REPORTING
+	 * LOGGING AND REPORTING
 	 */
+
+	private function mylog( $key, $value = '', $level = 'line' ) {
+		
+		$str = ( empty( $value ) ) ? $key : $key . ': ' . $value;
+
+		$this->logger->log( $this->log_file, $str, $level );
+		$this->report_add( $this->report, $key );
+
+	}
 
 	private function report_add( &$report, $key ) {
 		if( empty( $report[$key] ) ) $report[$key] = 0;
@@ -521,6 +496,80 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		}
 
 		return $url;
+
+	}
+
+
+	/**
+	 * AUTHORS / TEAM / CAP GA
+	 */
+
+	private function set_author( $post_id, $old_slug, $team_row ) {
+
+		$ga_id = $this->get_or_create_ga( $old_slug, $team_row );
+		if( ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) return;
+
+		$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga_id ), $post_id );
+
+		// add redirect
+		$ga_obj = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+		
+		print_r( $ga_obj );
+		exit();
+
+	}
+
+	private function get_or_create_ga( $old_slug, $team_row ) {
+
+		global $wpdb;
+
+		// look up by post meta
+		$ga_id = $wpdb->get_var( $wpdb->prepare( "
+			SELECT p.ID 
+			FROM {$wpdb->posts} p
+			JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = 'newspack_underscore_old_slug' AND pm.meta_value = %s
+			WHERE p.post_type = 'guest-author'
+		", $old_slug ) );
+
+		if( is_numeric( $ga_id ) && $ga_id > 0 ) return $ga_id;
+
+		// insert
+		$args = [
+			'display_name' => $team_row['Name'],
+			'user_login'   => $this->coauthorsplus_logic->get_unique_user_login( sanitize_title( urldecode( $old_slug ) ) ),
+		];
+		
+		$description = '';
+
+		if( ! empty( $team_row['Position'] ) ) $description .= '<h2>' . $team_row['Position'] + '</h2>';
+		if( ! empty( $team_row['Bio'] ) )      $description .= $team_row['Bio'];
+		
+		if( ! empty( $description ) ) {
+			$args['description'] = $description;
+		}
+
+		if( ! empty( $team_row['Picture'] ) ) {
+
+			$avatar = $this->attachments_logic->import_external_file( $team_row['Picture'], $team_row['Picture'] );
+			if( is_numeric( $avatar ) && $avatar > 0 ) {
+				$args['avatar'] = $avatar;
+			}
+			else {
+				$this->mylog( 'Unable to import author avatar.', $old_slug );
+			}
+
+		}
+
+		$ga_id = $this->coauthorsplus_logic->coauthors_guest_authors->create( $args );
+
+		if( ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
+			$this->mylog( 'CAP GA get or create failed', $old_slug, $this->logger::WARNING );
+			return null;
+		}
+
+		update_post_meta( $ga_id, 'newspack_underscore_old_slug', $old_slug );
+
+		return $ga_id;
 
 	}
 
