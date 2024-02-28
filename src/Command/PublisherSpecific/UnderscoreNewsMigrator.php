@@ -89,21 +89,22 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_import_posts( $pos_args, $assoc_args ) {
-
-		global $wpdb;
-
-		$this->log_file = 'underscorenews_' . __FUNCTION__ . '.txt';
-        $this->mylog( 'Starting ...' );
 		
 		// needs coauthors plus plugin
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-// make sure Redirects plugin is active
-// if( ! class_exists ( '\Red_Item' ) ) {
-// 	WP_CLI::error( 'Redirection plugin must be active.' );
-// }
+		// make sure Redirects plugin is active
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
+
+		global $wpdb;
+
+		$this->log_file = 'underscorenews_' . __FUNCTION__ . '.txt';
+
+		$this->mylog( 'Starting ...' );
 
 		// load csvs
 		$csv_posts = $this->get_csv_handle( $assoc_args[ 'csv-posts' ], 22 );
@@ -511,12 +512,9 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 		$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga_id ), $post_id );
 
-		// add redirect
 		$ga_obj = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+		$this->set_redirect( '/team/' . $old_slug, '/author/' . $ga_obj->user_nicename, 'team' );
 		
-		print_r( $ga_obj );
-		exit();
-
 	}
 
 	private function get_or_create_ga( $old_slug, $team_row ) {
@@ -541,7 +539,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		
 		$description = '';
 
-		if( ! empty( $team_row['Position'] ) ) $description .= '<h2>' . $team_row['Position'] + '</h2>';
+		if( ! empty( $team_row['Position'] ) ) $description .= '<h2>' . $team_row['Position'] . '</h2>';
 		if( ! empty( $team_row['Bio'] ) )      $description .= $team_row['Bio'];
 		
 		if( ! empty( $description ) ) {
