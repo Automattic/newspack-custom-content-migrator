@@ -88,5 +88,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\WindyCityMigrator::class,
 		Command\PublisherSpecific\InjusticeWatchMigrator::class,
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
+		Command\PublisherSpecific\UnderscoreNewsMigrator::class,
 	)
 );
