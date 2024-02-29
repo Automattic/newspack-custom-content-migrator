@@ -155,7 +155,8 @@ class S3UploadsMigrator implements InterfaceCommand {
 			'newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3',
 			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
 			[
-				'shortdesc' => '1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
+				'shortdesc' => 'This command contains instructions how to compare files from local path with files on S3, and lists a diff -- files that are present on local but missing on S3. ' .
+				                '1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
 								'e.g for entire uploads/: ' .
 								'$ find uploads -type f > uploads_local.txt ; ' .
 								'or e.g just for year 2009: ' .
@@ -169,7 +170,13 @@ class S3UploadsMigrator implements InterfaceCommand {
 								'' .
 								'3. Open the list of files on S3 from step 2. and check if there is a difference in local VS S3 paths. If S3 paths have a prefix segment that is missing from the paths of local files, provide it as an argument e.g. --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
-								'4. Then run the command like this: ' .
+								'4a. On OSX flavored bash, the resulting two files can easily be diff-ed using the command: ' .
+								'  $ comm -13 <(sort uploads_local.txt) <(sort uploads_s3.txt) > diff_exist_on_local_but_not_on_s3.txt' .
+								'' .
+								'4b. On Linux bash, a diff can be located like this:' . 
+								"  $ diff --changed-group-format='%>' --unchanged-group-format='' uploads_local.txt uploads_s3.txt | grep -v '^$' > diff_exist_on_local_but_not_on_s3.txt " .
+								'' .
+								'4c. It is now recommended to use 4a or 4b commands to find the diff, and this command is actually no longer necessary. But the two files can also be diffed by running it like this: ' .
 								'  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
 								'    --local-log=2009_local.txt \ ' .
 								'    --s3-log=2009_s3.txt \ ' .
