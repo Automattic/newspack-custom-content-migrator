@@ -170,13 +170,13 @@ class S3UploadsMigrator implements InterfaceCommand {
 								'' .
 								'3. Open the list of files on S3 from step 2. and check if there is a difference in local VS S3 paths. If S3 paths have a prefix segment that is missing from the paths of local files, provide it as an argument e.g. --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
-								'4a. On OSX flavored bash, the resulting two files can easily be diff-ed using the command: ' .
+								'4a. On OSX flavored bash, the resulting two files can easily be diff-ed using the command, however first make sure that the paths/prefixes inside both files are the same: ' .
 								'  $ comm -13 <(sort uploads_local.txt) <(sort uploads_s3.txt) > diff_exist_on_local_but_not_on_s3.txt' .
 								'' .
-								'4b. On Linux bash, a diff can be located like this:' . 
+								'4b. On Linux bash, a diff can be located like this, also previously making sure that paths/prefixes inside both files match:' . 
 								"  $ diff --changed-group-format='%>' --unchanged-group-format='' uploads_local.txt uploads_s3.txt | grep -v '^$' > diff_exist_on_local_but_not_on_s3.txt " .
 								'' .
-								'4c. It is now recommended to use 4a or 4b commands to find the diff, and this command is actually no longer necessary. But the two files can also be diffed by running it like this: ' .
+								'4c. The two files can also be diffed by running this command like this: ' .
 								'  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
 								'    --local-log=2009_local.txt \ ' .
 								'    --s3-log=2009_s3.txt \ ' .
