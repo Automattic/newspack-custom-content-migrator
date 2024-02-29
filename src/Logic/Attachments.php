@@ -9,6 +9,8 @@ use WP_Error;
  * Attachments logic.
  */
 class Attachments {
+	const MEDIA_LIBRARY_CACHE_KEY = 'newspack_custom_content_migrator_media_library_cache';
+
 	/**
 	 * Imports a media object from file and returns the ID.
 	 *
@@ -384,5 +386,85 @@ class Attachments {
 		// phpcs:enable
 
 		return $attachment_id;
+	}
+
+	/**
+	 * This function indexes and caches the media library. It provides a
+	 * reusable way to search for files within the library.
+	 *
+	 * @return void
+	 */
+	public function index_and_cache_local_media_library(): void {
+		$uploads_path = wp_get_upload_dir()['basedir'];
+
+		$search_stack = [ $uploads_path ];
+
+		$media_files = [];
+
+		while ( ! empty( $search_stack ) ) {
+			$dir = array_pop( $search_stack );
+
+			$contents = scandir( $dir );
+
+			foreach ( $contents as $content ) {
+				if ( '.' === $content || '..' === $content ) {
+					continue;
+				}
+
+				if ( is_dir( "$dir/$content" ) ) {
+					$search_stack[] = "$dir/$content";
+				} else {
+					$media_files[ $dir . '/' . $content ] = $content;
+				}
+			}
+		}
+
+		krsort( $media_files ); // Sort by key (full path) in reverse order, so that the most recent files are first.
+
+		wp_cache_set( self::MEDIA_LIBRARY_CACHE_KEY, $media_files );
+	}
+
+	/**
+	 * This function will return the path of the file being searched for if it is present in the media library.
+	 *
+	 * @param string $filename The filename of the file being searched for.
+	 * @param bool   $case_insensitive Whether to consider character cases for matches (defaults to false, meaning only exact matches are returned).
+	 *
+	 * @return string|null
+	 */
+	public function find_in_media_library( string $filename, bool $case_insensitive = false ): ?string {
+		$media_files = wp_cache_get( self::MEDIA_LIBRARY_CACHE_KEY );
+
+		if ( false === $media_files ) {
+			$this->index_and_cache_local_media_library();
+			$media_files = wp_cache_get( self::MEDIA_LIBRARY_CACHE_KEY );
+		}
+
+		if ( array_key_exists( $filename, $media_files ) ) {
+			return $filename;
+		}
+
+		$filename = basename( $filename );
+
+		foreach ( $media_files as $path => $file ) {
+			if ( $filename === $file ) {
+				return $path;
+			}
+		}
+
+		if ( $case_insensitive ) {
+			$filename = strtolower( $filename );
+			foreach ( $media_files as $path => $file ) {
+				if ( strtolower( $path ) === $filename ) {
+					return $path;
+				}
+
+				if ( strtolower( $file ) === $filename ) {
+					return $path;
+				}
+			}
+		}
+
+		return null;
 	}
 }
