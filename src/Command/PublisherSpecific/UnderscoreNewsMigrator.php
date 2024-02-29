@@ -215,7 +215,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 
 		} // csv post row
 
-		$this->mylog( 'Report', print_r( $this->report ) );
+		$this->mylog( 'Report', print_r( $this->report, true ) );
 
 		WP_CLI::success( "Done." );
 
