@@ -1,6 +1,6 @@
 # Newspack Custom Content Migrator
 
-This plugin is a set of WP CLI commands, and scripts used during Newspack sites Live Launches and/or Content Updates.
+This plugin is a set of WP CLI commands and scripts used during Newspack sites Live Launches and/or Content Updates.
 
 This Plugin consists of various Migrators (which perform reusable or publisher-specific content migration), and the "Content Diff" logic.
 
