@@ -112,6 +112,8 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		$team_hash = $this->csv_to_hash( $csv_team, 1, true );
 		$cats_hash = $this->csv_to_hash( $csv_cats, 1, true );
 
+		$primary_term_ids = term_exists( 'Reporting', 'category' );
+
 		// import posts
 		$header = null;
 		while( false !== ( $row = fgetcsv( $csv_posts ) ) ) {
@@ -186,7 +188,12 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 				$this->set_author( $post_id, $columns['Author'], $team_hash[$columns['Author']] );
 			}
 			
-			// set categories
+			// set primary /reporting/ category
+
+			wp_set_post_categories( $post_id, $primary_term_ids['term_id'] );
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $primary_term_ids['term_id'] );
+
+			//set additional categories
 			if( ! empty( $columns['Category'] ) ) {
 
 				$cats = array_map( 'trim', explode( ';', $columns['Category'] ) );
@@ -371,7 +378,7 @@ class UnderscoreNewsMigrator implements InterfaceCommand {
 		update_post_meta( $post_id, 'newspack_post_subtitle', $columns['Sub-title'] );
 
 		// set redirect if different slugs
-		$old_permalink = '/reporting/' . $columns['Slug'];
+		$old_permalink = '/reporting/' . $columns['Slug'] . '/';
 		$new_permalink = str_replace( get_site_url() , '', get_permalink( $post_id ) );
 
 		if( $old_permalink != $new_permalink ) {
