@@ -86,6 +86,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
-		Command\PublisherSpecific\InjusticeWatchMigrator::class,
+		Command\PublisherSpecific\CarsonNowMigrator::class,
 	)
 );
