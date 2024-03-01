@@ -9259,7 +9259,7 @@ BLOCK;
 				$file_exists        = file_exists( $full_filename_path );
 				$this->high_contrast_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
-				$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+				$possible_attachment_id = $this->attachments->get_attachment_by_filename( $filename );
 				$this->high_contrast_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 				if ( $possible_attachment_id ) {
