@@ -20,6 +20,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 	private $logger;
 	private $redirection_logic;
 
+	private $pdf_post_category_slug = 'issue-pdfs';
+
 	/**
 	 * Constructor.
 	 */
@@ -64,7 +66,16 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator bigbendsentinel-reset-pdf-post-category',
+			[ $this, 'cmd_reset_pdf_post_category' ],
+			[
+				'shortdesc' => 'Resets all PDF Post\'s category to only "Issue PDFs".',
+			]
+		);
+
 	}
+	
 	public function cmd_convert_issues_cpt( $pos_args, $assoc_args ) {
 
 		// register the taxonomy since the old site had this in their theme
@@ -451,6 +462,54 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 	}
 
+	public function cmd_reset_pdf_post_category( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+
+		$log = 'bigbendsentinel_' . __FUNCTION__ . '.txt';
+
+        $this->logger->log( $log , 'Starting ...' );
+
+		// get post with PDF Post block pattern
+		$posts = $wpdb->get_results("
+			SELECT ID
+			FROM {$wpdb->posts}
+			WHERE post_type = 'post'
+			AND post_content like '%<!-- wp:file {%wp-block-file%>Download</a></div>%<!-- /wp:file -->%'
+		");
+
+		$this->logger->log( $log, 'Posts found: ' . count( $posts ) );
+		
+		$primary_term_ids = term_exists( $this->pdf_post_category_slug, 'category' );
+
+		foreach( $posts as $post ) {
+			
+			$this->logger->log( $log , 'Post ID:' . $post->ID );
+			
+			$existing_cats = wp_get_post_categories( $post->ID, array( 'fields' => 'all' ) );
+
+			if( ! is_array( $existing_cats ) || 1 != count( $existing_cats ) || ! isset( $existing_cats[0]->slug ) ) {
+				$this->logger->log( $log , 'Skip: single post category mismatch.', $this->logger::WARNING );
+				continue;
+			}
+
+			if( $this->pdf_post_category_slug == $existing_cats[0]->slug ) {
+				$this->logger->log( $log , 'Skip: post was already reset.' );
+				continue;
+			}
+
+			if( 'news' != $existing_cats[0]->slug ) {
+				$this->logger->log( $log , 'Skip: post categories do not match only news.', $this->logger::WARNING );
+				continue;
+			}
+
+			wp_set_post_categories( $post->ID, $primary_term_ids['term_id'] );
+
+		}
+
+		WP_CLI::success( "Done." );
+
+	}
 
 	/**
 	 * ISSUES
@@ -546,6 +605,12 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		set_post_thumbnail( $new_pdf_post_id, $pdf_featured_image_id );
 		update_post_meta( $new_pdf_post_id, 'newspack_featured_image_position', 'hidden' ); // don't show at top of Post
+
+		// set category to only 'Issue PDFs'
+		$primary_term_ids = term_exists( $this->pdf_post_category_slug, 'category' );
+		if( isset( $primary_term_ids['term_id'] ) ) {
+			wp_set_post_categories( $new_pdf_post_id, $primary_term_ids['term_id'] );
+		}
 
 		return $new_pdf_post_id;
 		
