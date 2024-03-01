@@ -925,6 +925,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			),
 			array(
 				'type'        => 'flag',
+				'name'        => 'force-post-content',
+				'description' => 'Whether to force an update of the post content.',
+				'optional'    => true,
+				'repeating'   => false,
+			),
+			array(
+				'type'        => 'flag',
 				'name'        => 'published-date',
 				'description' => 'If this flag is set, it will update the published date of the post.',
 				'optional'    => true,
@@ -3909,6 +3916,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		$media_location = $assoc_args['media-location'];
 
+		$update_post_content = $assoc_args['force-post-content'] ?? false;
 		$update_published_date          = $assoc_args['published-date'] ?? false;
 		$update_post_authors            = $assoc_args['post-authors'] ?? false;
 		$update_keywords                = $assoc_args['keywords'] ?? false;
@@ -3963,6 +3971,10 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$post_data = array();
 			$post_meta = array();
+
+			if ( $update_post_content ) {
+				$post_data['post_content'] = $article['post_html'];
+			}
 
 			/*
 			 * PUBLISHED DATE UPDATE SECTION
@@ -4097,14 +4109,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			/*
 			 * *
 			 * FEATURED IMAGE SECTION
-			 * /
+			 */
 
 			/*
 			 * VIDEO AS FEATURED IMAGE SECTION
 			 * * */
-
 			if ( $update_video_as_featured_image ) {
-				$html = $article['post_html'];
+				$html = $post_data['post_content'] ?? $article['post_html'];
 				$html = str_replace( '//www.lasillavacia.com', '//lasillavacia-staging.newspackstaging.com', $html );
 				$html = str_replace( '//lasillavacia.com', '//lasillavacia-staging.newspackstaging.com', $html );
 				if ( ! is_null( $article['video'] ) ) {
