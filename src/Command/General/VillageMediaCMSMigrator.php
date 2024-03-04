@@ -10,6 +10,7 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Utils\Logger;
 use stdClass;
 use WP_User;
 use WP_CLI;
@@ -42,6 +43,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	 * @var GutenbergBlockGenerator|null
 	 */
 	protected ?GutenbergBlockGenerator $block_generator;
+	
+	/**
+	 * Logger.
+	 *
+	 * @var Logger
+	 */
+	protected Logger $logger;
 
 	/**
 	 * Singleton get_instance().
@@ -52,12 +60,19 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$class = get_called_class();
 
 		if ( null === self::$instance ) {
-			self::$instance                  = new $class();
-			self::$instance->attachments     = new Attachments();
-			self::$instance->block_generator = new GutenbergBlockGenerator();
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
+	}
+
+	/**
+	 * Singleton constructor.
+	 */
+	private function __construct() {
+		$this->attachments     = new Attachments();
+		$this->block_generator = new GutenbergBlockGenerator();
+		$this->logger          = new Logger();
 	}
 
 	/**
@@ -96,6 +111,179 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-fix-authors',
+			[ $this, 'cmd_fix_authors' ],
+			[
+				'shortdesc' => 'A helper command, re-sets the authors on all imported posts according to this rule: if <attributes> byline exists use that for author, and if it does not exist then use <author>.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'file-path',
+						'description' => 'Path to XML file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator village-cms-fix-authors` command.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_authors( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		// Args.
+		$xml_file = $pos_args[0];
+
+
+		// Logs.
+		$log     = 'village-cms-fix-authors.log'
+		$log_csv = 'village-cms-fix-authors.csv'
+		// Timestamp $log.
+		$this->logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
+		// Delete file $log_csv if it exists.
+		if ( file_exists( $log_csv ) ) {
+			unlink( $log_csv );
+		}
+		// Log all updates to a CSV.
+		$fp_csv  = fopen( $log_csv, 'w' );
+		$csv_headers = [
+			'original_article_id',
+			'post_id',
+			'author_before_id',
+			'author_before_displayname',
+			'author_after_id',
+			'author_after_displayname'
+		];
+		fputcsv( $fp_csv, $csv_headers );
+		
+		
+		// Loop through content nodes and fix authors.
+		$dom = new DOMDocument();
+		$dom->loadXML( file_get_contents( $xml_file ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$contents = $dom->getElementsByTagName( 'content' );
+		foreach ( $contents as $key_content => $content ) {
+
+			/**
+			 * Get id, author and attributes.
+			 */
+			$original_article_id = null;
+			$author_node         = null;
+			$attributes          = null;
+			foreach ( $content->childNodes as $node ) {
+				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					continue;
+				}
+				switch ( $node->nodeName ) {
+					case 'id':
+						$original_article_id = $node->nodeValue;
+						break;
+					case 'author':
+						$author_node = $node;
+						break;
+					case 'attributes':
+						$attributes = json_decode( $node->nodeValue, true );
+						break;
+				}
+			}
+
+
+			// Progress.
+			$this->logger->log( $log, sprintf( '(%d)/(%d) original article ID %s', $key_content + 1, count( $contents ), $original_article_id ) );
+			
+
+			// Get post ID.
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
+			if ( ! $post_id ) {
+				$this->logger->log( $log, sprintf( 'ERROR Post not found for original_article_id %s', $original_article_id ), $this->logger::ERROR, false );
+				continue;
+			}
+			$this->logger->log( $log, sprintf( 'Found post ID %d', $post_id ) );
+			
+
+			// Get the before author data.
+			$post                       = get_post( $post_id );
+			$author_before_id           = $post->post_author;
+			$author_before_display_name = get_the_author_meta( 'display_name', $author_before_id );
+
+			
+			/**
+			 * If byline attribute exists, use that for author.
+			 * If byline attribute does not exist, use <author> for author.
+			 */
+			$author_after_display_name = null;
+			$author_after_id           = null;
+			if ( ! empty( $attributes['byline'] ) ) {
+				// Use the byline attribute as author.
+				$author_after_display_name = $attributes['byline'];
+				$author_after_id           = $wpdb->query( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $author_after_display_name ) );
+				if ( ! $author_after_id ) {
+					$author_after_id = wp_insert_user( [ 'display_name' => $author_after_display_name ] );
+					if ( ! $author_after_id || is_wp_error( $author_after_id ) ) {
+						$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $author_after_display_name, is_wp_error( $author_after_id ) ? $author_after_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+						continue;
+					}
+				}
+			} else {
+				// Use <author> as author.
+				$after_author              = $this->handle_author( $author_node );
+				$author_after_id           = $after_author->ID;
+				$author_after_display_name = $after_author->display_name;
+			}
+
+
+			// Validate and log.
+			if ( ! $author_after_display_name || ! $author_after_id ) {
+				$this->logger->log( $log, sprintf( "ERROR Could not find after author ID %d display_name '%s'", $author_after_id, $author_after_display_name ), $this->logger::ERROR, false );
+				continue;
+			}
+			$this->logger->log( $log, sprintf( "Found after author ID %d display_name '%s'", $author_after_id, $author_after_display_name ) );
+			
+
+			// Skip if author was not changed.
+			if ( $author_before_id == $author_after_id ) {
+				$this->logger->log( $log, 'No change in author. Skipping.' );
+				continue;
+			}
+
+
+			// Persist.
+			$post_data    = [
+				'ID'          => $post_id,
+				'post_author' => $author_after_id,
+			];
+			$post_updated = wp_update_post( $post_data );
+			if ( ! $post_updated || is_wp_error( $post_updated ) ) {
+				$this->logger->log( $log, sprintf( 'ERROR Could not update post %s, err.msg: %s', json_encode( $post_data ), is_wp_error( $post_updated ) ? $post_updated->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+				continue;
+			}
+			$this->logger->log( $log, sprintf( 'Updated post ID %d', $post_id ), $this->logger::SUCCESS );
+
+
+			// Log CSV row.
+			$csv_row = [
+				$original_article_id,
+				$post_id,
+				$author_before_id,
+				$author_before_display_name,
+				$author_after_id,
+				$author_after_display_name,
+			];
+			fputcsv( $fp_csv, $csv_row );
+		}
+
+		WP_CLI::success( 'Done.' );
+		fclose( $fp_csv );
+		wp_cache_flush();
 	}
 
 	/**
@@ -155,7 +343,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				switch ( $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					case 'id':
 						$post_data['meta_input']['original_article_id'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						$post_imported = $wpdb->get_var(
+						$post_imported                                  = $wpdb->get_var(
 							$wpdb->prepare(
 								"SELECT post_id 
 								FROM $wpdb->postmeta 
@@ -250,7 +438,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				}
 
 				if ( $has_gallery && ! empty( $attachment_ids ) ) {
-					$post_data['ID']           = $post_id;
+					$post_data['ID']            = $post_id;
 					$post_data['post_content'] .= serialize_blocks(
 						[
 							$this->block_generator->get_gallery(
@@ -259,7 +447,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 								'full',
 								'none',
 								true
-							)
+							),
 						]
 					);
 					wp_update_post( $post_data );
@@ -269,14 +457,28 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Convenience function to handle Author nodes. It will attempt to find the author first, and if none is found,
-	 * it will create a new one.
-	 *
+	 * Convenience function to extract author data from an <author> node.
+	 * 
 	 * @param DOMElement $author Author node.
+	 * 
+	 * @return array $author_data {
+	 *     Array with author data as required by \wp_insert_user().
 	 *
-	 * @return WP_User|stdClass
+	 *     @type string $user_login           The user's login username.
+	 *     @type string $user_pass            User password for new users.
+	 *     @type string $user_email           The user email address.
+	 *     @type string $first_name           The user's first name. For new users, will be used
+	 *                                        to build the first part of the user's display name
+	 *                                        if `$display_name` is not specified.
+	 *     @type string $last_name            The user's last name. For new users, will be used
+	 *                                        to build the second part of the user's display name
+	 *                                        if `$display_name` is not specified.
+	 *     @type string $user_nicename        The URL-friendly user name.
+	 *     @type string $role                 User's role.
+	 *     @type array  $meta_input           Array of custom user meta values keyed by meta key.
+	 * }
 	 */
-	protected function handle_author( DOMElement $author ) {
+	public function get_author_data_from_author_node( DOMElement $author ): array {
 		$author_data = [
 			'user_login' => '',
 			'user_pass'  => wp_generate_password( 12 ),
@@ -307,7 +509,22 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			}
 		}
 
-		WP_CLI::log( 'Attempting to create Author: ' . $author_data['user_login'] . ' (' . $author_data['user_email'] . ')' );
+		return $author_data;
+	}
+
+	/**
+	 * Convenience function to handle Author nodes. It will attempt to find the author first, and if none is found,
+	 * it will create a new one.
+	 *
+	 * @param DOMElement $author Author node.
+	 *
+	 * @return WP_User|stdClass
+	 */
+	protected function handle_author( DOMElement $author ) {
+
+		$author_data = $this->get_author_data_from_author_node( $author );
+
+		WP_CLI::log( 'Attempting to create Author: 'z . $author_data['user_login'] . ' (' . $author_data['user_email'] . ')' );
 
 		$user = get_user_by( 'email', $author_data['user_email'] );
 
@@ -375,7 +592,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			} else {
 				return [
 					'type'    => 'post_tag',
-					'term_id' => $post_tag[ 'term_id' ],
+					'term_id' => $post_tag['term_id'],
 				];
 			}
 		}
@@ -387,8 +604,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	 * Convenience function to handle Media nodes and image attachment creation.
 	 *
 	 * @param DOMElement $media XML Media node.
-	 * @param int $post_id Post ID to attach the media to.
-	 * @param string $timezone Timezone to use for the media date.
+	 * @param int        $post_id Post ID to attach the media to.
+	 * @param string     $timezone Timezone to use for the media date.
 	 *
 	 * @return array|null
 	 * @throws Exception If the media file cannot be downloaded.
