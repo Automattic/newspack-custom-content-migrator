@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \WP_CLI;
+use \WP_Post;
 use \WP_User;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
@@ -29,11 +30,6 @@ class WindyCityMigrator implements InterfaceCommand {
 		'description' => 'Path to CSV input file.',
 		'optional'    => false,
 	];
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * @var AttachmentsLogic.
@@ -66,17 +62,17 @@ class WindyCityMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
+	 * Get Instance.
 	 *
-	 * @return InterfaceCommand|null
+	 * @return self
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
+	public static function get_instance(): self {
+		static $instance = null;
+		if ( null === $instance ) {
+			$instance = new self();
 		}
 
-		return self::$instance;
+		return $instance;
 	}
 
 	/**
@@ -119,6 +115,151 @@ class WindyCityMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator windy-city-fix-html-entites',
+			[ $this, 'cmd_windy_city_fix_html_entites' ],
+			[
+				'shortdesc' => 'Fix HTML entities in Windy City content.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'Post work from this post ID. Note that this is not default batching behaviour.',
+						'optional'    => true,
+					],
+				],
+			],
+		);
+	}
+
+	public function cmd_windy_city_fix_html_entites( array $pos_args, array $assoc_args ): void {
+		foreach ( $this->get_posts( $assoc_args ) as $post ) {
+			$this->fix_entities_in_post( $post );
+		}
+	}
+
+	/**
+	 * Replace select HTML entities in post content, excerpt and subtitle.
+	 *
+	 * @param WP_Post $post
+	 *
+	 * @return WP_Post
+	 */
+	private function fix_entities_in_post( WP_Post $post ): WP_Post {
+		if ( ! str_contains( $post->post_excerpt . $post->post_content, '&#', ) ) {
+			return $post;
+		}
+
+		static $search, $replace = null;
+		if ( ! $search ) {
+			$replacements = [
+				8194  => '&nbsp;',
+				8230  => '…',
+				8212  => '—',
+				243   => 'ó',
+				241   => 'ñ',
+				233   => 'é',
+				232   => 'è',
+				224   => 'à',
+				225   => 'á',
+				169   => '©',
+				162   => '¢',
+				151   => '—',
+				91    => '[',
+				92    => '\\',
+				93    => ']',
+				41    => ')',
+				'041' => ')',
+				40    => '(',
+				'040' => '(',
+				39    => "'",
+				'039' => "'",
+				34    => '"',
+				'034' => '"',
+			];
+			$search       = array_map( fn( $entity ) => "/&#{$entity};?/", array_keys( $replacements ) );
+			$replace      = array_values( $replacements );
+		}
+
+		$items_to_replace = [ 'excerpt' => $post->post_excerpt, 'content' => $post->post_content ];
+		if ( 'post' === $post->post_type ) {
+			$subtitle = get_post_meta( $post->ID, 'newspack_post_subtitle', true );
+			if ( $subtitle && str_contains( $subtitle, '&#' ) ) {
+				$items_to_replace['newspack_post_subtitle'] = get_post_meta( $post->ID, 'newspack_post_subtitle', true );
+			}
+		}
+		$replaced = preg_replace( $search, $replace, $items_to_replace );
+
+		$post->post_excerpt = $replaced['excerpt'];
+		$post->post_content = $replaced['content'];
+		wp_update_post( $post );
+		if ( ! empty( $replaced['newspack_post_subtitle'] ) ) {
+			update_post_meta( $post->ID, 'newspack_post_subtitle', $replaced['newspack_post_subtitle'] );
+		}
+		$this->logger->log( 'html-entities.log', sprintf( 'Replaced HTML entities in post id: %d', $post->ID ), Logger::SUCCESS );
+
+		return $post;
+	}
+
+	/**
+	 * Get an iterator from high to low post IDs (iterates backwards).
+	 *
+	 * @param array $assoc_args The assoc args array.
+	 * @param bool  $log_progress Whether to output progress to log - default to true.
+	 *
+	 * @return iterable
+	 */
+	private function get_posts( array $assoc_args = [], bool $log_progress = true ): iterable {
+		$post_id_passed = $assoc_args['post-id'] ?? false;
+		$num_posts      = $assoc_args['num-items'] ?? false;
+
+		if ( empty( $assoc_args['num-items'] ) && $post_id_passed ) {
+			$post_ids = [ $assoc_args['post-id'] ];
+
+		} else {
+			global $wpdb;
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts 
+          					WHERE post_type = 'attachment'
+          					AND ID < %d
+          					AND ( post_excerpt LIKE '%&#%' OR post_content LIKE '%&#%' )
+          					ORDER BY ID DESC",
+					[ empty( $post_id_passed ) ? PHP_INT_MAX : $post_id_passed ]
+				)
+			);
+		}
+		WP_CLI::log( sprintf( 'Found a total of %d posts with HTML entities that need replacing.', count( $post_ids ) ) );
+		if ( $num_posts ) {
+			$post_ids = array_slice( $post_ids, 0, $num_posts );
+		}
+		$total_posts = count( $post_ids );
+		WP_CLI::log( sprintf( 'Processing %d posts this run', $total_posts ) );
+
+		$home_url   = home_url();
+		$counter    = 0;
+		$post_count = count( $post_ids );
+
+		foreach ( $post_ids as $post_id ) {
+			$post = get_post( $post_id );
+			++$counter;
+			if ( $counter <= $post_count && $post instanceof \WP_Post ) {
+				if ( $log_progress ) {
+					WP_CLI::log(
+						sprintf(
+							'Processing %s %d/%d: %s',
+							$post->post_type,
+							$counter,
+							$total_posts,
+							"{$home_url}?p={$post_id}"
+						)
+					);
+				}
+				yield $post;
+			}
+		}
 	}
 
 	/**
@@ -297,6 +438,7 @@ class WindyCityMigrator implements InterfaceCommand {
 		if ( $post_id ) {
 			// Post exists.
 			$this->logger->log( self::LOG_FILE, ' -- Post already exists with ID: ' . $post_id, Logger::LINE );
+
 			return $post_id;
 		}
 
@@ -306,10 +448,12 @@ class WindyCityMigrator implements InterfaceCommand {
 
 		if ( is_wp_error( $post_id ) ) {
 			$this->logger->log( self::LOG_FILE, ' -- Error creating post: ' . $post_id->get_error_message(), Logger::WARNING );
+
 			return false;
 		}
 
 		$this->logger->log( self::LOG_FILE, ' -- Post created with ID: ' . $post_id, Logger::LINE );
+
 		return $post_id;
 	}
 
@@ -343,6 +487,7 @@ class WindyCityMigrator implements InterfaceCommand {
 
 			if ( is_wp_error( $author_id ) ) {
 				$this->logger->log( self::LOG_FILE, ' -- Error creating author: ' . $author_id->get_error_message(), Logger::WARNING );
+
 				return false;
 			}
 
@@ -379,6 +524,7 @@ class WindyCityMigrator implements InterfaceCommand {
 
 		if ( is_wp_error( $author_id ) ) {
 			$this->logger->log( self::LOG_FILE, ' -- Error creating author: ' . $author_id->get_error_message(), Logger::WARNING );
+
 			return false;
 		}
 
@@ -393,6 +539,7 @@ class WindyCityMigrator implements InterfaceCommand {
 	 * @param int    $post_id Post ID.
 	 * @param string $post_content Post content.
 	 * @param string $gallery Gallery.
+	 *
 	 * @return string Post content.
 	 */
 	private function migrate_gallery( $post_id, $post_content, $gallery ) {
@@ -441,6 +588,7 @@ class WindyCityMigrator implements InterfaceCommand {
 	 *
 	 * @param string $post_content Post content.
 	 * @param string $embed Embed.
+	 *
 	 * @return string Post content.
 	 */
 	private function migrate_embed( $post_content, $embed ) {
@@ -457,6 +605,7 @@ class WindyCityMigrator implements InterfaceCommand {
 
 			if ( ! $youtube_id ) {
 				$this->logger->log( self::LOG_FILE, ' -- Error extracting youtube ID from embed: ' . $embed, Logger::WARNING );
+
 				return $post_content;
 			}
 
@@ -473,12 +622,13 @@ class WindyCityMigrator implements InterfaceCommand {
 
 		if ( ! $iframe_src ) {
 			$this->logger->log( self::LOG_FILE, ' -- Error extracting iframe src from embed: ' . $embed, Logger::WARNING );
+
 			return $post_content;
 		}
 
 		return $post_content . serialize_block(
-			$this->gutenberg_block_generator->get_iframe( $iframe_src )
-		);
+				$this->gutenberg_block_generator->get_iframe( $iframe_src )
+			);
 	}
 
 	/**
@@ -487,6 +637,7 @@ class WindyCityMigrator implements InterfaceCommand {
 	 * @param int    $post_id Post ID.
 	 * @param string $post_content Post content.
 	 * @param string $pdf_folder_path PDF folder path.
+	 *
 	 * @return string Post content.
 	 */
 	private function migrate_pdfs( $post_id, $post_content, $pdf_folder_path ) {
