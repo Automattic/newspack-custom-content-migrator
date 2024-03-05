@@ -283,9 +283,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			
 
 			// Get the before author data.
-			$post                       = get_post( $post_id );
-			$author_before_id           = $post->post_author;
-			$author_before_display_name = get_the_author_meta( 'display_name', $author_before_id );
+			$post             = get_post( $post_id );
+			$author_before_id = $post->post_author;
 
 			
 			/**
@@ -294,7 +293,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			 */
 			$author_after_display_name = null;
 			$author_after_id           = null;
-			$wp_user_ids               = [];
+			$wp_user_ids_after         = [];
 			
 			if ( $byline ) {
 
@@ -319,36 +318,35 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						continue;
 					}
 					
-					$wp_user_ids[] = $wp_user_id;
+					$wp_user_ids_after[] = $wp_user_id;
 					$this->logger->log( $log, sprintf( "Created/fetched WP_User %d from author_name '%s'", $wp_user_id, $author_name ) );
 				}
 
 				// Log if not users were created.
-				if ( empty( $wp_user_ids ) ) {
+				if ( empty( $wp_user_ids_after ) ) {
 					$this->logger->log( $log, sprintf( "ERROR Could not assign ANY AUTHORS to Post ID %d, entire byline '%s'", $post_id, $byline ), $this->logger::ERROR, false );
 					continue;
 				}
 
 				// Continue setting authors.
-				// Set the first of the authors as the post_author.
-				$author_after_id = $wp_user_ids[0];
+				// Set the first of the authors as the `post_author`.
+				$author_after_id = $wp_user_ids_after[0];
 				
 				// If there are multiple authors, assign them all to post using CAP.
-				if ( count( $wp_user_ids ) > 1 ) {
+				if ( count( $wp_user_ids_after ) > 1 ) {
 					$wp_users = [];
-					foreach ( $wp_user_ids as $wp_user_id ) {
+					foreach ( $wp_user_ids_after as $wp_user_id ) {
 						$wp_users[] = get_user_by( 'ID', $wp_user_id );
 					}
 					$this->cap->assign_authors_to_post( $wp_users, $post_id, false );
-					$this->logger->log( $log, sprintf( 'Assigned CAP WP_User IDs %s to post_ID %d', implode( ',', $wp_user_ids ), $post_id ) );
-				}
-
+					$this->logger->log( $log, sprintf( 'Assigned CAP WP_User IDs %s to post_ID %d', implode( ',', $wp_user_ids_after ), $post_id ) );
+				}           
 			} else {
 
 				/**
 				 * Use <author> as author.
 				 */
-				
+
 				$after_author = $this->handle_author( $author_node );
 				if ( ! $after_author || is_wp_error( $after_author ) ) {
 					$this->logger->log( $log, sprintf( "ERROR Could not get/create WP_User by handle_author() from author_node '%s', err: %s", json_encode( $author_node ), is_wp_error( $after_author ) ? $after_author->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
@@ -393,16 +391,17 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			if ( ! is_null( $byline ) ) {
 				$author_after_display_name = '';
 				$author_after_id           = '';
-				foreach ( $wp_user_ids as $wp_user_id ) {
+				foreach ( $wp_user_ids_after as $wp_user_id ) {
 					$wp_user = get_user_by( 'ID', $wp_user_id );
 					
 					$author_after_display_name .= ! empty( $author_after_display_name ) ? "\n" : '';
 					$author_after_display_name .= $wp_user->display_name;
 					
 					$author_after_id .= ! empty( $author_after_id ) ? "\n" : '';
-					$author_after_id .= ! empty( $wp_user_id ) ? "\n" : '';
+					$author_after_id .= $wp_user_id;
 				}
 			}
+			$author_before_display_name = get_the_author_meta( 'display_name', $author_before_id );
 			$csv_row = [
 				$original_article_id,
 				$post_id,
