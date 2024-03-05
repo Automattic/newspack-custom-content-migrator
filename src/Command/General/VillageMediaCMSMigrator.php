@@ -221,13 +221,11 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		fputcsv( $fp_csv, $csv_headers );
 		
 
-		/**
-		 * Get byline helpers.
-		 */
-		 $bylines_special_cases = [];
-		 if ( isset( $assoc_args['bylines-special-cases-php-file'] ) && file_exists( $assoc_args['bylines-special-cases-php-file'] ) ) {
-			$bylines_special_cases = include( $assoc_args['bylines-special-cases-php-file'] );
-		 }
+		// You can provide some specific bylines and how they should be split in a "manual" fashion (for those completely irregular bylines).
+		$bylines_special_cases = [];
+		if ( isset( $assoc_args['bylines-special-cases-php-file'] ) && file_exists( $assoc_args['bylines-special-cases-php-file'] ) ) {
+			$bylines_special_cases = include $assoc_args['bylines-special-cases-php-file'];
+		}
 		
 
 		// Loop through content nodes and fix authors.
@@ -297,13 +295,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$author_after_display_name = null;
 			$author_after_id           = null;
 			$wp_user_ids               = [];
+			
 			if ( $byline ) {
 
 				/**
-				 * Get/split author names from byline attribute.
-				 */ 
+				 * Get author names from byline.
+				 */
 
-				// Special cases are manually defined how some bylines are split into author names (irregular ones).
 				if ( isset( $bylines_special_cases[ $byline ] ) ) {
 					$author_names = $bylines_special_cases[ $byline ];
 				} else {
@@ -311,11 +309,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$author_names = $this->split_byline( $byline );
 				}
 
-
 				// Create WP_Users.
 				$this->logger->log( $log, sprintf( "Creating WP_Users for Post ID %d from byline '%s' ...", $post_id, $byline ) );
 				foreach ( $author_names as $author_name ) {
-					$wp_user_id = $this->create_wp_user_from_byline( $author_name, $log );
+					$wp_user_id = $this->create_wp_user_from_display_name( $author_name, $log );
 					if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
 						$this->logger->log( $log, sprintf( "ERROR Could not assign WP_User to Post ID %d, author name '%s', entire byline '%s', err: %s", $post_id, $author_name, $byline, is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
 						
@@ -344,10 +341,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					}
 					$this->cap->assign_authors_to_post( $wp_users, $post_id, false );
 					$this->logger->log( $log, sprintf( 'Assigned CAP WP_User IDs %s to post_ID %d', implode( ',', $wp_user_ids ), $post_id ) );
-				}           
+				}
+
 			} else {
 
-				// Use <author> as author.
+				/**
+				 * Use <author> as author.
+				 */
+				
 				$after_author = $this->handle_author( $author_node );
 				if ( ! $after_author || is_wp_error( $after_author ) ) {
 					$this->logger->log( $log, sprintf( "ERROR Could not get/create WP_User by handle_author() from author_node '%s', err: %s", json_encode( $author_node ), is_wp_error( $after_author ) ? $after_author->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
@@ -421,65 +422,68 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		wp_cache_flush();
 	}
 
-	public function create_wp_user_from_byline( $byline, $log ) {
+	/**
+	 * Creates a WP_User from a display name.
+	 *
+	 * @param string $display_name Display name.
+	 * @param string $log          Path to log file.
+	 * @return int|string|WP_Error WP_User ID if successful, WP_Error if not.
+	 */
+	public function create_wp_user_from_display_name( string $display_name, string $log ) {
 		global $wpdb;
 		
-		$wp_user_id = null;
-
 		/**
 		 * Get an existing WP_User by:
 		 *      1) display name
 		 *      2) user_login
 		 */
-		$author_after_display_name      = $byline;
-		$author_after_display_name_slug = sanitize_title( $author_after_display_name );
-		$author_after_id                = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", apply_filters( 'pre_user_display_name', $author_after_display_name ) ) );
-		if ( ! $author_after_id ) {
-			$author_after_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $author_after_display_name_slug ) );
+		$display_name = $display_name;
+		$slug         = sanitize_title( $display_name );
+		$wp_user_id   = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", apply_filters( 'pre_user_display_name', $display_name ) ) );
+		if ( ! $wp_user_id ) {
+			$wp_user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $slug ) );
+		}
+
+		// Return user if found.
+		if ( $wp_user_id ) {
+			return $wp_user_id;
 		}
 
 		/**
-		 * Return user if found.
+		 * Create a WP_User.
 		 */
-		if ( $author_after_id ) {
-			return $author_after_id;
-		}
-
-		/**
-		 * Create WP_User.
-		 */
-
+		
 		// Trim to 50 chars: display_name, user_nicename, user_login.
-		$author_after_display_name_untrimmed = $author_after_display_name;
-		if ( strlen( $author_after_display_name ) > 50 ) {
-			$author_after_display_name = substr( $author_after_display_name, 0, 50 );
+		$display_name_untrimmed = $display_name;
+		if ( strlen( $display_name ) > 50 ) {
+			$display_name = substr( $display_name, 0, 50 );
 		}
-		$author_after_display_name_slug_untrimmed = $author_after_display_name_slug;
-		if ( strlen( $author_after_display_name_slug ) > 50 ) {
-			$author_after_display_name_slug = substr( $author_after_display_name_slug, 0, 50 );
+		$slug_untrimmed = $slug;
+		if ( strlen( $slug ) > 50 ) {
+			$slug = substr( $slug, 0, 50 );
 		}
 
 		// Insert WP_User.
 		$author_after_args = [
-			'display_name'  => $author_after_display_name,
-			'user_nicename' => $author_after_display_name_slug,
-			'user_login'    => $author_after_display_name_slug,
+			'display_name'  => $display_name,
+			'user_nicename' => $slug,
+			'user_login'    => $slug,
 			'user_pass'     => wp_generate_password( 12 ),
 			'role'          => 'author',
 		];
-		$author_after_id   = wp_insert_user( $author_after_args );
-		if ( ! $author_after_id || is_wp_error( $author_after_id ) ) {
-			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $author_after_display_name, is_wp_error( $author_after_id ) ? $author_after_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+		$wp_user_id        = wp_insert_user( $author_after_args );
+		if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
+			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $display_name, is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
 			
-			return $author_after_id;
+			return $wp_user_id;
 		}
 
 		// Log if trimmed display_name or user_login.
-		if ( $author_after_display_name_untrimmed != $author_after_display_name ) {
-			$this->logger->log( $log, sprintf( "ERROR Trimmed display_name WP_User %d from '%s' to '%s'", $author_after_id, $author_after_display_name_untrimmed, $author_after_display_name ), $this->logger::ERROR, false );
+		if ( $display_name_untrimmed != $display_name ) {
+			$this->logger->log( $log, sprintf( "ERROR Trimmed display_name WP_User %d from '%s' to '%s'", $wp_user_id, $display_name_untrimmed, $display_name ), $this->logger::ERROR, false );
 		}
-		if ( $author_after_display_name_slug_untrimmed != $author_after_display_name_slug ) {
-			$this->logger->log( $log, sprintf( "ERROR Trimmed user_login and user_nicename WP_User %d from '%s' to '%s'", $author_after_id, $author_after_display_name_slug_untrimmed, $author_after_display_name_slug ), $this->logger::ERROR, false );
+		if ( $slug_untrimmed != $slug ) {
+			$this->logger->log( $log, sprintf( "ERROR Trimmed user_login and user_nicename WP_User %d from '%s' to '%s'", $wp_user_id, $slug_untrimmed, $slug ), $this->logger::ERROR, false );
 		}
 
 		return $wp_user_id;
