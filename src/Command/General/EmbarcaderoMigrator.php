@@ -4,7 +4,10 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
 use DOMDocument;
+use Exception;
+use NewspackCustomContentMigrator\Command\General\TaxonomyMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
@@ -98,7 +101,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'dublin',
 		'east palo alto',
 		'editorial',
-		'education ',
+		'education',
 		'election',
 		'enterprise story',
 		'environment',
@@ -928,6 +931,39 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'name'        => 'story-report-items-dir-path',
 						'description' => 'Path to the CSV file containing the stories\'s report items to import.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-dupe-master-list-cats-tags',
+			[ $this, 'cmd_embarcadero_fix_dupe_master_list_cats_tags' ],
+			[
+				'shortdesc' => 'Merges duplicate categories and tags based on master list provided by Embarcadero.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-tags-on-posts',
+			[ $this, 'cmd_embarcadero_fix_tags_on_posts' ],
+			[
+				'shortdesc' => 'Fixes category-tag relationships for migrated (initial and refreshed) posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories\'s to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'after-row-number',
+						'description' => 'Starts after this row number.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -3085,6 +3121,313 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					WP_CLI::success( 'Updated' );
 				} else {
 					WP_CLI::line( 'NOT UPDATED' );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This function will go through an Embarcadero sites categories looking for duplicates across tags, and merge them.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_fix_dupe_master_list_cats_tags( $args, $assoc_args ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$duplicate_cats_tags       = $wpdb->get_results(
+			"SELECT 
+				sub.slug, 
+				ANY_VALUE(sub.name) as name, 
+				GROUP_CONCAT(sub.taxonomy) as taxonomies, 
+				COUNT(DISTINCT sub.term_taxonomy_id) as counter 
+			FROM (
+				SELECT 
+				    ROW_NUMBER() over ( PARTITION BY t.slug ORDER BY tt.taxonomy ) as row_num,
+					t.term_id, 
+					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name, 
+					t.slug, 
+					tt.taxonomy, 
+					tt.term_taxonomy_id 
+				FROM $wpdb->terms t 
+					LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+				WHERE tt.taxonomy IN ( 'category', 'post_tag' ) 
+				  AND tt.parent = 0
+				ORDER BY FIELD( tt.taxonomy, 'category', 'post_tag' )
+			) as sub 
+			GROUP BY sub.slug 
+			HAVING counter > 1 
+			ORDER BY counter DESC"
+		);
+		$count_duplicate_cats_tags = count( $duplicate_cats_tags );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d duplicate categories and tags.', $count_duplicate_cats_tags ), Logger::INFO );
+
+		foreach ( $duplicate_cats_tags as $duplicate ) {
+			echo "\n\n\n";
+			$duplicate->name = html_entity_decode( $duplicate->name );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Slug: %s, Name: %s, Taxonomies: %s', $duplicate->slug, $duplicate->name, $duplicate->taxonomies ), Logger::INFO );
+
+			// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+			if ( in_array( strtolower( $duplicate->name ), array_merge( self::ALLOWED_CATEGORIES, [ 'tri valley' ] ) ) ) {
+				$this->logger->log( self::LOG_FILE, 'Category is allowed. Proceeding to merge.', Logger::SUCCESS );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$category       = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+    						t.term_id, 
+    						t.name, 
+    						t.slug, 
+    						tt.taxonomy, 
+    						tt.term_taxonomy_id 
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE t.slug = %s 
+						  AND tt.taxonomy = 'category'
+						  AND tt.parent = 0",
+						$duplicate->slug
+					)
+				);
+				$count_category = count( $category );
+
+				if ( $count_category > 1 ) {
+					$this->logger->log( self::LOG_FILE, 'Found more than one category with the same slug. Skipping.', Logger::ERROR );
+					continue;
+				}
+
+				$category       = $category[0];
+				$category->name = html_entity_decode( $category->name );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$tags = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+							t.term_id, 
+							t.name, 
+							t.slug, 
+							tt.taxonomy, 
+							tt.term_taxonomy_id 
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE t.slug = %s 
+						  AND tt.taxonomy = 'post_tag'",
+						$duplicate->slug
+					)
+				);
+
+				$tag_term_ids = [];
+				foreach ( $tags as $tag ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Merging tag %s (Term_ID: %d) into category %s (Term_ID: %d)', $tag->name, $tag->term_id, $category->name, $category->term_id ), Logger::INFO );
+					$tag_term_ids[] = intval( $tag->term_id );
+				}
+
+				$result = TaxonomyMigrator::get_instance()->merge_terms(
+					$category->term_id,
+					$tag_term_ids,
+					[
+						'category',
+						'post_tag',
+					]
+				);
+
+				if ( is_wp_error( $result ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Error merging terms: %s', $result->get_error_message() ), Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Merged terms successfully.', Logger::SUCCESS );
+				}
+			} else {
+				$this->logger->log( self::LOG_FILE, 'Category is not allowed. Skipping.', Logger::ERROR );
+			}
+		}
+	}
+
+	/**
+	 * This function will go through the posts that were imported as part of the migration and remove any tags that
+	 * aren't part of the master list of tags.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the CSV file can't be read.
+	 */
+	public function cmd_embarcadero_fix_tags_on_posts( $args, $assoc_args ) {
+		$csv_file = $assoc_args['story-csv-path'];
+		$after_id = $assoc_args['after-row-number'] ?? 0;
+
+		$master_tag_list = [
+			'a&e - top post - primary',
+			'a&e - top post - secondary',
+			'arts & culture - music',
+			'arts & culture - performing arts',
+			'arts & culture - top post - primary',
+			'arts & culture - top post - secondary',
+			'arts & culture - visual arts',
+			'danvillesanramon - city government',
+			'danvillesanramon - city news',
+			'danvillesanramon - community',
+			'danvillesanramon - education',
+			'danvillesanramon - features',
+			'danvillesanramon - other local news',
+			'danvillesanramon - san mateo county news',
+			'danvillesanramon - top post - primary',
+			'danvillesanramon - top post - secondary',
+			'danvillesanramon - trending',
+			'food - new & trending',
+			'food - openings & closings',
+			'food - top post - primary',
+			'livermore - city government',
+			'livermore - city news',
+			'livermore - community',
+			'livermore - education',
+			'livermore - features',
+			'livermore - other local news',
+			'livermore - san mateo county news',
+			'livermore - top post - primary',
+			'livermore - top post - secondary',
+			'livermore - trending',
+			'menlopark - city government',
+			'menlopark - city news',
+			'menlopark - community',
+			'menlopark - education',
+			'menlopark - features',
+			'menlopark - other local news',
+			'menlopark - san mateo county news',
+			'menlopark - top post - primary',
+			'menlopark - top post - secondary',
+			'menlopark - trending',
+			'mountainview - city government',
+			'mountainview - city news',
+			'mountainview - community',
+			'mountainview - education',
+			'mountainview - features',
+			'mountainview - other local news',
+			'mountainview - san mateo county news',
+			'mountainview - top post - primary',
+			'mountainview - top post - secondary',
+			'mountainview - trending',
+			'paloalto - city government',
+			'paloalto - city news',
+			'paloalto - community',
+			'paloalto - education',
+			'paloalto - features',
+			'paloalto - other local news',
+			'paloalto - san mateo county news',
+			'paloalto - top post - primary',
+			'paloalto - top post - secondary',
+			'paloalto - trending',
+			'playback',
+			'pleasanton - city government',
+			'pleasanton - city news',
+			'pleasanton - community',
+			'pleasanton - education',
+			'pleasanton - features',
+			'pleasanton - other local news',
+			'pleasanton - san mateo county news',
+			'pleasanton - top post - primary',
+			'pleasanton - top post - secondary',
+			'pleasanton - trending',
+			'real estate - home & garden',
+			'real estate - neighborhoods',
+			'real estate - top post - primary',
+			'real estate - top post - secondary',
+			'real estate - business',
+			'redwoodcity - city government',
+			'redwoodcity - city news',
+			'redwoodcity - community',
+			'redwoodcity - education',
+			'redwoodcity - features',
+			'redwoodcity - other local news',
+			'redwoodcity - san mateo county news',
+			'redwoodcity - top post - primary',
+			'redwoodcity - top post - secondary',
+			'redwoodcity - trending',
+			'the big picture',
+			'the six fifty',
+			'the six fifty - culture',
+			'the six fifty - food & drink',
+			'the six fifty - neighborhood guide',
+			'the six fifty - outdoors',
+			'the six fifty - things to do',
+			'the six fifty - top post - primary',
+		];
+
+		$iterator = ( new FileImportFactory() )->get_file( $csv_file )->set_start( $after_id )->getIterator();
+
+		foreach ( $iterator as $row_number => $row ) {
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing story %d (Row #: %d)', $row['story_id'], $row_number ), Logger::INFO );
+
+			global $wpdb;
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT 
+    					p.* 
+						FROM $wpdb->posts p 
+						    INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
+						WHERE meta_key = %s 
+						  AND meta_value = %d",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					$row['story_id']
+				)
+			);
+
+			if ( ! $post ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find post with the original story ID %d', $row['story_id'] ), Logger::ERROR );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found post %d', $post->ID ), Logger::INFO );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_tags = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT 
+    					t.term_id, 
+    					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+    					t.slug, 
+    					tt.taxonomy, 
+    					tt.term_taxonomy_id 
+					FROM $wpdb->terms t 
+					    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+					    INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
+					WHERE tr.object_id = %d 
+					  AND tt.taxonomy = 'post_tag'",
+					$post->ID
+				)
+			);
+
+			foreach ( $post_tags as $post_tag ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Post tag `%s`', $post_tag->name ), Logger::INFO );
+				// Is part of master tag list?
+				// If yes, keep
+				// If not, remove from post.
+
+				// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+				if ( ! in_array( html_entity_decode( $post_tag->name ), $master_tag_list ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the master list. Removing.', $post_tag->name ), Logger::WARNING );
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$result = $wpdb->delete(
+						$wpdb->term_relationships,
+						[
+							'object_id'        => $post->ID,
+							'term_taxonomy_id' => $post_tag->term_taxonomy_id,
+						]
+					);
+
+					if ( false === $result ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not remove tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::ERROR );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Removed tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::SUCCESS );
+					}
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is part of the master list. Keeping.', $post_tag->name ), Logger::SUCCESS );
 				}
 			}
 		}
