@@ -472,9 +472,18 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		];
 		$wp_user_id        = wp_insert_user( $author_after_args );
 		if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
-			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $display_name, is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
-			
-			return $wp_user_id;
+			$err_msg = is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a';
+			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $display_name, $err_msg ), $this->logger::ERROR, false );
+
+			// If creation error is "Sorry, that username already exists", then fetch that username, and label it in logs for double-checking.
+			if ( false !== strpos( $err_msg, 'Sorry, that username already exists' ) ) {
+				$wp_user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $slug ) );
+				if ( $wp_user_id ) {
+					$this->logger->log( $log, sprintf( "ERROR/WARNING Now fetched and using WP_User with SAME user_login '%s' exist ing WP_User ID: %d", $slug, $wp_user_id ), $this->logger::ERROR, false );
+					
+					return $wp_user_id;
+				}
+			}
 		}
 
 		// Log if trimmed display_name or user_login.
