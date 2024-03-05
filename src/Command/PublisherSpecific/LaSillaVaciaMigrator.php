@@ -15,7 +15,6 @@ use Generator;
 use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
@@ -23,6 +22,7 @@ use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -655,6 +655,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 * @var User $user User logic.
 	 */
 	private $user;
+
+	/**
+	 * Posts logic.
+	 *
+	 * @var Posts $posts Posts logic and console output capability.
+	 */
+	private $posts;
 
 	/**
 	 * Singleton constructor.
