@@ -10,6 +10,7 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Utils\Logger;
 use stdClass;
 use WP_User;
@@ -45,6 +46,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	protected ?GutenbergBlockGenerator $block_generator;
 	
 	/**
+	 * CoAuthorsPlus.
+	 *
+	 * @var CoAuthorPlus
+	 */
+	private CoAuthorPlus $cap;
+	
+	/**
 	 * Logger.
 	 *
 	 * @var Logger
@@ -72,6 +80,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->attachments     = new Attachments();
 		$this->block_generator = new GutenbergBlockGenerator();
+		$this->cap             = new CoAuthorPlus();
 		$this->logger          = new Logger();
 	}
 
@@ -116,7 +125,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			'newspack-content-migrator village-cms-fix-authors',
 			[ $this, 'cmd_fix_authors' ],
 			[
-				'shortdesc' => 'A helper command, re-sets the authors on all imported posts according to this rule: if <attributes> byline exists use that for author, and if it does not exist then use <author>.',
+				'shortdesc' => 'A helper command, re-sets authors on all already imported posts according to this rule: if <attributes> byline exists use that for author, and if it does not exist then use <author> node for author.',
 				'synopsis'  => [
 					[
 						'type'        => 'positional',
@@ -125,9 +134,51 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'bylines-special-cases-php-file',
+						'description' => 'Path to a PHP file which returns an array with bylines that are manually split/parsed. The PHP file array being returned should cointain bylines as keys, and split author names as values.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
+	}
+
+	public function split_byline( $byline ): array {
+
+		$author_names = [];
+			
+		// Replace multiple separators with a common separator
+		$separators       = [ ', and', ',', ' and ', ' with ', ' & ' ];
+		$common_separator = '&&';
+		$byline_replaced  = str_replace( $separators, $common_separator, $byline );
+
+		// Explode using the common separator
+		$author_names = explode( $common_separator, $byline_replaced );
+		
+		// Trim.
+		$author_names = array_map( 'trim', $author_names );
+		$author_names = array_map(
+			function ( $string ) {
+				// Remove.
+				$string = str_replace( 'By ', '', $string );
+				$string = str_replace( 'by ', '', $string );
+				// Remove double spaces.
+				$string = str_replace( '   ', ' ', $string );
+				$string = str_replace( '  ', ' ', $string );
+				// Make sure '/' is always surrounded by one space.
+				$string = str_replace( ' /', '/', $string );
+				$string = str_replace( '/ ', '/', $string );
+				$string = str_replace( '/', ' / ', $string );
+
+				return $string;
+			},
+			$author_names
+		);
+
+		return $author_names;
 	}
 
 	/**
@@ -145,28 +196,40 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$xml_file = $pos_args[0];
 
 
-		// Logs.
-		$log     = 'village-cms-fix-authors.log'
-		$log_csv = 'village-cms-fix-authors.csv'
+		/**
+		 * Logs.
+		 */
+		$log     = 'village-cms-fix-authors.log';
+		$log_csv = 'village-cms-fix-authors.csv';
 		// Timestamp $log.
 		$this->logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
 		// Delete file $log_csv if it exists.
 		if ( file_exists( $log_csv ) ) {
 			unlink( $log_csv );
 		}
-		// Log all updates to a CSV.
-		$fp_csv  = fopen( $log_csv, 'w' );
+		// We'll log detailed before&after changes to a CSV.
+		$fp_csv      = fopen( $log_csv, 'w' );
 		$csv_headers = [
 			'original_article_id',
 			'post_id',
 			'author_before_id',
 			'author_before_displayname',
+			'byline',
 			'author_after_id',
-			'author_after_displayname'
+			'author_after_displayname',
 		];
 		fputcsv( $fp_csv, $csv_headers );
 		
+
+		/**
+		 * Get byline helpers.
+		 */
+		 $bylines_special_cases = [];
+		 if ( isset( $assoc_args['bylines-special-cases-php-file'] ) && file_exists( $assoc_args['bylines-special-cases-php-file'] ) ) {
+			$bylines_special_cases = include( $assoc_args['bylines-special-cases-php-file'] );
+		 }
 		
+
 		// Loop through content nodes and fix authors.
 		$dom = new DOMDocument();
 		$dom->loadXML( file_get_contents( $xml_file ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
@@ -174,11 +237,11 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		foreach ( $contents as $key_content => $content ) {
 
 			/**
-			 * Get id, author and attributes.
+			 * Get id, author node and attributes.
 			 */
 			$original_article_id = null;
+			$byline              = null;
 			$author_node         = null;
-			$attributes          = null;
 			foreach ( $content->childNodes as $node ) {
 				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					continue;
@@ -192,13 +255,24 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						break;
 					case 'attributes':
 						$attributes = json_decode( $node->nodeValue, true );
+						if ( isset( $attributes['byline'] ) && ! empty( $attributes['byline'] ) ) {
+							$byline = $attributes['byline'];
+						}
 						break;
 				}
+			}
+			if ( ! $original_article_id ) {
+				$this->logger->log( $log, sprintf( 'ERROR original_article_id not found in key_content %d', $key_content ), $this->logger::ERROR, false );
+				continue;
+			}
+			if ( ! $byline && ! $author_node ) {
+				$this->logger->log( $log, sprintf( 'ERROR neither byline nor author_node found in key_content %d', $key_content ), $this->logger::ERROR, false );
+				continue;
 			}
 
 
 			// Progress.
-			$this->logger->log( $log, sprintf( '(%d)/(%d) original article ID %s', $key_content + 1, count( $contents ), $original_article_id ) );
+			$this->logger->log( $log, sprintf( '(%d)/(%d) original_article_id %s', $key_content + 1, count( $contents ), $original_article_id ) );
 			
 
 			// Get post ID.
@@ -222,33 +296,75 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			 */
 			$author_after_display_name = null;
 			$author_after_id           = null;
-			if ( ! empty( $attributes['byline'] ) ) {
-				// Use the byline attribute as author.
-				$author_after_display_name = $attributes['byline'];
-				$author_after_id           = $wpdb->query( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $author_after_display_name ) );
-				if ( ! $author_after_id ) {
-					$author_after_id = wp_insert_user( [ 'display_name' => $author_after_display_name ] );
-					if ( ! $author_after_id || is_wp_error( $author_after_id ) ) {
-						$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $author_after_display_name, is_wp_error( $author_after_id ) ? $author_after_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+			$wp_user_ids               = [];
+			if ( $byline ) {
+
+				/**
+				 * Get/split author names from byline attribute.
+				 */ 
+
+				// Special cases are manually defined how some bylines are split into author names (irregular ones).
+				if ( isset( $bylines_special_cases[ $byline ] ) ) {
+					$author_names = $bylines_special_cases[ $byline ];
+				} else {
+					// Split the byline into multiple author names.
+					$author_names = $this->split_byline( $byline );
+				}
+
+
+				// Create WP_Users.
+				$this->logger->log( $log, sprintf( "Creating WP_Users for Post ID %d from byline '%s' ...", $post_id, $byline ) );
+				foreach ( $author_names as $author_name ) {
+					$wp_user_id = $this->create_wp_user_from_byline( $author_name, $log );
+					if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
+						$this->logger->log( $log, sprintf( "ERROR Could not assign WP_User to Post ID %d, author name '%s', entire byline '%s', err: %s", $post_id, $author_name, $byline, is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+						
 						continue;
 					}
+					
+					$wp_user_ids[] = $wp_user_id;
+					$this->logger->log( $log, sprintf( "Created/fetched WP_User %d from author_name '%s'", $wp_user_id, $author_name ) );
 				}
+
+				// Log if not users were created.
+				if ( empty( $wp_user_ids ) ) {
+					$this->logger->log( $log, sprintf( "ERROR Could not assign ANY AUTHORS to Post ID %d, entire byline '%s'", $post_id, $byline ), $this->logger::ERROR, false );
+					continue;
+				}
+
+				// Continue setting authors.
+				// Set the first of the authors as the post_author.
+				$author_after_id = $wp_user_ids[0];
+				
+				// If there are multiple authors, assign them all to post using CAP.
+				if ( count( $wp_user_ids ) > 1 ) {
+					$wp_users = [];
+					foreach ( $wp_user_ids as $wp_user_id ) {
+						$wp_users[] = get_user_by( 'ID', $wp_user_id );
+					}
+					$this->cap->assign_authors_to_post( $wp_users, $post_id, false );
+					$this->logger->log( $log, sprintf( 'Assigned CAP WP_User IDs %s to post_ID %d', implode( ',', $wp_user_ids ), $post_id ) );
+				}           
 			} else {
+
 				// Use <author> as author.
-				$after_author              = $this->handle_author( $author_node );
+				$after_author = $this->handle_author( $author_node );
+				if ( ! $after_author || is_wp_error( $after_author ) ) {
+					$this->logger->log( $log, sprintf( "ERROR Could not get/create WP_User by handle_author() from author_node '%s', err: %s", json_encode( $author_node ), is_wp_error( $after_author ) ? $after_author->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+					continue;
+				}
 				$author_after_id           = $after_author->ID;
 				$author_after_display_name = $after_author->display_name;
-			}
 
-
-			// Validate and log.
-			if ( ! $author_after_display_name || ! $author_after_id ) {
-				$this->logger->log( $log, sprintf( "ERROR Could not find after author ID %d display_name '%s'", $author_after_id, $author_after_display_name ), $this->logger::ERROR, false );
-				continue;
+				// Validate.
+				if ( ! $author_after_display_name || ! $author_after_id ) {
+					$this->logger->log( $log, sprintf( "ERROR original_article_id:%d post_id:%d handling <author>, no author_after_id:'%s' or author_after_display_name:'%s' from author node:%s", $original_article_id, $post_id, $author_after_id, $author_after_display_name, json_encode( $author_node ) ), $this->logger::ERROR, false );
+					continue;
+				}
+				$this->logger->log( $log, sprintf( "Found <author> WP_User %d display_name '%s'", $author_after_id, $author_after_display_name ) );
 			}
-			$this->logger->log( $log, sprintf( "Found after author ID %d display_name '%s'", $author_after_id, $author_after_display_name ) );
 			
-
+			
 			// Skip if author was not changed.
 			if ( $author_before_id == $author_after_id ) {
 				$this->logger->log( $log, 'No change in author. Skipping.' );
@@ -269,21 +385,104 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$this->logger->log( $log, sprintf( 'Updated post ID %d', $post_id ), $this->logger::SUCCESS );
 
 
-			// Log CSV row.
+			/**
+			 * Log CSV row.
+			 */
+			// Output all IDs and names if byline was used.
+			if ( ! is_null( $byline ) ) {
+				$author_after_display_name = '';
+				$author_after_id           = '';
+				foreach ( $wp_user_ids as $wp_user_id ) {
+					$wp_user = get_user_by( 'ID', $wp_user_id );
+					
+					$author_after_display_name .= ! empty( $author_after_display_name ) ? "\n" : '';
+					$author_after_display_name .= $wp_user->display_name;
+					
+					$author_after_id .= ! empty( $author_after_id ) ? "\n" : '';
+					$author_after_id .= ! empty( $wp_user_id ) ? "\n" : '';
+				}
+			}
 			$csv_row = [
 				$original_article_id,
 				$post_id,
 				$author_before_id,
 				$author_before_display_name,
+				$byline,
 				$author_after_id,
 				$author_after_display_name,
 			];
+
 			fputcsv( $fp_csv, $csv_row );
+
 		}
 
 		WP_CLI::success( 'Done.' );
 		fclose( $fp_csv );
 		wp_cache_flush();
+	}
+
+	public function create_wp_user_from_byline( $byline, $log ) {
+		global $wpdb;
+		
+		$wp_user_id = null;
+
+		/**
+		 * Get an existing WP_User by:
+		 *      1) display name
+		 *      2) user_login
+		 */
+		$author_after_display_name      = $byline;
+		$author_after_display_name_slug = sanitize_title( $author_after_display_name );
+		$author_after_id                = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", apply_filters( 'pre_user_display_name', $author_after_display_name ) ) );
+		if ( ! $author_after_id ) {
+			$author_after_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $author_after_display_name_slug ) );
+		}
+
+		/**
+		 * Return user if found.
+		 */
+		if ( $author_after_id ) {
+			return $author_after_id;
+		}
+
+		/**
+		 * Create WP_User.
+		 */
+
+		// Trim to 50 chars: display_name, user_nicename, user_login.
+		$author_after_display_name_untrimmed = $author_after_display_name;
+		if ( strlen( $author_after_display_name ) > 50 ) {
+			$author_after_display_name = substr( $author_after_display_name, 0, 50 );
+		}
+		$author_after_display_name_slug_untrimmed = $author_after_display_name_slug;
+		if ( strlen( $author_after_display_name_slug ) > 50 ) {
+			$author_after_display_name_slug = substr( $author_after_display_name_slug, 0, 50 );
+		}
+
+		// Insert WP_User.
+		$author_after_args = [
+			'display_name'  => $author_after_display_name,
+			'user_nicename' => $author_after_display_name_slug,
+			'user_login'    => $author_after_display_name_slug,
+			'user_pass'     => wp_generate_password( 12 ),
+			'role'          => 'author',
+		];
+		$author_after_id   = wp_insert_user( $author_after_args );
+		if ( ! $author_after_id || is_wp_error( $author_after_id ) ) {
+			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $author_after_display_name, is_wp_error( $author_after_id ) ? $author_after_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
+			
+			return $author_after_id;
+		}
+
+		// Log if trimmed display_name or user_login.
+		if ( $author_after_display_name_untrimmed != $author_after_display_name ) {
+			$this->logger->log( $log, sprintf( "ERROR Trimmed display_name WP_User %d from '%s' to '%s'", $author_after_id, $author_after_display_name_untrimmed, $author_after_display_name ), $this->logger::ERROR, false );
+		}
+		if ( $author_after_display_name_slug_untrimmed != $author_after_display_name_slug ) {
+			$this->logger->log( $log, sprintf( "ERROR Trimmed user_login and user_nicename WP_User %d from '%s' to '%s'", $author_after_id, $author_after_display_name_slug_untrimmed, $author_after_display_name_slug ), $this->logger::ERROR, false );
+		}
+
+		return $wp_user_id;
 	}
 
 	/**
@@ -524,7 +723,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 		$author_data = $this->get_author_data_from_author_node( $author );
 
-		WP_CLI::log( 'Attempting to create Author: 'z . $author_data['user_login'] . ' (' . $author_data['user_email'] . ')' );
+		WP_CLI::log( 'Attempting to create Author: ' . $author_data['user_login'] . ' (' . $author_data['user_email'] . ')' );
 
 		$user = get_user_by( 'email', $author_data['user_email'] );
 
