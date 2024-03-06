@@ -39,6 +39,7 @@ PluginSetup::register_migrators(
 		Command\General\InlineFeaturedImageMigrator::class,
 		Command\General\SubtitleMigrator::class,
 		Command\General\CoAuthorPlusMigrator::class,
+		Command\General\CoAuthorPlusDataFixingMigrator::class,
 		Command\General\CPTMigrator::class,
 		Command\General\AdsMigrator::class,
 		Command\General\NewslettersMigrator::class,
