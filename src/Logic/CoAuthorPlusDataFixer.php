@@ -2,9 +2,36 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use WP_Error;
+
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 
+/**
+ * Class to handle fixing CoAuthors Plus data.
+ */
 class CoAuthorPlusDataFixer {
+
+	/**
+	 * Legacy Custom CAP logic.
+	 *
+	 * @var CoAuthorPlus $co_authors_plus CoAuthors Plus class instance.
+	 */
+	private CoAuthorPlus $co_authors_plus;
+
+	/**
+	 * Taxonomy and console output logic.
+	 *
+	 * @var TaxonomyConsoleOutputLogic $taxonomy_console_output_logic Taxonomy Console Output Logic class instance.
+	 */
+	private TaxonomyConsoleOutputLogic $taxonomy_console_output_logic;
+
+	/**
+	 * Constructor.
+	 */
+	public function __construct() {
+		$this->co_authors_plus               = new CoAuthorPlus();
+		$this->taxonomy_console_output_logic = new TaxonomyConsoleOutputLogic();
+	}
 
 	/**
 	 * This function is meant to determine if a Guest Author record has a linked Author taxonomy.
@@ -100,11 +127,11 @@ class CoAuthorPlusDataFixer {
 	 *
 	 * @return int|WP_Error
 	 */
-	public function attempt_to_relate_standalone_guest_author_and_term( int $guest_author_id, int $term_id ) {
+	public function attempt_to_relate_standalone_guest_author_and_term( int $guest_author_id, int $term_id ): int|object {
 		wp_cache_flush();
 
 		return $this->insert_guest_author_taxonomy(
-			$this->get_guest_author_by_id( $guest_author_id ),
+			$this->co_authors_plus->get_guest_author_by_id( $guest_author_id ),
 			$term_id
 		);
 	}
@@ -113,29 +140,29 @@ class CoAuthorPlusDataFixer {
 	 * This function will insert a new author term-taxonomy record for a given Guest Author.
 	 *
 	 * @param object $author Guest Author object. {
-	 *		This object should be a Guest Author Object obtained from the CoAuthors_Guest_Authors class.
+	 *      This object should be a Guest Author Object obtained from the CoAuthors_Guest_Authors class.
 	 *
-	 *		@type int     $ID
-	 *		@type string  $display_name
-	 *		@type string  $first_name
-	 *		@type string  $last_name
-	 *		@type string  $user_login
-	 *		@type string  $user_email
-	 *		@type string  $user_nicename
+	 * @type int    $ID
+	 * @type string $display_name
+	 * @type string $first_name
+	 * @type string $last_name
+	 * @type string $user_login
+	 * @type string $user_email
+	 * @type string $user_nicename
 	 * }
 	 *
 	 * @param int    $term_id Term ID.
 	 *
-	 * @return WP_Error|int
+	 * @return int|WP_Error
 	 */
-	public function insert_guest_author_taxonomy( object $author, int $term_id ) {
+	public function insert_guest_author_taxonomy( object $author, int $term_id ): int|object {
 		$coauthor_slug = $author->user_nicename;
 
 		if ( ! str_starts_with( $coauthor_slug, 'cap-' ) ) {
 			$coauthor_slug = 'cap-' . $coauthor_slug;
 		}
 
-		$existing_slugs = $this->taxonomy_logic->get_term_by_slug( $coauthor_slug, $term_id );
+		$existing_slugs = $this->taxonomy_console_output_logic->get_term_by_slug( $coauthor_slug, $term_id );
 
 		if ( ! empty( $existing_slugs ) ) {
 			return new WP_Error(
@@ -154,7 +181,7 @@ class CoAuthorPlusDataFixer {
 			if ( 1 === count( $author_taxonomy ) ) {
 				// This term already seems to have the appropriate author taxonomy connected to it.
 
-				$this->taxonomy_logic->insert_relationship_if_not_exists(
+				$this->taxonomy_console_output_logic->insert_relationship_if_not_exists(
 					$author->ID,
 					$author_taxonomy[0]->term_taxonomy_id
 				);
@@ -195,7 +222,7 @@ class CoAuthorPlusDataFixer {
 			);
 		}
 
-		$this->taxonomy_logic->insert_relationship_if_not_exists( $author->ID, $insert );
+		$this->taxonomy_console_output_logic->insert_relationship_if_not_exists( $author->ID, $insert );
 
 		return $this->get_guest_author_taxonomy( $term_id )[0]->term_taxonomy_id;
 	}
@@ -204,15 +231,15 @@ class CoAuthorPlusDataFixer {
 	 * Generates a description for an author term.
 	 *
 	 * @param object $author Guest Author object. {
-	 *		This object should be a Guest Author Object obtained from the CoAuthors_Guest_Authors class.
+	 *      This object should be a Guest Author Object obtained from the CoAuthors_Guest_Authors class.
 	 *
-	 *		@type int     $ID
-	 *		@type string  $display_name
-	 *		@type string  $first_name
-	 *		@type string  $last_name
-	 *		@type string  $user_login
-	 *		@type string  $user_email
-	 *		@type string  $user_nicename
+	 * @type int    $ID
+	 * @type string $display_name
+	 * @type string $first_name
+	 * @type string $last_name
+	 * @type string $user_login
+	 * @type string $user_email
+	 * @type string $user_nicename
 	 *  }
 	 *
 	 * @return string
@@ -245,7 +272,7 @@ class CoAuthorPlusDataFixer {
 	 *
 	 * @return bool|null
 	 */
-	public function update_author_term_description( object $author, object $term ) {
+	public function update_author_term_description( object $author, object $term ): ?bool {
 		$description = $this->get_author_term_description( $author );
 
 		global $wpdb;
@@ -293,7 +320,7 @@ class CoAuthorPlusDataFixer {
 	 */
 	public function is_guest_author_standalone( $guest_author ): bool {
 		if ( is_numeric( $guest_author ) ) {
-			$guest_author = $this->get_guest_author_by_id( $guest_author );
+			$guest_author = $this->co_authors_plus->get_guest_author_by_id( $guest_author );
 		}
 
 		// user_email, user_login, user_nicename.
