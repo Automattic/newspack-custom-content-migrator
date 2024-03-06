@@ -314,6 +314,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				}
 			}
 		}
+
+		WP_CLI::warning( 'NOTE -- make sure to run `newspack-content-migrator village-cms-fix-authors` to properly assign all authors.' );
 	}
 
 	/**
