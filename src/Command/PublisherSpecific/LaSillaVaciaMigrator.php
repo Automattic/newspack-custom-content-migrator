@@ -15,6 +15,7 @@ use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Users;
@@ -598,6 +599,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * CoAuthorPlus data fixer logic.
+	 *
+	 * @var CoAuthorPlusDataFixer $co_author_plus_data_fixer_logic
+	 */
+	private $co_author_plus_data_fixer_logic;
+
+	/**
 	 * @var SimpleLocalAvatars $simple_local_avatars
 	 */
 	private $simple_local_avatars;
@@ -674,19 +682,20 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 * Singleton constructor.
 	 */
 	private function __construct() {
-		$this->log_file_path                 = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
-		$this->coauthorsplus_logic           = new CoAuthorPlus();
-		$this->simple_local_avatars          = new SimpleLocalAvatars();
-		$this->redirection                   = new Redirection();
-		$this->logger                        = new Logger();
-		$this->attachments                   = new Attachments();
-		$this->posts                         = new Posts();
-		$this->console_table                 = new ConsoleTable();
-		$this->taxonomy                      = new Taxonomy();
-		$this->taxonomy_console_output_logic = new TaxonomyConsoleOutputLogic();
-		$this->images                        = new Images();
-		$this->json_iterator                 = new JsonIterator();
-		$this->user                          = new Users();
+		$this->log_file_path                   = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
+		$this->coauthorsplus_logic             = new CoAuthorPlus();
+		$this->co_author_plus_data_fixer_logic = new CoAuthorPlusDataFixer();
+		$this->simple_local_avatars            = new SimpleLocalAvatars();
+		$this->redirection                     = new Redirection();
+		$this->logger                          = new Logger();
+		$this->attachments                     = new Attachments();
+		$this->posts                           = new Posts();
+		$this->console_table                   = new ConsoleTable();
+		$this->taxonomy                        = new Taxonomy();
+		$this->taxonomy_console_output_logic   = new TaxonomyConsoleOutputLogic();
+		$this->images                          = new Images();
+		$this->json_iterator                   = new JsonIterator();
+		$this->user                            = new Users();
 	}
 
 	/**
@@ -6174,7 +6183,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
-		$this->coauthorsplus_logic->update_author_term_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
+		$this->co_author_plus_data_fixer_logic->update_author_term_description( $this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ), $term );
 	}
 
 	/**
@@ -6300,7 +6309,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			}
 		}
 
-		$this->coauthorsplus_logic->update_author_term_description( $user, $term );
+		$this->co_author_plus_data_fixer_logic->update_author_term_description( $user, $term );
 	}
 
 	public function cmd_fix_standalone_guest_author_term_data( $args, $assoc_args ) {
@@ -6496,7 +6505,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
-		$this->coauthorsplus_logic->update_author_term_description(
+		$this->co_author_plus_data_fixer_logic->update_author_term_description(
 			$this->coauthorsplus_logic->get_guest_author_by_id( $guest_author_id ),
 			$term
 		);
@@ -7540,7 +7549,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			array(
 				'term_id'     => $term_id,
 				'taxonomy'    => 'author',
-				'description' => $this->coauthorsplus_logic->get_author_term_description( $author ),
+				'description' => $this->co_author_plus_data_fixer_logic->get_author_term_description( $author ),
 				'parent'      => 0,
 				'count'       => 0,
 			)
