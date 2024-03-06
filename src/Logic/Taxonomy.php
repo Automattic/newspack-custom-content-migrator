@@ -14,9 +14,6 @@ use WP_CLI;
  */
 class Taxonomy {
 
-	const TERM_ID = 'term_id';
-	const TAX_ID  = 'term_taxonomy_id';
-
 	/**
 	 * Fixes counts for taxonomy.
 	 *

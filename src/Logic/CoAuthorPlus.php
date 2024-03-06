@@ -12,6 +12,7 @@ use \CoAuthors_Guest_Authors;
 use \WP_CLI;
 use WP_Error;
 use WP_Post;
+use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 
 /**
  * CoAuthorPlus general logic class.
@@ -880,14 +881,14 @@ class CoAuthorPlus {
 	 * a term which is an Author term, an empty array will be returned.
 	 *
 	 * @param int    $by_id ID of the term or term_taxonomy record.
-	 * @param string $id_type Type of ID being passed. Either Taxonomy::TERM_ID or Taxonomy::TAX_ID.
+	 * @param string $id_type Type of ID being passed. Either TaxonomyConsoleOutputLogic::TERM_ID or TaxonomyConsoleOutputLogic::TAX_ID.
 	 *
 	 * @return array
 	 */
-	public function get_guest_author_taxonomy( int $by_id, string $id_type = Taxonomy::TERM_ID ): array {
+	public function get_guest_author_taxonomy( int $by_id, string $id_type = TaxonomyConsoleOutputLogic::TERM_ID ): array {
 		$constraint_column = 't.term_id';
 
-		if ( Taxonomy::TAX_ID === $id_type ) {
+		if ( TaxonomyConsoleOutputLogic::TAX_ID === $id_type ) {
 			$constraint_column = 'tt.term_taxonomy_id';
 		}
 
