@@ -5,7 +5,7 @@
  * @package NewspackCustomContentMigrator
  */
 
-namespace NewspackCustomContentMigrator\Logic;
+namespace NewspackCustomContentMigrator\Logic\ConsoleOutput;
 
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
@@ -14,7 +14,7 @@ use WP_User;
 /**
  * Class to handle user related logic.
  */
-class User {
+class Users {
 
 	/**
 	 * Constructor.

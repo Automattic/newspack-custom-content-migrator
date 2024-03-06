@@ -3,7 +3,6 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use cli\Streams;
-use cli\Table;
 use DateTime;
 use DateTimeZone;
 use DOMDocument;
@@ -14,21 +13,21 @@ use Exception;
 use Generator;
 use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\Redirection;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use NewspackCustomContentMigrator\Utils\ConsoleTable;
-use NewspackCustomContentMigrator\Logic\Images;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
+use NewspackCustomContentMigrator\Logic\ConsoleOutput\Users;
+use NewspackCustomContentMigrator\Logic\Images;
+use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
-use NewspackCustomContentMigrator\Logic\User;
 use WP_CLI;
 use WP_Http;
 use WP_Term;
@@ -660,7 +659,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	/**
 	 * User logic.
 	 *
-	 * @var User $user User logic.
+	 * @var Users $user User logic.
 	 */
 	private $user;
 
@@ -687,7 +686,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->taxonomy_console_output_logic = new TaxonomyConsoleOutputLogic();
 		$this->images                        = new Images();
 		$this->json_iterator                 = new JsonIterator();
-		$this->user                          = new User();
+		$this->user                          = new Users();
 	}
 
 	/**
