@@ -12,6 +12,7 @@ use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use WP_CLI;
 
@@ -184,6 +185,103 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'community kindness',
 	];
 
+	const ALLOWED_TAG_LIST = [
+		'a&e - top post - primary',
+		'a&e - top post - secondary',
+		'arts & culture - music',
+		'arts & culture - performing arts',
+		'arts & culture - top post - primary',
+		'arts & culture - top post - secondary',
+		'arts & culture - visual arts',
+		'danvillesanramon - city government',
+		'danvillesanramon - city news',
+		'danvillesanramon - community',
+		'danvillesanramon - education',
+		'danvillesanramon - features',
+		'danvillesanramon - other local news',
+		'danvillesanramon - san mateo county news',
+		'danvillesanramon - top post - primary',
+		'danvillesanramon - top post - secondary',
+		'danvillesanramon - trending',
+		'food - new & trending',
+		'food - openings & closings',
+		'food - top post - primary',
+		'livermore - city government',
+		'livermore - city news',
+		'livermore - community',
+		'livermore - education',
+		'livermore - features',
+		'livermore - other local news',
+		'livermore - san mateo county news',
+		'livermore - top post - primary',
+		'livermore - top post - secondary',
+		'livermore - trending',
+		'menlopark - city government',
+		'menlopark - city news',
+		'menlopark - community',
+		'menlopark - education',
+		'menlopark - features',
+		'menlopark - other local news',
+		'menlopark - san mateo county news',
+		'menlopark - top post - primary',
+		'menlopark - top post - secondary',
+		'menlopark - trending',
+		'mountainview - city government',
+		'mountainview - city news',
+		'mountainview - community',
+		'mountainview - education',
+		'mountainview - features',
+		'mountainview - other local news',
+		'mountainview - san mateo county news',
+		'mountainview - top post - primary',
+		'mountainview - top post - secondary',
+		'mountainview - trending',
+		'paloalto - city government',
+		'paloalto - city news',
+		'paloalto - community',
+		'paloalto - education',
+		'paloalto - features',
+		'paloalto - other local news',
+		'paloalto - san mateo county news',
+		'paloalto - top post - primary',
+		'paloalto - top post - secondary',
+		'paloalto - trending',
+		'playback',
+		'pleasanton - city government',
+		'pleasanton - city news',
+		'pleasanton - community',
+		'pleasanton - education',
+		'pleasanton - features',
+		'pleasanton - other local news',
+		'pleasanton - san mateo county news',
+		'pleasanton - top post - primary',
+		'pleasanton - top post - secondary',
+		'pleasanton - trending',
+		'real estate - home & garden',
+		'real estate - neighborhoods',
+		'real estate - top post - primary',
+		'real estate - top post - secondary',
+		'real estate - business',
+		'redwoodcity - city government',
+		'redwoodcity - city news',
+		'redwoodcity - community',
+		'redwoodcity - education',
+		'redwoodcity - features',
+		'redwoodcity - other local news',
+		'redwoodcity - san mateo county news',
+		'redwoodcity - top post - primary',
+		'redwoodcity - top post - secondary',
+		'redwoodcity - trending',
+		'the big picture',
+		'the six fifty',
+		'the six fifty - culture',
+		'the six fifty - food & drink',
+		'the six fifty - neighborhood guide',
+		'the six fifty - outdoors',
+		'the six fifty - things to do',
+		'the six fifty - top post - primary',
+	];
+
 	/**
 	 * Instance.
 	 *
@@ -213,6 +311,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * Taxonomy instance.
+	 *
+	 * @var Taxonomy $taxonomy_logic
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * GutenbergBlockGenerator instance.
 	 *
 	 * @var GutenbergBlockGenerator.
@@ -230,6 +335,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
+		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorPlus();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 
@@ -938,10 +1044,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator embarcadero-fix-dupe-master-list-cats-tags',
-			[ $this, 'cmd_embarcadero_fix_dupe_master_list_cats_tags' ],
+			'newspack-content-migrator embarcadero-fix-dupe-sanctioned-list-cats-tags',
+			[ $this, 'cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags' ],
 			[
-				'shortdesc' => 'Merges duplicate categories and tags based on master list provided by Embarcadero.',
+				'shortdesc' => 'Merges duplicate categories and tags based on sanctioned list provided by Embarcadero.',
 				'synopsis'  => [],
 			]
 		);
@@ -967,6 +1073,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-delete-disallowed-tags',
+			[ $this, 'cmd_embarcadero_delete_disallowed_tags' ],
+			[
+				'shortdesc' => 'Deletes disallowed tags from the database.',
+				'synopsis'  => [],
 			]
 		);
 	}
@@ -3134,7 +3249,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function cmd_embarcadero_fix_dupe_master_list_cats_tags( $args, $assoc_args ): void {
+	public function cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags( $args, $assoc_args ): void {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -3247,7 +3362,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 	/**
 	 * This function will go through the posts that were imported as part of the migration and remove any tags that
-	 * aren't part of the master list of tags.
+	 * aren't part of the sanctioned list of tags.
 	 *
 	 * @param array $args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
@@ -3258,103 +3373,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_fix_tags_on_posts( $args, $assoc_args ) {
 		$csv_file = $assoc_args['story-csv-path'];
 		$after_id = $assoc_args['after-row-number'] ?? 0;
-
-		$master_tag_list = [
-			'a&e - top post - primary',
-			'a&e - top post - secondary',
-			'arts & culture - music',
-			'arts & culture - performing arts',
-			'arts & culture - top post - primary',
-			'arts & culture - top post - secondary',
-			'arts & culture - visual arts',
-			'danvillesanramon - city government',
-			'danvillesanramon - city news',
-			'danvillesanramon - community',
-			'danvillesanramon - education',
-			'danvillesanramon - features',
-			'danvillesanramon - other local news',
-			'danvillesanramon - san mateo county news',
-			'danvillesanramon - top post - primary',
-			'danvillesanramon - top post - secondary',
-			'danvillesanramon - trending',
-			'food - new & trending',
-			'food - openings & closings',
-			'food - top post - primary',
-			'livermore - city government',
-			'livermore - city news',
-			'livermore - community',
-			'livermore - education',
-			'livermore - features',
-			'livermore - other local news',
-			'livermore - san mateo county news',
-			'livermore - top post - primary',
-			'livermore - top post - secondary',
-			'livermore - trending',
-			'menlopark - city government',
-			'menlopark - city news',
-			'menlopark - community',
-			'menlopark - education',
-			'menlopark - features',
-			'menlopark - other local news',
-			'menlopark - san mateo county news',
-			'menlopark - top post - primary',
-			'menlopark - top post - secondary',
-			'menlopark - trending',
-			'mountainview - city government',
-			'mountainview - city news',
-			'mountainview - community',
-			'mountainview - education',
-			'mountainview - features',
-			'mountainview - other local news',
-			'mountainview - san mateo county news',
-			'mountainview - top post - primary',
-			'mountainview - top post - secondary',
-			'mountainview - trending',
-			'paloalto - city government',
-			'paloalto - city news',
-			'paloalto - community',
-			'paloalto - education',
-			'paloalto - features',
-			'paloalto - other local news',
-			'paloalto - san mateo county news',
-			'paloalto - top post - primary',
-			'paloalto - top post - secondary',
-			'paloalto - trending',
-			'playback',
-			'pleasanton - city government',
-			'pleasanton - city news',
-			'pleasanton - community',
-			'pleasanton - education',
-			'pleasanton - features',
-			'pleasanton - other local news',
-			'pleasanton - san mateo county news',
-			'pleasanton - top post - primary',
-			'pleasanton - top post - secondary',
-			'pleasanton - trending',
-			'real estate - home & garden',
-			'real estate - neighborhoods',
-			'real estate - top post - primary',
-			'real estate - top post - secondary',
-			'real estate - business',
-			'redwoodcity - city government',
-			'redwoodcity - city news',
-			'redwoodcity - community',
-			'redwoodcity - education',
-			'redwoodcity - features',
-			'redwoodcity - other local news',
-			'redwoodcity - san mateo county news',
-			'redwoodcity - top post - primary',
-			'redwoodcity - top post - secondary',
-			'redwoodcity - trending',
-			'the big picture',
-			'the six fifty',
-			'the six fifty - culture',
-			'the six fifty - food & drink',
-			'the six fifty - neighborhood guide',
-			'the six fifty - outdoors',
-			'the six fifty - things to do',
-			'the six fifty - top post - primary',
-		];
 
 		$iterator = ( new FileImportFactory() )->get_file( $csv_file )->set_start( $after_id )->getIterator();
 
@@ -3405,13 +3423,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			foreach ( $post_tags as $post_tag ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Post tag `%s`', $post_tag->name ), Logger::INFO );
-				// Is part of master tag list?
-				// If yes, keep
-				// If not, remove from post.
 
 				// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
-				if ( ! in_array( html_entity_decode( $post_tag->name ), $master_tag_list ) ) {
-					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the master list. Removing.', $post_tag->name ), Logger::WARNING );
+				if ( ! in_array( html_entity_decode( $post_tag->name ), self::ALLOWED_TAG_LIST ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the allowed tag list. Removing.', $post_tag->name ), Logger::WARNING );
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 					$result = $wpdb->delete(
 						$wpdb->term_relationships,
@@ -3427,7 +3442,106 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$this->logger->log( self::LOG_FILE, sprintf( 'Removed tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::SUCCESS );
 					}
 				} else {
-					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is part of the master list. Keeping.', $post_tag->name ), Logger::SUCCESS );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is part of the allowed tag list. Keeping.', $post_tag->name ), Logger::SUCCESS );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This function will go through all the tags on an Embarcadero site and delete any tags that aren't part
+	 * of the allowed list of tags specified by the Embarcadero team.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_delete_disallowed_tags(): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$tags = $wpdb->get_results(
+			"SELECT 
+    			t.term_id, 
+    			REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+    			t.slug, 
+    			tt.taxonomy, 
+    			tt.term_taxonomy_id,
+    			tt.description
+			FROM $wpdb->terms t 
+			    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+			WHERE tt.taxonomy = 'post_tag'"
+		);
+
+		foreach ( $tags as $tag ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s`', $tag->name ), Logger::INFO );
+
+			// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+			if ( ! in_array( strtolower( html_entity_decode( $tag->name ) ), self::ALLOWED_TAG_LIST ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the allowed tag list. Removing.', $tag->name ), Logger::WARNING );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$tag->post_ids = $wpdb->get_col(
+					$wpdb->prepare(
+						"SELECT tr.object_id 
+						FROM $wpdb->term_relationships tr 
+						WHERE tr.term_taxonomy_id = %d",
+						$tag->term_taxonomy_id
+					)
+				);
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+				$wpdb->insert(
+					$wpdb->termmeta,
+					[
+						'term_id'    => $tag->term_id,
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+						'meta_key'   => '_newspack_disallowed_tag',
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+						'meta_value' => wp_json_encode( $tag ),
+					]
+				);
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_rel_rows = $wpdb->delete(
+					$wpdb->term_relationships,
+					[
+						'term_taxonomy_id' => $tag->term_taxonomy_id,
+					]
+				);
+
+				if ( false === $deleted_rel_rows ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove relationships, skipping.', Logger::ERROR );
+					continue;
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Removed %d relationships', $deleted_rel_rows ), Logger::SUCCESS );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_taxonomy_row = $wpdb->delete(
+					$wpdb->term_taxonomy,
+					[
+						'term_taxonomy_id' => $tag->term_taxonomy_id,
+					]
+				);
+
+				if ( false === $deleted_taxonomy_row ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove taxonomy row, skipping.', Logger::ERROR );
+					continue;
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Removed taxonomy row', Logger::SUCCESS );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_term_row = $wpdb->delete(
+					$wpdb->terms,
+					[
+						'term_id' => $tag->term_id,
+					]
+				);
+
+				if ( false === $deleted_term_row ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove term row, skipping.', Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Removed term row', Logger::SUCCESS );
 				}
 			}
 		}
