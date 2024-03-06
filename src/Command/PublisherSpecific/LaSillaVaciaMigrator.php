@@ -23,6 +23,7 @@ use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Logic\Images;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
+use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -643,6 +644,13 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private $taxonomy;
 
 	/**
+	 * Taxonomy console output logic.
+	 *
+	 * @var TaxonomyConsoleOutputLogic $taxonomy_console_output_logic Taxonomy console output logic.
+	 */
+	private $taxonomy_console_output_logic;
+
+	/**
 	 * Images logic.
 	 *
 	 * @var Images $images Images logic.
@@ -667,18 +675,19 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 * Singleton constructor.
 	 */
 	private function __construct() {
-		$this->log_file_path        = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
-		$this->coauthorsplus_logic  = new CoAuthorPlus();
-		$this->simple_local_avatars = new SimpleLocalAvatars();
-		$this->redirection          = new Redirection();
-		$this->logger               = new Logger();
-		$this->attachments          = new Attachments();
-		$this->posts                = new Posts();
-		$this->console_table        = new ConsoleTable();
-		$this->taxonomy             = new Taxonomy();
-		$this->images               = new Images();
-		$this->json_iterator        = new JsonIterator();
-		$this->user = new User();
+		$this->log_file_path                 = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
+		$this->coauthorsplus_logic           = new CoAuthorPlus();
+		$this->simple_local_avatars          = new SimpleLocalAvatars();
+		$this->redirection                   = new Redirection();
+		$this->logger                        = new Logger();
+		$this->attachments                   = new Attachments();
+		$this->posts                         = new Posts();
+		$this->console_table                 = new ConsoleTable();
+		$this->taxonomy                      = new Taxonomy();
+		$this->taxonomy_console_output_logic = new TaxonomyConsoleOutputLogic();
+		$this->images                        = new Images();
+		$this->json_iterator                 = new JsonIterator();
+		$this->user                          = new User();
 	}
 
 	/**
@@ -5051,7 +5060,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$this->posts->get_and_output_postmeta_table( $user->email_post_id, '' );
 			$author_taxonomies = $this->get_author_term_from_guest_author_id( $user->email_post_id );
 
-			$this->taxonomy->output_term_and_term_taxonomy_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ), Taxonomy::TERM_ID, '' );
+			$this->taxonomy_console_output_logic->output_term_and_term_taxonomy_table( array_map( fn( $tax ) => $tax->term_id, $author_taxonomies ), Taxonomy::TERM_ID, '' );
 
 			if ( 1 === count( $author_taxonomies ) ) {
 				$this->fix_author_term_data_from_guest_author( intval( $user->email_post_id ), $author_taxonomies[0], get_user_by( 'id', $user->user_id ), false );
@@ -5116,7 +5125,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$copy_term_ids         = $term_ids;
 			$term_ids_placeholders = implode( ',', array_fill( 0, count( $term_ids ), '%d' ) );
 
-			$this->taxonomy->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
+			$this->taxonomy_console_output_logic->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
 
 			$connected_guest_author_terms = $wpdb->get_results(
 				$wpdb->prepare(
@@ -5314,7 +5323,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				}
 			}
 
-			$this->taxonomy->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
+			$this->taxonomy_console_output_logic->output_term_and_term_taxonomy_table( $copy_term_ids, Taxonomy::TERM_ID, '' );
 		}
 	}
 
@@ -5379,7 +5388,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		if ( ! empty( $existing_slugs ) ) {
 			echo WP_CLI::colorize( "%YExisting slugs found%n\n" );
 			foreach ( $existing_slugs as $record ) {
-				$this->taxonomy->output_term_and_term_taxonomy_table( [ intval( $record->term_id ) ], Taxonomy::TERM_ID, '' );
+				$this->taxonomy_console_output_logic->output_term_and_term_taxonomy_table( [ intval( $record->term_id ) ], Taxonomy::TERM_ID, '' );
 				$description_id = $this->extract_id_from_description( $record->description );
 				$guest_author_record = $this->get_guest_author_post_from_term_taxonomy_id( $record->term_taxonomy_id );
 
@@ -6348,7 +6357,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 		$this->posts->output_table( [ $guest_author_id ], [], 'Guest Author Record' );
 		$post = get_post( $guest_author_id );
-		$this->taxonomy->output_term_and_term_taxonomy_table( [ $term->term_id ], Taxonomy::TERM_ID, 'Author Term' );
+		$this->taxonomy_console_output_logic->output_term_and_term_taxonomy_table( [ $term->term_id ], Taxonomy::TERM_ID, 'Author Term' );
 		$filtered_author_cap_fields = $this->get_filtered_cap_fields(
 			$guest_author_id,
 			array(
@@ -7721,7 +7730,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						$this->confirm_ok_to_proceed( $loose_author_term->term_id );
 						continue;
 					} else {
-						$this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids, '' );
+						$this->taxonomy_console_output_logic->output_term_taxonomy_table( $term_taxonomy_ids, '' );
 
 						if ( $user instanceof WP_User ) {
 							$command = "wp newspack-content-migrator la-silla-vacia-fix-user-guest-author-term-data --guest-author-id=$guest_author->ID --term-id=$loose_author_term->term_id --user-id=$user->ID";
@@ -7756,7 +7765,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						}
 					}
 				} else {
-					$taxonomies = $this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids, '' );
+					$taxonomies = $this->taxonomy_console_output_logic->output_term_taxonomy_table( $term_taxonomy_ids, '' );
 
 					if ( empty( $taxonomies ) ) {
 						// Somehow the term_taxonomy_id - guest author relationship is invalid. So no harm in automating this part
@@ -7778,7 +7787,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					$single_taxonomy = count( $term_taxonomy_ids ) === 1;
 
 					foreach ( $taxonomies as $taxonomy_record ) {
-						$terms = $this->taxonomy->output_term_and_term_taxonomy_table( [ $taxonomy_record->term_id ], Taxonomy::TERM_ID, '' );
+						$terms = $this->taxonomy_console_output_logic->output_term_and_term_taxonomy_table( [ $taxonomy_record->term_id ], Taxonomy::TERM_ID, '' );
 						$terms_count = count( $terms );
 
 						if ( $terms_count > 1 ) {
@@ -7967,12 +7976,12 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 						continue;
 					}
 				} else {
-					$this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids_from_post_id_relationships, '' );
+					$this->taxonomy_console_output_logic->output_term_taxonomy_table( $term_taxonomy_ids_from_post_id_relationships, '' );
 				}
 			}
 
 			// Since term_id and term_taxonomy_id usually match, check to see if there's anything.
-			$taxonomies = $this->taxonomy->output_term_taxonomy_table( [ $loose_author_term->term_id ], '' );
+			$taxonomies = $this->taxonomy_console_output_logic->output_term_taxonomy_table( [ $loose_author_term->term_id ], '' );
 
 			if ( ! empty( $taxonomies ) ) {
 				foreach ( $taxonomies as $taxonomy_record ) {
@@ -8001,7 +8010,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$term_taxonomy_ids = $this->search_for_taxonomies_with_descriptions_like( $loose_author_term->name );
 
-			$this->taxonomy->output_term_taxonomy_table( $term_taxonomy_ids, '' );
+			$this->taxonomy_console_output_logic->output_term_taxonomy_table( $term_taxonomy_ids, '' );
 
 			if ( 1 === count( $post_ids ) ) {
 				$standalone_command = 'newspack-content-migrator la-silla-vacia-fix-standalone-guest-author-term-data';
