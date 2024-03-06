@@ -819,7 +819,6 @@ class CoAuthorPlus {
 		return $all_gas;
 	}
 
-
 	/**
 	 * Convenience function to help validate a WP User object. If passed a User ID,
 	 * it will convert it to a WP User object.
