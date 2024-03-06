@@ -146,39 +146,174 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		);
 	}
 
-	public function split_byline( $byline ): array {
+	/**
+	 * Migrates XML files from Village Media Export.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the XML file cannot be loaded, or timezone is invalid.
+	 */
+	public function cmd_migrate_xmls( $args, $assoc_args ) {
+		global $wpdb;
 
-		$author_names = [];
-			
-		// Replace multiple separators with a common separator
-		$separators       = [ ', and', ',', ' and ', ' with ', ' & ' ];
-		$common_separator = '&&';
-		$byline_replaced  = str_replace( $separators, $common_separator, $byline );
+		$file_path = $args[0];
 
-		// Explode using the common separator
-		$author_names = explode( $common_separator, $byline_replaced );
-		
-		// Trim.
-		$author_names = array_map( 'trim', $author_names );
-		$author_names = array_map(
-			function ( $string ) {
-				// Remove.
-				$string = str_replace( 'By ', '', $string );
-				$string = str_replace( 'by ', '', $string );
-				// Remove double spaces.
-				$string = str_replace( '   ', ' ', $string );
-				$string = str_replace( '  ', ' ', $string );
-				// Make sure '/' is always surrounded by one space.
-				$string = str_replace( ' /', '/', $string );
-				$string = str_replace( '/ ', '/', $string );
-				$string = str_replace( '/', ' / ', $string );
+		$dom = new DOMDocument();
+		$dom->loadXML( file_get_contents( $file_path ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$contents         = $dom->getElementsByTagName( 'content' );
+		$row_number_start = $assoc_args['start-at-row-number'];
+		$gmt_timezone     = new DateTimeZone( 'GMT' );
 
-				return $string;
-			},
-			$author_names
-		);
+		foreach ( $contents as $row_number => $content ) {
+			/* @var DOMElement $content */
 
-		return $author_names;
+			if ( $row_number < $row_number_start ) {
+				continue;
+			}
+
+			echo WP_CLI::colorize( "Row number: %B{$row_number}%n\n" ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+
+			$post_data = [
+				'post_author'       => 0,
+				'post_date'         => '',
+				'post_date_gmt'     => '',
+				'post_content'      => '',
+				'post_title'        => '',
+				'post_excerpt'      => '',
+				'post_status'       => '',
+				'post_type'         => 'post',
+				'post_name'         => '',
+				'post_modified'     => '',
+				'post_modified_gmt' => '',
+				'post_category'     => [],
+				'tags_input'        => [],
+				'meta_input'        => [],
+			];
+
+			$images      = [];
+			$has_gallery = false;
+
+			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					continue;
+				}
+
+				switch ( $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					case 'id':
+						$post_data['meta_input']['original_article_id'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						$post_imported                                  = $wpdb->get_var(
+							$wpdb->prepare(
+								"SELECT post_id 
+								FROM $wpdb->postmeta 
+								WHERE meta_key = 'original_article_id' 
+								  AND meta_value = %s",
+								$node->nodeValue // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+							)
+						); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+
+						if ( ! is_null( $post_imported ) ) {
+							WP_CLI::log( 'Post already imported, skipping...' );
+							continue 3;
+						}
+						break;
+					case 'title':
+						$post_data['post_title'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						WP_CLI::log( 'Post Title: ' . $node->nodeValue ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
+					case 'slug':
+						$post_data['post_name'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
+					case 'dateupdated':
+						$date                       = $this->get_date_time( $node->nodeValue, $assoc_args['timezone'] ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						$post_data['post_modified'] = $date->format( 'Y-m-d H:i:s' );
+						$date->setTimezone( $gmt_timezone );
+						$post_data['post_modified_gmt'] = $date->format( 'Y-m-d H:i:s' );
+						break;
+					case 'datepublish':
+						$date                   = $this->get_date_time( $node->nodeValue, $assoc_args['timezone'] ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						$post_data['post_date'] = $date->format( 'Y-m-d H:i:s' );
+						$date->setTimezone( $gmt_timezone );
+						$post_data['post_date_gmt'] = $date->format( 'Y-m-d H:i:s' );
+						$post_data['post_status']   = 'publish';
+						break;
+					case 'intro':
+						$post_data['post_excerpt']                         = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						$post_data['meta_input']['newspack_post_subtitle'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
+					case 'description':
+						$post_data['post_content'] = '<!-- wp:html -->' . $node->nodeValue . '<!-- /wp:html -->'; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
+					case 'author':
+						$author = $this->handle_author( $node );
+
+						if ( ! is_null( $author ) ) {
+							$post_data['post_author'] = $author->ID;
+						}
+
+						break;
+					case 'tags':
+						foreach ( $node->childNodes as $tag ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+							if ( '#text' === $tag->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+								continue;
+							}
+							$term = $this->handle_tag( $tag );
+
+							if ( 'category' === $term['type'] ) {
+								$post_data['post_category'][] = $term['term_id'];
+							} elseif ( 'post_tag' === $term['type'] ) {
+								$post_data['tags_input'][] = $term['term_id'];
+							}
+						}
+
+						break;
+					case 'medias':
+						foreach ( $node->childNodes as $media ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+							if ( '#text' === $media->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+								continue;
+							}
+
+							$images[] = $media;
+						}
+
+						break;
+					case 'gallery':
+						$has_gallery = true;
+						break;
+				}
+			}
+
+			$post_id = wp_insert_post( $post_data, true );
+
+			if ( ! is_wp_error( $post_id ) ) {
+
+				$attachment_ids = [];
+				foreach ( $images as $image ) {
+					$attachment = $this->handle_media( $image, $post_id, $assoc_args['timezone'] );
+
+					if ( $attachment['is_gallery_item'] && ! is_null( $attachment ) ) {
+						$attachment_ids[] = $attachment['attachment_id'];
+					}
+				}
+
+				if ( $has_gallery && ! empty( $attachment_ids ) ) {
+					$post_data['ID']            = $post_id;
+					$post_data['post_content'] .= serialize_blocks(
+						[
+							$this->block_generator->get_gallery(
+								$attachment_ids,
+								3,
+								'full',
+								'none',
+								true
+							),
+						]
+					);
+					wp_update_post( $post_data );
+				}
+			}
+		}
 	}
 
 	/**
@@ -202,7 +337,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$log     = 'village-cms-fix-authors.log';
 		$log_csv = 'village-cms-fix-authors.csv';
 		// Timestamp $log.
-		$this->logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
+		$this->logger->log( $log, sprintf( 'Starting %s', gmdate( 'Y-m-d H:I:s' ) ) );
 		// Delete file $log_csv if it exists.
 		if ( file_exists( $log_csv ) ) {
 			unlink( $log_csv );
@@ -240,19 +375,19 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$original_article_id = null;
 			$byline              = null;
 			$author_node         = null;
-			foreach ( $content->childNodes as $node ) {
+			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					continue;
 				}
-				switch ( $node->nodeName ) {
+				switch ( $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 					case 'id':
-						$original_article_id = $node->nodeValue;
+						$original_article_id = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 						break;
 					case 'author':
 						$author_node = $node;
 						break;
 					case 'attributes':
-						$attributes = json_decode( $node->nodeValue, true );
+						$attributes = json_decode( $node->nodeValue, true ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 						if ( isset( $attributes['byline'] ) && ! empty( $attributes['byline'] ) ) {
 							$byline = $attributes['byline'];
 						}
@@ -402,7 +537,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				}
 			}
 			$author_before_display_name = get_the_author_meta( 'display_name', $author_before_id );
-			$csv_row = [
+			$csv_row                    = [
 				$original_article_id,
 				$post_id,
 				$author_before_id,
@@ -419,252 +554,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		WP_CLI::success( 'Done.' );
 		fclose( $fp_csv );
 		wp_cache_flush();
-	}
-
-	/**
-	 * Creates a WP_User from a display name.
-	 *
-	 * @param string $display_name Display name.
-	 * @param string $log          Path to log file.
-	 * @return int|string|WP_Error WP_User ID if successful, WP_Error if not.
-	 */
-	public function create_wp_user_from_display_name( string $display_name, string $log ) {
-		global $wpdb;
-		
-		/**
-		 * Get an existing WP_User by:
-		 *      1) display name
-		 *      2) user_login
-		 */
-		$display_name = $display_name;
-		$slug         = sanitize_title( $display_name );
-		$wp_user_id   = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", apply_filters( 'pre_user_display_name', $display_name ) ) );
-		if ( ! $wp_user_id ) {
-			$wp_user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $slug ) );
-		}
-
-		// Return user if found.
-		if ( $wp_user_id ) {
-			return $wp_user_id;
-		}
-
-		/**
-		 * Create a WP_User.
-		 */
-		
-		// Trim to 50 chars: display_name, user_nicename, user_login.
-		$display_name_untrimmed = $display_name;
-		if ( strlen( $display_name ) > 50 ) {
-			$display_name = substr( $display_name, 0, 50 );
-		}
-		$slug_untrimmed = $slug;
-		if ( strlen( $slug ) > 50 ) {
-			$slug = substr( $slug, 0, 50 );
-		}
-
-		// Insert WP_User.
-		$author_after_args = [
-			'display_name'  => $display_name,
-			'user_nicename' => $slug,
-			'user_login'    => $slug,
-			'user_pass'     => wp_generate_password( 12 ),
-			'role'          => 'author',
-		];
-		$wp_user_id        = wp_insert_user( $author_after_args );
-		if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
-			$err_msg = is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a';
-			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $display_name, $err_msg ), $this->logger::ERROR, false );
-
-			// If creation error is "Sorry, that username already exists", then fetch that username, and label it in logs for double-checking.
-			if ( false !== strpos( $err_msg, 'Sorry, that username already exists' ) ) {
-				$wp_user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $slug ) );
-				if ( $wp_user_id ) {
-					$this->logger->log( $log, sprintf( "ERROR/WARNING Now fetched and using WP_User with SAME user_login '%s' exist ing WP_User ID: %d", $slug, $wp_user_id ), $this->logger::ERROR, false );
-					
-					return $wp_user_id;
-				}
-			}
-		}
-
-		// Log if trimmed display_name or user_login.
-		if ( $display_name_untrimmed != $display_name ) {
-			$this->logger->log( $log, sprintf( "ERROR Trimmed display_name WP_User %d from '%s' to '%s'", $wp_user_id, $display_name_untrimmed, $display_name ), $this->logger::ERROR, false );
-		}
-		if ( $slug_untrimmed != $slug ) {
-			$this->logger->log( $log, sprintf( "ERROR Trimmed user_login and user_nicename WP_User %d from '%s' to '%s'", $wp_user_id, $slug_untrimmed, $slug ), $this->logger::ERROR, false );
-		}
-
-		return $wp_user_id;
-	}
-
-	/**
-	 * Migrates XML files from Village Media Export.
-	 *
-	 * @param array $args Positional arguments.
-	 * @param array $assoc_args Associative arguments.
-	 *
-	 * @return void
-	 * @throws Exception When the XML file cannot be loaded, or timezone is invalid.
-	 */
-	public function cmd_migrate_xmls( $args, $assoc_args ) {
-		global $wpdb;
-
-		$file_path = $args[0];
-
-		$dom = new DOMDocument();
-		$dom->loadXML( file_get_contents( $file_path ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$contents         = $dom->getElementsByTagName( 'content' );
-		$row_number_start = $assoc_args['start-at-row-number'];
-		$gmt_timezone     = new DateTimeZone( 'GMT' );
-
-		foreach ( $contents as $row_number => $content ) {
-			/* @var DOMElement $content */
-
-			if ( $row_number < $row_number_start ) {
-				continue;
-			}
-
-			echo WP_CLI::colorize( "Row number: %B{$row_number}%n\n" ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-
-			$post_data = [
-				'post_author'       => 0,
-				'post_date'         => '',
-				'post_date_gmt'     => '',
-				'post_content'      => '',
-				'post_title'        => '',
-				'post_excerpt'      => '',
-				'post_status'       => '',
-				'post_type'         => 'post',
-				'post_name'         => '',
-				'post_modified'     => '',
-				'post_modified_gmt' => '',
-				'post_category'     => [],
-				'tags_input'        => [],
-				'meta_input'        => [],
-			];
-
-			$images      = [];
-			$has_gallery = false;
-
-			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-					continue;
-				}
-
-				switch ( $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-					case 'id':
-						$post_data['meta_input']['original_article_id'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						$post_imported                                  = $wpdb->get_var(
-							$wpdb->prepare(
-								"SELECT post_id 
-								FROM $wpdb->postmeta 
-								WHERE meta_key = 'original_article_id' 
-								  AND meta_value = %s",
-								$node->nodeValue
-							)
-						); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-
-						if ( ! is_null( $post_imported ) ) {
-							WP_CLI::log( 'Post already imported, skipping...' );
-							continue 3;
-						}
-						break;
-					case 'title':
-						$post_data['post_title'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						WP_CLI::log( 'Post Title: ' . $node->nodeValue ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						break;
-					case 'slug':
-						$post_data['post_name'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						break;
-					case 'dateupdated':
-						$date                       = $this->get_date_time( $node->nodeValue, $assoc_args['timezone'] ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						$post_data['post_modified'] = $date->format( 'Y-m-d H:i:s' );
-						$date->setTimezone( $gmt_timezone );
-						$post_data['post_modified_gmt'] = $date->format( 'Y-m-d H:i:s' );
-						break;
-					case 'datepublish':
-						$date                   = $this->get_date_time( $node->nodeValue, $assoc_args['timezone'] ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						$post_data['post_date'] = $date->format( 'Y-m-d H:i:s' );
-						$date->setTimezone( $gmt_timezone );
-						$post_data['post_date_gmt'] = $date->format( 'Y-m-d H:i:s' );
-						$post_data['post_status']   = 'publish';
-						break;
-					case 'intro':
-						$post_data['post_excerpt']                         = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						$post_data['meta_input']['newspack_post_subtitle'] = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						break;
-					case 'description':
-						$post_data['post_content'] = '<!-- wp:html -->' . $node->nodeValue . '<!-- /wp:html -->'; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-						break;
-					case 'author':
-						$author = $this->handle_author( $node );
-
-						if ( ! is_null( $author ) ) {
-							$post_data['post_author'] = $author->ID;
-						}
-
-						break;
-					case 'tags':
-						foreach ( $node->childNodes as $tag ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-							if ( '#text' === $tag->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-								continue;
-							}
-							$term = $this->handle_tag( $tag );
-
-							if ( 'category' === $term['type'] ) {
-								$post_data['post_category'][] = $term['term_id'];
-							} elseif ( 'post_tag' === $term['type'] ) {
-								$post_data['tags_input'][] = $term['term_id'];
-							}
-						}
-
-						break;
-					case 'medias':
-						foreach ( $node->childNodes as $media ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-							if ( '#text' === $media->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-								continue;
-							}
-
-							$images[] = $media;
-						}
-
-						break;
-					case 'gallery':
-						$has_gallery = true;
-						break;
-				}
-			}
-
-			$post_id = wp_insert_post( $post_data, true );
-
-			if ( ! is_wp_error( $post_id ) ) {
-
-				$attachment_ids = [];
-				foreach ( $images as $image ) {
-					$attachment = $this->handle_media( $image, $post_id, $assoc_args['timezone'] );
-
-					if ( $attachment['is_gallery_item'] && ! is_null( $attachment ) ) {
-						$attachment_ids[] = $attachment['attachment_id'];
-					}
-				}
-
-				if ( $has_gallery && ! empty( $attachment_ids ) ) {
-					$post_data['ID']            = $post_id;
-					$post_data['post_content'] .= serialize_blocks(
-						[
-							$this->block_generator->get_gallery(
-								$attachment_ids,
-								3,
-								'full',
-								'none',
-								true
-							),
-						]
-					);
-					wp_update_post( $post_data );
-				}
-			}
-		}
 	}
 
 	/**
@@ -754,7 +643,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		}
 
 		global $wpdb;
-		$user = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+		$user = $wpdb->get_row(
 			$wpdb->prepare(
 				"SELECT 
        				u.* 
@@ -764,6 +654,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				$author_data['meta_input']['original_author_id']
 			)
 		);
+		// phpcs:enable
 
 		if ( $user ) {
 			WP_CLI::log( 'Found existing user with original_author_id: ' . $author_data['meta_input']['original_author_id'] . ' (' . $user->ID . ')' );
@@ -911,5 +802,122 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		}
 
 		return $date;
+	}
+
+	/**
+	 * Splits a byline string into multiple author names.
+	 *
+	 * @param string $byline Byline string.
+	 * @return array Array of author names.
+	 */
+	public function split_byline( string $byline ): array {
+
+		$author_names = [];
+			
+		// Replace multiple separators with a common separator.
+		$separators       = [ ', and', ',', ' and ', ' with ', ' & ' ];
+		$common_separator = '&&';
+		$byline_replaced  = str_replace( $separators, $common_separator, $byline );
+
+		// Explode using the common separator.
+		$author_names = explode( $common_separator, $byline_replaced );
+		
+		// Trim.
+		$author_names = array_map( 'trim', $author_names );
+		$author_names = array_map(
+			function ( $string ) {
+				// Remove.
+				$string = str_replace( 'By ', '', $string );
+				$string = str_replace( 'by ', '', $string );
+				// Remove double spaces.
+				$string = str_replace( '   ', ' ', $string );
+				$string = str_replace( '  ', ' ', $string );
+				// Make sure '/' is always surrounded by one space.
+				$string = str_replace( ' /', '/', $string );
+				$string = str_replace( '/ ', '/', $string );
+				$string = str_replace( '/', ' / ', $string );
+
+				return $string;
+			},
+			$author_names
+		);
+
+		return $author_names;
+	}
+
+	/**
+	 * Creates a WP_User from a display name.
+	 *
+	 * @param string $display_name Display name.
+	 * @param string $log          Path to log file.
+	 * @return int|string|WP_Error WP_User ID if successful, WP_Error if not.
+	 */
+	public function create_wp_user_from_display_name( string $display_name, string $log ) {
+		global $wpdb;
+		
+		/**
+		 * Get an existing WP_User by:
+		 *      1) display name
+		 *      2) user_login
+		 */
+		$display_name = $display_name;
+		$slug         = sanitize_title( $display_name );
+		$wp_user_id   = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", apply_filters( 'pre_user_display_name', $display_name ) ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+		if ( ! $wp_user_id ) {
+			$wp_user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $slug ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+		}
+
+		// Return user if found.
+		if ( $wp_user_id ) {
+			return $wp_user_id;
+		}
+
+		/**
+		 * Create a WP_User.
+		 */
+		
+		// Trim to 50 chars: display_name, user_nicename, user_login.
+		$display_name_untrimmed = $display_name;
+		if ( strlen( $display_name ) > 50 ) {
+			$display_name = substr( $display_name, 0, 50 );
+		}
+		$slug_untrimmed = $slug;
+		if ( strlen( $slug ) > 50 ) {
+			$slug = substr( $slug, 0, 50 );
+		}
+
+		// Insert WP_User.
+		$author_after_args = [
+			'display_name'  => $display_name,
+			'user_nicename' => $slug,
+			'user_login'    => $slug,
+			'user_pass'     => wp_generate_password( 12 ),
+			'role'          => 'author',
+		];
+		$wp_user_id        = wp_insert_user( $author_after_args );
+		if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
+			$err_msg = is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a';
+			$this->logger->log( $log, sprintf( "ERROR Could not create WP_User with display_name '%s', err: %s", $display_name, $err_msg ), $this->logger::ERROR, false );
+
+			// If creation error is "Sorry, that username already exists", then fetch that username, and label it in logs for double-checking.
+			if ( false !== strpos( $err_msg, 'Sorry, that username already exists' ) ) {
+				$wp_user_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE user_login = %s", $slug ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				if ( $wp_user_id ) {
+					$this->logger->log( $log, sprintf( "ERROR/WARNING Now fetched and using WP_User with SAME user_login '%s' exist ing WP_User ID: %d", $slug, $wp_user_id ), $this->logger::ERROR, false );
+					
+					return $wp_user_id;
+				}
+			}
+		}
+
+		// Log if trimmed display_name or user_login.
+		if ( $display_name_untrimmed != $display_name ) {
+			$this->logger->log( $log, sprintf( "ERROR Trimmed display_name WP_User %d from '%s' to '%s'", $wp_user_id, $display_name_untrimmed, $display_name ), $this->logger::ERROR, false );
+		}
+		if ( $slug_untrimmed != $slug ) {
+			$this->logger->log( $log, sprintf( "ERROR Trimmed user_login and user_nicename WP_User %d from '%s' to '%s'", $wp_user_id, $slug_untrimmed, $slug ), $this->logger::ERROR, false );
+		}
+
+		return $wp_user_id;
 	}
 }
