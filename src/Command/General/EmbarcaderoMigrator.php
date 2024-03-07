@@ -758,13 +758,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'print-sections-csv-file-path',
-						'description' => 'Path to the CSV file containing print sections to import.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
 						'name'        => 'print-pdf-dir-path',
 						'description' => 'Path to the directory containing the print issues PDF files to import.',
 						'optional'    => false,
@@ -2564,10 +2557,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$publication_name             = $assoc_args['publication-name'];
 		$publication_email            = $assoc_args['publication-email'];
 		$pdf_section_suffix           = $assoc_args['pdf-section-suffix'];
-		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
-		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
 		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
 		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
+		$print_issues_csv_file_path = $assoc_args['print-issues-csv-file-path'];
 
 		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
 		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
@@ -2609,6 +2601,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Get author based on the publication name.
 			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
 
+			$post_title = date( "F d, Y", strtotime( $print_issue['seo_link'] ) );
+
 			// Create a new issue post.
 			$wp_issue_post_id = $this->get_or_create_post(
 				$print_issue['issue_number'],
@@ -2626,15 +2620,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			if ( is_wp_error( $wp_issue_post_id ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create issue %s: %s', $print_issue['issue_number'], $wp_issue_post_id->get_error_message() ), Logger::WARNING );
 				continue;
-			}
-
-			// Issue section.
-			$section_name  = 'Section ' . $print_issue['sections'];
-			$section_index = array_search( $print_issue['sections'], array_column( $print_sections, 'section_id' ) );
-			if ( false === $section_index ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['sections'], $print_issue['issue_number'] ), Logger::WARNING );
-			} else {
-				$section_name = $print_sections[ $section_index ]['section_title'];
 			}
 
 			$post_content_blocks = [];
@@ -2658,6 +2643,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			wp_update_post(
 				[
 					'ID'           => $wp_issue_post_id,
+					'post_title'   => $post_title,
 					'post_content' => $post_content,
 				]
 			);
