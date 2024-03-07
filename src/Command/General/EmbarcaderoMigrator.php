@@ -2587,7 +2587,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.' . $pdf_section_suffix . '.section' . $i . '.pdf';
 
 				if ( ! file_exists( $pdf_file_path ) ) {
-					break;
+					continue;
 				}
 
 				$pdf_files_paths[] = $pdf_file_path;
