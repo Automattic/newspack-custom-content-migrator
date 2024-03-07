@@ -2554,15 +2554,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param array $assoc_args array Command associative arguments.
 	 */
 	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
-		$publication_name             = $assoc_args['publication-name'];
-		$publication_email            = $assoc_args['publication-email'];
-		$pdf_section_suffix           = $assoc_args['pdf-section-suffix'];
-		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
-		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
+		$publication_name           = $assoc_args['publication-name'];
+		$publication_email          = $assoc_args['publication-email'];
+		$pdf_section_suffix         = $assoc_args['pdf-section-suffix'];
 		$print_issues_csv_file_path = $assoc_args['print-issues-csv-file-path'];
+		$print_pdf_dir_path         = $assoc_args['print-pdf-dir-path'];
+		$print_cover_dir_path       = $assoc_args['print-cover-dir-path'];
 
-		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
-		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
+		$print_issues = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
 
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d (%s)', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'], $print_issue['seo_link'] ), Logger::LINE );
@@ -2650,7 +2649,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			);
 
 			// Handle post cover.
-			$cover_file_path = $print_cover_dir_path . '/' . $seo_link[0] . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.cover.jpg';
+			$cover_file_path = $print_cover_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.cover.jpg';
 
 			if ( ! is_file( $cover_file_path ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find cover file %s', $cover_file_path ), Logger::WARNING );
