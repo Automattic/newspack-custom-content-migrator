@@ -2626,6 +2626,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
 				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+				$filename     = basename( $pdf_file_path );
 
 				if ( is_wp_error( $file_post_id ) ) {
 					wp_delete_post( $wp_issue_post_id, true );
@@ -2635,7 +2636,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 				$attachment_post = get_post( $file_post_id );
 
-				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
+				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $filename );
 			}
 
 			$post_content = serialize_blocks( $post_content_blocks );
