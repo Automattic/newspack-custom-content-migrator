@@ -278,6 +278,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'the six fifty - outdoors',
 		'the six fifty - things to do',
 		'the six fifty - top post - primary',
+		'trending',
 	];
 
 	/**
