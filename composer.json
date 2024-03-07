@@ -24,12 +24,12 @@
     "paquettg/php-html-parser": "^3.1",
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
-    "automattic/newspack-scraper-migrator": "dev-trunk",
     "automattic/newspack-post-image-downloader": "dev-master",
     "automattic/newspack-content-converter": "dev-master",
     "halaxa/json-machine": "^1.1",
     "mustache/mustache": "^2.14",
-    "simplehtmldom/simplehtmldom": "2.0-RC2"
+    "simplehtmldom/simplehtmldom": "2.0-RC2",
+    "automattic/newspack-scraper-migrator": "dev-add/cc-migrator"
   },
   "require-dev": {
     "automattic/vipwpcs": "^3.0",
