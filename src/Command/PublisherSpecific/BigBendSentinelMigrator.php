@@ -67,6 +67,14 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator bigbendsentinel-fix-pdf-for-pages',
+			[ $this, 'cmd_fix_pdf_for_pages' ],
+			[
+				'shortdesc' => 'Fix PDF image for Pages.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator bigbendsentinel-reset-pdf-post-category',
 			[ $this, 'cmd_reset_pdf_post_category' ],
 			[
@@ -462,6 +470,70 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 	}
 
+	public function cmd_fix_pdf_for_pages( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+
+		$log = 'bigbendsentinel_' . __FUNCTION__ . '.txt';
+
+        $this->logger->log( $log , 'Starting ...' );
+
+		$parent_1 = get_page_by_path( 'issues-archive', OBJECT, 'page' );
+		$parent_2 = get_page_by_path( 'issues-archive-presidio-international', OBJECT, 'page' );
+
+		// select Pages where featured image thumbnail is not set
+		$query = new \WP_Query ( [
+			'posts_per_page' => -1,
+			'post_type'     => 'page',
+			'post_status'   => 'publish',
+			'post_parent__in' => array( $parent_1->ID, $parent_2->ID ),
+			'fields'		=> 'ids',
+			'meta_query' 	=> [
+				[
+					'key' => '_thumbnail_id',
+					'compare' => 'NOT EXISTS',
+				],
+			],
+		]);
+
+        $this->logger->log( $log , 'Pages found: ' . $query->post_count );
+
+		foreach ( $query->posts as $post_id ) {
+
+			$this->logger->log( $log , 'Page ID:' . $post_id );
+
+			// get block content
+			$post = get_post( $post_id );
+			
+			if( ! preg_match( '/"postsToShow":1,"includeSubcategories":false,"specificPosts":\["(\d+)"\]/', $post->post_content, $matches ) ) {
+				$this->logger->log( $log, 'No PDF Post.', $this->logger::WARNING );
+				continue;
+			}
+
+			if( ! isset( $matches[1] ) || ! is_numeric( $matches[1] ) || ! ( $matches[1] > 0 ) ) {
+				$this->logger->log( $log, 'PDF Post id malformed.', $this->logger::WARNING );
+				continue;
+			}
+
+			$pdf_post_thumb_id = get_post_meta( $matches[1], '_thumbnail_id', true );
+
+			if( ! is_numeric( $pdf_post_thumb_id ) || ! ( $pdf_post_thumb_id > 0 ) ) {
+				$this->logger->log( $log, 'PDF Post has no thumbnail.', $this->logger::WARNING );
+				continue;
+
+			}
+			
+			update_post_meta( $post_id, '_thumbnail_id', $pdf_post_thumb_id );
+			update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' ); // don't show at top of Page
+
+			$this->logger->log( $log, 'Thumbnail set.', $this->logger::SUCCESS );
+
+		}
+
+		$this->logger->log( $log, 'Done.', $this->logger::SUCCESS );
+
+	}
+
 	public function cmd_reset_pdf_post_category( $pos_args, $assoc_args ) {
 
 		global $wpdb;
@@ -510,6 +582,7 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		WP_CLI::success( "Done." );
 
 	}
+
 
 	/**
 	 * ISSUES
