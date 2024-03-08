@@ -417,6 +417,135 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			]
 		);
+
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-authors-from-json',
+			[ $this, 'fix_authors_from_json' ],
+			[
+				'shortdesc' => 'Fix authors from JSON.',
+				'synopsis'  => [
+					'synopsis' => [
+						$this->articles_json_arg,
+						...BatchLogic::get_batch_args(),
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-image-dates-from-json',
+			[ $this, 'fix_image_dates_from_json' ],
+			[
+				'shortdesc' => 'Fix image dates from JSON data.',
+				'synopsis'  => [
+					$this->images_json_arg,
+					...BatchLogic::get_batch_args(),
+				],
+			]
+		);
+	}
+
+	/**
+	 * Some dates on attachments were way wrong in the future and this will fix them.
+	 *
+	 * Loops over all images, checks date, fixes if necessary.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function fix_image_dates_from_json( array $pos_args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		$now              = date( 'Y-m-d H:i:s' );
+		$json_date_format = 'Y-m-d\TH:i:sP';
+		$wp_date_format   = 'Y-m-d H:i:s';
+
+		$row_number = 0;
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			if ( $row_number % 10 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
+			++$row_number;
+
+			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
+
+			if ( ! $existing_id ) {
+				continue;
+			}
+			$img_post        = get_post( $existing_id );
+			$attachment_date = $img_post->post_date;
+
+			if ( ! $img_post instanceof WP_Post || $now > $attachment_date ) {
+				continue;
+			}
+			$created_at = DateTime::createFromFormat( $json_date_format, trim( $row->created ), $this->site_timezone );
+			$updated_at = DateTime::createFromFormat( $json_date_format, trim( $row->modified ), $this->site_timezone );
+
+			$created_at_formatted = $created_at->format( $wp_date_format );
+			$updated_at_formatted = $updated_at->format( $wp_date_format );
+
+			wp_update_post( [
+				'ID'            => $existing_id,
+				'post_date'     => $created_at_formatted,
+				'post_modified' => $updated_at_formatted,
+				'post_date_gmt' => get_gmt_from_date( $created_at_formatted, $wp_date_format ),
+			] );
+
+			$this->logger->log(
+				$log_file,
+				sprintf( 'Updated date on %s from %s to %s',
+					home_url( "wp-admin/upload.php?item={$existing_id}" ),
+					$attachment_date,
+					$created_at_formatted,
+				),
+				Logger::SUCCESS
+			);
+		}
+	}
+
+	/**
+	 * Put the authors from the JSON on posts.
+	 *
+	 * This function can be used to repair broken authors. It can take a partial file of articles or an
+	 * entire one. A partial one could look like this:
+	 * cat HCNNewsArticle.json | jq  '.[] | select(.author|test("Some Name|Other Name|You get it"))  | {UID: .UID, author: .author}' | jq -s > authors.json
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function fix_authors_from_json( array $pos_args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			$post_id = $this->get_post_id_from_uid( $row->UID );
+			if ( empty( $post_id ) ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find post with UID %s', $row->UID ), Logger::ERROR );
+				continue;
+			}
+			$co_authors = array_map(
+				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
+				$this->parse_author_string( $row->author )
+			);
+
+			if ( empty( $co_authors ) ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find or create author %s', $row->author ), Logger::ERROR );
+			}
+
+			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $post_id );
+			$this->logger->log( $log_file, sprintf( 'Updated author(s) to %s on %s', $row->author, get_permalink( $post_id ) ), Logger::SUCCESS );
+		}
+
 	}
 
 	/**

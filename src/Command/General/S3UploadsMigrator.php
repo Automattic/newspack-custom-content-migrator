@@ -155,21 +155,34 @@ class S3UploadsMigrator implements InterfaceCommand {
 			'newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3',
 			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
 			[
-				'shortdesc' => '1. Save list of all files from local folder to a --local-log file, run this year by year, e.g for year 2009: ' .
-								'find 2009 -type f > 2009_local.txt ; ' .
+				'shortdesc' => 'This command contains instructions how to compare files from local path with files on S3, and lists a diff -- files that are present on local but missing on S3. ' .
+				                '1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
+								'e.g for entire uploads/: ' .
+								'$ find uploads -type f > uploads_local.txt ; ' .
+								'or e.g just for year 2009: ' .
+								'$ find 2009 -type f > 2009_local.txt ; ' .
 								'' .
-								'2. Save list of all files from S3 to --s3-log file, run this for same years, year by year: ' .
-								"aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
+								'2. Save list of all files from S3 to --s3-log file, run this for the folder, ' .
+								'e.g. for entire uploads/: ' .
+								"$ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/ --recursive | awk {'print $4'} > uploads_s3.txt ; " .
+								'or e.g justfor year 2009: ' .
+								"$ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
 								'' .
-								'3. Notice what the path to this folder is on S3 and use it as --path-to-this-folder-on-s3=wp-content/uploads/ ' .
+								'3. Open the list of files on S3 from step 2. and check if there is a difference in local VS S3 paths. If S3 paths have a prefix segment that is missing from the paths of local files, provide it as an argument e.g. --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
-								'4. Then run the command like this: ' .
+								'4a. On OSX flavored bash, the resulting two files can easily be diff-ed using the command, however first make sure that the paths/prefixes inside both files are the same: ' .
+								'  $ comm -13 <(sort uploads_local.txt) <(sort uploads_s3.txt) > diff_exist_on_local_but_not_on_s3.txt' .
+								'' .
+								'4b. On Linux bash, a diff can be located like this, also previously making sure that paths/prefixes inside both files match:' . 
+								"  $ diff --changed-group-format='%>' --unchanged-group-format='' uploads_local.txt uploads_s3.txt | grep -v '^$' > diff_exist_on_local_but_not_on_s3.txt " .
+								'' .
+								'4c. The two files can also be diffed by running this command like this: ' .
 								'  wp newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3 \ ' .
 								'    --local-log=2009_local.txt \ ' .
 								'    --s3-log=2009_s3.txt \ ' .
 								'    --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
-								'and files which are missing on S3 will be detected and saved to log.',
+								'which will list/log all the files that are present on local but missing on S3.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -188,12 +201,8 @@ class S3UploadsMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'path-to-this-folder-on-s3',
-						'description' => "Path to the folder that's being examined on S3," .
-										"E.g. one -- if we're examining 2009 in s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ , " .
-										'value for this flag is `wp-content/uploads/`. ' .
-										"E.g. two -- if we're examining folder 01 inside 2009, s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/01/ , ",
-						'value for this flag is `wp-content/uploads/2009/` .' .
-						'optional'    => false,
+						'description' => 'An extra prefixed path segment for files on S3 as opposed to files on local.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -272,7 +281,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	public function cmd_compare_uploads_contents_local_with_s3( $positional_args, $assoc_args ) {
 		$local_log_path       = $assoc_args['local-log'] ?? null;
 		$s3_log_path          = $assoc_args['s3-log'] ?? null;
-		$path_to_folder_on_s3 = $assoc_args['path-to-this-folder-on-s3'] ?? null;
+		$path_to_folder_on_s3 = $assoc_args['path-to-this-folder-on-s3'] ?? '';
 
 		// Clear output results log file.
 		$notfound_log = 's3uploads-compare-files-local-w-s3.log';
@@ -678,26 +687,26 @@ class S3UploadsMigrator implements InterfaceCommand {
 		/**
 		 * Get all the sizes which this command will fix&download.
 		 */
-		$sizes = [];
+		$sizes_registered = [];
 		if ( $only_use_sizes_csv ) {
 			// Use just some specifically provided sizes.
-			$sizes = $this->explode_csv_sizes( $only_use_sizes_csv );
+			$sizes_registered = $this->explode_csv_sizes( $only_use_sizes_csv );
 		} else {
 			// Use all registered sizes.
-			$sizes = $this->get_all_image_sizes();
+			$sizes_registered = $this->get_all_image_sizes();
 			
 			// Merge with extra sizes provided.
 			if ( $extra_sizes_csv ) {
-				$extra_sizes = $this->explode_csv_sizes( $extra_sizes_csv );
-				$sizes       = $this->merge_sizes( $sizes, $extra_sizes );
+				$extra_sizes      = $this->explode_csv_sizes( $extra_sizes_csv );
+				$sizes_registered = $this->merge_sizes( $sizes_registered, $extra_sizes );
 			}
 		}
 		// Confirm sizes before continuing.
 		$this->log( $log, 'Sizes which will be downloaded:' );
-		foreach ( $sizes as $size ) {
+		foreach ( $sizes_registered as $size ) {
 			$this->log( $log, sprintf( '- %sx%s', $size['width'], $size['height'] ) );
 		}
-		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nDiscover which sizes may have been used in post_content with `s3uploads-discover-image-sizes-used-in-post-content` command.\nAdd more sizes by using --add-extra-sizes.\nContinue downloading these %d sizes? ", count( $sizes ) ) );
+		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nDiscover which sizes may have been used in post_content with `s3uploads-discover-image-sizes-used-in-post-content` command.\nAdd more sizes by using --add-extra-sizes.\nContinue downloading these %d sizes? (y/n) ", count( $sizes_registered ) ) );
 		if ( 'y' != $input ) {
 			exit;
 		}
@@ -714,11 +723,11 @@ class S3UploadsMigrator implements InterfaceCommand {
 		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
 		 */
 		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id ) {
-			$this->log( $log, sprintf( '(%d/%d) Attachment ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
+			$this->log( $log, sprintf( "\n" . 'Attachment (%d/%d) ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
 
 			// Skip if attachment is not an image.
 			if ( ! wp_attachment_is_image( $attachment_id ) ) {
-				$this->log( $log, 'Not an image, skipping.' );
+				$this->log( $log, 'Not an image, skipping' );
 				continue;
 			}
 
@@ -734,6 +743,9 @@ class S3UploadsMigrator implements InterfaceCommand {
 				exit;
 			}
 
+			// Get attachment metadata.
+			$attachment_metadata = wp_get_attachment_metadata( $attachment_id );
+
 			// Check if $local_path filename ends in '-scaled'.
 			$attachment_filename                   = basename( $local_path );
 			$attachment_filename_without_extension = pathinfo( $attachment_filename, PATHINFO_FILENAME );
@@ -743,7 +755,6 @@ class S3UploadsMigrator implements InterfaceCommand {
 			$local_path_original = null;
 			$url_local_original  = null;
 			if ( $attachment_filename_is_scaled ) {
-				$attachment_metadata          = wp_get_attachment_metadata( $attachment_id );
 				$original_attachment_filename = $attachment_metadata['original_image'] ?? null;
 				if ( ! is_null( $original_attachment_filename ) ) {
 					$local_path_original = str_replace( '/' . $attachment_filename, '/' . $original_attachment_filename, $local_path );
@@ -752,18 +763,36 @@ class S3UploadsMigrator implements InterfaceCommand {
 			}
 			
 			/**
-			 * Download original image file.
+			 * Download attachment image file $local_path / $url_local.
 			 */
 			if ( file_exists( $local_path ) ) {
-				$this->log( $log, sprintf( "+ 'original' file found %s, skipping", $local_path ) );
+				$this->log( $log, sprintf( '+ attachment file exists %s, skipping', $local_path ) );
 			} else {
 				$url_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local );
-				$this->log( $log, sprintf( "- 'original' file not found %s, downloading %s", $local_path, $url_remote ) );
+				$this->log( $log, sprintf( '- attachment file not found %s, downloading %s', $local_path, $url_remote ) );
 				
 				$downloaded = $this->download_url_to_file( $url_remote, $local_path );
 				if ( is_wp_error( $downloaded ) || ! $downloaded ) {
 					$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
-					$this->log( $log, sprintf( "ERROR downloading att. ID %d 'original' %s : %s", $attachment_id, $url_remote, $err_msg ) );
+					$this->log( $log, sprintf( 'ERROR downloading att. ID %d from %s : %s', $attachment_id, $url_remote, $err_msg ) );
+				}
+			}
+
+			/**
+			 * If attachment file $local_path / $url_local is already '-scaled', download the non-scaled 'original' file too $local_path_original / $url_local_original.
+			 */
+			if ( $attachment_filename_is_scaled && $local_path_original && $url_local_original ) {
+				if ( file_exists( $local_path_original ) ) {
+					$this->log( $log, sprintf( "+ 'original' non-scaled file exists %s, skipping", $local_path ) );
+				} else {
+					$url_remote_original = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local_original );
+					$this->log( $log, sprintf( "- 'original' non-scaled file not found %s, downloading %s", $local_path_original, $url_remote_original ) );
+					
+					$downloaded = $this->download_url_to_file( $url_remote_original, $local_path_original );
+					if ( is_wp_error( $downloaded ) || ! $downloaded ) {
+						$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
+						$this->log( $log, sprintf( "ERROR downloading att. ID %d 'original' non-scaled %s : %s", $attachment_id, $url_remote, $err_msg ) );
+					}
 				}
 			}
 
@@ -771,12 +800,10 @@ class S3UploadsMigrator implements InterfaceCommand {
 			 * Download '-scaled' if it exists on remote. WP automatically creates a scaled image if it's larger than the threshold:
 			 *  https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
 			 */
-			if ( $attachment_filename_is_scaled ) {
-				$this->log( $log, sprintf( "+ filename is already '-scaled' so not downloading that, skipping", $local_path ) );
-			} else {
+			if ( ! $attachment_filename_is_scaled ) {
 				$local_path_scaled = $this->append_suffix_to_file( $local_path, '-scaled' );
 				if ( file_exists( $local_path_scaled ) ) {
-					$this->log( $log, sprintf( "+ '-scaled' file found %s, skipping", $local_path_scaled ) );
+					$this->log( $log, sprintf( "+ '-scaled' file exists %s, skipping", $local_path_scaled ) );
 				} else {
 					$url_scaled_local  = $this->append_suffix_to_file( $url_local, '-scaled' );
 					$url_scaled_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_scaled_local );
@@ -789,7 +816,11 @@ class S3UploadsMigrator implements InterfaceCommand {
 						if ( is_wp_error( $downloaded ) || ! $downloaded ) {
 							$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
 							$this->log( $log, sprintf( "ERROR downloading att. ID %d '-scaled' %s : %s", $attachment_id, $url_scaled_remote, $err_msg ) );
+						} else {
+							$this->log( $log, "+ '-scaled' downloaded" );
 						}
+					} else {
+						$this->log( $log, "- '-scaled' does not exist on remote, skipping" );
 					}
 				}
 			}
@@ -797,11 +828,17 @@ class S3UploadsMigrator implements InterfaceCommand {
 			/**
 			 * Download all subsizes.
 			 */
+			// Combine registered sizes with attachment metadata sizes.
+			$sizes = $sizes_registered;
+			if ( isset( $attachment_metadata['sizes'] ) && ! empty( $attachment_metadata['sizes'] ) ) {
+				$sizes = $this->merge_sizes( $sizes, $attachment_metadata['sizes'] );
+			}
+			// Loop through all sizes and download them.
 			$i_size = 0;
 			foreach ( $sizes as $size_name => $size ) {
 				$height    = $size['height'];
 				$width     = $size['width'];
-				$size_name = $height . 'x' . $width;
+				$size_name = $width . 'x' . $height;
 				$this->log( $log, sprintf( 'Size (%d/%d) %s', $i_size + 1, count( $sizes ), $size_name ) );
 				
 				// Get size filename. If image was scaled, we need to use the original filename and append size suffix to it.
@@ -812,7 +849,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 				}
 				
 				if ( file_exists( $local_path_size ) ) {
-					$this->log( $log, sprintf( '+ %s file found %s, skipping', $size_name, $local_path_size ) );
+					$this->log( $log, sprintf( '+ %s file exists %s, skipping', $size_name, $local_path_size ) );
 				} else {
 
 					// Get URL of size. If image was scaled, we need to use the original's URL and append size suffix to it.
@@ -1006,7 +1043,20 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 * @return array Merged array of sizes.
 	 */
 	public function merge_sizes( array $sizes1, array $sizes2 ): array {
-		$sizes = $sizes1;
+		
+		/**
+		 * It's expected that $sizes1 might already contain duplicates,
+		 * e.g. sizes newspack-article-block-landscape-large newspack-archive-image-large are both 1200x900
+		 * so by not starting with `$sizes = $sizes1;` and by looping through each element of $sizes1 and $sizes2
+		 * duplicates are removed.
+		 */
+		$sizes = [];
+
+		foreach ( $sizes1 as $size1 ) {
+			if ( ! $this->does_size_exist( $sizes, $size1['width'], $size1['height'] ) ) {
+				$sizes[] = $size1;
+			}
+		}
 		foreach ( $sizes2 as $size2 ) {
 			if ( ! $this->does_size_exist( $sizes, $size2['width'], $size2['height'] ) ) {
 				$sizes[] = $size2;
