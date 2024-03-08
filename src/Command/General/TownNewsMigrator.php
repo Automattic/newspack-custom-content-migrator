@@ -706,7 +706,7 @@ class TownNewsMigrator implements InterfaceCommand {
 				// The user isn't found using an email, however, it still may already exist, just under a different display name.
 				// Under the hood, `$this->coauthorsplus_logic->create_guest_author()` uses this function to check that it
 				// isn't creating a duplicate Guest Author.
-				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_display_name( sanitize_title( $display_name ) );
+				$guest_author = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', sanitize_title( $display_name ) );
 			}
 
 			if ( $guest_author ) {
