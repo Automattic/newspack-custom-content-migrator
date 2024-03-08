@@ -158,20 +158,21 @@ class S3UploadsMigrator implements InterfaceCommand {
 				'shortdesc' => 'This command contains instructions how to compare files from local path with files on S3, and lists a diff -- files that are present on local but missing on S3. ' .
 				                '1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
 								'e.g for entire uploads/: ' .
-								'$ find uploads -type f > uploads_local.txt ; ' .
+								'  $ find uploads -type f > uploads_local.txt ; ' .
 								'or e.g just for year 2009: ' .
-								'$ find 2009 -type f > 2009_local.txt ; ' .
+								'  $ find 2009 -type f > 2009_local.txt ; ' .
 								'' .
 								'2. Save list of all files from S3 to --s3-log file, run this for the folder, ' .
 								'e.g. for entire uploads/: ' .
-								"$ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/ --recursive | awk {'print $4'} > uploads_s3.txt ; " .
+								"  $ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/ --recursive | awk {'print $4'} > uploads_s3.txt ; " .
 								'or e.g justfor year 2009: ' .
-								"$ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
+								"  $ aws s3 ls --profile berkeleyside s3://newspack-berkeleyside-cityside/wp-content/uploads/2009/ --recursive | awk {'print $4'} > 2009_s3.txt ; " .
 								'' .
 								'3. Open the list of files on S3 from step 2. and check if there is a difference in local VS S3 paths. If S3 paths have a prefix segment that is missing from the paths of local files, provide it as an argument e.g. --path-to-this-folder-on-s3=wp-content/uploads/ ' .
 								'' .
+								'Last step is to compare the two files from steps 1. and 2. There is different ways to get the diff. Use one of the following ones.' .
 								'4a. On OSX flavored bash, the resulting two files can easily be diff-ed using the command, however first make sure that the paths/prefixes inside both files are the same: ' .
-								'  $ comm -13 <(sort uploads_local.txt) <(sort uploads_s3.txt) > diff_exist_on_local_but_not_on_s3.txt' .
+								'  $ comm -23 <(sort uploads_local.txt) <(sort uploads_s3.txt) > diff_exist_on_local_but_not_on_s3.txt' .
 								'' .
 								'4b. On Linux bash, a diff can be located like this, also previously making sure that paths/prefixes inside both files match:' . 
 								"  $ diff --changed-group-format='%>' --unchanged-group-format='' uploads_local.txt uploads_s3.txt | grep -v '^$' > diff_exist_on_local_but_not_on_s3.txt " .
@@ -737,11 +738,13 @@ class S3UploadsMigrator implements InterfaceCommand {
 				$this->log( $log, sprintf( 'ERROR Attachment ID %d has no local path.', $attachment_id ) );
 				exit;
 			}
+			$this->log( $log, sprintf( '> get_attached_file %s', $local_path ) );
 			$url_local = wp_get_attachment_url( $attachment_id );
 			if ( false === $url_local ) {
 				$this->log( $log, sprintf( 'ERROR Attachment ID %d has no local URL.', $attachment_id ) );
 				exit;
 			}
+			$this->log( $log, sprintf( '> wp_get_attachment_url %s', $url_local ) );
 
 			// Get attachment metadata.
 			$attachment_metadata = wp_get_attachment_metadata( $attachment_id );
