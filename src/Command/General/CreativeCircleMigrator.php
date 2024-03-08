@@ -141,16 +141,25 @@ class CreativeCircleMigrator implements InterfaceCommand {
 		foreach ( $this->batch_query_without_meta_key( $meta_key_for_processed_posts, $assoc_args ) as $post_id ) {
 			WP_CLI::line( sprintf( 'Post %d/%d', ++$counter, $posts_this_run ) );
 
-			$image_urls = json_decode( get_post_meta( $post_id, 'cc_images', true ), true );
-			if ( empty( $image_urls ) ) {
-				update_post_meta( $post_id, $meta_key_for_processed_posts, true );
-				continue;
+			// Import featured image.
+			$featured_image_id  = 0;
+			$featured_image_url = get_post_meta( $post_id, 'cc_featured_image', true );
+			if ( ! empty( $featured_image_url ) ) {
+				$featured_image_id = $this->attachments_logic->import_attachment_for_post( $post_id, $featured_image_url );
+				if ( is_wp_error( $featured_image_id ) ) {
+					$this->logger->log( $featured_image_log_file, sprintf( "Can't import featured image %s: %s", $featured_image_url, $featured_image_id->get_error_message() ),
+						Logger::WARNING );
+				} else {
+					set_post_thumbnail( $post_id, $featured_image_id );
+					$this->logger->log( $featured_image_log_file, sprintf( 'Featured image for post %d is set: %s', $post_id, $featured_image_id ), Logger::SUCCESS );
+				}
 			}
 
-			$post      = get_post( $post_id );
-			$image_ids = [];
+			// Import images.
+			$image_urls = json_decode( get_post_meta( $post_id, 'cc_images', true ), true ) ?? [];
+			$image_ids  = [];
 			foreach ( $image_urls as $image_url ) {
-				$image_id = $this->attachments_logic->import_attachment_for_post( $post->ID, $image_url );
+				$image_id = $this->attachments_logic->import_attachment_for_post( $post_id, $image_url );
 				if ( is_wp_error( $image_id ) ) {
 					$this->logger->log( $images_log_file, sprintf( "Can't import image %s: %s", $image_url, $image_id->get_error_message() ), Logger::WARNING );
 				} else {
@@ -158,6 +167,20 @@ class CreativeCircleMigrator implements InterfaceCommand {
 				}
 			}
 
+			if ( empty( $image_ids ) ) {
+				update_post_meta( $post_id, $meta_key_for_processed_posts, true );
+				continue;
+			}
+
+			$post = get_post( $post_id );
+
+			if ( empty( $featured_image_id ) ) {
+				// Set the first image as featured image if we didn't fine one already.
+				set_post_thumbnail( $post_id, $image_ids[0] );
+				$this->logger->log( $featured_image_log_file, sprintf( 'Featured image for post %d is set: %s', $post->ID, $featured_image_id ), Logger::SUCCESS );
+			}
+
+			// If there is more than more image, create a slideshow.
 			if ( count( $image_ids ) > 1 ) {
 				$image_content = $this->gutenberg_block_generator->get_jetpack_slideshow( $image_ids );
 				$type_created  = 'Gallery';
@@ -176,14 +199,6 @@ class CreativeCircleMigrator implements InterfaceCommand {
 			);
 
 			$this->logger->log( $images_log_file, sprintf( '%s for post %d is created: %s', $type_created, $post->ID, implode( ',', $image_ids ) ), Logger::SUCCESS );
-
-			// Set the first image as featured image.
-			$featured_image_id = $image_ids[0];
-			if ( ! set_post_thumbnail( $post->ID, $featured_image_id ) ) {
-				$this->logger->log( $featured_image_log_file, sprintf( "Can't set featured image for post %d", $post->ID ), Logger::WARNING );
-			} else {
-				$this->logger->log( $featured_image_log_file, sprintf( 'Featured image for post %d is set: %s', $post->ID, $featured_image_id ), Logger::SUCCESS );
-			}
 
 			update_post_meta( $post->ID, $meta_key_for_processed_posts, true );
 		}
