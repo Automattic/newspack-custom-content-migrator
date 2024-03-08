@@ -299,6 +299,21 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 	
 			update_post_meta( $new_page_id, '_wp_page_template', 'single-feature.php' ); // 'One column'
 
+			// set featured image thumbnail to the same as pdf post featured
+			if( ! is_wp_error( $pdf_post_id ) && is_numeric( $pdf_post_id ) && $pdf_post_id > 0 ) {
+				
+				$pdf_post_thumb_id = get_post_meta( $pdf_post_id, '_thumbnail_id', true );
+				
+				if( is_numeric( $pdf_post_thumb_id ) && $pdf_post_thumb_id > 0 ) {				
+					
+					update_post_meta( $new_page_id, '_thumbnail_id', $pdf_post_thumb_id );
+					update_post_meta( $new_page_id, 'newspack_featured_image_position', 'hidden' ); // don't show at top of Page
+
+				}
+
+			} // featured image
+
+
 			// set redirect from old Issues Custom Taxonomy urls
 			$this->set_redirect( 
 				'/issue/' . $issue->slug, 
