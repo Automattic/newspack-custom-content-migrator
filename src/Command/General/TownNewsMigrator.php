@@ -171,6 +171,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Importing post from %s', $file->getFilename() ), Logger::INFO );
 						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $imported_original_ids, $default_author_id );
 
 						if ( $post_id ) {
@@ -720,19 +721,20 @@ class TownNewsMigrator implements InterfaceCommand {
 						$avatar_id = null;
 					}
 				}
-				$author_id = $this->coauthorsplus_logic->create_guest_author(
-					[
-						'display_name' => $display_name,
-						'first_name'   => $first_name,
-						'last_name'    => $last_name,
-						'user_email'   => $email,
-						'avatar'       => $avatar_id,
-					]
-				);
+				$guest_author_data = [
+					'display_name' => $display_name,
+					'first_name'   => $first_name,
+					'last_name'    => $last_name,
+					'user_email'   => $email,
+					'avatar'       => $avatar_id,
+				];
+				$author_id         = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
 
 				// At this point we've exhausted our attempts to search for a valid GA and we're getting an error.
 				// Let's just use the staff GA ID at this point, since we don't want the script to stop.
 				if ( is_wp_error( $author_id ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Error creating author for Post ID %d, assigning Staff Account: %s', $post_id, $author_id->get_error_message() ), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Guest Author Data: %s', wp_json_encode( $guest_author_data ) ), Logger::INFO );
 					$author_id = $this->get_staff_author_id();
 				}
 			}
