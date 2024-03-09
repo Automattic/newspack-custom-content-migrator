@@ -156,7 +156,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
 			[
 				'shortdesc' => 'This command contains instructions how to compare files from local path with files on S3, and lists a diff -- files that are present on local but missing on S3. ' .
-				                '1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
+								'1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
 								'e.g for entire uploads/: ' .
 								'  $ find uploads -type f > uploads_local.txt ; ' .
 								'or e.g just for year 2009: ' .
@@ -214,7 +214,10 @@ class S3UploadsMigrator implements InterfaceCommand {
 			'newspack-content-migrator s3uploads-download-all-image-sizes-from-atomic',
 			[ $this, 'cmd_download_all_image_sizes_from_atomic' ],
 			[
-				'shortdesc' => 'Downloads missing intermediate image sizes from given Atomic server which are not present on local disk.',
+				'shortdesc' => 'Downloads missing intermediate image sizes from given Atomic server which are not present on local disk.' .
+					'Additional info:' .
+					"-- try and check sizes registered on Atomic by running `$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`" .
+					'-- discover which sizes may have been used in post_content with `s3uploads-discover-image-sizes-used-in-post-content` command.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -246,15 +249,22 @@ class S3UploadsMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'add-extra-sizes',
-						'description' => 'Manually add extra sizes to the list of registered image sizes, CSV. E.g. --add-extra-sizes=1200x900,150x55',
+						'name'        => 'download-extra-sizes',
+						'description' => 'Downloaded extra sizes, CSV. E.g. --download-extra-sizes=1200x900,150x55 NOTE: these sizes will be downloaded verbatim with locked aspect ratio, while regular scaled images could get relative width and height depending on image dimensions.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'only-use-sizes',
-						'description' => 'Run only for the sizes listed in this, CSV. E.g. --only-use-sizes=1200x900,150x55',
+						'name'        => 'only-download-sizes',
+						'description' => 'Download only these specific sizes, CSV. E.g. --only-download-sizes=1200x900,150x55 NOTE: This will override and ignore all other sizes and will download only the sizes listed here. These sizes will not be dynamically scaled and relative to the original image dimensions, but only used verbatim as they are with locked aspect ratio which may or may not correspond to specific attachment IDs ratios.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'download-all-registered-sizes-with-locked-ratio',
+						'description' => 'Development option. Will add all to list of sizes to be downloaded all the sizes registered in `\get_intermediate_image_sizes()` and `global $_wp_additional_image_sizes`. NOTE: these sizes will be downloaded verbatim with locked aspect ratio, while regular scaled images could get relative width and height depending on image dimensions.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -657,10 +667,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_download_all_image_sizes_from_atomic( $pos_args, $assoc_args ) {
-
+		
 		global $wpdb;
 
-		// Arguments.
+		/**
+		 * Arguments.
+		 */
 		$remote_host         = $assoc_args['remote-host'];
 		$attachment_ids      = isset( $assoc_args['attachment-ids'] ) && ! empty( $assoc_args['attachment-ids'] ) ? explode( ',', $assoc_args['attachment-ids'] ) : null;
 		$attachment_ids_from = $assoc_args['attachment-ids-range-from'] ?? null;
@@ -671,10 +683,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 		if ( ! is_null( $attachment_ids_from ) && ! is_null( $attachment_ids ) ) {
 			WP_CLI::error( 'Either provide specific attachments with --attachment-ids or define ID range with --attachment-ids-range-from and --attachment-ids-range-to.' );
 		}
-		$extra_sizes_csv    = $assoc_args['add-extra-sizes'] ?? null;
-		$only_use_sizes_csv = $assoc_args['only-use-sizes'] ?? null;
-		if ( ! is_null( $extra_sizes_csv ) && ! is_null( $only_use_sizes_csv ) ) {
-			WP_CLI::error( 'Cannot use both --add-extra-sizes and --only-use-sizes at the same time.' );
+		$only_download_sizes_csv       = $assoc_args['only-download-sizes'] ?? null;
+		$extra_sizes_csv               = $assoc_args['download-extra-sizes'] ?? null;
+		// Using null instead of false for flag $download_all_registered_sizes makes it more convenient.
+		$download_all_registered_sizes = $assoc_args['download-all-registered-sizes-with-locked-ratio'] ?? null;
+		if ( ! is_null( $only_download_sizes_csv ) && ( ! is_null( $extra_sizes_csv ) || ! is_null( $download_all_registered_sizes ) ) ) {
+			WP_CLI::error( 'Cannot use both --only-download-sizes and --download-extra-sizes or --download-all-registered-sizes-with-locked-ratio at the same time.' );
 		}
 
 		// Timestamp the log.
@@ -685,33 +699,52 @@ class S3UploadsMigrator implements InterfaceCommand {
 		$parsed_site_url = parse_url( site_url() );
 		$local_host      = $parsed_site_url['host'];
 
+
 		/**
-		 * Get all the sizes which this command will fix&download.
+		 * Get custom sizes for download.
 		 */
-		$sizes_registered = [];
-		if ( $only_use_sizes_csv ) {
-			// Use just some specifically provided sizes.
-			$sizes_registered = $this->explode_csv_sizes( $only_use_sizes_csv );
+		$custom_sizes = [];
+		if ( $only_download_sizes_csv ) {
+			// Download just some specific sizes.
+			$custom_sizes = $this->explode_csv_sizes( $only_download_sizes_csv );
 		} else {
-			// Use all registered sizes.
-			$sizes_registered = $this->get_all_image_sizes();
-			
-			// Merge with extra sizes provided.
+			// Use extra provided sizes.
 			if ( $extra_sizes_csv ) {
-				$extra_sizes      = $this->explode_csv_sizes( $extra_sizes_csv );
-				$sizes_registered = $this->merge_sizes( $sizes_registered, $extra_sizes );
+				$extra_sizes  = $this->explode_csv_sizes( $extra_sizes_csv );
+				$custom_sizes = $this->merge_sizes( $custom_sizes, $extra_sizes );
+			}
+
+			// Use all the registered sizes with locked aspect ratio (a development option).
+			if ( $download_all_registered_sizes ) {
+				$registered_image_sizes = $this->get_registered_image_sizes();
+				$custom_sizes           = $this->merge_sizes( $custom_sizes, $registered_image_sizes );
 			}
 		}
-		// Confirm sizes before continuing.
-		$this->log( $log, 'Sizes which will be downloaded:' );
-		foreach ( $sizes_registered as $size ) {
-			$this->log( $log, sprintf( '- %sx%s', $size['width'], $size['height'] ) );
-		}
-		$input = PHP::readline( sprintf( "Compare with sizes registered on Atomic by running:\n`$ wp eval 'global \$_wp_additional_image_sizes; var_dump(\$_wp_additional_image_sizes);'`\nDiscover which sizes may have been used in post_content with `s3uploads-discover-image-sizes-used-in-post-content` command.\nAdd more sizes by using --add-extra-sizes.\nContinue downloading these %d sizes? (y/n) ", count( $sizes_registered ) ) );
-		if ( 'y' != $input ) {
-			exit;
+
+		// Confirm custom sizes before continuing.
+		if ( ! empty( $custom_sizes ) ) {
+			if ( $only_download_sizes_csv ) {
+				$this->log( $log, sprintf( 'These are the only %d sizes which will be downloaded, and even the attachment-specific meta sizes will be skipped:', count( $custom_sizes ) ) );
+			} else {
+				$this->log( $log, sprintf( 'These %d custom sizes will be downloaded in addition to regular attachment meta sizes:', count( $custom_sizes ) ) );
+			}
+			foreach ( $custom_sizes as $size ) {
+				$this->log( $log, sprintf( '- %sx%s', $size['width'], $size['height'] ) );
+			}
+			$this->log( $log, '⚠️  WARNING -- aspect ratio for these custom sizes will be locked and not relative to actual image attachment sizes! Such subsizes may or may not correspond to sizes generated by WP.' );
+
+			// Confirm.
+			$input = PHP::readline( 'Continue downloading sizes? (y/n) ' );
+			if ( 'y' != $input ) {
+				exit;
+			}
 		}
 
+
+		/**
+		 * Loop over attachments and download all missing sizes files from remote.
+		 */
+		
 		// Get attachment IDs.
 		if ( ! is_null( $attachment_ids_from ) && ! is_null( $attachment_ids_to ) ) {
 			// phpcs:ignore -- Prepared statement.
@@ -720,9 +753,6 @@ class S3UploadsMigrator implements InterfaceCommand {
 			$attachment_ids = $this->posts->get_all_posts_ids( 'attachment' );
 		}
 
-		/**
-		 * Loop over attachments and download all sizes files from remote host files, if missing locally.
-		 */
 		foreach ( $attachment_ids as $key_atatchment_id => $attachment_id ) {
 			$this->log( $log, sprintf( "\n" . 'Attachment (%d/%d) ID %d', $key_atatchment_id + 1, count( $attachment_ids ), $attachment_id ) );
 
@@ -732,143 +762,154 @@ class S3UploadsMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			// Get attachment local path and URL.
+			// Get attachment metadata.
+			$attachment_metadata = wp_get_attachment_metadata( $attachment_id );
+			
+			// If a large image was uploaded, WP will create a '-scaled' image to be used in its place. Original filename may be stored in 'original_image' key, if it exists.
+			$filename_original = $attachment_metadata['original_image'] ?? null;
+
+			/**
+			 * Get attachment's
+			 *      $local_path -- full path to local file
+			 *      $url_local -- URL to file using this host
+			 *      $filename -- just the filename
+			 */
 			$local_path = get_attached_file( $attachment_id );
+			$filename   = basename( $local_path );
+			$url_local  = wp_get_attachment_url( $attachment_id );
+			// Some debugging level validation.
 			if ( false === $local_path ) {
 				$this->log( $log, sprintf( 'ERROR Attachment ID %d has no local path.', $attachment_id ) );
 				exit;
 			}
-			$this->log( $log, sprintf( '> get_attached_file %s', $local_path ) );
-			$url_local = wp_get_attachment_url( $attachment_id );
 			if ( false === $url_local ) {
 				$this->log( $log, sprintf( 'ERROR Attachment ID %d has no local URL.', $attachment_id ) );
 				exit;
 			}
-			$this->log( $log, sprintf( '> wp_get_attachment_url %s', $url_local ) );
-
-			// Get attachment metadata.
-			$attachment_metadata = wp_get_attachment_metadata( $attachment_id );
-
-			// Check if $local_path filename ends in '-scaled'.
-			$attachment_filename                   = basename( $local_path );
-			$attachment_filename_without_extension = pathinfo( $attachment_filename, PATHINFO_FILENAME );
-			$attachment_filename_is_scaled         = substr( $attachment_filename_without_extension, -7 ) === '-scaled';
-
-			// If it's a scaled image, get the original filename path (without the '-scaled' suffix).
-			$local_path_original = null;
-			$url_local_original  = null;
-			if ( $attachment_filename_is_scaled ) {
-				$original_attachment_filename = $attachment_metadata['original_image'] ?? null;
-				if ( ! is_null( $original_attachment_filename ) ) {
-					$local_path_original = str_replace( '/' . $attachment_filename, '/' . $original_attachment_filename, $local_path );
-					$url_local_original  = str_replace( '/' . $attachment_filename, '/' . $original_attachment_filename, $url_local );
-				}
-			}
+			// Log.
+			$this->log( $log, sprintf( '> get_attached_file %s', $local_path ) );
+			
 			
 			/**
-			 * Download attachment image file $local_path / $url_local.
+			 * Check if this image was '-scaled'.
+			 * There might be a hash appended even after '-scaled', so it's not always safe to just search for '-scaled' suffix to determine this.
+			 * 
+			 * WP automatically creates a scaled image if it's larger than the threshold:
+			 *  https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
+			 */
+			$is_image_scaled = ! is_null( $filename_original )
+				&& ( $filename_original != $filename )
+				&& ( false !== strpos( $filename, '-scaled' ) );
+			
+
+			/**
+			 * If it's a '-scaled' image, also get
+			 *      $local_path_original
+			 *      $url_local_original
+			 *      $filename_original
+			 * 
+			 * If this is not a '-scaled' image, these will be null.
+			 */
+			$local_path_original = null;
+			$url_local_original  = null;
+			if ( $is_image_scaled ) {
+				$local_path_original = str_replace( '/' . $filename, '/' . $filename_original, $local_path );
+				$url_local_original  = str_replace( '/' . $filename, '/' . $filename_original, $url_local );
+			}
+			// Some debugging level validation -- if image is scaled, these should not be null.
+			if ( $is_image_scaled && ( is_null( $local_path_original ) || is_null( $url_local_original ) ) ) {
+				$this->log( $log, sprintf( 'ERROR Attachment ID %d is scaled but $local_path_original:%s or $url_local_original:%s are not defined.', $attachment_id, $local_path_original ?? 'null', $url_local_original ?? 'null' ) );
+				exit;
+			}
+			// Log.
+			$this->log( $log, sprintf( '> $is_attachment_scaled %s', $is_image_scaled ? 'true' : 'false' ) );
+			$this->log( $log, sprintf( '> $local_path_original %s', $local_path_original ?? 'null' ) );
+			
+
+			/**
+			 * Download attachment file to $local_path from $url_local.
 			 */
 			if ( file_exists( $local_path ) ) {
-				$this->log( $log, sprintf( '+ attachment file exists %s, skipping', $local_path ) );
+				$this->log( $log, sprintf( '+ attached file exists %s, skipping', $local_path ) );
 			} else {
 				$url_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local );
-				$this->log( $log, sprintf( '- attachment file not found %s, downloading %s', $local_path, $url_remote ) );
+				$this->log( $log, sprintf( '- attached file not found %s, downloading %s', $local_path, $url_remote ) );
 				
 				$downloaded = $this->download_url_to_file( $url_remote, $local_path );
 				if ( is_wp_error( $downloaded ) || ! $downloaded ) {
 					$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
-					$this->log( $log, sprintf( 'ERROR downloading att. ID %d from %s : %s', $attachment_id, $url_remote, $err_msg ) );
+					$this->log( $log, sprintf( 'ERROR att. ID %d downloading attached file %s from %s', $attachment_id, $url_remote, $err_msg ) );
 				}
 			}
 
+
 			/**
-			 * If attachment file $local_path / $url_local is already '-scaled', download the non-scaled 'original' file too $local_path_original / $url_local_original.
+			 * If the attachment file is already '-scaled', also download the non-scaled original $local_path_original
+			 * from $url_local_original.
 			 */
-			if ( $attachment_filename_is_scaled && $local_path_original && $url_local_original ) {
+			if ( $is_image_scaled && $local_path_original && $url_local_original ) {
 				if ( file_exists( $local_path_original ) ) {
-					$this->log( $log, sprintf( "+ 'original' non-scaled file exists %s, skipping", $local_path ) );
+					$this->log( $log, sprintf( '+ original non-scaled file exists %s, skipping', $local_path_original ) );
 				} else {
 					$url_remote_original = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_local_original );
-					$this->log( $log, sprintf( "- 'original' non-scaled file not found %s, downloading %s", $local_path_original, $url_remote_original ) );
+					$this->log( $log, sprintf( '- original non-scaled file not found %s, downloading %s', $local_path_original, $url_remote_original ) );
 					
 					$downloaded = $this->download_url_to_file( $url_remote_original, $local_path_original );
 					if ( is_wp_error( $downloaded ) || ! $downloaded ) {
 						$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
-						$this->log( $log, sprintf( "ERROR downloading att. ID %d 'original' non-scaled %s : %s", $attachment_id, $url_remote, $err_msg ) );
+						$this->log( $log, sprintf( 'ERROR att. ID %d downloading original non-scaled file from %s err.msg: %s', $attachment_id, $url_remote, $err_msg ) );
 					}
 				}
 			}
-
+			
+			
 			/**
-			 * Download '-scaled' if it exists on remote. WP automatically creates a scaled image if it's larger than the threshold:
-			 *  https://github.com/WordPress/wordpress-develop/blob/trunk/src/wp-admin/includes/image.php#L288
+			 * Download all the subsizes.
 			 */
-			if ( ! $attachment_filename_is_scaled ) {
-				$local_path_scaled = $this->append_suffix_to_file( $local_path, '-scaled' );
-				if ( file_exists( $local_path_scaled ) ) {
-					$this->log( $log, sprintf( "+ '-scaled' file exists %s, skipping", $local_path_scaled ) );
-				} else {
-					$url_scaled_local  = $this->append_suffix_to_file( $url_local, '-scaled' );
-					$url_scaled_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_scaled_local );
-					
-					// If $url_scaled_remote responds with 200, download it.
-					$this->log( $log, sprintf( "Checking if '-scaled' exists on remote %s ...", $url_scaled_remote ) );
-					$response = wp_remote_head( $url_scaled_remote );
-					if ( 200 == wp_remote_retrieve_response_code( $response ) ) {
-						$downloaded = $this->download_url_to_file( $url_scaled_remote, $local_path_scaled );
-						if ( is_wp_error( $downloaded ) || ! $downloaded ) {
-							$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
-							$this->log( $log, sprintf( "ERROR downloading att. ID %d '-scaled' %s : %s", $attachment_id, $url_scaled_remote, $err_msg ) );
-						} else {
-							$this->log( $log, "+ '-scaled' downloaded" );
-						}
-					} else {
-						$this->log( $log, "- '-scaled' does not exist on remote, skipping" );
-					}
-				}
+			
+			// If just downloading specific sizes was selected, then select just those...
+			$sizes = [];
+			if ( $only_download_sizes_csv ) {
+				$sizes = $custom_sizes;
+			} elseif ( isset( $attachment_metadata['sizes'] ) && ! empty( $attachment_metadata['sizes'] ) ) {
+				// ... otherwise get the attachment metadata sizes -- NOTE, these are the most important sizes -- with other possible custom sizes.
+				$sizes = $this->merge_sizes( $custom_sizes, $attachment_metadata['sizes'] );
 			}
 
-			/**
-			 * Download all subsizes.
-			 */
-			// Combine registered sizes with attachment metadata sizes.
-			$sizes = $sizes_registered;
-			if ( isset( $attachment_metadata['sizes'] ) && ! empty( $attachment_metadata['sizes'] ) ) {
-				$sizes = $this->merge_sizes( $sizes, $attachment_metadata['sizes'] );
-			}
-			// Loop through all sizes and download them.
+			// Loop through sizes and download them.
 			$i_size = 0;
 			foreach ( $sizes as $size_name => $size ) {
 				$height    = $size['height'];
 				$width     = $size['width'];
 				$size_name = $width . 'x' . $height;
-				$this->log( $log, sprintf( 'Size (%d/%d) %s', $i_size + 1, count( $sizes ), $size_name ) );
+				$this->log( $log, sprintf( '... size %d/%d %s', $i_size + 1, count( $sizes ), $size_name ) );
 				
 				// Get size filename. If image was scaled, we need to use the original filename and append size suffix to it.
-				if ( ! $attachment_filename_is_scaled ) {
-					$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
-				} elseif ( $attachment_filename_is_scaled && $original_attachment_filename ) {
+				if ( $is_image_scaled ) {
 					$local_path_size = $this->append_suffix_to_file( $local_path_original, '-' . $size_name );
+				} else {
+					$local_path_size = $this->append_suffix_to_file( $local_path, '-' . $size_name );
 				}
 				
 				if ( file_exists( $local_path_size ) ) {
 					$this->log( $log, sprintf( '+ %s file exists %s, skipping', $size_name, $local_path_size ) );
 				} else {
 
-					// Get URL of size. If image was scaled, we need to use the original's URL and append size suffix to it.
-					if ( ! $attachment_filename_is_scaled ) {
-						$url_size_local = $this->append_suffix_to_file( $url_local, '-' . $size_name );
-					} else {
+					// Get remote URL of the sized file. If image was '-scale'd, use the original's URL and append size suffix to it.
+					if ( $is_image_scaled ) {
 						$url_size_local = $this->append_suffix_to_file( $url_local_original, '-' . $size_name );
+					} else {
+						$url_size_local = $this->append_suffix_to_file( $url_local, '-' . $size_name );
 					}
 					$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
 					
+					// Fetch it.
 					$downloaded = $this->download_url_to_file( $url_size_remote, $local_path_size );
 					if ( is_wp_error( $downloaded ) || ! $downloaded ) {
 						$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
-						$this->log( $log, sprintf( 'ERROR downloading att. ID %d size %s %s : %s', $attachment_id, $size_name, $url_size_remote, $err_msg ) );
+						$this->log( $log, sprintf( 'ERROR att. ID %d downloading size %s from %s err.msg: %s', $attachment_id, $size_name, $url_size_remote, $err_msg ) );
 					} else {
-						$this->log( $log, sprintf( '+ downloaded %s', $local_path_size ) );
+						$this->log( $log, sprintf( '+ downloaded %s', $url_size_remote ) );
 					}
 				}
 				++$i_size;
@@ -1106,7 +1147,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Gets all registered image sizes.
+	 * Gets all registered image sizes. These registered sizes are static, i.e. with locked aspect ratio while subsizes might be dynamic.
 	 *
 	 * @return array {
 	 *   @type string width
@@ -1114,7 +1155,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 *   @type bool   crop
 	 * }
 	 */
-	public function get_all_image_sizes(): array {
+	public function get_registered_image_sizes(): array {
 		
 		global $_wp_additional_image_sizes;
 		$default_sizes = [ 'thumbnail', 'medium', 'medium_large', 'large' ];
