@@ -29,7 +29,7 @@ class ConsoleTable {
 	 *
 	 * @return void
 	 */
-	public function output_comparison( array $keys, array ...$arrays ) {
+	public static function output_comparison( array $keys, array ...$arrays ) {
 		$array_bag = array(
 			...$arrays,
 		);
@@ -55,6 +55,26 @@ class ConsoleTable {
 				if ( array_key_exists( $key, $array ) ) {
 					if ( is_bool( $array[ $key ] ) ) {
 						$row[] = $array[ $key ] ? 'true' : 'false';
+					} elseif ( is_array( $array[ $key ] ) ) {
+						$sub_key   = array_key_first( $array[ $key ] );
+						$sub_value = reset( $array[ $key ] );
+						$row[]     = ConsoleColor::black_with_cyan_background( $sub_key )->get() .
+									 ConsoleColor::white( ":{$sub_value}" )->get();
+
+						$table->addRow( $row );
+
+						unset( $array[ $key ][ $sub_key ] );
+						foreach ( $array[ $key ] as $sub_key => $sub_value ) {
+							$table->addRow(
+								[
+									'',
+									ConsoleColor::black_with_cyan_background( $sub_key )->get() .
+									ConsoleColor::white( ":{$sub_value}" )->get(),
+								]
+							);
+						}
+
+						continue 2;
 					} elseif ( empty( $array[ $key ] ) ) {
 						$row[] = '-';
 					} else {
@@ -83,7 +103,7 @@ class ConsoleTable {
 	 *
 	 * @return array[]
 	 */
-	public function output_value_comparison( array $keys, array $left_set, array $right_set, bool $strict = true, string $left = 'LEFT', string $right = 'RIGHT' ) {
+	public static function output_value_comparison( array $keys, array $left_set, array $right_set, bool $strict = true, string $left = 'LEFT', string $right = 'RIGHT' ) {
 		if ( empty( $keys ) ) {
 			$keys = array_keys( array_merge( $left_set, $right_set ) );
 		}
@@ -162,21 +182,34 @@ class ConsoleTable {
 	/**
 	 * Simple function to output a table of data, with an optional title.
 	 *
-	 * @param array  $array_of_arrays An array of arrays that hold the data to be output.
-	 * @param array  $header An array of strings that will be used as the table header.
-	 * @param string $title The title of the table.
+	 * @param array[] $array_of_arrays An array of arrays that hold the data to be output.
+	 * @param array   $header An array of strings that will be used as the table header.
+	 * @param string  $title The title of the table.
 	 *
 	 * @return void
 	 */
-	public function output_data( array $array_of_arrays, array $header = [], string $title = '' ) {
+	public static function output_data( array $array_of_arrays, array $header = [], string $title = '' ) {
+		$array_of_arrays = array_map(
+			function ( $member ) {
+				if ( ! is_array( $member ) ) {
+					return (array) $member;
+				}
+
+				return $member;
+			},
+			$array_of_arrays
+		);
+
 		if ( empty( $header ) && isset( $array_of_arrays[0] ) ) {
 			$header = array_keys( $array_of_arrays[0] );
 		}
 
 		if ( ! empty( $title ) ) {
-			$title         = WP_CLI::colorize( '%B%U' . $title . '%n' ) . PHP_EOL;
-			$title_escaped = esc_html( $title );
-			echo $title_escaped; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			if ( ConsoleColor::has_color( $title ) ) {
+				echo esc_html( $title ) . PHP_EOL;
+			} else {
+				ConsoleColor::title_output( $title );
+			}
 		}
 
 		WP_CLI\Utils\format_items( 'table', $array_of_arrays, $header );
