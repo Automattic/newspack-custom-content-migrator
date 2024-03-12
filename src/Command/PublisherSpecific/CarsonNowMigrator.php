@@ -50,13 +50,6 @@ class CarsonNowMigrator implements InterfaceCommand {
 	private $reader_content_cutoff_date;
 
 	private function __construct() {
-		$this->reader_content_cutoff_date = DateTimeImmutable::createFromFormat( self::DRUPAL_DATE_FORMAT, '2023-01-01T00:00:00' );
-		$this->logger                     = new Logger();
-		$this->gutenberg_block_generator  = new GutenbergBlockGenerator();
-		$this->attachments                = new Attachments();
-
-		$this->utc_timezone  = new DateTimeZone( 'UTC' );
-		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
 	}
 
 	public static function get_instance(): self {
@@ -84,7 +77,6 @@ class CarsonNowMigrator implements InterfaceCommand {
 		add_action( 'fgd2wp_post_insert_post', [ $this, 'fg_action_fgd2wp_post_insert_post' ], 11, 5 );
 	}
 
-
 	/**
 	 * @throws \Exception
 	 */
@@ -96,7 +88,19 @@ class CarsonNowMigrator implements InterfaceCommand {
 			[
 				'shortdesc'     => 'Wrap the import command from FG Drupal.',
 				'synopsis'      => [],
-				'before_invoke' => [ $this, 'preflight_check' ],
+				'before_invoke' => [ $this, 'preflight' ],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator cn-manipulate-bylines',
+			[ $this, 'cmd_manipulate_bylines' ],
+			[
+				'shortdesc'     => 'Massage bylines.',
+				'synopsis'      => [
+					$this->refresh_existing,
+				],
+				'before_invoke' => [ $this, 'preflight' ],
 			]
 		);
 
@@ -108,16 +112,23 @@ class CarsonNowMigrator implements InterfaceCommand {
 				'synopsis'      => [
 					$this->refresh_existing,
 				],
-				'before_invoke' => [ $this, 'preflight_check' ],
+				'before_invoke' => [ $this, 'preflight' ],
 			]
 		);
 	}
 
-
 	/**
 	 * @throws ExitException
 	 */
-	public function preflight_check(): void {
+	public function preflight(): void {
+		$this->reader_content_cutoff_date = DateTimeImmutable::createFromFormat( self::DRUPAL_DATE_FORMAT, '2023-01-01T00:00:00' );
+		$this->logger                     = new Logger();
+		$this->gutenberg_block_generator  = new GutenbergBlockGenerator();
+		$this->attachments                = new Attachments();
+
+		$this->utc_timezone  = new DateTimeZone( 'UTC' );
+		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
+
 		static $checked = false;
 
 		if ( $checked ) {
@@ -138,6 +149,75 @@ class CarsonNowMigrator implements InterfaceCommand {
 		}
 
 		$checked = true;
+	}
+
+	/**
+	 * Add the byline to the content if there is one.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 */
+	public function cmd_manipulate_bylines( array $pos_args, array $assoc_args ): void {
+		$command_meta_key     = __FUNCTION__;
+		$command_meta_version = 1;
+		$log_file             = "{$command_meta_key}_$command_meta_version.log";
+		$refresh              = $assoc_args['refresh-existing'] ?? false;
+
+
+		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ] ) as $post ) {
+			if ( ! $refresh && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
+				$this->logger->log( $log_file, sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post->ID ), $command_meta_version ) );
+				continue;
+			}
+
+			$nid = get_post_meta( $post->ID, '_fgd2wp_old_node_id', true );
+			if ( empty( $nid ) ) {
+				continue;
+			}
+
+			$drupal_byline = $this->get_drupal_byline( $nid );
+			if ( empty( $drupal_byline ) || $drupal_byline === get_the_author_meta( 'display_name', $post->post_author ) ) {
+				MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
+				continue;
+			}
+
+			$byline_block_class = 'np-byline-inline';
+			$byline_block       = $this->gutenberg_block_generator->get_byline( $drupal_byline );
+			$post_blocks        = parse_blocks( $post->post_content );
+			if ( GutenbergBlockManipulator::find_blocks_with_class( $byline_block_class, $post_blocks ) ) {
+				$post_blocks = GutenbergBlockManipulator::replace_blocks_with_class( $byline_block_class, $post->post_content, $byline_block );
+			} else {
+				array_unshift( $post_blocks, $byline_block );
+			}
+			wp_update_post( [
+				'ID'           => $post->ID,
+				'post_content' => serialize_blocks( $post_blocks ),
+			] );
+			// Set the byline as metadata too.
+			update_post_meta( $post->ID, '_newspack_content_byline', $drupal_byline );
+
+			$this->logger->log( $log_file, sprintf( 'Added a byline in content for %s in %s', $drupal_byline, get_permalink( $post ) ) );
+		}
+	}
+
+	/**
+	 * Get the drupal byline for a given node.
+	 *
+	 * @param int $nid
+	 *
+	 * @return string byline
+	 */
+	private function get_drupal_byline( int $nid ): string {
+		$sql = "SELECT field_byline_value FROM drupal_content_field_byline cfb
+					JOIN drupal_node n ON cfb.nid = n.nid AND cfb.vid = n.vid
+					WHERE cfb.nid = $nid";
+		global $wpdb;
+
+		$byline = $wpdb->get_var( $sql );
+
+		return $byline ?? '';
 	}
 
 	public function cmd_import_images( array $pos_args, array $assoc_args ): void {
