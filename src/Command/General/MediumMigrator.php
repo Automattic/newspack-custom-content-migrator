@@ -261,13 +261,17 @@ class MediumMigrator implements InterfaceCommand {
 	 * @param bool  $refresh_content If set, it will refresh the existing content, and import the new one.
 	 */
 	private function process_post( $article, $refresh_content ) {
+		$author = $this->medium_logic->get_author();
+		if ( empty( $author ) && defined( 'NCCM_MEDIUM_FALLBACK_AUTHOR_USERNAME' ) ) {
+			$author = [ 'user_login' => NCCM_MEDIUM_FALLBACK_AUTHOR_USERNAME ];
+		}
 		// Get/add author.
-		if ( empty( $this->medium_logic->get_author() ) ) {
+		if ( empty( $author ) ) {
 			$this->logger->log( self::$log_file, ' -- Error: Author not found: ' . $article['author'], Logger::WARNING );
 			return;
 		}
 
-		$author_id = $this->get_or_insert_author( $this->medium_logic->get_author() );
+		$author_id = $this->get_or_insert_author( $author );
 
 		if ( ! $author_id ) {
 			return;
