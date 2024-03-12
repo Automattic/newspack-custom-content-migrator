@@ -29,7 +29,7 @@
     "halaxa/json-machine": "^1.1",
     "mustache/mustache": "^2.14",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
-    "automattic/newspack-scraper-migrator": "dev-add/cc-migrator"
+    "automattic/newspack-scraper-migrator": "dev-trunk"
   },
   "require-dev": {
     "automattic/vipwpcs": "^3.0",

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3ce41ebb1dcb7a192fceff8343e78aeb",
+    "content-hash": "ba927ee3149f687c3ba46c96e2a2a9ea",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -117,11 +117,11 @@
         },
         {
             "name": "automattic/newspack-scraper-migrator",
-            "version": "dev-add/cc-migrator",
+            "version": "dev-trunk",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-scraper-migrator.git",
-                "reference": "f0b4f3707bb5e09a2f726feb54f9e923d3762d88"
+                "reference": "8c7188dac6f0a55527471525acbf690849dc2f0a"
             },
             "require": {
                 "paquettg/php-html-parser": "^3.0.0",
@@ -129,6 +129,7 @@
                 "symfony/dom-crawler": "^5.4",
                 "symfony/http-client": "^5.4"
             },
+            "default-branch": true,
             "type": "library",
             "autoload": {
                 "classmap": [
@@ -140,7 +141,7 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Plugin that migrates a site by scraping the frontend content.",
-            "time": "2024-03-07T18:20:34+00:00"
+            "time": "2024-03-12T13:24:54+00:00"
         },
         {
             "name": "brainmaestro/composer-git-hooks",

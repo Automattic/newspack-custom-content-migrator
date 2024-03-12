@@ -2,7 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use Newspack_Scraper_Migrator_CC_Scraper;
+use Newspack_Scraper_Migrator_Creative_Circle_Scraper;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
@@ -126,7 +126,7 @@ class CreativeCircleMigrator implements InterfaceCommand {
 		$page_from         = intval( $assoc_args['page-from'] ?? 1 );
 		$page_to           = isset( $assoc_args['page-to'] ) ? intval( $assoc_args['page-to'] ) : null;
 
-		Newspack_Scraper_Migrator_CC_Scraper::get_instance()->process( $subdomain, $xajaxr_param, $mediasiteq_cookie, $page_from, $page_to );
+		Newspack_Scraper_Migrator_Creative_Circle_Scraper::get_instance()->process( $subdomain, $xajaxr_param, $mediasiteq_cookie, $page_from, $page_to );
 		WP_CLI::success( 'Completed.' );
 	}
 
