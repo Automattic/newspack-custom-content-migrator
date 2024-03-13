@@ -219,6 +219,49 @@ class TheFriscMigrator implements InterfaceCommand {
 				}
 			}
 
+			// Grab all the single url embeds and replace them with Homepage Posts Block with just one post.
+			if ( preg_match_all( '/\[embed\](http(.*?))\[\/embed\]/i', $fixed_content, $matches ) ) {
+				$content_with_embeds = $fixed_content;
+				foreach ( $matches[0] as $idx => $embed ) {
+
+					$path = trim( wp_parse_url( $matches[1][ $idx ], PHP_URL_PATH ) ?? '' );
+					if ( empty( $path ) ) {
+						continue;
+					}
+
+
+					$related_post = get_page_by_path( $path, OBJECT, 'post' );
+					if ( empty( $related_post->ID ) ) {
+						continue;
+					}
+
+					$block               = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts(
+						[ $related_post->ID ],
+						[
+							'showExcerpt'   => false,
+							'showDate'      => false,
+							'showAuthor'    => false,
+							'postsToShow'   => 1,
+							'mediaPosition' => 'left',
+							'typeScale'     => 3,
+							'imageScale'    => 1,
+							'specificMode'  => true,
+							'className'     => [ 'is-style-default', 'np-single-post-embed' ],
+						]
+					);
+					$content_with_embeds = str_replace( $embed, serialize_block( $block ), $content_with_embeds );
+				}
+				if ( $content_with_embeds !== $fixed_content ) {
+					wp_update_post(
+						[
+							'ID'           => $post->ID,
+							'post_content' => $content_with_embeds,
+						]
+					);
+					$this->logger->log( $log_file, sprintf( 'Replaced single link embeds for post %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
+				}
+			}
+
 			$crawler->clear();
 		}
 	}
@@ -273,7 +316,7 @@ class TheFriscMigrator implements InterfaceCommand {
 				'typeScale'     => 3,
 				'imageScale'    => 1,
 				'specificMode'  => true,
-				'className'     => [ 'is-style-default' ],
+				'className'     => [ 'is-style-default', 'np-more-posts-embed' ],
 			]
 		);
 
