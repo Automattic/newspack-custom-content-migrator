@@ -603,10 +603,6 @@ HTML;
 			)
 		);
 
-		/*$posts_without_updated_byline = $wpdb->get_results(
-			"SELECT ID, post_name, post_content FROM $wpdb->posts WHERE ID = 11554"
-		);*/
-
 		foreach ( $posts_without_updated_byline as $post ) {
 			echo "\n\n\n";
 			ConsoleColor::white( 'Processing Post ID:' )
