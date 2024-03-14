@@ -255,6 +255,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'pleasanton - top post - primary',
 		'pleasanton - top post - secondary',
 		'pleasanton - trending',
+		'print ready',
 		'real estate - home & garden',
 		'real estate - neighborhoods',
 		'real estate - top post - primary',
