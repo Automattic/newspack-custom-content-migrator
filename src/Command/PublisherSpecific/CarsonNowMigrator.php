@@ -18,13 +18,26 @@ class CarsonNowMigrator implements InterfaceCommand {
 
 	const SKIP_IMPORTING_POST = [];
 
-	private array $refresh_existing = [
+	private array $refresh_existing_arg = [
 		'type'        => 'flag',
 		'name'        => 'refresh-existing',
 		'description' => 'Will refresh existing content rather than create new',
 		'optional'    => true,
 	];
 
+	private array $num_posts_arg = [
+		'type'        => 'assoc',
+		'name'        => 'num-posts',
+		'description' => 'Number of posts to process',
+		'optional'    => true,
+	];
+
+	private array $max_post_id_arg = [
+		'type'        => 'assoc',
+		'name'        => 'max-post-id',
+		'description' => 'Maximum post ID to include in run (inclusive).',
+		'optional'    => true,
+	];
 
 	/**
 	 * @var DateTimeZone
@@ -98,7 +111,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 			[
 				'shortdesc'     => 'Massage bylines.',
 				'synopsis'      => [
-					$this->refresh_existing,
+					$this->refresh_existing_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
 			]
@@ -110,7 +123,9 @@ class CarsonNowMigrator implements InterfaceCommand {
 			[
 				'shortdesc'     => 'Import images.',
 				'synopsis'      => [
-					$this->refresh_existing,
+					$this->refresh_existing_arg,
+					$this->num_posts_arg,
+					$this->max_post_id_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
 			]
@@ -148,6 +163,10 @@ class CarsonNowMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( "Site timezone should be '%s'. Make sure it's set correctly before running the migration commands", $this->site_timezone->getName() ) );
 		}
 
+		if ( ! defined( 'NCCM_SOURCE_WEBSITE_URL' ) ) {
+			WP_CLI::error( 'NCCM_SOURCE_WEBSITE_URL is not defined in wp-config.php' );
+		}
+
 		$checked = true;
 	}
 
@@ -166,9 +185,9 @@ class CarsonNowMigrator implements InterfaceCommand {
 		$refresh              = $assoc_args['refresh-existing'] ?? false;
 
 
-		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ] ) as $post ) {
+		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ], $assoc_args ) as $post ) {
 			if ( ! $refresh && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				$this->logger->log( $log_file, sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post->ID ), $command_meta_version ) );
+				WP_CLI::log( sprintf('Post ID %d %s is at MigrationMeta version %s, skipping', $post->ID, get_permalink( $post->ID ), $command_meta_version ) );
 				continue;
 			}
 
@@ -189,6 +208,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 			if ( GutenbergBlockManipulator::find_blocks_with_class( $byline_block_class, $post_blocks ) ) {
 				$post_blocks = GutenbergBlockManipulator::replace_blocks_with_class( $byline_block_class, $post->post_content, $byline_block );
 			} else {
+				// Add the byline block to the beginning of the content.
 				array_unshift( $post_blocks, $byline_block );
 			}
 			wp_update_post( [
@@ -196,7 +216,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 				'post_content' => serialize_blocks( $post_blocks ),
 			] );
 			// Set the byline as metadata too.
-			update_post_meta( $post->ID, '_newspack_content_byline', $drupal_byline );
+			update_post_meta( $post->ID, 'newspack_content_byline', $drupal_byline );
 
 			$this->logger->log( $log_file, sprintf( 'Added a byline in content for %s in %s', $drupal_byline, get_permalink( $post ) ) );
 		}
@@ -226,10 +246,9 @@ class CarsonNowMigrator implements InterfaceCommand {
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 		$refresh              = $assoc_args['refresh-existing'] ?? false;
 
-
-		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ] ) as $post ) {
+		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ], $assoc_args ) as $post ) {
 			if ( ! $refresh && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				$this->logger->log( $log_file, sprintf( '%s is at MigrationMeta version %s, skipping', get_permalink( $post->ID ), $command_meta_version ) );
+				WP_CLI::log( sprintf('Post ID %d %s is at MigrationMeta version %s, skipping', $post->ID, get_permalink( $post->ID ), $command_meta_version ) );
 				continue;
 			}
 
@@ -240,7 +259,11 @@ class CarsonNowMigrator implements InterfaceCommand {
 			$images      = $this->get_drupal_images_from_nid( $nid );
 			$attachments = [];
 			foreach ( $images as $img ) {
-				$attachments[] = $this->attachments->import_attachment_for_post( $post->ID, $img['url'], '', $img['attributes'] );
+				$attrs                 = $img['attributes'];
+				$attrs['post_excerpt'] = $attrs['description'] ?? '';
+				$attrs['post_title']   = empty( $attrs['title'] ) ? $attrs['post_excerpt'] : $attrs['title'];
+				$attrs['alt']          = empty( $attrs['alt'] ) ? $attrs['post_title'] : $attrs['alt'];
+				$attachments[]         = $this->attachments->import_attachment_for_post( $post->ID, $img['url'], $attrs['alt'], $attrs );
 			}
 			if ( ! empty( $attachments ) ) {
 				// First is featured.
@@ -260,23 +283,25 @@ class CarsonNowMigrator implements InterfaceCommand {
 			return $post;
 		}
 		if ( count( $images ) > 1 ) {
-			$gallery_class               = 'cn-gallery';
-			$post->post_content          = serialize_blocks( GutenbergBlockManipulator::remove_blocks_with_class( $gallery_class, $post->post_content ) );
-			$block                       = $this->gutenberg_block_generator->get_jetpack_slideshow( $images );
-			$block['attrs']['className'] = $gallery_class;
-			$gallery                     = serialize_block( $block );
-			$post->post_content          = $gallery . $post->post_content;
-			$this->logger->log( 'images.log', sprintf( 'Added gallery to post %s', get_permalink( $post ) ) );
+			$gallery_class                       = 'cn-gallery';
+			$blocks                              = GutenbergBlockManipulator::remove_blocks_with_class( $gallery_class, $post->post_content );
+			$gallery_block                       = $this->gutenberg_block_generator->get_jetpack_slideshow( $images );
+			$gallery_block['attrs']['className'] = $gallery_class;
+			$post->post_content                  = serialize_blocks( [ $gallery_block, ...$blocks ] );
+
+			$this->logger->log( 'images.log', sprintf( 'Added gallery to post ID %d: %s', $post->ID, get_permalink( $post ) ) );
 		} else { // Some galleries only have one image – in that case we don't need a gallery block.
 			$attachment_post = get_post( current( $images ) );
 			if ( ! $attachment_post instanceof WP_Post ) {
 				return $post;
 			}
-			$img_block_class    = 'cn-gallery-1-img';
-			$post->post_content = serialize_blocks( GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content ) );
-			$img_block          = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, $img_block_class ) );
-			$post->post_content = $img_block . $post->post_content;
-			$this->logger->log( 'images.log', sprintf( 'Added image block to post %s', get_permalink( $post ) ) );
+			$img_block_class                 = 'cn-gallery-1-img';
+			$blocks                          = GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content );
+			$img_block                       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false );
+			$img_block['attrs']['className'] = $img_block_class;
+			$post->post_content              = serialize_blocks( [ $img_block, ...$blocks ] );
+
+			$this->logger->log( 'images.log', sprintf( 'Added image block to post ID %d: %s', $post->ID, get_permalink( $post ) ) );
 		}
 
 		return $post;
@@ -475,7 +500,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 	}
 
 	public function fg_action_fgd2wp_post_insert_post( $new_post_id, $node, $post_type, $entity_type ): void {
-		$old_url = trailingslashit( $this->get_fg_options( 'url' ) ) . 'node/' . $node['nid'];
+		$old_url = trailingslashit( NCCM_SOURCE_WEBSITE_URL ) . 'node/' . $node['nid'];
 		$new_url = get_permalink( $new_post_id );
 		$this->logger->log(
 			'imported-posts.log',
@@ -489,22 +514,12 @@ class CarsonNowMigrator implements InterfaceCommand {
 		);
 	}
 
-	private function get_fg_options( string $key = '' ) {
-		static $options = null;
-		if ( null === $options ) {
-			$options = get_option( 'fgd2wp_options' );
-		}
-		if ( empty( $key ) ) {
-			return $options;
-		}
-
-		return $options[ $key ] ?? '';
-	}
-
-	private function get_wp_posts_iterator( array $post_types, array $post_statuses = [ 'publish' ], array $args = [], bool $log_progress = true ): iterable {
-		if ( ! empty( $args['post-id'] ) ) {
-			$all_ids = [ $args['post-id'] ];
+	private function get_wp_posts_iterator( array $post_types, array $assoc_args, array $post_statuses = [ 'publish' ], bool $log_progress = true ): iterable {
+		if ( ! empty( $assoc_args['post-id'] ) ) {
+			$all_ids = [ $assoc_args['post-id'] ];
 		} else {
+			$max_post_id = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
+			$num_posts   = $assoc_args['num-posts'] ?? PHP_INT_MAX;
 			global $wpdb;
 			$post_type_placeholders   = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
 			$post_status_placeholders = implode( ',', array_fill( 0, count( $post_statuses ), '%s' ) );
@@ -513,13 +528,13 @@ class CarsonNowMigrator implements InterfaceCommand {
 					"SELECT ID
 			FROM {$wpdb->posts}
 			WHERE post_type IN ( $post_type_placeholders )
-			AND post_status IN ( $post_status_placeholders ) ;",
-					[ ...$post_types, ...$post_statuses ],
+			AND post_status IN ( $post_status_placeholders )
+			AND ID <= %d
+			ORDER BY ID DESC
+			LIMIT %d",
+					[ ...$post_types, ...$post_statuses, $max_post_id, $num_posts ]
 				)
 			);
-			if ( ! empty( $args['num-posts'] ) ) {
-				$all_ids = array_slice( $all_ids, 0, $args['num-posts'] );
-			}
 		}
 		$total_posts = count( $all_ids );
 		$home_url    = home_url();
