@@ -3242,7 +3242,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$duplicate_cats_tags       = $wpdb->get_results(
 			"SELECT 
 				sub.slug, 
-				ANY_VALUE(sub.name) as name, 
+				sub.name, 
 				GROUP_CONCAT(sub.taxonomy) as taxonomies, 
 				COUNT(DISTINCT sub.term_taxonomy_id) as counter 
 			FROM (
