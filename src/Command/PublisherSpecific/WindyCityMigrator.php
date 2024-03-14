@@ -93,6 +93,12 @@ class WindyCityMigrator implements InterfaceCommand {
 					...BatchLogic::get_batch_args(),
 					[
 						'type'        => 'assoc',
+						'name'        => 'pdf-folder-path',
+						'description' => 'Path to PDF folder.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'default-author-display-name',
 						'description' => 'Default author display name.',
 						'optional'    => false,
@@ -102,6 +108,13 @@ class WindyCityMigrator implements InterfaceCommand {
 						'name'        => 'default-author-email',
 						'description' => 'Default author email.',
 						'optional'    => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-content',
+						'description' => 'Refresh the content of the posts that were already imported.',
+						'optional'    => true,
+						'repeating'   => false,
 					],
 				],
 			]
@@ -118,6 +131,8 @@ class WindyCityMigrator implements InterfaceCommand {
 		$csv_file_path               = $assoc_args[ $this->csv_input_file['name'] ];
 		$default_author_display_name = $assoc_args['default-author-display-name'];
 		$default_author_email        = $assoc_args['default-author-email'];
+		$pdf_folder_path             = $assoc_args['pdf-folder-path'];
+		$refresh_content             = isset( $assoc_args['refresh-content'] ) ? true : false;
 		$batch_args                  = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
 		$total_entries               = $this->csv_iterator->count_csv_file_entries( $csv_file_path, ',' );
 		$entries                     = $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] );
@@ -129,7 +144,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating entry %d/%d.', $index + 1, $batch_args['end'] ), Logger::LINE );
 
 			// Check if post exists.
-			if ( in_array( $entry['GUID'], $existing_original_ids ) ) {
+			if ( ! $refresh_content && in_array( $entry['GUID'], $existing_original_ids ) ) {
 				$this->logger->log( self::LOG_FILE, ' -- Article already exists: ' . $entry['TITLE'], Logger::WARNING );
 				continue;
 			}
@@ -140,27 +155,10 @@ class WindyCityMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$post_content = $entry['BODY'];
-			// Galleries.
-			$post_content = $this->migrate_gallery( $post_content, $entry['MORE_IMAGES'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY1'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY2'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY3'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY4'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY5'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY6'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY7'] );
-			$post_content = $this->migrate_gallery( $post_content, $entry['GALLERY8'] );
-
-			// Embeds.
-			if ( ! empty( $entry['EMBED'] ) ) {
-				$post_content = $this->migrate_embed( $post_content, $entry['EMBED'] );
-			}
-
 			// Create post.
 			$post_data = [
 				'post_title'     => $entry['TITLE'],
-				'post_content'   => $post_content,
+				'post_content'   => $entry['BODY'],
 				'post_excerpt'   => $entry['SUMMARY'],
 				'post_status'    => 'publish',
 				'post_type'      => 'post',
@@ -186,7 +184,44 @@ class WindyCityMigrator implements InterfaceCommand {
 				}
 			}
 
-			$post_id = wp_insert_post( $post_data );
+			// Create or get the post.
+			$post_id = $this->get_create_post( $entry['GUID'], $post_data );
+
+
+			// Migrate post content.
+			$post_content = $entry['BODY'];
+
+			// Galleries.
+			$gallery_content = $entry['MORE_IMAGES'];
+			// Gallery data is in the entry attributes GALLERY1...GALLERY8.
+			for ( $i = 1; $i <= 8; $i++ ) {
+				if ( ! empty( $entry[ 'GALLERY' . $i ] ) ) {
+					$gallery_content .= $entry[ 'GALLERY' . $i ];
+				}
+			}
+
+			$post_content = $this->migrate_gallery( $post_id, $post_content, $gallery_content );
+
+			// If the post contains a gallery, we need to hide the featured image.
+			if ( ! empty( $gallery_content ) ) {
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+			}
+
+			// Embeds.
+			if ( ! empty( $entry['EMBED'] ) ) {
+				$post_content = $this->migrate_embed( $post_content, $entry['EMBED'] );
+			}
+
+			// PDFs.
+			$post_content = $this->migrate_pdfs( $post_id, $post_content, $pdf_folder_path );
+
+			// Update post content.
+			wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => $post_content,
+				]
+			);
 
 			// Post Tags.
 			$post_tags = explode( ';', $entry['TAGS'] );
@@ -217,7 +252,20 @@ class WindyCityMigrator implements InterfaceCommand {
 				$attachment_id = $this->attachments_logic->import_external_file( $entry['FEATURED'], $entry['TITLE'], $entry['FEATURED_CAPTION'], null, null, $post_id );
 
 				if ( is_wp_error( $attachment_id ) ) {
-					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment: ' . $attachment_id->get_error_message(), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $entry['FEATURED'] . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
+				} else {
+					set_post_thumbnail( $post_id, $attachment_id );
+				}
+			} elseif ( ! empty( $gallery_content ) ) {
+				// If the post contains a gallery, we'll set the first image as the featured image.
+				$gallery_images = explode( ';', $gallery_content );
+				$first_image    = trim( current( $gallery_images ) );
+				$first_image    = current( explode( '|', $first_image ) );
+
+				$attachment_id = $this->attachments_logic->import_external_file( $first_image, $entry['TITLE'], null, null, null, $post_id );
+
+				if ( is_wp_error( $attachment_id ) ) {
+					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $first_image . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
 				} else {
 					set_post_thumbnail( $post_id, $attachment_id );
 				}
@@ -227,8 +275,42 @@ class WindyCityMigrator implements InterfaceCommand {
 			update_post_meta( $post_id, self::ORIGINAL_ID_META_KEY, $entry['GUID'] );
 			update_post_meta( $post_id, 'newspack_post_subtitle', $entry['SUBTITLE'] );
 
-			$this->logger->log( self::LOG_FILE, ' -- Article created with ID: ' . $post_id, Logger::SUCCESS );
+			$this->logger->log( self::LOG_FILE, ' -- Article migrated with ID: ' . $post_id, Logger::SUCCESS );
 		}
+	}
+
+	/**
+	 * Get or create post.
+	 * If post exists, return its ID.
+	 * If post does not exist, create it and return its ID.
+	 *
+	 * @param string $original_id Original ID.
+	 * @param array  $post_data Post data.
+	 *
+	 * @return int|bool Post ID or false on failure.
+	 */
+	private function get_create_post( $original_id, $post_data ) {
+		global $wpdb;
+
+		$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s", self::ORIGINAL_ID_META_KEY, $original_id ) );
+
+		if ( $post_id ) {
+			// Post exists.
+			$this->logger->log( self::LOG_FILE, ' -- Post already exists with ID: ' . $post_id, Logger::LINE );
+			return $post_id;
+		}
+
+		// Post does not exist.
+		// Create post.
+		$post_id = wp_insert_post( $post_data );
+
+		if ( is_wp_error( $post_id ) ) {
+			$this->logger->log( self::LOG_FILE, ' -- Error creating post: ' . $post_id->get_error_message(), Logger::WARNING );
+			return false;
+		}
+
+		$this->logger->log( self::LOG_FILE, ' -- Post created with ID: ' . $post_id, Logger::LINE );
+		return $post_id;
 	}
 
 	/**
@@ -308,11 +390,12 @@ class WindyCityMigrator implements InterfaceCommand {
 	/**
 	 * Migrate gallery.
 	 *
+	 * @param int    $post_id Post ID.
 	 * @param string $post_content Post content.
 	 * @param string $gallery Gallery.
 	 * @return string Post content.
 	 */
-	private function migrate_gallery( $post_content, $gallery ) {
+	private function migrate_gallery( $post_id, $post_content, $gallery ) {
 		if ( empty( $gallery ) ) {
 			return $post_content;
 		}
@@ -320,20 +403,30 @@ class WindyCityMigrator implements InterfaceCommand {
 		$gallery_images = explode( ';', $gallery );
 		$gallery_images = array_map( 'trim', $gallery_images );
 
-		$gallery_images = [];
+		$gallery_image_ids = [];
 		foreach ( $gallery_images as $gallery_image ) {
-			$attachment_id = $this->attachments_logic->import_external_file( $gallery_image );
-
-			if ( is_wp_error( $attachment_id ) ) {
-				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment: ' . $attachment_id->get_error_message(), Logger::WARNING );
+			if ( empty( $gallery_image ) ) {
 				continue;
 			}
 
-			$gallery_images[] = $attachment_id;
+			// $gallery_image is in the format: https://www.windycitymediagroup.com/images/publications/wct/2019-11-06/cover.jpg|Caption
+			$gallery_image = explode( '|', $gallery_image );
+			$gallery_image = array_map( 'trim', $gallery_image );
+			$image_url     = $gallery_image[0];
+			$caption       = $gallery_image[1] ?? null;
+			$attachment_id = $this->attachments_logic->import_external_file( $image_url, null, $caption, null, null, $post_id );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $image_url . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, ' -- Imported attachment with ID: ' . $attachment_id, Logger::LINE );
+			$gallery_image_ids[] = $attachment_id;
 		}
 
-		$gallery_content = empty( $gallery_images ) ? '' : serialize_block(
-			$this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_images )
+		$gallery_content = empty( $gallery_image_ids ) ? '' : serialize_block(
+			$this->gutenberg_block_generator->get_jetpack_slideshow( $gallery_image_ids )
 		);
 
 		if ( ! empty( $gallery_content ) ) {
@@ -386,6 +479,50 @@ class WindyCityMigrator implements InterfaceCommand {
 		return $post_content . serialize_block(
 			$this->gutenberg_block_generator->get_iframe( $iframe_src )
 		);
+	}
+
+	/**
+	 * Migrate PDFs.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $post_content Post content.
+	 * @param string $pdf_folder_path PDF folder path.
+	 * @return string Post content.
+	 */
+	private function migrate_pdfs( $post_id, $post_content, $pdf_folder_path ) {
+		// The PDF links are hardcoded in the post content in the format (https://)?windycitytimes.com/pdf/1stWardAldProcoMoreno.pdf.
+		// We need to extract the PDF file name from the link and then find the file in the PDF folder.
+		// And Replace the URL with the filename linked to the PDF file.
+		$pattern = '/(?P<pdf_link>(https?:\/\/)?windycitytimes.com\/pdf\/(?P<pdf_file_name>(.*?)\.pdf))/im';
+		preg_match_all( $pattern, $post_content, $matches );
+
+		if ( empty( $matches['pdf_file_name'] ) ) {
+			return $post_content;
+		}
+
+		foreach ( $matches['pdf_file_name'] as $match_index => $pdf_file_name ) {
+			$pdf_file_path = $pdf_folder_path . '/' . $pdf_file_name;
+
+			if ( ! file_exists( $pdf_file_path ) ) {
+				$this->logger->log( self::LOG_FILE, ' -- PDF file does not exist: ' . $pdf_file_path, Logger::WARNING );
+				continue;
+			}
+
+			$attachment_id = $this->attachments_logic->import_external_file( $pdf_file_path, null, null, null, null, $post_id );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $pdf_file_path . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, ' -- Imported PDF with ID: ' . $attachment_id, Logger::LINE );
+
+			// Replace the URL with the filename linked to the PDF file.
+			$html_link    = '<a href="' . wp_get_attachment_url( $attachment_id ) . '">' . $pdf_file_name . '</a>';
+			$post_content = str_replace( $matches['pdf_link'][ $match_index ], $html_link, $post_content );
+		}
+
+		return $post_content;
 	}
 
 	/**

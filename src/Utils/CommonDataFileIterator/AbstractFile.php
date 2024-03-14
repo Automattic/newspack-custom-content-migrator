@@ -7,7 +7,7 @@
 
 namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use \Exception;
+use Exception;
 
 /**
  * Abstract File class, handles low level loading of file and basic functions.
@@ -46,6 +46,7 @@ abstract class AbstractFile implements Contracts\File {
 	 * Constructor. For now this class expects the file to exist on the system.
 	 *
 	 * @param string $path Full file path.
+	 *
 	 * @throws Exception If file does not exist.
 	 */
 	public function __construct( string $path ) {
@@ -54,9 +55,9 @@ abstract class AbstractFile implements Contracts\File {
 		}
 
 		$this->path = $path;
-		$parts = explode( '/', $path );
+		$parts      = explode( '/', $path );
 		$this->name = array_pop( $parts );
-		$this->size = filesize( $this->path ) / 1024;
+		$this->size = absint( filesize( $this->path ) / 1024 );
 	}
 
 	/**
@@ -76,6 +77,7 @@ abstract class AbstractFile implements Contracts\File {
 	 */
 	public function get_handle() {
 		if ( is_null( $this->handle ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 			$this->handle = fopen( $this->get_path(), 'r' );
 		}
 
@@ -105,7 +107,7 @@ abstract class AbstractFile implements Contracts\File {
 	 */
 	public function __destruct() {
 		if ( is_resource( $this->handle ) ) {
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_fclose
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 			fclose( $this->handle );
 		}
 	}

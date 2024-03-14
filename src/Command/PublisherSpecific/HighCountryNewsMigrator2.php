@@ -72,6 +72,13 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		'optional'    => true,
 	];
 
+	private array $min_post_id = [
+		'type'        => 'assoc',
+		'name'        => 'min-post-id',
+		'description' => 'When selecting or processing wp posts any post with an id less than this will be skipped',
+		'optional'    => true,
+	];
+
 	private array $refresh_existing = [
 		'type'        => 'flag',
 		'name'        => 'refresh-existing',
@@ -365,6 +372,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 						'optional'    => true,
 					],
 					BatchLogic::$num_items,
+					$this->min_post_id,
 				],
 			]
 		);
@@ -409,6 +417,135 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				],
 			]
 		);
+
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-authors-from-json',
+			[ $this, 'fix_authors_from_json' ],
+			[
+				'shortdesc' => 'Fix authors from JSON.',
+				'synopsis'  => [
+					'synopsis' => [
+						$this->articles_json_arg,
+						...BatchLogic::get_batch_args(),
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hcn-fix-image-dates-from-json',
+			[ $this, 'fix_image_dates_from_json' ],
+			[
+				'shortdesc' => 'Fix image dates from JSON data.',
+				'synopsis'  => [
+					$this->images_json_arg,
+					...BatchLogic::get_batch_args(),
+				],
+			]
+		);
+	}
+
+	/**
+	 * Some dates on attachments were way wrong in the future and this will fix them.
+	 *
+	 * Loops over all images, checks date, fixes if necessary.
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function fix_image_dates_from_json( array $pos_args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->images_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		$now              = date( 'Y-m-d H:i:s' );
+		$json_date_format = 'Y-m-d\TH:i:sP';
+		$wp_date_format   = 'Y-m-d H:i:s';
+
+		$row_number = 0;
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			if ( $row_number % 10 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
+			++$row_number;
+
+			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
+
+			if ( ! $existing_id ) {
+				continue;
+			}
+			$img_post        = get_post( $existing_id );
+			$attachment_date = $img_post->post_date;
+
+			if ( ! $img_post instanceof WP_Post || $now > $attachment_date ) {
+				continue;
+			}
+			$created_at = DateTime::createFromFormat( $json_date_format, trim( $row->created ), $this->site_timezone );
+			$updated_at = DateTime::createFromFormat( $json_date_format, trim( $row->modified ), $this->site_timezone );
+
+			$created_at_formatted = $created_at->format( $wp_date_format );
+			$updated_at_formatted = $updated_at->format( $wp_date_format );
+
+			wp_update_post( [
+				'ID'            => $existing_id,
+				'post_date'     => $created_at_formatted,
+				'post_modified' => $updated_at_formatted,
+				'post_date_gmt' => get_gmt_from_date( $created_at_formatted, $wp_date_format ),
+			] );
+
+			$this->logger->log(
+				$log_file,
+				sprintf( 'Updated date on %s from %s to %s',
+					home_url( "wp-admin/upload.php?item={$existing_id}" ),
+					$attachment_date,
+					$created_at_formatted,
+				),
+				Logger::SUCCESS
+			);
+		}
+	}
+
+	/**
+	 * Put the authors from the JSON on posts.
+	 *
+	 * This function can be used to repair broken authors. It can take a partial file of articles or an
+	 * entire one. A partial one could look like this:
+	 * cat HCNNewsArticle.json | jq  '.[] | select(.author|test("Some Name|Other Name|You get it"))  | {UID: .UID, author: .author}' | jq -s > authors.json
+	 *
+	 * @param array $pos_args
+	 * @param array $assoc_args
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function fix_authors_from_json( array $pos_args, array $assoc_args ): void {
+		$log_file   = __FUNCTION__ . '.log';
+		$file_path  = $assoc_args[ $this->articles_json_arg['name'] ];
+		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $file_path, $assoc_args );
+
+		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			$post_id = $this->get_post_id_from_uid( $row->UID );
+			if ( empty( $post_id ) ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find post with UID %s', $row->UID ), Logger::ERROR );
+				continue;
+			}
+			$co_authors = array_map(
+				fn( $author ) => $this->coauthorsplus_logic->get_guest_author_by_id( $this->coauthorsplus_logic->create_guest_author( [ 'display_name' => $author ] ) ),
+				$this->parse_author_string( $row->author )
+			);
+
+			if ( empty( $co_authors ) ) {
+				$this->logger->log( $log_file, sprintf( 'Could not find or create author %s', $row->author ), Logger::ERROR );
+			}
+
+			$this->coauthorsplus_logic->assign_authors_to_post( $co_authors, $post_id );
+			$this->logger->log( $log_file, sprintf( 'Updated author(s) to %s on %s', $row->author, get_permalink( $post_id ) ), Logger::SUCCESS );
+		}
+
 	}
 
 	/**
@@ -603,14 +740,16 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	public function fix_wp_related_links_in_posts( array $args, array $assoc_args ): void {
 		$log_file = __FUNCTION__ . '.log';
 
-		$num_items = $assoc_args['num-items'] ?? PHP_INT_MAX;
-		$post_ids  = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
+		$num_items   = $assoc_args['num-items'] ?? PHP_INT_MAX;
+		$min_post_id = $assoc_args['min-post-id'] ?? 0;
+
+		$post_ids = ! empty( $assoc_args['post-id'] ) ? [ $assoc_args['post-id'] ] : false;
 		if ( ! $post_ids ) {
 			global $wpdb;
 			$post_ids = $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE '%[RELATED:%' ORDER BY ID DESC LIMIT %d",
-					[ $num_items ]
+					"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' AND ID >= %d AND post_content LIKE '%[RELATED:%' ORDER BY ID DESC LIMIT %d",
+					[ $min_post_id, $num_items ]
 				)
 			);
 		}
@@ -647,8 +786,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
+			if ( $row_number % 500 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
 			$row_number ++;
-			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number, $batch_args['total'], $row->username ) );
 
 			if ( empty( $row->email ) ) {
 				continue; // Nope. No email, no user.
@@ -685,9 +826,9 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			);
 
 			if ( is_wp_error( $result ) ) {
-				WP_CLI::log( $result->get_error_message() );
+				$this->logger->log( 'failed-users.log', sprintf( 'Failed to create user %s', $row->email ), Logger::ERROR );
 			} else {
-				WP_CLI::success( "User $row->email created." );
+				$this->logger->log( 'new-users.log', sprintf( 'Created new user %s', $row->email ), Logger::SUCCESS );
 			}
 		}
 	}
@@ -724,7 +865,11 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$batch_args = $this->json_iterator->validate_and_get_batch_args_for_json_file( $issues_json, $assoc_args );
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $issues_json, $batch_args['start'], $batch_args['end'] ) as $issue ) {
-			WP_CLI::log( sprintf( 'Processing issue (%d of %d): %s', ++ $row_number, $batch_args['total'], $issue->{'@id'} ) );
+			if ( $row_number % 500 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
+			$row_number ++;
+
 			$alias = false;
 
 			$slug = substr( $issue->{'@id'}, strrpos( $issue->{'@id'}, '/' ) + 1 );
@@ -792,10 +937,16 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 			$image_id = 0;
 			if ( ! empty( $issue->image ) ) {
-				$blob_file_path      = $blobs_folder . $issue->image->blob_path;
+
+				if ( ! empty( $issue->image->download ) ) {
+					$path = $issue->image->download;
+				} elseif ( ! empty( $issue->image->blob_path ) ) {
+					$path = $blobs_folder . $issue->image->blob_path;
+				}
+
 				$image_attachment_id = $this->attachments->import_attachment_for_post(
 					$post_id,
-					$blob_file_path,
+					$path,
 					'Magazine cover: ' . $issue_name,
 					[],
 					$issue->image->filename
@@ -896,7 +1047,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 		$row_number = 0;
 		foreach ( $this->json_iterator->batched_items( $file_path, $batch_args['start'], $batch_args['end'] ) as $row ) {
-			WP_CLI::log( sprintf( 'Processing row %d of %d: %s', $row_number ++, $batch_args['total'], $row->{'@id'} ) );
+			if ( $row_number % 10 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d / %d', $row_number, $batch_args['total'] ) );
+			}
+			++ $row_number;
 
 			if ( empty( $row->image->filename ) && empty( $row->legacyPath ) ) {
 				continue;
@@ -904,7 +1058,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			$existing_id = $this->get_attachment_id_by_uid( $row->UID );
 
 			if ( $existing_id && ! $refresh ) {
-				$this->logger->log( $log_file, 'Image already imported. Skipping.' );
 				continue;
 			}
 
@@ -939,7 +1092,10 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				'post_modified' => $updated_at->format( 'Y-m-d H:i:s' ),
 			];
 
-			if ( ! empty( $row->image->blob_path ) ) {
+			if ( ! empty( $row->image->download ) ) {
+				$path     = $row->image->download;
+				$filename = $row->image->filename;
+			} elseif ( ! empty( $row->image->blob_path ) ) {
 				$path     = $blobs_path . '/' . $row->image->blob_path;
 				$filename = $row->image->filename;
 			} else {
@@ -1012,6 +1168,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			if ( $existing_id && ! $refresh_existing ) {
 				$this->logger->log( $log_file, sprintf( 'Article already imported. Skipping: %s', $row->{'@id'} ) );
 				update_post_meta( $existing_id, 'plone_tree_path', $tree_path );
+				continue;
 			}
 
 			$post_date_string     = $row->effective ?? $row->created;
@@ -1184,7 +1341,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	private function replace_galleries_in_post_content( string $text, string $tree_path, int $post_id, bool $is_inline, bool $force_all_images_fetch = false ): string {
 		// The force fetch is a desperate measure to get the images for the inline galleries. Should only be used in
 		// runs where we are trying to fix the inline galleries.
-		$fetch_all_img = $is_inline || $force_all_images_fetch;
+		$fetch_all_img  = $is_inline || $force_all_images_fetch;
 		$gallery_images = $this->get_attachment_ids_by_tree_path( $tree_path, $fetch_all_img );
 
 		if ( $fetch_all_img ) {
@@ -1209,7 +1366,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 			preg_match_all( $regex, $text, $gallery_matches );
 
 			foreach ( $gallery_matches[0] as $idx => $gallery_anchor ) {
-				$gallery_id = $gallery_matches[1][ $idx ] ?? false;
+				$gallery_id              = $gallery_matches[1][ $idx ] ?? false;
 				$images_for_this_gallery = $gallery_images;
 				if ( false !== $gallery_id ) {
 					// Grab only the ones with the given gallery id.

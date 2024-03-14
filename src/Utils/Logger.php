@@ -7,7 +7,7 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Class for handling commands' logging
@@ -20,6 +20,7 @@ class Logger {
 	const LINE    = 'line';
 	const SUCCESS = 'success';
 	const ERROR   = 'error';
+	const INFO    = 'info';
 
 	/**
 	 * Determine the writeable directory used for storing logs created by migration commands.
@@ -34,7 +35,6 @@ class Logger {
 		}
 
 		return $log_dir . DIRECTORY_SEPARATOR . $filename . '.log';
-
 	}
 
 	/**
@@ -65,13 +65,21 @@ class Logger {
 				case ( self::ERROR ):
 					WP_CLI::error( $message, $exit_on_error );
 					break;
+				case ( self::INFO ):
+					$label = 'Info';
+					if ( class_exists( 'cli\Colors' ) ) {
+						$color = '%B';
+						$label = \cli\Colors::colorize( "$color$label:%n", true );
+					} else {
+						$label = "$label:";
+					}
+					WP_CLI::line( "$label $message" );
+					break;
 				case ( self::LINE ):
 				default:
 					WP_CLI::line( $message );
 					break;
 			}
 		}
-
 	}
-
 }

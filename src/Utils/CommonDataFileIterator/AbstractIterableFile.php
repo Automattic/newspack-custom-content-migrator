@@ -7,7 +7,7 @@
 
 namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use \Exception;
+use Exception;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\IterableFile;
 
 /**
