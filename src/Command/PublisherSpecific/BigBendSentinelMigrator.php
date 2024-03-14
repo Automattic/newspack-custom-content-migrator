@@ -63,6 +63,14 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			[ $this, 'cmd_convert_people_cpt' ],
 			[
 				'shortdesc' => 'Convert People CPT to Co-Authors Plus and add Redirects.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => 'During Content Diff, custom Taxonomies are only in Live tables.',
+						'optional'    => true,
+					],
+				],
 			]
 		);
 
@@ -338,6 +346,23 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 	public function cmd_convert_people_cpt( $pos_args, $assoc_args ) {
 
+		$live_table_prefix = null;
+		$original_prefix = null;
+		$original_post_id = null;
+
+		if( isset( $assoc_args['live-table-prefix'] ) ) {
+
+			$live_table_prefix_regex = '/^[0-9A-Za-z_]+$/';
+			
+			if( ! preg_match( $live_table_prefix_regex, $assoc_args['live-table-prefix'] ) ) {
+				WP_CLI::error( 'Live table prefix must match: ' . $live_table_prefix_regex );
+			}
+			
+			$live_table_prefix = $assoc_args['live-table-prefix'];
+			WP_CLI::line( 'Using live table prefix: ' . $live_table_prefix );
+
+		}
+
 		// register the taxonomy since the old site had this in their theme
         register_taxonomy('people', ['post', 'attachment'], [
             'labels' => [
@@ -391,6 +416,11 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		$cache_gas_for_posts = [];
 
+		if( $live_table_prefix ) {
+			$original_prefix = $wpdb->get_blog_prefix();
+			$wpdb->set_prefix( $live_table_prefix );
+		}
+
 		$people = $wpdb->get_results("
 			SELECT tt.term_taxonomy_id, t.name, t.slug
 			FROM {$wpdb->term_taxonomy} tt
@@ -399,7 +429,11 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			order by t.name, t.slug
 		");
 
-        $this->logger->log( $log, 'Found people: ' . count( $people ) );
+		if( $live_table_prefix ) {
+			$wpdb->set_prefix( $original_prefix );
+		}
+
+		$this->logger->log( $log, 'Found people: ' . count( $people ) );
 
 		foreach( $people as $person ) {
 
@@ -462,7 +496,27 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 			// get display names - this "should" get bylines in correct author order (if multiple)
 			// turn off old site plugin: Custom Taxonomy Order
+
+			$maybe_live_post_id = get_post_meta( $post_id, 'newspackcontentdiff_live_id', true );
+
+			if( $live_table_prefix ) {
+				
+				$original_post_id = $post_id;
+				$post_id = $maybe_live_post_id;
+
+				$original_prefix = $wpdb->get_blog_prefix();
+				$wpdb->set_prefix( $live_table_prefix );
+
+			}
+	
 			$terms = wp_get_post_terms( $post_id, 'people', array( 'fields' => 'names' ) );
+
+			if( $live_table_prefix ) {
+				
+				$post_id = $original_post_id;
+				$wpdb->set_prefix( $original_prefix );
+
+			}
 
 			// if no terms, assign default GA
 			if ( count( $terms ) == 0 ) {
@@ -743,6 +797,5 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		if( empty( $report[$key] ) ) $report[$key] = 0;
 		$report[$key]++;
 	}
-	
 
 }
