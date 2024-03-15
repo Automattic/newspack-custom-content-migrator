@@ -223,7 +223,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$post_ids = $wpdb->get_col(
 				$wpdb->prepare(
 					"SELECT ID FROM $wpdb->posts 
-          					WHERE post_type = 'attachment'
+          					WHERE post_type = 'post'
           					AND ID < %d
           					AND ( post_excerpt LIKE '%&#%' OR post_content LIKE '%&#%' )
           					ORDER BY ID DESC",
