@@ -22,6 +22,10 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 	private $pdf_post_category_slug = 'issue-pdfs';
 
+	private $live_table_prefix;
+	private $original_prefix;
+
+
 	/**
 	 * Constructor.
 	 */
@@ -55,6 +59,14 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			[ $this, 'cmd_convert_issues_cpt' ],
 			[
 				'shortdesc' => 'Convert Issues Custom Taxonomy to Pages and Tags and maybe some Redirects.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'live-table-prefix',
+						'description' => 'During Content Diff, custom Taxonomies are only in Live tables.',
+						'optional'    => true,
+					],
+				],
 			]
 		);
 
@@ -93,6 +105,24 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 	}
 	
 	public function cmd_convert_issues_cpt( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+		
+		if( isset( $assoc_args['live-table-prefix'] ) ) {
+
+			$live_table_prefix_regex = '/^[0-9A-Za-z_]+$/';
+			
+			if( ! preg_match( $live_table_prefix_regex, $assoc_args['live-table-prefix'] ) ) {
+				WP_CLI::error( 'Live table prefix must match: ' . $live_table_prefix_regex );
+			}
+			
+			$this->original_prefix = $wpdb->get_blog_prefix();
+
+			$this->live_table_prefix = $assoc_args['live-table-prefix'];
+
+			WP_CLI::line( 'Using live table prefix: ' . $this->live_table_prefix );
+
+		}
 
 		// register the taxonomy since the old site had this in their theme
         register_taxonomy('issue', ['post'], [
@@ -134,8 +164,6 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 
-		global $wpdb;
-		
 		// set patterns
 		
 		$pattern_for_page = $wpdb->get_var(
@@ -168,6 +196,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 		$this->logger->log( $log , 'Starting conversion of Issues Taxonomy.' );
 
+		if( $this->live_table_prefix ) $wpdb->set_prefix( $this->live_table_prefix );
+
 		$issues = $wpdb->get_results("
 			SELECT t.term_id, t.name, t.slug
 			FROM {$wpdb->term_taxonomy} tt
@@ -176,6 +206,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			order by slug
 		");
 
+		if( $this->live_table_prefix ) $wpdb->set_prefix( $this->original_prefix );
+
         $this->logger->log( $log, 'Found issues: ' . count( $issues ) );
 
 		foreach( $issues as $issue ) {
@@ -183,6 +215,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			$this->logger->log( $log, 'Converting issue: ' . $issue->term_id . '; ' . $issue->name . '; ' . $issue->slug );
 			$this->report_add( $report, 'Converting issue.' );
 
+			if( $this->live_table_prefix ) $wpdb->set_prefix( $this->live_table_prefix );
+	
 			// get post ids
 			$posts = $wpdb->get_results( $wpdb->prepare( "
 				SELECT p.ID
@@ -192,6 +226,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 				where tt.taxonomy = 'issue' and tt.term_id = %d
 			", $issue->term_id ) );
 						
+			if( $this->live_table_prefix ) $wpdb->set_prefix( $this->original_prefix );
+
 			$this->logger->log( $log, 'Posts in issue: ' . count( $posts ) );
 
 			// skip if no posts
@@ -246,9 +282,29 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 
 			// add tag to posts
 			foreach( $posts as $post ) {
-				wp_add_post_tags( $post->ID, $issue->name );
+
+				$post_id_for_add_post_tags = $post->ID;
+
+				if( $this->live_table_prefix ) {
+
+					$post_id_for_add_post_tags = $wpdb->get_var( $wpdb->prepare("
+						SELECT post_id FROM {$wpdb->postmeta} where meta_key = 'newspackcontentdiff_live_id' and meta_value = %d
+						", $post->ID
+					));
+
+				}
+		
+				wp_add_post_tags( (int) $post_id_for_add_post_tags, $issue->name );
+							
 			}
 
+			// get term meta for volume
+			if( $this->live_table_prefix ) $wpdb->set_prefix( $this->live_table_prefix );
+
+			$issue_volume = get_term_meta( $issue->term_id, 'issue_volume', true );
+
+			if( $this->live_table_prefix ) $wpdb->set_prefix( $this->original_prefix );
+	
 			// get or create PDF post
 			// NOTE: PDF Post and Issue Page share the same Title
 			$pdf_post_id = $this->get_or_create_pdf_post( $page_title, $issue, $issue_name_split[0], $pattern_for_pdf_post, $wp_user, $log, $report );
@@ -256,7 +312,7 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 			// set Page content from pattern
 			$page_pattern = $pattern_for_page;
 	
-			$page_pattern = str_replace( 'Vol. XX No. XX', get_term_meta( $issue->term_id, 'issue_volume', true ), $page_pattern );
+			$page_pattern = str_replace( 'Vol. XX No. XX', $issue_volume, $page_pattern );
 
 			$page_pattern = str_replace( 
 				'"postsToShow":12,"includeSubcategories":false,',
@@ -677,7 +733,21 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		} 
 
 		// get PDF file attachment
+
+		if( $this->live_table_prefix ) $wpdb->set_prefix( $this->live_table_prefix );
+
 		$pdf_attachment_id = get_term_meta( $issue->term_id, 'issue_pdf', true );
+
+		if( $this->live_table_prefix ) {
+			
+			$wpdb->set_prefix( $this->original_prefix );
+
+			$pdf_attachment_id = $wpdb->get_var( $wpdb->prepare("
+				SELECT post_id FROM {$wpdb->postmeta} where meta_key = 'newspackcontentdiff_live_id' and meta_value = %d
+				", $pdf_attachment_id
+			));
+			
+		}
 
 		if ( empty( $pdf_attachment_id ) || false == is_numeric( $pdf_attachment_id ) || ! ( $pdf_attachment_id > 0 ) ) {
 			$this->logger->log( $log, 'FYI: PDF attachment ID not gt 0.' );
@@ -700,8 +770,8 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		// update pattern for content
 		$pdf_pattern = str_replace( 'wp:file {"id":22408', 'wp:file {"id":' . $pdf_attachment_id, $pdf_pattern );
 		$pdf_pattern = str_replace( '08-03-23 bbs for web', esc_attr( $pdf_attachment[0]->post_title ), $pdf_pattern );
-		$pdf_pattern = str_replace(
-			'https://bigbendsentinel-newspack.newspackstaging.com/wp-content/uploads/2023/08/08-03-23-bbs-for-web.pdf',
+		$pdf_pattern = preg_replace(
+			'#https://[^/]+/wp-content/uploads/2023/08/08-03-23-bbs-for-web.pdf#',
 			wp_get_attachment_url( $pdf_attachment_id ),
 			$pdf_pattern
 		);
@@ -725,7 +795,20 @@ class BigBendSentinelMigrator implements InterfaceCommand {
 		update_post_meta( $new_pdf_post_id, '_wp_page_template', 'single-feature.php' ); // 'One column'
 
 		// set PDF image only if exists
+		if( $this->live_table_prefix ) $wpdb->set_prefix( $this->live_table_prefix );
+
 		$pdf_featured_image_id = get_term_meta( $issue->term_id, 'issue_image', true );
+
+		if( $this->live_table_prefix ) {
+			
+			$wpdb->set_prefix( $this->original_prefix );
+
+			$pdf_featured_image_id = $wpdb->get_var( $wpdb->prepare("
+				SELECT post_id FROM {$wpdb->postmeta} where meta_key = 'newspackcontentdiff_live_id' and meta_value = %d
+				", $pdf_featured_image_id
+			));
+			
+		}
 
 		if ( empty( $pdf_featured_image_id ) || false == is_numeric( $pdf_featured_image_id ) || ! ( $pdf_featured_image_id > 0 ) ) {
 			$this->logger->log( $log, 'FYI: PDF image ID not gt 0.' );
