@@ -581,7 +581,7 @@ HTML;
 	 * This function will handle updating the bylines for all posts which do not already have the custom RT byline set.
 	 *
 	 * @param array $args Positional arguments.
-	 * @param array $assoc_args Associative arguments
+	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
@@ -614,7 +614,7 @@ HTML;
 						->output();
 			$guest_authors    = $this->cap_logic->get_guest_authors_for_post( $post->ID );
 			$guest_author_ids = array_map(
-				function( $guest_author ) {
+				function ( $guest_author ) {
 					return $guest_author->ID;
 				},
 				$guest_authors
@@ -623,7 +623,7 @@ HTML;
 			$additional_contributor_meta  = get_post_meta( $post->ID, 'newspack_chorus_additional_contributor_ga_id' );
 			$additional_contributor_meta  = array_filter(
 				$additional_contributor_meta,
-				function( $meta_data ) {
+				function ( $meta_data ) {
 					return is_numeric( $meta_data ); // There are WP_Error classes which were saved as additional contributors.
 				}
 			);
