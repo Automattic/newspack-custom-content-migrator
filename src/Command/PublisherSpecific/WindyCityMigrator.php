@@ -2,11 +2,15 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use \DateTimeImmutable;
+use \DateTimeZone;
 use \WP_CLI;
+use \WP_CLI\ExitException;
 use \WP_Post;
+use \WP_Query;
 use \WP_User;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Utils\BatchLogic;
 use \NewspackCustomContentMigrator\Utils\CsvIterator;
@@ -18,6 +22,11 @@ use \NewspackCustomContentMigrator\Utils\Logger;
 class WindyCityMigrator implements InterfaceCommand {
 	const LOG_FILE             = 'windy-city-migrator.log';
 	const ORIGINAL_ID_META_KEY = '_newspack_original_id';
+
+	const DEFAULT_AUTHOR_ID = 2;
+
+	const MYSQL_DATETIME_FORMAT = 'Y-m-d H:i:s';
+
 
 	/**
 	 * CSV input file.
@@ -31,8 +40,15 @@ class WindyCityMigrator implements InterfaceCommand {
 		'optional'    => false,
 	];
 
+	private array $refresh_existing = [
+		'type'        => 'flag',
+		'name'        => 'refresh-existing',
+		'description' => 'Will refresh existing content rather than create new',
+		'optional'    => true,
+	];
+
 	/**
-	 * @var AttachmentsLogic.
+	 * @var Attachments.
 	 */
 	private $attachments_logic;
 
@@ -52,13 +68,14 @@ class WindyCityMigrator implements InterfaceCommand {
 	private $csv_iterator;
 
 	/**
+	 * @var DateTimeZone.
+	 */
+	private DateTimeZone $site_timezone;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->attachments_logic         = new AttachmentsLogic();
-		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
-		$this->logger                    = new Logger();
-		$this->csv_iterator              = new CsvIterator();
 	}
 
 	/**
@@ -75,6 +92,32 @@ class WindyCityMigrator implements InterfaceCommand {
 		return $instance;
 	}
 
+	public function preflight(): void {
+		static $checked = false;
+
+		if ( $checked ) {
+			// It looks like this gets called at least more than once pr. run, so bail if we already checked.
+			return;
+		}
+
+		$this->attachments_logic         = new Attachments();
+		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+		$this->logger                    = new Logger();
+		$this->csv_iterator              = new CsvIterator();
+		$this->site_timezone             = new DateTimeZone( 'America/Chicago' );
+
+		$check_required_plugins = [
+			'newspack-listings/newspack-listings.php' => 'Newspack listings',
+		];
+		foreach ( $check_required_plugins as $plugin => $plugin_name ) {
+			if ( ! is_plugin_active( $plugin ) ) {
+				WP_CLI::error( '"' . $plugin_name . '" plugin not found. Install and activate it before using the migration commands.' );
+			}
+		}
+
+		$checked = true;
+	}
+
 	/**
 	 * See InterfaceCommand::register_commands.
 	 */
@@ -83,6 +126,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			'newspack-content-migrator windy-city-migrator',
 			[ $this, 'cmd_windy_city_migrator' ],
 			[
+				'before_invoke' => [ $this, 'preflight' ],
 				'shortdesc' => 'Custom migration scripts for Windy City.',
 				'synopsis'  => [
 					$this->csv_input_file,
@@ -117,9 +161,29 @@ class WindyCityMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator windy-city-pdf-listings',
+			[ $this, 'cmd_windy_city_pdf_listings' ],
+			[
+				'before_invoke' => [ $this, 'preflight' ],
+				'shortdesc'     => 'Import PDF listings from CSV.',
+				'synopsis'      => [
+					... BatchLogic::get_batch_args(),
+					$this->refresh_existing,
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-input-file',
+						'description' => 'Path to CSV input file.',
+						'optional'    => false,
+					],
+				],
+			],
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator windy-city-fix-html-entites',
 			[ $this, 'cmd_windy_city_fix_html_entites' ],
 			[
+				'before_invoke' => [ $this, 'preflight' ],
 				'shortdesc' => 'Fix HTML entities in Windy City content.',
 				'synopsis'  => [
 					BatchLogic::$num_items,
@@ -132,6 +196,93 @@ class WindyCityMigrator implements InterfaceCommand {
 				],
 			],
 		);
+	}
+
+	/**
+	 * @throws ExitException
+	 */
+	public function cmd_windy_city_pdf_listings( array $pos_args, array $assoc_args ): void {
+		$log_file      = __FUNCTION__ . '.log';
+		$csv_file_path = $assoc_args['csv-input-file'];
+		$refresh       = $assoc_args['refresh-existing'] ?? false;
+
+		$batch_args = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
+
+		// Keys here correspond to the publication names in the CSV file.
+		$archive_cats = [
+			'Windy City Times' => 333, // Archives -> Windy City Times -> print edition.
+			'nightspots'       => 339, // Archives -> Nightspots -> print edition.
+		];
+
+		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row_no => $row ) {
+			$num_item_prcoessing = $row_no + 1;
+			if ( $num_item_prcoessing % 10 === 0 ) {
+				WP_CLI::log( sprintf( 'Processing row %d/%d', $num_item_prcoessing, $batch_args['total'] ) );
+			}
+
+			$post_type     = 'newspack_lst_generic';
+			$pub           = $row['IPUBNAME'];
+			$cat_id        = $archive_cats[ $pub ];
+			$date          = DateTimeImmutable::createFromFormat( 'Y-m-d', $row['IDATE'], $this->site_timezone );
+			$listing_title = $date->format( 'F j, Y' );
+
+			$query     = new WP_Query( [
+				'post_type' => $post_type,
+				'category'  => $cat_id,
+				'title'     => $listing_title,
+			] );
+
+			$post_data = [
+				'post_title'    => $listing_title,
+				'post_status'   => 'publish',
+				'post_author'   => self::DEFAULT_AUTHOR_ID,
+				'post_type'     => $post_type,
+				'post_category' => [ $cat_id ],
+				'post_date'     => $date->format( self::MYSQL_DATETIME_FORMAT ),
+				'meta_input'    => [
+					'newspack_featured_image_position' => 'hidden',
+					'_wp_page_template' => 'default',
+				],
+			];
+			if ( $query->found_posts < 1 ) {
+				$listing_id = wp_insert_post( $post_data );
+			} else {
+				if ( ! $refresh ) {
+					WP_CLI::log( sprintf( 'Row with title "%s" for pub "%s" has already been imported – skipping', $listing_title, $pub ) );
+					continue;
+				}
+				$listing_id      = $query->posts[0];
+				$post_data['ID'] = $listing_id;
+				wp_update_post( $post_data );
+			}
+			if ( ! $listing_id || is_wp_error( $listing_id ) ) {
+				WP_CLI::error( sprintf( 'Failed to create/update post for row %d', $num_item_prcoessing ) );
+			}
+
+			$featured_img_id = $this->attachments_logic->import_attachment_for_post( $listing_id, $row['IIMAGE'], $listing_title );
+			if ( ! is_wp_error( $featured_img_id ) ) {
+				set_post_thumbnail( $listing_id, $featured_img_id );
+			}
+
+			$pdf_id = $this->attachments_logic->import_attachment_for_post( $listing_id, $row['IPDF'], $listing_title );
+			if ( ! is_wp_error( $pdf_id ) ) {
+				$pdf_post = get_post( $pdf_id );
+				$block    = $this->gutenberg_block_generator->get_file_pdf( $pdf_post, $listing_title, false, 800 );
+				wp_update_post( [ 'ID' => $listing_id, 'post_content' => serialize_block( $block ) ] ); // Only content in post is the file PDF block.
+			}
+
+			$this->logger->log(
+				$log_file,
+				sprintf(
+					'Row with title "%s" for pub "%s" has been imported to ID %d: %s',
+					$listing_title,
+					$pub,
+					$listing_id,
+					get_permalink( $listing_id )
+				),
+				Logger::SUCCESS
+			);
+		}
 	}
 
 	public function cmd_windy_city_fix_html_entites( array $pos_args, array $assoc_args ): void {
