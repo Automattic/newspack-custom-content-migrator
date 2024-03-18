@@ -60,13 +60,13 @@ class PostDateMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'from-timezone',
-						'description' => 'Current timezone of the posts',
+						'description' => 'Current timezone of the posts. Eg. --from-timezone="UTC"',
 						'optional'    => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'target-timezone',
-						'description' => 'Desired timezone of the posts',
+						'description' => 'Desired timezone of the posts. Eg. --target-timezone="America/New_York"',
 						'optional'    => false,
 					],
 					[
@@ -91,7 +91,7 @@ class PostDateMigrator implements InterfaceCommand {
 	 * @throws Exception If the operation fails.
 	 */
 	public function cmd_change_posts_timezone( array $pos_args, array $assoc_args ): void {
-		$metadata_key = 'np_timezone_fix';
+		$metadata_key = '_np_timezone_fix';
 
 		$num_items       = $assoc_args['num-items'] ?? PHP_INT_MAX;
 		$from_timezone   = new DateTimeZone( $assoc_args['from-timezone'] );
@@ -112,20 +112,30 @@ class PostDateMigrator implements InterfaceCommand {
 		$total_posts = count( $post_ids );
 		foreach ( $post_ids as $row_no => $post_id ) {
 			WP_CLI::log( sprintf( 'Processing (%d/%d) post id: %d', ( $row_no + 1 ), $total_posts, $post_id ) );
-			$post     = get_post( $post_id );
-			$new_date = $this->convert_date_to_timezone( $post->post_date, $from_timezone, $target_timezone );
-			$result   = wp_update_post(
+			$post = get_post( $post_id );
+
+			$new_post_date     = $this->convert_date_to_timezone( $post->post_date, $from_timezone, $target_timezone );
+			$new_modified_date = $this->convert_date_to_timezone( $post->post_modified, $from_timezone, $target_timezone );
+
+			$result = wp_update_post(
 				[
-					'ID'            => $post_id,
-					'post_date'     => $new_date,
-					'post_date_gmt' => get_gmt_from_date( $new_date ),
+					'ID'                => $post_id,
+					'post_date'         => $new_post_date,
+					'post_date_gmt'     => get_gmt_from_date( $new_post_date ),
+					'post_modified'     => $new_modified_date,
+					'post_modified_gmt' => get_gmt_from_date( $new_modified_date ),
+					'meta_input'        => [ $metadata_key => 1 ],
 				]
 			);
 
 			if ( is_wp_error( $result ) ) {
 				WP_CLI::error( sprintf( 'Failed to update post id: %d', $post_id ) );
+				continue;
 			}
+			WP_CLI::log( sprintf( 'Updated time from %s to %s on post id %d', $post->post_date, $new_post_date, $post_id ) );
 		}
+
+		WP_CLI::log( sprintf( 'Updated time on %d posts', $total_posts ) );
 	}
 
 	/**
