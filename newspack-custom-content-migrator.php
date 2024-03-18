@@ -72,7 +72,6 @@ PluginSetup::register_migrators(
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
 		Command\General\BlockTransformerCommand::class,
-		Command\General\CreativeCircleMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\RetroReportMigrator::class,
@@ -87,7 +86,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
-		Command\PublisherSpecific\InjusticeWatchMigrator::class,
 		Command\PublisherSpecific\CityViewMigrator::class,
+		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 	)
 );
