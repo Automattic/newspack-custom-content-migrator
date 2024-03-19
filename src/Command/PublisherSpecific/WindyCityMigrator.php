@@ -210,6 +210,25 @@ class WindyCityMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator windy-city-place-listings',
+			[ $this, 'cmd_windy_city_place_listings' ],
+			[
+				'before_invoke' => [ $this, 'preflight' ],
+				'shortdesc'     => 'Import place listings from CSV.',
+				'synopsis'      => [
+					... BatchLogic::get_batch_args(),
+					$this->refresh_existing,
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-input-file',
+						'description' => 'Path to CSV input file.',
+						'optional'    => false,
+					],
+				],
+			],
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator windy-city-fix-html-entites',
 			[ $this, 'cmd_windy_city_fix_html_entites' ],
 			[
@@ -294,13 +313,6 @@ class WindyCityMigrator implements InterfaceCommand {
 
 			$url                = wp_parse_url( $row['COMCANONICALURL'] );
 			$redirect_path      = $url['path'] . '?' . $url['query'];
-			$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $redirect_path );
-			if ( ! empty( $existing_redirects ) ) {
-				foreach ( $existing_redirects as $existing_redirect ) {
-					$existing_redirect->delete();
-				}
-			}
-
 			$this->redirection->create_redirection_rule_in_group(
 				'Community Group: ' . $listing_title,
 				$redirect_path,
@@ -321,6 +333,111 @@ class WindyCityMigrator implements InterfaceCommand {
 			);
 		}
 
+	}
+
+	/**
+	 * Import place listings from CSV.
+	 *
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function cmd_windy_city_place_listings( array $pos_args, array $assoc_args ): void {
+		$log_file      = __FUNCTION__ . '.log';
+		$csv_file_path = $assoc_args['csv-input-file'];
+		$refresh       = $assoc_args['refresh-existing'] ?? false;
+		$post_type     = 'newspack_lst_place';
+		$cat_id        = 330; // Bars
+
+		$batch_args = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
+
+		WP_CLI::log( sprintf( '%s %d place listings', ( $refresh ? 'Refreshing' : 'Creating' ), $batch_args['total'] ) );
+		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row_no => $row ) {
+			$num_item_processing = $row_no + 1;
+			WP_CLI::log( sprintf( 'Processing row %d/%d', $num_item_processing, $batch_args['total'] ) );
+
+			$replaced_fields = $this->replace_html_entities( array_intersect_key( $row, array_flip( [ 'bar_name', 'description', 'hours' ] ) ) );
+			$address_data    = array_intersect_key( $row, array_flip( [ 'address', 'city', 'state', 'zipcode' ] ) );
+
+			$listing_title = $replaced_fields['bar_name'];
+			$content_blocks[] = $this->gutenberg_block_generator->get_paragraph(
+				sprintf(
+					'<a href="https://www.google.com/maps/search/?api=1&query=%s" target="_blank" rel="noreferrer noopener">%s</a>',
+					urlencode( implode( ',', $address_data ) ),
+					implode( ', ', $address_data )
+				)
+			);
+			$content_blocks[] = $this->gutenberg_block_generator->get_paragraph(
+				sprintf( '<a href="%1$s">%1$s</a><br>%2$s', $row['website'], $row['phone'] )
+			);
+
+			$content_blocks[] = $this->gutenberg_block_generator->get_html( $replaced_fields['description'] );
+			$content_blocks[] = $this->gutenberg_block_generator->get_html( $replaced_fields['hours'] );
+
+			$query = new WP_Query( [
+				'post_type' => $post_type,
+				'category'  => $cat_id,
+				'title'     => $listing_title,
+			] );
+
+			$post_data = [
+				'post_title'    => $listing_title,
+				'post_status'   => 'publish',
+				'post_author'   => self::DEFAULT_AUTHOR_ID,
+				'post_type'     => $post_type,
+				'post_content'     => serialize_blocks( $content_blocks),
+				'post_category' => [ $cat_id ],
+				'meta_input'    => [
+					'newspack_listings_hide_author' => 1,
+					'newspack_listings_hide_publish_date' => 1,
+				],
+			];
+
+			if ( $query->found_posts < 1 ) {
+				$listing_id = wp_insert_post( $post_data );
+				$verb       = 'created';
+			} else {
+				if ( ! $refresh ) {
+					WP_CLI::log( sprintf( 'Place with title "%s" has already been imported – skipping', $listing_title ) );
+					continue;
+				}
+				$listing_id      = $query->posts[0];
+				$post_data['ID'] = $listing_id;
+				wp_update_post( $post_data );
+				$verb       = 'updated';
+			}
+			if ( ! $listing_id || is_wp_error( $listing_id ) ) {
+				WP_CLI::error( sprintf( 'Failed to %s post for row %d', $verb, $num_item_processing ) );
+			}
+
+			$featured_img_id = $this->attachments_logic->import_attachment_for_post( $listing_id, $row['image'], $listing_title );
+			if ( ! is_wp_error( $featured_img_id ) ) {
+				set_post_thumbnail( $listing_id, $featured_img_id );
+			}
+
+			$url                = wp_parse_url( $row['canonical_url'] );
+			$redirect_path      = $url['path'] . '?' . $url['query'];
+			$this->redirection->create_redirection_rule_in_group(
+				'Place listing: ' . $listing_title,
+				$redirect_path,
+				"/?p=$listing_id",
+				'Migration'
+			);
+
+			$this->logger->log(
+				$log_file,
+				sprintf(
+					'Place listing with title "%s" for has been %s. ID %d: %s',
+					$listing_title,
+					$verb,
+					$listing_id,
+					get_permalink( $listing_id )
+				),
+				Logger::SUCCESS
+			);
+		}
 	}
 
 	/**
