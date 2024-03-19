@@ -28,7 +28,7 @@ class PluginSetup {
 	/**
 	 * Configures all errors and warnings will be output to CLI.
 	 * 
-	 * @param string $level Error reporting level. Presently defaults to 'dev' but can be extended.
+	 * @param string $level Error reporting level. 'dev' is default. 'live' will not change error reporting.
 	 */
 	public static function configure_error_reporting( $level = 'dev' ) {
 		if ( 'dev' === $level ) {
@@ -50,6 +50,8 @@ class PluginSetup {
 			if ( ! defined( 'WP_DEBUG_DISPLAY' ) ) {
 				define( 'WP_DEBUG_DISPLAY', true );
 			}
+		} elseif( 'live' === $level ) {
+			// Do not alter default error reporting.
 		}
 	}
 
