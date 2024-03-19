@@ -2,22 +2,23 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \DateTimeImmutable;
-use \DateTimeZone;
-use \WP_CLI;
-use \WP_CLI\ExitException;
-use \WP_Post;
-use \WP_Query;
-use \WP_User;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Utils\BatchLogic;
-use \NewspackCustomContentMigrator\Utils\CsvIterator;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use DateTimeImmutable;
+use DateTimeZone;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Utils\BatchLogic;
+use NewspackCustomContentMigrator\Utils\CsvIterator;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
+use WP_CLI\ExitException;
+use WP_Post;
+use WP_Query;
+use WP_User;
 
 /**
- * Custom migration scripts for Saporta News.
+ * Custom migration scripts.
  */
 class WindyCityMigrator implements InterfaceCommand {
 	const LOG_FILE             = 'windy-city-migrator.log';
@@ -73,6 +74,11 @@ class WindyCityMigrator implements InterfaceCommand {
 	private DateTimeZone $site_timezone;
 
 	/**
+	 * @var Redirection
+	 */
+	private Redirection $redirection;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -92,6 +98,9 @@ class WindyCityMigrator implements InterfaceCommand {
 		return $instance;
 	}
 
+	/**
+	 * Set things up and check a few things before continuing.
+	 */
 	public function preflight(): void {
 		static $checked = false;
 
@@ -105,9 +114,11 @@ class WindyCityMigrator implements InterfaceCommand {
 		$this->logger                    = new Logger();
 		$this->csv_iterator              = new CsvIterator();
 		$this->site_timezone             = new DateTimeZone( 'America/Chicago' );
+		$this->redirection               = new Redirection();
 
 		$check_required_plugins = [
 			'newspack-listings/newspack-listings.php' => 'Newspack listings',
+			'redirection/redirection.php'             => 'Redirection',
 		];
 		foreach ( $check_required_plugins as $plugin => $plugin_name ) {
 			if ( ! is_plugin_active( $plugin ) ) {
@@ -127,8 +138,8 @@ class WindyCityMigrator implements InterfaceCommand {
 			[ $this, 'cmd_windy_city_migrator' ],
 			[
 				'before_invoke' => [ $this, 'preflight' ],
-				'shortdesc' => 'Custom migration scripts for Windy City.',
-				'synopsis'  => [
+				'shortdesc'     => 'Custom migration scripts for Windy City.',
+				'synopsis'      => [
 					$this->csv_input_file,
 					...BatchLogic::get_batch_args(),
 					[
@@ -180,12 +191,31 @@ class WindyCityMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator windy-city-group-listings',
+			[ $this, 'cmd_windy_city_group_listings' ],
+			[
+				'before_invoke' => [ $this, 'preflight' ],
+				'shortdesc'     => 'Import community group listings from CSV.',
+				'synopsis'      => [
+					... BatchLogic::get_batch_args(),
+					$this->refresh_existing,
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-input-file',
+						'description' => 'Path to CSV input file.',
+						'optional'    => false,
+					],
+				],
+			],
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator windy-city-fix-html-entites',
 			[ $this, 'cmd_windy_city_fix_html_entites' ],
 			[
 				'before_invoke' => [ $this, 'preflight' ],
-				'shortdesc' => 'Fix HTML entities in Windy City content.',
-				'synopsis'  => [
+				'shortdesc'     => 'Fix HTML entities in Windy City content.',
+				'synopsis'      => [
 					BatchLogic::$num_items,
 					[
 						'type'        => 'assoc',
@@ -196,6 +226,97 @@ class WindyCityMigrator implements InterfaceCommand {
 				],
 			],
 		);
+	}
+
+	/**
+	 * Import community group listings from CSV.
+	 *
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function cmd_windy_city_group_listings( array $pos_args, array $assoc_args ): void {
+		$log_file      = __FUNCTION__ . '.log';
+		$csv_file_path = $assoc_args['csv-input-file'];
+		$refresh       = $assoc_args['refresh-existing'] ?? false;
+		$post_type     = 'newspack_lst_generic';
+
+		$batch_args      = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
+		$groups_category = 340;
+
+		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row_no => $row ) {
+			$num_item_processing = $row_no + 1;
+			WP_CLI::log( sprintf( 'Processing row %d/%d', $num_item_processing, $batch_args['total'] ) );
+
+			$replaced_text = $this->replace_html_entities( [
+				'post_title'   => $row['COMCATEGORY'],
+				'post_content' => $row['COMBODY'],
+			] );
+
+			$replaced_text['post_content'] = serialize_block( $this->gutenberg_block_generator->get_html( $replaced_text['post_content'] ) );
+			$listing_title = $replaced_text['post_title'];
+
+			$query = new WP_Query( [
+				'post_type' => $post_type,
+				'category'  => $groups_category,
+				'title'     => $listing_title,
+			] );
+
+			$post_data = [
+				...$replaced_text,
+				'post_status'   => 'publish',
+				'post_author'   => self::DEFAULT_AUTHOR_ID,
+				'post_type'     => $post_type,
+				'post_category' => [ $groups_category ],
+				'meta_input'    => [
+					'_wp_page_template' => 'default',
+				],
+			];
+			if ( $query->found_posts < 1 ) {
+				$listing_id = wp_insert_post( $post_data );
+			} else {
+				if ( ! $refresh ) {
+					WP_CLI::log( sprintf( 'Row with title "%s" has already been imported – skipping', $post_data['post_title'] ) );
+					continue;
+				}
+				$listing_id      = $query->posts[0];
+				$post_data['ID'] = $listing_id;
+				wp_update_post( $post_data );
+			}
+			if ( ! $listing_id || is_wp_error( $listing_id ) ) {
+				WP_CLI::error( sprintf( 'Failed to create/update post for row %d', $num_item_processing ) );
+			}
+
+			$url = wp_parse_url($row['COMCANONICALURL']);
+			$redirect_path = $url['path'] . '?' . $url['query'];
+			$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $redirect_path );
+			if ( ! empty( $existing_redirects ) ) {
+				foreach ( $existing_redirects as $existing_redirect ) {
+					$existing_redirect->delete();
+				}
+			}
+
+			$this->redirection->create_redirection_rule_in_group(
+				'Community Group: ' . $listing_title,
+				$redirect_path,
+				"/?p=$listing_id",
+				'Migration'
+			);
+
+			$this->logger->log(
+				$log_file,
+				sprintf(
+					'Community group listing with title "%s" for has been imported to ID %d: %s',
+					$listing_title,
+					$listing_id,
+					get_permalink( $listing_id )
+				),
+				Logger::SUCCESS
+			);
+		}
+
 	}
 
 	/**
@@ -226,7 +347,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$date          = DateTimeImmutable::createFromFormat( 'Y-m-d', $row['IDATE'], $this->site_timezone );
 			$listing_title = $date->format( 'F j, Y' );
 
-			$query     = new WP_Query( [
+			$query = new WP_Query( [
 				'post_type' => $post_type,
 				'category'  => $cat_id,
 				'title'     => $listing_title,
@@ -241,7 +362,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				'post_date'     => $date->format( self::MYSQL_DATETIME_FORMAT ),
 				'meta_input'    => [
 					'newspack_featured_image_position' => 'hidden',
-					'_wp_page_template' => 'default',
+					'_wp_page_template'                => 'default',
 				],
 			];
 			if ( $query->found_posts < 1 ) {
@@ -274,7 +395,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$this->logger->log(
 				$log_file,
 				sprintf(
-					'Row with title "%s" for pub "%s" has been imported to ID %d: %s',
+					'PDF listing with title "%s" for pub "%s" has been imported to ID %d: %s',
 					$listing_title,
 					$pub,
 					$listing_id,
@@ -292,17 +413,13 @@ class WindyCityMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Replace select HTML entities in post content, excerpt and subtitle.
+	 * Replace select HTML entities in an array of items.
 	 *
-	 * @param WP_Post $post
+	 * @param array $items_to_replace Keyed array (e.g. ['excerpt' => '...', 'content' => '...']) to replace entities in multiple items.
 	 *
-	 * @return WP_Post
+	 * @return array the keyed array with replaced entities.
 	 */
-	private function fix_entities_in_post( WP_Post $post ): WP_Post {
-		if ( ! str_contains( $post->post_excerpt . $post->post_content, '&#', ) ) {
-			return $post;
-		}
-
+	private function replace_html_entities( array $items_to_replace ): array {
 		static $search, $replace = null;
 		if ( ! $search ) {
 			$replacements = [
@@ -334,6 +451,21 @@ class WindyCityMigrator implements InterfaceCommand {
 			$replace      = array_values( $replacements );
 		}
 
+		return preg_replace( $search, $replace, $items_to_replace );
+	}
+
+	/**
+	 * Replace select HTML entities in post content, excerpt and subtitle.
+	 *
+	 * @param WP_Post $post
+	 *
+	 * @return WP_Post
+	 */
+	private function fix_entities_in_post( WP_Post $post ): WP_Post {
+		if ( ! str_contains( $post->post_excerpt . $post->post_content, '&#', ) ) {
+			return $post;
+		}
+
 		$items_to_replace = [ 'excerpt' => $post->post_excerpt, 'content' => $post->post_content ];
 		if ( 'post' === $post->post_type ) {
 			$subtitle = get_post_meta( $post->ID, 'newspack_post_subtitle', true );
@@ -341,7 +473,8 @@ class WindyCityMigrator implements InterfaceCommand {
 				$items_to_replace['newspack_post_subtitle'] = get_post_meta( $post->ID, 'newspack_post_subtitle', true );
 			}
 		}
-		$replaced = preg_replace( $search, $replace, $items_to_replace );
+
+		$replaced = $this->replace_html_entities( $items_to_replace );
 
 		$post->post_excerpt = $replaced['excerpt'];
 		$post->post_content = $replaced['content'];
