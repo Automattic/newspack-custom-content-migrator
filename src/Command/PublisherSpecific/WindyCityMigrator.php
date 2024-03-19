@@ -246,6 +246,7 @@ class WindyCityMigrator implements InterfaceCommand {
 		$batch_args      = $this->csv_iterator->validate_and_get_batch_args_for_file( $csv_file_path, $assoc_args, ',' );
 		$groups_category = 340;
 
+		WP_CLI::log( sprintf( '%s %d community group listings', ( $refresh ? 'Refreshing' : 'Creating' ), $batch_args['total'] ) );
 		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row_no => $row ) {
 			$num_item_processing = $row_no + 1;
 			WP_CLI::log( sprintf( 'Processing row %d/%d', $num_item_processing, $batch_args['total'] ) );
@@ -256,7 +257,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			] );
 
 			$replaced_text['post_content'] = serialize_block( $this->gutenberg_block_generator->get_html( $replaced_text['post_content'] ) );
-			$listing_title = $replaced_text['post_title'];
+			$listing_title                 = $replaced_text['post_title'];
 
 			$query = new WP_Query( [
 				'post_type' => $post_type,
@@ -276,21 +277,23 @@ class WindyCityMigrator implements InterfaceCommand {
 			];
 			if ( $query->found_posts < 1 ) {
 				$listing_id = wp_insert_post( $post_data );
+				$verb       = 'created';
 			} else {
 				if ( ! $refresh ) {
 					WP_CLI::log( sprintf( 'Row with title "%s" has already been imported – skipping', $post_data['post_title'] ) );
 					continue;
 				}
-				$listing_id      = $query->posts[0];
+				$listing_id      = $query->posts[0]->ID;
 				$post_data['ID'] = $listing_id;
 				wp_update_post( $post_data );
+				$verb = 'updated';
 			}
 			if ( ! $listing_id || is_wp_error( $listing_id ) ) {
 				WP_CLI::error( sprintf( 'Failed to create/update post for row %d', $num_item_processing ) );
 			}
 
-			$url = wp_parse_url($row['COMCANONICALURL']);
-			$redirect_path = $url['path'] . '?' . $url['query'];
+			$url                = wp_parse_url( $row['COMCANONICALURL'] );
+			$redirect_path      = $url['path'] . '?' . $url['query'];
 			$existing_redirects = $this->redirection->get_redirects_by_exact_from_url( $redirect_path );
 			if ( ! empty( $existing_redirects ) ) {
 				foreach ( $existing_redirects as $existing_redirect ) {
@@ -308,8 +311,9 @@ class WindyCityMigrator implements InterfaceCommand {
 			$this->logger->log(
 				$log_file,
 				sprintf(
-					'Community group listing with title "%s" for has been imported to ID %d: %s',
+					'Community group listing with title "%s" for has been %s. ID %d: %s',
 					$listing_title,
+					$verb,
 					$listing_id,
 					get_permalink( $listing_id )
 				),
