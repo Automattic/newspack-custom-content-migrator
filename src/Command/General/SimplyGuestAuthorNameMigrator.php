@@ -95,21 +95,23 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 			array(
 				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
-				// 'fields'      => 'ids',
+				// Order by date desc so newest GAs created will have newest Bios.
+				'orderby'     => 'date',
+				'order'       => 'DESC',
+				// Limit data payload from DB.
+				'fields'      => 'ids',
 			),
-			function( $post ) use ( &$report ) {
+			function( $post_id ) use ( &$report ) {
 
-				$post_id = $post->ID;
 				$single_report = '-';
 
 				$this->logger->log( $this->log_file, 'Post id: ' . $post_id );
-				$this->logger->log( $this->log_file, 'Author id: ' . $post->post_author );
 				
-				// Post Author.
-				$wp_user = get_userdata( $post->post_author );
+				// Post Author (WP User).
+				$wp_user = get_userdata( get_post_field( 'post_author', $post_id ) );
 
 				if( is_a( $wp_user, 'WP_user' ) ) {
-					$this->logger->log( $this->log_file, 'WP User: ' . $wp_user->display_name );
+					$this->logger->log( $this->log_file, 'WP User: ' . $wp_user->ID . ' / ' . $wp_user->display_name );
 				}
 				else {
 					$this->logger->log( $this->log_file, 'WP User: (not exists)', $this->logger::WARNING );
@@ -117,13 +119,27 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 					$single_report .= 'wp-user-missing';
 				}
 
+				// Existing GAs.
+				$existing_gas = array_map( function( $ga ) {
+					return $ga->display_name;
+				}, $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id ));
+				
+				if( ! empty( $existing_gas ) ) {
+					$this->logger->log( $this->log_file, 'Existing GAs: ' . implode( ', ', $existing_gas ), $this->logger::WARNING );					
+					$report['gas-exist']++;
+					$single_report .= 'gas-exist';
+
+				}
+
 				// Simply meta.
 				$sfly = array(
-					'desc'  => get_post_meta( $post_id, 'sfly_guest_author_description', true ),
-					'email' => get_post_meta( $post_id, 'sfly_guest_author_email', true ),
-					'names' => get_post_meta( $post_id, 'sfly_guest_author_names', true ),
-					'link'  => get_post_meta( $post_id, 'sfly_guest_link', true ),
+					'desc'  => trim( get_post_meta( $post_id, 'sfly_guest_author_description', true ) ),
+					'email' => trim( get_post_meta( $post_id, 'sfly_guest_author_email', true ) ),
+					'names' => trim( get_post_meta( $post_id, 'sfly_guest_author_names', true ) ),
+					'link'  => trim( get_post_meta( $post_id, 'sfly_guest_link', true ) ),
 				);
+				
+				$sfly['names'] = preg_replace( '/^by\s+/i', '', $sfly['names'] );
 				
 				if( ! empty( $sfly['names'] ) ) {
 
@@ -139,26 +155,38 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 				}
 
-
-				// Existing GAs.
-				$gas = array_map( function( $ga ) {
-					return $ga->display_name;
-				}, $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id ));
-				
-				if( ! empty( $gas ) ) {
-					$this->logger->log( $this->log_file, 'Existing GAs: ' . implode( ', ', $gas ), $this->logger::WARNING );					
-					$report['gas-exist']++;
-					$single_report .= 'gas-exist';
-
-				}
-
+				// Reporting.
 				$this->logger->log( $this->log_file, 'Report: ' . $single_report );
 
 				if( ! isset( $report['each'][$single_report] ) ) $report['each'][$single_report] = 0;
 				$report['each'][$single_report]++;
 
-				// get or create GA
-				// assign to post
+				// Skip if no Simply Name(s).
+				if( empty( $sfly['names'] ) ) return;
+
+				// Get or create GA.
+				$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly['names'] ) );
+
+				if( is_wp_error( $ga_id ) ) {
+					var_dump( $ga_id );
+					exit();
+				}
+
+
+				// Assign to post.
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( array ( $ga_id ), $post_id );
+
+				// Update Bio if not already set.
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+
+				if( empty( $ga->description ) ) {
+					
+					$description = '<p>' . sanitize_textarea_field( $sfly['desc'] ) . '</p>';
+					$description .= '<p><a href="' . sanitize_url( $sfly['link'] ) . '">Link</a></p>';
+
+					$this->coauthorsplus_logic->update_guest_author( $ga_id, array( 'description' => $description ) );
+
+				}
 		
 			},
 			0
@@ -169,8 +197,6 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log_file, print_r( $report, true ) );
 
 		$this->logger->log( $this->log_file, 'Done.', $this->logger::SUCCESS );
-
-		WP_CLI::success( 'Done.' );
 
 	}
 
