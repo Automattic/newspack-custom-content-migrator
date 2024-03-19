@@ -164,29 +164,51 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				// Skip if no Simply Name(s).
 				if( empty( $sfly['names'] ) ) return;
 
-				// Get or create GA.
-				$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly['names'] ) );
+				$this->logger->log( $this->log_file, 'Doing Updates.' );
 
-				if( is_wp_error( $ga_id ) ) {
-					var_dump( $ga_id );
-					exit();
+				// Get existing GA if exists.
+				// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
+				// can not be trusted. WP Error occures if existing database GA is "Jon A. Doe / cap-jon-a-doe " but
+				// new GA is "Jon A Doe". New GA will not match on display name, but will fail on create when existing
+				// sanitized slug is found.
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $sfly['names'] );
+
+// this could be a single object, array of objects or null
+
+				if( null == $ga ) {
+					
+					// Create.
+					$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly['names'] ) );
+
+					if( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
+						$this->logger->log( $this->log_file, 'GA create failed.', $this->logger::WARNING );		
+						return;
+					}
+
+					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+
 				}
 
+				$this->logger->log( $this->log_file, 'GA ID: ' . $ga->ID );
 
 				// Assign to post.
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( array ( $ga_id ), $post_id );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( array ( $ga->ID ), $post_id );
+
+				$this->logger->log( $this->log_file, 'Assigned GA to post.' );
 
 				// Update Bio if not already set.
-				$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+				if( ! empty( trim( $ga->description ) ) ) return;
 
-				if( empty( $ga->description ) ) {
-					
-					$description = '<p>' . sanitize_textarea_field( $sfly['desc'] ) . '</p>';
-					$description .= '<p><a href="' . sanitize_url( $sfly['link'] ) . '">Link</a></p>';
+				$this->logger->log( $this->log_file, 'GA Desc: ' . $ga->description );
 
-					$this->coauthorsplus_logic->update_guest_author( $ga_id, array( 'description' => $description ) );
+				$new_desc = array();
+				if( ! empty( $sfly['desc'] ) ) $new_desc[] = '<p>' . sanitize_textarea_field( $sfly['desc'] ) . '</p>';
+				if( ! empty( $sfly['link'] ) ) $new_desc[] = '<p><a href="' . sanitize_url( $sfly['link'] ) . '">Link</a></p>';
 
-				}
+				if( empty( $new_desc ) ) return;
+				
+				$this->logger->log( $this->log_file, 'New Desc: ' . implode( "", $new_desc ) );
+				$this->coauthorsplus_logic->update_guest_author( $ga_id, array( 'description' => implode( "\n", $new_desc ) ) );
 		
 			},
 			0
