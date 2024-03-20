@@ -13,17 +13,17 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 	private $log_file;
 
 	/**
-	 * @var CoAuthorPlus.
+	 * @var CoAuthorPlus
 	 */
 	private $coauthorsplus_logic;
 
 	/**
-	 * @var Logger.
+	 * @var Logger
 	 */
 	private $logger;
 
 	/**
-	 * @var PostsLogic.
+	 * @var PostsLogic
 	 */
 	private $posts_logic = null;
 
