@@ -365,6 +365,27 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		foreach ( $posts_wo_featured_img as $k => $post ) {
 			WP_CLI::line( sprintf( '👉 (%d/%d) ID %d ...', $k + 1, count( $posts_wo_featured_img ), $post->ID ) );
 
+			// Check if the post content is generated using blocks and search for the first core/image block
+			// If such block is found, use it to set the Featured Image
+			if ( has_block( 'image', $post ) ) {
+				WP_CLI::line( '✓ found Gutenberg image block.' );
+
+				$post_blocks = parse_blocks( $post->post_content );
+				$post_core_image_blocks = array_filter( $post_blocks, function ( $block ) {
+					return $block['blockName'] === 'core/image' && ! empty($block['attrs']['id']);
+				} );
+
+				if ( ! empty( $post_core_image_blocks ) ) {
+					foreach ( $post_core_image_blocks as $image_block ) {
+						if ( ! empty( $image_block['attrs']['id'] ) ) {
+							set_post_thumbnail( $post, $image_block['attrs']['id'] );
+							WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. ID %d', $image_block['attrs']['id'] ) );
+							continue 2;
+						}
+					}
+				}
+			}
+
 			// Find the first <img>.
 			$crawler->clear();
 			$crawler->add( $post->post_content );
