@@ -3,17 +3,15 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
-	private $log_file;
-
 	/**
-	 * @var CoAuthorPlus
+	 * @var CoAuthorPlusLogic
 	 */
 	private $coauthorsplus_logic;
 
@@ -36,7 +34,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 		$this->logger              = new Logger();
 		$this->posts_logic         = new PostsLogic();
 	}
@@ -78,153 +76,89 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
+		
+		$log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
-		$this->log_file = str_replace(__NAMESPACE__ . '\\', '', __CLASS__) . '_' . __FUNCTION__ . '.log';
-
-		$report = [
-			'wp-user-missing' => 0,
-			'sfly-mismatch' => 0,
-			'sfly-exists' => 0,
-			'gas-exist' => 0,
-			'each' => [],
-		];
-
-		$this->logger->log( $this->log_file, 'Starting migration...' );
+		$this->logger->log( $log, 'Starting migration.' );
 
 		$this->posts_logic->throttled_posts_loop(
 			array(
 				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
-				// Order by date desc so newest GAs created will have newest Bios.
+				'fields'      => 'ids',
+				// Order by date desc so newest GAs will have newest Bios.
 				'orderby'     => 'date',
 				'order'       => 'DESC',
-				// Limit data payload from DB.
-				'fields'      => 'ids',
 			),
-			function( $post_id ) use ( &$report ) {
+			function ( $post_id ) use ( $log ) {
 
-				$single_report = '-';
+				$this->logger->log( $log, 'Post id: ' . $post_id );
 
-				$this->logger->log( $this->log_file, 'Post id: ' . $post_id );
-				
-				// Post Author (WP User).
-				$wp_user = get_userdata( get_post_field( 'post_author', $post_id ) );
+				$sfly_names = get_post_meta( $post_id, 'sfly_guest_author_names', true );
 
-				if( is_a( $wp_user, 'WP_user' ) ) {
-					$this->logger->log( $this->log_file, 'WP User: ' . $wp_user->ID . ' / ' . $wp_user->display_name );
-				}
-				else {
-					$this->logger->log( $this->log_file, 'WP User: (not exists)', $this->logger::WARNING );
-					$report['wp-user-missing']++;
-					$single_report .= 'wp-user-missing';
-				}
-
-				// Existing GAs.
-				$existing_gas = array_map( function( $ga ) {
-					return $ga->display_name;
-				}, $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id ));
-				
-				if( ! empty( $existing_gas ) ) {
-					$this->logger->log( $this->log_file, 'Existing GAs: ' . implode( ', ', $existing_gas ), $this->logger::WARNING );					
-					$report['gas-exist']++;
-					$single_report .= 'gas-exist';
-
-				}
-
-				// Simply meta.
-				$sfly = array(
-					'desc'  => trim( get_post_meta( $post_id, 'sfly_guest_author_description', true ) ),
-					'email' => trim( get_post_meta( $post_id, 'sfly_guest_author_email', true ) ),
-					'names' => trim( get_post_meta( $post_id, 'sfly_guest_author_names', true ) ),
-					'link'  => trim( get_post_meta( $post_id, 'sfly_guest_link', true ) ),
-				);
-				
 				// Remove unicode line breaks and left-to-right ("u" modifier)
-				$sfly['names'] = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $sfly['names'] ) );
+				$sfly_names = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $sfly_names ) );
 
 				// Replace unicode spaces with normal space, ("u" modifier)
-				$sfly['names'] = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}|\x{FEFF}/u', ' ', $sfly['names'] ) );
+				$sfly_names = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}|\x{FEFF}/u', ' ', $sfly_names ) );
 
 				// Replace multiple spaces with single space
-				$sfly['names'] = trim( preg_replace( '/\s{2,}/', ' ', $sfly['names'] ) );
+				$sfly_names = trim( preg_replace( '/\s{2,}/', ' ', $sfly_names ) );
 
 				// Remove leading "by" (case insensitive)
-				$sfly['names'] = trim( preg_replace( '/^by\s+/i', '', $sfly['names'] ) );
+				$sfly_names = trim( preg_replace( '/^by\s+/i', '', $sfly_names ) );
 				
-				if( ! empty( $sfly['names'] ) ) {
-
-					$this->logger->log( $this->log_file, 'Simply Names: ' . $sfly['names'] );
-					$report['sfly-exists']++;
-					$single_report .= 'sfly-exists';
-
+				if( empty( $sfly_names ) ) {
+					$this->logger->log( $log, 'Skip: no simply guest author name.' );
+					return;
 				}
-				else if( ! empty( $sfly['desc'] ) || ! empty( $sfly['email'] )  || ! empty( $sfly['link'] ) ) {
-
-					$this->logger->log( $this->log_file, 'Simply Names Mismatch: ' . print_r( $sfly, true ), $this->logger::WARNING );
-					$report['sfly-mismatch']++;
-
-				}
-
-				// Reporting.
-				$this->logger->log( $this->log_file, 'Report: ' . $single_report );
-
-				if( ! isset( $report['each'][$single_report] ) ) $report['each'][$single_report] = 0;
-				$report['each'][$single_report]++;
-
-				// Skip if no Simply Name(s).
-				if( empty( $sfly['names'] ) ) return;
-
-				$this->logger->log( $this->log_file, 'Doing Updates.' );
 
 				// Get existing GA if exists.
-				// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
-				// can not be trusted. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
-				// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
-				$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $sfly['names'] ) ) );
-
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $sfly_names ) ) );
+				
+				// Create.
 				if( false === $ga  ) {
 					
-					// Create.
-					$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly['names'] ) );
+					$created_ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly_names ) );
 
-					if( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
-						$this->logger->log( $this->log_file, 'GA create failed.', $this->logger::ERROR );		
+					if( is_wp_error( $created_ga_id ) || ! is_numeric( $created_ga_id ) || ! ( $created_ga_id > 0 ) ) {
+						$this->logger->log( $log, 'GA create failed: ' . $sfly_names, $this->logger::WARNING );		
+						return;
 					}
 
-					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $created_ga_id );
 
 				}
 
-				$this->logger->log( $this->log_file, 'GA ID: ' . $ga->ID );
+				$this->logger->log( $log, 'GA ID: ' . $ga->ID );
 
 				// Assign to post.
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( array ( $ga->ID ), $post_id );
 
-				$this->logger->log( $this->log_file, 'Assigned GA to post.' );
-
-				// Update Bio if not already set.
+				// Skip Bio creation if already set.
 				if( ! empty( trim( $ga->description ) ) ) return;
-
-				$this->logger->log( $this->log_file, 'GA Desc: ' . $ga->description );
+				
+				$sfly_description = trim( get_post_meta( $post_id, 'sfly_guest_author_description', true ) );
+				$sfly_link        = trim( get_post_meta( $post_id, 'sfly_guest_link', true ) );
 
 				$new_desc = array();
-				if( ! empty( $sfly['desc'] ) ) $new_desc[] = '<p>' . sanitize_textarea_field( $sfly['desc'] ) . '</p>';
-				if( ! empty( $sfly['link'] ) ) $new_desc[] = '<p><a href="' . sanitize_url( $sfly['link'] ) . '">Link</a></p>';
+
+				if( ! empty( $sfly_description ) ) $new_desc[] = '<p>' . sanitize_textarea_field( $sfly_description ) . '</p>';
+				if( ! empty( $sfly_link ) )        $new_desc[] = '<p><a href="' . sanitize_url( $sfly_link ) . '">Link</a></p>';
 
 				if( empty( $new_desc ) ) return;
 				
-				$this->logger->log( $this->log_file, 'New Desc: ' . implode( "", $new_desc ) );
-				$this->coauthorsplus_logic->update_guest_author( $ga_id, array( 'description' => implode( "\n", $new_desc ) ) );
+				$this->logger->log( $log, 'New Description: ' . implode( "", $new_desc ) );
+
+				$this->coauthorsplus_logic->update_guest_author( $ga->ID, array( 'description' => implode( "\n", $new_desc ) ) );
 		
-			},
-			0
-		);
+			} // callback function
+
+		); // throttled posts
 
 		wp_cache_flush();
 
-		$this->logger->log( $this->log_file, print_r( $report, true ) );
-
-		$this->logger->log( $this->log_file, 'Done.', $this->logger::SUCCESS );
+		$this->logger->log( $log, 'Done.', $this->logger::SUCCESS );
 
 	}
 
