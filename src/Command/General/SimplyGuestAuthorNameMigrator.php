@@ -139,7 +139,17 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 					'link'  => trim( get_post_meta( $post_id, 'sfly_guest_link', true ) ),
 				);
 				
-				$sfly['names'] = preg_replace( '/^by\s+/i', '', $sfly['names'] );
+				// Remove unicode line breaks and left-to-right ("u" modifier)
+				$sfly['names'] = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $sfly['names'] ) );
+
+				// Replace unicode spaces with normal space, ("u" modifier)
+				$sfly['names'] = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}|\x{FEFF}/u', ' ', $sfly['names'] ) );
+
+				// Replace multiple spaces with single space
+				$sfly['names'] = trim( preg_replace( '/\s{2,}/', ' ', $sfly['names'] ) );
+
+				// Remove leading "by" (case insensitive)
+				$sfly['names'] = trim( preg_replace( '/^by\s+/i', '', $sfly['names'] ) );
 				
 				if( ! empty( $sfly['names'] ) ) {
 
@@ -168,21 +178,17 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 				// Get existing GA if exists.
 				// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
-				// can not be trusted. WP Error occures if existing database GA is "Jon A. Doe / cap-jon-a-doe " but
-				// new GA is "Jon A Doe". New GA will not match on display name, but will fail on create when existing
-				// sanitized slug is found.
-				$ga = $this->coauthorsplus_logic->get_guest_author_by_display_name( $sfly['names'] );
+				// can not be trusted. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
+				// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $sfly['names'] ) ) );
 
-// this could be a single object, array of objects or null
-
-				if( null == $ga ) {
+				if( false === $ga  ) {
 					
 					// Create.
 					$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly['names'] ) );
 
 					if( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
-						$this->logger->log( $this->log_file, 'GA create failed.', $this->logger::WARNING );		
-						return;
+						$this->logger->log( $this->log_file, 'GA create failed.', $this->logger::ERROR );		
 					}
 
 					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
