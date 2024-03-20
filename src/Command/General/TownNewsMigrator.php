@@ -171,6 +171,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Importing post from %s', $file->getFilename() ), Logger::INFO );
 						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $imported_original_ids, $default_author_id );
 
 						if ( $post_id ) {
@@ -461,8 +462,8 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		// Set post content.
 		$post_content = 'collection' === $file_type
-		? $this->get_collection_content( $xml_doc, $dir_path, $post_id )
-		: $this->get_article_content( $xml_doc, $dir_path, $post_id );
+			? $this->get_collection_content( $xml_doc, $dir_path, $post_id )
+			: $this->get_article_content( $xml_doc, $dir_path, $post_id );
 
 		wp_update_post(
 			[
@@ -700,6 +701,14 @@ class TownNewsMigrator implements InterfaceCommand {
 		} else {
 			// Set as a co-author.
 			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $email );
+
+			if ( ! $guest_author ) {
+				// The user isn't found using an email, however, it still may already exist, just under a different display name.
+				// Under the hood, `$this->coauthorsplus_logic->create_guest_author()` uses this function to check that it
+				// isn't creating a duplicate Guest Author.
+				$guest_author = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', sanitize_title( $display_name ) );
+			}
+
 			if ( $guest_author ) {
 				$author_id = $guest_author->ID;
 			} else {
@@ -712,15 +721,22 @@ class TownNewsMigrator implements InterfaceCommand {
 						$avatar_id = null;
 					}
 				}
-				$author_id = $this->coauthorsplus_logic->create_guest_author(
-					[
-						'display_name' => $display_name,
-						'first_name'   => $first_name,
-						'last_name'    => $last_name,
-						'user_email'   => $email,
-						'avatar'       => $avatar_id,
-					]
-				);
+				$guest_author_data = [
+					'display_name' => $display_name,
+					'first_name'   => $first_name,
+					'last_name'    => $last_name,
+					'user_email'   => $email,
+					'avatar'       => $avatar_id,
+				];
+				$author_id         = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
+
+				// At this point we've exhausted our attempts to search for a valid GA and we're getting an error.
+				// Let's just use the staff GA ID at this point, since we don't want the script to stop.
+				if ( is_wp_error( $author_id ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Error creating author for Post ID %d, assigning Staff Account: %s', $post_id, $author_id->get_error_message() ), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Guest Author Data: %s', wp_json_encode( $guest_author_data ) ), Logger::INFO );
+					$author_id = $this->get_staff_author_id();
+				}
 			}
 
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $author_id ], $post_id );
@@ -1010,7 +1026,8 @@ class TownNewsMigrator implements InterfaceCommand {
 	 */
 	private function get_element_by_xpath( $parent_element, $xpath, $default = '' ) {
 		$element_node = $parent_element->xpath( $xpath );
-		return count( $element_node ) > 0 ? (string) $element_node[0] : $default;
+
+		return count( $element_node ) > 0 ? (string) trim( $element_node[0] ) : $default;
 	}
 
 	/**

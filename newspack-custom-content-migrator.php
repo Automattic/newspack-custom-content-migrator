@@ -72,20 +72,19 @@ PluginSetup::register_migrators(
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
 		Command\General\BlockTransformerCommand::class,
+		Command\General\PostDateMigrator::class,
 
 		// Publisher specific, remove when launched.
-		Command\PublisherSpecific\RetroReportMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
-		Command\PublisherSpecific\InsightCrimeMigrator::class,
+		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
-		Command\PublisherSpecific\TheEmancipatorMigrator::class,
-		Command\PublisherSpecific\HighCountryNewsMigrator2::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
-		Command\PublisherSpecific\CarsonNowMigrator::class,
+		Command\PublisherSpecific\CityViewMigrator::class,
+		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 	)
 );

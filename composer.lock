@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a11b63a32e4e43ccf304a1637a39910e",
+    "content-hash": "ba927ee3149f687c3ba46c96e2a2a9ea",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -121,7 +121,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-scraper-migrator.git",
-                "reference": "6df50af18b5f4509fdabc64b0174c629e48a6c86"
+                "reference": "8c7188dac6f0a55527471525acbf690849dc2f0a"
             },
             "require": {
                 "paquettg/php-html-parser": "^3.0.0",
@@ -141,7 +141,7 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Plugin that migrates a site by scraping the frontend content.",
-            "time": "2024-03-06T15:51:54+00:00"
+            "time": "2024-03-12T13:24:54+00:00"
         },
         {
             "name": "brainmaestro/composer-git-hooks",
@@ -2254,32 +2254,29 @@
         },
         {
             "name": "symfony/service-contracts",
-            "version": "v3.0.2",
+            "version": "v3.4.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/service-contracts.git",
-                "reference": "d78d39c1599bd1188b8e26bb341da52c3c6d8a66"
+                "reference": "fe07cbc8d837f60caf7018068e350cc5163681a0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/service-contracts/zipball/d78d39c1599bd1188b8e26bb341da52c3c6d8a66",
-                "reference": "d78d39c1599bd1188b8e26bb341da52c3c6d8a66",
+                "url": "https://api.github.com/repos/symfony/service-contracts/zipball/fe07cbc8d837f60caf7018068e350cc5163681a0",
+                "reference": "fe07cbc8d837f60caf7018068e350cc5163681a0",
                 "shasum": ""
             },
             "require": {
-                "php": ">=8.0.2",
-                "psr/container": "^2.0"
+                "php": ">=8.1",
+                "psr/container": "^1.1|^2.0"
             },
             "conflict": {
                 "ext-psr": "<1.1|>=2"
             },
-            "suggest": {
-                "symfony/service-implementation": ""
-            },
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "3.0-dev"
+                    "dev-main": "3.4-dev"
                 },
                 "thanks": {
                     "name": "symfony/contracts",
@@ -2289,7 +2286,10 @@
             "autoload": {
                 "psr-4": {
                     "Symfony\\Contracts\\Service\\": ""
-                }
+                },
+                "exclude-from-classmap": [
+                    "/Test/"
+                ]
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
@@ -2316,7 +2316,7 @@
                 "standards"
             ],
             "support": {
-                "source": "https://github.com/symfony/service-contracts/tree/v3.0.2"
+                "source": "https://github.com/symfony/service-contracts/tree/v3.4.1"
             },
             "funding": [
                 {
@@ -2332,7 +2332,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2022-05-30T19:17:58+00:00"
+            "time": "2023-12-26T14:02:43+00:00"
         }
     ],
     "packages-dev": [
@@ -4814,10 +4814,10 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "automattic/newspack-scraper-migrator": 20,
         "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-content-converter": 20,
-        "simplehtmldom/simplehtmldom": 5
+        "simplehtmldom/simplehtmldom": 5,
+        "automattic/newspack-scraper-migrator": 20
     },
     "prefer-stable": false,
     "prefer-lowest": false,
