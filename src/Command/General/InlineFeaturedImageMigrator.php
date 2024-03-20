@@ -367,21 +367,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 			// Check if the post content is generated using blocks and search for the first core/image block
 			// If such block is found, use it to set the Featured Image
-			if ( has_block( 'image', $post ) ) {
-				WP_CLI::line( '✓ found Gutenberg image block.' );
+			$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post->post_content ) );
 
-				$post_blocks = parse_blocks( $post->post_content );
-				$post_core_image_blocks = array_filter( $post_blocks, function ( $block ) {
-					return $block['blockName'] === 'core/image' && ! empty($block['attrs']['id']);
-				} );
+			if ( ! empty( $image_blocks ) ) {
+				WP_CLI::line( '✓ found Gutenberg image blocks.' );
 
-				if ( ! empty( $post_core_image_blocks ) ) {
-					foreach ( $post_core_image_blocks as $image_block ) {
-						if ( ! empty( $image_block['attrs']['id'] ) ) {
-							set_post_thumbnail( $post, $image_block['attrs']['id'] );
-							WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. ID %d', $image_block['attrs']['id'] ) );
-							continue 2;
-						}
+				foreach ( $image_blocks as $image_block ) {
+					if ( set_post_thumbnail( $post, $image_block['attrs']['id'] ) ) {
+						WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. Attachment ID %d', $image_block['attrs']['id'] ) );
+						continue 2;
+					} else {
+						WP_CLI::line( sprintf( '❌ Could not set Featured Image from Block. ID %d', $image_block['attrs']['id'] ) );
 					}
 				}
 			}
@@ -528,5 +524,23 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Finished. See %s/ folder for logs.', $log_dir ) );
+	}
+
+	/**
+	 * Returns an array of all "core/image" blocks from the given
+	 * array of post content blocks.
+	 */
+	private function get_image_blocks_from_post_content_blocks( array $post_content_blocks ): array {
+		$image_blocks = [];
+
+		foreach ( $post_content_blocks as $block ) {
+			if ( $block['blockName'] === 'core/image' && ! empty( $block['attrs']['id'] ) ) {
+				$image_blocks[] = $block;
+			} else if ( ! empty( $block['innerBlocks'] ) ) {
+				$image_blocks = array_merge( $image_blocks, $this->get_image_blocks_from_post_content_blocks( $block['innerBlocks'] ) );
+			}
+		}
+
+		return $image_blocks;
 	}
 }
