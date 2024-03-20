@@ -1,6 +1,6 @@
 <?php
 /**
- * Migration tasks for The Emancipator.
+ * Migration tasks for LA Focus.
  *
  * @package NewspackCustomContentMigrator
  */
@@ -12,7 +12,7 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use WP_CLI;
 
 /**
- * Custom migration scripts for The Emancipator.
+ * Custom migration scripts for LA Focus.
  */
 class LAFocusMigrator implements InterfaceCommand {
 
