@@ -7,7 +7,9 @@ use DateTimeZone;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\CsvIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -79,6 +81,16 @@ class WindyCityMigrator implements InterfaceCommand {
 	private Redirection $redirection;
 
 	/**
+	 * @var Posts
+	 */
+	private Posts $posts;
+
+	/**
+	 * @var Taxonomy
+	 */
+	private Taxonomy $taxonomy;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -115,6 +127,8 @@ class WindyCityMigrator implements InterfaceCommand {
 		$this->csv_iterator              = new CsvIterator();
 		$this->site_timezone             = new DateTimeZone( 'America/Chicago' );
 		$this->redirection               = new Redirection();
+		$this->posts                     = new Posts();
+		$this->taxonomy                     = new Taxonomy();
 
 		$check_required_plugins = [
 			'newspack-listings/newspack-listings.php' => 'Newspack listings',
@@ -229,6 +243,24 @@ class WindyCityMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator windy-city-archive-date-categories',
+			[ $this, 'cmd_windy_city_archive_date_categories' ],
+			[
+				'before_invoke' => [ $this, 'preflight' ],
+				'shortdesc'     => 'Juggle categories to move them under the correct date in archives.',
+				'synopsis'      => [
+					BatchLogic::$num_items,
+					[
+						'type'        => 'assoc',
+						'name'        => 'archive-sub-category-id',
+						'description' => 'The ID of a category under "archive". to process',
+						'optional'    => false,
+					],
+				],
+			],
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator windy-city-fix-html-entites',
 			[ $this, 'cmd_windy_city_fix_html_entites' ],
 			[
@@ -245,6 +277,40 @@ class WindyCityMigrator implements InterfaceCommand {
 				],
 			],
 		);
+	}
+
+	/**
+	 * @throws \Exception
+	 */
+	public function cmd_windy_city_archive_date_categories( array $pos_args, array $assoc_args ): void {
+		$log_file       = __FUNCTION__ . '.log';
+		$num_items      = $assoc_args['num-items'] ?? false;
+		$archive_cat_id = 16;
+		$sub_cat_id     = $assoc_args['archive-sub-category-id'];
+
+
+		$post_ids = $this->posts->get_all_posts_ids_in_category( $sub_cat_id, 'post', [ 'publish' ] );
+		if ( $num_items ) {
+			$post_ids = array_slice( $post_ids, 0, $num_items );
+		}
+
+		WP_CLI::log( sprintf( 'Processing %d posts', count( $post_ids ) ) );
+		foreach ( $post_ids as $id ) {
+			$post      = get_post( $id );
+			$date      = DateTimeImmutable::createFromFormat( self::MYSQL_DATETIME_FORMAT, $post->post_date, $this->site_timezone );
+			$date_cat = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $date->format( 'F j, Y' ), $sub_cat_id );
+			wp_set_post_categories( $id, [ $date_cat ], true );
+			$this->logger->log(
+				$log_file,
+				sprintf(
+					'Post ID %d got category "%s" added',
+					$id,
+					get_cat_name( $date_cat )
+				),
+				Logger::SUCCESS
+			);
+		}
+
 	}
 
 	/**
@@ -311,8 +377,8 @@ class WindyCityMigrator implements InterfaceCommand {
 				WP_CLI::error( sprintf( 'Failed to create/update post for row %d', $num_item_processing ) );
 			}
 
-			$url                = wp_parse_url( $row['COMCANONICALURL'] );
-			$redirect_path      = $url['path'] . '?' . $url['query'];
+			$url           = wp_parse_url( $row['COMCANONICALURL'] );
+			$redirect_path = $url['path'] . '?' . $url['query'];
 			$this->redirection->create_redirection_rule_in_group(
 				'Community Group: ' . $listing_title,
 				$redirect_path,
@@ -361,7 +427,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$replaced_fields = $this->replace_html_entities( array_intersect_key( $row, array_flip( [ 'bar_name', 'description', 'hours' ] ) ) );
 			$address_data    = array_intersect_key( $row, array_flip( [ 'address', 'city', 'state', 'zipcode' ] ) );
 
-			$listing_title = $replaced_fields['bar_name'];
+			$listing_title    = $replaced_fields['bar_name'];
 			$content_blocks[] = $this->gutenberg_block_generator->get_paragraph(
 				sprintf(
 					'<a href="https://www.google.com/maps/search/?api=1&query=%s" target="_blank" rel="noreferrer noopener">%s</a>',
@@ -387,10 +453,10 @@ class WindyCityMigrator implements InterfaceCommand {
 				'post_status'   => 'publish',
 				'post_author'   => self::DEFAULT_AUTHOR_ID,
 				'post_type'     => $post_type,
-				'post_content'     => serialize_blocks( $content_blocks),
+				'post_content'  => serialize_blocks( $content_blocks ),
 				'post_category' => [ $cat_id ],
 				'meta_input'    => [
-					'newspack_listings_hide_author' => 1,
+					'newspack_listings_hide_author'       => 1,
 					'newspack_listings_hide_publish_date' => 1,
 				],
 			];
@@ -406,7 +472,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				$listing_id      = $query->posts[0];
 				$post_data['ID'] = $listing_id;
 				wp_update_post( $post_data );
-				$verb       = 'updated';
+				$verb = 'updated';
 			}
 			if ( ! $listing_id || is_wp_error( $listing_id ) ) {
 				WP_CLI::error( sprintf( 'Failed to %s post for row %d', $verb, $num_item_processing ) );
@@ -417,8 +483,8 @@ class WindyCityMigrator implements InterfaceCommand {
 				set_post_thumbnail( $listing_id, $featured_img_id );
 			}
 
-			$url                = wp_parse_url( $row['canonical_url'] );
-			$redirect_path      = $url['path'] . '?' . $url['query'];
+			$url           = wp_parse_url( $row['canonical_url'] );
+			$redirect_path = $url['path'] . '?' . $url['query'];
 			$this->redirection->create_redirection_rule_in_group(
 				'Place listing: ' . $listing_title,
 				$redirect_path,
@@ -528,7 +594,7 @@ class WindyCityMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_windy_city_fix_html_entites( array $pos_args, array $assoc_args ): void {
-		foreach ( $this->get_posts( $assoc_args ) as $post ) {
+		foreach ( $this->get_posts_with_html_entities( $assoc_args ) as $post ) {
 			$this->fix_entities_in_post( $post );
 		}
 	}
@@ -616,7 +682,7 @@ class WindyCityMigrator implements InterfaceCommand {
 	 *
 	 * @return iterable
 	 */
-	private function get_posts( array $assoc_args = [], bool $log_progress = true ): iterable {
+	private function get_posts_with_html_entities( array $assoc_args = [], bool $log_progress = true ): iterable {
 		$post_id_passed = $assoc_args['post-id'] ?? false;
 		$num_posts      = $assoc_args['num-items'] ?? false;
 
