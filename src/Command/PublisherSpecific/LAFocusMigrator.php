@@ -43,7 +43,7 @@ class LAFocusMigrator implements InterfaceCommand {
 	public function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator lafocus-set-featured-image-from-first-image-in-post-content',
-			[ $this, 'cmd_lafocus_set_featured_image_from_first_image_in_post_content' ],
+			[ $this, 'cmd_set_featured_image_from_first_image_in_post_content' ],
 			[
 				'shortdesc' => 'Searches for the first image in Post Content and uses is a Featured Image in full size.',
 			]
@@ -53,7 +53,7 @@ class LAFocusMigrator implements InterfaceCommand {
 	/** 
 	 * Searches for the first image in Post Content and uses it as a Featured Image in full size.
 	 */
-	public function cmd_lafocus_set_featured_image_from_first_image_in_post_content( array $args, array $assoc_args ): void {
+	public function cmd_set_featured_image_from_first_image_in_post_content( array $args, array $assoc_args ): void {
 		WP_CLI::runcommand( 'newspack-content-migrator set-first-image-from-content-as-featured-image' );
 	}
 }
