@@ -425,6 +425,7 @@ class WindyCityMigrator implements InterfaceCommand {
 		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row_no => $row ) {
 			$num_item_processing = $row_no + 1;
 			WP_CLI::log( sprintf( 'Processing row %d/%d', $num_item_processing, $batch_args['total'] ) );
+			$content_blocks = [];
 
 			$replaced_fields = $this->replace_html_entities( array_intersect_key( $row, array_flip( [ 'bar_name', 'description', 'hours' ] ) ) );
 			$address_data    = array_intersect_key( $row, array_flip( [ 'address', 'city', 'state', 'zipcode' ] ) );
