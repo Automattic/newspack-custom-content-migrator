@@ -54,6 +54,8 @@ class LAFocusMigrator implements InterfaceCommand {
 	 * Searches for the first image in Post Content and uses it as a Featured Image in full size.
 	 */
 	public function cmd_set_featured_image_from_first_image_in_post_content( array $args, array $assoc_args ): void {
-		WP_CLI::runcommand( 'newspack-content-migrator set-first-image-from-content-as-featured-image' );
+		WP_CLI::runcommand( 'newspack-content-migrator set-first-image-from-content-as-featured-image', [
+			'launch' => false,
+		] );
 	}
 }
