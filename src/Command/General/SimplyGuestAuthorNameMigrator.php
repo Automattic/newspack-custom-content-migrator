@@ -114,6 +114,10 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				}
 
 				// Get existing GA if exists.
+				// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
+				// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
+				// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
+				// Use a more direct approach here:
 				$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $sfly_names ) ) );
 				
 				// Create.
@@ -122,8 +126,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 					$created_ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly_names ) );
 
 					if( is_wp_error( $created_ga_id ) || ! is_numeric( $created_ga_id ) || ! ( $created_ga_id > 0 ) ) {
-						$this->logger->log( $log, 'GA create failed: ' . $sfly_names, $this->logger::WARNING );		
-						return;
+						$this->logger->log( $log, 'GA create failed: ' . $sfly_names, $this->logger::ERROR );
 					}
 
 					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $created_ga_id );
@@ -140,6 +143,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				
 				$sfly_description = trim( get_post_meta( $post_id, 'sfly_guest_author_description', true ) );
 				$sfly_link        = trim( get_post_meta( $post_id, 'sfly_guest_link', true ) );
+				// TODO: incorporate 'sfly_guest_author_email' into GA profile/bio
 
 				$new_desc = array();
 
@@ -150,7 +154,11 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				
 				$this->logger->log( $log, 'New Description: ' . implode( "", $new_desc ) );
 
-				$this->coauthorsplus_logic->update_guest_author( $ga->ID, array( 'description' => implode( "\n", $new_desc ) ) );
+				// Add bio to GA.
+				// As of 2024-03-20, "coauthorsplus_logic->update_guest_author" for "description" field will replace
+				// line breaks with just the letter "n" when updating the database.
+				// Use a direct update here:
+				update_post_meta( $ga->ID, 'cap-description', implode( PHP_EOL, $new_desc ) );
 		
 			} // callback function
 
