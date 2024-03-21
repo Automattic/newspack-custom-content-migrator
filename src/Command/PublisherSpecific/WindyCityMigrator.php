@@ -128,7 +128,7 @@ class WindyCityMigrator implements InterfaceCommand {
 		$this->site_timezone             = new DateTimeZone( 'America/Chicago' );
 		$this->redirection               = new Redirection();
 		$this->posts                     = new Posts();
-		$this->taxonomy                     = new Taxonomy();
+		$this->taxonomy                  = new Taxonomy();
 
 		$check_required_plugins = [
 			'newspack-listings/newspack-listings.php' => 'Newspack listings',
@@ -296,8 +296,8 @@ class WindyCityMigrator implements InterfaceCommand {
 
 		WP_CLI::log( sprintf( 'Processing %d posts', count( $post_ids ) ) );
 		foreach ( $post_ids as $id ) {
-			$post      = get_post( $id );
-			$date      = DateTimeImmutable::createFromFormat( self::MYSQL_DATETIME_FORMAT, $post->post_date, $this->site_timezone );
+			$post     = get_post( $id );
+			$date     = DateTimeImmutable::createFromFormat( self::MYSQL_DATETIME_FORMAT, $post->post_date, $this->site_timezone );
 			$date_cat = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $date->format( 'F j, Y' ), $sub_cat_id );
 			wp_set_post_categories( $id, [ $date_cat ], true );
 			$this->logger->log(
@@ -341,8 +341,9 @@ class WindyCityMigrator implements InterfaceCommand {
 				'post_content' => $row['COMBODY'],
 			] );
 
-			$replaced_text['post_content'] = serialize_block( $this->gutenberg_block_generator->get_html( $replaced_text['post_content'] ) );
-			$listing_title                 = $replaced_text['post_title'];
+			$post_content  = make_clickable( $replaced_text['post_content'] );
+			$post_content  = serialize_block( $this->gutenberg_block_generator->get_html( $post_content ) );
+			$listing_title = $replaced_text['post_title'];
 
 			$query = new WP_Query( [
 				'post_type' => $post_type,
@@ -351,7 +352,8 @@ class WindyCityMigrator implements InterfaceCommand {
 			] );
 
 			$post_data = [
-				...$replaced_text,
+				'post_title'    => $listing_title,
+				'post_content'  => $post_content,
 				'post_status'   => 'publish',
 				'post_author'   => self::DEFAULT_AUTHOR_ID,
 				'post_type'     => $post_type,
