@@ -17,6 +17,13 @@ use WP_CLI;
 class LAFocusMigrator implements InterfaceCommand {
 
 	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+		// 
+	}
+
+	/**
 	 * Singleton.
 	 *
 	 * @return LAFocusMigrator
