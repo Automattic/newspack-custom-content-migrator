@@ -518,8 +518,8 @@ class WindyCityMigrator implements InterfaceCommand {
 
 		// Keys here correspond to the publication names in the CSV file.
 		$archive_cats = [
-			'Windy City Times' => 333, // Archives -> Windy City Times -> print edition.
-			'nightspots'       => 339, // Archives -> Nightspots -> print edition.
+			'Windy City Times' => 339, // Archives -> Windy City Times -> print edition.
+			'nightspots'       => 333, // Archives -> Nightspots -> print edition.
 		];
 
 		foreach ( $this->csv_iterator->batched_items( $csv_file_path, ',', $batch_args['start'], $batch_args['end'] ) as $row_no => $row ) {
