@@ -1,31 +1,47 @@
 <?php
+/**
+ * Newspack Custom Content Migrator (Simply) Guest Author Name plugin authorship to CAP.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
+/**
+ * Custom migration scripts for (Simply) Guest Author Name plugin.
+ */
 class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 	/**
-	 * @var CoAuthorPlusLogic
+	 * CoAuthorPlusLogic
+	 * 
+	 * @var CoAuthorPlusLogic 
 	 */
 	private $coauthorsplus_logic;
 
 	/**
+	 * Logger
+	 * 
 	 * @var Logger
 	 */
 	private $logger;
 
 	/**
+	 * PostsLogic
+	 * 
 	 * @var PostsLogic
 	 */
 	private $posts_logic = null;
 
 	/**
+	 * Instance
+	 * 
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
@@ -65,13 +81,15 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				'shortdesc' => 'Migrate Simply Guest Author Names to CoAuthorsPlus.',
 			]
 		);
-
 	}
 
 	/**
 	 * Migrate Simply Guest Author Names to CoAuthorsPlus.
+	 * 
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_migrate_simply_guest_author_names( $args, $assoc_args ) {
+	public function cmd_migrate_simply_guest_author_names( $pos_args, $assoc_args ) {
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
@@ -96,19 +114,19 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 				$sfly_names = get_post_meta( $post_id, 'sfly_guest_author_names', true );
 
-				// Remove unicode line breaks and left-to-right ("u" modifier)
+				// Remove unicode line breaks and left-to-right ("u" modifier).
 				$sfly_names = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $sfly_names ) );
 
-				// Replace unicode spaces with normal space, ("u" modifier)
+				// Replace unicode spaces with normal space, ("u" modifier).
 				$sfly_names = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}|\x{FEFF}/u', ' ', $sfly_names ) );
 
-				// Replace multiple spaces with single space
+				// Replace multiple spaces with single space.
 				$sfly_names = trim( preg_replace( '/\s{2,}/', ' ', $sfly_names ) );
 
-				// Remove leading "by" (case insensitive)
+				// Remove leading "by" (case insensitive).
 				$sfly_names = trim( preg_replace( '/^by\s+/i', '', $sfly_names ) );
 				
-				if( empty( $sfly_names ) ) {
+				if ( empty( $sfly_names ) ) {
 					$this->logger->log( $log, 'Skip: no simply guest author name.' );
 					return;
 				}
@@ -117,15 +135,15 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
 				// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
 				// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
-				// Use a more direct approach here:
+				// Use a more direct approach here.
 				$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $sfly_names ) ) );
 				
 				// Create.
-				if( false === $ga  ) {
+				if ( false === $ga ) {
 					
 					$created_ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly_names ) );
 
-					if( is_wp_error( $created_ga_id ) || ! is_numeric( $created_ga_id ) || ! ( $created_ga_id > 0 ) ) {
+					if ( is_wp_error( $created_ga_id ) || ! is_numeric( $created_ga_id ) || ! ( $created_ga_id > 0 ) ) {
 						$this->logger->log( $log, 'GA create failed: ' . $sfly_names, $this->logger::ERROR, true );
 					}
 
@@ -136,38 +154,42 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				$this->logger->log( $log, 'GA ID: ' . $ga->ID );
 
 				// Assign to post.
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( array ( $ga->ID ), $post_id );
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
 
 				// Skip Bio creation if already set.
-				if( ! empty( trim( $ga->description ) ) ) return;
+				if ( ! empty( trim( $ga->description ) ) ) {
+					return;
+				}
 				
 				$sfly_description = trim( get_post_meta( $post_id, 'sfly_guest_author_description', true ) );
 				$sfly_link        = trim( get_post_meta( $post_id, 'sfly_guest_link', true ) );
-				// TODO: incorporate 'sfly_guest_author_email' into GA profile/bio
+				// TODO: incorporate 'sfly_guest_author_email' into GA profile/bio.
 
 				$new_desc = array();
 
-				if( ! empty( $sfly_description ) ) $new_desc[] = '<p>' . sanitize_textarea_field( $sfly_description ) . '</p>';
-				if( ! empty( $sfly_link ) )        $new_desc[] = '<p><a href="' . sanitize_url( $sfly_link ) . '">Link</a></p>';
+				if ( ! empty( $sfly_description ) ) {
+					$new_desc[] = '<p>' . sanitize_textarea_field( $sfly_description ) . '</p>';
+				}
+				if ( ! empty( $sfly_link ) ) {
+					$new_desc[] = '<p><a href="' . sanitize_url( $sfly_link ) . '">Link</a></p>';
+				}
 
-				if( empty( $new_desc ) ) return;
+				if ( empty( $new_desc ) ) {
+					return;
+				}
 				
-				$this->logger->log( $log, 'New Description: ' . implode( "", $new_desc ) );
+				$this->logger->log( $log, 'New Description: ' . implode( '', $new_desc ) );
 
 				// Add bio to GA.
 				// As of 2024-03-20, "coauthorsplus_logic->update_guest_author" for "description" field will replace
 				// line breaks with just the letter "n" when updating the database.
-				// Use a direct update here:
+				// Use a direct update here.
 				update_post_meta( $ga->ID, 'cap-description', implode( PHP_EOL, $new_desc ) );
-		
-			} // callback function
-
-		); // throttled posts
+			}
+		);
 
 		wp_cache_flush();
 
 		$this->logger->log( $log, 'Done.', $this->logger::SUCCESS );
-
 	}
-
 }
