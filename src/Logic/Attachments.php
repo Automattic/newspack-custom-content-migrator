@@ -65,15 +65,6 @@ class Attachments {
 	 * @return int|WP_Error Attachment ID.
 	 */
 	public function import_external_file( $path, $title = null, $caption = null, $description = null, $alt = null, $post_id = 0, $args = [], $desired_filename = '' ) {
-		// When using WP.com CDN, the URL can look like this:
-		// https://i0.wp.com/lafocus-newspack.newspackstaging.com/wp-content/uploads/2022/08/1_original_file_I0.jpg?resize=804%2C1024&ssl=1
-		//
-		// The ?resize=804%2C1024&ssl=1 part breaks the logic to download file and set proper extension and file data.
-		// So, we check if the URL matches a WP.com CDN pattern and strip the GET part.
-		if ( str_starts_with( $path, 'https://i0.wp.com' ) ) {
-			$path = preg_replace( '~\\?.*~', '', $path );
-		}
-
 		// Fetch remote or local file.
 		$is_http = 'http' == substr( $path, 0, 4 );
 		if ( $is_http ) {

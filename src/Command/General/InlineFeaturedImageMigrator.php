@@ -401,6 +401,18 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				continue;
 			}
 
+			// When using WP.com CDN, the URL can look like this:
+			// https://i0.wp.com/lafocus-newspack.newspackstaging.com/wp-content/uploads/2022/08/1_original_file_I0.jpg?resize=804%2C1024&ssl=1
+			//
+			// The ?resize=804%2C1024&ssl=1 part breaks the logic to download file and set proper extension and file data.
+			//
+			// The code below strips the CDN pattern to leave the original URL which can be both
+			// from the current site or an external file.
+			if ( preg_match( '~^https?:\/\/i\d+\.wp\.com\/~', $img_src ) ) {
+				$img_src = preg_replace( '~i\d+\.wp\.com\/~', '', $img_src );
+				$img_src = preg_replace( '~\\?.*~', '', $img_src );
+			}
+
 			// Import attachment if it doesn't exist.
 			$att_id     = attachment_url_to_postid( $img_src );
 			$attachment = get_post( $att_id );
