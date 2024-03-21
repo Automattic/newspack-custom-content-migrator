@@ -11,6 +11,7 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use stdClass;
 use WP_User;
@@ -53,6 +54,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	private CoAuthorPlus $cap;
 	
 	/**
+	 * Posts.
+	 *
+	 * @var Posts
+	 */
+	private Posts $posts;
+	
+	/**
 	 * Logger.
 	 *
 	 * @var Logger
@@ -81,6 +89,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$this->attachments     = new Attachments();
 		$this->block_generator = new GutenbergBlockGenerator();
 		$this->cap             = new CoAuthorPlus();
+		$this->posts           = new Posts();
 		$this->logger          = new Logger();
 	}
 
@@ -139,6 +148,29 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						'name'        => 'bylines-special-cases-php-file',
 						'description' => 'Path to a PHP file which returns an array with bylines that are manually split/parsed. The PHP file array being returned should cointain bylines as keys, and split author names as values.',
 						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-consolidate-authors--list-all-wp-users',
+			[ $this, 'cmd_consolidate_authors_list_all_users' ],
+			[
+				'shortdesc' => 'User consolidation helper command no.1. Produces a list of all WP_Users, sorted by display name, and with their emails.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-consolidate-authors--merge-selected-wp-users',
+			[ $this, 'cmd_consolidate_authors_merge_users' ],
+			[
+				'shortdesc' => 'User consolidation helper command no.2. Takes a CSV which notes which users are being deleted and replaced by other existing users.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-consolidated-users',
+						'description' => 'Path to CSV file which defines how users should be consolidated.',
+						'optional'    => false,
 						'repeating'   => false,
 					],
 				],
@@ -316,6 +348,245 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::warning( 'NOTE -- make sure to run `newspack-content-migrator village-cms-fix-authors` to properly assign all authors.' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator village-cms-consolidate-authors--list-all-wp-users`.
+	 *
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_consolidate_authors_list_all_users( $pos_args, $assoc_args ) {
+		
+		// Fetch all WP_Users: ID, display_name, email.
+		$users = get_users( [ 'fields' => [ 'ID', 'display_name', 'user_email' ] ] );
+		// Convert to array.
+		$users = array_map(
+			function ( $user ) {
+				return (array) $user;
+			},
+			$users
+		);
+
+		// Sort Users by display_name.
+		usort(
+			$users,
+			function ( $a, $b ) {
+				return strcmp( $a['display_name'], $b['display_name'] );
+			}
+		);
+
+		// Export as CSV.
+		$log_authors = 'authors.csv';
+		$fp_csv      = fopen( $log_authors, 'w' );
+		fputcsv( $fp_csv, [ 'ID', 'display_name', 'user_email' ] );
+		foreach ( $users as $user ) {
+			fputcsv( $fp_csv, [ $user['ID'], $user['display_name'], $user['user_email'] ] );
+		}
+		fclose( $fp_csv );
+		WP_CLI::success( sprintf( 'Logged %s', $log_authors ) );
+		
+		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator village-cms-consolidate-authors--merge-selected-wp-users`.
+	 *
+	 * @param array $pos_args  Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_consolidate_authors_merge_users( $pos_args, $assoc_args ) {
+		global $wpdb;
+		
+		$list_consolidated = $assoc_args['csv-consolidated-users'] ?? null;
+		if ( ! file_exists( $list_consolidated ) ) {
+			WP_CLI::error( 'CSV file does not exist.' );
+		}
+
+		/**
+		 * Parse CSV.
+		 */
+
+		// Load contents of CSV file.
+		$consolidated = array_map( 'str_getcsv', file( $list_consolidated ) );
+		
+		// Get and validate headers.
+		$headers          = array_shift( $consolidated );
+		$expected_columns = [ 'ID', 'display_name', 'replaced_by_id', 'new_display_name', 'user_email' ];
+		foreach ( $expected_columns as $expected_column ) {
+			if ( ! in_array( $expected_column, $headers ) ) {
+				WP_CLI::error( sprintf( 'CSV file is missing header %s', $expected_column ) );
+			}   
+		}
+
+		// Get column indexes.
+		$index_id               = array_search( 'ID', $headers );
+		$index_replaced_by_id   = array_search( 'replaced_by_id', $headers );
+		$index_new_display_name = array_search( 'new_display_name', $headers );
+
+		// Loop through CSV and populate data arrays.
+		$wp_user_substitutions       = [];
+		$wp_user_displayname_updates = [];
+		foreach ( $consolidated as $row ) {
+			$current_user_id    = $row[ $index_id ];
+			$replace_by_user_id = $row[ $index_replaced_by_id ];
+			$new_display_name   = $row[ $index_new_display_name ];
+
+			if ( ! empty( $replace_by_user_id ) ) {
+				$wp_user_substitutions[ $current_user_id ] = $replace_by_user_id;
+			}
+			if ( ! empty( $new_display_name ) ) {
+				$wp_user_displayname_updates[ $current_user_id ] = $new_display_name;
+			}
+		}
+
+
+		/**
+		 * Rename WP_Users.
+		 */
+		$renamed_users = [];
+		foreach ( $wp_user_displayname_updates as $wp_user_id => $new_display_name ) {
+			$old_display_name = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $wp_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+			$wpdb->update(
+				$wpdb->users, // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				[ 'display_name' => $new_display_name ],
+				[ 'ID' => $wp_user_id ]
+			);
+			$renamed_users[ $wp_user_id ] = [
+				'old_display_name' => $old_display_name,
+				'new_display_name' => $new_display_name,
+			];
+		}
+
+
+		/**
+		 * Merge/replace WP_Users with other existing WP_Users.
+		 */
+		$log_post_coauthor_updates = [];
+		$log_post_author_updates   = [];
+		$post_ids                  = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+
+			// If authorship is set by CAP, and update the authorship there.
+			$coauthors = $this->cap->get_all_authors_for_post( $post_id );
+			if ( $coauthors && ! empty( $coauthors ) ) {
+				// Replace with new.
+				$new_coauthors = $coauthors;
+				foreach ( $coauthors as $key_coauthor => $coauthor ) {
+					if ( isset( $wp_user_substitutions[ $coauthor->ID ] ) ) {
+						$new_coauthor_id                = $wp_user_substitutions[ $coauthor->ID ];
+						$new_coauthor                   = get_user_by( 'ID', $new_coauthor_id );
+						$new_coauthors[ $key_coauthor ] = $new_coauthor;
+					}
+				}
+
+				// Update with new.
+				$this->cap->assign_authors_to_post( $new_coauthors, $post_id, false );
+
+				// Log.
+				$log_post_coauthor_updates[ $post_id ] = [
+					'old_ids'           => array_map(
+						function ( $coauthor ) {
+							return $coauthor->ID; },
+						$coauthors 
+					),
+					'new_ids'           => array_map(
+						function ( $new_coauthor ) {
+							return $new_coauthor->ID; },
+						$new_coauthors 
+					),
+					'old_display_names' => array_map(
+						function ( $coauthor ) {
+							return $coauthor->display_name; },
+						$coauthors 
+					),
+					'new_display_names' => array_map(
+						function ( $new_coauthor ) {
+							return $new_coauthor->display_name; },
+						$new_coauthors 
+					),
+				];
+			}
+			
+			// Update all posts' `wp_posts`.`post_author` column.
+			$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			if ( isset( $wp_user_substitutions[ $author_id ] ) ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_author' => $wp_user_substitutions[ $author_id ] ],
+					[ 'ID' => $post_id ]
+				);
+				$log_post_author_updates[ $post_id ] = [
+					'old_id' => $author_id,
+					'new_id' => $wp_user_substitutions[ $author_id ],
+				];
+			}
+		}
+		
+
+		/**
+		 * Log post IDs updates.
+		 */
+		$log_updated_posts = 'updated_posts.csv';
+		/** Log post IDs updates. For Publisher's QC convenience:
+		 * - log post's coauthors update
+		 * - if coauthors not used on post, log post's author update
+		 * Since coauthors supersedes post_author, no need to log both.
+		 */
+		$log_post_updates = $log_post_coauthor_updates;
+		foreach ( $log_post_author_updates as $post_id => $post_update ) {
+			$old_user_id                 = $post_update['old_id'];
+			$new_user_id                 = $post_update['new_id'];
+			$old_display_name            = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $old_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+			$new_display_name            = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $new_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+			$log_post_coauthor_updates[] = [
+				'post_id'           => $post_id,
+				'old_ids'           => $old_user_id,
+				'new_ids'           => $new_user_id,
+				'old_display_names' => $old_display_name,
+				'new_display_names' => $new_display_name,
+			];
+		}
+		// Put headers.
+		$fp_csv      = fopen( $log_updated_posts, 'w' );
+		$csv_headers = [ 'post_id', 'old_ids', 'new_ids', 'old_display_names', 'new_display_names' ];
+		fputcsv( $fp_csv, $csv_headers );
+		// Put rows.
+		foreach ( $log_post_coauthor_updates as $post_id => $log_post_author_update ) {
+			$csv_row = [
+				$post_id,
+				$log_post_author_update['old_ids'],
+				$log_post_author_update['new_ids'],
+				$log_post_author_update['old_display_names'],
+				$log_post_author_update['new_display_names'],
+			];
+			fputcsv( $fp_csv, $csv_row );
+		}
+		WP_CLI::success( sprintf( 'Logged %s', $log_post_updates ) );
+
+
+		/**
+		 * Log user renamings.
+		 */
+		$log_renamed_users = 'renamed_users.csv';
+		// Put headers.
+		$fp_csv      = fopen( $log_renamed_users, 'w' );
+		$csv_headers = [ 'user_id', 'old_display_name', 'new_display_name' ];
+		fputcsv( $fp_csv, $csv_headers );
+		// Put rows.
+		foreach ( $renamed_users as $user_id => $renamed_user ) {
+			$csv_row = [
+				$user_id,
+				$renamed_user['old_display_name'],
+				$renamed_user['new_display_name'],
+			];
+			fputcsv( $fp_csv, $csv_row );
+		}
+		WP_CLI::success( sprintf( 'Logged %s', $log_updated_posts ) );
+		
+		WP_CLI::success( 'Done.' );
 	}
 
 	/**
