@@ -126,7 +126,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 					$created_ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $sfly_names ) );
 
 					if( is_wp_error( $created_ga_id ) || ! is_numeric( $created_ga_id ) || ! ( $created_ga_id > 0 ) ) {
-						$this->logger->log( $log, 'GA create failed: ' . $sfly_names, $this->logger::ERROR );
+						$this->logger->log( $log, 'GA create failed: ' . $sfly_names, $this->logger::ERROR, true );
 					}
 
 					$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $created_ga_id );
