@@ -448,7 +448,7 @@ class WindyCityMigrator implements InterfaceCommand {
 
 			$query = new WP_Query( [
 				'post_type' => $post_type,
-				'category'  => $cat_id,
+				'cat'  => $cat_id,
 				'title'     => $listing_title,
 			] );
 
@@ -540,7 +540,7 @@ class WindyCityMigrator implements InterfaceCommand {
 
 			$query = new WP_Query( [
 				'post_type' => $post_type,
-				'category'  => $cat_id,
+				'cat'  => $cat_id,
 				'title'     => $listing_title,
 			] );
 
