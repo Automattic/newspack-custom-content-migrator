@@ -441,6 +441,15 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				$wp_user_displayname_updates[ $current_user_id ] = $new_display_name;
 			}
 		}
+		// Basic validation of input data.
+		foreach ( $wp_user_substitutions as $wp_user_old => $wp_user_new ) {
+			if ( $wp_user_old == $wp_user_new ) {
+				WP_CLI::error( sprintf( '$wp_user_substitutions from %s to %s', $wp_user_old, $wp_user_new ) );
+			}
+			if ( ! $wp_user_new ) {
+				WP_CLI::error( sprintf( '$wp_user_substitutions ! $wp_user_new %s', $wp_user_new ) );
+			}
+		}
 
 
 		/**
@@ -458,18 +467,21 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				'old_display_name' => $old_display_name,
 				'new_display_name' => $new_display_name,
 			];
+			WP_CLI::success( sprintf( 'Renamed %d from `%s` to `%s`', $wp_user_id, $old_display_name, $new_display_name ) );
 		}
 
 
 		/**
 		 * Merge/replace WP_Users with other existing WP_Users.
 		 */
-		$log_post_coauthor_updates = [];
-		$log_post_author_updates   = [];
+		$post_coauthor_updates = [];
+		$post_author_updates   = [];
 		$post_ids                  = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
-
-			// If authorship is set by CAP, and update the authorship there.
+			WP_CLI::log( sprintf( '(%d)/(%d) Post ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
+			/**
+			 * If authorship is set by CAP, update the WP_User coauthors.
+			 */
 			$coauthors = $this->cap->get_all_authors_for_post( $post_id );
 			if ( $coauthors && ! empty( $coauthors ) ) {
 				// Replace with new.
@@ -482,89 +494,86 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					}
 				}
 
-				// Update with new.
-				$this->cap->assign_authors_to_post( $new_coauthors, $post_id, false );
+				if ( $new_coauthors != $coauthors ) {
+					// Update post with new coauthors.
+					$this->cap->assign_authors_to_post( $new_coauthors, $post_id, false );
 
-				// Log.
-				$log_post_coauthor_updates[ $post_id ] = [
-					'old_ids'           => array_map(
-						function ( $coauthor ) {
-							return $coauthor->ID; },
-						$coauthors 
-					),
-					'new_ids'           => array_map(
-						function ( $new_coauthor ) {
-							return $new_coauthor->ID; },
-						$new_coauthors 
-					),
-					'old_display_names' => array_map(
-						function ( $coauthor ) {
-							return $coauthor->display_name; },
-						$coauthors 
-					),
-					'new_display_names' => array_map(
-						function ( $new_coauthor ) {
-							return $new_coauthor->display_name; },
-						$new_coauthors 
-					),
-				];
+					// Log.
+					WP_CLI::success( sprintf( 'Updated coauthors for post ID %d', $post_id ) );
+					// phpcs:disable Convenient log one-liners.
+					$post_coauthor_updates[ $post_id ] = [
+						'old_ids'           => array_map( function ( $coauthor ) { return $coauthor->ID; }, $coauthors ),
+						'new_ids'           => array_map( function ( $new_coauthor ) { return $new_coauthor->ID; }, $new_coauthors ),
+						'old_display_names' => array_map( function ( $coauthor ) { return $coauthor->display_name; }, $coauthors ),
+						'new_display_names' => array_map( function ( $new_coauthor ) { return $new_coauthor->display_name; }, $new_coauthors ),
+					];
+					// phpcs:enable
+				}
 			}
 			
-			// Update all posts' `wp_posts`.`post_author` column.
-			$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
-			if ( isset( $wp_user_substitutions[ $author_id ] ) ) {
+			/**
+			 * Update `wp_posts`.`post_author`.
+			 */
+			$post_author_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			if ( isset( $wp_user_substitutions[ $post_author_id ] ) ) {
 				$wpdb->update(
 					$wpdb->posts,
-					[ 'post_author' => $wp_user_substitutions[ $author_id ] ],
+					[ 'post_author' => $wp_user_substitutions[ $post_author_id ] ],
 					[ 'ID' => $post_id ]
 				);
-				$log_post_author_updates[ $post_id ] = [
-					'old_id' => $author_id,
-					'new_id' => $wp_user_substitutions[ $author_id ],
+
+				WP_CLI::success( sprintf( 'Updated post_author for post ID %d from %s to %s', $post_id, $post_author_id, $wp_user_substitutions[ $post_author_id ] ) );
+				$post_author_updates[ $post_id ] = [
+					'old_id' => $post_author_id,
+					'new_id' => $wp_user_substitutions[ $post_author_id ],
 				];
 			}
 		}
-		
+
 
 		/**
-		 * Log post IDs updates.
+		 * Save logs.
 		 */
 		$log_updated_posts = 'updated_posts.csv';
-		/** Log post IDs updates. For Publisher's QC convenience:
-		 * - log post's coauthors update
-		 * - if coauthors not used on post, log post's author update
-		 * Since coauthors supersedes post_author, no need to log both.
+
+		/** 
+		 * For Publisher's QC convenience:
+		 * 	1. log post's coauthors update
+		 * 	2. only if coauthors is not used on post, log post_author update
+		 * Since coauthors supersedes post_author, no need to log 2nd if 1st has been made.
 		 */
-		$log_post_updates = $log_post_coauthor_updates;
-		foreach ( $log_post_author_updates as $post_id => $post_update ) {
+		$post_author_updates_log = $post_coauthor_updates;
+		foreach ( $post_author_updates as $post_id => $post_update ) {
 			$old_user_id                 = $post_update['old_id'];
 			$new_user_id                 = $post_update['new_id'];
 			$old_display_name            = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $old_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 			$new_display_name            = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $new_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
-			$log_post_coauthor_updates[] = [
-				'post_id'           => $post_id,
-				'old_ids'           => $old_user_id,
-				'new_ids'           => $new_user_id,
-				'old_display_names' => $old_display_name,
-				'new_display_names' => $new_display_name,
-			];
+			if ( ! isset( $post_coauthor_updates[ $post_id ] ) ) {
+				$post_author_updates_log[] = [
+					'post_id'           => $post_id,
+					'old_ids'           => $old_user_id,
+					'new_ids'           => $new_user_id,
+					'old_display_names' => $old_display_name,
+					'new_display_names' => $new_display_name,
+				];
+			}
 		}
 		// Put headers.
 		$fp_csv      = fopen( $log_updated_posts, 'w' );
 		$csv_headers = [ 'post_id', 'old_ids', 'new_ids', 'old_display_names', 'new_display_names' ];
 		fputcsv( $fp_csv, $csv_headers );
 		// Put rows.
-		foreach ( $log_post_coauthor_updates as $post_id => $log_post_author_update ) {
+		foreach ( $post_coauthor_updates as $post_id => $log_post_author_update ) {
 			$csv_row = [
 				$post_id,
-				$log_post_author_update['old_ids'],
-				$log_post_author_update['new_ids'],
-				$log_post_author_update['old_display_names'],
-				$log_post_author_update['new_display_names'],
+				implode( ';', $log_post_author_update['old_ids'] ),
+				implode( ';', $log_post_author_update['new_ids'] ),
+				implode( ';', $log_post_author_update['old_display_names'] ),
+				implode( ';', $log_post_author_update['new_display_names'] ),
 			];
 			fputcsv( $fp_csv, $csv_row );
 		}
-		WP_CLI::success( sprintf( 'Logged %s', $log_post_updates ) );
+		WP_CLI::success( sprintf( 'Logged %s', $log_updated_posts ) );
 
 
 		/**
@@ -585,6 +594,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			fputcsv( $fp_csv, $csv_row );
 		}
 		WP_CLI::success( sprintf( 'Logged %s', $log_updated_posts ) );
+		
+		WP_CLI::warning( sprintf( 'Ready for deletion -- users replaced in %s', $log_updated_posts ) );
 		
 		WP_CLI::success( 'Done.' );
 	}
