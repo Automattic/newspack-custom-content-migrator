@@ -443,7 +443,8 @@ class WindyCityMigrator implements InterfaceCommand {
 			);
 
 			$content_blocks[] = $this->gutenberg_block_generator->get_html( $replaced_fields['description'] );
-			$content_blocks[] = $this->gutenberg_block_generator->get_html( $replaced_fields['hours'] );
+			// Put a line break over the hours so the two HTML block's content don't stick together.
+			$content_blocks[] = $this->gutenberg_block_generator->get_html( '<br>' . $replaced_fields['hours'] );
 
 			$query = new WP_Query( [
 				'post_type' => $post_type,
@@ -472,7 +473,7 @@ class WindyCityMigrator implements InterfaceCommand {
 					WP_CLI::log( sprintf( 'Place with title "%s" has already been imported – skipping', $listing_title ) );
 					continue;
 				}
-				$listing_id      = $query->posts[0];
+				$listing_id      = $query->posts[0]->ID;
 				$post_data['ID'] = $listing_id;
 				wp_update_post( $post_data );
 				$verb = 'updated';
@@ -562,7 +563,7 @@ class WindyCityMigrator implements InterfaceCommand {
 					WP_CLI::log( sprintf( 'Row with title "%s" for pub "%s" has already been imported – skipping', $listing_title, $pub ) );
 					continue;
 				}
-				$listing_id      = $query->posts[0];
+				$listing_id      = $query->posts[0]->ID;
 				$post_data['ID'] = $listing_id;
 				wp_update_post( $post_data );
 			}
