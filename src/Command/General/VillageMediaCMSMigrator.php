@@ -150,6 +150,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dev-only-update-bylines',
+						'description' => 'Dev helper flag. If it is set, will only update coauthors where byline attribute is set, not where author node is set.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -645,6 +652,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		if ( isset( $assoc_args['bylines-special-cases-php-file'] ) && file_exists( $assoc_args['bylines-special-cases-php-file'] ) ) {
 			$bylines_special_cases = include $assoc_args['bylines-special-cases-php-file'];
 		}
+		$dev_only_update_bylines = $assoc_args['dev-only-update-bylines'] ?? null;
 		
 
 		// Loop through content nodes and fix authors.
@@ -760,7 +768,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$this->cap->assign_authors_to_post( $wp_users, $post_id, false );
 					$this->logger->log( $log, sprintf( 'Assigned CAP WP_User IDs %s to post_ID %d', implode( ',', $wp_user_ids_after ), $post_id ) );
 				}           
-			} else {
+			} elseif ( ! $dev_only_update_bylines ) {
 
 				/**
 				 * Use <author> as author.
@@ -1099,7 +1107,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$author_names = [];
 			
 		// Replace multiple separators with a common separator.
-		$separators       = [ ', and', ',', ' and ', ' with ', ' & ' ];
+		$separators       = [ ', and', ',', ' and ', ' with ', ' & ', ' y ' ];
 		$common_separator = '&&';
 		$byline_replaced  = str_replace( $separators, $common_separator, $byline );
 
