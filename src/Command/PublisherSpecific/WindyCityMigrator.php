@@ -439,12 +439,14 @@ class WindyCityMigrator implements InterfaceCommand {
 				)
 			);
 			$content_blocks[] = $this->gutenberg_block_generator->get_paragraph(
-				sprintf( '<a href="%1$s">%1$s</a><br>%2$s', $row['website'], $row['phone'] )
+				// Urls in data  have no protocol. We'll just guess it's https.
+				sprintf( '<a href="https://%1$s">%1$s</a><br>%2$s', $row['website'], $row['phone'] )
 			);
 
 			$content_blocks[] = $this->gutenberg_block_generator->get_html( $replaced_fields['description'] );
-			// Put a line break over the hours so the two HTML block's content don't stick together.
-			$content_blocks[] = $this->gutenberg_block_generator->get_html( '<br>' . $replaced_fields['hours'] );
+			// Put an empty paragraph between description and hours HTML blocks so the content does not display in one line.
+			$content_blocks[] = $this->gutenberg_block_generator->get_paragraph('');
+			$content_blocks[] = $this->gutenberg_block_generator->get_html( $replaced_fields['hours'] );
 
 			$query = new WP_Query( [
 				'post_type' => $post_type,
