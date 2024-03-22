@@ -609,6 +609,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'target-story-ids',
+						'description' => 'CSV list of target story IDs to re-process the "more posts" block for.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
