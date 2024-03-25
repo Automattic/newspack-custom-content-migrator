@@ -111,9 +111,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			),
 			function ( $post ) use ( $log ) {
 
-				$this->logger->log( $log, 'Post id: ' . $post->ID );
+				$this->logger->log( $log, '---- Post id: ' . $post->ID );
 
-                // check for shortcodes
+                // Get shortcodes.
 				preg_match_all( '/' . get_shortcode_regex( array( 'media-credit' ) ) . '/', $post->post_content, $shortcode_matches, PREG_SET_ORDER );
 
 				$this->logger->log( $log, 'Shortcodes found: ' . count( $shortcode_matches ) );
@@ -135,16 +135,70 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 					}
 
+					$this->logger->log( $log, '-- Atts: ' . $shortcode_match[3] );
+
+					$atts = shortcode_parse_atts( $shortcode_match[3] );
+
+					$atts_has_name = array_key_exists( 'name', $atts );
+					$atts_has_id = array_key_exists( 'id', $atts );
+
+					// Both types?
+					if( $atts_has_name && $atts_has_id ) {
+
+						$this->logger->log( $log, print_r( $shortcode_match, true) );
+						$this->logger->log( $log, 'Atts has both types.', $this->logger::ERROR, true );
+
+					}
+					// ID.
+					else if( $atts_has_id ) {
+
+						$this->logger->log( $log, 'User ID not used by publisher.', $this->logger::WARNING );
+						return;
+
+					}
+					else {
+						
+						if( ! $atts_has_name ) {
+							$this->logger->log( $log, 'No type?', $this->logger::ERROR, true );
+						}
+					}
+					
+					
+					// Match img tag.
 					preg_match( '/wp-image-(\d+)/', $shortcode_match[5], $img_matches );
 
 					if( 0 == count( $img_matches ) ) {
 
-						$img_type = 'External ' . $shortcode_match[5];
+						$this->logger->log( $log, 'Image: External' );
+						$this->logger->log( $log, print_r( $shortcode_match, true) );
+						return;
 
 					}
 					else if( 2 == count( $img_matches ) ) {
 
-						$img_type = 'Media ' . $img_matches[1];
+						$this->logger->log( $log, 'Image ID: ' . $img_matches[1] );
+
+						$img_postmeta = get_post_meta( $img_matches[1], '_media_credit', true );
+
+						$this->logger->log( $log, 'DB postmeta: ' . $img_postmeta );
+
+						// Check for matching DB value.
+						if( $atts['name'] == $img_postmeta ) {
+							$this->logger->log( $log, 'Atts postmeta match.' );
+							return;
+						}
+
+						// If DB value is blank, then set it
+						if( empty( trim( $img_postmeta ) ) ) {
+							
+							$this->logger->log( $log, 'DO update_post_meta' );
+							return;
+
+						}
+
+						$this->logger->log( $log, 'DIFFERENT!', $this->logger::WARNING );
+						return;
+					
 					}
 					else {
 
@@ -153,13 +207,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 					}
 
-					$this->logger->log( $log, $img_type . ' => ' . trim( $shortcode_match[3] ) );
-
 				}
 
-
-
-                // update postmeta
+                // update postmeta or <figcaption>
 				// remove shortcode open and close tags
 
                 // exit();
