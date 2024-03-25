@@ -87,5 +87,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\CityViewMigrator::class,
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 		Command\PublisherSpecific\LAFocusMigrator::class,
+		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 	)
 );
