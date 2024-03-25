@@ -58,7 +58,7 @@ class TheFifthEstateMigrator implements InterfaceCommand {
 
         WP_CLI::line( 'Starting Orders and Customers Deletion' );
 
-        foreach ( $this->get_wc_orders( -1 ) as $order ) {
+        foreach ( $this->get_wc_orders() as $order ) {
             WP_CLI::line( sprintf( '[Memory: %s » Time: %s] Deleting Customer %s', size_format( memory_get_usage( true ) ), human_time_diff( $start_time, microtime( true ) ), $order->get_customer_id() ) );
             wp_delete_user( $order->get_customer_id() );
 
@@ -72,12 +72,12 @@ class TheFifthEstateMigrator implements InterfaceCommand {
     /**
      * Get WooCommerce orders
      */
-    private function get_wc_orders( $limit = 100 ): iterable {
+    private function get_wc_orders(): iterable {
         $ids = wc_get_orders( [
             'date_created' => '2022-12-22',
             'status' => 'wc-failed',
             'return' => 'ids',
-            'limit' => $limit,
+            'limit' => -1,
         ] );
 
         foreach ( $ids as $id ) {
