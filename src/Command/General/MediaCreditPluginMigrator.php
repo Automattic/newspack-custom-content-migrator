@@ -180,9 +180,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		}
 
-		global $wpdb;
-		$wpdb->set_prefix( 'live_' );
-
+global $wpdb;
+$wpdb->set_prefix( 'live_' );
 
 		$this->posts_logic->throttled_posts_loop(
 			array(
@@ -203,17 +202,21 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
                 // Get shortcodes within content.
 				preg_match_all( '/' . get_shortcode_regex( array( 'caption' ) ) . '/', $post->post_content, $shortcode_matches, PREG_SET_ORDER );
 
-				$this->logger->log( $this->log, 'Shortcodes found: ' . count( $shortcode_matches ) );
+				if( 0 == count( $shortcode_matches ) ) return;
 
-				$this->logger->log( $this->log, $post->post_content );
-
+				// Replace content with processed shortcodes.
 				foreach( $shortcode_matches as $shortcode_match ) {
 
-					$post->post_content = str_replace( $shortcode_match[0], $this->process_caption_shortcode_match( $shortcode_match ), $post->post_content );
+					$updated_shortcode = $this->process_caption_shortcode_match( $shortcode_match );
 
-				} // each shortcode
+					$this->logger->log( $this->log, '-- Old: ' . $shortcode_match[0] );
+					$this->logger->log( $this->log, '-- New: ' . $updated_shortcode );
 
-				// update post
+					$post->post_content = str_replace( $shortcode_match[0], $updated_shortcode, $post->post_content );
+
+				}
+
+				// Update post.
 				if( $this->dry_run ) {
 
 					$this->logger->log( $this->log, 
@@ -224,15 +227,12 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 				}
 				else {
 	
-					echo "do update here";
-					exit();
-	
+					wp_update_post( array(
+						'ID'           => $post->ID,
+						'post_content' => $post->post_content,
+					));
+				  
 				}
-
-				$this->logger->log( $this->log, $post->post_content );
-
-				exit();
-	
 
 			},
             1, 100
@@ -244,9 +244,23 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Process a caption shortcode match.
+	 * Get media-credit shortcode matches from content.
+	 *
+	 * @param string $content
+	 * @return array $shortcode_matches
+	 */
+	private function get_media_credit_shortcode_matches( $content ) {
+
+		preg_match_all( '/' . get_shortcode_regex( array( 'media-credit' ) ) . '/', $content, $shortcode_matches, PREG_SET_ORDER );
+
+		return $shortcode_matches;
+
+	}
+
+	/**
+	 * Process a [caption] shortcode match.
 	 * 
-	 * Array
+	 * Array:
 	 * [0] => [caption id="attachment_1045738" ... ][media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption[/caption]
 	 * [1] =>
 	 * [2] => caption
@@ -294,22 +308,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Get media-credit shortcode matches from content.
+	 * Process a [media-credit] shortcode.
 	 *
-	 * @param string $content
-	 * @return array $shortcode_matches
-	 */
-	private function get_media_credit_shortcode_matches( $content ) {
-
-		preg_match_all( '/' . get_shortcode_regex( array( 'media-credit' ) ) . '/', $content, $shortcode_matches, PREG_SET_ORDER );
-
-		return $shortcode_matches;
-
-	}
-
-	/**
-	 * Process a single media credit shortcode.
-	 *
+	 * Array:
 	 * [0] => [media-credit name|id="" ... ]<img class="wp-image-1022982 ..." ... />[/media-credit]
 	 * [1] => 
 	 * [2] => media-credit
@@ -322,6 +323,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 * @return null|string $media_credit_name
 	 */
 	private function process_media_credit_shortcode( $shortcode_match ) {
+
+		global $wpdb;
 
 		// Data integrity check.
 		if( 7 != count( $shortcode_match ) || 'media-credit' != $shortcode_match[2] ) {
@@ -387,25 +390,32 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		}
 
 		// Data integrity for img.
-		if( 2 != count( $img_match ) ) {
+		if( 2 != count( $img_match ) || ! is_numeric( $img_match[1] ) || ! ( $img_match[1] > 0 ) ) {
 
 			$this->logger->log( $this->log,
-				'Media Credit image matche error: ' . print_r( $img_match, true ),
+				'Media Credit image match error: ' . print_r( $img_match, true ),
 				$this->logger::ERROR,
 				true
 			);
 
 		}
 
-// Verify ID is an image.
-echo "here";
-// Not an image, return name as is.
-exit();
+		// Verify ID exists in db.
+		$attachment_id = $wpdb->get_var( $wpdb->prepare("select ID from {$wpdb->posts} where post_type = 'attachment' and ID = %d", $img_match[1] ) );
 
+		if( ! is_numeric( $attachment_id ) || ! ( $attachment_id > 0 ) ) {
 
+			$this->logger->log( $this->log,
+				'Media credit missing db attachment: ' . print_r( $img_match, true ),
+				$this->logger::WARNING
+			);
 
+			// Return the shortcode credit name.
+			return $atts['name'];
 
-		// Compare to DB credit string.
+		}
+
+		// Get DB credit string.
 		$img_postmeta = trim( get_post_meta( $img_match[1], '_media_credit', true ) );
 
 		// If shortcode string matches db string, no more processing needed.
