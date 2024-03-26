@@ -28,12 +28,15 @@ use WP_CLI;
  */
 class MediaCreditPluginMigrator implements InterfaceCommand {
 
+	private $dry_run = false;
+
 	/**
 	 * Logger
 	 * 
 	 * @var Logger
 	 */
 	private $logger;
+	private $log;
 
 	/**
 	 * PostsLogic
@@ -89,6 +92,15 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_media_credit_plugin_captions' ],
 			[
 				'shortdesc' => 'Migrate Media Credit Plugin caption shortcodes.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry-run simulation only. No updates.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 
@@ -104,13 +116,24 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_media_credit_plugin( $pos_args, $assoc_args ) {
 
-		$log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
-		$this->logger->log( $log, 'Starting migration.' );
+		$this->logger->log( $this->log, 'Starting migration.' );
 
 
 		global $wpdb;
 		$wpdb->set_prefix( 'live_' );
+
+// ORDER POSTS by date DESC so NEWEST post will save to the BLANK DB value
+// ORDER POSTS by date DESC so NEWEST post will save to the BLANK DB value
+// ORDER POSTS by date DESC so NEWEST post will save to the BLANK DB value
+// ORDER POSTS by date DESC so NEWEST post will save to the BLANK DB value
+// ORDER POSTS by date DESC so NEWEST post will save to the BLANK DB value
+
+
+// <figcaption>
+// remove shortcode open and close tags
+
 
 
 		$this->posts_logic->throttled_posts_loop(
@@ -120,117 +143,22 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
                 's'              => '[media-credit',
                 'search_columns' => array( 'post_content' ),
 
-// ORDER POSTS by date ASC so that last post will save the latest html credit
 
 			),
-			function ( $post ) use ( $log ) {
+			function ( $post ) {
 
-				$this->logger->log( $log, '---- Post id: ' . $post->ID );
+				$this->logger->log( $this->log, '---- Post id: ' . $post->ID );
 
-                // Get shortcodes.
-				preg_match_all( '/' . get_shortcode_regex( array( 'media-credit' ) ) . '/', $post->post_content, $shortcode_matches, PREG_SET_ORDER );
-
-				$this->logger->log( $log, 'Shortcodes found: ' . count( $shortcode_matches ) );
-
-				foreach( $shortcode_matches as $shortcode_match ) {
-
-					// [0] => [media-credit name="Photo courtesy of the family)" align="aligncenter" width="300"]<img class="wp-image-1022982 size-full" src="https://spokesman-recorder-newspack.newspackstaging.com/wp-content/uploads/2011/03/Picture-32-300x201-1.png" width="300" height="201" />[/media-credit]
-					// [1] => 
-					// [2] => media-credit
-					// [3] =>  name="Photo courtesy of the family)" align="aligncenter" width="300"
-					// [4] => 
-					// [5] => <img class="wp-image-1022982 size-full" src="https://spokesman-recorder-newspack.newspackstaging.com/wp-content/uploads/2011/03/Picture-32-300x201-1.png" width="300" height="201" />
-					// [6] => 
-
-					if( 7 != count( $shortcode_match ) || 'media-credit' != $shortcode_match[2] ) {
-	
-						$this->logger->log( $log, print_r( $shortcode_match, true) );
-						$this->logger->log( $log, 'Media Credit incorrect parse error.', $this->logger::ERROR, true );
-
-					}
-
-					$this->logger->log( $log, '-- Attributes: ' . $shortcode_match[3] );
-
-					$atts = shortcode_parse_atts( $shortcode_match[3] );
-
-					$atts_has_name = array_key_exists( 'name', $atts );
-					$atts_has_id = array_key_exists( 'id', $atts );
-
-					// Both types?
-					if( $atts_has_name && $atts_has_id ) {
-
-						$this->logger->log( $log, print_r( $shortcode_match, true) );
-						$this->logger->log( $log, 'Atts has both types.', $this->logger::ERROR, true );
-
-					}
-					// ID.
-					else if( $atts_has_id ) {
-
-						$this->logger->log( $log, 'User ID not used by publisher.', $this->logger::WARNING );
-						continue;
-
-					}
-					else if( ! $atts_has_name ) {
-						$this->logger->log( $log, 'No type?', $this->logger::ERROR, true );
-					}
-					
-					
-					// Match img tag.
-					preg_match( '/wp-image-(\d+)/', $shortcode_match[5], $img_matches );
-
-					if( 0 == count( $img_matches ) ) {
-
-						$this->logger->log( $log, 'Image: External' );
-						$this->logger->log( $log, print_r( $shortcode_match, true) );
-						continue;
-
-					}
-					else if( 2 != count( $img_matches ) ) {
-
-						$this->logger->log( $log, print_r( $img_matches, true) );
-						$this->logger->log( $log, 'Media Credit incorrect image count.', $this->logger::ERROR, true );
-
-					}
-
-					$this->logger->log( $log, 'Image ID: ' . $img_matches[1] );
-
-					$img_postmeta = get_post_meta( $img_matches[1], '_media_credit', true );
-
-					$this->logger->log( $log, 'DB postmeta: ' . $img_postmeta );
-
-					// Check for matching DB value.
-					if( $atts['name'] == $img_postmeta ) {
-						$this->logger->log( $log, 'Atts postmeta match.' );
-						continue;
-					}
-
-					// If DB value is blank, then set it
-					if( empty( trim( $img_postmeta ) ) ) {
-						
-						// ORDER POSTS by date ASC so that last post will save the latest html caption
-						$this->logger->log( $log, 'DO update_post_meta' );
-						continue;
-
-					}
-
-					$this->logger->log( $log, 'DIFFERENT!', $this->logger::WARNING );
-
-					// examine 
-
-
-
-					// update postmeta or <figcaption>
-					// remove shortcode open and close tags
-					
-				} // each shortcode
-
+				// update postmeta or <figcaption>
+				// remove shortcode open and close tags
+				
 			},
             1, 100
 		);
 
 		wp_cache_flush();
 
-		$this->logger->log( $log, 'Done.', $this->logger::SUCCESS );
+		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
 
 	/**
@@ -241,10 +169,16 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_media_credit_plugin_captions( $pos_args, $assoc_args ) {
 
-		$log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+		
+		$this->logger->log( $this->log, 'Starting migration.' );
 
-		$this->logger->log( $log, 'Starting migration.' );
+		if( isset( $assoc_args['dry-run'] ) ) {
 
+			$this->dry_run = true;
+			$this->logger->log( $this->log, 'with --dry-run.' );
+
+		}
 
 		global $wpdb;
 		$wpdb->set_prefix( 'live_' );
@@ -254,120 +188,51 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			array(
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish' ),
-                's'              => '[caption',
+                // Search for caption shortcode.
+				's'              => '[caption',
                 'search_columns' => array( 'post_content' ),
-
-// ORDER POSTS by date ASC so that last post will save the latest html credit
+				// Order by date DESC so newest caption will be set into blank postmeta.
+				'orderby'        => 'date',
+				'order'          => 'DESC',
 
 			),
-			function ( $post ) use ( $log ) {
+			function ( $post ) {
 
-				$this->logger->log( $log, '---- Post id: ' . $post->ID );
+				$this->logger->log( $this->log, '---- Post id: ' . $post->ID );
 
-                // Get shortcodes.
+                // Get shortcodes within content.
 				preg_match_all( '/' . get_shortcode_regex( array( 'caption' ) ) . '/', $post->post_content, $shortcode_matches, PREG_SET_ORDER );
 
-				$this->logger->log( $log, 'Shortcodes found: ' . count( $shortcode_matches ) );
+				$this->logger->log( $this->log, 'Shortcodes found: ' . count( $shortcode_matches ) );
+
+				$this->logger->log( $this->log, $post->post_content );
 
 				foreach( $shortcode_matches as $shortcode_match ) {
 
-					// [0] => [media-credit name="Photo courtesy of the family)" align="aligncenter" width="300"]<img class="wp-image-1022982 size-full" src="https://spokesman-recorder-newspack.newspackstaging.com/wp-content/uploads/2011/03/Picture-32-300x201-1.png" width="300" height="201" />[/media-credit]
-					// [1] => 
-					// [2] => media-credit
-					// [3] =>  name="Photo courtesy of the family)" align="aligncenter" width="300"
-					// [4] => 
-					// [5] => <img class="wp-image-1022982 size-full" src="https://spokesman-recorder-newspack.newspackstaging.com/wp-content/uploads/2011/03/Picture-32-300x201-1.png" width="300" height="201" />
-					// [6] => 
+					$post->post_content = str_replace( $shortcode_match[0], $this->process_caption_shortcode_match( $shortcode_match ), $post->post_content );
 
-					$this->logger->log( $log, print_r( $shortcode_match, true) );
-
-					$this->parse_media_credit_shortcode( $shortcode_match[5] );
-
-
-
-					exit();
-
-					if( 7 != count( $shortcode_match ) || 'media-credit' != $shortcode_match[2] ) {
-	
-						$this->logger->log( $log, print_r( $shortcode_match, true) );
-						$this->logger->log( $log, 'Media Credit incorrect parse error.', $this->logger::ERROR, true );
-
-					}
-
-					$this->logger->log( $log, '-- Attributes: ' . $shortcode_match[3] );
-
-					$atts = shortcode_parse_atts( $shortcode_match[3] );
-
-					$atts_has_name = array_key_exists( 'name', $atts );
-					$atts_has_id = array_key_exists( 'id', $atts );
-
-					// Both types?
-					if( $atts_has_name && $atts_has_id ) {
-
-						$this->logger->log( $log, print_r( $shortcode_match, true) );
-						$this->logger->log( $log, 'Atts has both types.', $this->logger::ERROR, true );
-
-					}
-					// ID.
-					else if( $atts_has_id ) {
-
-						$this->logger->log( $log, 'User ID not used by publisher.', $this->logger::WARNING );
-						continue;
-
-					}
-					else if( ! $atts_has_name ) {
-						$this->logger->log( $log, 'No type?', $this->logger::ERROR, true );
-					}
-					
-					
-					// Match img tag.
-					preg_match( '/wp-image-(\d+)/', $shortcode_match[5], $img_matches );
-
-					if( 0 == count( $img_matches ) ) {
-
-						$this->logger->log( $log, 'Image: External' );
-						$this->logger->log( $log, print_r( $shortcode_match, true) );
-						continue;
-
-					}
-					else if( 2 != count( $img_matches ) ) {
-
-						$this->logger->log( $log, print_r( $img_matches, true) );
-						$this->logger->log( $log, 'Media Credit incorrect image count.', $this->logger::ERROR, true );
-
-					}
-
-					$this->logger->log( $log, 'Image ID: ' . $img_matches[1] );
-
-					$img_postmeta = get_post_meta( $img_matches[1], '_media_credit', true );
-
-					$this->logger->log( $log, 'DB postmeta: ' . $img_postmeta );
-
-					// Check for matching DB value.
-					if( $atts['name'] == $img_postmeta ) {
-						$this->logger->log( $log, 'Atts postmeta match.' );
-						continue;
-					}
-
-					// If DB value is blank, then set it
-					if( empty( trim( $img_postmeta ) ) ) {
-						
-						// ORDER POSTS by date ASC so that last post will save the latest html caption
-						$this->logger->log( $log, 'DO update_post_meta' );
-						continue;
-
-					}
-
-					$this->logger->log( $log, 'DIFFERENT!', $this->logger::WARNING );
-
-					// examine 
-
-
-
-					// update postmeta or <figcaption>
-					// remove shortcode open and close tags
-					
 				} // each shortcode
+
+				// update post
+				if( $this->dry_run ) {
+
+					$this->logger->log( $this->log, 
+						'Dry-run only: update post content.',
+						$this->logger::INFO
+					);
+	
+				}
+				else {
+	
+					echo "do update here";
+					exit();
+	
+				}
+
+				$this->logger->log( $this->log, $post->post_content );
+
+				exit();
+	
 
 			},
             1, 100
@@ -375,17 +240,203 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 
-		$this->logger->log( $log, 'Done.', $this->logger::SUCCESS );
+		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
 
+	/**
+	 * Process a caption shortcode match.
+	 * 
+	 * Array
+	 * [0] => [caption id="attachment_1045738" ... ][media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption[/caption]
+	 * [1] =>
+	 * [2] => caption
+	 * [3] =>  id="attachment_1045738" ...
+	 * [4] =>
+	 * [5] => [media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption
+	 * [6] =>
+	 *
+	 * @param string $shortcode_match
+	 * @return string $updated_shortcode
+	 */
+	private function process_caption_shortcode_match( $shortcode_match ) {
 
-	private function parse_media_credit_shortcode( $content ) {
+		// No need to process if media-credit shortcode not found.
+		if( false === strpos( $shortcode_match[5], '[media-credit' ) ) {
+			return $shortcode_match[0];
+		}
+
+		// Get media-credit shortcode.
+		$media_credit_shortcode_matches = $this->get_media_credit_shortcode_matches( $shortcode_match[5] );
+
+		// Only one shortcode should be found.
+		if( 1 != count( $media_credit_shortcode_matches ) ) {
+			
+			$this->logger->log( $this->log,
+				'Caption shortcode contained multiple media-credit shortcodes: ' . print_r( $shortcode_match, true ),
+				$this->logger::ERROR,
+				true
+			);
+		}
+
+		// Process media-credit.
+		$media_credit_name = $this->process_media_credit_shortcode( $media_credit_shortcode_matches[0] );
+
+		// Remove media credit shortcode.
+		$updated_shortcode = str_replace( $media_credit_shortcode_matches[0][0], $media_credit_shortcode_matches[0][5], $shortcode_match[0] );
+
+		// Add credit into caption.
+		if( ! empty( $media_credit_name ) ) {
+			$updated_shortcode = str_replace( '[/caption]', ' (Credit: ' . $media_credit_name . ')[/caption]', $updated_shortcode );
+		}
+
+		return $updated_shortcode;
+
+	}
+
+	/**
+	 * Get media-credit shortcode matches from content.
+	 *
+	 * @param string $content
+	 * @return array $shortcode_matches
+	 */
+	private function get_media_credit_shortcode_matches( $content ) {
 
 		preg_match_all( '/' . get_shortcode_regex( array( 'media-credit' ) ) . '/', $content, $shortcode_matches, PREG_SET_ORDER );
 
-		print_r($shortcode_matches);
+		return $shortcode_matches;
+
+	}
+
+	/**
+	 * Process a single media credit shortcode.
+	 *
+	 * [0] => [media-credit name|id="" ... ]<img class="wp-image-1022982 ..." ... />[/media-credit]
+	 * [1] => 
+	 * [2] => media-credit
+	 * [3] =>  name|id="" ...
+	 * [4] => 
+	 * [5] => <img ... />
+	 * [6] => 
+
+	 * @param array $shortcode_match
+	 * @return null|string $media_credit_name
+	 */
+	private function process_media_credit_shortcode( $shortcode_match ) {
+
+		// Data integrity check.
+		if( 7 != count( $shortcode_match ) || 'media-credit' != $shortcode_match[2] ) {
+
+			$this->logger->log( $this->log, 
+				'Media Credit parse error: ' . print_r( $shortcode_match, true ),
+				$this->logger::ERROR,
+				true 
+			);
+
+		}
+
+		// Parse attributes.
+		$atts = shortcode_parse_atts( $shortcode_match[3] );
+
+		// Attributes integrity check.
+		if( array_key_exists( 'name', $atts ) && array_key_exists( 'id', $atts ) ) {
+
+			$this->logger->log( $this->log,
+				'Media credit attributes error:' . print_r( $shortcode_match, true ),
+				$this->logger::ERROR,
+				true
+			);
+
+		}
+
+		// TODO: User id.
+		if( array_key_exists( 'id', $atts ) ) {
+
+			$this->logger->log( $this->log,
+				'TODO: User ID not used by initial publisher.',
+				$this->logger::WARNING
+			);
+
+			return;
+
+		}
+
+		// Data integrity check.
+		if( false == array_key_exists( 'name', $atts ) ) {
+
+			$this->logger->log( $this->log,
+				'Media credit attributes name missing:' . print_r( $shortcode_match, true ),
+				$this->logger::ERROR,
+				true
+			);
+
+		}
+		
+		$atts['name'] = trim( $atts['name'] );
+
+		// Attempt to match image ID.
+		if( false == preg_match( '/wp-image-(\d+)/', $shortcode_match[5], $img_match ) ) {
+
+			$this->logger->log( $this->log,
+				'Media credit missing or external image: ' . print_r( $shortcode_match, true ),
+				$this->logger::WARNING
+			);
+
+			// Return the shortcode credit name.
+			return $atts['name'];
+
+		}
+
+		// Data integrity for img.
+		if( 2 != count( $img_match ) ) {
+
+			$this->logger->log( $this->log,
+				'Media Credit image matche error: ' . print_r( $img_match, true ),
+				$this->logger::ERROR,
+				true
+			);
+
+		}
+
+// Verify ID is an image.
+echo "here";
+// Not an image, return name as is.
+exit();
 
 
+
+
+		// Compare to DB credit string.
+		$img_postmeta = trim( get_post_meta( $img_match[1], '_media_credit', true ) );
+
+		// If shortcode string matches db string, no more processing needed.
+		if( $img_postmeta == $atts['name'] ) {
+			return;
+		}
+
+		// If DB value is blank, then set it to the shortcode value.
+		if( empty( $img_postmeta ) ) {
+
+			if( $this->dry_run ) {
+
+				$this->logger->log( $this->log, 
+					'Dry-run only: update post meta => ' . $img_match[1] . ' _media_credit ' . $atts['name'],
+					$this->logger::INFO
+				);
+
+			}
+			else {
+
+				update_post_meta( $img_match[1], '_media_credit', $atts['name'] );
+
+			}
+
+			return;
+
+		}
+
+		// Return the shortcode credit name.
+		return $atts['name'];
+		
 	}
 
 }
