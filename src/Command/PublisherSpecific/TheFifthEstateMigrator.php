@@ -62,7 +62,7 @@ class TheFifthEstateMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
-				]
+				],
 			]
 		);
 	}
@@ -77,12 +77,12 @@ class TheFifthEstateMigrator implements InterfaceCommand {
 
 		$start_time = microtime( true );
 
-		$this->logger->log( $log, sprintf( 'Starting Orders and Customers Deletion %s', date('Y-m-d H:I:s') ) );
+		$this->logger->log( $log, sprintf( 'Starting Orders and Customers Deletion %s', date( 'Y-m-d H:I:s' ) ) );
 
 		foreach ( $this->get_wc_orders() as $order ) {
 			$this->logger->log( $log, sprintf( '[Memory: %s » Time: %s] Deleting Customer %s', size_format( memory_get_usage( true ) ), human_time_diff( $start_time, microtime( true ) ), $order->get_customer_id() ) );
 
-			if ( !$dry_run ) {
+			if ( ! $dry_run ) {
 				if ( wp_delete_user( $order->get_customer_id() ) ) {
 					$this->logger->log( $log, sprintf( '✅ Successfully deleted Customer with ID %s', $order->get_customer_id() ), Logger::SUCCESS );
 				} else {
@@ -92,7 +92,7 @@ class TheFifthEstateMigrator implements InterfaceCommand {
 
 			$this->logger->log( $log, sprintf( '[Memory: %s » Time: %s] Deleting Order %s', size_format( memory_get_usage( true ) ), human_time_diff( $start_time, microtime( true ) ), $order->get_id() ) );
 
-			if ( !$dry_run ) {
+			if ( ! $dry_run ) {
 				if ( wp_delete_post( $order->get_id() ) ) {
 					$this->logger->log( $log, sprintf( '✅ Successfully deleted Order with ID %s', $order->get_id() ), Logger::SUCCESS );
 				} else {
@@ -101,7 +101,7 @@ class TheFifthEstateMigrator implements InterfaceCommand {
 			}
 		}
 
-		if ($dry_run) {
+		if ( $dry_run ) {
 			$this->logger->log( $log, '⚠️ Dry Run: No deletions have been made.', Logger::SUCCESS );
 		} else {
 			$this->logger->log( $log, '✅ All Orders and their Customers have been successfully deleted!', Logger::SUCCESS );
@@ -112,12 +112,14 @@ class TheFifthEstateMigrator implements InterfaceCommand {
 	 * Get WooCommerce orders
 	 */
 	private function get_wc_orders(): iterable {
-		$ids = wc_get_orders( [
-			'date_created' => '2022-12-22',
-			'status' => 'wc-failed',
-			'return' => 'ids',
-			'limit' => -1,
-		] );
+		$ids = wc_get_orders(
+			[
+				'date_created' => '2022-12-22',
+				'status'       => 'wc-failed',
+				'return'       => 'ids',
+				'limit'        => -1,
+			] 
+		);
 
 		foreach ( $ids as $id ) {
 			yield wc_get_order( $id );
