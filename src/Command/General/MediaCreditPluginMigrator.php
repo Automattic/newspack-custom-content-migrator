@@ -216,7 +216,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 					$new_shortcode_string .= $shortcode_match[5]; 
 
 					if ( ! empty( $media_credit_info[0] ) ) {
-						$new_shortcode_string .= $media_credit_info[0];
+						$new_shortcode_string .= esc_html( $media_credit_info[0] );
 					}
 					
 					$new_shortcode_string .= '[/caption]';
@@ -234,6 +234,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	
 				} else {
 	
+					$this->logger->log( $this->log, 'WP update post.' );
+
 					wp_update_post(
 						array(
 							'ID'           => $post->ID,
@@ -426,6 +428,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			return array( null, $atts, $attachment_id );
 
 		}
+
+		$this->logger->log( $this->log, 'Add credit to html.' );
 
 		// Return the shortcode credit name.
 		return array( $atts['name'], $atts, $attachment_id );
