@@ -28,6 +28,11 @@ use WP_CLI;
  */
 class MediaCreditPluginMigrator implements InterfaceCommand {
 
+	/**
+	 * Dry Run
+	 *
+	 * @var boolean $dry_run
+	 */
 	private $dry_run = false;
 
 	/**
@@ -36,6 +41,12 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 * @var Logger
 	 */
 	private $logger;
+
+	/**
+	 * Log (file path)
+	 *
+	 * @var string $log
+	 */
 	private $log;
 
 	/**
@@ -140,7 +151,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 				// Process [media-credit] shortcodes already within [caption] shortcode.
 
-				// Match array:
+				// Match array indexes:
 				// [0] => [caption id="attachment_1045738" ... ][media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption[/caption]
 				// [1] =>
 				// [2] => caption
@@ -148,6 +159,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 				// [4] =>
 				// [5] => [media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption
 				// [6] =>
+				// (phpcs: comment with period at end).
 
 				$shortcode_matches = $this->get_caption_shortcode_matches( $new_post_content );
 
@@ -167,7 +179,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 				// Process [media-credit] shortcodes remaining in content and convert to [caption] shortcode.
 
-				// Match array:
+				// Match array indexes:
 				// [0] => [media-credit name|id="" ... ]<img class="wp-image-1022982 ..." ... />[/media-credit]
 				// [1] => 
 				// [2] => media-credit
@@ -175,6 +187,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 				// [4] => 
 				// [5] => <img class="wp-image-1022982 ..." ... />
 				// [6] => 
+				// (phpcs: comment with period at end).
 		   
 				$shortcode_matches = $this->get_media_credit_shortcode_matches( $new_post_content );
 
@@ -242,7 +255,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Get [caption] shortcode matches from content.
 	 *
-	 * @param string $content
+	 * @param string $content Content to parse for [caption].
 	 * @return array $shortcode_matches
 	 */
 	private function get_caption_shortcode_matches( $content ) {
@@ -255,7 +268,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Get [media-credit] shortcode matches from content.
 	 *
-	 * @param string $content
+	 * @param string $content Content to parse for [media-credit].
 	 * @return array $shortcode_matches
 	 */
 	private function get_media_credit_shortcode_matches( $content ) {
@@ -268,7 +281,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Process a [caption] shortcode match.
 	 *
-	 * @param string $shortcode_match
+	 * @param string $shortcode_match Array of parsed shortcode.
 	 * @return string $updated_shortcode
 	 */
 	private function process_caption_shortcode_match( $shortcode_match ) {
@@ -308,7 +321,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Process a [media-credit] shortcode.
 	 *
-	 * @param array $shortcode_match
+	 * @param array $shortcode_match Attay of parsed shortcode.
 	 * @return array [append, atts, attachment_id]
 	 */
 	private function process_media_credit_shortcode( $shortcode_match ) {
@@ -423,7 +436,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 * 
 	 * Example: <img class="wp-image-1022982 ..." ... />
 	 *
-	 * @param string $content
+	 * @param string $content Content to parse for image id.
 	 * @return null|int $attachment_id
 	 */
 	private function get_attachment_id_from_content( $content ) {
