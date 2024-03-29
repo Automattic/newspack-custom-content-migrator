@@ -609,6 +609,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'target-story-ids',
+						'description' => 'CSV list of target story IDs to re-process the "more posts" block for.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -2155,20 +2162,36 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_migrate_more_posts_block( $args, $assoc_args ) {
 		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
 		$story_media_csv_file_path = $assoc_args['story-media-file-path'];
+		$target_story_ids          = $assoc_args['target-story-ids'] ?? '';
+		$target_story_ids          = explode( ',', $target_story_ids );
 
-		$posts                 = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$media_list            = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
-		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+		$posts      = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$media_list = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
 
-		// Skip already imported posts.
-		$posts = array_values(
-			array_filter(
-				$posts,
-				function ( $post ) use ( $imported_original_ids ) {
-					return ! in_array( $post['story_id'], $imported_original_ids );
-				}
-			)
-		);
+		if ( ! empty( $target_story_ids ) ) {
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function ( $post ) use ( $target_story_ids ) {
+						// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- don't need strict comparison for this.
+						return in_array( $post['story_id'], $target_story_ids );
+					}
+				)
+			);
+		} else {
+			$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+
+			// Skip already imported posts.
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function ( $post ) use ( $imported_original_ids ) {
+						// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- don't need strict comparison for this.
+						return ! in_array( $post['story_id'], $imported_original_ids );
+					}
+				)
+			);
+		}
 
 		foreach ( $posts as $post_index => $post ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Importing post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
