@@ -1086,6 +1086,23 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-create-missing-categories',
+			[ $this, 'cmd_embarcadero_create_missing_categories' ],
+			[
+				'shortdesc' => 'Creates missing categories based from a single curated list.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file containing the categories that exist per site.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -3658,6 +3675,45 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Need to close the file handle.
 		fclose( $handle );
+	}
+
+	/**
+	 * This function uses a pre-defined CSV file that determines which categories and tags are missing from
+	 * each site in the Embarcadero network. Whichever one is missing, the script will create that
+	 * category or tag on the site.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the CSV file can't be read.
+	 */
+	public function cmd_embarcadero_create_missing_categories( $args, $assoc_args ): void {
+		$csv_path = $assoc_args['csv-path'];
+		$csv      = ( new FileImportFactory() )->get_file( $csv_path )->getIterator();
+
+		$site = str_replace( 'https://', '', get_site_url() );
+
+		foreach ( $csv as $row_number => $row ) {
+			$taxonomy = $row['taxonomy'];
+			$slug     = $row['slug'];
+			$create   = 'No' === $row[ $site ];
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing row %d - Tax: %s Slug: %s Exists: %s', $row_number, $taxonomy, $slug, $row[ $site ] ), Logger::INFO );
+
+			if ( ! $create ) {
+				$this->logger->log( self::LOG_FILE, 'Skipping', Logger::INFO );
+				continue;
+			}
+
+			$term = wp_insert_term( $slug, $taxonomy );
+
+			if ( is_wp_error( $term ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create term %s: %s', $slug, $term->get_error_message() ), Logger::ERROR );
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Created term %s', $slug ), Logger::SUCCESS );
+			}
+		}
 	}
 
 	/**
