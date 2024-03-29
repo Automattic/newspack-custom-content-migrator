@@ -290,6 +290,23 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-delete-all-author-terms',
+			[ $this, 'cmd_delete_all_author_terms' ],
+			[
+				'shortdesc' => 'Delete all "author" terms (and taxonomies) on the site.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry run without deleting anything.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-delete-all-co-authors',
 			[ $this, 'cmd_delete_all_co_authors' ],
 			[
@@ -1184,6 +1201,45 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			WP_CLI::log( sprintf( '(%d)/(%d) updating term_id %d', $key_term_id, count( $update_term_ids ), $term_id ) );
 			wp_update_term_count_now( [ $term_id ], $update_taxonomy );
 		}
+	}
+
+	public function cmd_delete_all_author_terms( array $positional_args, array $assoc_args ): void {
+
+		WP_CLI::line( "For now, please use: wp term delete author $(wp term list author --format=ids)" );
+		WP_CLI::line( "or, fix and test the todo in code below." );
+
+		return;
+
+		$dry_run = $assoc_args['dry-run'] ?? false;
+		if ( $dry_run ) {
+			WP_CLI::log( 'Dry run is enabled, so this command will only show what would be deleted.' );
+		}
+
+		global $wpdb;
+
+		$term_ids = $wpdb->get_col( "SELECT term_id FROM $wpdb->term_taxonomy WHERE taxonomy = 'author'" );
+
+		$total= count( $term_ids );
+		$counter   = 0;
+		WP_CLI::confirm( sprintf( 'About to delete %d author terms/taxonomies. Is that OK?', $total ) );
+
+		foreach ( $term_ids as $term_id ) {
+
+			WP_CLI::log( sprintf( '(%d)/(%d) Author Term #%d.', ++ $counter, $total, $term_id ) );
+			if ( ! $dry_run ) {
+
+				// TODO: turn off CoAuthorsPlus term callback: '_update_users_posts_count' );
+				// it takes too long to run each sql and the term will be deleted anyway
+				// so counts are not needed.
+
+				// wp_delete_term( $term_id, 'author' );
+
+				WP_CLI::log( sprintf( 'Deleted #%d.', $term_id ) );
+			}
+		}
+
+		wp_cache_flush();
+		WP_CLI::success( 'Done' );
 	}
 
 	public function cmd_delete_all_co_authors( array $positional_args, array $assoc_args ): void {
