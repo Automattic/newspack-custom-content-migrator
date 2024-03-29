@@ -1703,39 +1703,141 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_fix_post_times( array $args, array $assoc_args ): void {
+		global $wpdb;
+		
 		$story_csv_file_path = $assoc_args['story-csv-file-path'];
 		$index_from          = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 
-		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$log_file = 'fix-post-times.log';
+		// General log.
+		$log_general_file = 'fix-post-times.log';
+		// Detailed log.
+		$log_detailed_csv_file = 'fix-post-times.csv';
+		$changes               = [];
 
+		// Intialize data from detailed log.
+		if ( file_exists( $log_detailed_csv_file ) ) {
+			$previous_changes = $this->get_data_from_csv_or_tsv( $log_detailed_csv_file );
+		} else {
+			$previous_changes = [];
+		}
+
+		// Explain usage and confirm.
+		WP_CLI::warning( "The way to run this command is to feed it story_1.csv first (if it exists), and after that run it the second time with story.csv. That's because story_1.csv might contain newer versions of posts than story.csv so we want to run it first. SECOND IMPORTANT NOTE -- the file $log_detailed_csv_file created by this command is being used to track what has previously been updated, i.e. first importing posts from story_1.csv and second skipping the same story if an older version is found in story.csv. So MAKE SURE TO DELETE $log_detailed_csv_file when you begin to run this command with story_1.csv, and keep $log_detailed_csv_file when running it again with story.csv. Use start/end from index as usual." );
+		WP_CLI::confirm( 'Continue?' );
+		
 		// Get selected posts.
+		$posts = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
 		if ( -1 !== $index_to ) {
 			$posts = array_slice( $posts, $index_from, $index_to - $index_from + 1 );
 		}
 
+		// GMT offset.
+		$gmt_offset = get_option( 'gmt_offset' );
+		
 		$total_posts = count( $posts );
-
 		foreach ( $posts as $post_index => $post ) {
-			$this->logger->log( $log_file, sprintf( 'Fixing timezone for the post %d/%d: %d', $index_from + $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
 
 			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
-
 			if ( ! $wp_post_id ) {
-				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
+				$this->logger->log( $log_general_file, sprintf( 'ERROR Could not find post with story_id %d', $post['story_id'] ), Logger::WARNING );
 				continue;
 			}
-			$post_data = [
-				'ID'        => $wp_post_id,
-				'post_date' => $this->get_post_date_from_timestamp( $post['date_epoch'] ),
-			];
-			$result    = wp_update_post( $post_data );
-			if ( is_wp_error( $result ) ) {
-				$this->logger->log( $log_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
+
+			$this->logger->log( $log_general_file, sprintf( '%d/%d story_ID %d postID %d', $post_index + 1, $total_posts, $post['story_id'], $wp_post_id ), Logger::LINE );
+
+			// Check if $wp_post_id was already updated in $changes log, and skip if it has.
+			$already_updated = false;
+			foreach ( $previous_changes as $key => $previous_change ) {
+				if ( $wp_post_id == $previous_change['post_id'] ) {
+					$already_updated = true;
+					break;
+				}
 			}
-			$this->logger->log( $log_file, sprintf( 'Fixed date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+			if ( true === $already_updated ) {
+				$this->logger->log( $log_general_file, sprintf( 'Already updated story_id %d postID %d. Skipping.', $post['story_id'], $wp_post_id ), Logger::LINE );
+				continue;
+			}
+
+			// For update.
+			$post_data = [];
+
+			// Current post values.
+			$post_date_current         = get_post_field( 'post_date', $wp_post_id );
+			$post_date_gmt_current     = get_post_field( 'post_date_gmt', $wp_post_id );
+			$post_modified_current     = get_post_field( 'post_modified', $wp_post_id );
+			$post_modified_gmt_current = get_post_field( 'post_modified_gmt', $wp_post_id );
+
+			// Get story published date.
+			$story_date     = $this->get_post_date_from_timestamp( $post['date_epoch'] );
+			$story_date_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $story_date ) - $gmt_offset * HOUR_IN_SECONDS );
+
+			// Get story modified date.
+			if ( isset( $post['date_updated_epoch'] ) && ! empty( $post['date_updated_epoch'] ) && '0' != $post['date_updated_epoch'] ) {
+				$story_modified     = $this->get_post_date_from_timestamp( $post['date_updated_epoch'] );
+				$story_modified_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $story_modified ) - $gmt_offset * HOUR_IN_SECONDS );
+			} else {
+				// If not set, use post_date.
+				$story_modified     = $story_date;
+				$story_modified_gmt = $story_date_gmt;
+			}
+
+			// Add to update.
+			if ( $post_date_current != $story_date ) {
+				$post_data['post_date'] = $story_date;
+			}
+			if ( $post_date_gmt_current != $story_date_gmt ) {
+				$post_data['post_date_gmt'] = $story_date_gmt;
+			}
+			if ( $post_modified_current != $story_modified ) {
+				$post_data['post_modified'] = $story_modified;
+			}
+			if ( $post_modified_gmt_current != $story_modified_gmt ) {
+				$post_data['post_modified_gmt'] = $story_modified_gmt;
+			}
+
+			// Update.
+			if ( ! empty( $post_data ) ) {
+				$result = $wpdb->update( $wpdb->posts, $post_data, [ 'ID' => $wp_post_id ] );
+				if ( false == $result ) {
+					$this->logger->log( $log_general_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
+				}
+				$this->logger->log( $log_general_file, sprintf( 'Updated dates on story_id %d postID', $post['story_id'], $wp_post_id ), Logger::LINE );
+			}
+
+			// Detailed log.
+			$changes[ $wp_post_id ] = [
+				'post_date_old'         => $post_date_current,
+				'post_date_new'         => $story_date,
+				'post_date_gmt_old'     => $post_date_gmt_current,
+				'post_date_gmt_new'     => $story_date_gmt,
+				'post_modified_old'     => $post_modified_current,
+				'post_modified_new'     => $story_modified,
+				'post_modified_gmt_old' => $post_modified_gmt_current,
+				'post_modified_gmt_new' => $story_modified_gmt,
+			];
 		}
+
+		// Log detailed changes to CSV.
+		$csv = fopen( $log_detailed_csv_file, 'w' );
+		fputcsv( $csv, [ 'post_id', 'post_date_old', 'post_date_new', 'post_date_gmt_old', 'post_date_gmt_new', 'post_modified_old', 'post_modified_new', 'post_modified_gmt_old', 'post_modified_gmt_new' ] );
+		foreach ( $changes as $post_id => $change ) {
+			fputcsv(
+				$csv,
+				[
+					$post_id,
+					$change['post_date_old'] ?? '',
+					$change['post_date_new'] ?? '',
+					$change['post_date_gmt_old'] ?? '',
+					$change['post_date_gmt_new'] ?? '',
+					$change['post_modified_old'] ?? '',
+					$change['post_modified_new'] ?? '',
+					$change['post_modified_gmt_old'] ?? '',
+					$change['post_modified_gmt_new'] ?? '',
+				] 
+			);
+		}
+		WP_CLI::success( 'Changes saved to ' . $log_detailed_csv_file );
 	}
 
 	/**
@@ -2610,7 +2712,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			// Get author based on the publication name.
 			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
 
-			$post_title = date( "F d, Y", strtotime( $print_issue['seo_link'] ) );
+			$post_title = date( 'F d, Y', strtotime( $print_issue['seo_link'] ) );
 
 			// Create a new issue post.
 			$wp_issue_post_id = $this->get_or_create_post(
