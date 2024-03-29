@@ -79,7 +79,16 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_simply_guest_author_names' ],
 			[
 				'shortdesc' => 'Migrate Simply Guest Author Names to CoAuthorsPlus.',
-			]
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'overwrite-post-gas',
+						'description' => 'Overwrite GAs if they already exist on the post.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+				]
 		);
 	}
 
@@ -90,6 +99,11 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_migrate_simply_guest_author_names( $pos_args, $assoc_args ) {
+		
+		WP_CLI::line( 'This command does NOT break apart multi-author strings (ex: "Jill Doe, Mary Parker, and Jim Smith").' );
+		WP_CLI::line( 'The full string will be used as the display name to create a single GA.' );
+		
+		WP_CLI::confirm( 'Continue?' );
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
@@ -99,14 +113,39 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 		$this->logger->log( $log, 'Starting migration.' );
 
+		// Must have required postmeta value.
+		$meta_query = array(
+			array(
+				'key'     => 'sfly_guest_author_names',
+				'value'   => '',
+				'compare' => '!=',
+			),
+		);				
+
+		// Optional overwrite existing GAs on posts.
+		if( isset( $assoc_args['overwrite-post-gas'] ) ) {
+			$tax_query = null;
+		}
+		// Default: only process posts where GA does not exist.
+		else {
+			$tax_query = array(
+				array(
+					'taxonomy' => 'author',
+					'operator' => 'NOT EXISTS', 
+				),
+			);	
+		}
+
 		$this->posts_logic->throttled_posts_loop(
 			array(
-				'post_type'   => 'post',
-				'post_status' => array( 'publish' ),
-				'fields'      => 'ids',
+				'post_type'    => 'post',
+				'post_status'  => array( 'publish' ),
+				'fields'       => 'ids',
+				'meta_query'   => $meta_query,
+				'tax_query'    => $tax_query,
 				// Order by date desc so newest GAs will have newest Bios.
-				'orderby'     => 'date',
-				'order'       => 'DESC',
+				'orderby'      => 'date',
+				'order'        => 'DESC',
 			),
 			function ( $post_id ) use ( $log ) {
 
