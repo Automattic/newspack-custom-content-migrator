@@ -1084,6 +1084,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-establish-primary-categories',
+			[ $this, 'cmd_embarcadero_establish_primary_categories' ],
+			[
+				'shortdesc' => 'Establishes primary categories for migrated posts that don\'t already have them.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	/**
@@ -3554,6 +3563,124 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				}
 			}
 		}
+	}
+
+	/**
+	 * This script helps establish the primary category for posts that were imported from Embarcadero's legacy system.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_establish_primary_categories(): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_without_primary_category       = $wpdb->get_results(
+			"SELECT 
+    				p.ID 
+				FROM $wpdb->posts p 
+				WHERE p.ID IN (
+				  SELECT post_id 
+				  FROM $wpdb->postmeta 
+				  WHERE meta_key IN ( '_newspack_import_id', 'original_article_id' )
+				  ) 
+				  AND p.ID NOT IN (
+					SELECT post_id 
+					FROM $wpdb->postmeta 
+					WHERE meta_key = '_yoast_wpseo_primary_category' 
+					  AND meta_value <> '' 
+				)"
+		);
+		$posts_without_primary_category_count = count( $posts_without_primary_category );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %s posts without a primary category.', number_format( $posts_without_primary_category_count ) ), Logger::INFO );
+
+		if ( 0 === $posts_without_primary_category_count ) {
+			$this->logger->log( self::LOG_FILE, 'No posts without a primary category found.', Logger::SUCCESS );
+
+			return;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$categories_by_slug = $wpdb->get_results(
+			"SELECT t.slug, t.name, t.term_id FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE tt.taxonomy = 'category'",
+			OBJECT_K
+		);
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need handle to file to write CSV data.
+		$handle = fopen( 'establish_primary_categories.csv', 'w' );
+		fputcsv(
+			$handle,
+			[
+				'Post ID',
+				'Story ID',
+				'Permalink',
+				'Extracted Category',
+				'Current Categories',
+				'Status',
+			]
+		);
+		foreach ( $posts_without_primary_category as $post ) {
+			$permalink         = get_permalink( $post->ID );
+			$url_path          = wp_parse_url( $permalink, PHP_URL_PATH );
+			$exploded_url_path = array_filter( explode( '/', $url_path ) );
+			$story_id          = get_post_meta( $post->ID, '_newspack_import_id', true );
+			if ( empty( $story_id ) ) {
+				$temp = get_post_meta( $post->ID, 'original_article_id', true );
+				if ( ! empty( $temp ) ) {
+					$story_id = $temp;
+				}
+			}
+
+			$csv_row_data = [
+				'Post ID'            => $post->ID,
+				'Story ID'           => $story_id,
+				'Permalink'          => $permalink,
+				'Extracted Category' => null,
+				'Current Categories' => implode( ' <> ', wp_get_post_terms( $post->ID, 'category', [ 'fields' => 'names' ] ) ),
+				'Status'             => null,
+			];
+
+			if ( empty( $exploded_url_path ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find a category within the slug (Post ID: %d) %s', $post->ID, $permalink ), Logger::ERROR );
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			$first                              = array_shift( $exploded_url_path );
+			$csv_row_data['Extracted Category'] = $first;
+			if ( ! array_key_exists( $first, $categories_by_slug ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Category not found %s', $permalink ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Not Found';
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			if ( 'uncategorized' === $first ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Category is uncategorized, skipping post %d', $post->ID ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Skipped';
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found %s, setting primary category for post %d to %s', $first, $post->ID, $categories_by_slug[ $first ]->name ), Logger::SUCCESS );
+
+			$category = $categories_by_slug[ $first ];
+
+			$update = update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+
+			if ( $update ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Primary category set for post %d', $post->ID ), Logger::SUCCESS );
+				$csv_row_data['Status'] = 'Updated';
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not set primary category for post %d', $post->ID ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Failed';
+			}
+
+			fputcsv( $handle, array_values( $csv_row_data ) );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Need to close the file handle.
+		fclose( $handle );
 	}
 
 	/**
