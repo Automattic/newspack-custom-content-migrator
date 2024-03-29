@@ -88,7 +88,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
-				]
+			]
 		);
 	}
 
@@ -120,32 +120,31 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				'value'   => '',
 				'compare' => '!=',
 			),
-		);				
+		);              
 
 		// Optional overwrite existing GAs on posts.
-		if( isset( $assoc_args['overwrite-post-gas'] ) ) {
+		if ( isset( $assoc_args['overwrite-post-gas'] ) ) {
 			$tax_query = null;
-		}
-		// Default: only process posts where GA does not exist.
-		else {
+		} else {
+			// Default: only process posts where GA does not exist.
 			$tax_query = array(
 				array(
 					'taxonomy' => 'author',
 					'operator' => 'NOT EXISTS', 
 				),
-			);	
+			);  
 		}
 
 		$this->posts_logic->throttled_posts_loop(
 			array(
-				'post_type'    => 'post',
-				'post_status'  => array( 'publish' ),
-				'fields'       => 'ids',
-				'meta_query'   => $meta_query,
-				'tax_query'    => $tax_query,
+				'post_type'   => 'post',
+				'post_status' => array( 'publish' ),
+				'fields'      => 'ids',
+				'meta_query'  => $meta_query,
+				'tax_query'   => $tax_query,
 				// Order by date desc so newest GAs will have newest Bios.
-				'orderby'      => 'date',
-				'order'        => 'DESC',
+				'orderby'     => 'date',
+				'order'       => 'DESC',
 			),
 			function ( $post_id ) use ( $log ) {
 
