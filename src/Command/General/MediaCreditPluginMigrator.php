@@ -19,7 +19,6 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -27,13 +26,6 @@ use WP_CLI;
  * Custom migration scripts for Media Credit Plugin.
  */
 class MediaCreditPluginMigrator implements InterfaceCommand {
-
-	/**
-	 * Dry Run
-	 *
-	 * @var boolean $dry_run
-	 */
-	private $dry_run = false;
 
 	/**
 	 * Logger
@@ -50,13 +42,6 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	private $log;
 
 	/**
-	 * PostsLogic
-	 * 
-	 * @var PostsLogic
-	 */
-	private $posts_logic = null;
-
-	/**
 	 * Instance
 	 * 
 	 * @var null|InterfaceCommand Instance.
@@ -68,7 +53,6 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger      = new Logger();
-		$this->posts_logic = new PostsLogic();
 	}
 
 	/**
@@ -95,15 +79,6 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_media_credit_plugin' ],
 			[
 				'shortdesc' => 'Migrate Media Credit Plugin postmeta and shortcodes.',
-				'synopsis'  => [
-					[
-						'type'        => 'flag',
-						'name'        => 'dry-run',
-						'description' => 'Do a dry-run simulation only. No updates.',
-						'optional'    => true,
-						'repeating'   => false,
-					],
-				],
 			]
 		);
 	}
@@ -116,142 +91,150 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_media_credit_plugin( $pos_args, $assoc_args ) {
 
-
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
-		$this->logger->log( $this->log, 'Starting migration.' );
+		$this->logger->log( $this->log, 'Doing migration.' );
 		
-		if ( isset( $assoc_args['dry-run'] ) ) {
+		do {
 
-			$this->dry_run = true;
-			$this->logger->log( $this->log, 'with --dry-run.' );
-
-		}
-
-		$this->posts_logic->throttled_posts_loop(
-			array(
-
+			$posts = get_posts( array(
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish' ),
-
+				'posts_per_page' => '100',
+				'no_found_rows'  => true,
 				// Search for posts with media-credit shortcodes.
 				's'              => '[media-credit',
 				'search_columns' => array( 'post_content' ),
-
 				// Order by date DESC so newest credit will be set into blank postmeta.
 				'orderby'        => 'date',
 				'order'          => 'DESC',
+			));
 
-			),
-			function ( $post ) {
+			foreach ( $posts as $post ) {
 
 				$this->logger->log( $this->log, '---- Post id: ' . $post->ID );
 
-				$new_post_content = $post->post_content;
+				$new_post_content = $this->process_post_content( $post->post_content );
 
-				// Process [media-credit] shortcodes already within [caption] shortcode.
+				// Error if replacments were not successful. ( new == old )
+				if( $new_post_content == $post->post_content ) {
 
-				// Match array indexes:
-				// [0] => [caption id="attachment_1045738" ... ][media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption[/caption]
-				// [1] =>
-				// [2] => caption
-				// [3] =>  id="attachment_1045738" ...
-				// [4] =>
-				// [5] => [media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption
-				// [6] =>
-				// (phpcs: comment with period at end).
-
-				$shortcode_matches = $this->get_caption_shortcode_matches( $new_post_content );
-
-				foreach ( $shortcode_matches as $shortcode_match ) {
-
-					$old_shortcode_string = $shortcode_match[0];
-
-					$this->logger->log( $this->log, 'Old string: ' . $old_shortcode_string );
-
-					$new_shortcode_string = $this->process_caption_shortcode_match( $shortcode_match );
-
-					$this->logger->log( $this->log, 'New string: ' . $new_shortcode_string );
-
-					$new_post_content = str_replace( $old_shortcode_string, $new_shortcode_string, $new_post_content );
-
-				}
-
-				// Process [media-credit] shortcodes remaining in content and convert to [caption] shortcode.
-
-				// Match array indexes:
-				// [0] => [media-credit name|id="" ... ]<img class="wp-image-1022982 ..." ... />[/media-credit]
-				// [1] => 
-				// [2] => media-credit
-				// [3] =>  name|id="" ...
-				// [4] => 
-				// [5] => <img class="wp-image-1022982 ..." ... />
-				// [6] => 
-				// (phpcs: comment with period at end).
-		   
-				$shortcode_matches = $this->get_media_credit_shortcode_matches( $new_post_content );
-
-				foreach ( $shortcode_matches as $shortcode_match ) {
-
-					$old_shortcode_string = $shortcode_match[0];
-
-					$this->logger->log( $this->log, 'Old string: ' . $old_shortcode_string );
-
-					$media_credit_info = $this->process_media_credit_shortcode( $shortcode_match );
-
-					$new_shortcode_string = '[caption';
-
-					if ( isset( $media_credit_info[2] ) && is_numeric( $media_credit_info[2] ) && $media_credit_info[2] > 0 ) {
-						$new_shortcode_string .= ' id="attachment_' . esc_attr( $media_credit_info[2] ) . '"';
-					} 
-					if ( isset( $media_credit_info[1]['align'] ) ) {
-						$new_shortcode_string .= ' align="' . esc_attr( $media_credit_info[1]['align'] ) . '"';
-					}
-					if ( isset( $media_credit_info[1]['width'] ) ) {
-						$new_shortcode_string .= ' width="' . esc_attr( $media_credit_info[1]['width'] ) . '"';
-					}
-					
-					$new_shortcode_string .= ']';
-					
-					$new_shortcode_string .= $shortcode_match[5]; 
-
-					if ( ! empty( $media_credit_info[0] ) ) {
-						$new_shortcode_string .= esc_html( $media_credit_info[0] );
-					}
-					
-					$new_shortcode_string .= '[/caption]';
-
-					$this->logger->log( $this->log, 'New string: ' . $new_shortcode_string );
-
-					$new_post_content = str_replace( $old_shortcode_string, $new_shortcode_string, $new_post_content );
-
-				}
-
-				// Update post.
-				if ( $this->dry_run ) {
-
-					$this->logger->log( $this->log, 'Dry-run only: update post content.' );
-	
-				} else {
-	
-					$this->logger->log( $this->log, 'WP update post.' );
-
-					wp_update_post(
-						array(
-							'ID'           => $post->ID,
-							'post_content' => $new_post_content,
-						)
+					$this->logger->log(
+						$this->log,
+						'New content is the same as old content.',
+						$this->logger::ERROR,
+						true
 					);
-				  
+		
 				}
-			},
-			1,
-			100
-		);
 
-		wp_cache_flush();
+				wp_update_post(
+					array(
+						'ID'           => $post->ID,
+						'post_content' => $new_post_content,
+					)
+				);
+			
+			} // foreach post
+
+			wp_cache_flush();
+
+		} while( count( $posts ) > 0 );
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
+	}
+
+	/**
+	 * Process a single post's content for shortcodes.
+	 * 
+	 * Replace "shortode inside shortcode" [caption ][media-credit ] with just [caption ]
+	 * Then replace remaining [media-credit ] with [caption ]
+	 * 
+	 * @param string $post_content Before shortcode replacements
+	 * @return string $new_post_content After shortcode replacements
+	 */
+	private function process_post_content( $post_content ) {
+
+		// Process [media-credit] shortcodes already within [caption] shortcode.
+
+		// Match array indexes:
+		// [0] => [caption id="attachment_1045738" ... ][media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption[/caption]
+		// [1] =>
+		// [2] => caption
+		// [3] =>  id="attachment_1045738" ...
+		// [4] =>
+		// [5] => [media-credit name="" ... ]<img class="wp-image-1045738" ... />[/media-credit] text caption
+		// [6] =>
+		// (phpcs: comment with period at end).
+
+		$shortcode_matches = $this->get_caption_shortcode_matches( $post_content );
+
+		foreach ( $shortcode_matches as $shortcode_match ) {
+
+			$old_shortcode_string = $shortcode_match[0];
+
+			$this->logger->log( $this->log, 'Old string: ' . $old_shortcode_string );
+
+			$new_shortcode_string = $this->process_caption_shortcode_match( $shortcode_match );
+
+			$this->logger->log( $this->log, 'New string: ' . $new_shortcode_string );
+
+			$post_content = str_replace( $old_shortcode_string, $new_shortcode_string, $post_content );
+
+		}
+
+		// Process [media-credit] shortcodes remaining in content and convert to [caption] shortcode.
+
+		// Match array indexes:
+		// [0] => [media-credit name|id="" ... ]<img class="wp-image-1022982 ..." ... />[/media-credit]
+		// [1] => 
+		// [2] => media-credit
+		// [3] =>  name|id="" ...
+		// [4] => 
+		// [5] => <img class="wp-image-1022982 ..." ... />
+		// [6] => 
+		// (phpcs: comment with period at end).
+	
+		$shortcode_matches = $this->get_media_credit_shortcode_matches( $post_content );
+
+		foreach ( $shortcode_matches as $shortcode_match ) {
+
+			$old_shortcode_string = $shortcode_match[0];
+
+			$this->logger->log( $this->log, 'Old string: ' . $old_shortcode_string );
+
+			$media_credit_info = $this->process_media_credit_shortcode( $shortcode_match );
+
+			$new_shortcode_string = '[caption';
+
+			if ( isset( $media_credit_info[2] ) && is_numeric( $media_credit_info[2] ) && $media_credit_info[2] > 0 ) {
+				$new_shortcode_string .= ' id="attachment_' . esc_attr( $media_credit_info[2] ) . '"';
+			} 
+			if ( isset( $media_credit_info[1]['align'] ) ) {
+				$new_shortcode_string .= ' align="' . esc_attr( $media_credit_info[1]['align'] ) . '"';
+			}
+			if ( isset( $media_credit_info[1]['width'] ) ) {
+				$new_shortcode_string .= ' width="' . esc_attr( $media_credit_info[1]['width'] ) . '"';
+			}
+			
+			$new_shortcode_string .= ']';
+			
+			$new_shortcode_string .= $shortcode_match[5]; 
+
+			if ( ! empty( $media_credit_info[0] ) ) {
+				$new_shortcode_string .= esc_html( $media_credit_info[0] );
+			}
+			
+			$new_shortcode_string .= '[/caption]';
+
+			$this->logger->log( $this->log, 'New string: ' . $new_shortcode_string );
+
+			$post_content = str_replace( $old_shortcode_string, $new_shortcode_string, $post_content );
+		
+		}
+
+		return $post_content;
+
 	}
 
 	/**
@@ -404,7 +387,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		// If shortcode string matches db string, no more processing needed.
 		if ( $img_postmeta == $atts['name'] ) {
 
-			$this->logger->log( $this->log, 'DB already matches HTML.' );
+			$this->logger->log( $this->log, 'Postmeta _media_credit matches.' );
 
 			return array( null, $atts, $attachment_id );
 
@@ -413,17 +396,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		// If DB value is blank, then set it to the shortcode value.
 		if ( empty( $img_postmeta ) ) {
 
-			if ( $this->dry_run ) {
-
-				$this->logger->log( $this->log, 'Dry-run only: update post meta => ' . $attachment_id . ' _media_credit ' . $atts['name'] );
-
-			} else {
-
-				$this->logger->log( $this->log, 'Img match postmeta updated.' );
-
-				update_post_meta( $attachment_id, '_media_credit', $atts['name'] );
-
-			}
+			$this->logger->log( $this->log, 'Img ' . $attachment_id . ' postmeta _media_credit updated: ' . $atts['name'] );
+			
+			update_post_meta( $attachment_id, '_media_credit', $atts['name'] );
 
 			return array( null, $atts, $attachment_id );
 
