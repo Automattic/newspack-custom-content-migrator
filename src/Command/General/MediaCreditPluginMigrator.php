@@ -28,6 +28,13 @@ use WP_CLI;
 class MediaCreditPluginMigrator implements InterfaceCommand {
 
 	/**
+	 * Dry Run
+	 *
+	 * @var boolean $dry_run
+	 */
+	private $dry_run = false;
+
+	/**
 	 * Logger
 	 * 
 	 * @var Logger
@@ -52,7 +59,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->logger      = new Logger();
+		$this->logger = new Logger();
 	}
 
 	/**
@@ -79,6 +86,15 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_media_credit_plugin' ],
 			[
 				'shortdesc' => 'Migrate Media Credit Plugin postmeta and shortcodes.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Do a dry-run simulation only. No updates.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -95,20 +111,40 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 		
+		if ( isset( $assoc_args['dry-run'] ) ) {
+
+			$this->dry_run = true;
+			$this->logger->log( $this->log, 'with --dry-run.' );
+
+		}
+
+		$batch = 0;
+
 		do {
 
-			$posts = get_posts( array(
+			++$batch;
+
+			$this->logger->log( $this->log, '------ Batch: ' . $batch );
+
+			$args = array(
 				'post_type'      => 'post',
 				'post_status'    => array( 'publish' ),
 				'posts_per_page' => '100',
-				'no_found_rows'  => true,
 				// Search for posts with media-credit shortcodes.
 				's'              => '[media-credit',
 				'search_columns' => array( 'post_content' ),
 				// Order by date DESC so newest credit will be set into blank postmeta.
 				'orderby'        => 'date',
 				'order'          => 'DESC',
-			));
+			);
+
+			// Add paging when doing dry run. Otherwise if no posts are updated, the same set will be fetched.
+			// (When not dry-run, the posts are actually updated, thus the 's' (search) will find the next set automatically).
+			if ( $this->dry_run ) {
+				$args['paged'] = $batch;
+			}
+
+			$posts = get_posts( $args );
 
 			foreach ( $posts as $post ) {
 
@@ -116,8 +152,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 				$new_post_content = $this->process_post_content( $post->post_content );
 
-				// Error if replacments were not successful. ( new == old )
-				if( $new_post_content == $post->post_content ) {
+				// Error if replacments were not successful ( new == old ).
+				if ( $new_post_content == $post->post_content ) {
 
 					$this->logger->log(
 						$this->log,
@@ -127,19 +163,32 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 					);
 		
 				}
+					
+				// Update post.
+				if ( $this->dry_run ) {
 
-				wp_update_post(
-					array(
-						'ID'           => $post->ID,
-						'post_content' => $new_post_content,
-					)
-				);
-			
-			} // foreach post
+					$this->logger->log( $this->log, 'Dry-run: WP update post.' );
+
+				} else {
+
+					$this->logger->log( $this->log, 'WP update post.' );
+
+					wp_update_post(
+						array(
+							'ID'           => $post->ID,
+							'post_content' => $new_post_content,
+						)
+					);
+				
+				}           
+			} // foreach post.
 
 			wp_cache_flush();
 
-		} while( count( $posts ) > 0 );
+			// PHPCS: can't do count() directly in the while loop, must set variable.
+			$posts_count = count( $posts );
+
+		} while ( $posts_count > 0 ); // get_posts.
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
@@ -150,8 +199,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 * Replace "shortode inside shortcode" [caption ][media-credit ] with just [caption ]
 	 * Then replace remaining [media-credit ] with [caption ]
 	 * 
-	 * @param string $post_content Before shortcode replacements
-	 * @return string $new_post_content After shortcode replacements
+	 * @param string $post_content Before shortcode replacements.
+	 * @return string $new_post_content After shortcode replacements.
 	 */
 	private function process_post_content( $post_content ) {
 
@@ -234,7 +283,6 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		}
 
 		return $post_content;
-
 	}
 
 	/**
@@ -396,9 +444,17 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		// If DB value is blank, then set it to the shortcode value.
 		if ( empty( $img_postmeta ) ) {
 
-			$this->logger->log( $this->log, 'Img ' . $attachment_id . ' postmeta _media_credit updated: ' . $atts['name'] );
+			if ( $this->dry_run ) {
+
+				$this->logger->log( $this->log, 'Dry-run: Img ' . $attachment_id . ' postmeta _media_credit updated: ' . $atts['name'] );
+
+			} else {
+				
+				$this->logger->log( $this->log, 'Img ' . $attachment_id . ' postmeta _media_credit updated: ' . $atts['name'] );
 			
-			update_post_meta( $attachment_id, '_media_credit', $atts['name'] );
+				update_post_meta( $attachment_id, '_media_credit', $atts['name'] );
+
+			}
 
 			return array( null, $atts, $attachment_id );
 
