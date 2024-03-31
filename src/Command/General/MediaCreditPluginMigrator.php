@@ -35,6 +35,13 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	private $dry_run = false;
 
 	/**
+	 * Log (file path)
+	 *
+	 * @var string $log
+	 */
+	private $log;
+
+	/**
 	 * Logger
 	 * 
 	 * @var Logger
@@ -42,11 +49,11 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
-	 * Log (file path)
+	 * Report for dry-run
 	 *
-	 * @var string $log
+	 * @var array $report
 	 */
-	private $log;
+	private $report;
 
 	/**
 	 * Instance
@@ -90,7 +97,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
-						'description' => 'Do a dry-run simulation only. No updates.',
+						'description' => 'Do a dry-run simulation only. No updates. Show report.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -189,6 +196,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			$posts_count = count( $posts );
 
 		} while ( $posts_count > 0 ); // get_posts.
+
+		if( $this->dry_run ) $this->log_report();
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
@@ -437,6 +446,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			$this->logger->log( $this->log, 'Postmeta _media_credit matches.' );
 
+			if( $this->dry_run) $this->report( $attachment_id, 'equal', $img_postmeta, $atts['name'] );
+
 			return array( null, $atts, $attachment_id );
 
 		}
@@ -456,11 +467,15 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			}
 
+			if( $this->dry_run) $this->report( $attachment_id, 'insert', $img_postmeta, $atts['name'] );
+
 			return array( null, $atts, $attachment_id );
 
 		}
 
 		$this->logger->log( $this->log, 'Add credit to html.' );
+
+		if( $this->dry_run) $this->report( $attachment_id, 'different', $img_postmeta, $atts['name'] );
 
 		// Return the shortcode credit name.
 		return array( $atts['name'], $atts, $attachment_id );
@@ -520,4 +535,37 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		
 		return $attachment_id;
 	}
+
+	private function report( $attachment_id, $compare, $img_postmeta, $atts_name ) {
+
+		$value = json_encode( array( $compare, $img_postmeta, $atts_name ) );
+
+		if( ! isset( $this->report[$attachment_id] ) ) $this->report[$attachment_id] = array();
+		
+		if( ! in_array( $value, $this->report[$attachment_id] ) ) $this->report[$attachment_id][] = $value;
+
+	}
+
+	private function log_report() {
+		
+		$this->logger->log( $this->log, '------ Report:' );
+
+		foreach( $this->report as $attachment_id => $jsons ) {
+
+			$names = array_map( function( $json ) { return json_decode( $json ); }, $jsons );
+
+			if( 1 == count( $names ) && 'equal' == $names[0][0] ) continue;
+			if( 1 == count( $names ) && 'insert' == $names[0][0] ) continue;
+
+			$this->logger->log( $this->log, '---- Attachment_id = ' . $attachment_id );
+
+			foreach( $names as $name ) {
+
+				$this->logger->log( $this->log, $name[0] . ': ' . $name[1] . ' => ' . $name[2] );
+
+			}
+
+		}
+	}
+
 }
