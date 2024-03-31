@@ -197,7 +197,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		} while ( $posts_count > 0 ); // get_posts.
 
-		if( $this->dry_run ) $this->log_report();
+		if ( $this->dry_run ) {
+			$this->log_report();
+		}
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
@@ -446,7 +448,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			$this->logger->log( $this->log, 'Postmeta _media_credit matches.' );
 
-			if( $this->dry_run) $this->report( $attachment_id, 'equal', $img_postmeta, $atts['name'] );
+			if ( $this->dry_run ) {
+				$this->report( $attachment_id, 'equal', $img_postmeta, $atts['name'] );
+			}
 
 			return array( null, $atts, $attachment_id );
 
@@ -467,7 +471,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			}
 
-			if( $this->dry_run) $this->report( $attachment_id, 'insert', $img_postmeta, $atts['name'] );
+			if ( $this->dry_run ) {
+				$this->report( $attachment_id, 'insert', $img_postmeta, $atts['name'] );
+			}
 
 			return array( null, $atts, $attachment_id );
 
@@ -475,7 +481,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		$this->logger->log( $this->log, 'Add credit to html.' );
 
-		if( $this->dry_run) $this->report( $attachment_id, 'different', $img_postmeta, $atts['name'] );
+		if ( $this->dry_run ) {
+			$this->report( $attachment_id, 'different', $img_postmeta, $atts['name'] );
+		}
 
 		// Return the shortcode credit name.
 		return array( $atts['name'], $atts, $attachment_id );
@@ -536,36 +544,60 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		return $attachment_id;
 	}
 
+	/**
+	 * Store report jsons for custom media credits.
+	 *
+	 * @param int    $attachment_id Image ID from posts table.
+	 * @param string $compare Postmeta to HTML comparison.
+	 * @param string $img_postmeta Existing postmeta medit credit.
+	 * @param string $atts_name HTML media credit.
+	 * @return void
+	 */
 	private function report( $attachment_id, $compare, $img_postmeta, $atts_name ) {
 
 		$value = json_encode( array( $compare, $img_postmeta, $atts_name ) );
 
-		if( ! isset( $this->report[$attachment_id] ) ) $this->report[$attachment_id] = array();
+		if ( ! isset( $this->report[ $attachment_id ] ) ) {
+			$this->report[ $attachment_id ] = array();
+		}
 		
-		if( ! in_array( $value, $this->report[$attachment_id] ) ) $this->report[$attachment_id][] = $value;
-
+		if ( ! in_array( $value, $this->report[ $attachment_id ] ) ) {
+			$this->report[ $attachment_id ][] = $value;
+		}
 	}
 
+	/**
+	 * Output report.
+	 *
+	 * @return void
+	 */
 	private function log_report() {
 		
 		$this->logger->log( $this->log, '------ Report:' );
 
-		foreach( $this->report as $attachment_id => $jsons ) {
+		foreach ( $this->report as $attachment_id => $jsons ) {
 
-			$names = array_map( function( $json ) { return json_decode( $json ); }, $jsons );
+			$names = array_map(
+				function ( $json ) {
+					return json_decode( $json );
+				},
+				$jsons 
+			);
 
-			if( 1 == count( $names ) && 'equal' == $names[0][0] ) continue;
-			if( 1 == count( $names ) && 'insert' == $names[0][0] ) continue;
+			if ( 1 == count( $names ) && 'equal' == $names[0][0] ) {
+				continue;
+			}
+			if ( 1 == count( $names ) && 'insert' == $names[0][0] ) {
+				continue;
+			}
 
 			$this->logger->log( $this->log, '---- Attachment_id = ' . $attachment_id );
 
-			foreach( $names as $name ) {
+			foreach ( $names as $name ) {
 
 				$this->logger->log( $this->log, $name[0] . ': ' . $name[1] . ' => ' . $name[2] );
 
-			}
-
+			}       
 		}
 	}
-
 }
