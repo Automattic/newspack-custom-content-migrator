@@ -74,6 +74,7 @@ PluginSetup::register_migrators(
 		Command\General\BlockTransformerCommand::class,
 		Command\General\PostDateMigrator::class,
 		Command\General\MediaCreditPluginMigrator::class,
+		Command\General\SimplyGuestAuthorNameMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
@@ -88,5 +89,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\CityViewMigrator::class,
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 		Command\PublisherSpecific\LAFocusMigrator::class,
+		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 	)
 );

@@ -229,7 +229,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_no_host );
 				if ( ! $featured_image_used_in_post_content ) {
 					WP_CLI::line( sprintf( 'Featured image not used inline.', $post_id ) );
-					continue;
+				}
+
+				// Check if Featured Image is used anywhere in post_content blocks.
+				$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+				foreach ( $image_blocks as $image_block ) {
+					if ( $image_block['attrs']['id'] == $thumbnail_id ) {
+						$this->logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
+						$featured_image_used_in_post_content = true;
+
+						break;
+					}
 				}
 
 				// Hide featured image.
