@@ -4,11 +4,15 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
 use DOMDocument;
+use Exception;
+use NewspackCustomContentMigrator\Command\General\TaxonomyMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use WP_CLI;
 
@@ -80,105 +84,202 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'a&e',
 		'alameda county',
 		'alamo',
+		'around the region',
+		'arts',
 		'atherton',
 		'belle haven',
 		'blackhawk',
 		'business',
 		'city government',
+		'city limits',
 		'city politics',
 		'coastside',
-		'community',
+		'coming up',
+		'community kindness',
 		'community leaders',
+		'community',
 		'contra costa county',
 		'courts',
 		'cover story',
 		'covid',
 		'crime',
 		'danville',
+		'diablo',
 		'dublin',
 		'east palo alto',
 		'editorial',
-		'education ',
+		'editorials',
+		'education',
 		'election',
 		'enterprise story',
 		'environment',
 		'family/lifestyle',
+		'feature',
+		'features',
 		'fire/wildfire',
 		'food',
 		'guest opinion',
-		'health',
 		'health care',
+		'health',
+		'home improvement',
+		'home sales',
 		'housing',
 		'investigative story',
 		'ladera',
 		'land use',
+		'letters to the editor',
 		'livermore',
-		'los altos',
 		'los altos hills',
+		'los altos',
+		'meet the artist',
 		'menlo park',
 		'mountain view',
 		'neighborhood',
+		'neighborhoods',
+		'news & events',
+		'news',
 		'north fair oaks',
 		'obituary',
 		'outdoor recreation',
+		'palo alto city',
+		'palo alto news',
+		'palo alto people',
+		'palo alto schools',
 		'palo alto',
 		'peninsula',
+		'pet of the week',
 		'pleasanton',
 		'police',
 		'portola valley',
 		'poverty',
 		'profile',
+		'profile',
 		'real estate',
 		'redwood city',
 		'regional politics',
+		'roundup',
 		'san carlos',
 		'san mateo county',
-		'san ramon',
 		'san ramon valley',
+		'san ramon',
 		'santa clara county',
 		'seniors',
 		'social justice',
 		'social services',
 		'sports',
-		'stanford',
 		'stanford university',
+		'stanford',
 		'state',
 		'sunol',
 		'technology',
+		'top stories',
 		'traffic',
 		'transportation',
 		'tri-valley',
+		'triumph',
 		'video',
+		'walnut creek',
 		'woodside',
 		'youth',
-		'top stories',
-		'palo alto news',
-		'around the region',
-		'palo alto people',
-		'palo alto city',
-		'palo alto schools',
-		'editorials',
-		'guest opinion',
-		'letters to the editor',
-		'news',
-		'roundup',
-		'feature',
-		'profile',
-		'features',
-		'meet the artist',
-		'news & events',
-		'coming up',
-		'arts',
-		'home improvement',
-		'neighborhoods',
-		'home sales',
-		'diablo',
-		'walnut creek',
-		'pet of the week',
-		'community leaders',
-		'city limits',
-		'triumph',
-		'community kindness',
+	];
+
+	const ALLOWED_TAG_LIST = [
+		'a&e - top post - primary',
+		'a&e - top post - secondary',
+		'arts & culture - music',
+		'arts & culture - performing arts',
+		'arts & culture - top post - primary',
+		'arts & culture - top post - secondary',
+		'arts & culture - visual arts',
+		'danvillesanramon - city government',
+		'danvillesanramon - city news',
+		'danvillesanramon - community',
+		'danvillesanramon - education',
+		'danvillesanramon - features',
+		'danvillesanramon - other local news',
+		'danvillesanramon - san mateo county news',
+		'danvillesanramon - top post - primary',
+		'danvillesanramon - top post - secondary',
+		'danvillesanramon - trending',
+		'food - new & trending',
+		'food - openings & closings',
+		'food - top post - primary',
+		'livermore - city government',
+		'livermore - city news',
+		'livermore - community',
+		'livermore - education',
+		'livermore - features',
+		'livermore - other local news',
+		'livermore - san mateo county news',
+		'livermore - top post - primary',
+		'livermore - top post - secondary',
+		'livermore - trending',
+		'menlopark - city government',
+		'menlopark - city news',
+		'menlopark - community',
+		'menlopark - education',
+		'menlopark - features',
+		'menlopark - other local news',
+		'menlopark - san mateo county news',
+		'menlopark - top post - primary',
+		'menlopark - top post - secondary',
+		'menlopark - trending',
+		'mountainview - city government',
+		'mountainview - city news',
+		'mountainview - community',
+		'mountainview - education',
+		'mountainview - features',
+		'mountainview - other local news',
+		'mountainview - san mateo county news',
+		'mountainview - top post - primary',
+		'mountainview - top post - secondary',
+		'mountainview - trending',
+		'paloalto - city government',
+		'paloalto - city news',
+		'paloalto - community',
+		'paloalto - education',
+		'paloalto - features',
+		'paloalto - other local news',
+		'paloalto - san mateo county news',
+		'paloalto - top post - primary',
+		'paloalto - top post - secondary',
+		'paloalto - trending',
+		'playback',
+		'pleasanton - city government',
+		'pleasanton - city news',
+		'pleasanton - community',
+		'pleasanton - education',
+		'pleasanton - features',
+		'pleasanton - other local news',
+		'pleasanton - san mateo county news',
+		'pleasanton - top post - primary',
+		'pleasanton - top post - secondary',
+		'pleasanton - trending',
+		'print ready',
+		'real estate - home & garden',
+		'real estate - neighborhoods',
+		'real estate - top post - primary',
+		'real estate - top post - secondary',
+		'real estate - business',
+		'redwoodcity - city government',
+		'redwoodcity - city news',
+		'redwoodcity - community',
+		'redwoodcity - education',
+		'redwoodcity - features',
+		'redwoodcity - other local news',
+		'redwoodcity - san mateo county news',
+		'redwoodcity - top post - primary',
+		'redwoodcity - top post - secondary',
+		'redwoodcity - trending',
+		'the big picture',
+		'the six fifty',
+		'the six fifty - culture',
+		'the six fifty - food & drink',
+		'the six fifty - neighborhood guide',
+		'the six fifty - outdoors',
+		'the six fifty - things to do',
+		'the six fifty - top post - primary',
+		'trending',
 	];
 
 	/**
@@ -210,6 +311,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * Taxonomy instance.
+	 *
+	 * @var Taxonomy $taxonomy_logic
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * GutenbergBlockGenerator instance.
 	 *
 	 * @var GutenbergBlockGenerator.
@@ -227,6 +335,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
+		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorPlus();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 
@@ -500,6 +609,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'target-story-ids',
+						'description' => 'CSV list of target story IDs to re-process the "more posts" block for.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -645,13 +761,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'print-issues-csv-file-path',
 						'description' => 'Path to the CSV file containing print issues to import.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'print-sections-csv-file-path',
-						'description' => 'Path to the CSV file containing print sections to import.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -927,6 +1036,74 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'story-report-items-dir-path',
 						'description' => 'Path to the CSV file containing the stories\'s report items to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-dupe-sanctioned-list-cats-tags',
+			[ $this, 'cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags' ],
+			[
+				'shortdesc' => 'Merges duplicate categories and tags based on sanctioned list provided by Embarcadero.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-tags-on-posts',
+			[ $this, 'cmd_embarcadero_fix_tags_on_posts' ],
+			[
+				'shortdesc' => 'Fixes category-tag relationships for migrated (initial and refreshed) posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories\'s to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'after-row-number',
+						'description' => 'Starts after this row number.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-delete-disallowed-tags',
+			[ $this, 'cmd_embarcadero_delete_disallowed_tags' ],
+			[
+				'shortdesc' => 'Deletes disallowed tags from the database.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-establish-primary-categories',
+			[ $this, 'cmd_embarcadero_establish_primary_categories' ],
+			[
+				'shortdesc' => 'Establishes primary categories for migrated posts that don\'t already have them.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-create-missing-categories',
+			[ $this, 'cmd_embarcadero_create_missing_categories' ],
+			[
+				'shortdesc' => 'Creates missing categories based from a single curated list.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file containing the categories that exist per site.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -2002,20 +2179,36 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_migrate_more_posts_block( $args, $assoc_args ) {
 		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
 		$story_media_csv_file_path = $assoc_args['story-media-file-path'];
+		$target_story_ids          = $assoc_args['target-story-ids'] ?? '';
+		$target_story_ids          = explode( ',', $target_story_ids );
 
-		$posts                 = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$media_list            = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
-		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+		$posts      = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$media_list = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
 
-		// Skip already imported posts.
-		$posts = array_values(
-			array_filter(
-				$posts,
-				function ( $post ) use ( $imported_original_ids ) {
-					return ! in_array( $post['story_id'], $imported_original_ids );
-				}
-			)
-		);
+		if ( ! empty( $target_story_ids ) ) {
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function ( $post ) use ( $target_story_ids ) {
+						// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- don't need strict comparison for this.
+						return in_array( $post['story_id'], $target_story_ids );
+					}
+				)
+			);
+		} else {
+			$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+
+			// Skip already imported posts.
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function ( $post ) use ( $imported_original_ids ) {
+						// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- don't need strict comparison for this.
+						return ! in_array( $post['story_id'], $imported_original_ids );
+					}
+				)
+			);
+		}
 
 		foreach ( $posts as $post_index => $post ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Importing post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
@@ -2411,16 +2604,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param array $assoc_args array Command associative arguments.
 	 */
 	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
-		$publication_name             = $assoc_args['publication-name'];
-		$publication_email            = $assoc_args['publication-email'];
-		$pdf_section_suffix           = $assoc_args['pdf-section-suffix'];
-		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
-		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
-		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
-		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
+		$publication_name           = $assoc_args['publication-name'];
+		$publication_email          = $assoc_args['publication-email'];
+		$pdf_section_suffix         = $assoc_args['pdf-section-suffix'];
+		$print_issues_csv_file_path = $assoc_args['print-issues-csv-file-path'];
+		$print_pdf_dir_path         = $assoc_args['print-pdf-dir-path'];
+		$print_cover_dir_path       = $assoc_args['print-cover-dir-path'];
 
-		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
-		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
+		$print_issues = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
 
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d (%s)', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'], $print_issue['seo_link'] ), Logger::LINE );
@@ -2445,7 +2636,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.' . $pdf_section_suffix . '.section' . $i . '.pdf';
 
 				if ( ! file_exists( $pdf_file_path ) ) {
-					break;
+					continue;
 				}
 
 				$pdf_files_paths[] = $pdf_file_path;
@@ -2458,6 +2649,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Get author based on the publication name.
 			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
+
+			$post_title = date( "F d, Y", strtotime( $print_issue['seo_link'] ) );
 
 			// Create a new issue post.
 			$wp_issue_post_id = $this->get_or_create_post(
@@ -2478,19 +2671,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			// Issue section.
-			$section_name  = 'Section ' . $print_issue['sections'];
-			$section_index = array_search( $print_issue['sections'], array_column( $print_sections, 'section_id' ) );
-			if ( false === $section_index ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['sections'], $print_issue['issue_number'] ), Logger::WARNING );
-			} else {
-				$section_name = $print_sections[ $section_index ]['section_title'];
-			}
-
 			$post_content_blocks = [];
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
 				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+				$filename     = basename( $pdf_file_path );
 
 				if ( is_wp_error( $file_post_id ) ) {
 					wp_delete_post( $wp_issue_post_id, true );
@@ -2500,7 +2685,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 				$attachment_post = get_post( $file_post_id );
 
-				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
+				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $filename );
 			}
 
 			$post_content = serialize_blocks( $post_content_blocks );
@@ -2508,12 +2693,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			wp_update_post(
 				[
 					'ID'           => $wp_issue_post_id,
+					'post_title'   => $post_title,
 					'post_content' => $post_content,
 				]
 			);
 
 			// Handle post cover.
-			$cover_file_path = $print_cover_dir_path . '/' . $seo_link[0] . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.cover.jpg';
+			$cover_file_path = $print_cover_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.cover.jpg';
 
 			if ( ! is_file( $cover_file_path ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find cover file %s', $cover_file_path ), Logger::WARNING );
@@ -3086,6 +3272,469 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				} else {
 					WP_CLI::line( 'NOT UPDATED' );
 				}
+			}
+		}
+	}
+
+	/**
+	 * This function will go through an Embarcadero sites categories looking for duplicates across tags, and merge them.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags( $args, $assoc_args ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$duplicate_cats_tags       = $wpdb->get_results(
+			"SELECT 
+				sub.slug, 
+				sub.name, 
+				GROUP_CONCAT(sub.taxonomy) as taxonomies, 
+				COUNT(DISTINCT sub.term_taxonomy_id) as counter 
+			FROM (
+				SELECT 
+				    ROW_NUMBER() over ( PARTITION BY t.slug ORDER BY tt.taxonomy ) as row_num,
+					t.term_id, 
+					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name, 
+					t.slug, 
+					tt.taxonomy, 
+					tt.term_taxonomy_id 
+				FROM $wpdb->terms t 
+					LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+				WHERE tt.taxonomy IN ( 'category', 'post_tag' ) 
+				  AND tt.parent = 0
+				ORDER BY FIELD( tt.taxonomy, 'category', 'post_tag' )
+			) as sub 
+			GROUP BY sub.slug 
+			HAVING counter > 1 
+			ORDER BY counter DESC"
+		);
+		$count_duplicate_cats_tags = count( $duplicate_cats_tags );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d duplicate categories and tags.', $count_duplicate_cats_tags ), Logger::INFO );
+
+		foreach ( $duplicate_cats_tags as $duplicate ) {
+			echo "\n\n\n";
+			$duplicate->name = html_entity_decode( $duplicate->name );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Slug: %s, Name: %s, Taxonomies: %s', $duplicate->slug, $duplicate->name, $duplicate->taxonomies ), Logger::INFO );
+
+			// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+			if ( in_array( strtolower( $duplicate->name ), array_merge( self::ALLOWED_CATEGORIES, [ 'tri valley' ] ) ) ) {
+				$this->logger->log( self::LOG_FILE, 'Category is allowed. Proceeding to merge.', Logger::SUCCESS );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$category       = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+    						t.term_id, 
+    						t.name, 
+    						t.slug, 
+    						tt.taxonomy, 
+    						tt.term_taxonomy_id 
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE t.slug = %s 
+						  AND tt.taxonomy = 'category'
+						  AND tt.parent = 0",
+						$duplicate->slug
+					)
+				);
+				$count_category = count( $category );
+
+				if ( $count_category > 1 ) {
+					$this->logger->log( self::LOG_FILE, 'Found more than one category with the same slug. Skipping.', Logger::ERROR );
+					continue;
+				}
+
+				$category       = $category[0];
+				$category->name = html_entity_decode( $category->name );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$tags = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+							t.term_id, 
+							t.name, 
+							t.slug, 
+							tt.taxonomy, 
+							tt.term_taxonomy_id 
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE t.slug = %s 
+						  AND tt.taxonomy = 'post_tag'",
+						$duplicate->slug
+					)
+				);
+
+				$tag_term_ids = [];
+				foreach ( $tags as $tag ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Merging tag %s (Term_ID: %d) into category %s (Term_ID: %d)', $tag->name, $tag->term_id, $category->name, $category->term_id ), Logger::INFO );
+					$tag_term_ids[] = intval( $tag->term_id );
+				}
+
+				$result = TaxonomyMigrator::get_instance()->merge_terms(
+					$category->term_id,
+					$tag_term_ids,
+					[
+						'category',
+						'post_tag',
+					]
+				);
+
+				if ( is_wp_error( $result ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Error merging terms: %s', $result->get_error_message() ), Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Merged terms successfully.', Logger::SUCCESS );
+				}
+			} else {
+				$this->logger->log( self::LOG_FILE, 'Category is not allowed. Skipping.', Logger::ERROR );
+			}
+		}
+	}
+
+	/**
+	 * This function will go through the posts that were imported as part of the migration and remove any tags that
+	 * aren't part of the sanctioned list of tags.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the CSV file can't be read.
+	 */
+	public function cmd_embarcadero_fix_tags_on_posts( $args, $assoc_args ) {
+		$csv_file = $assoc_args['story-csv-path'];
+		$after_id = $assoc_args['after-row-number'] ?? 0;
+
+		$iterator = ( new FileImportFactory() )->get_file( $csv_file )->set_start( $after_id )->getIterator();
+
+		foreach ( $iterator as $row_number => $row ) {
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing story %d (Row #: %d)', $row['story_id'], $row_number ), Logger::INFO );
+
+			global $wpdb;
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT 
+    					p.* 
+						FROM $wpdb->posts p 
+						    INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
+						WHERE meta_key = %s 
+						  AND meta_value = %d",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					$row['story_id']
+				)
+			);
+
+			if ( ! $post ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find post with the original story ID %d', $row['story_id'] ), Logger::ERROR );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found post %d', $post->ID ), Logger::INFO );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_tags = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT 
+    					t.term_id, 
+    					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+    					t.slug, 
+    					tt.taxonomy, 
+    					tt.term_taxonomy_id 
+					FROM $wpdb->terms t 
+					    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+					    INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
+					WHERE tr.object_id = %d 
+					  AND tt.taxonomy = 'post_tag'",
+					$post->ID
+				)
+			);
+
+			foreach ( $post_tags as $post_tag ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Post tag `%s`', $post_tag->name ), Logger::INFO );
+
+				// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+				if ( ! in_array( html_entity_decode( $post_tag->name ), self::ALLOWED_TAG_LIST ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the allowed tag list. Removing.', $post_tag->name ), Logger::WARNING );
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$result = $wpdb->delete(
+						$wpdb->term_relationships,
+						[
+							'object_id'        => $post->ID,
+							'term_taxonomy_id' => $post_tag->term_taxonomy_id,
+						]
+					);
+
+					if ( false === $result ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not remove tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::ERROR );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Removed tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::SUCCESS );
+					}
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is part of the allowed tag list. Keeping.', $post_tag->name ), Logger::SUCCESS );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This function will go through all the tags on an Embarcadero site and delete any tags that aren't part
+	 * of the allowed list of tags specified by the Embarcadero team.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_delete_disallowed_tags(): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$tags = $wpdb->get_results(
+			"SELECT 
+    			t.term_id, 
+    			REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+    			t.slug, 
+    			tt.taxonomy, 
+    			tt.term_taxonomy_id,
+    			tt.description
+			FROM $wpdb->terms t 
+			    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+			WHERE tt.taxonomy = 'post_tag'"
+		);
+
+		foreach ( $tags as $tag ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s`', $tag->name ), Logger::INFO );
+
+			// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+			if ( ! in_array( strtolower( html_entity_decode( $tag->name ) ), self::ALLOWED_TAG_LIST ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the allowed tag list. Removing.', $tag->name ), Logger::WARNING );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$tag->post_ids = $wpdb->get_col(
+					$wpdb->prepare(
+						"SELECT tr.object_id 
+						FROM $wpdb->term_relationships tr 
+						WHERE tr.term_taxonomy_id = %d",
+						$tag->term_taxonomy_id
+					)
+				);
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+				$wpdb->insert(
+					$wpdb->termmeta,
+					[
+						'term_id'    => $tag->term_id,
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+						'meta_key'   => '_newspack_disallowed_tag',
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+						'meta_value' => wp_json_encode( $tag ),
+					]
+				);
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_rel_rows = $wpdb->delete(
+					$wpdb->term_relationships,
+					[
+						'term_taxonomy_id' => $tag->term_taxonomy_id,
+					]
+				);
+
+				if ( false === $deleted_rel_rows ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove relationships, skipping.', Logger::ERROR );
+					continue;
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Removed %d relationships', $deleted_rel_rows ), Logger::SUCCESS );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_taxonomy_row = $wpdb->delete(
+					$wpdb->term_taxonomy,
+					[
+						'term_taxonomy_id' => $tag->term_taxonomy_id,
+					]
+				);
+
+				if ( false === $deleted_taxonomy_row ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove taxonomy row, skipping.', Logger::ERROR );
+					continue;
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Removed taxonomy row', Logger::SUCCESS );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_term_row = $wpdb->delete(
+					$wpdb->terms,
+					[
+						'term_id' => $tag->term_id,
+					]
+				);
+
+				if ( false === $deleted_term_row ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove term row, skipping.', Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Removed term row', Logger::SUCCESS );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This script helps establish the primary category for posts that were imported from Embarcadero's legacy system.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_establish_primary_categories(): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_without_primary_category       = $wpdb->get_results(
+			"SELECT 
+    				p.ID 
+				FROM $wpdb->posts p 
+				WHERE p.ID IN (
+				  SELECT post_id 
+				  FROM $wpdb->postmeta 
+				  WHERE meta_key IN ( '_newspack_import_id', 'original_article_id' )
+				  ) 
+				  AND p.ID NOT IN (
+					SELECT post_id 
+					FROM $wpdb->postmeta 
+					WHERE meta_key = '_yoast_wpseo_primary_category' 
+					  AND meta_value <> '' 
+				)"
+		);
+		$posts_without_primary_category_count = count( $posts_without_primary_category );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %s posts without a primary category.', number_format( $posts_without_primary_category_count ) ), Logger::INFO );
+
+		if ( 0 === $posts_without_primary_category_count ) {
+			$this->logger->log( self::LOG_FILE, 'No posts without a primary category found.', Logger::SUCCESS );
+
+			return;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$categories_by_slug = $wpdb->get_results(
+			"SELECT t.slug, t.name, t.term_id FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE tt.taxonomy = 'category'",
+			OBJECT_K
+		);
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need handle to file to write CSV data.
+		$handle = fopen( 'establish_primary_categories.csv', 'w' );
+		fputcsv(
+			$handle,
+			[
+				'Post ID',
+				'Story ID',
+				'Permalink',
+				'Extracted Category',
+				'Current Categories',
+				'Status',
+			]
+		);
+		foreach ( $posts_without_primary_category as $post ) {
+			$permalink         = get_permalink( $post->ID );
+			$url_path          = wp_parse_url( $permalink, PHP_URL_PATH );
+			$exploded_url_path = array_filter( explode( '/', $url_path ) );
+			$story_id          = get_post_meta( $post->ID, '_newspack_import_id', true );
+			if ( empty( $story_id ) ) {
+				$temp = get_post_meta( $post->ID, 'original_article_id', true );
+				if ( ! empty( $temp ) ) {
+					$story_id = $temp;
+				}
+			}
+
+			$csv_row_data = [
+				'Post ID'            => $post->ID,
+				'Story ID'           => $story_id,
+				'Permalink'          => $permalink,
+				'Extracted Category' => null,
+				'Current Categories' => implode( ' <> ', wp_get_post_terms( $post->ID, 'category', [ 'fields' => 'names' ] ) ),
+				'Status'             => null,
+			];
+
+			if ( empty( $exploded_url_path ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find a category within the slug (Post ID: %d) %s', $post->ID, $permalink ), Logger::ERROR );
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			$first                              = array_shift( $exploded_url_path );
+			$csv_row_data['Extracted Category'] = $first;
+			if ( ! array_key_exists( $first, $categories_by_slug ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Category not found %s', $permalink ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Not Found';
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			if ( 'uncategorized' === $first ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Category is uncategorized, skipping post %d', $post->ID ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Skipped';
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found %s, setting primary category for post %d to %s', $first, $post->ID, $categories_by_slug[ $first ]->name ), Logger::SUCCESS );
+
+			$category = $categories_by_slug[ $first ];
+
+			$update = update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+
+			if ( $update ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Primary category set for post %d', $post->ID ), Logger::SUCCESS );
+				$csv_row_data['Status'] = 'Updated';
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not set primary category for post %d', $post->ID ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Failed';
+			}
+
+			fputcsv( $handle, array_values( $csv_row_data ) );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Need to close the file handle.
+		fclose( $handle );
+	}
+
+	/**
+	 * This function uses a pre-defined CSV file that determines which categories and tags are missing from
+	 * each site in the Embarcadero network. Whichever one is missing, the script will create that
+	 * category or tag on the site.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the CSV file can't be read.
+	 */
+	public function cmd_embarcadero_create_missing_categories( $args, $assoc_args ): void {
+		$csv_path = $assoc_args['csv-path'];
+		$csv      = ( new FileImportFactory() )->get_file( $csv_path )->getIterator();
+
+		$site = str_replace( 'https://', '', get_site_url() );
+
+		foreach ( $csv as $row_number => $row ) {
+			$taxonomy = $row['taxonomy'];
+			$slug     = $row['slug'];
+			$create   = 'No' === $row[ $site ];
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing row %d - Tax: %s Slug: %s Exists: %s', $row_number, $taxonomy, $slug, $row[ $site ] ), Logger::INFO );
+
+			if ( ! $create ) {
+				$this->logger->log( self::LOG_FILE, 'Skipping', Logger::INFO );
+				continue;
+			}
+
+			$term = wp_insert_term( $slug, $taxonomy );
+
+			if ( is_wp_error( $term ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create term %s: %s', $slug, $term->get_error_message() ), Logger::ERROR );
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Created term %s', $slug ), Logger::SUCCESS );
 			}
 		}
 	}
