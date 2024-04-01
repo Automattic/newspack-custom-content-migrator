@@ -482,7 +482,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		}
 
-		$this->logger->log( $this->log, 'Add credit to html.' );
+		$this->logger->log( $this->log, 'Different HTML vs DB credits', $this->logger::WARNING );
 
 		if ( $this->dry_run ) {
 			$this->report( $post_id, $attachment_id, 'different', $img_postmeta, $atts['name'] );
