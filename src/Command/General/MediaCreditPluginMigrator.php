@@ -157,7 +157,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 				$this->logger->log( $this->log, '---- Post id: ' . $post->ID );
 
-				$new_post_content = $this->process_post_content( $post->post_content );
+				$new_post_content = $this->process_post_content( $post->ID, $post->post_content );
 
 				// Error if replacments were not successful ( new == old ).
 				if ( $new_post_content == $post->post_content ) {
@@ -210,10 +210,11 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 * Replace "shortode inside shortcode" [caption ][media-credit ] with just [caption ]
 	 * Then replace remaining [media-credit ] with [caption ]
 	 * 
+	 * @param int    $post_id Post ID.
 	 * @param string $post_content Before shortcode replacements.
 	 * @return string $new_post_content After shortcode replacements.
 	 */
-	private function process_post_content( $post_content ) {
+	private function process_post_content( $post_id, $post_content ) {
 
 		// Process [media-credit] shortcodes already within [caption] shortcode.
 
@@ -235,7 +236,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			$this->logger->log( $this->log, 'Old string: ' . $old_shortcode_string );
 
-			$new_shortcode_string = $this->process_caption_shortcode_match( $shortcode_match );
+			$new_shortcode_string = $this->process_caption_shortcode_match( $post_id, $shortcode_match );
 
 			$this->logger->log( $this->log, 'New string: ' . $new_shortcode_string );
 
@@ -263,7 +264,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			$this->logger->log( $this->log, 'Old string: ' . $old_shortcode_string );
 
-			$media_credit_info = $this->process_media_credit_shortcode( $shortcode_match );
+			$media_credit_info = $this->process_media_credit_shortcode( $post_id, $shortcode_match );
 
 			$new_shortcode_string = '[caption';
 
@@ -325,10 +326,11 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Process a [caption] shortcode match.
 	 *
+	 * @param int    $post_id    PostID.
 	 * @param string $shortcode_match Array of parsed shortcode.
 	 * @return string $updated_shortcode
 	 */
-	private function process_caption_shortcode_match( $shortcode_match ) {
+	private function process_caption_shortcode_match( $post_id, $shortcode_match ) {
 
 		// No need to process if media-credit shortcode not found.
 		if ( false === strpos( $shortcode_match[5], '[media-credit' ) ) {
@@ -353,7 +355,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		$updated_shortcode = str_replace( $media_credit_shortcode_matches[0][0], $media_credit_shortcode_matches[0][5], $shortcode_match[0] );
 
 		// Add credit into caption if needed.
-		$media_credit_info = $this->process_media_credit_shortcode( $media_credit_shortcode_matches[0] );
+		$media_credit_info = $this->process_media_credit_shortcode( $post_id, $media_credit_shortcode_matches[0] );
 
 		if ( ! empty( $media_credit_info ) && is_array( $media_credit_info ) && ! empty( $media_credit_info[0] ) ) {
 			$updated_shortcode = str_replace( '[/caption]', ' (Credit: ' . esc_html( $media_credit_info[0] ) . ')[/caption]', $updated_shortcode );
@@ -365,10 +367,11 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Process a [media-credit] shortcode.
 	 *
+	 * @param int   $post_id PostID.
 	 * @param array $shortcode_match Attay of parsed shortcode.
 	 * @return array [append, atts, attachment_id]
 	 */
-	private function process_media_credit_shortcode( $shortcode_match ) {
+	private function process_media_credit_shortcode( $post_id, $shortcode_match ) {
 
 		global $wpdb;
 
@@ -449,7 +452,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			$this->logger->log( $this->log, 'Postmeta _media_credit matches.' );
 
 			if ( $this->dry_run ) {
-				$this->report( $attachment_id, 'equal', $img_postmeta, $atts['name'] );
+				$this->report( $post_id, $attachment_id, 'equal', $img_postmeta, $atts['name'] );
 			}
 
 			return array( null, $atts, $attachment_id );
@@ -472,7 +475,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			}
 
 			if ( $this->dry_run ) {
-				$this->report( $attachment_id, 'insert', $img_postmeta, $atts['name'] );
+				$this->report( $post_id, $attachment_id, 'insert', $img_postmeta, $atts['name'] );
 			}
 
 			return array( null, $atts, $attachment_id );
@@ -482,11 +485,14 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, 'Add credit to html.' );
 
 		if ( $this->dry_run ) {
-			$this->report( $attachment_id, 'different', $img_postmeta, $atts['name'] );
+			$this->report( $post_id, $attachment_id, 'different', $img_postmeta, $atts['name'] );
 		}
 
 		// Return the shortcode credit name.
-		return array( $atts['name'], $atts, $attachment_id );
+		// NO: just share this in output report instead: return array( $atts['name'], $atts, $attachment_id );
+		// Otherwise, once the [caption] is convert to Blocks, then Newspack Plugin will tack on the media-credit
+		// causing a double credit.
+		return array( null, $atts, $attachment_id );
 	}
 
 	/**
@@ -547,23 +553,33 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	/**
 	 * Store report jsons for custom media credits.
 	 *
+	 * @param int    $post_id PostID.
 	 * @param int    $attachment_id Image ID from posts table.
 	 * @param string $compare Postmeta to HTML comparison.
 	 * @param string $img_postmeta Existing postmeta medit credit.
 	 * @param string $atts_name HTML media credit.
 	 * @return void
 	 */
-	private function report( $attachment_id, $compare, $img_postmeta, $atts_name ) {
-
-		$value = json_encode( array( $compare, $img_postmeta, $atts_name ) );
+	private function report( $post_id, $attachment_id, $compare, $img_postmeta, $atts_name ) {
 
 		if ( ! isset( $this->report[ $attachment_id ] ) ) {
 			$this->report[ $attachment_id ] = array();
 		}
 		
-		if ( ! in_array( $value, $this->report[ $attachment_id ] ) ) {
-			$this->report[ $attachment_id ][] = $value;
+		$lookup = json_encode( array( $compare, $img_postmeta, $atts_name ) );
+
+		// Don't save duplicates.
+		foreach ( $this->report[ $attachment_id ] as $arr ) {
+			
+			// Remove post_id from the comparison.
+			array_shift( $arr ); 
+
+			if ( json_encode( $arr ) == $lookup ) {
+				return;
+			}       
 		}
+
+		$this->report[ $attachment_id ][] = array( $post_id, $compare, $img_postmeta, $atts_name );
 	}
 
 	/**
@@ -575,19 +591,12 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		
 		$this->logger->log( $this->log, '------ Report:' );
 
-		foreach ( $this->report as $attachment_id => $jsons ) {
+		foreach ( $this->report as $attachment_id => $names ) {
 
-			$names = array_map(
-				function ( $json ) {
-					return json_decode( $json );
-				},
-				$jsons 
-			);
-
-			if ( 1 == count( $names ) && 'equal' == $names[0][0] ) {
+			if ( 1 == count( $names ) && 'equal' == $names[0][1] ) {
 				continue;
 			}
-			if ( 1 == count( $names ) && 'insert' == $names[0][0] ) {
+			if ( 1 == count( $names ) && 'insert' == $names[0][1] ) {
 				continue;
 			}
 
@@ -595,7 +604,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 			foreach ( $names as $name ) {
 
-				$this->logger->log( $this->log, $name[0] . ': ' . $name[1] . ' => ' . $name[2] );
+				$this->logger->log( $this->log, 'Post ' . $name[0] . ': ' . $name[1] . ': ' . $name[2] . ' => ' . $name[3] );
 
 			}       
 		}
