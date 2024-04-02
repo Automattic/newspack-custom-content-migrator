@@ -142,7 +142,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'post-types-csv',
-						'description' => 'CSV of all the post types to scan, no extra spaces. E.g. --post-types-csv=post,page,attachment,some_cpt. Default value is post,page,attachment.',
+						'description' => 'CSV of all the post types to scan, no extra spaces. E.g. --post-types-csv=post,page,attachment,some_cpt. Default value is post,attachment.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -380,7 +380,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
 		$export_dir        = $assoc_args['export-dir'] ?? false;
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
-		$post_types        = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'page', 'attachment' ];
+		$post_types        = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'attachment' ];
 
 		global $wpdb;
 		try {
