@@ -22,9 +22,9 @@ use WP_CLI;
  */
 class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
-    const TD_POST_THEME_SETTINGS = 'td_post_theme_settings';
+	const TD_POST_THEME_SETTINGS = 'td_post_theme_settings';
 
-    const TD_POST_THEME_SETTINGS_SOURCE = 'td_source';
+	const TD_POST_THEME_SETTINGS_SOURCE = 'td_source';
 	
 	/**
 	 * CoAuthorPlusLogic
@@ -124,7 +124,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 
-        $this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 		
@@ -167,18 +167,18 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 				$settings = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
 
-				if( empty( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE ] ) ) {
+				if ( empty( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE ] ) ) {
 
 					$this->logger->log( $this->log, 'Empty post meta source.', $this->logger::WARNING );
 					return;
 
 				}
 
-                $source = $this->sanitize_source( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE ] );
+				$source = $this->sanitize_source( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE ] );
 
 				if ( empty( $source ) ) {
 					
-                    $this->logger->log( $this->log, 'Empty sanitized source.', $this->logger::WARNING );
+					$this->logger->log( $this->log, 'Empty sanitized source.', $this->logger::WARNING );
 					return;
 				}
 
@@ -187,7 +187,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
 				// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
 				// Use a more direct approach here.
-                $ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $source ) ) );
+				$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_title( urldecode( $source ) ) );
 				
 				// Create.
 				if ( false === $ga ) {
@@ -206,7 +206,6 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 				// Assign to post.
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
-
 			}
 		);
 
@@ -215,22 +214,26 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
 
-    private function sanitize_source( $source ) {
+	/**
+	 * Sanitize DB post meta author source names.
+	 *
+	 * @param string $source String from post meta.
+	 * @return string $source
+	 */
+	private function sanitize_source( $source ) {
 
-        // Remove unicode line breaks and left-to-right ("u" modifier).
-        $source = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $source ) );
+		// Remove unicode line breaks and left-to-right ("u" modifier).
+		$source = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $source ) );
 
-        // Replace unicode spaces with normal space, ("u" modifier).
-        $source = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}|\x{FEFF}/u', ' ', $source ) );
+		// Replace unicode spaces with normal space, ("u" modifier).
+		$source = trim( preg_replace( '/\x{00A0}|\x{200B}|\x{202F}|\x{FEFF}/u', ' ', $source ) );
 
-        // Replace multiple spaces with single space.
-        $source = trim( preg_replace( '/\s{2,}/', ' ', $source ) );
+		// Replace multiple spaces with single space.
+		$source = trim( preg_replace( '/\s{2,}/', ' ', $source ) );
 
-        // Remove leading "by" (case insensitive).
-        $source = trim( preg_replace( '/^by\s+/i', '', $source ) );
+		// Remove leading "by" (case insensitive).
+		$source = trim( preg_replace( '/^by\s+/i', '', $source ) );
 
-        return $source;
-
-    }
-
+		return $source;
+	}
 }
