@@ -2005,7 +2005,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					);
 				}
 
-
 				if ( $update ) {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Updated %s %d with the ID %d', $type, $index + 1, $identifier ), Logger::SUCCESS );
 				} else {
