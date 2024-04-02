@@ -22,10 +22,10 @@ use WP_CLI;
  */
 class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
-    const TD_POST_THEME_SETTINGS_KEY = 'td_post_theme_settings';
+    const TD_POST_THEME_SETTINGS = 'td_post_theme_settings';
 
-    const TD_POST_THEME_SETTINGS_SOURCE_PROPERTY = 'td_source';
-    
+    const TD_POST_THEME_SETTINGS_SOURCE = 'td_source';
+	
 	/**
 	 * CoAuthorPlusLogic
 	 * 
@@ -131,8 +131,8 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 		// Must have required postmeta value.
 		$meta_query = array(
 			array(
-				'key'     => self::TD_POST_THEME_SETTINGS_KEY,
-				'value'   => self::TD_POST_THEME_SETTINGS_SOURCE_PROPERTY,
+				'key'     => self::TD_POST_THEME_SETTINGS,
+				'value'   => '"' . self::TD_POST_THEME_SETTINGS_SOURCE . '"',
 				'compare' => 'LIKE',
 			),
 		);              
@@ -165,13 +165,20 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 				$this->logger->log( $this->log, 'Post id: ' . $post_id );
 
-				$settings = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS_KEY, true );
+				$settings = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
 
-                $source = $this->clean_source( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE_PROPERTY ] );
-				
-				if ( empty( $souce ) ) {
+				if( empty( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE ] ) ) {
+
+					$this->logger->log( $this->log, 'Empty post meta source.', $this->logger::WARNING );
+					return;
+
+				}
+
+                $source = $this->sanitize_source( $settings[ self::TD_POST_THEME_SETTINGS_SOURCE ] );
+
+				if ( empty( $source ) ) {
 					
-                    $this->logger->log( $this->log, 'No cleaned source name.', $this->logger::WARNING );
+                    $this->logger->log( $this->log, 'Empty sanitized source.', $this->logger::WARNING );
 					return;
 				}
 
@@ -208,7 +215,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
 
-    private function clean_source( $source ) {
+    private function sanitize_source( $source ) {
 
         // Remove unicode line breaks and left-to-right ("u" modifier).
         $source = trim( preg_replace( '/\x{2028}|\x{200E}/u', '', $source ) );
