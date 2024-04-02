@@ -965,17 +965,16 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'batch',
-						'description' => 'Batch to start from.',
-						'optional'    => true,
+						'name'        => 'target',
+						'description' => 'The target of the update operation to fix styling.',
+						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'posts-per-batch',
-						'description' => 'Posts to import per batch',
-						'optional'    => true,
-						'repeating'   => false,
+						'default'     => 'content',
+						'options'     => [
+							'content',
+							'excerpt',
+							'meta',
+						],
 					],
 				],
 			]
@@ -1932,46 +1931,85 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param array $args array Command arguments.
 	 * @param array $assoc_args array Command associative arguments.
 	 */
-	public function cmd_embarcadero_fix_content_styling( $args, $assoc_args ) {
-		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
-		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+	public function cmd_embarcadero_fix_content_styling( $args, $assoc_args ): void {
+		global $wpdb;
 
-		$total_query = new \WP_Query(
-			[
-				'posts_per_page' => -1,
-				'post_type'      => 'post',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-			]
-		);
+		$target = $assoc_args['target'];
 
-		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+		$prepared_query = match ( $target ) {
+			'content' => $wpdb->prepare(
+				"SELECT * FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE %s",
+				'%' . $wpdb->esc_like( '==' ) . '%'
+			),
+			'excerpt' => $wpdb->prepare(
+				"SELECT * FROM $wpdb->posts WHERE post_type IN ('post', 'page', 'revision', 'attachment') AND post_excerpt LIKE %s",
+				'%' . $wpdb->esc_like( '==' ) . '%'
+			),
+			'meta' => $wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE meta_key IN ('_wp_attachment_image_alt', '_wp_attachment_metadata') AND meta_value LIKE %s",
+				'%' . $wpdb->esc_like( '==' ) . '%'
+			),
+		};
 
-		$query = new \WP_Query(
-			[
-				'post_type'      => 'post',
-				'paged'          => $batch,
-				'posts_per_page' => $posts_per_batch,
-			]
-		);
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.DirectQuery
+		$records       = $wpdb->get_results( $prepared_query );
+		$total_records = count( $records );
 
-		$posts       = $query->get_posts();
-		$total_posts = count( $posts );
+		foreach ( $records as $index => $record ) {
+			$type = match ( $target ) {
+				'content', 'excerpt' => 'Post',
+				'meta' => 'Post Meta'
+			};
 
-		foreach ( $posts as $index => $post ) {
-			\WP_CLI::line( sprintf( 'Post %d/%d (%d)', $index + 1, $total_posts, $post->ID ) );
+			$identifier = match ( $target ) {
+				'content', 'excerpt' => $record->ID,
+				'meta' => $record->meta_id
+			};
 
-			$new_content = $this->migrate_text_styling( $post->post_content );
+			$text = match ( $target ) {
+				'content' => $record->post_content,
+				'excerpt' => $record->post_excerpt,
+				'meta' => $record->meta_value
+			};
+			\WP_CLI::line( sprintf( '%s %d/%d (%d)', $type, $index + 1, $total_records, $identifier ) );
 
-			if ( $new_content !== $post->post_content ) {
-				wp_update_post(
-					[
-						'ID'           => $post->ID,
-						'post_content' => $new_content,
-					]
-				);
+			$new_content = $this->migrate_text_styling( $text );
 
-				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $index + 1, $post->ID ), Logger::SUCCESS );
+			if ( $new_content !== $text ) {
+
+				$update = false;
+
+				if ( 'meta' === $target ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$update = $wpdb->update(
+						$wpdb->postmeta,
+						[
+							// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+							'meta_value' => $new_content,
+						],
+						[
+							'meta_id' => $identifier,
+						]
+					);
+				} else {
+					$update_column = match ( $target ) {
+						'content' => 'post_content',
+						'excerpt' => 'post_excerpt',
+					};
+
+					$update = wp_update_post(
+						[
+							'ID'           => $identifier,
+							$update_column => $new_content,
+						]
+					);
+				}
+
+				if ( $update ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Updated %s %d with the ID %d', $type, $index + 1, $identifier ), Logger::SUCCESS );
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Failed to update %s %d with the ID %d', $type, $index + 1, $identifier ), Logger::ERROR );
+				}
 			}
 		}
 	}
