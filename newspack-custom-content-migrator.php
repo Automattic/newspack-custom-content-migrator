@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.5.2
+ * Version:     1.5.3
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -73,6 +73,7 @@ PluginSetup::register_migrators(
 		Command\General\MediumMigrator::class,
 		Command\General\BlockTransformerCommand::class,
 		Command\General\PostDateMigrator::class,
+		Command\General\SimplyGuestAuthorNameMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
@@ -86,5 +87,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\WindyCityMigrator::class,
 		Command\PublisherSpecific\CityViewMigrator::class,
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
+		Command\PublisherSpecific\LAFocusMigrator::class,
+		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 	)
 );

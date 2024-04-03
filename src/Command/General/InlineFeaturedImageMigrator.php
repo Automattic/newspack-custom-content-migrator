@@ -229,7 +229,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_no_host );
 				if ( ! $featured_image_used_in_post_content ) {
 					WP_CLI::line( sprintf( 'Featured image not used inline.', $post_id ) );
-					continue;
+				}
+
+				// Check if Featured Image is used anywhere in post_content blocks.
+				$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+				foreach ( $image_blocks as $image_block ) {
+					if ( $image_block['attrs']['id'] == $thumbnail_id ) {
+						$this->logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
+						$featured_image_used_in_post_content = true;
+
+						break;
+					}
 				}
 
 				// Hide featured image.
@@ -365,6 +375,30 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		foreach ( $posts_wo_featured_img as $k => $post ) {
 			WP_CLI::line( sprintf( '👉 (%d/%d) ID %d ...', $k + 1, count( $posts_wo_featured_img ), $post->ID ) );
 
+			// Check if the post content is generated using blocks and search for the first core/image block
+			// If such block is found, use it to set the Featured Image
+			$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post->post_content ) );
+			$has_set_featured_image_from_blocks = false;
+
+			if ( ! empty( $image_blocks ) ) {
+				WP_CLI::line( '✓ found Gutenberg image blocks.' );
+
+				foreach ( $image_blocks as $image_block ) {
+					if ( set_post_thumbnail( $post, $image_block['attrs']['id'] ) ) {
+						$has_set_featured_image_from_blocks = true;
+						break;
+					} else {
+						WP_CLI::line( sprintf( '❌ Could not set Featured Image from Block. ID %d', $image_block['attrs']['id'] ) );
+					}
+				}
+			}
+
+			// Check if Featured Image was set from Gutenberg Blocks. If so, continue with the next post
+			if ( $has_set_featured_image_from_blocks ) {
+				WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. Attachment ID %d', $image_block['attrs']['id'] ) );
+				continue;
+			}
+
 			// Find the first <img>.
 			$crawler->clear();
 			$crawler->add( $post->post_content );
@@ -382,6 +416,18 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			if ( ! $is_src_fully_qualified ) {
 				WP_CLI::line( sprintf( '× skipping, img src `%s` not fully qualified URL', $img_src ) );
 				continue;
+			}
+
+			// When using WP.com CDN, the URL can look like this:
+			// https://i0.wp.com/lafocus-newspack.newspackstaging.com/wp-content/uploads/2022/08/1_original_file_I0.jpg?resize=804%2C1024&ssl=1
+			//
+			// The ?resize=804%2C1024&ssl=1 part breaks the logic to download file and set proper extension and file data.
+			//
+			// The code below strips the CDN pattern to leave the original URL which can be both
+			// from the current site or an external file.
+			if ( preg_match( '~^https?:\/\/i\d+\.wp\.com\/~', $img_src ) ) {
+				$img_src = preg_replace( '~i\d+\.wp\.com\/~', '', $img_src );
+				$img_src = preg_replace( '~\\?.*~', '', $img_src );
 			}
 
 			// Import attachment if it doesn't exist.
@@ -507,5 +553,23 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Finished. See %s/ folder for logs.', $log_dir ) );
+	}
+
+	/**
+	 * Returns an array of all "core/image" blocks from the given
+	 * array of post content blocks.
+	 */
+	private function get_image_blocks_from_post_content_blocks( array $post_content_blocks ): array {
+		$image_blocks = [];
+
+		foreach ( $post_content_blocks as $block ) {
+			if ( $block['blockName'] === 'core/image' && ! empty( $block['attrs']['id'] ) ) {
+				$image_blocks[] = $block;
+			} else if ( ! empty( $block['innerBlocks'] ) ) {
+				$image_blocks = array_merge( $image_blocks, $this->get_image_blocks_from_post_content_blocks( $block['innerBlocks'] ) );
+			}
+		}
+
+		return $image_blocks;
 	}
 }
