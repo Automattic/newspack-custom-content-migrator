@@ -1036,15 +1036,4 @@ VIDEO;
 		];
 	}
 
-	/**
-	 * Convinience function to get a paragraph with a consistent class for use in inline bylines.
-	 *
-	 * @param string $byline_text to put in paragraph.
-	 *
-	 * @return array
-	 */
-	public function get_byline( string $byline_text ) {
-		return $this->get_paragraph( $byline_text, '', '', '', [ 'np-byline-inline' ] );
-	}
-
 }

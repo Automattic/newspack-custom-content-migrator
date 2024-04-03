@@ -2,17 +2,18 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \DateTimeImmutable;
+use DateTimeImmutable;
 use DateTimeZone;
+use Newspack_Content_Byline;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
-use \WP_CLI;
+use WP_CLI;
 use WP_CLI\ExitException;
-use \WP_Post;
+use WP_Post;
 
 class CarsonNowMigrator implements InterfaceCommand {
 
@@ -106,12 +107,14 @@ class CarsonNowMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator cn-manipulate-bylines',
-			[ $this, 'cmd_manipulate_bylines' ],
+			'newspack-content-migrator cn-add-inline-bylines',
+			[ $this, 'cmd_add_inline_bylines' ],
 			[
-				'shortdesc'     => 'Massage bylines.',
+				'shortdesc'     => 'Add inline bylines.',
 				'synopsis'      => [
 					$this->refresh_existing_arg,
+					$this->num_posts_arg,
+					$this->max_post_id_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
 			]
@@ -151,13 +154,20 @@ class CarsonNowMigrator implements InterfaceCommand {
 			return;
 		}
 
-		if ( ! is_plugin_active( 'newspack-listings/newspack-listings.php' ) ) {
-			WP_CLI::error( '"Newspack listings" plugin not found. Install and activate it before using the migration commands.' );
-		}
+		$required_plugins = [
+			'newspack-listings',
+			'fg-drupal-to-wp-premium',
+			'newspack-content-byline',
+		];
 
-		if ( ! is_plugin_active( 'fg-drupal-to-wp-premium/fg-drupal-to-wp-premium.php' ) ) {
-			WP_CLI::error( '"fg-drupal-to-wp-premium" plugin not found. Install and activate it before using the migration commands.' );
-		}
+		array_map(
+			function ( $plugin ) {
+				if ( ! is_plugin_active( "$plugin/$plugin.php" ) ) {
+					WP_CLI::error( sprintf( '"%s" plugin not found. Install and activate it before using the migration commands.', $plugin ) );
+				}
+			},
+			$required_plugins
+		);
 
 		if ( get_option( 'timezone_string', false ) !== $this->site_timezone->getName() ) {
 			WP_CLI::error( sprintf( "Site timezone should be '%s'. Make sure it's set correctly before running the migration commands", $this->site_timezone->getName() ) );
@@ -178,16 +188,15 @@ class CarsonNowMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function cmd_manipulate_bylines( array $pos_args, array $assoc_args ): void {
+	public function cmd_add_inline_bylines( array $pos_args, array $assoc_args ): void {
 		$command_meta_key     = __FUNCTION__;
 		$command_meta_version = 1;
 		$log_file             = "{$command_meta_key}_$command_meta_version.log";
 		$refresh              = $assoc_args['refresh-existing'] ?? false;
 
-
 		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ], $assoc_args ) as $post ) {
 			if ( ! $refresh && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::log( sprintf('Post ID %d %s is at MigrationMeta version %s, skipping', $post->ID, get_permalink( $post->ID ), $command_meta_version ) );
+				WP_CLI::log( sprintf( 'Post ID %d %s is at MigrationMeta version %s, skipping', $post->ID, get_permalink( $post->ID ), $command_meta_version ) );
 				continue;
 			}
 
@@ -202,23 +211,23 @@ class CarsonNowMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$byline_block_class = 'np-byline-inline';
-			$byline_block       = $this->gutenberg_block_generator->get_byline( $drupal_byline );
-			$post_blocks        = parse_blocks( $post->post_content );
-			if ( GutenbergBlockManipulator::find_blocks_with_class( $byline_block_class, $post_blocks ) ) {
-				$post_blocks = GutenbergBlockManipulator::replace_blocks_with_class( $byline_block_class, $post->post_content, $byline_block );
-			} else {
-				// Add the byline block to the beginning of the content.
-				array_unshift( $post_blocks, $byline_block );
+			$post_blocks = parse_blocks( $post->post_content );
+			if ( GutenbergBlockManipulator::find_blocks_with_class( Newspack_Content_Byline::BYLINE_BLOCK_CLASS_NAME, $post_blocks ) ) {
+				// Remove existing byline blocks if any.
+				$post_blocks = GutenbergBlockManipulator::remove_blocks_with_class( Newspack_Content_Byline::BYLINE_BLOCK_CLASS_NAME, $post->post_content );
 			}
+			// Add the byline block to the beginning of the content.
+			array_unshift( $post_blocks, Newspack_Content_Byline::get_post_meta_bound_byline_block() );
+
 			wp_update_post( [
 				'ID'           => $post->ID,
 				'post_content' => serialize_blocks( $post_blocks ),
 			] );
 			// Set the byline as metadata too.
-			update_post_meta( $post->ID, 'newspack_content_byline', $drupal_byline );
+			update_post_meta( $post->ID, Newspack_Content_Byline::BYLINE_META_KEY, $drupal_byline );
 
-			$this->logger->log( $log_file, sprintf( 'Added a byline in content for %s in %s', $drupal_byline, get_permalink( $post ) ) );
+			$this->logger->log( $log_file, sprintf( '%d Added a byline "%s" in %s', $post->ID, $drupal_byline, get_permalink( $post ) ) );
+			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
 		}
 	}
 
@@ -237,7 +246,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 
 		$byline = $wpdb->get_var( $sql );
 
-		return $byline ?? '';
+		return empty( $byline ) ? '' : trim( $byline );
 	}
 
 	public function cmd_import_images( array $pos_args, array $assoc_args ): void {
@@ -248,7 +257,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 
 		foreach ( $this->get_wp_posts_iterator( [ 'post', 'page', 'newspack_lst_event' ], $assoc_args ) as $post ) {
 			if ( ! $refresh && MigrationMeta::get( $post->ID, $command_meta_key, 'post' ) >= $command_meta_version ) {
-				WP_CLI::log( sprintf('Post ID %d %s is at MigrationMeta version %s, skipping', $post->ID, get_permalink( $post->ID ), $command_meta_version ) );
+				WP_CLI::log( sprintf( 'Post ID %d %s is at MigrationMeta version %s, skipping', $post->ID, get_permalink( $post->ID ), $command_meta_version ) );
 				continue;
 			}
 
