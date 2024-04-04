@@ -395,12 +395,12 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 
 		foreach ( $post_ids as $k => $post_id ) {
-			WP_CLI::line( sprintf( '👉 (%d/%d) ID %d ...', $k + 1, count( $post_ids ), $post_id ) );
+			WP_CLI::line( sprintf( '(%d/%d) post ID %d ...', $k + 1, count( $post_ids ), $post_id ) );
 			
 			// Skip posts which already have a featured image.
 			if ( false == $re_set_existing_featured_images ) {
 				if ( get_post_thumbnail_id( $post_id ) ) {
-					WP_CLI::line( '× post already has a featured image, skipping.' );
+					WP_CLI::line( '× skipping, post already has a featured image.' );
 					continue;
 				}   
 			}   
@@ -416,14 +416,14 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			$img_title = $img_data[0][1] ?? null;
 			$img_alt   = $img_data[0][2] ?? null;
 			if ( ! $img_src ) {
-				WP_CLI::line( '× no images found in Post.' );
+				WP_CLI::line( '× skipping, no images found in Post.' );
 				continue;
 			}
 
 			// Check if there's already an attachment with this image.
 			$is_src_fully_qualified = ( 0 == strpos( $img_src, 'http' ) );
 			if ( ! $is_src_fully_qualified ) {
-				WP_CLI::line( sprintf( '× skipping, img src `%s` not fully qualified URL', $img_src ) );
+				WP_CLI::line( sprintf( '× skipping, img src `%s` not fully qualified URL in post ID %s', $img_src, $post_id ) );
 				continue;
 			}
 
@@ -443,16 +443,16 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( '- importing img `%s`...', $img_src ) );
 			$att_id = $this->attachments->import_external_file( $img_src, $img_title, $img_alt, $description = null, $img_alt, $post_id );
 			if ( is_wp_error( $att_id ) ) {
-				WP_CLI::warning( sprintf( '❗ ERROR importing img `%s` : %s', $img_src, $att_id->get_error_message() ) );
+				WP_CLI::warning( sprintf( '❗ ERROR importing img `%s` to post ID %s : %s', $img_src, $post_id, $att_id->get_error_message() ) );
 				continue;
 			}
 
 			// Set attachment as featured image.
 			$result_featured_set = set_post_thumbnail( $post_id, $att_id );
 			if ( ! $result_featured_set ) {
-				WP_CLI::warning( sprintf( '❗ could not set att.ID %s as featured image', $att_id ) );
+				WP_CLI::warning( sprintf( '❗ ERROR could not set att.ID %s as featured image to post ID %s', $att_id, $post_id ) );
 			} else {
-				WP_CLI::line( sprintf( '👍 set att.ID %s as featured image', $att_id ) );
+				WP_CLI::line( sprintf( '👍 SUCCESS att.ID %s set as featured image to post ID %s', $att_id, $post_id ) );
 			}
 		}
 
