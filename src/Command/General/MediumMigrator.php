@@ -125,13 +125,14 @@ class MediumMigrator implements InterfaceCommand {
 		$articles_csv_file_path = $assoc_args['zip-archive'];
 		$refresh_content        = isset( $assoc_args['refresh-content'] ) ? true : false;
 
-		$this->logger->log( self::$log_file, 'Migrating Medium archive...', Logger::LINE );
+		$this->logger->log( self::$log_file, sprintf( 'Migrating Medium archive: %s', $articles_csv_file_path ), Logger::LINE );
 
 		$result                = $this->medium_logic->process_file( $articles_csv_file_path );
 		$existing_original_ids = $this->get_existing_original_ids();
 
 		if ( is_wp_error( $result ) ) {
 			$this->logger->log( self::$log_file, 'Error: ' . $result->get_error_message(), Logger::LINE );
+
 			return;
 		}
 
@@ -183,6 +184,7 @@ class MediumMigrator implements InterfaceCommand {
 
 			if ( is_wp_error( $author_id ) ) {
 				$this->logger->log( self::$log_file, ' -- Error creating author: ' . $author_id->get_error_message(), Logger::WARNING );
+
 				return false;
 			}
 
@@ -205,7 +207,7 @@ class MediumMigrator implements InterfaceCommand {
 	 * Import images from the Post content.
 	 *
 	 * @param string $post_content Post content.
-	 * @param int    $post_id      Post ID.
+	 * @param int    $post_id Post ID.
 	 *
 	 * @return string Post content with updated image URIs.
 	 */
@@ -223,12 +225,6 @@ class MediumMigrator implements InterfaceCommand {
 			$title = $img_datum[1];
 			$alt   = $img_datum[2];
 
-			// Check if this image `src` was used multiple times in the content, and has possibly already downloaded.
-			if ( false === strpos( $post_content_updated, $src ) && false === strpos( $post_content_updated, esc_attr( $src ) ) ) {
-				WP_CLI::line( sprintf( ' ✖ skipping, already downloaded %s', $src ) );
-				continue;
-			}
-
 			// Check if the local image file exists, which will decide whether the image will be imported form file or downloaded.
 			$is_src_absolute = ( 0 === strpos( strtolower( $src ), 'http' ) );
 
@@ -243,7 +239,7 @@ class MediumMigrator implements InterfaceCommand {
 			$alt                   = empty( $alt ) ? $filename_wo_extension : $alt;
 
 			// Download or import the image file.
-			WP_CLI::line( sprintf( '✓ downloading %s ...', $src ) );
+			WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
 			$attachment_id = $this->attachments->import_external_file( $src, $title, null, null, $alt, $post_id );
 
 			// Replace the URI in Post content with the new one.
@@ -268,6 +264,7 @@ class MediumMigrator implements InterfaceCommand {
 		// Get/add author.
 		if ( empty( $author ) ) {
 			$this->logger->log( self::$log_file, ' -- Error: Author not found: ' . $article['author'], Logger::WARNING );
+
 			return;
 		}
 
@@ -279,19 +276,25 @@ class MediumMigrator implements InterfaceCommand {
 
 		$existing_post_id = $refresh_content ? $this->get_post_id_by_meta( $article['original_id'] ) : null;
 
-		$post_id = $existing_post_id ?? wp_insert_post(
-			[
-				'post_title'     => $article['title'],
-				'post_name'      => $article['original_slug'] ?? '',
-				'post_content'   => $article['content'],
-				'post_status'    => $article['status'],
-				'post_type'      => $article['post_type'],
-				'post_date_gmt'  => $article['post_date_gmt'],
-				'comment_status' => $article['comment_status'],
-				'ping_status'    => $article['ping_status'],
-				'post_author'    => $author_id,
-			]
-		);
+		$data = 	[
+			'post_title'     => $article['title'],
+			'post_name'      => $article['original_slug'] ?? '',
+			'post_content'   => $article['content'],
+			'post_status'    => $article['status'],
+			'post_type'      => $article['post_type'],
+			'post_date_gmt'  => $article['post_date_gmt'],
+			'comment_status' => $article['comment_status'],
+			'ping_status'    => $article['ping_status'],
+			'post_author'    => $author_id,
+		];
+		if ( $existing_post_id ) {
+			$post_id = $existing_post_id;
+			$data['ID'] = $post_id;
+			wp_update_post( $data );
+		} else {
+			$post_id = wp_insert_post( $data );
+		}
+		$verb = $existing_post_id ? 'updated' : 'inserted';
 
 		// Import images from the Post content.
 		$post_content = $this->import_post_images( $article['content'], $post_id );
@@ -307,16 +310,18 @@ class MediumMigrator implements InterfaceCommand {
 
 		if ( is_wp_error( $post_id ) ) {
 			$this->logger->log( self::$log_file, 'Error: ' . $post_id->get_error_message(), Logger::LINE );
+
 			return;
 		}
 
-		$this->logger->log( self::$log_file, ' -- Article inserted with ID: ' . $post_id, Logger::LINE );
+		$this->logger->log( self::$log_file, ' -- Article ' . $verb . ' with ID: ' . $post_id, Logger::LINE );
 
 		// Set the featured image.
 		if ( ! empty( $article['featured_image'] ) ) {
-			$featured_image_id = $this->attachments->import_external_file( $article['featured_image']['url'], $article['title'], $article['featured_image']['caption'], null, null, $post_id );
+			$featured_image_id = $this->attachments->import_external_file( $article['featured_image']['url'], $article['title'], $article['featured_image']['caption'], null, null,
+				$post_id );
 			if ( is_wp_error( $featured_image_id ) ) {
-				$this->logger->log( 'featured-images-import-fail.log', ' -- Error importing featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
+				$this->logger->log( 'featured-images-import-fail.log', ' -- Error ' . $verb . ' featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
 			} else {
 				set_post_thumbnail( $post_id, $featured_image_id );
 			}
@@ -350,6 +355,7 @@ class MediumMigrator implements InterfaceCommand {
 	 * Get post ID by meta.
 	 *
 	 * @param string $original_id Article original ID.
+	 *
 	 * @return int|null
 	 */
 	private function get_post_id_by_meta( $original_id ) {

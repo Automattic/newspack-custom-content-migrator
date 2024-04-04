@@ -5,7 +5,9 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\BatchLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use simplehtmldom\HtmlDocument;
 use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 
@@ -78,9 +80,187 @@ class TheFriscMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-id',
+						'description' => 'Only this post id',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator the-frisk-transform-orphan-links-to-homepage-blocks',
+			[ $this, 'cmd_transform_links_to_homepage_blocks' ],
+			[
+				'shortdesc' => 'Transform links where link text and destination equals to homepage blocks.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator the-frisk-remove-related-blocks',
+			[ $this, 'cmd_remove_related_blocks' ],
+			[
+				'shortdesc' => 'Remove related blocks from the bottom of posts.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+				],
+			]
+		);
+	}
+
+	public function cmd_remove_related_blocks( array $pos_args, array $assoc_args ): void {
+		$logfile     = __FUNCTION__ . '.log';
+		$heading_tag = '<h4 class="wp-block-heading">';
+
+		global $wpdb;
+		$post_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM wp_posts WHERE post_content LIKE %s AND post_status = 'publish' AND post_type = 'post' ORDER BY ID LIMIT %d",
+				'%' . $wpdb->esc_like( $heading_tag ) . '%',
+				$assoc_args[ BatchLogic::$num_items['name'] ] ?? PHP_INT_MAX
+			)
+		);
+
+		$this->logger->log( $logfile, sprintf( 'Found %d posts with related posts blocks', count( $post_ids ) ), Logger::INFO );
+
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing post %d', $post_id ) );
+			$post        = get_post( $post_id );
+			$blocks      = parse_blocks( $post->post_content );
+			$block_count = count( $blocks );
+
+			foreach ( $blocks as $idx => $block ) {
+				if ( $block['blockName'] === 'core/heading' ) {
+					if ( str_starts_with( $block['innerHTML'], $heading_tag . 'RELATED COVERAGE ' ) || str_starts_with( $block['innerHTML'], $heading_tag . 'MORE ' ) ) {
+						// If we find one of those blocks, remove it and all the blocks after it.
+						array_splice( $blocks, $idx );
+						// And stop looking.
+						break;
+					}
+				}
+			}
+
+			$count_after = count( $blocks );
+			if ( $count_after !== $block_count ) {
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => serialize_blocks( $blocks ),
+					]
+				);
+			}
+			WP_CLI::log( sprintf( 'Removed %d blocks in %d', ( $block_count - $count_after ), $post_id ) );
+		}
+	}
+
+	public function cmd_transform_links_to_homepage_blocks( array $pos_args, array $assoc_args ): void {
+		$logfile = __FUNCTION__ . '.log';
+
+		$home_block_args = [
+			'showExcerpt'   => false,
+			'showDate'      => false,
+			'showAuthor'    => false,
+			'postsToShow'   => 1,
+			'mediaPosition' => 'left',
+			'typeScale'     => 3,
+			'imageScale'    => 1,
+			'specificMode'  => true,
+			'className'     => [ 'np-single-post-embed' ],
+		];
+
+		global $wpdb;
+		$post_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM wp_posts WHERE post_content LIKE '%>https://thefrisc.com%' AND post_status = 'publish' AND post_type = 'post' ORDER BY ID LIMIT %d",
+				$assoc_args[ BatchLogic::$num_items['name'] ] ?? PHP_INT_MAX
+			)
+		);
+
+		$this->logger->log( $logfile, sprintf( 'Found %d posts with links to thefrisc.com', count( $post_ids ) ), Logger::INFO );
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing post %d', $post_id ) );
+			$post          = get_post( $post_id );
+			$blocks        = parse_blocks( $post->post_content );
+			$new_block_arr = [];
+			foreach ( $blocks as $block ) {
+				if (
+					'core/paragraph' !== $block['blockName'] || ! str_contains( $block['innerHTML'], '>https://thefrisc.com' ) ) {
+					$new_block_arr[] = $block;
+					continue;
+				}
+
+				$doc = new HtmlDocument( $block['innerHTML'] );
+
+				$post_ids_linked_to = [];
+				foreach ( $doc->find( 'a' ) as $a ) {
+					if ( $a->getAttribute( 'href' ) !== $a->getAttribute( 'innertext' ) ) {
+						continue;
+					}
+					$slug = trim( wp_parse_url( $a->getAttribute( 'href' ), PHP_URL_PATH ), '/' );
+					if ( empty( $slug ) ) { // This is just a link to the homepage.
+						$this->logger->log( $logfile, sprintf( 'Skipping link to homepage for post %d', $post_id ), Logger::WARNING );
+						continue;
+					} elseif ( str_contains( $slug, '/' ) ) {
+						$this->logger->log( $logfile, sprintf( 'Skipping non-post link for post %d', $post_id ), Logger::WARNING );
+						continue;
+					}
+					$linked_post = get_page_by_path( $slug, OBJECT, 'post' );
+					if ( ! $linked_post instanceof \WP_Post ) {
+						$this->logger->log( $logfile, sprintf( 'Linked post %s not found for post %d', $slug, $post->ID ), Logger::WARNING );
+						continue;
+					}
+					$post_ids_linked_to[] = $linked_post->ID;
+					$a->remove();
+				}
+
+				$has_links = count( $post_ids_linked_to ) > 0;
+				if ( $has_links ) {
+					$replaced_content      = $doc->save();
+					$block['innerHTML']    = $replaced_content;
+					$block['innerContent'] = [ $replaced_content ];
+				}
+
+				$new_block_arr[] = $block;
+
+				if ( $has_links ) {
+					$home_block_args['postsToShow'] = count( $post_ids_linked_to );
+					$new_block_arr[]                = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts( $post_ids_linked_to, $home_block_args );
+				}
+			}
+
+			wp_update_post(
+				[
+					'ID'           => $post_id,
+					'post_content' => serialize_blocks( $new_block_arr ),
+				]
+			);
+		}
+	}
+
+	private function remove_donation_elements( Crawler $donation_elements ): Crawler {
+		$donation_elements->each(
+			function ( Crawler $node ) {
+				$link_parent_node = $node->getNode( 0 )->parentNode;
+
+				if ( 'a' === $link_parent_node->nodeName ) {
+					$figure_parent_node = $link_parent_node->parentNode;
+
+					if ( 'figure' === $figure_parent_node->nodeName ) {
+						$figure_parent_node->parentNode->removeChild( $figure_parent_node );
+					}
+				} else {
+					$link_parent_node->parentNode->removeChild( $link_parent_node );
+				}
+			}
+		);
+
+		return $donation_elements;
 	}
 
 	/**
@@ -105,14 +285,15 @@ class TheFriscMigrator implements InterfaceCommand {
 
 		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
 
-		$query = new \WP_Query(
-			[
-				// 'p'              => 440,
-				'post_type'      => 'post',
-				'paged'          => $batch,
-				'posts_per_page' => $posts_per_batch,
-			]
-		);
+		$query_args = [
+			'post_type'      => 'post',
+			'paged'          => $batch,
+			'posts_per_page' => $posts_per_batch,
+		];
+		if ( ! empty( $assoc_args['post-id'] ) ) {
+			$query_args['p'] = $assoc_args['post-id'];
+		}
+		$query = new \WP_Query( $query_args );
 
 		$posts       = $query->get_posts();
 		$total_posts = count( $posts );
@@ -122,106 +303,55 @@ class TheFriscMigrator implements InterfaceCommand {
 			$fixed_content = $post->post_content;
 
 			$crawler = new Crawler();
-			$crawler->addHtmlContent( $post->post_content );
+			$crawler->addHtmlContent( $fixed_content );
 
-			// Remove inline donation image.
-			$donation_image_filenames = [ '146TmTISmYAk6D6', 'IRdBXuOB3yQRI2ug', '14H8PXxZb3hKNgEjeiHZOjA', '1hysjT9T1QhiLyp7qBG9TsA', 'EemQ_88mTjP6p37So2fNA' ];
-			foreach ( $donation_image_filenames as $donation_image_filename ) {
-				$donation_image_elements = $crawler->filterXPath( '//img[contains(@src, "' . $donation_image_filename . '")]' );
+			// Remove inline donation images.
+			$donation_image_filenames = [
+				'146TmTISmYAk6D6',
+				'IRdBXuOB3yQRI2ug',
+				'14H8PXxZb3hKNgEjeiHZOjA',
+				'1hysjT9T1QhiLyp7qBG9TsA',
+				'EemQ_88mTjP6p37So2fNA',
+				'146TmTISmYAk6D6-e7Pf7FA',
+				'1HBvjvIAvmIlBbtkz2tejbw',
+			];
+			if ( preg_match( sprintf( '@%s@', implode( '|', $donation_image_filenames ) ), $fixed_content ) ) {
+
+				foreach ( $donation_image_filenames as $donation_image_filename ) {
+					$donation_image_elements = $crawler->filterXPath( '//img[contains(@src, "' . $donation_image_filename . '")]' );
+					if ( $donation_image_elements->count() > 0 ) {
+						$this->remove_donation_elements( $donation_image_elements );
+					}
+				}
+				$this->logger->log( $log_file, sprintf( 'Removed donation images for post %d', $post->ID ), Logger::SUCCESS );
+			}
+
+			// Remove even more inline donation images that we might have missed.
+			if ( str_contains( $fixed_content, 'list-manage.com/subscribe' ) || str_contains( $fixed_content, 'https://the-frisc.fundjournalism.org' ) ) {
+				$donation_image_elements = $crawler->filterXPath( '//a[(contains(@href, "list-manage.com") or contains(@href, "the-frisc.fundjournalism.org")) and .//img]' );
 
 				if ( $donation_image_elements->count() > 0 ) {
-					$this->logger->log( $log_file, sprintf( 'Found inline donation image in post %d', $post->ID ), Logger::INFO );
-
-					$donation_image_elements->each(
-						function ( Crawler $node ) use ( $post, $log_file ) {
-							$link_parent_node = $node->getNode( 0 )->parentNode;
-
-							if ( 'a' === $link_parent_node->nodeName ) {
-								$figure_parent_node = $link_parent_node->parentNode;
-
-								if ( 'figure' === $figure_parent_node->nodeName ) {
-									$figure_parent_node->parentNode->removeChild( $figure_parent_node );
-								} else {
-									$this->logger->log( $log_file, sprintf( 'No parent figure found for image in post %d', $post->ID ), Logger::INFO );
-								}
-							} else {
-								$link_parent_node->parentNode->removeChild( $link_parent_node );
-							}
-						}
-					);
-
-					$fixed_content = $crawler->html();
-
-					if ( $fixed_content !== $post->post_content ) {
-						wp_update_post(
-							[
-								'ID'           => $post->ID,
-								'post_content' => $fixed_content,
-							]
-						);
-
-						$this->logger->log( $log_file, sprintf( 'Fixed content for post %d', $post->ID ), Logger::SUCCESS );
-					}
+					$this->remove_donation_elements( $donation_image_elements );
 				}
+				$this->logger->log( $log_file, sprintf( 'Removed signup images for post %d', $post->ID ), Logger::SUCCESS );
 			}
 
-			// Remove Mailchimp signup text.
-			$mailchimp_text_regexes = [
-				'/(?<mailchimp_cta><blockquote>(<strong>)?(.*)list-manage.com\/subscribe(.*)<\/blockquote>)/i',
-			];
-
-			foreach ( $mailchimp_text_regexes as $mailchimp_text_regex ) {
-				preg_match_all( $mailchimp_text_regex, $fixed_content, $matches );
-
-				foreach ( $matches['mailchimp_cta'] as $mailchimp_signup_text ) {
-					if ( str_contains( $fixed_content, $mailchimp_signup_text ) ) {
-						$fixed_content = str_replace( $mailchimp_signup_text, '', $fixed_content );
-
-						wp_update_post(
-							[
-								'ID'           => $post->ID,
-								'post_content' => $fixed_content,
-							]
-						);
-
-						$this->logger->log( $log_file, sprintf( 'Removed Mailchimp signup text for post %d', $post->ID ), Logger::SUCCESS );
-					}
+			// Remove Mailchimp signup blockquotes
+			if ( str_contains( $fixed_content, 'list-manage.com/subscribe' ) ) {
+				foreach ( $crawler->filterXPath( '//blockquote[.//a[contains(@href, "list-manage.com/subscribe")]]' ) as $blockquote ) {
+					$blockquote->parentNode->removeChild( $blockquote );
 				}
+				$this->logger->log( $log_file, sprintf( 'Removed Mailchimp signup text for post %d', $post->ID ), Logger::SUCCESS );
 			}
 
-			// Migrate related coverage to Homepage Posts Block.
-			$related_coverage_regexes = [
-				'/(?<more_posts><h[34]{1}>(<strong>)?MORE(.*)(<\/strong>)?<\/h[34]{1}>\[embed\](.*)\[\/embed\])/i',
-				'/(?<more_posts><h[34]{1}>(<strong>)?RELATED COVERAGE(<\/strong>)?<\/h[34]{1}>\[embed\](.*)\[\/embed\])/i',
-			];
+			$fixed_content = $crawler->html();
 
-			foreach ( $related_coverage_regexes as $related_coverage_regex ) {
-				preg_match_all( $related_coverage_regex, $fixed_content, $matches );
-
-				foreach ( $matches['more_posts'] as $related_coverage_text ) {
-					if ( str_contains( $fixed_content, $related_coverage_text ) ) {
-						$homepage_posts_block_content = $this->migrate_related_coverage_text( $related_coverage_text, $log_file );
-
-						if ( empty( $homepage_posts_block_content ) ) {
-							$this->logger->log( $log_file, sprintf( 'No related posts found for the post %d', $post->ID ), Logger::WARNING );
-							continue;
-						}
-
-						$fixed_content = str_replace( $related_coverage_text, $homepage_posts_block_content, $fixed_content );
-
-						wp_update_post(
-							[
-								'ID'           => $post->ID,
-								'post_content' => $fixed_content,
-							]
-						);
-					}
-				}
-			}
+			// Remove the more blocks entirely.
+			$fixed_content = preg_replace( '@<h[34]{1}>(<strong>)?(RELATED|MORE|MAS HISTORIAS) .*(<\/strong>)?<\/h[34]{1}>(\[embed\]https://thefrisc.com(.*)\[\/embed\])+@i', '',
+				$fixed_content );
 
 			// Grab all the single url embeds and replace them with Homepage Posts Block with just one post.
-			if ( preg_match_all( '/\[embed\](http(.*?))\[\/embed\]/i', $fixed_content, $matches ) ) {
-				$content_with_embeds = $fixed_content;
+			if ( preg_match_all( '@\[embed\](https://thefrisc.com/(.*?))\[/embed\]@i', $fixed_content, $matches ) ) {
 				foreach ( $matches[0] as $idx => $embed ) {
 
 					$path = trim( wp_parse_url( $matches[1][ $idx ], PHP_URL_PATH ) ?? '' );
@@ -229,97 +359,51 @@ class TheFriscMigrator implements InterfaceCommand {
 						continue;
 					}
 
-
 					$related_post = get_page_by_path( $path, OBJECT, 'post' );
-					if ( empty( $related_post->ID ) ) {
-						continue;
+					// Replace with nothing if we don't find the post.
+					if ( ! $related_post instanceof \WP_Post ) {
+						$replacement = '';
+					} else {
+						$block       = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts(
+							[ $related_post->ID ],
+							[
+								'showExcerpt'   => false,
+								'showDate'      => false,
+								'showAuthor'    => false,
+								'postsToShow'   => 1,
+								'mediaPosition' => 'left',
+								'typeScale'     => 3,
+								'imageScale'    => 1,
+								'specificMode'  => true,
+								'className'     => [ 'is-style-default', 'np-single-post-embed' ],
+							]
+						);
+						$replacement = serialize_block( $block );
 					}
 
-					$block               = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts(
-						[ $related_post->ID ],
-						[
-							'showExcerpt'   => false,
-							'showDate'      => false,
-							'showAuthor'    => false,
-							'postsToShow'   => 1,
-							'mediaPosition' => 'left',
-							'typeScale'     => 3,
-							'imageScale'    => 1,
-							'specificMode'  => true,
-							'className'     => [ 'is-style-default', 'np-single-post-embed' ],
-						]
-					);
-					$content_with_embeds = str_replace( $embed, serialize_block( $block ), $content_with_embeds );
+					$fixed_content = str_replace( $embed, $replacement, $fixed_content );
 				}
-				if ( $content_with_embeds !== $fixed_content ) {
-					wp_update_post(
-						[
-							'ID'           => $post->ID,
-							'post_content' => $content_with_embeds,
-						]
-					);
-					$this->logger->log( $log_file, sprintf( 'Replaced single link embeds for post %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
-				}
+				$this->logger->log( $log_file, sprintf( 'Replaced single link embeds for post %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
 			}
 
-			$crawler->clear();
+			// The Crawler will add body tags. No thanks.
+			$fixed_content = trim( $fixed_content );
+			if ( str_starts_with( $fixed_content, '<body>' ) ) {
+				$fixed_content = substr( $fixed_content, 6 );
+			}
+			if ( str_ends_with( $fixed_content, '<body>' ) ) {
+				$fixed_content = substr( $fixed_content, 0, -7 );
+			}
+
+			if ( $fixed_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $fixed_content,
+					]
+				);
+			}
 		}
 	}
 
-	/**
-	 * Migrate related coverage to Homepage Posts Block.
-	 *
-	 * @param string $related_coverage_text Related coverage text.
-	 * @param string $log_file Log file.
-	 *
-	 * @return string Serialized blocks.
-	 */
-	private function migrate_related_coverage_text( $related_coverage_text, $log_file ) {
-		preg_match( '/<h[34]{1}>(<strong>)?(?<title>.*)(<\/strong>)?<\/h[34]{1}>/i', $related_coverage_text, $title_match );
-		$title = $title_match['title'];
-
-		preg_match_all( '/\[embed\](?<embed_url>.*?)\[\/embed\]/i', $related_coverage_text, $embed_url_match );
-
-		foreach ( $embed_url_match['embed_url'] as $embed_url ) {
-			$embed_url = trim( $embed_url );
-
-			$embed_url_parts = explode( '/', $embed_url );
-			$embed_url_parts = array_filter( $embed_url_parts );
-
-			$embed_url_post_sulg = end( $embed_url_parts );
-
-			$related_post = get_page_by_path( $embed_url_post_sulg, OBJECT, 'post' );
-
-			if ( ! $related_post ) {
-				$this->logger->log( $log_file, sprintf( 'Related post not found for embed URL %s', $embed_url ), Logger::WARNING );
-				continue;
-			}
-
-			$related_posts[] = $related_post->ID;
-		}
-
-		if ( empty( $related_posts ) ) {
-			$this->logger->log( $log_file, sprintf( 'No related posts found for embed URL %s', $embed_url ), Logger::WARNING );
-			return '';
-		}
-
-		$homepage_posts_block_title   = $this->gutenberg_block_generator->get_heading( empty( $title ) ? 'Related Coverage' : $title, 'h4' );
-		$homepage_posts_block_content = $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts(
-			$related_posts,
-			[
-				'showExcerpt'   => false,
-				'showDate'      => false,
-				'showAuthor'    => false,
-				'columns'       => 4,
-				'postsToShow'   => count( $related_posts ),
-				'mediaPosition' => 'left',
-				'typeScale'     => 3,
-				'imageScale'    => 1,
-				'specificMode'  => true,
-				'className'     => [ 'is-style-default', 'np-more-posts-embed' ],
-			]
-		);
-
-		return serialize_blocks( [ $homepage_posts_block_title, $homepage_posts_block_content ] );
-	}
 }
