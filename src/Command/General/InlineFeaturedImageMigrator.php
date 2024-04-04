@@ -397,9 +397,11 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		foreach ( $post_ids as $k => $post_id ) {
 			WP_CLI::line( sprintf( '(%d/%d) post ID %d ...', $k + 1, count( $post_ids ), $post_id ) );
 			
+			$current_thumbnail_id = get_post_thumbnail_id( $post_id );
+			
 			// Skip posts which already have a featured image.
 			if ( false == $re_set_existing_featured_images ) {
-				if ( get_post_thumbnail_id( $post_id ) ) {
+				if ( $current_thumbnail_id ) {
 					WP_CLI::line( '× skipping, post already has a featured image.' );
 					continue;
 				}   
@@ -448,12 +450,18 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			}
 
 			// Set attachment as featured image.
-			$result_featured_set = set_post_thumbnail( $post_id, $att_id );
-			if ( ! $result_featured_set ) {
-				WP_CLI::warning( sprintf( '❗ ERROR could not set att.ID %s as featured image to post ID %s', $att_id, $post_id ) );
+			if ( $current_thumbnail_id == $att_id ) {
+				WP_CLI::line( sprintf( '× skipping, att.ID %s is already correct on post ID %s', $att_id, $post_id ) );
+				continue;
 			} else {
-				WP_CLI::line( sprintf( '👍 SUCCESS att.ID %s set as featured image to post ID %s', $att_id, $post_id ) );
+				$result_featured_set = set_post_thumbnail( $post_id, $att_id );
+				if ( ! $result_featured_set ) {
+					WP_CLI::warning( sprintf( '❗ ERROR could not set att.ID %s as featured image to post ID %s', $att_id, $post_id ) );
+				} else {
+					WP_CLI::line( sprintf( '👍 SUCCESS att.ID %s set as featured image to post ID %s', $att_id, $post_id ) );
+				}
 			}
+
 		}
 
 		WP_CLI::line( 'All done! 🙌' );
