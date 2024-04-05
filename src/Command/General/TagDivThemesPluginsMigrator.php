@@ -151,9 +151,9 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				),
 			),
 			
-			// Default: "nopaging" because as each GA get's set, the tax_query will only get the remaing posts without need for paging.
-			'nopaging'    => true,
-			
+			// Default: keep results to first page because as each GA get's set the tax_query will only get the remaing posts without need for paging.
+			'paged'       => 1,
+
 			// Order by date desc for better logging in order.
 			'orderby'     => 'date',
 			'order'       => 'DESC',
@@ -166,8 +166,8 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 			// Remove the tax_query "not exists" exclusion so that rows where authors do exist will be re-processed.
 			unset( $args['tax_query'] );
 
-			// Need to turn on paging so all rows will be processed (with or without an existing author).
-			unset( $args['nopaging'] );
+			// Allow throttled posts loop set the paging so all rows will be processed (with or without an existing author).
+			unset( $args['paged'] );
 
 		}
 
