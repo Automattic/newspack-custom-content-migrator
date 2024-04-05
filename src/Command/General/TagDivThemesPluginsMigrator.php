@@ -127,40 +127,52 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
 		$this->logger->log( $this->log, 'Doing migration.' );
-		
-		// Must have required postmeta value.
-		$meta_query = array(
-			array(
-				'key'     => self::TD_POST_THEME_SETTINGS,
-				'value'   => '"' . self::TD_POST_THEME_SETTINGS_SOURCE . '"',
-				'compare' => 'LIKE',
-			),
-		);              
 
-		// Optional overwrite existing GAs on posts.
-		if ( isset( $assoc_args['overwrite-post-gas'] ) ) {
-			$tax_query = null;
-		} else {
-			// Default: only process posts where GA does not exist.
-			$tax_query = array(
+		$args = array(
+
+			'post_type'   => 'post',
+			'post_status' => array( 'publish' ),
+			'fields'      => 'ids',
+			
+			// Must have required postmeta value.
+			'meta_query'  => array(
+				array(
+					'key'     => self::TD_POST_THEME_SETTINGS,
+					'value'   => '"' . self::TD_POST_THEME_SETTINGS_SOURCE . '"',
+					'compare' => 'LIKE',
+				),
+			),
+			
+			// Default: only process posts where GA does not already exist.
+			'tax_query'   => array(
 				array(
 					'taxonomy' => 'author',
 					'operator' => 'NOT EXISTS', 
 				),
-			);  
+			),
+			
+			// Default: "nopaging" because as each GA get's set, the tax_query will only get the remaing posts without need for paging.
+			'nopaging'    => true,
+			
+			// Order by date desc for better logging in order.
+			'orderby'     => 'date',
+			'order'       => 'DESC',
+
+		);
+
+		// Optional: overwrite existing GAs on posts.
+		if ( isset( $assoc_args['overwrite-post-gas'] ) ) {
+
+			// Remove the tax_query "not exists" exclusion so that rows where authors do exist will be re-processed.
+			unset( $args['tax_query'] );
+
+			// Need to turn on paging so all rows will be processed (with or without an existing author).
+			unset( $args['nopaging'] );
+
 		}
 
-		$this->posts_logic->throttled_posts_loop(
-			array(
-				'post_type'   => 'post',
-				'post_status' => array( 'publish' ),
-				'fields'      => 'ids',
-				'meta_query'  => $meta_query,
-				'tax_query'   => $tax_query,
-				// Order by date desc for better logging in order.
-				'orderby'     => 'date',
-				'order'       => 'DESC',
-			),
+		$this->posts_logic->throttled_posts_loop( 
+			$args,
 			function ( $post_id ) {
 
 				$this->logger->log( $this->log, 'Post id: ' . $post_id );
@@ -206,7 +218,9 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 				// Assign to post.
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
-			}
+			},
+			1,
+			100
 		);
 
 		wp_cache_flush();
