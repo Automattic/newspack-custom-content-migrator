@@ -115,7 +115,9 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 		$overwrite_post_gas = ( isset( $assoc_args['overwrite-post-gas'] ) ) ? true : false;
 
-		if( $overwrite_post_gas ) $this->logger->log( $log, 'With --overwrite-post-gas.' );
+		if ( $overwrite_post_gas ) {
+			$this->logger->log( $log, 'With --overwrite-post-gas.' );
+		}
 
 		// Must have required postmeta value.
 		$meta_query = array(
@@ -184,14 +186,13 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				// Assign to post.
 
 				$existing_post_gas = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );
-				$this->logger->log( $log, 'Existing post GAs count:' . count( $existing_post_gas) );
+				$this->logger->log( $log, 'Existing post GAs count:' . count( $existing_post_gas ) );
 
 				// If no GAs exist on post, or "overwrite" is true, then set gas to post. 
-				if( 0 == count( $existing_post_gas) || $overwrite_post_gas ) {
+				if ( 0 == count( $existing_post_gas ) || $overwrite_post_gas ) {
 					$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
 					$this->logger->log( $log, 'Assigned GAs to post.' );
-				}
-				else {
+				} else {
 					$this->logger->log( $log, 'Post GAs unchanged.' );
 				}
 
