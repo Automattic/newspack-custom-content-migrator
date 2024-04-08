@@ -169,7 +169,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 					$status, // Status.
 					$issue_source_id, // Issue Source ID.
 					sprintf( 'https://arktimes.com/wp-admin/post.php?post=%d&action=edit', $issue_source_id ), // Issue Source Edit URL.
-					get_post_meta( $issue_source_id, 'release_date', true ), // Issue Release Date.
+					$issue_source_post->post_title, // Issue Title.
 					$post_id, // Issue Post ID.
 					get_permalink( $post_id ), // Issue New Post ID.
 				] 
