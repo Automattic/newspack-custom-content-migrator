@@ -85,6 +85,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
+		Command\PublisherSpecific\TheFriscMigrator::class,
 		Command\PublisherSpecific\CityViewMigrator::class,
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 		Command\PublisherSpecific\LAFocusMigrator::class,
