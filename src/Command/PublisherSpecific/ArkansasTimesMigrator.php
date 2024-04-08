@@ -223,7 +223,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				'Media Credit 5',
 				'Media Credit 5 URL',
 				'Media Credits Value',
-				'Media Credits URL Value'
+				'Media Credits URL Value',
 			] 
 		);
 
@@ -251,41 +251,41 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				$this->logger->log( $log, sprintf( 'Attachment has media credits #%d', $attachment_id ) );
 			}
 
-			$media_credits = [];
+			$media_credits      = [];
 			$media_credits_urls = [];
 
-			// Replace old meta keys with custom prefix
+			// Replace old meta keys with custom prefix.
 			$replacement_map = [
-				'media_credit' => 'acf_media_credit',
+				'media_credit'  => 'acf_media_credit',
 				'_media_credit' => '_acf_media_credit',
 			];
 
-			// Update replacements map
+			// Update replacements map.
 			for ( $i = 0; $i < $attachment_media_credits_count; $i++ ) {
-				$replacement_map['media_credit_' . $i . '_credit'] = 'acf_media_credit_' . $i . '_credit';
-				$replacement_map['_media_credit_' . $i . '_credit'] = '_acf_media_credit_' . $i . '_credit';
-				$replacement_map['media_credit_' . $i . '_credit_link'] = 'acf_media_credit_' . $i . '_credit_link';
-				$replacement_map['_media_credit_' . $i . '_credit_link'] = '_acf_media_credit_' . $i . '_credit_link';
+				$replacement_map[ 'media_credit_' . $i . '_credit' ]       = 'acf_media_credit_' . $i . '_credit';
+				$replacement_map[ '_media_credit_' . $i . '_credit' ]      = '_acf_media_credit_' . $i . '_credit';
+				$replacement_map[ 'media_credit_' . $i . '_credit_link' ]  = 'acf_media_credit_' . $i . '_credit_link';
+				$replacement_map[ '_media_credit_' . $i . '_credit_link' ] = '_acf_media_credit_' . $i . '_credit_link';
 
-				$media_credits[] = get_post_meta( $attachment_id, 'media_credit_' . $i . '_credit', true );
+				$media_credits[]      = get_post_meta( $attachment_id, 'media_credit_' . $i . '_credit', true );
 				$media_credits_urls[] = get_post_meta( $attachment_id, 'media_credit_' . $i . '_credit_link', true );
 			}
 
-			// Update metas
+			// Update metas.
 			foreach ( $replacement_map as $old_meta_key => $new_meta_key ) {
-				// Add meta with the updated key 
+				// Add meta with the updated key.
 				add_post_meta( $attachment_id, $new_meta_key, get_post_meta( $attachment_id, $old_meta_key, true ) );
 
-				// Delete the old meta
+				// Delete the old meta.
 				delete_post_meta( $attachment_id, $old_meta_key );
 			}
 
-			// Set flag for replaced metas
+			// Set flag for replaced metas.
 			add_post_meta( $attachment_id, 'newspack_metas_replaced', 'yes' );
 			
 			$this->logger->log( $log, sprintf( 'Store meta keys as legacy #%d', $attachment_id ) );
 
-			// Store the Media Credits
+			// Store the Media Credits.
 			if ( $new_media_credits = implode( ' | ', array_unique( array_filter( $media_credits ) ) ) ) {
 				add_post_meta( $attachment_id, '_media_credit', $new_media_credits );
 
@@ -298,7 +298,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				$this->logger->log( $log, sprintf( 'Store media credits urls #%d', $attachment_id ) );
 			}
 
-			// Set flag for updated Newspack Plugin Media Credits fields
+			// Set flag for updated Newspack Plugin Media Credits fields.
 			add_post_meta( $attachment_id, 'newspack_metas_updated_media_credits', 'yes' );
 			
 			// 2. Populate CSV.
