@@ -732,7 +732,7 @@ class Medium {
 
 			$media_resource_id = '';
 			foreach ( $paragraphs as $paragraph ) {
-				if ( $paragraph['name'] === $embed_id ) {
+				if ( isset( $paragraph['name'] ) && $paragraph['name'] === $embed_id ) {
 					// Locate `mediaResourceId` for given embed.
 					$media_resource_id = $paragraph['iframe']['mediaResourceId'];
 					break;
