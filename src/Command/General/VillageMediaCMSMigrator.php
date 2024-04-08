@@ -707,7 +707,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				continue;
 			}
 			$this->logger->log( $log, sprintf( 'Found post ID %d', $post_id ) );
-			
 
 			// Get the before author data.
 			$post             = get_post( $post_id );
@@ -766,13 +765,27 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						$wp_users[] = get_user_by( 'ID', $wp_user_id );
 					}
 					$this->cap->assign_authors_to_post( $wp_users, $post_id, false );
+					$authors_set = $this->cap->validate_authors_for_post( $post_id, $wp_users, $strict_order_or_authors = false );
+					if ( is_wp_error( $authors_set ) ) {
+						$wp_users_data = array_map( fn( $user ) => [ 'ID' => $user->ID, 'display_name' => $user->display_name ], $wp_users );
+						$this->logger->log( $log, sprintf( "ERROR Could not assign WP_Users to Post ID %d, authors '%s', err: %s", $post_id, implode( ';', $wp_users_data ), $authors_set->get_error_message() ), $this->logger::ERROR, false );
+						continue;
+					}
 					$this->logger->log( $log, sprintf( 'Assigned CAP WP_User IDs %s to post_ID %d', implode( ',', $wp_user_ids_after ), $post_id ) );
-				}           
-			} elseif ( ! $dev_only_update_bylines ) {
+				} else {
+					// If no multiple GAs are used, unassign possible previously set coauthors.
+					$this->cap->unassign_all_guest_authors_from_post( $post_id );
+				}
+			}
+			
+			if ( ! $dev_only_update_bylines ) {
 
 				/**
 				 * Use <author> as author.
 				 */
+
+				// Since <author> is just one person (go GAs), unassign possible previously set coauthors.
+				$this->cap->unassign_all_guest_authors_from_post( $post_id );
 
 				$after_author = $this->handle_author( $author_node );
 				if ( ! $after_author || is_wp_error( $after_author ) ) {
@@ -799,11 +812,11 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 
 			// Persist.
-			$post_data    = [
-				'ID'          => $post_id,
-				'post_author' => $author_after_id,
-			];
-			$post_updated = wp_update_post( $post_data );
+			$post_updated = $wpdb->update(
+				$wpdb->posts,
+				[ 'post_author' => $author_after_id ],
+				[ 'ID' => $post_id ]
+			);
 			if ( ! $post_updated || is_wp_error( $post_updated ) ) {
 				$this->logger->log( $log, sprintf( 'ERROR Could not update post %s, err.msg: %s', json_encode( $post_data ), is_wp_error( $post_updated ) ? $post_updated->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
 				continue;
