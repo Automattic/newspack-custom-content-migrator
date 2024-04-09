@@ -814,26 +814,39 @@ class PostsMigrator implements InterfaceCommand {
 
 		$this->logger->log( $log_file, 'Starting hide ALL featured images.' );
 
+		// Posts with a featured image.
 		$query_args = [
 			'post_type'   => 'post',
 			'post_status' => 'any',
 			'fields'      => 'ids',
+			'meta_query'  => [
+				[
+					'key'     => '_thumbnail_id',
+					'value'   => '',
+					'compare' => '!=',
+				],
+			],
 		];
+
+		$counter = 0;
 
 		$this->posts_logic->throttled_posts_loop(
 			$query_args, 
-			function ( $post_id ) use( $log_file ) {
+			function ( $post_id ) use( $log_file, &$counter ) {
 
-				// update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 
-				$this->logger->log(
-					$log_file,
-					sprintf( 'Featured image hidden for the post %d', $post_id )
-				);
+				$this->logger->log( $log_file, sprintf( 'Featured image hidden for the post %d', $post_id ) );
+
+				$counter++;
 			}
 		);
 
+		$this->logger->log( $log_file, 'Updated count: ' . $counter );
+		
 		wp_cache_flush();
+
+		$this->logger->log( $log_file, 'Done', $this->logger::SUCCESS );
 	}
 
 	/**
