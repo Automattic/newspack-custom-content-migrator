@@ -183,6 +183,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-dev-helper',
+			[ $this, 'cmd_dev_helper_scripts' ],
+			[
+				'shortdesc' => 'Temporary dev scripts.',
+			]
+		);
 	}
 
 	/**
@@ -483,7 +490,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 */
 		$post_coauthor_updates = [];
 		$post_author_updates   = [];
-		$post_ids                  = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		$post_ids              = $this->posts->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d)/(%d) Post ID %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
 			/**
@@ -509,10 +516,26 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					WP_CLI::success( sprintf( 'Updated coauthors for post ID %d', $post_id ) );
 					// phpcs:disable Convenient log one-liners.
 					$post_coauthor_updates[ $post_id ] = [
-						'old_ids'           => array_map( function ( $coauthor ) { return $coauthor->ID; }, $coauthors ),
-						'new_ids'           => array_map( function ( $new_coauthor ) { return $new_coauthor->ID; }, $new_coauthors ),
-						'old_display_names' => array_map( function ( $coauthor ) { return $coauthor->display_name; }, $coauthors ),
-						'new_display_names' => array_map( function ( $new_coauthor ) { return $new_coauthor->display_name; }, $new_coauthors ),
+						'old_ids'           => array_map(
+							function ( $coauthor ) {
+								return $coauthor->ID; },
+							$coauthors 
+						),
+						'new_ids'           => array_map(
+							function ( $new_coauthor ) {
+								return $new_coauthor->ID; },
+							$new_coauthors 
+						),
+						'old_display_names' => array_map(
+							function ( $coauthor ) {
+								return $coauthor->display_name; },
+							$coauthors 
+						),
+						'new_display_names' => array_map(
+							function ( $new_coauthor ) {
+								return $new_coauthor->display_name; },
+							$new_coauthors 
+						),
 					];
 					// phpcs:enable
 				}
@@ -545,16 +568,16 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 		/** 
 		 * For Publisher's QC convenience:
-		 * 	1. log post's coauthors update
-		 * 	2. only if coauthors is not used on post, log post_author update
+		 *  1. log post's coauthors update
+		 *  2. only if coauthors is not used on post, log post_author update
 		 * Since coauthors supersedes post_author, no need to log 2nd if 1st has been made.
 		 */
 		$post_author_updates_log = $post_coauthor_updates;
 		foreach ( $post_author_updates as $post_id => $post_update ) {
-			$old_user_id                 = $post_update['old_id'];
-			$new_user_id                 = $post_update['new_id'];
-			$old_display_name            = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $old_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
-			$new_display_name            = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $new_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+			$old_user_id      = $post_update['old_id'];
+			$new_user_id      = $post_update['new_id'];
+			$old_display_name = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $old_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+			$new_display_name = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $new_user_id ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 			if ( ! isset( $post_coauthor_updates[ $post_id ] ) ) {
 				$post_author_updates_log[] = [
 					'post_id'           => $post_id,
@@ -605,6 +628,310 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		WP_CLI::warning( sprintf( 'Ready for deletion -- users replaced in %s', $log_updated_posts ) );
 		
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Get data from CSV file.
+	 *
+	 * @param string $file_path Path to CSV file.
+	 * @return array
+	 */
+	public function get_csv_data( string $file_path ): array {
+		$data        = [];
+		$file_handle = fopen( $file_path, 'r' );
+		while ( ( $row = fgetcsv( $file_handle ) ) !== false ) {
+			$data[] = $row;
+		}
+		fclose( $file_handle );
+
+		return $data;
+	}
+
+	/**
+	 * Save array to CSV file.
+	 *
+	 * @param array  $data          Array to save.
+	 * @param string $csv_file_path Path to CSV file.
+	 * @return void
+	 * @throws \UnexpectedValueException When all array elements columns are not the same.
+	 */
+	public function save_array_to_csv_file( $data, $csv_file_path ) {
+		// Validate if all array elements columns are the same.
+		$columns = null;
+		foreach ( $data as $row ) {
+			if ( null === $columns ) {
+				$columns = array_keys( $row );
+			} elseif ( array_keys( $row ) !== $columns ) {
+					throw new \UnexpectedValueException( 'All array elements must have the same columns' );
+			}
+		}
+	
+		// Write CSV file.
+		$file = fopen( $csv_file_path, 'w' );
+		fputcsv( $file, $columns );
+		foreach ( $data as $row ) {
+			fputcsv( $file, $row );
+		}
+		fclose( $file );
+	}
+
+	/**
+	 * Helper dev scripts.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_dev_helper_scripts( $pos_args, $assoc_args ) {
+
+		/**
+		 * Helper script.
+		 * ----------------------
+		 * Set authors from CSV.
+		 * ----------------------
+		 */
+		$csv_file = $pos_args[0];
+		$ids_csv  = $pos_args[1];
+		if ( ! file_exists( $csv_file ) ) {
+			WP_CLI::error( 'CSV file does not exist.' );
+		}
+		$ids = explode( ',', $ids_csv );
+		if ( empty( $ids ) ) {
+			WP_CLI::error( 'No IDs provided.' );
+		}
+		
+		global $wpdb;
+		$rows = $this->get_csv_data( $csv_file );
+		
+		// Columns: original_article_id,post_id,link,author_before_id,author_before_displayname,byline,author_after_id,author_after_displayname.
+		foreach ( $rows as $key_row => $row ) {
+			$post_id                   = $row[1];
+			$author_after_displaynames = explode( "\n", $row[7] );
+
+			if ( ! in_array( $post_id, $ids ) ) {
+				continue;
+			}
+
+			// Get authors to set.
+			$authors = [];
+			foreach ( $author_after_displaynames as $author_after_displayname ) {
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $author_after_displayname ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				$author    = get_user_by( 'ID', $author_id );
+				if ( ! $author ) {
+					WP_CLI::warning( sprintf( 'ERROR WP_User not found: %s', $author_after_displayname ) );
+				} 
+				$authors[] = $author;
+			}
+
+			// First clear previous.
+			$this->cap->unassign_all_guest_authors_from_post( $post_id );
+
+			// Set as post_author.
+			if ( 1 === count( $authors ) ) {
+				$current_post_author_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+				$current_post_author    = get_user_by( 'ID', $current_post_author_id );
+				$new_post_author        = get_user_by( 'ID', $authors[0]->ID );
+				
+				if ( $current_post_author_id != $authors[0]->ID ) {
+					$updated = $wpdb->update(
+						$wpdb->posts,
+						[ 'post_author' => $authors[0]->ID ],
+						[ 'ID' => $post_id ]
+					);
+					WP_CLI::success( sprintf( "Updated post ID %d from post_author ID %d '%s' to post_author %d '%s'", $post_id, $current_post_author_id, $current_post_author->display_name, $authors[0]->ID, $new_post_author->display_name ) );
+				} else {
+					WP_CLI::warning( sprintf( "No change for post ID %d, from post_author ID %d '%s' to post_author ID %d '%s'", $post_id, $current_post_author_id, $current_post_author->display_name, $new_post_author->ID, $new_post_author->display_name ) );
+				}
+			} elseif ( count( $authors ) > 1 ) {
+				// Set as CAP GAs.
+
+				$new_author_ids               = array_map(
+					function ( $author ) {
+						return $author->ID;
+					},
+					$authors 
+				);
+				$new_author_display_names     = array_map(
+					function ( $author ) {
+						return $author->display_name;
+					},
+					$authors 
+				);
+				$current_authors              = $this->cap->get_all_authors_for_post( $post_id );
+				$current_author_ids           = array_map(
+					function ( $author ) {
+						return $author->ID;
+					},
+					$current_authors 
+				);
+				$current_author_display_names = array_map(
+					function ( $author ) {
+						return $author->display_name;
+					},
+					$current_authors 
+				);
+				
+				if ( array_diff( $current_author_ids, $new_author_ids ) || array_diff( $new_author_ids, $current_author_ids ) ) {
+					$this->cap->assign_authors_to_post( $authors, $post_id, false );
+					WP_CLI::success( sprintf( "Updated post ID %d, multiple, from current post_author IDs %s '%s' to post_author IDs %s %s", $post_id, implode( ',', $current_author_ids ), implode( ',', $current_author_display_names ), implode( ',', $new_author_ids ), implode( ',', $new_author_display_names ) ) );
+				} else {
+					WP_CLI::warning( sprintf( "No change for post ID %d, multiple, from current post_author IDs %s '%s' to post_author IDs %s %s", $post_id, implode( ',', $current_author_ids ), implode( ',', $current_author_display_names ), implode( ',', $new_author_ids ), implode( ',', $new_author_display_names ) ) );
+				}
+			} else {
+				WP_CLI::warning( sprintf( 'ERROR authors count %s for post ID %d', count( $authors ), $post_id ) );
+			}
+		}
+
+		return;
+
+
+		/**
+		 * Helper script.
+		 * ----------------------
+		 * Bylines to authors spreadsheet helper:
+		 * - fetch original sheet
+		 * - fetch sheet with consolidated author names
+		 * - compose new bylines sheet with consolidated author names
+		 * ----------------------
+		 */
+		$path                     = $pos_args[0];
+		$csv_path                 = $path . '/li-spreadsheet-1.csv';
+		$csv_authors_consolidated = $path . '/li-spreadsheet-authors.csv';
+		$csv_path_consolidated    = $path . '/li-spreadsheet-1--consolidated.csv';
+		// $csv_path = $path . '/rwp-spreadsheet-1.csv';
+		// $csv_authors_consolidated = $path . '/rwp-spreadsheet-authors.csv';
+		// $csv_path_consolidated = $path . '/rwp-spreadsheet-1--consolidated.csv';
+		
+		$rwp_data         = $this->get_csv_data( $csv_path );
+		$rwp_authors_data = $this->get_csv_data( $csv_authors_consolidated );
+		// Create csv data w/ consolidated users.
+		$rwp_data_consolidated = [];
+
+		// Create an array of consolidated user names, key old name, value new name.
+		$authors_names_consolidated = [];
+		// First map kept users: id => new name.
+		$authors_ids_names = [];
+		foreach ( $rwp_authors_data as $key_row => $row ) {
+			if ( 0 === $key_row ) {
+				continue; }
+			$id               = $row[0];
+			$display_name     = $row[1];
+			$replaced_by_id   = $row[2];
+			$new_display_name = $row[3];
+			if ( 'kept' == $replaced_by_id ) {
+				if ( ! empty( $new_display_name ) ) {
+					$authors_ids_names[ $id ] = $new_display_name;
+				} else {
+					$authors_ids_names[ $id ] = $display_name;
+				}
+			}
+		}
+		// Then loop through merged authors, and map them to new ones: id => new id.
+		foreach ( $rwp_authors_data as $key_row => $row ) {
+			if ( 0 === $key_row ) {
+				continue; }
+			$id               = $row[0];
+			$display_name     = $row[1];
+			$replaced_by_id   = $row[2];
+			$new_display_name = $row[3];
+			if ( 'kept' != $replaced_by_id ) {
+				$authors_ids_names[ $id ] = $authors_ids_names[ $replaced_by_id ];
+			}
+		}
+		// Then create an array of consolidated names: old name => new name.
+		foreach ( $rwp_authors_data as $key_row => $row ) {
+			if ( 0 === $key_row ) {
+				continue; }
+			$id           = $row[0];
+			$display_name = $row[1];
+			$authors_names_consolidated[ $display_name ] = $authors_ids_names[ $id ];
+		}
+
+		// Create csv data w/ consolidated users.
+		$rwp_data_consolidated = [];
+		foreach ( $rwp_data as $key_row => $row ) {
+			if ( 0 === $key_row ) {
+				continue; }
+			$row_consolidated = $row;
+			// Columns are: original_article_id,post_id,link,author_before_id,author_before_displayname,byline,author_after_id,author_after_displayname
+			// Could be multiple, so explode "\n".
+			$author_after_displaynames             = explode( "\n", $row[7] );
+			$author_after_displayname_consolidated = [];
+			foreach ( $author_after_displaynames as $author_after_displayname ) {
+				if ( isset( $authors_names_consolidated[ $author_after_displayname ] ) ) {
+					$author_after_displayname_consolidated[] = $authors_names_consolidated[ $author_after_displayname ];
+				} else {
+					$author_after_displayname_consolidated[] = $author_after_displayname;
+				}
+			}
+			$row_consolidated[7]     = implode( "\n", $author_after_displayname_consolidated );
+			$rwp_data_consolidated[] = $row_consolidated;
+		}
+		$this->save_array_to_csv_file( $rwp_data_consolidated, $csv_path_consolidated );
+		WP_CLI::success( 'Created ' . $csv_path_consolidated );
+		return;
+
+
+		/**
+		 * Helper script.
+		 * ----------------------
+		 * Validate which post authors need to be fixed.
+		 * Also QA new method for validating authors.
+		 * ----------------------
+		 */
+		// Columns: original_article_id,post_id,link,author_before_id,author_before_displayname,byline,author_after_id,author_after_displayname.
+		$path                  = $pos_args[0];
+		$csv_path_consolidated = $path . '/li-spreadsheet-1--consolidated.csv';
+		// $csv_path_consolidated = $path . '/rwp-spreadsheet-1--consolidated.csv';
+		
+		$rwp_data_consolidated = $this->get_csv_data( $csv_path_consolidated );
+
+		// Loop through posts and validate and fix authors.
+		$wrong_post_ids          = [];
+		$wrong_post_ids_validate = [];
+		foreach ( $rwp_data_consolidated as $key_row => $row ) {
+			if ( 0 == $key_row ) {
+				continue;
+			}
+
+			WP_CLI::line( sprintf( '%d/%d', $key_row + 1, count( $rwp_data_consolidated ) ) );
+			
+			// Get CSV data.
+			$post_id                   = is_numeric( $row[1] ) ? (int) $row[1] : null;
+			$authors_after_id          = explode( "\n", $row[6] );
+			$authors_after_displayname = explode( "\n", $row[7] );
+
+			// Get current authors.
+			$current_authors = $this->cap->get_all_authors_for_post( $post_id );
+			if ( ! $current_authors ) {
+				$wp_post         = get_post( $post_id );
+				$current_authors = [ get_userdata( $wp_post->post_author ) ];
+			}
+			
+			// Compare author names.
+			foreach ( $current_authors as $key_current_author => $current_author ) {
+				if ( $authors_after_displayname[ $key_current_author ] != $current_author->display_name ) {
+					$wrong_post_ids[] = $post_id;
+				}
+			}
+
+			// Use validate method to compare author names.
+			$res_validate = $this->cap->validate_authors_for_post( $post_id, $authors_after_displayname );
+			if ( is_wp_error( $res_validate ) ) {
+				$wrong_post_ids_validate[ $post_id ] = $res_validate->get_error_message();
+			}
+		}
+		
+		// Save wrong post IDs.
+		file_put_contents( 'wrong_post_ids.php', "<?php\nreturn " . var_export( $wrong_post_ids, true ) . ";\n" );
+		file_put_contents( 'wrong_post_ids_validate.php', "<?php\nreturn " . var_export( $wrong_post_ids_validate, true ) . ";\n" );
+
+		if ( array_keys( $wrong_post_ids_validate ) == $wrong_post_ids ) {
+			WP_CLI::success( '$wrong_post_ids_validate and $wrong_post_ids are the same' );
+		} else {
+			WP_CLI::warning( '$wrong_post_ids_validate and $wrong_post_ids are not the same' );
+		}
+		return;
 	}
 
 	/**
@@ -740,7 +1067,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$wp_user_id = $this->create_wp_user_from_display_name( $author_name, $log );
 					if ( ! $wp_user_id || is_wp_error( $wp_user_id ) ) {
 						$this->logger->log( $log, sprintf( "ERROR Could not assign WP_User to Post ID %d, author name '%s', entire byline '%s', err: %s", $post_id, $author_name, $byline, is_wp_error( $wp_user_id ) ? $wp_user_id->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
-						
 						continue;
 					}
 					
@@ -767,7 +1093,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$this->cap->assign_authors_to_post( $wp_users, $post_id, false );
 					$authors_set = $this->cap->validate_authors_for_post( $post_id, $wp_users, $strict_order_or_authors = false );
 					if ( is_wp_error( $authors_set ) ) {
-						$wp_users_data = array_map( fn( $user ) => [ 'ID' => $user->ID, 'display_name' => $user->display_name ], $wp_users );
+						$wp_users_data = array_map(
+							fn( $user ) => [
+								'ID'           => $user->ID,
+								'display_name' => $user->display_name,
+							],
+							$wp_users 
+						);
 						$this->logger->log( $log, sprintf( "ERROR Could not assign WP_Users to Post ID %d, authors '%s', err: %s", $post_id, implode( ';', $wp_users_data ), $authors_set->get_error_message() ), $this->logger::ERROR, false );
 						continue;
 					}
@@ -775,6 +1107,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				} else {
 					// If no multiple GAs are used, unassign possible previously set coauthors.
 					$this->cap->unassign_all_guest_authors_from_post( $post_id );
+					$this->logger->log( $log, sprintf( 'Unassigned all CAP users from post_ID %d', $post_id ) );
 				}
 			}
 			
@@ -786,6 +1119,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 				// Since <author> is just one person (go GAs), unassign possible previously set coauthors.
 				$this->cap->unassign_all_guest_authors_from_post( $post_id );
+				$this->logger->log( $log, sprintf( 'Unassigned all CAP users from post_ID %d', $post_id ) );
 
 				$after_author = $this->handle_author( $author_node );
 				if ( ! $after_author || is_wp_error( $after_author ) ) {
@@ -821,7 +1155,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				$this->logger->log( $log, sprintf( 'ERROR Could not update post %s, err.msg: %s', json_encode( $post_data ), is_wp_error( $post_updated ) ? $post_updated->get_error_message() : 'n/a' ), $this->logger::ERROR, false );
 				continue;
 			}
-			$this->logger->log( $log, sprintf( 'Updated post ID %d', $post_id ), $this->logger::SUCCESS );
+			$this->logger->log( $log, sprintf( 'Updated post ID %d post_author to %s', $post_id, $author_after_id ), $this->logger::SUCCESS );
 
 
 			/**
