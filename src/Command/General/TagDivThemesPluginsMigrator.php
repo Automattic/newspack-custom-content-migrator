@@ -128,6 +128,12 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 
+		$overwrite_post_gas = ( isset( $assoc_args['overwrite-post-gas'] ) ) ? true : false;
+
+		if ( $overwrite_post_gas ) {
+			$this->logger->log( $this->log, 'With --overwrite-post-gas.' );
+		}
+
 		$args = array(
 
 			'post_type'   => 'post',
@@ -143,37 +149,15 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				),
 			),
 			
-			// Default: only process posts where GA does not already exist.
-			'tax_query'   => array(
-				array(
-					'taxonomy' => 'author',
-					'operator' => 'NOT EXISTS', 
-				),
-			),
-			
-			// Default: keep results to first page because as each GA get's set the tax_query will only get the remaing posts without need for paging.
-			'paged'       => 1,
-
 			// Order by date desc for better logging in order.
 			'orderby'     => 'date',
 			'order'       => 'DESC',
 
 		);
 
-		// Optional: overwrite existing GAs on posts.
-		if ( isset( $assoc_args['overwrite-post-gas'] ) ) {
-
-			// Remove the tax_query "not exists" exclusion so that rows where authors do exist will be re-processed.
-			unset( $args['tax_query'] );
-
-			// Allow throttled posts loop set the paging so all rows will be processed (with or without an existing author).
-			unset( $args['paged'] );
-
-		}
-
 		$this->posts_logic->throttled_posts_loop( 
 			$args,
-			function ( $post_id ) {
+			function ( $post_id ) use( $overwrite_post_gas ) {
 
 				$this->logger->log( $this->log, 'Post id: ' . $post_id );
 
@@ -217,7 +201,17 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				$this->logger->log( $this->log, 'GA ID: ' . $ga->ID );
 
 				// Assign to post.
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
+
+				$existing_post_gas = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );
+				$this->logger->log( $this->log, 'Existing post GAs count:' . count( $existing_post_gas ) );
+
+				// If no GAs exist on post, or "overwrite" is true, then set gas to post. 
+				if ( 0 == count( $existing_post_gas ) || $overwrite_post_gas ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
+					$this->logger->log( $this->log, 'Assigned GAs to post.' );
+				} else {
+					$this->logger->log( $this->log, 'Post GAs unchanged.' );
+				}
 			},
 			1,
 			100
