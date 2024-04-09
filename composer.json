@@ -16,15 +16,8 @@
       "type": "git"
     },
     {
-      "type": "package",
-      "package": {
-        "name": "automattic/newspack-content-converter",
-        "version": "0.1.5",
-        "dist": {
-          "url": "https://github.com/Automattic/newspack-content-converter/releases/download/0.1.5/newspack-content-converter.zip",
-          "type": "zip"
-        }
-      }
+      "url": "https://github.com/Automattic/newspack-content-converter.git",
+      "type": "git"
     }
   ],
   "require": {
@@ -32,11 +25,11 @@
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
     "automattic/newspack-post-image-downloader": "dev-master",
+    "automattic/newspack-content-converter": "dev-master",
     "halaxa/json-machine": "^1.1",
     "mustache/mustache": "^2.14",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
-    "automattic/newspack-scraper-migrator": "dev-trunk",
-    "automattic/newspack-content-converter": "0.1.5"
+    "automattic/newspack-scraper-migrator": "dev-trunk"
   },
   "require-dev": {
     "automattic/vipwpcs": "^3.0",

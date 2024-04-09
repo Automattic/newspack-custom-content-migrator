@@ -4,16 +4,42 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "359bf94ffe3daa636abe41446e8f2ba8",
+    "content-hash": "ba927ee3149f687c3ba46c96e2a2a9ea",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
-            "version": "0.1.5",
-            "dist": {
-                "type": "zip",
-                "url": "https://github.com/Automattic/newspack-content-converter/releases/download/0.1.5/newspack-content-converter.zip"
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/Automattic/newspack-content-converter.git",
+                "reference": "8ec779ddedd3e9d9355af233f42bea5fae7da1b8"
             },
-            "type": "library"
+            "require": {
+                "brainmaestro/composer-git-hooks": "^2.6",
+                "composer/installers": "^1.6"
+            },
+            "require-dev": {
+                "automattic/vipwpcs": "^2.0.0",
+                "dealerdirect/phpcodesniffer-composer-installer": "*",
+                "phpcompatibility/phpcompatibility-wp": "*",
+                "phpunit/phpunit": "^9.5",
+                "wp-coding-standards/wpcs": "*",
+                "xwp/wp-dev-lib": "^1.5",
+                "yoast/phpunit-polyfills": "^1.0"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "classmap": [
+                    "lib/",
+                    "tests/"
+                ]
+            },
+            "license": [
+                "GPL-2.0-or-later"
+            ],
+            "description": "Plugin that enables mass conversion of pre-Gutenberg post content to the Gutenberg Blocks content.",
+            "time": "2023-10-25T09:16:00+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
@@ -4789,6 +4815,7 @@
     "minimum-stability": "stable",
     "stability-flags": {
         "automattic/newspack-post-image-downloader": 20,
+        "automattic/newspack-content-converter": 20,
         "simplehtmldom/simplehtmldom": 5,
         "automattic/newspack-scraper-migrator": 20
     },
@@ -4796,5 +4823,5 @@
     "prefer-lowest": false,
     "platform": [],
     "platform-dev": [],
-    "plugin-api-version": "2.3.0"
+    "plugin-api-version": "2.6.0"
 }
