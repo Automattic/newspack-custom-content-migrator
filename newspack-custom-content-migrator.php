@@ -12,13 +12,12 @@
 
 namespace NewspackCustomContentMigrator;
 
-require __DIR__ . '/vendor/autoload.php';
-
 // Don't do anything outside WP CLI.
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
 }
 
+require __DIR__ . '/vendor/autoload.php';
 require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
