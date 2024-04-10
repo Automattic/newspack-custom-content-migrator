@@ -113,6 +113,12 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 
 		$this->logger->log( $log, 'Starting migration.' );
 
+		$overwrite_post_gas = ( isset( $assoc_args['overwrite-post-gas'] ) ) ? true : false;
+
+		if ( $overwrite_post_gas ) {
+			$this->logger->log( $log, 'With --overwrite-post-gas.' );
+		}
+
 		// Must have required postmeta value.
 		$meta_query = array(
 			array(
@@ -122,31 +128,17 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 			),
 		);              
 
-		// Optional overwrite existing GAs on posts.
-		if ( isset( $assoc_args['overwrite-post-gas'] ) ) {
-			$tax_query = null;
-		} else {
-			// Default: only process posts where GA does not exist.
-			$tax_query = array(
-				array(
-					'taxonomy' => 'author',
-					'operator' => 'NOT EXISTS', 
-				),
-			);  
-		}
-
 		$this->posts_logic->throttled_posts_loop(
 			array(
 				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
 				'fields'      => 'ids',
 				'meta_query'  => $meta_query,
-				'tax_query'   => $tax_query,
 				// Order by date desc so newest GAs will have newest Bios.
 				'orderby'     => 'date',
 				'order'       => 'DESC',
 			),
-			function ( $post_id ) use ( $log ) {
+			function ( $post_id ) use ( $log, $overwrite_post_gas ) {
 
 				$this->logger->log( $log, 'Post id: ' . $post_id );
 
@@ -192,10 +184,21 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				$this->logger->log( $log, 'GA ID: ' . $ga->ID );
 
 				// Assign to post.
-				$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
+
+				$existing_post_gas = $this->coauthorsplus_logic->get_guest_authors_for_post( $post_id );
+				$this->logger->log( $log, 'Existing post GAs count:' . count( $existing_post_gas ) );
+
+				// If no GAs exist on post, or "overwrite" is true, then set gas to post. 
+				if ( 0 == count( $existing_post_gas ) || $overwrite_post_gas ) {
+					$this->coauthorsplus_logic->assign_guest_authors_to_post( array( $ga->ID ), $post_id );
+					$this->logger->log( $log, 'Assigned GAs to post.' );
+				} else {
+					$this->logger->log( $log, 'Post GAs unchanged.' );
+				}
 
 				// Skip Bio creation if already set.
 				if ( ! empty( trim( $ga->description ) ) ) {
+					$this->logger->log( $log, 'GA bio exists.' );
 					return;
 				}
 				
@@ -213,6 +216,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 				}
 
 				if ( empty( $new_desc ) ) {
+					$this->logger->log( $log, 'No new bio info.' );
 					return;
 				}
 				
