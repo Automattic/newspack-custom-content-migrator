@@ -112,6 +112,82 @@ class TheFriscMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator the-frisk-repair-homepage-blocks',
+			[ $this, 'cmd_repair_homepage_blocks' ],
+			[
+				'shortdesc' => 'Repair homepage blocks that were converted to HTML blocks.',
+			]
+		);
+	}
+
+	public function cmd_repair_homepage_blocks( array $pos_args, array $assoc_args ): void {
+		$logfile     = __FUNCTION__ . '.log';
+		$block_class = 'np-single-post-embed';
+
+		$block_args = [
+			'showExcerpt'   => false,
+			'showDate'      => false,
+			'showAuthor'    => false,
+			'postsToShow'   => 1,
+			'mediaPosition' => 'left',
+			'typeScale'     => 3,
+			'imageScale'    => 1,
+			'specificMode'  => true,
+			'className'     => [ 'is-style-default', 'np-single-post-embed' ],
+		];
+
+		global $wpdb;
+		$post_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM wp_posts WHERE post_content LIKE %s AND post_status = 'publish' AND post_type = 'post' ORDER BY ID LIMIT %d",
+				'%' . $wpdb->esc_like( $block_class ) . '%',
+				$assoc_args[ BatchLogic::$num_items['name'] ] ?? PHP_INT_MAX
+			)
+		);
+
+		$this->logger->log( $logfile, sprintf( 'Found %d posts with related posts blocks', count( $post_ids ) ), Logger::INFO );
+
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing post %d', $post_id ) );
+			$post        = get_post( $post_id );
+			$blocks      = array_map(
+				function ( $block ) use ( $block_class, $block_args ) {
+					if ( $block['blockName'] !== 'core/html' || ! str_contains( $block['innerHTML'], $block_class ) ) {
+						return $block;
+					}
+					$doc  = new HtmlDocument( $block['innerHTML'] );
+					$link = $doc->find( '.entry-title a' );
+					if ( empty( $link[0] ) ) {
+						return $block;
+					}
+					$url         = $link[0]->getAttribute( 'href' );
+					$slug        = trim( wp_parse_url( $url, PHP_URL_PATH ), '/' );
+					$linked_post = get_page_by_path( $slug, OBJECT, 'post' );
+
+					if ( empty( $linked_post->ID ) ) {
+						return $block;
+					}
+
+					return $this->gutenberg_block_generator->get_homepage_articles_for_specific_posts(
+						[ $linked_post->ID ],
+						$block_args
+					);
+				},
+				parse_blocks( $post->post_content )
+			);
+			$new_content = serialize_blocks( $blocks );
+			if ( $new_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => $new_content,
+					]
+				);
+				$this->logger->log( $logfile, sprintf( 'Updated homepage blocks post %d', $post_id ), Logger::SUCCESS );
+			}
+		}
+
 	}
 
 	public function cmd_remove_related_blocks( array $pos_args, array $assoc_args ): void {
