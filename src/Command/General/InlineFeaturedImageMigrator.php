@@ -129,6 +129,14 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hide-all-featured-images',
+			[ $this, 'cmd_hide_all_featured_images' ],
+			[
+				'shortdesc' => 'Hide ALL featured image.',
+			]
+		);
 	}
 
 	/**
@@ -229,7 +237,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_no_host );
 				if ( ! $featured_image_used_in_post_content ) {
 					WP_CLI::line( sprintf( 'Featured image not used inline.', $post_id ) );
-					continue;
+				}
+
+				// Check if Featured Image is used anywhere in post_content blocks.
+				$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+				foreach ( $image_blocks as $image_block ) {
+					if ( $image_block['attrs']['id'] == $thumbnail_id ) {
+						$this->logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
+						$featured_image_used_in_post_content = true;
+
+						break;
+					}
 				}
 
 				// Hide featured image.
@@ -543,6 +561,54 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Finished. See %s/ folder for logs.', $log_dir ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hide-all-featured-images`.
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args      Associative arguments.
+	 * @return void
+	 */
+	public function cmd_hide_all_featured_images( $positional_args, $assoc_args ) {
+		
+		$log_file = 'hide_all_featured_images.log';
+
+		$this->logger->log( $log_file, 'Starting hide ALL featured images.' );
+
+		// Posts with a featured image.
+		$query_args = [
+			'post_type'   => 'post',
+			'post_status' => 'any',
+			'fields'      => 'ids',
+			'meta_query'  => [
+				[
+					'key'     => '_thumbnail_id',
+					'value'   => '',
+					'compare' => '!=',
+				],
+			],
+		];
+
+		$counter = 0;
+
+		$this->post_logic->throttled_posts_loop(
+			$query_args, 
+			function ( $post_id ) use( $log_file, &$counter ) {
+
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+
+				$this->logger->log( $log_file, sprintf( 'Featured image hidden for the post %d', $post_id ) );
+
+				$counter++;
+			}
+		);
+
+		$this->logger->log( $log_file, 'Updated count: ' . $counter );
+		
+		wp_cache_flush();
+
+		$this->logger->log( $log_file, 'Done', $this->logger::SUCCESS );
 	}
 
 	/**

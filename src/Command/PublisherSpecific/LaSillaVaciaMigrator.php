@@ -768,6 +768,15 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator la-silla-vacia-cleanup-base64-images-in-content',
+			[ $this, 'cmd_cleanup_base64_images_in_content' ],
+			[
+				'shortdesc' => 'Content contains base64 data which is screwing up things with the site',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator la-silla-vacia-migrate-expertos-as-guest-authors',
 			array( $this, 'migrate_expertos_2' ),
 			array(
@@ -8975,6 +8984,61 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				'post-id-range' => $assoc_args['post-id-range'] ?? '',
 			),
 		);
+	}
+
+	/**
+	 * This function cleans up a handful of posts on LSV's site that have base64 encoded images
+	 * in post_content. It will download the image, upload it to the media library, and update the
+	 * post_content to use the new image URL.
+	 *
+	 * @return void
+	 */
+	public function cmd_cleanup_base64_images_in_content(): void {
+		global $wpdb;
+
+		$regexp_pattern = 'src=\"data:image\/([a-zA-Z]*);base64,([^\"]*)\"';
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$base64_posts       = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_content FROM $wpdb->posts WHERE post_content REGEXP %s",
+				$regexp_pattern
+			)
+		);
+		$count_base64_posts = count( $base64_posts );
+		ConsoleColor::yellow( 'There are' )->bright_yellow( $count_base64_posts )->yellow( 'posts with base64 data to address' )->output();
+
+		foreach ( $base64_posts as $key => $post ) {
+			ConsoleColor::white( 'Post ID:' )->bright_white( $post->ID )->output();
+
+			preg_match_all( "/$regexp_pattern/", $post->post_content, $matches );
+			$src_attribute  = $matches[0][0];
+			$file_extension = $matches[1][0];
+			$data           = base64_decode( $matches[2][0] ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+			$path           = "/tmp/convert_base64_images/$post->ID-$key.$file_extension";
+			file_put_contents( $path, $data ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+			$attachment_id  = $this->attachments->import_external_file( $path, null, null, null, null, $post->ID );
+			$attachment_url = wp_get_attachment_url( $attachment_id );
+			ConsoleColor::cyan( $attachment_url )->output();
+
+			$post_content = str_replace( $src_attribute, 'src="' . $attachment_url . '"', $post->post_content );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$update = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $post_content,
+				],
+				[
+					'ID' => $post->ID,
+				]
+			);
+
+			if ( $update ) {
+				ConsoleColor::green( 'Updated' )->output();
+			} else {
+				ConsoleColor::red( 'Failed' )->output();
+			}
+		}
 	}
 
 	public function create_missing_podcasts( array $args, array $assoc_args ) {
