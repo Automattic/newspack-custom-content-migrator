@@ -22,10 +22,10 @@ use WP_CLI;
  */
 class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
-	const TD_POST_THEME_SETTINGS = 'td_post_theme_settings';
+	const TD_POST_THEME_SETTINGS             = 'td_post_theme_settings';
+	const TD_POST_THEME_SETTINGS_SOURCE      = 'td_source';
+	const TD_POST_THEME_SETTINGS_PRIMARY_CAT = 'td_primary_cat';
 
-	const TD_POST_THEME_SETTINGS_SOURCE = 'td_source';
-	
 	/**
 	 * CoAuthorPlusLogic
 	 * 
@@ -103,6 +103,14 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator migrate-tagdiv-primary-categories',
+			[ $this, 'cmd_migrate_tagdiv_primary_categories' ],
+			[
+				'shortdesc' => 'Migrate TagDiv Primary Categories to Yoast.',
 			]
 		);
 	}
@@ -212,6 +220,127 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				} else {
 					$this->logger->log( $this->log, 'Post GAs unchanged.' );
 				}
+			},
+			1,
+			100
+		);
+
+		wp_cache_flush();
+
+		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
+	}
+
+	/**
+	 * Migrate TagDiv Primary Categories to Yoast.
+	 * 
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_migrate_tagdiv_primary_categories( $pos_args, $assoc_args ) {
+
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+
+		$this->logger->log( $this->log, 'Doing migration.' );
+
+		$args = array(
+
+			'post_type'   => 'post',
+			'post_status' => array( 'publish' ),
+			'fields'      => 'ids',
+			
+// What about setting if there is no theme settings????
+// Must have required postmeta value.
+// 'meta_query'  => array(
+// 	array(
+// 		'key'     => self::TD_POST_THEME_SETTINGS,
+// 		'value'   => '"' . self::TD_POST_THEME_SETTINGS_PRIMARY_CAT . '"',
+// 		'compare' => 'LIKE',
+// 	),
+// ),
+			
+			// Order by date for better logging in order.
+			'orderby'     => 'date',
+			'order'       => 'DESC',
+
+		);
+
+		$this->posts_logic->throttled_posts_loop( 
+			$args,
+			function ( $post_id ) {
+
+				$this->logger->log( $this->log, "\n" );
+				$this->logger->log( $this->log, '---- Post: ' . $post_id );
+				
+				// HTML.
+
+				$url = 'https://mountainexpressmagazine.com/?p=' . $post_id;
+				$this->logger->log( $this->log, $url );
+				
+				$file_get_contents = file_get_contents( $url );
+				preg_match( '#entry-crumb" href="https://mountainexpressmagazine.com/category/([^/]+)/">([^<]+)<#', $file_get_contents, $matches );
+				$body_cat_slug = $matches[1];
+				$body_cat_name = $matches[2];
+				$this->logger->log( $this->log, 'HTML: ' . $body_cat_name . ', ' . $body_cat_slug );
+
+				// JSON.
+				$url = 'https://mountainexpressmagazine.com/wp-json/wp/v2/posts/' . $post_id;
+				$this->logger->log( $this->log, $url );
+
+				$file_get_contents = file_get_contents( $url );
+				$json = json_decode( $file_get_contents );
+				$json_cat_name = $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0];
+				$this->logger->log( $this->log, 'Json: ' . $json_cat_name );
+				
+
+				if( $json_cat_name != $body_cat_name ) {
+					$this->logger->log( $this->log, 'cat mismatch', $this->logger::WARNING );
+				}
+
+				// Theme Cat.
+				$postmeta = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
+
+				$theme_cat = null;
+				if ( isset( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] ) 
+					&& is_numeric( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] ) 
+					&& ( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] > 0 )
+				) {
+					$theme_cat = get_category( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] );
+					if( is_object( $theme_cat ) && ! is_wp_error( $theme_cat ) ) {
+						$this->logger->log( $this->log, 'Theme cat: ' . $theme_cat->name . ' / ' . $theme_cat->slug );
+					} else {
+						$theme_cat = null;
+					}
+				}
+
+				// Yoast.
+				$postmeta = get_post_meta( $post_id, '_yoast_wpseo_primary_category', true );
+
+				$yoast_cat = null;
+				if ( is_numeric( $postmeta ) && $postmeta > 0 ) {
+					$yoast_cat = get_category( $postmeta );
+					if( is_object( $yoast_cat ) && ! is_wp_error( $yoast_cat ) ) {
+						$this->logger->log( $this->log, 'Yoast cat: ' . $yoast_cat->name . ' / ' . $yoast_cat->slug );
+					} else {
+						$yoast_cat = null;
+					}
+				}
+
+				// Post cats.
+				$post_cats = wp_get_post_categories( $post_id, [ 'fields' => 'all' ] );
+				foreach( $post_cats as $cat ) {
+					$this->logger->log( $this->log, 'Post cat: ' . $cat->name . ' / ' . $cat->slug );
+				}
+
+
+
+				sleep(3);
+				return;
+				exit();
+
+
+
+				// update post meta
+
 			},
 			1,
 			100
