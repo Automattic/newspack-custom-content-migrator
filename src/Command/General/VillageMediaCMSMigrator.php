@@ -190,6 +190,20 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				'shortdesc' => 'Temporary dev scripts.',
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-dev-helper-get-consolidated-users',
+			[ $this, 'cmd_dev_helper_get_consolidated_users' ],
+			[
+				'shortdesc' => 'Composes a usable data file for VillageMedia consolidated users based on a spreadsheet.',
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-dev-helper-get-consolidated-data-file',
+			[ $this, 'cmd_dev_helper_get_consolidated_data_file' ],
+			[
+				'shortdesc' => 'Composes a usable data file for VillageMedia, containing relevant XML and WP post data, which can be run directly on Atomic (XML memory overflows).',
+			]
+		);
 	}
 
 	/**
@@ -639,12 +653,62 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	public function get_csv_data( string $file_path ): array {
 		$data        = [];
 		$file_handle = fopen( $file_path, 'r' );
+		$key = 0;
 		while ( ( $row = fgetcsv( $file_handle ) ) !== false ) {
+			if ( 0 === $key ) {
+				$key++;
+				continue;
+			}
 			$data[] = $row;
 		}
 		fclose( $file_handle );
 
 		return $data;
+	}
+
+	public function save_array_to_csv( $data, $file_path ) {
+		
+		// Validate if every subarray has the same keys/headers
+		$columns = array_keys( reset( $data ) );
+		foreach ( $data as $row ) {
+			if ( array_keys( $row ) !== $columns ) {
+				return false;
+			}
+		}
+	
+		$handle = fopen( $file_path, 'w' );
+		if ( false === $handle ) {
+			return false;
+		}
+
+		// Write CSV data.
+		fputcsv( $handle, $columns );
+		foreach ( $data as $row ) {
+			fputcsv( $handle, $row );
+		}
+
+		fclose( $handle );
+
+		return true;
+	}
+
+	public function parse_csv_file( $file_path ) {
+	
+		$rows = [];
+		if ( ( $handle = fopen( $file_path, 'r' ) ) !== false ) {
+			$headers = fgetcsv( $handle );
+	
+			// Remaining rows.
+			while ( ( $data = fgetcsv( $handle ) ) !== false ) {
+				// Combine headers with data to create associative array.
+				$row = array_combine( $headers, $data );
+				$rows[] = $row;
+			}
+	
+			fclose( $handle );
+		}
+	
+		return $rows;
 	}
 
 	/**
@@ -673,6 +737,173 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			fputcsv( $file, $row );
 		}
 		fclose( $file );
+	}
+
+	public function cmd_dev_helper_get_consolidated_data_file( $pos_args, $assoc_args ) {
+		
+		global $wpdb;
+		$xml_file = $pos_args[0];
+
+		// You can provide some specific bylines and how they should be split in a "manual" fashion (for those completely irregular bylines).
+		$bylines_special_cases = [];
+		if ( isset( $assoc_args['bylines-special-cases-php-file'] ) && file_exists( $assoc_args['bylines-special-cases-php-file'] ) ) {
+			$bylines_special_cases = include $assoc_args['bylines-special-cases-php-file'];
+		}
+
+		// Loop through content nodes and compose data.
+		$data = [];
+		$dom = new DOMDocument();
+		$dom->loadXML( file_get_contents( $xml_file ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$contents = $dom->getElementsByTagName( 'content' );
+		$not_found_original_article_id = [];
+		foreach ( $contents as $key_content => $content ) {
+			WP_CLI::line( sprintf( '%d/%d', $key_content, $contents->length ) );
+
+			// Get original id, author node and byline attribute.
+			$original_article_id = null;
+			$byline              = null;
+			$author_node         = null;
+			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					continue;
+				}
+				switch ( $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					case 'id':
+						$original_article_id = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
+					case 'author':
+						$author_node = $node;
+						break;
+					case 'attributes':
+						$attributes = json_decode( $node->nodeValue, true ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						if ( isset( $attributes['byline'] ) && ! empty( $attributes['byline'] ) ) {
+							$byline = $attributes['byline'];
+						}
+						break;
+				}
+			}
+			if ( ! $original_article_id ) {
+				WP_CLI::error( sprintf( 'ERROR original_article_id not found in key_content %d', $key_content ) );
+				continue;
+			}
+			if ( ! $byline && ! $author_node ) {
+				WP_CLI::error( sprintf( 'ERROR neither byline nor author_node found in key_content %d', $key_content ) );
+				continue;
+			}
+
+			// Collect all data in $data_row array.
+			$data_row = [
+				'original_article_id' => $original_article_id,
+			];
+			$author_data = $this->get_author_data_from_author_node( $author_node );
+			$data_row['author'] = $author_data['first_name'] . ' '. $author_data['last_name'];
+			$byline_names_split = [];
+			if ( $byline ) {
+				if ( isset( $bylines_special_cases[ $byline ] ) ) {
+					$byline_names_split = $bylines_special_cases[ $byline ];
+				} else {
+					// Split the byline into multiple author names.
+					$byline_names_split = $this->split_byline( $byline );
+				}
+			}
+			$data_row['byline'] = $byline;
+			$data_row['byline_split_csv'] = implode( ',', $byline_names_split );
+
+			// Get post ID.
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
+			if ( ! $post_id ) {
+				WP_CLI::warning( sprintf( 'ERROR Post not found for original_article_id %s', $original_article_id ) );
+				$not_found_original_article_id[] = $original_article_id;
+				continue;
+			}
+			$data_row['post_id'] = $post_id;
+			$post_author = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			$data_row['post_author'] = $post_author;
+			$post_author_display_name = null;
+			if ( $post_author ) {
+				$post_author_display_name = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $post_author ) );
+			}
+			$data_row['post_author_display_name'] = $post_author_display_name;
+
+			$current_authors = $this->cap->get_all_authors_for_post( $post_id );
+			$current_ga_names_csv = implode( ',', array_map( fn( $author ) => $author->display_name, $current_authors ) );
+			$data_row['current_ga_names_csv'] = $current_ga_names_csv;
+			$current_ga_names_ids = implode( ',', array_map( fn( $author ) => $author->ID, $current_authors ) );
+			$data_row['current_ga_ids_csv'] = $current_ga_names_ids;
+
+			$data[] = $data_row;
+		}
+
+		$path = dirname( $xml_file ) . '/data.csv';
+		if ( false === $this->save_array_to_csv( $data, $path ) ) {
+			WP_CLI::warning( sprintf( 'ERROR saving %s', $path ) );
+		} {
+			WP_CLI::success( sprintf( 'Saved %s', $path ) );
+		}
+		
+		
+		if ( ! empty( $not_found_original_article_id ) ) {
+			WP_CLI::warning( sprintf( '$not_found_original_article_id %s', count( $not_found_original_article_id ) ) );
+			$path_not_found_original_article_id = dirname( $xml_file ) . '/not_found_original_article_id.csv';
+			if ( false === $this->save_array_to_csv( $not_found_original_article_id, $path_not_found_original_article_id ) ) {
+				WP_CLI::warning( sprintf( 'ERROR saving %s', $path_not_found_original_article_id ) );
+			} {
+				WP_CLI::success( sprintf( 'Saved %s', $path_not_found_original_article_id ) );
+			}
+		}
+		
+		WP_CLI::warning( sprintf( 'Total content nodes %s, data elements %s', $key_content + 1, count( $data ) ) );
+	}
+
+	public function cmd_dev_helper_get_consolidated_users( $pos_args, $assoc_args ) {
+		
+		// Consolidated users sheet, columns: ID,display_name,replaced_by_id,new_display_name
+		$csv_authors_consolidated_path = $pos_args[0];
+		$authors_data = $this->parse_csv_file( $csv_authors_consolidated_path );
+		
+		// Create an array of consolidated user names, key old name, value new name.
+		$authors_names_consolidated = [];
+
+		// First map kept users: id => new name.
+		$authors_ids_names = [];
+		foreach ( $authors_data as $key_row => $row ) {
+			$id               = $row['ID'];
+			$display_name     = $row['display_name'];
+			$replaced_by_id   = $row['replaced_by_id'];
+			$new_display_name = $row['new_display_name'];
+			if ( 'kept' == $replaced_by_id ) {
+				if ( ! empty( $new_display_name ) ) {
+					$authors_ids_names[ $id ] = $new_display_name;
+				} else {
+					$authors_ids_names[ $id ] = $display_name;
+				}
+			}
+		}
+
+		// Then loop through merged authors, and map them to new ones: id => new id.
+		foreach ( $authors_data as $key_row => $row ) {
+			$id               = $row['ID'];
+			$display_name     = $row['display_name'];
+			$replaced_by_id   = $row['replaced_by_id'];
+			$new_display_name = $row['new_display_name'];
+			if ( 'kept' != $replaced_by_id ) {
+				$authors_ids_names[ $id ] = $authors_ids_names[ $replaced_by_id ];
+			}
+		}
+
+		// Then create an array of consolidated names: old name => new name.
+		foreach ( $authors_data as $key_row => $row ) {
+			$id               = $row['ID'];
+			$display_name     = $row['display_name'];
+			if ( $display_name != $authors_ids_names[ $id ] ) {
+				$authors_names_consolidated[ $display_name ] = $authors_ids_names[ $id ];
+			}
+		}
+
+		// Save the resulting array to a .php file which can be simply included.
+		$path = dirname( $csv_authors_consolidated_path ) . '/authors_names_consolidated.php';
+		file_put_contents( $path ,  "<?php\nreturn " . var_export( $authors_names_consolidated, true ) . ";\n" );
+		WP_CLI::success( sprintf( 'Saved %s', $path ) );
 	}
 
 	/**
@@ -785,91 +1016,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		return;
 
 
-		/**
-		 * Helper script.
-		 * ----------------------
-		 * Bylines to authors spreadsheet helper:
-		 * - fetch original sheet
-		 * - fetch sheet with consolidated author names
-		 * - compose new bylines sheet with consolidated author names
-		 * ----------------------
-		 */
-		$path                     = $pos_args[0];
-		$csv_path                 = $path . '/li-spreadsheet-1.csv';
-		$csv_authors_consolidated = $path . '/li-spreadsheet-authors.csv';
-		$csv_path_consolidated    = $path . '/li-spreadsheet-1--consolidated.csv';
-		// $csv_path = $path . '/rwp-spreadsheet-1.csv';
-		// $csv_authors_consolidated = $path . '/rwp-spreadsheet-authors.csv';
-		// $csv_path_consolidated = $path . '/rwp-spreadsheet-1--consolidated.csv';
-		
-		$rwp_data         = $this->get_csv_data( $csv_path );
-		$rwp_authors_data = $this->get_csv_data( $csv_authors_consolidated );
-		// Create csv data w/ consolidated users.
-		$rwp_data_consolidated = [];
 
-		// Create an array of consolidated user names, key old name, value new name.
-		$authors_names_consolidated = [];
-		// First map kept users: id => new name.
-		$authors_ids_names = [];
-		foreach ( $rwp_authors_data as $key_row => $row ) {
-			if ( 0 === $key_row ) {
-				continue; }
-			$id               = $row[0];
-			$display_name     = $row[1];
-			$replaced_by_id   = $row[2];
-			$new_display_name = $row[3];
-			if ( 'kept' == $replaced_by_id ) {
-				if ( ! empty( $new_display_name ) ) {
-					$authors_ids_names[ $id ] = $new_display_name;
-				} else {
-					$authors_ids_names[ $id ] = $display_name;
-				}
-			}
-		}
-		// Then loop through merged authors, and map them to new ones: id => new id.
-		foreach ( $rwp_authors_data as $key_row => $row ) {
-			if ( 0 === $key_row ) {
-				continue; }
-			$id               = $row[0];
-			$display_name     = $row[1];
-			$replaced_by_id   = $row[2];
-			$new_display_name = $row[3];
-			if ( 'kept' != $replaced_by_id ) {
-				$authors_ids_names[ $id ] = $authors_ids_names[ $replaced_by_id ];
-			}
-		}
-		// Then create an array of consolidated names: old name => new name.
-		foreach ( $rwp_authors_data as $key_row => $row ) {
-			if ( 0 === $key_row ) {
-				continue; }
-			$id           = $row[0];
-			$display_name = $row[1];
-			$authors_names_consolidated[ $display_name ] = $authors_ids_names[ $id ];
-		}
-
-		// Create csv data w/ consolidated users.
-		$rwp_data_consolidated = [];
-		foreach ( $rwp_data as $key_row => $row ) {
-			if ( 0 === $key_row ) {
-				continue; }
-			$row_consolidated = $row;
-			// Columns are: original_article_id,post_id,link,author_before_id,author_before_displayname,byline,author_after_id,author_after_displayname
-			// Could be multiple, so explode "\n".
-			$author_after_displaynames             = explode( "\n", $row[7] );
-			$author_after_displayname_consolidated = [];
-			foreach ( $author_after_displaynames as $author_after_displayname ) {
-				if ( isset( $authors_names_consolidated[ $author_after_displayname ] ) ) {
-					$author_after_displayname_consolidated[] = $authors_names_consolidated[ $author_after_displayname ];
-				} else {
-					$author_after_displayname_consolidated[] = $author_after_displayname;
-				}
-			}
-			$row_consolidated[7]     = implode( "\n", $author_after_displayname_consolidated );
-			$rwp_data_consolidated[] = $row_consolidated;
-		}
-		$this->save_array_to_csv_file( $rwp_data_consolidated, $csv_path_consolidated );
-		WP_CLI::success( 'Created ' . $csv_path_consolidated );
-		return;
 
 
 		/**
