@@ -742,7 +742,11 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	public function cmd_dev_helper_get_consolidated_data_file( $pos_args, $assoc_args ) {
 		
 		global $wpdb;
+
+		// VillageMedia XML file.
 		$xml_file = $pos_args[0];
+		// Path to file output by cmd_dev_helper_get_consolidated_users.
+		$consolidated_user_display_names = include $pos_args[1];
 
 		// You can provide some specific bylines and how they should be split in a "manual" fashion (for those completely irregular bylines).
 		$bylines_special_cases = [];
@@ -824,10 +828,12 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				$post_author_display_name = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $post_author ) );
 			}
 			$data_row['post_author_display_name'] = $post_author_display_name;
-
+			$data_row['post_author_display_name_consolidated'] = isset( $consolidated_user_display_names[ $post_author_display_name ] ) ? $consolidated_user_display_names[ $post_author_display_name ] : $post_author_display_name;
 			$current_authors = $this->cap->get_all_authors_for_post( $post_id );
 			$current_ga_names_csv = implode( ',', array_map( fn( $author ) => $author->display_name, $current_authors ) );
 			$data_row['current_ga_names_csv'] = $current_ga_names_csv;
+			$current_ga_names_consolidated_csv = implode( ',', array_map( fn( $author ) => isset( $consolidated_user_display_names[ $author->display_name ] ) ? $consolidated_user_display_names[ $author->display_name ] : $author->display_name, $current_authors ) );
+			$data_row['current_ga_names_consolidated_csv'] = $current_ga_names_consolidated_csv;
 			$current_ga_names_ids = implode( ',', array_map( fn( $author ) => $author->ID, $current_authors ) );
 			$data_row['current_ga_ids_csv'] = $current_ga_names_ids;
 
