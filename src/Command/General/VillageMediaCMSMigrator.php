@@ -800,7 +800,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				'original_article_id' => $original_article_id,
 			];
 			$author_data = $this->get_author_data_from_author_node( $author_node );
-			$data_row['author'] = $author_data['first_name'] . ' '. $author_data['last_name'];
+			$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
+			$data_row['author'] = $author_display_name;
+			$data_row['author_consolidated'] = isset( $consolidated_user_display_names[ $author_display_name ] ) ? $consolidated_user_display_names[ $author_display_name ] : $author_display_name;
 			$byline_names_split = [];
 			if ( $byline ) {
 				if ( isset( $bylines_special_cases[ $byline ] ) ) {
