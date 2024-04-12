@@ -812,6 +812,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			}
 			$data_row['byline'] = $byline;
 			$data_row['byline_split_csv'] = implode( ',', $byline_names_split );
+			$data_row['byline_split_consolidated_csv'] = implode( ',', array_map( fn( $author ) => isset( $consolidated_user_display_names[ $author ] ) ? $consolidated_user_display_names[ $author ] : $author, $byline_names_split ) );
 
 			// Get post ID.
 			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
