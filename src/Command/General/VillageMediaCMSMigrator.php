@@ -935,6 +935,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		foreach ( $data as $key_row => $row ) {
 
 			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row + 1, count( $data ), $row['post_id'] ) );
+
+			// Get fresh post_author (Embarcadero folks have been updating in the mean time).
+			$row['post_author'] = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
 			
 			// There is no byline.
 			if ( $row['byline_count'] == 0 ) {
