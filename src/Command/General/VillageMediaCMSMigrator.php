@@ -202,6 +202,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			[ $this, 'cmd_dev_helper_get_consolidated_data_file' ],
 			[
 				'shortdesc' => 'Composes a usable data file for VillageMedia, containing relevant XML and WP post data, which can be run directly on Atomic (XML memory overflows).',
+				]
+			);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-dev-helper-fix-consolidated-users',
+			[ $this, 'cmd_dev_helper_fix_consolidated_users' ],
+			[
+				'shortdesc' => 'Fixes consolidated users based on spreadsheet created by cmd_dev_helper_get_consolidated_data_file.',
 			]
 		);
 	}
@@ -650,7 +657,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	 * @param string $file_path Path to CSV file.
 	 * @return array
 	 */
-	public function get_csv_data( string $file_path ): array {
+	public function get_csv_data_TEMP( string $file_path ): array {
 		$data        = [];
 		$file_handle = fopen( $file_path, 'r' );
 		$key = 0;
@@ -692,7 +699,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		return true;
 	}
 
-	public function parse_csv_file( $file_path ) {
+	public function read_csv_file( $file_path ) {
 	
 		$rows = [];
 		if ( ( $handle = fopen( $file_path, 'r' ) ) !== false ) {
@@ -709,34 +716,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		}
 	
 		return $rows;
-	}
-
-	/**
-	 * Save array to CSV file.
-	 *
-	 * @param array  $data          Array to save.
-	 * @param string $csv_file_path Path to CSV file.
-	 * @return void
-	 * @throws \UnexpectedValueException When all array elements columns are not the same.
-	 */
-	public function save_array_to_csv_file( $data, $csv_file_path ) {
-		// Validate if all array elements columns are the same.
-		$columns = null;
-		foreach ( $data as $row ) {
-			if ( null === $columns ) {
-				$columns = array_keys( $row );
-			} elseif ( array_keys( $row ) !== $columns ) {
-					throw new \UnexpectedValueException( 'All array elements must have the same columns' );
-			}
-		}
-	
-		// Write CSV file.
-		$file = fopen( $csv_file_path, 'w' );
-		fputcsv( $file, $columns );
-		foreach ( $data as $row ) {
-			fputcsv( $file, $row );
-		}
-		fclose( $file );
 	}
 
 	public function cmd_dev_helper_get_consolidated_data_file( $pos_args, $assoc_args ) {
@@ -869,7 +848,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		
 		// Consolidated users sheet, columns: ID,display_name,replaced_by_id,new_display_name
 		$csv_authors_consolidated_path = $pos_args[0];
-		$authors_data = $this->parse_csv_file( $csv_authors_consolidated_path );
+		$authors_data = $this->read_csv_file( $csv_authors_consolidated_path );
 		
 		// Create an array of consolidated user names, key old name, value new name.
 		$authors_names_consolidated = [];
@@ -916,6 +895,167 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Saved %s', $path ) );
 	}
 
+	public function cmd_dev_helper_fix_consolidated_users( $pos_args, $assoc_args ) {
+		global $wpdb;
+		$log = 'cmd_dev_helper_fix_consolidated_users.log';
+
+		/**
+		 * Columns
+		 * original_article_id
+		 * author
+		 * author_consolidated
+		 * byline
+		 * byline_count
+		 * byline_split_csv
+		 * byline_split_consolidated_csv
+		 * post_id
+		 * post_author
+		 * post_author_display_name
+		 * post_author_display_name_consolidated
+		 * current_ga_names_csv
+		 * current_ga_names_consolidated_csv
+		 * current_ga_ids_csv@param [type] $pos_args
+		 */
+		$data = $this->read_csv_file( $pos_args[0] );
+
+		/**
+		 * If there is no byline 
+		 * 		use <author> node for authorship, no CAP taxonomy
+		 * 		set wp_posts.post_author to <author> node user
+		 * 		unset all GAs from post
+		 * elseif there's only one author in byline
+		 * 		use single byline user for authorship, no CAP taxonomy
+		 * 		set wp_posts.post_author to single byline user
+		 * 		unset all GAs from post
+		 * elseif there are multiple authors in byline
+		 * 		use CAP taxonomy for multiple authors from byline
+		 * 		set wp_posts.post_author to first byline user
+		 *		set byline users as GAs using CAP
+		 */
+		foreach ( $data as $key_row => $row ) {
+
+			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row, count( $data ), $row['post_id'] ) );
+			
+			// There is no byline.
+			if ( $row['byline_count'] == 0 ) {
+				/**
+				 * <author> node is used for authorship via wp_posts.post_author, no CAP taxonomy.
+				 */ 
+				
+				// This is the consolidated author node name.
+				$row['author_consolidated'];
+
+				// Unset all GAs from post.
+				$this->cap->unassign_all_guest_authors_from_post( $row['post_id'] );
+
+				// Check if post_author needs to be updated.
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $row['author_consolidated'] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				if ( ! $author_id ) {
+					$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, not found author name '%s'", $row['post_id'], $row['author_consolidated'] ) );
+					continue;
+				}
+				if ( $row['post_author'] != $author_id ) {
+					// Set wp_posts.post_author to <author> node user.
+					$updated = $wpdb->update(
+						$wpdb->posts,
+						[ 'post_author' => $author_id ],
+						[ 'ID' => $row['post_id'] ]
+					);
+					if ( false === $updated || 0 === $updated ) {
+						$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $author_id, json_encode( $updated ) ) );
+						continue;
+					}
+					
+					$this->logger->log( $log, sprintf( "author_node_is_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $author_id, $row['post_author'], $author_id ) );
+				} else {
+					$this->logger->log( $log, sprintf( "author_node_is_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $author_id ) );
+				}
+
+			} elseif ( 1 == $row['byline_count'] ) {
+				/**
+				 * There's a single byline author. wp_posts.post_author is to be used and no CAP taxonomy.
+				 */
+
+				// Unassign all GAs from post.
+				$this->cap->unassign_all_guest_authors_from_post( $row['post_id'] );
+				
+				// Get byline name -- just one element.
+				$byline_names = explode( ',', $row['byline_split_consolidated_csv'] );
+				
+				// Check if post_author needs to be updated.
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				if ( ! $author_id ) {
+					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'", $byline_names[0] ) );
+					continue;
+				}
+				if ( $row['post_author'] != $author_id ) {
+					// Set wp_posts.post_author to single byline user.
+					$updated = $wpdb->update(
+						$wpdb->posts,
+						[ 'post_author' => $author_id ],
+						[ 'ID' => $row['post_id'] ]
+					);
+					if ( false === $updated || 0 === $updated ) {
+						$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $author_id, json_encode( $updated ) ) );
+						continue;
+					}
+
+					$this->logger->log( $log, sprintf( "byline_one_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
+				} else {
+					$this->logger->log( $log, sprintf( "byline_one_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $author_id ) );
+				}
+
+			} elseif ( $row['byline_count'] > 1 ) {
+				/**
+				 * There are multiple byline authors. wp_posts.post_author is to be set to first user, and CAP GAs are used for authorship.
+				 */
+
+				// Get byline names.
+				$byline_names = explode( ',', $row['byline_split_consolidated_csv'] );
+
+				// Check if post_author needs to be updated.
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				if ( ! $author_id ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $byline_names[0] ) );
+					continue;
+				}
+				if ( $row['post_author'] != $author_id ) {
+					// Set wp_posts.post_author to first byline user.
+					$updated = $wpdb->update(
+						$wpdb->posts,
+						[ 'post_author' => $author_id ],
+						[ 'ID' => $row['post_id'] ]
+					);
+					if ( false === $updated || 0 === $updated ) {
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $author_id, json_encode( $updated ) ) );
+						continue;
+					}
+					
+					$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $author_id, $row['post_author'], $author_id ) );
+				} else {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $author_id ) );
+				}
+				
+				// Set byline users as GAs using CAP.
+				$authors = [];
+				foreach ( $byline_names as $byline_name ) {
+					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+					if ( ! $author_id ) {
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $byline_name ) );
+						continue;
+					}
+					$author = get_user_by( 'ID', $author_id );
+					$authors[] = $author;
+				}
+				$this->cap->assign_authors_to_post( $authors, $row['post_id'], false );
+				
+				$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, assigned %s GAs", $row['post_id'], count( $authors ) ) );
+			}
+		}
+
+		wp_cache_flush();
+	}
+
 	/**
 	 * Helper dev scripts.
 	 *
@@ -942,7 +1082,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		}
 		
 		global $wpdb;
-		$rows = $this->get_csv_data( $csv_file );
+		$rows = $this->get_csv_data_TEMP( $csv_file );
 		
 		// Columns: original_article_id,post_id,link,author_before_id,author_before_displayname,byline,author_after_id,author_after_displayname.
 		foreach ( $rows as $key_row => $row ) {
@@ -1041,7 +1181,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$csv_path_consolidated = $path . '/li-spreadsheet-1--consolidated.csv';
 		// $csv_path_consolidated = $path . '/rwp-spreadsheet-1--consolidated.csv';
 		
-		$rwp_data_consolidated = $this->get_csv_data( $csv_path_consolidated );
+		$rwp_data_consolidated = $this->get_csv_data_TEMP( $csv_path_consolidated );
 
 		// Loop through posts and validate and fix authors.
 		$wrong_post_ids          = [];
