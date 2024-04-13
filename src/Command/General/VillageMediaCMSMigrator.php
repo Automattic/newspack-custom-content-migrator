@@ -934,12 +934,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 */
 		foreach ( $data as $key_row => $row ) {
 
-			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row, count( $data ), $row['post_id'] ) );
+			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row + 1, count( $data ), $row['post_id'] ) );
 			
 			// There is no byline.
 			if ( $row['byline_count'] == 0 ) {
 				/**
-				 * <author> node is used for authorship via wp_posts.post_author, no CAP taxonomy.
+				 * There is no byline, <author> node is used
+				 * - wp_posts.post_author is used for authorship and set to <author>
+				 * - CAP taxonomy is not used
 				 */ 
 				
 				// This is the consolidated author node name.
@@ -966,14 +968,16 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						continue;
 					}
 					
-					$this->logger->log( $log, sprintf( "author_node_is_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $author_id, $row['post_author'], $author_id ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
 				} else {
-					$this->logger->log( $log, sprintf( "author_node_is_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $author_id ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
 				}
 
 			} elseif ( 1 == $row['byline_count'] ) {
 				/**
-				 * There's a single byline author. wp_posts.post_author is to be used and no CAP taxonomy.
+				 * There's a single byline author:
+				 * - wp_posts.post_author is used for authorship and set to the byline author
+				 * - CAP taxonomy is not used
 				 */
 
 				// Unassign all GAs from post.
@@ -985,7 +989,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'", $byline_names[0] ) );
+					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'", $row['post_id'], $byline_names[0] ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -1002,12 +1006,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 					$this->logger->log( $log, sprintf( "byline_one_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
 				} else {
-					$this->logger->log( $log, sprintf( "byline_one_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $author_id ) );
+					$this->logger->log( $log, sprintf( "byline_one_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
 				}
 
 			} elseif ( $row['byline_count'] > 1 ) {
 				/**
-				 * There are multiple byline authors. wp_posts.post_author is to be set to first user, and CAP GAs are used for authorship.
+				 * There are multiple byline authors
+				 * - wp_posts.post_author is set to first byline author, but not used for authorship
+				 * - CAP GAs are used for authorship
 				 */
 
 				// Get byline names.
@@ -1016,7 +1022,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $byline_names[0] ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $row['post_id'], $byline_names[0] ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -1031,9 +1037,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						continue;
 					}
 					
-					$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $author_id, $row['post_author'], $author_id ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
 				} else {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $author_id ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
 				}
 				
 				// Set byline users as GAs using CAP.
@@ -1041,7 +1047,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				foreach ( $byline_names as $byline_name ) {
 					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					if ( ! $author_id ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $byline_name ) );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $row['post_id'], $byline_name ) );
 						continue;
 					}
 					$author = get_user_by( 'ID', $author_id );
@@ -1049,7 +1055,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				}
 				$this->cap->assign_authors_to_post( $authors, $row['post_id'], false );
 				
-				$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, assigned %s GAs", $row['post_id'], count( $authors ) ) );
+				$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, assigned total %s GAs", $row['post_id'], count( $authors ) ) );
 			}
 		}
 
