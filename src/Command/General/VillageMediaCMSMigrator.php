@@ -956,7 +956,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $row['author_consolidated'] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, not found author name '%s'", $row['post_id'], $row['author_consolidated'] ) );
+					// Get current author.
+					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
+					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $row['author_consolidated'], $author_id_current, $author_name_current ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -992,7 +995,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'", $row['post_id'], $byline_names[0] ) );
+					// Get current author.
+					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
+					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
+					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $byline_names[0], $author_id_current, $author_name_current ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -1025,7 +1031,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $row['post_id'], $byline_names[0] ) );
+					// Get current author.
+					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
+					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $byline_names[0], $author_id_current, $author_name_current ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
