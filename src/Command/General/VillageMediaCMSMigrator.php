@@ -1054,12 +1054,15 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$this->logger->log( $log, sprintf( "byline_multiple_authors SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
 				}
 				
-				// Set byline users as GAs using CAP.
+				// Set multiple byline users as GAs using CAP.
 				$authors = [];
 				foreach ( $byline_names as $byline_name ) {
 					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					if ( ! $author_id ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'", $row['post_id'], $byline_name ) );
+						// Get current authors.
+						$authors_current = $this->cap->get_all_authors_for_post( $row['post_id'] );
+						$authors_current_names = array_map( fn( $author ) => $author->display_name, $authors_current );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'. Curent GAs '%s'", $row['post_id'], $byline_name, implode( ',', $authors_current_names ) ) );
 						continue;
 					}
 					$author = get_user_by( 'ID', $author_id );
