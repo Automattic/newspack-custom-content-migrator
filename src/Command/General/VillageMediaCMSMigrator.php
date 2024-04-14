@@ -209,6 +209,22 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			[ $this, 'cmd_dev_helper_fix_consolidated_users' ],
 			[
 				'shortdesc' => 'Fixes consolidated users based on spreadsheet created by cmd_dev_helper_get_consolidated_data_file.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'data-csv',
+						'description' => 'Path to consolidated data CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'additional-consolidated-users',
+						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 	}
@@ -916,7 +932,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 * current_ga_names_consolidated_csv
 		 * current_ga_ids_csv@param [type] $pos_args
 		 */
-		$data = $this->read_csv_file( $pos_args[0] );
+		$data = $this->read_csv_file( $assoc_args['data-csv'] );
+		$additional_consolidated_names = $assoc_args['additional-consolidated-users'] ? include $assoc_args['additional-consolidated-users'] : null;
 
 		/**
 		 * If there is no byline 
@@ -947,19 +964,17 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				 * - CAP taxonomy is not used
 				 */ 
 				
-				// This is the consolidated author node name.
-				$row['author_consolidated'];
-
 				// Unset all GAs from post.
 				$this->cap->unassign_all_guest_authors_from_post( $row['post_id'] );
 
 				// Check if post_author needs to be updated.
-				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $row['author_consolidated'] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				$display_name = isset( $additional_consolidated_names[ $row['author_consolidated'] ] ) ? $additional_consolidated_names[ $row['author_consolidated'] ] : $row['author_consolidated'];
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
 					// Get current author.
 					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
 					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
-					$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $row['author_consolidated'], $author_id_current, $author_name_current ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $display_name, $author_id_current, $author_name_current ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -989,16 +1004,17 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Unassign all GAs from post.
 				$this->cap->unassign_all_guest_authors_from_post( $row['post_id'] );
 				
-				// Get byline name -- just one element.
+				// Get byline name -- just first element.
 				$byline_names = explode( ',', $row['byline_split_consolidated_csv'] );
+				$display_name = isset( $additional_consolidated_names[ $byline_names[0] ] ) ? $additional_consolidated_names[ $byline_names[0] ] : $byline_names[0];
 				
 				// Check if post_author needs to be updated.
-				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
 					// Get current author.
 					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
 					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
-					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $byline_names[0], $author_id_current, $author_name_current ) );
+					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $display_name, $author_id_current, $author_name_current ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -1027,14 +1043,15 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 				// Get byline names.
 				$byline_names = explode( ',', $row['byline_split_consolidated_csv'] );
+				$display_name_first = isset( $additional_consolidated_names[ $byline_names[0] ] ) ? $additional_consolidated_names[ $byline_names[0] ] : $byline_names[0];
 
 				// Check if post_author needs to be updated.
-				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_names[0] ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name_first ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
 					// Get current author.
 					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
 					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
-					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $byline_names[0], $author_id_current, $author_name_current ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $display_name_first, $author_id_current, $author_name_current ) );
 					continue;
 				}
 				if ( $row['post_author'] != $author_id ) {
@@ -1057,6 +1074,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Set multiple byline users as GAs using CAP.
 				$authors = [];
 				foreach ( $byline_names as $byline_name ) {
+					$byline_name = isset( $additional_consolidated_names[ $byline_name ] ) ? $additional_consolidated_names[ $byline_name ] : $byline_name;
 					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					if ( ! $author_id ) {
 						// Get current authors.
