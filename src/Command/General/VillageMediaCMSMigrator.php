@@ -784,7 +784,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$bylines_special_cases = include $assoc_args['bylines-special-cases-php-file'];
 		}
 
-$dev_byline_node_data = [];
 
 		// Loop through content nodes and compose data.
 		$data = [];
@@ -793,7 +792,7 @@ $dev_byline_node_data = [];
 		$contents = $dom->getElementsByTagName( 'content' );
 		$not_found_original_article_id = [];
 		foreach ( $contents as $key_content => $content ) {
-			WP_CLI::line( sprintf( '%d/%d', $key_content, $contents->length ) );
+			WP_CLI::line( sprintf( '%d/%d', $key_content + 1, $contents->length ) );
 
 			// Get original id, author node and byline attribute.
 			$original_article_id = null;
@@ -831,7 +830,7 @@ $dev_byline_node_data = [];
 				continue;
 			}
 
-			// Collect all data in $data_row array.
+			// Collect all XML sourced data in $data_row array.
 			$data_row = [
 				'original_article_id' => $original_article_id,
 			];
@@ -839,25 +838,40 @@ $dev_byline_node_data = [];
 			$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
 			$data_row['author'] = $author_display_name;
 			$data_row['author_consolidated'] = isset( $consolidated_user_display_names[ $author_display_name ] ) ? $consolidated_user_display_names[ $author_display_name ] : $author_display_name;
+			$data_row['author_consolidated'] = isset( $consolidated_user_display_names[ trim( $author_display_name ) ] ) ? $consolidated_user_display_names[ trim( $author_display_name ) ] : $author_display_name;
 			$byline_names_split = [];
 			// Is there a byline attribute?
 			if ( $byline_attribute ) {
 				if ( isset( $bylines_special_cases[ $byline_attribute ] ) ) {
 					$byline_names_split = $bylines_special_cases[ $byline_attribute ];
+				} elseif ( isset( $bylines_special_cases[ trim( $byline_attribute ) ] ) ) {
+					$byline_names_split = $bylines_special_cases[ trim( $byline_attribute ) ];
 				} else {
 					// Split the byline into multiple author names.
 					$byline_names_split = $this->split_byline( $byline_attribute );
 				}
 			} elseif ( $byline_node ) {
+				// Is there a byline node?
 				$author_data = $this->get_author_data_from_author_node( $byline_node );
 				$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
+				$author_display_name = isset( $consolidated_user_display_names[ $author_display_name ] ) ? $consolidated_user_display_names[ $author_display_name ] : $author_display_name;
+				$author_display_name = isset( $consolidated_user_display_names[ trim( $author_display_name ) ] ) ? $consolidated_user_display_names[ trim( $author_display_name ) ] : $author_display_name;
 				$byline_names_split = [ $author_display_name ];
-$dev_byline_node_data[] = $author_data;
 			}
 			$data_row['byline'] = $byline;
 			$data_row['byline_count'] = count( $byline_names_split );
 			$data_row['byline_split_csv'] = implode( ',', $byline_names_split );
-			$data_row['byline_split_consolidated_csv'] = implode( ',', array_map( fn( $author ) => isset( $consolidated_user_display_names[ $author ] ) ? $consolidated_user_display_names[ $author ] : $author, $byline_names_split ) );
+			$data_row['byline_split_consolidated_csv'] = implode(
+				',',
+				array_map(
+					function( $display_name ) use ( $consolidated_user_display_names ) {
+						$display_name = isset( $consolidated_user_display_names[ $display_name ] ) ? $consolidated_user_display_names[ $display_name ] : $display_name;
+						$display_name = isset( $consolidated_user_display_names[ trim( $display_name ) ] ) ? $consolidated_user_display_names[ trim( $display_name ) ] : $display_name;
+						return $display_name;
+					},
+					$byline_names_split
+				)
+			);
 
 			// Get post ID.
 			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
@@ -875,10 +889,21 @@ $dev_byline_node_data[] = $author_data;
 			}
 			$data_row['post_author_display_name'] = $post_author_display_name;
 			$data_row['post_author_display_name_consolidated'] = isset( $consolidated_user_display_names[ $post_author_display_name ] ) ? $consolidated_user_display_names[ $post_author_display_name ] : $post_author_display_name;
+			$data_row['post_author_display_name_consolidated'] = ( ! empty( $post_author_display_name ) && $post_author_display_name ) && isset( $consolidated_user_display_names[ trim( $post_author_display_name ) ] ) ? $consolidated_user_display_names[ trim( $post_author_display_name ) ] : $post_author_display_name;
 			$current_authors = $this->cap->get_all_authors_for_post( $post_id );
 			$current_ga_names_csv = implode( ',', array_map( fn( $author ) => $author->display_name, $current_authors ) );
 			$data_row['current_ga_names_csv'] = $current_ga_names_csv;
-			$current_ga_names_consolidated_csv = implode( ',', array_map( fn( $author ) => isset( $consolidated_user_display_names[ $author->display_name ] ) ? $consolidated_user_display_names[ $author->display_name ] : $author->display_name, $current_authors ) );
+			$current_ga_names_consolidated_csv = implode(
+				',',
+				array_map(
+					function ( $current_author ) use ( $consolidated_user_display_names ) {
+						$display_name_consolidated = isset( $consolidated_user_display_names[ $current_author->display_name ] ) ? $consolidated_user_display_names[ $current_author->display_name ] : $current_author->display_name;
+						$display_name_consolidated = isset( $consolidated_user_display_names[ trim( $current_author->display_name ) ] ) ? $consolidated_user_display_names[ trim( $current_author->display_name ) ] : $current_author->display_name;
+						return $display_name_consolidated;
+					},
+					$current_authors
+				)
+			);
 			$data_row['current_ga_names_consolidated_csv'] = $current_ga_names_consolidated_csv;
 			$current_ga_names_ids = implode( ',', array_map( fn( $author ) => $author->ID, $current_authors ) );
 			$data_row['current_ga_ids_csv'] = $current_ga_names_ids;
@@ -905,8 +930,6 @@ $dev_byline_node_data[] = $author_data;
 			}
 		}
 		
-WP_CLI::warning( 'PUT $dev_byline_node_data DELETE FROM CODE' );
-file_put_contents( 'dev_byline_node_data.php' ,  "<?php\nreturn " . var_export( $dev_byline_node_data, true ) . ";\n" );
 		WP_CLI::warning( sprintf( 'Total content nodes %s, data elements %s', $key_content + 1, count( $data ) ) );
 	}
 
@@ -1000,10 +1023,6 @@ file_put_contents( 'dev_byline_node_data.php' ,  "<?php\nreturn " . var_export( 
 		 *		set byline users as GAs using CAP
 		 */
 		foreach ( $data as $key_row => $row ) {
-
-// if ( 10679 != $row['post_id'] ) {
-// 	continue;
-// }
 
 			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row + 1, count( $data ), $row['post_id'] ) );
 
