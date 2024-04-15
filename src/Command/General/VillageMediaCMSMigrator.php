@@ -1308,7 +1308,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				$this->logger->log( $log, sprintf( 'ERROR Post not found for original_article_id %s', $original_article_id ), $this->logger::ERROR, false );
 				continue;
 			}
-			$this->logger->log( $log, sprintf( 'Found post ID %d', $post_id ) );
 			if ( in_array( $post_id, $ignore_post_ids ) ) {
 				$this->logger->log( $log, 'Skipping.', $this->logger::LINE, false );
 				continue;
