@@ -86,11 +86,6 @@ class WindyCityMigrator implements InterfaceCommand {
 	private Posts $posts;
 
 	/**
-	 * @var Taxonomy
-	 */
-	private Taxonomy $taxonomy;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -134,6 +129,11 @@ class WindyCityMigrator implements InterfaceCommand {
 			'newspack-listings/newspack-listings.php' => 'Newspack listings',
 			'redirection/redirection.php'             => 'Redirection',
 		];
+
+		if ( wp_timezone()->getName() !== $this->site_timezone->getName() ) {
+			WP_CLI::error( "Timezones don't match!" );
+		}
+
 		foreach ( $check_required_plugins as $plugin => $plugin_name ) {
 			if ( ! is_plugin_active( $plugin ) ) {
 				WP_CLI::error( '"' . $plugin_name . '" plugin not found. Install and activate it before using the migration commands.' );
@@ -285,9 +285,22 @@ class WindyCityMigrator implements InterfaceCommand {
 	public function cmd_windy_city_archive_date_categories( array $pos_args, array $assoc_args ): void {
 		$log_file       = __FUNCTION__ . '.log';
 		$num_items      = $assoc_args['num-items'] ?? false;
-		$archive_cat_id = 16;
 		$sub_cat_id     = $assoc_args['archive-sub-category-id'];
 
+		$slug_prefixes = [
+			17  => 'ns',
+			98  => 'id',
+			185 => 'bl',
+			271 => 'lv',
+			314 => 'qc',
+			338 => 'wc',
+		];
+
+		if ( ! array_key_exists( $sub_cat_id, $slug_prefixes ) ) {
+			WP_CLI::error( 'Invalid sub category ID' );
+		}
+
+		$slug_prefix_for_cat = $slug_prefixes[ $sub_cat_id ];
 
 		$post_ids = $this->posts->get_all_posts_ids_in_category( $sub_cat_id, 'post', [ 'publish' ] );
 		if ( $num_items ) {
@@ -295,22 +308,55 @@ class WindyCityMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::log( sprintf( 'Processing %d posts', count( $post_ids ) ) );
-		foreach ( $post_ids as $id ) {
-			$post     = get_post( $id );
-			$date     = DateTimeImmutable::createFromFormat( self::MYSQL_DATETIME_FORMAT, $post->post_date, $this->site_timezone );
-			$date_cat = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $date->format( 'F j, Y' ), $sub_cat_id );
-			wp_set_post_categories( $id, [ $date_cat ], true );
+		foreach ( $post_ids as $post_id ) {
+			$date  = get_post_datetime( $post_id );
+			$cat_slug = $slug_prefix_for_cat . '-' . $date->format( 'Y-m-d' );
+			$cat_name = $date->format( 'F j, Y' );
+			$cat_id = $this->get_or_create_category( $cat_slug, $cat_name, $sub_cat_id );
+			$post_cats = wp_get_post_categories( $post_id );
+			if ( in_array( $cat_id, $post_cats, true ) ) {
+				WP_CLI::log( sprintf( 'Post ID %d already has category "%s" added', $post_id, get_cat_name( $cat_id ) ) );
+				continue;
+			}
+			wp_set_post_categories( $post_id, [ $cat_id ], true );
 			$this->logger->log(
 				$log_file,
 				sprintf(
 					'Post ID %d got category "%s" added',
-					$id,
-					get_cat_name( $date_cat )
+					$post_id,
+					get_cat_name( $cat_id )
 				),
 				Logger::SUCCESS
 			);
 		}
 
+	}
+
+	/**
+	 * Get category ID if it exists, otherwise create it.
+	 *
+	 * @param string $slug Slug for category.
+	 * @param string $name Category name to get/create.
+	 * @param int    $parent_id     Parent category ID.
+	 * @return int  Category ID.
+	 */
+	private function get_or_create_category( string $slug, string $name, int $parent_id ): int {
+		$category_id = get_term_by( 'slug', $slug, 'category' );
+
+		// Great! We have it already.
+		if ( $category_id ) {
+			return $category_id->term_id;
+		}
+
+		// Add category.
+		return wp_insert_category(
+			[
+				'category_nicename' => $slug,
+				'cat_name'          => $name,
+				'taxonomy'          => 'category',
+				'category_parent'   => $parent_id,
+			]
+		);
 	}
 
 	/**
