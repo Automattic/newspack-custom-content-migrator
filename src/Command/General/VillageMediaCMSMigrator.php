@@ -874,9 +874,11 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Is there a byline node?
 				$author_data = $this->get_author_data_from_author_node( $byline_node );
 				$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
-				$author_display_name = isset( $consolidated_user_display_names[ $author_display_name ] ) ? $consolidated_user_display_names[ $author_display_name ] : $author_display_name;
-				$author_display_name = isset( $consolidated_user_display_names[ trim( $author_display_name ) ] ) ? $consolidated_user_display_names[ trim( $author_display_name ) ] : $author_display_name;
-				$byline_names_split = [ $author_display_name ];
+				if ( ! empty( trim( $author_display_name ) ) ) {
+					$author_display_name = isset( $consolidated_user_display_names[ $author_display_name ] ) ? $consolidated_user_display_names[ $author_display_name ] : $author_display_name;
+					$author_display_name = isset( $consolidated_user_display_names[ trim( $author_display_name ) ] ) ? $consolidated_user_display_names[ trim( $author_display_name ) ] : $author_display_name;
+					$byline_names_split = [ $author_display_name ];
+				}
 			}
 			$data_row['byline'] = $byline;
 			$data_row['byline_count'] = count( $byline_names_split );
@@ -1227,11 +1229,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$ignore_post_ids = isset( $assoc_args['ignore-post-ids-csv'] ) ? explode( ',', $assoc_args['ignore-post-ids-csv'] ) : [];
 
 		// Loop through content nodes and compose data.
-		$data = [];
 		$dom = new DOMDocument();
 		$dom->loadXML( file_get_contents( $xml_file ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		$contents = $dom->getElementsByTagName( 'content' );
-		$not_found_original_article_id = [];
 		foreach ( $contents as $key_content => $content ) {
 			WP_CLI::line( sprintf( '%d/%d', $key_content + 1, $contents->length ) );
 
@@ -1273,9 +1273,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 			// Get author data.
 			$author_data = $this->get_author_data_from_author_node( $author_node );
-			$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
-			$author_display_name_consolidated = isset( $additional_consolidated_names[ $author_display_name ] ) ? $additional_consolidated_names[ $author_display_name ] : $author_display_name;
-			$author_display_name_consolidated = isset( $additional_consolidated_names[ trim( $author_display_name ) ] ) ? $additional_consolidated_names[ trim( $author_display_name ) ] : $author_display_name;
+			$author_node_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
+			$author_node_display_name_consolidated = isset( $additional_consolidated_names[ $author_node_display_name ] ) ? $additional_consolidated_names[ $author_node_display_name ] : $author_node_display_name;
+			$author_node_display_name_consolidated = isset( $additional_consolidated_names[ trim( $author_node_display_name ) ] ) ? $additional_consolidated_names[ trim( $author_node_display_name ) ] : $author_node_display_name;
 			
 			// Get bylines split into individual author names.
 			$byline_names_split = [];
@@ -1287,7 +1287,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Get byline node author name.
 				$byline_node_data = $this->get_author_data_from_author_node( $byline_node );
 				$byline_node_display_name = $byline_node_data['first_name'] . ' '. $byline_node_data['last_name'];
-				$byline_names_split = [ $byline_node_display_name ];
+				$is_empty_byline_node_display_name = empty( trim( $byline_node_display_name ) );
+				if ( ! $is_empty_byline_node_display_name ) {
+					$byline_names_split = [ $byline_node_display_name ];
+				}
 			}
 			
 			// Get bylines' consolidated names.
@@ -1306,6 +1309,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				continue;
 			}
 			$this->logger->log( $log, sprintf( 'Found post ID %d', $post_id ) );
+			if ( in_array( $post_id, $ignore_post_ids ) ) {
+				$this->logger->log( $log, 'Skipping.', $this->logger::LINE, false );
+				continue;
+			}
 			
 			// Get post author data.
 			$post_author_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
@@ -1313,8 +1320,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 			// Get post CAP taxonomy data.
 			$cap_taxonomy_results = $wpdb->get_results( $wpdb->prepare( "select wtr.object_id, wtr.term_taxonomy_id from $wpdb->term_relationships wtr join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author' where wtr.object_id = %s;", $post_id ), ARRAY_A );
-			$cap_authors = $this->cap->get_all_authors_for_post( $post_id );
-			$cap_authors_names = array_map( fn( $cap_author ) => $cap_author->display_name, $cap_authors );
 
 
 			/** 
@@ -1322,48 +1327,50 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			 */
 			
 			// If there is no byline, author node is used.
-			if ( 0 === count( $byline_split_consolidated ) ) {
+			if ( 0 === count( $byline_names_consolidated ) ) {
 				
 				// Validate that wp_posts.post_author is set to <author>.
-				if ( $author_display_name_consolidated != $post_author_display_name ) {
-					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d original_article_id %s, ERROR post_author_display_name '%s' != author_display_name_consolidated '%s'", $post_id, $original_article_id, $post_author_display_name, $author_display_name_consolidated ), 'line', false );
+				if ( $author_node_display_name_consolidated != $post_author_display_name ) {
+					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d original_article_id %s, ERROR current post_author_display_name '%s' (ID %s) != author_node_display_name_consolidated '%s'", $post_id, $original_article_id, $post_author_display_name, $post_author_id, $author_node_display_name_consolidated ), 'line', false );
 					continue;
 				}
 				
 				// Validate that there are no GAs assigned to post.
-				if ( ! empty( $cap_taxonomy_results ) || ! empty( $cap_authors ) ) {
+				if ( ! empty( $cap_taxonomy_results ) ) {
 					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d original_article_id %s, ERROR some CAP GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, $original_article_id, json_encode( $cap_taxonomy_results ) ), 'line', false );
 					continue;
 				}
 				
-			} elseif ( 1 === count( $byline_split_consolidated ) ) {
+			} elseif ( 1 === count( $byline_names_consolidated ) ) {
 				// There's just one byline author.
 				
 				// Validate that wp_posts.post_author is set to byline single author.
-				if ( $byline_split_consolidated[0] != $post_author_display_name ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR post_author_display_name '%s' != byline_split_consolidated[0] '%s'", $post_id, $original_article_id, $post_author_display_name, $byline_split_consolidated[0] ), 'line', false );
+				if ( $byline_names_consolidated[0] != $post_author_display_name ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR current post_author_display_name '%s' (ID %s) != byline_split_consolidated[0] '%s'", $post_id, $original_article_id, $post_author_display_name, $post_author_id, $byline_names_consolidated[0] ), 'line', false );
 					continue;
 				}
 	
 				// Validate that there are no GAs assigned to post.
-				if ( ! empty( $cap_taxonomy_results ) || ! empty( $cap_authors ) ) {
+				if ( ! empty( $cap_taxonomy_results ) ) {
 					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR some GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, $original_article_id, json_encode( $cap_taxonomy_results ) ), 'line', false );
 					continue;
 				}
 				
-			} elseif ( count( $byline_split_consolidated ) > 1 ) {
+			} elseif ( count( $byline_names_consolidated ) > 1 ) {
 				// If there are multiple byline authors.
 	
 				// Validate that wp_posts.post_author is set to first byline.
-				if ( $byline_split_consolidated[0] != $post_author_display_name ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR post_author_display_name '%s' != byline_split_consolidated[0] '%s'", $post_id, $original_article_id, $post_author_display_name, $byline_split_consolidated[0] ), 'line', false );
+				if ( $byline_names_consolidated[0] != $post_author_display_name ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR current post_author_display_name '%s' (ID %s) != byline_split_consolidated[0] '%s'", $post_id, $original_article_id, $post_author_display_name, $post_author_id, $byline_names_consolidated[0] ), 'line', false );
 					continue;
 				}
 	
 				// Validate that GAs are assigned to post.
-				foreach ( $authors as $key_author => $author ) {
-					if ( $byline_split_consolidated[ $key_author ] != $author->display_name ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_split '%s', byline_split_consolidated '%s', current_author_names '%s'", $post_id, $original_article_id, $key_author, $byline_split_consolidated[ $key_author ], $author->display_name, implode( ',', $byline_split ), implode( ',', $byline_split_consolidated ), implode( ',', $authors_names ) ), 'line', false );
+				$cap_authors = $this->cap->get_all_authors_for_post( $post_id );
+				$cap_authors_names = array_map( function ( $author ) { return $author->display_name; }, $cap_authors );
+				foreach ( $cap_authors as $key_author => $cap_author ) {
+					if ( $byline_names_consolidated[ $key_author ] != $cap_author->display_name ) {
+						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_split '%s', byline_split_consolidated '%s', current_author_names '%s'", $post_id, $original_article_id, $key_author, $byline_names_consolidated[ $key_author ], $cap_author->display_name, implode( ',', $byline_split ), implode( ',', $byline_names_consolidated ), implode( ',', $cap_authors_names ) ), 'line', false );
 					}
 				}
 	
