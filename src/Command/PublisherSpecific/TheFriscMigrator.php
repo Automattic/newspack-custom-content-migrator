@@ -119,6 +119,14 @@ class TheFriscMigrator implements InterfaceCommand {
 				'shortdesc' => 'Repair homepage blocks that were converted to HTML blocks.',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator the-frisk-repair-twitter-blocks',
+			[ $this, 'cmd_repair_twitter_blocks' ],
+			[
+				'shortdesc' => 'Repair twitter blocks that were converted to HTML blocks.',
+			]
+		);
 	}
 
 	public function cmd_repair_homepage_blocks( array $pos_args, array $assoc_args ): void {
@@ -185,6 +193,78 @@ class TheFriscMigrator implements InterfaceCommand {
 					]
 				);
 				$this->logger->log( $logfile, sprintf( 'Updated homepage blocks post %d', $post_id ), Logger::SUCCESS );
+			}
+		}
+
+	}
+
+	public function cmd_repair_twitter_blocks( array $pos_args, array $assoc_args ): void {
+		$logfile    = __FUNCTION__ . '.log';
+		$script_tag = '<script async="" src="https://platform.twitter.com/widgets.js"';
+
+		global $wpdb;
+		$post_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM wp_posts WHERE post_content LIKE %s AND post_status = 'publish' AND post_type = 'post' ORDER BY ID LIMIT %d",
+				'%' . $script_tag . '%',
+				$assoc_args[ BatchLogic::$num_items['name'] ] ?? PHP_INT_MAX
+			)
+		);
+
+		$this->logger->log( $logfile, sprintf( 'Found %d posts with potential twitter embeds', count( $post_ids ) ), Logger::INFO );
+
+		foreach ( $post_ids as $post_id ) {
+			WP_CLI::log( sprintf( 'Processing post %d', $post_id ) );
+			$post   = get_post( $post_id );
+			$blocks = parse_blocks( $post->post_content );
+			foreach ( $blocks as $idx => $block ) {
+				// Find HTML blocks with that script tag.
+				if ( $block['blockName'] !== 'core/html' || ! str_contains( $block['innerHTML'], $script_tag ) ) {
+					continue;
+				}
+
+				$one_before = $blocks[ $idx - 1 ];
+				$two_before = $blocks[ $idx - 2 ];
+				$to_delete  = false;
+				// There is a blockquote before the HTML block that has the url we need for the embed.
+				// There may or may not be an "empty" block between the HTML block and the blockquote.
+				if ( $two_before['blockName'] === 'core/quote' && $one_before['blockName'] === null ) {
+					$to_delete = $idx - 2;
+				} elseif ( $one_before['blockName'] === 'core/quote' ) {
+					$to_delete = $idx - 1;
+				}
+
+				$doc  = new HtmlDocument( render_block( $blocks[ $to_delete ] ) );
+				$link = $doc->find( 'a' );
+				if ( empty( $link ) ) {
+					continue;
+				}
+				$a   = end( $link ); // The last link is the one that is embeddable.
+				$url = $a->getAttribute( 'href' );
+				if ( empty( $url ) || ! str_contains( $url, 'twitter.com' ) ) {
+					continue;
+				}
+				// Strip the query and/or fragment.
+				$url_parts    = parse_url( $url );
+				$stripped_url = trim( $url_parts['scheme'] . '://' . $url_parts['host'] . $url_parts['path'] );
+
+				$blocks[ $idx ]                       = $this->gutenberg_block_generator->get_twitter( $stripped_url, '', [ 'align' => 'center' ] );
+				$blocks[ $idx ]['attrs']['align']     = 'center';
+				$blocks[ $idx ]['attrs']['className'] .= ' aligncenter';
+
+				// Remove the block with the blockquote.
+				unset( $blocks[ $to_delete ] );
+			}
+
+			$new_content = serialize_blocks( array_values( $blocks ) );
+			if ( $new_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => $new_content,
+					]
+				);
+				$this->logger->log( $logfile, sprintf( 'Fixed twitter embeds in post %d. %s', $post_id, get_permalink( $post ) ), Logger::SUCCESS );
 			}
 		}
 
@@ -390,6 +470,7 @@ class TheFriscMigrator implements InterfaceCommand {
 				'EemQ_88mTjP6p37So2fNA',
 				'146TmTISmYAk6D6-e7Pf7FA',
 				'1HBvjvIAvmIlBbtkz2tejbw',
+				'1WZoy33dPrQigNA3lVAYzvw',
 			];
 			if ( preg_match( sprintf( '@%s@', implode( '|', $donation_image_filenames ) ), $fixed_content ) ) {
 
