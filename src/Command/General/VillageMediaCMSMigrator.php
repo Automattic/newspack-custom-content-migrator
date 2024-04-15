@@ -905,7 +905,8 @@ $dev_byline_node_data[] = $author_data;
 			}
 		}
 		
-WP_CLI::warning( 'PUT $dev_byline_node_data AND DELETE FROM CODE' );
+WP_CLI::warning( 'PUT $dev_byline_node_data DELETE FROM CODE' );
+file_put_contents( 'dev_byline_node_data.php' ,  "<?php\nreturn " . var_export( $dev_byline_node_data, true ) . ";\n" );
 		WP_CLI::warning( sprintf( 'Total content nodes %s, data elements %s', $key_content + 1, count( $data ) ) );
 	}
 
