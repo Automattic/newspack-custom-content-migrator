@@ -114,6 +114,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				'shortdesc' => 'Migrate TagDiv Primary Categories to Yoast.',
 			]
 		);
+
 	}
 
 	/**
@@ -243,6 +244,25 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 
+// option: 'Auto select primary category'
+
+/*
+report: Array
+(
+    [total] => 2033
+    [first-y, yoast-y] => 42
+    [first-y, yoast-n] => 32
+    [first-y] => 770
+    [theme-y, first-n, yoast-n] => 773
+    [theme-y, first-y, yoast-n] => 8
+    [theme-y, first-n] => 39
+    [theme-y, first-y, yoast-y] => 283
+    [theme-y, first-n, yoast-y] => 63
+    [theme-y, first-y] => 14
+)
+*/
+
+
 		$args = array(
 
 			'post_type'   => 'post',
@@ -331,7 +351,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				preg_match_all( '#entry-crumb" href="https://mountainexpressmagazine.com/category/([^"]+)">([^<]+)<#', $file_get_contents, $matches, PREG_SET_ORDER );
 
 				if( empty( $matches ) ) {
-					$this->logger->log( $this->log, 'HTML preg_match_all fail.', $this->logger::WARNING );
+					$this->logger->log( $this->log, 'HTML preg_match_all fail. USE POST CATEGORY.', $this->logger::WARNING );
 					return;
 				}
 
@@ -367,7 +387,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				$json_cat_name = '';
 				
 				if( empty( $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0] ) ) {
-					$this->logger->log( $this->log, 'JSON section fail', $this->logger::WARNING );
+					// $this->logger->log( $this->log, 'JSON section fail', $this->logger::WARNING );
 				} else {
 					$json_cat_name = $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0];
 				}
@@ -375,9 +395,9 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				$this->logger->log( $this->log, 'Json: ' . $json_cat_name );	
 				
 				// Tests.
-				if( $json_cat_name != $body_cat_name ) {
-					$this->logger->log( $this->log, 'cat mismatch', $this->logger::WARNING );
-				}
+				// if( $json_cat_name != $body_cat_name ) {
+				// 	$this->logger->log( $this->log, 'cat mismatch', $this->logger::WARNING );
+				// }
 
 
 
@@ -465,7 +485,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 		}
 
 		if( 0 == strlen( trim( $file_get_contents ) ) ) {
-			$this->logger->log( $this->log, 'File get content is empty.', $this->logger::ERROR, true );	
+			$this->logger->log( $this->log, 'File get content is empty. USE POST CAT.', $this->logger::WARNING, true );	
 		}
 
 
