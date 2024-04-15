@@ -1016,7 +1016,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 *		set byline users as GAs using CAP
 		 */
 		foreach ( $data as $key_row => $row ) {
-			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row + 1, count( $data ), $row['post_id'] ) );
+			WP_CLI::line( sprintf( '%d/%d post_ID %d original_article_id', $key_row + 1, count( $data ), $row['post_id'], $row['original_article_id'] ) );
 
 			// Get fresh post_author (Embarcadero folks have been updating in the mean time).
 			$row['post_author'] = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
@@ -1039,14 +1039,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "author_node_is_author WARNING, post ID %d, author node to post_author '%s' WP_User not found, about to create", $row['post_id'], $display_name ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author WARNING, post ID %d original_article_id %s, author node to post_author '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $display_name ) );
 					// Create WP_User.
-					$author_id = $this->create_wp_user_from_display_name( $display_name, $log );
+					$author_id = $this->create_wp_user_from_display_name( trim( $display_name ), $log );
 					if ( ! $author_id || is_wp_error( $author_id ) ) {
-						$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $display_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+						$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d original_article_id %s, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $row['original_article_id'], $display_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
 						continue;
 					}
-					$this->logger->log( $log, sprintf( "author_node_is_author CREATED NEW USER, post ID %d, name '%s'", $row['post_id'], $display_name ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author CREATED NEW USER, post ID %d original_article_id %s, name '%s'", $row['post_id'], $row['original_article_id'], trim( $display_name ) ) );
 				}
 				if ( $row['post_author'] != $author_id ) {
 					// Set wp_posts.post_author to <author> node user.
@@ -1056,11 +1056,11 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						[ 'ID' => $row['post_id'] ]
 					);
 					if ( false === $updated || 0 === $updated ) {
-						$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $author_id, json_encode( $updated ) ) );
+						$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d original_article_id %s, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $row['original_article_id'], $author_id, json_encode( $updated ) ) );
 						continue;
 					}
 					
-					$this->logger->log( $log, sprintf( "author_node_is_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
+					$this->logger->log( $log, sprintf( "author_node_is_author UPDATED, post ID %d original_article_id %s, post_author_old %s post_author_new %s", $row['post_id'], $row['original_article_id'], $row['post_author'], $author_id ) );
 				} else {
 					$this->logger->log( $log, sprintf( "author_node_is_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
 				}
@@ -1083,14 +1083,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "byline_one_author WARNING, post ID %d, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $display_name ) );
+					$this->logger->log( $log, sprintf( "byline_one_author WARNING, post ID %d original_article_id %s, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $display_name ) );
 					// Create WP_User.
-					$author_id = $this->create_wp_user_from_display_name( $display_name, $log );
+					$author_id = $this->create_wp_user_from_display_name( trim( $display_name ), $log );
 					if ( ! $author_id || is_wp_error( $author_id ) ) {
-						$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $display_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+						$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d original_article_id %s, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $row['original_article_id'], $display_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
 						continue;
 					}
-					$this->logger->log( $log, sprintf( "byline_one_author CREATED NEW USER, post ID %d, '%s'", $row['post_id'], $display_name ) );
+					$this->logger->log( $log, sprintf( "byline_one_author CREATED NEW USER, post ID %d original_article_id %s, '%s'", $row['post_id'], $row['original_article_id'], trim( $display_name ) ) );
 				}
 				if ( $row['post_author'] != $author_id ) {
 					// Set wp_posts.post_author to single byline user.
@@ -1100,13 +1100,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						[ 'ID' => $row['post_id'] ]
 					);
 					if ( false === $updated || 0 === $updated ) {
-						$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $author_id, json_encode( $updated ) ) );
+						$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d original_article_id %s, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $row['original_article_id'], $author_id, json_encode( $updated ) ) );
 						continue;
 					}
 
-					$this->logger->log( $log, sprintf( "byline_one_author UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
+					$this->logger->log( $log, sprintf( "byline_one_author UPDATED, post ID %d original_article_id %s, post_author_old %s post_author_new %s", $row['post_id'], $row['original_article_id'], $row['post_author'], $author_id ) );
 				} else {
-					$this->logger->log( $log, sprintf( "byline_one_author SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
+					$this->logger->log( $log, sprintf( "byline_one_author SKIPPING, post ID %d original_article_id %s, post_author %s is correct", $row['post_id'], $row['original_article_id'], $row['post_author'] ) );
 				}
 
 			} elseif ( $row['byline_count'] > 1 ) {
@@ -1124,14 +1124,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name_first ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $display_name_first ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d original_article_id %s, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $display_name_first ) );
 					// Create WP_User.
-					$author_id = $this->create_wp_user_from_display_name( $display_name_first, $log );
+					$author_id = $this->create_wp_user_from_display_name( trim( $display_name_first ), $log );
 					if ( ! $author_id || is_wp_error( $author_id ) ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $display_name_first, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d original_article_id %s, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $row['original_article_id'], $display_name_first, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
 						continue;
 					}
-					$this->logger->log( $log, sprintf( "byline_multiple_authors CREATED NEW USER, post ID %d, '%s'", $row['post_id'], $display_name_first ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors CREATED NEW USER, post ID %d original_article_id %s, '%s'", $row['post_id'], $row['original_article_id'], trim( $display_name_first ) ) );
 				}
 				if ( $row['post_author'] != $author_id ) {
 					// Set wp_posts.post_author to first byline user.
@@ -1141,13 +1141,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						[ 'ID' => $row['post_id'] ]
 					);
 					if ( false === $updated || 0 === $updated ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $author_id, json_encode( $updated ) ) );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d original_article_id %s, error updating wp_posts.post_author %s, updated='%s'", $row['post_id'], $row['original_article_id'], $author_id, json_encode( $updated ) ) );
 						continue;
 					}
 					
-					$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, post_author_old %s post_author_new %s", $row['post_id'], $row['post_author'], $author_id ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d original_article_id %s, post_author_old %s post_author_new %s", $row['post_id'], $row['original_article_id'], $row['post_author'], $author_id ) );
 				} else {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors SKIPPING, post ID %d, post_author %s is correct", $row['post_id'], $row['post_author'] ) );
+					$this->logger->log( $log, sprintf( "byline_multiple_authors SKIPPING, post ID %d original_article_id %s, post_author %s is correct", $row['post_id'], $row['original_article_id'], $row['post_author'] ) );
 				}
 				
 				// Set multiple byline users as GAs using CAP.
@@ -1156,21 +1156,21 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$byline_name = isset( $additional_consolidated_names[ $byline_name ] ) ? $additional_consolidated_names[ $byline_name ] : $byline_name;
 					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					if ( ! $author_id ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d, one of GAs '%s' WP_User not found, about to create", $row['post_id'], $byline_name ) );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d original_article_id %s, one of GAs '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $byline_name ) );
 						// Create WP_User.
-						$author_id = $this->create_wp_user_from_display_name( $byline_name, $log );
+						$author_id = $this->create_wp_user_from_display_name( trim( $byline_name ), $log );
 						if ( ! $author_id || is_wp_error( $author_id ) ) {
-							$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $byline_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+							$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d original_article_id %s, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $row['original_article_id'], $byline_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
 							continue;
 						}
-						$this->logger->log( $log, sprintf( "byline_multiple_authors CREATED NEW USER, post ID %d, '%s'", $row['post_id'], $byline_name ) );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors CREATED NEW USER, post ID %d original_article_id %s, '%s'", $row['post_id'], $row['original_article_id'], trim( $byline_name ) ) );
 					}
 					$author = get_user_by( 'ID', $author_id );
 					$authors[] = $author;
 				}
 				$this->cap->assign_authors_to_post( $authors, $row['post_id'], false );
 				
-				$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d, assigned total %s GAs", $row['post_id'], count( $authors ) ) );
+				$this->logger->log( $log, sprintf( "byline_multiple_authors UPDATED, post ID %d original_article_id %s, assigned total %s GAs", $row['post_id'], $row['original_article_id'], count( $authors ) ) );
 			}
 		}
 
