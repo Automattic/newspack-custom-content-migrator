@@ -15,7 +15,6 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
-use stdClass;
 use WP_CLI;
 
 /**
@@ -112,6 +111,15 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_tagdiv_primary_categories' ],
 			[
 				'shortdesc' => 'Migrate TagDiv Primary Categories to Yoast.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'No updates.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 
@@ -244,204 +252,75 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 
-// option: 'Auto select primary category'
+		$dry_run = false;
+		if( isset( $assoc_args['dry-run'] ) ) {
+			$dry_run = true;
+			$this->logger->log( $this->log, '--dry-run.' );
+		}
 
-/*
-report: Array
-(
-    [total] => 2033
-    [first-y, yoast-y] => 42
-    [first-y, yoast-n] => 32
-    [first-y] => 770
-    [theme-y, first-n, yoast-n] => 773
-    [theme-y, first-y, yoast-n] => 8
-    [theme-y, first-n] => 39
-    [theme-y, first-y, yoast-y] => 283
-    [theme-y, first-n, yoast-y] => 63
-    [theme-y, first-y] => 14
-)
-*/
-
+		// Reusable function.
+		$set_yoast_primary_function = function( $post_id, $category_id ) use ( $dry_run ) {
+			if( $dry_run ) {
+				$this->logger->log( $this->log, '(dry-run) Update yoast primary: ' . $category_id );
+			} else {
+				$this->logger->log( $this->log, 'Update yoast primary: ' . $category_id );
+				//update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_id );
+			}
+		};
 
 		$args = array(
-
 			'post_type'   => 'post',
 			'post_status' => array( 'publish' ),
 			'fields'      => 'ids',
-			
-// What about setting if there is no theme settings????
-// Must have required postmeta value.
-// 'meta_query'  => array(
-// 	array(
-// 		'key'     => self::TD_POST_THEME_SETTINGS,
-// 		'value'   => '"' . self::TD_POST_THEME_SETTINGS_PRIMARY_CAT . '"',
-// 		'compare' => 'LIKE',
-// 	),
-// ),
-			
 			// Order by date for better logging in order.
 			'orderby'     => 'date',
 			'order'       => 'DESC',
-
-		);
-
-		$report = array(
-			'total' => 0,
 		);
 
 		$this->posts_logic->throttled_posts_loop( 
 			$args,
-			function ( $post_id ) use ( &$report ) {
+			function ( $post_id ) use ( $set_yoast_primary_function ) {
 
-				$report['total']++;
+				$this->logger->log( $this->log, '---- Post id: ' . $post_id );
 
-				$this->logger->log( $this->log, "\n" );
-				$this->logger->log( $this->log, '---- Post: ' . $post_id );
-			
-				
-
-
-				// Theme Cat.
+				// Get postmeta: 'td_post_theme_settings' => 'a:3:{s:14:\"td_primary_cat\";s:2:\"36\";...}'
 				$postmeta = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
 
-				$theme_cat = null;
+				// If primary category key ('td_primary_cat') exists in postmeta array (unserialized).
 				if ( isset( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] ) 
 					&& is_numeric( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] ) 
 					&& ( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] > 0 )
 				) {
-					$theme_cat = get_category( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] );
-					if( is_object( $theme_cat ) && ! is_wp_error( $theme_cat ) ) {
-						$this->logger->log( $this->log, 'Theme cat: ' . $theme_cat->name . ' / ' . $theme_cat->slug );
-					} else {
-						$theme_cat = null;
-					}
-				}
 
-				// Yoast.
-				$postmeta = get_post_meta( $post_id, '_yoast_wpseo_primary_category', true );
+					// Verify category id is real category.
+					$category = get_category( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] );
 
-				$yoast_cat = null;
-				if ( is_numeric( $postmeta ) && $postmeta > 0 ) {
-					$yoast_cat = get_category( $postmeta );
-					if( is_object( $yoast_cat ) && ! is_wp_error( $yoast_cat ) ) {
-						$this->logger->log( $this->log, 'Yoast cat: ' . $yoast_cat->name . ' / ' . $yoast_cat->slug );
-					} else {
-						$yoast_cat = null;
-					}
-				}
+					// If exists, set it to yoast.
+					if( ! is_wp_error( $category ) && is_object( $category ) && property_exists( $category, 'term_id' ) ) {
 
-				// Post cats.
-				$post_cats = wp_get_post_categories( $post_id, [ 'fields' => 'all' ] );
-				$first_post_cat = null;
-				foreach( $post_cats as $cat ) {
-					$this->logger->log( $this->log, 'Post cat: ' . $cat->name . ' / ' . $cat->slug );
-					if( empty( $first_post_cat ) ) $first_post_cat = $cat;
-				}
-				
-				
+						$this->logger->log( $this->log, 'Using postmeta value.' );
 
+						return $set_yoast_primary_function( $post_id, $category->term_id );
 
+					} // if category exists.
 
+				} // postmeta array key exists.
 
-				
-				// HTML.
+				// If postmeta didn't work, then TagDiv's "Auto select primary category" will default to the first category.
+				$categories = wp_get_post_categories( $post_id );
 
-				$file_get_contents = $this->cache_or_fetch( $post_id, '.html', 'https://mountainexpressmagazine.com/?p=' );
+				if( is_array( $categories ) && ! empty( $categories[0] ) ) {
 
-				preg_match_all( '#entry-crumb" href="https://mountainexpressmagazine.com/category/([^"]+)">([^<]+)<#', $file_get_contents, $matches, PREG_SET_ORDER );
+					$this->logger->log( $this->log, 'Using first category.' );
 
-				if( empty( $matches ) ) {
-					$this->logger->log( $this->log, 'HTML preg_match_all fail. USE POST CATEGORY.', $this->logger::WARNING );
-					return;
-				}
+					return $set_yoast_primary_function( $post_id, $categories[0] );
 
-				$last_match = $matches[ count($matches) - 1 ]; // heirarchial cats
+				} // first post category.
 
-				if( 3 != count( $last_match ) ) {
-					$this->logger->log( $this->log, 'HTML last_match fail: ' . print_r( $matches, true ), $this->logger::ERROR, true );
-				}
+			} // callback function.
 
-				preg_match( '#([^/]+)/$#', $last_match[1], $last_match_slug_matches );
+		); // loop.
 
-				if( 2 != count( $last_match_slug_matches ) ) {
-					$this->logger->log( $this->log, 'last_match_slug_matches: ' . print_r( $last_match_slug_matches, true ), $this->logger::ERROR, true );
-				}
-
-				$body_cat_slug = $last_match_slug_matches[1];
-				$body_cat_name = $last_match[2];
-				$body_cat_name = str_replace( '&#039;', "'", $body_cat_name );
-				$this->logger->log( $this->log, 'HTML: ' . $body_cat_name . ', ' . $body_cat_slug );
-
-				// JSON.
-
-				$file_get_contents = $this->cache_or_fetch( $post_id, '.json', 'https://mountainexpressmagazine.com/wp-json/wp/v2/posts/' );
-
-				$json = json_decode( $file_get_contents, null, 2147483647 );
-				$json_last_error = json_last_error();
-				$json_last_error_msg = json_last_error_msg();
-
-				if( 0 != $json_last_error || 'No error' != $json_last_error_msg ) {
-					$this->logger->log( $this->log, 'JSON error: ' . $json_last_error . ' - ' . $json_last_error_msg, $this->logger::ERROR, true );	
-				}
-
-				$json_cat_name = '';
-				
-				if( empty( $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0] ) ) {
-					// $this->logger->log( $this->log, 'JSON section fail', $this->logger::WARNING );
-				} else {
-					$json_cat_name = $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0];
-				}
-
-				$this->logger->log( $this->log, 'Json: ' . $json_cat_name );	
-				
-				// Tests.
-				// if( $json_cat_name != $body_cat_name ) {
-				// 	$this->logger->log( $this->log, 'cat mismatch', $this->logger::WARNING );
-				// }
-
-
-
-
-
-
-				$loop_report = array();
-				
-				if( !empty( $theme_cat ) ) {
-					if( $body_cat_name == $theme_cat->name && $body_cat_slug == $theme_cat->slug ) $loop_report[] = 'theme-y';
-					else $loop_report[] = 'theme-n';
-				}
-				
-				if( !empty( $first_post_cat ) ) {
-					if( $body_cat_name == $first_post_cat->name && $body_cat_slug == $first_post_cat->slug ) $loop_report[] = 'first-y';
-					else $loop_report[] = 'first-n';
-				}
-				
-				if( !empty( $yoast_cat ) ) {
-					if( $body_cat_name == $yoast_cat->name && $body_cat_slug == $yoast_cat->slug ) $loop_report[] = 'yoast-y';
-					else $loop_report[] = 'yoast-n';
-				}
-				
-
-				if( 0 == count( $loop_report ) ) {
-					$this->logger->log( $this->log, 'loop report empty', $this->logger::ERROR, true );
-				}
-
-				$loop_report_str = implode( ', ', $loop_report );
-				$this->logger->log( $this->log, 'loop_report_str: ' . $loop_report_str );
-
-				if( ! isset( $report[$loop_report_str] ) ) $report[$loop_report_str] = 0;
-				$report[$loop_report_str]++;
-
-				// update post meta
-				$this->logger->log( $this->log, 'report: ' . print_r( $report, true ) );
-
-
-			},
-			1,
-			500
-		);
-
-		
 		wp_cache_flush();
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
@@ -468,29 +347,6 @@ report: Array
 		$source = trim( preg_replace( '/^by\s+/i', '', $source ) );
 
 		return $source;
-	}
-
-	private function cache_or_fetch( $post_id, $file_suffix, $url_prefix ) {
-
-		$file_key = 'posts/' . $post_id . $file_suffix;
-				
-		if( file_exists( $file_key ) ) {
-			$this->logger->log( $this->log, 'Using cached file: ' . $file_key );
-			$file_get_contents = file_get_contents( $file_key );
-		} else {
-			$url = $url_prefix . $post_id;
-			$this->logger->log( $this->log, 'Fetching url: ' . $url );
-			$file_get_contents = file_get_contents( $url );
-			file_put_contents( $file_key, $file_get_contents );
-		}
-
-		if( 0 == strlen( trim( $file_get_contents ) ) ) {
-			$this->logger->log( $this->log, 'File get content is empty. USE POST CAT.', $this->logger::WARNING, true );	
-		}
-
-
-		return $file_get_contents;
-
 	}
 
 }
