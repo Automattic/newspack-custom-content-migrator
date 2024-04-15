@@ -1369,7 +1369,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				$cap_authors_names = array_map( function ( $author ) { return $author->display_name; }, $cap_authors );
 				foreach ( $cap_authors as $key_author => $cap_author ) {
 					if ( $byline_names_consolidated[ $key_author ] != $cap_author->display_name ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_split '%s', byline_split_consolidated '%s', current_author_names '%s'", $post_id, $original_article_id, $key_author, $byline_names_consolidated[ $key_author ], $cap_author->display_name, implode( ',', $byline_split ), implode( ',', $byline_names_consolidated ), implode( ',', $cap_authors_names ) ), 'line', false );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_names_consolidated '%s', cap_author_names '%s'", $post_id, $original_article_id, $key_author, $byline_names_consolidated[ $key_author ], $cap_author->display_name, implode( ',', $byline_names_consolidated ), implode( ',', $cap_authors_names ) ), 'line', false );
 					}
 				}
 	
