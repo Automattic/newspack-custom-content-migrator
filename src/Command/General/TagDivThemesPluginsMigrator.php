@@ -277,59 +277,9 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 				$this->logger->log( $this->log, "\n" );
 				$this->logger->log( $this->log, '---- Post: ' . $post_id );
+			
 				
-				// HTML.
 
-				$file_get_contents = $this->cache_or_fetch( $post_id, '.html', 'https://mountainexpressmagazine.com/?p=' );
-
-				preg_match_all( '#entry-crumb" href="https://mountainexpressmagazine.com/category/([^"]+)">([^<]+)<#', $file_get_contents, $matches, PREG_SET_ORDER );
-
-				if( empty( $matches ) ) {
-					$this->logger->log( $this->log, 'HTML preg_match_all fail.', $this->logger::ERROR, true );
-				}
-
-				$last_match = $matches[ count($matches) - 1 ]; // heirarchial cats
-
-				if( 3 != count( $last_match ) ) {
-					$this->logger->log( $this->log, 'HTML last_match fail: ' . print_r( $matches, true ), $this->logger::ERROR, true );
-				}
-
-				preg_match( '#([^/]+)/$#', $last_match[1], $last_match_slug_matches );
-
-				if( 2 != count( $last_match_slug_matches ) ) {
-					$this->logger->log( $this->log, 'last_match_slug_matches: ' . print_r( $last_match_slug_matches, true ), $this->logger::ERROR, true );
-				}
-
-				$body_cat_slug = $last_match_slug_matches[1];
-				$body_cat_name = $last_match[2];
-				$this->logger->log( $this->log, 'HTML: ' . $body_cat_name . ', ' . $body_cat_slug );
-
-				// JSON.
-
-				$file_get_contents = $this->cache_or_fetch( $post_id, '.json', 'https://mountainexpressmagazine.com/wp-json/wp/v2/posts/' );
-
-				$json = json_decode( $file_get_contents, null, 2147483647 );
-				$json_last_error = json_last_error();
-				$json_last_error_msg = json_last_error_msg();
-
-				if( 0 != $json_last_error || 'No error' != $json_last_error_msg ) {
-					$this->logger->log( $this->log, 'JSON error: ' . $json_last_error . ' - ' . $json_last_error_msg, $this->logger::ERROR, true );	
-				}
-
-				$json_cat_name = '';
-				
-				if( empty( $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0] ) ) {
-					$this->logger->log( $this->log, 'JSON section fail', $this->logger::WARNING );
-				} else {
-					$json_cat_name = $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0];
-				}
-
-				$this->logger->log( $this->log, 'Json: ' . $json_cat_name );	
-				
-				// Tests.
-				if( $json_cat_name != $body_cat_name ) {
-					$this->logger->log( $this->log, 'cat mismatch', $this->logger::WARNING );
-				}
 
 				// Theme Cat.
 				$postmeta = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
@@ -367,6 +317,72 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 					$this->logger->log( $this->log, 'Post cat: ' . $cat->name . ' / ' . $cat->slug );
 					if( empty( $first_post_cat ) ) $first_post_cat = $cat;
 				}
+				
+				
+
+
+
+
+				
+				// HTML.
+
+				$file_get_contents = $this->cache_or_fetch( $post_id, '.html', 'https://mountainexpressmagazine.com/?p=' );
+
+				preg_match_all( '#entry-crumb" href="https://mountainexpressmagazine.com/category/([^"]+)">([^<]+)<#', $file_get_contents, $matches, PREG_SET_ORDER );
+
+				if( empty( $matches ) ) {
+					$this->logger->log( $this->log, 'HTML preg_match_all fail.', $this->logger::WARNING );
+					return;
+				}
+
+				$last_match = $matches[ count($matches) - 1 ]; // heirarchial cats
+
+				if( 3 != count( $last_match ) ) {
+					$this->logger->log( $this->log, 'HTML last_match fail: ' . print_r( $matches, true ), $this->logger::ERROR, true );
+				}
+
+				preg_match( '#([^/]+)/$#', $last_match[1], $last_match_slug_matches );
+
+				if( 2 != count( $last_match_slug_matches ) ) {
+					$this->logger->log( $this->log, 'last_match_slug_matches: ' . print_r( $last_match_slug_matches, true ), $this->logger::ERROR, true );
+				}
+
+				$body_cat_slug = $last_match_slug_matches[1];
+				$body_cat_name = $last_match[2];
+				$body_cat_name = str_replace( '&#039;', "'", $body_cat_name );
+				$this->logger->log( $this->log, 'HTML: ' . $body_cat_name . ', ' . $body_cat_slug );
+
+				// JSON.
+
+				$file_get_contents = $this->cache_or_fetch( $post_id, '.json', 'https://mountainexpressmagazine.com/wp-json/wp/v2/posts/' );
+
+				$json = json_decode( $file_get_contents, null, 2147483647 );
+				$json_last_error = json_last_error();
+				$json_last_error_msg = json_last_error_msg();
+
+				if( 0 != $json_last_error || 'No error' != $json_last_error_msg ) {
+					$this->logger->log( $this->log, 'JSON error: ' . $json_last_error . ' - ' . $json_last_error_msg, $this->logger::ERROR, true );	
+				}
+
+				$json_cat_name = '';
+				
+				if( empty( $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0] ) ) {
+					$this->logger->log( $this->log, 'JSON section fail', $this->logger::WARNING );
+				} else {
+					$json_cat_name = $json->yoast_head_json->schema->{"@graph"}[0]->articleSection[0];
+				}
+
+				$this->logger->log( $this->log, 'Json: ' . $json_cat_name );	
+				
+				// Tests.
+				if( $json_cat_name != $body_cat_name ) {
+					$this->logger->log( $this->log, 'cat mismatch', $this->logger::WARNING );
+				}
+
+
+
+
+
 
 				$loop_report = array();
 				
@@ -402,7 +418,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 			},
 			1,
-			100
+			500
 		);
 
 		
