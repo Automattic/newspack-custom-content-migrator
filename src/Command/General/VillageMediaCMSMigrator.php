@@ -227,6 +227,41 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator village-cms-dev-helper-validate-all-authorship',
+			[ $this, 'cmd_dev_helper_validate_all_authorship' ],
+			[
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'data-xml',
+						'description' => 'Path to original XML file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'additional-consolidated-users-1',
+						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'additional-consolidated-users-2',
+						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'ignore-post-ids-csv',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -749,6 +784,8 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$bylines_special_cases = include $assoc_args['bylines-special-cases-php-file'];
 		}
 
+$dev_byline_node_data = [];
+
 		// Loop through content nodes and compose data.
 		$data = [];
 		$dom = new DOMDocument();
@@ -761,6 +798,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			// Get original id, author node and byline attribute.
 			$original_article_id = null;
 			$byline              = null;
+			$byline_attribute    = null;
 			$author_node         = null;
 			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
@@ -773,10 +811,13 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					case 'author':
 						$author_node = $node;
 						break;
+					case 'byline':
+						$byline_node = $node; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
 					case 'attributes':
 						$attributes = json_decode( $node->nodeValue, true ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 						if ( isset( $attributes['byline'] ) && ! empty( $attributes['byline'] ) ) {
-							$byline = $attributes['byline'];
+							$byline_attribute = $attributes['byline'];
 						}
 						break;
 				}
@@ -799,13 +840,19 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$data_row['author'] = $author_display_name;
 			$data_row['author_consolidated'] = isset( $consolidated_user_display_names[ $author_display_name ] ) ? $consolidated_user_display_names[ $author_display_name ] : $author_display_name;
 			$byline_names_split = [];
-			if ( $byline ) {
-				if ( isset( $bylines_special_cases[ $byline ] ) ) {
-					$byline_names_split = $bylines_special_cases[ $byline ];
+			// Is there a byline attribute?
+			if ( $byline_attribute ) {
+				if ( isset( $bylines_special_cases[ $byline_attribute ] ) ) {
+					$byline_names_split = $bylines_special_cases[ $byline_attribute ];
 				} else {
 					// Split the byline into multiple author names.
-					$byline_names_split = $this->split_byline( $byline );
+					$byline_names_split = $this->split_byline( $byline_attribute );
 				}
+			} elseif ( $byline_node ) {
+				$author_data = $this->get_author_data_from_author_node( $byline_node );
+				$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
+				$byline_names_split = [ $author_display_name ];
+$dev_byline_node_data[] = $author_data;
 			}
 			$data_row['byline'] = $byline;
 			$data_row['byline_count'] = count( $byline_names_split );
@@ -837,6 +884,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			$data_row['current_ga_ids_csv'] = $current_ga_names_ids;
 
 			$data[] = $data_row;
+
 		}
 
 		$path = dirname( $xml_file ) . '/data.csv';
@@ -857,6 +905,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			}
 		}
 		
+WP_CLI::warning( 'PUT $dev_byline_node_data AND DELETE FROM CODE' );
 		WP_CLI::warning( sprintf( 'Total content nodes %s, data elements %s', $key_content + 1, count( $data ) ) );
 	}
 
@@ -950,6 +999,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 *		set byline users as GAs using CAP
 		 */
 		foreach ( $data as $key_row => $row ) {
+
+// if ( 10679 != $row['post_id'] ) {
+// 	continue;
+// }
 
 			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row + 1, count( $data ), $row['post_id'] ) );
 
@@ -1093,6 +1146,125 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		}
 
 		wp_cache_flush();
+	}
+
+	public function cmd_dev_helper_validate_all_authorship( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+		$log = 'cmd_dev_helper_validate_all_authorship.log';
+		
+		// Arguments.
+		$xml_file = $assoc_args['data-xml'];
+		if ( empty( include( $assoc_args['additional-consolidated-users-1'] ) ) || empty( include( $assoc_args['additional-consolidated-users-2'] ) ) ) {
+			WP_CLI::error( 'Additional consolidated users files are incorrect or empty.' );
+		}
+		$consolidated_names = array_merge( include( $assoc_args['additional-consolidated-users-1'] ), include( $assoc_args['additional-consolidated-users-2'] ) );
+		$ignore_post_ids = explode( ',', $assoc_args['ignore-post-ids-csv'] );
+
+		// Read XML.
+		$dom = new DOMDocument();
+		$dom->loadXML( file_get_contents( $xml_file ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$contents = $dom->getElementsByTagName( 'content' );
+		foreach ( $contents as $key_content => $content ) {
+			// Get id, author node and attributes.
+			$original_article_id = null;
+			$byline              = null;
+			$author_node         = null;
+			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					continue;
+				}
+				switch ( $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					case 'id':
+						$original_article_id = $node->nodeValue; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
+					case 'author':
+						$author_node = $node;
+						break;
+					case 'attributes':
+						$attributes = json_decode( $node->nodeValue, true ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						if ( isset( $attributes['byline'] ) && ! empty( $attributes['byline'] ) ) {
+							$byline = $attributes['byline'];
+						}
+						break;
+				}
+			}
+
+			// Get post ID.
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
+			if ( in_array( $post_id, $ignore_post_ids ) ) {
+				$this->logger->log( $log, sprintf( 'IGNORING and SKIPPING post_id %d.', $post_id ), 'line', false );
+				continue;
+			}
+			if ( ! $post_id ) {
+				$this->logger->log( $log, sprintf( 'ERROR Post not found for original_article_id %s', $original_article_id ), 'line', false );
+				continue;
+			}
+			// Post data.
+			$post_author_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			$post_author_display_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $post_author_current ) );
+
+			// Get author node display name.
+			$author_data = $this->get_author_data_from_author_node( $author_node );
+			$author_display_name = $author_data['first_name'] . ' ' . $author_data['last_name'];
+			$author_display_name_consolidated = isset( $consolidated_names[ $author_display_name ] ) ? $consolidated_names[ $author_display_name ] : $author_display_name;
+			// Get byline names.
+			$byline_split = $byline ? $this->split_byline( $byline ) : [];
+			$byline_split_consolidated = [];
+			foreach ( $byline_split as $byline_split_name ) {
+				$byline_split_consolidated[] = isset( $consolidated_names[ $byline_split_name ] ) ? $consolidated_names[ $byline_split_name ] : $byline_split_name;
+			}	
+
+			if ( 0 === count( $byline_split_consolidated ) ) {
+				
+				// Check if wp_posts.post_author is set to <author>.
+				if ( $author_display_name_consolidated != $post_author_display_name_current) {
+					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d, ERROR post_author_display_name_current '%s' != byline_split_consolidated[0] '%s'", $post_id, $post_author_display_name_current, $byline_split_consolidated[0] ), 'line', false );
+					continue;
+				}
+
+				// Check that there are no GAs assigned to post.
+				$results = $wpdb->get_results( $wpdb->prepare( "select wtr.object_id, wtr.term_taxonomy_id from $wpdb->term_relationships wtr join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author' where wtr.object_id = %s;", $post_id ), ARRAY_A );
+				if ( ! empty( $results ) ) {
+					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d, ERROR some GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, json_encode( $results ) ), 'line', false );
+					continue;
+				}
+				
+			} elseif ( 1 === count( $byline_split_consolidated ) ) {
+				
+				// Check if wp_posts.post_author is set to byline single author.
+				if ( $post_author_display_name_current != $byline_split_consolidated[0] ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR post_author_display_name_current '%s' != byline_split_consolidated[0] '%s'", $post_id, $post_author_display_name_current, $byline_split_consolidated[0] ), 'line', false );
+					continue;
+				}
+
+				// Check that there are no GAs assigned to post.
+				$results = $wpdb->get_results( $wpdb->prepare( "select wtr.object_id, wtr.term_taxonomy_id from $wpdb->term_relationships wtr join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author' where wtr.object_id = %s;", $post_id ), ARRAY_A );
+				if ( ! empty( $results ) ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR some GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, json_encode( $results ) ), 'line', false );
+					continue;
+				}
+				
+			} elseif ( count( $byline_split_consolidated ) > 1 ) {
+
+				// Check if wp_posts.post_author is set to first byline.
+				if ( $post_author_display_name_current != $byline_split_consolidated[0] ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR post_author_display_name_current '%s' != byline_split_consolidated[0] '%s'", $post_id, $post_author_display_name_current, $byline_split_consolidated[0] ), 'line', false );
+					continue;
+				}
+
+				// Check if GAs are assigned to post.
+				$authors = $this->cap->get_all_authors_for_post(238248);
+				$authors_names = array_map( fn( $author ) => $author->display_name, $authors );
+				foreach ( $authors as $key_author => $author ) {
+					if ( $byline_split_consolidated[ $key_author ] != $author->display_name ) {
+						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_split '%s', byline_split_consolidated '%s', current_author_names '%s'", $post_id, $key_author, $byline_split_consolidated[ $key_author ], $author->display_name, implode( ',', $byline_split ), implode( ',', $byline_split_consolidated ), implode( ',', $authors_names ) ), 'line', false );
+					}
+				}
+
+			}
+
+		}
 	}
 
 	/**
