@@ -122,7 +122,6 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				],
 			]
 		);
-
 	}
 
 	/**
@@ -253,18 +252,18 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, 'Doing migration.' );
 
 		$dry_run = false;
-		if( isset( $assoc_args['dry-run'] ) ) {
+		if ( isset( $assoc_args['dry-run'] ) ) {
 			$dry_run = true;
 			$this->logger->log( $this->log, '--dry-run.' );
 		}
 
 		// Reusable function.
-		$set_yoast_primary_function = function( $post_id, $category_id ) use ( $dry_run ) {
-			if( $dry_run ) {
+		$set_yoast_primary_function = function ( $post_id, $category_id ) use ( $dry_run ) {
+			if ( $dry_run ) {
 				$this->logger->log( $this->log, '(dry-run) Update yoast primary: ' . $category_id );
 			} else {
 				$this->logger->log( $this->log, 'Update yoast primary: ' . $category_id );
-				//update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_id );
+				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_id );
 			}
 		};
 
@@ -283,7 +282,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 				$this->logger->log( $this->log, '---- Post id: ' . $post_id );
 
-				// Get postmeta: 'td_post_theme_settings' => 'a:3:{s:14:\"td_primary_cat\";s:2:\"36\";...}'
+				// Get postmeta: 'td_post_theme_settings' => 'a:3:{s:14:\"td_primary_cat\";s:2:\"36\";...}'.
 				$postmeta = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
 
 				// If primary category key ('td_primary_cat') exists in postmeta array (unserialized).
@@ -296,7 +295,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 					$category = get_category( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] );
 
 					// If exists, set it to yoast.
-					if( ! is_wp_error( $category ) && is_object( $category ) && property_exists( $category, 'term_id' ) ) {
+					if ( ! is_wp_error( $category ) && is_object( $category ) && property_exists( $category, 'term_id' ) ) {
 
 						$this->logger->log( $this->log, 'Using postmeta value.' );
 
@@ -309,16 +308,14 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 				// If postmeta didn't work, then TagDiv's "Auto select primary category" will default to the first category.
 				$categories = wp_get_post_categories( $post_id );
 
-				if( is_array( $categories ) && ! empty( $categories[0] ) ) {
+				if ( is_array( $categories ) && ! empty( $categories[0] ) ) {
 
 					$this->logger->log( $this->log, 'Using first category.' );
 
 					return $set_yoast_primary_function( $post_id, $categories[0] );
 
 				} // first post category.
-
 			} // callback function.
-
 		); // loop.
 
 		wp_cache_flush();
@@ -348,5 +345,4 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 		return $source;
 	}
-
 }
