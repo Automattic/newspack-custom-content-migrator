@@ -202,7 +202,31 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			[ $this, 'cmd_dev_helper_get_consolidated_data_file' ],
 			[
 				'shortdesc' => 'Composes a custom data file for VillageMedia which contains all relevant XML and WP post data to update authorships. As opposed to feeding an XML file, this file can be run directly on Atomic (XML memory overflows).',
-				]
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'data-xml',
+						'description' => 'Path to original Village Media CMS XML data file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'additional-consolidated-users',
+						'description' => 'Optional. Path to PHP file which returns an array of additionally consolidated user display names.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'bylines-special-cases-php-file',
+						'description' => 'Optional. Path to PHP file which returns an array of specifically/manually split byline strings into individual author names.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+
+			]
 			);
 		WP_CLI::add_command(
 			'newspack-content-migrator village-cms-dev-helper-fix-consolidated-users',
@@ -767,9 +791,12 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// VillageMedia XML file.
-		$xml_file = $pos_args[0];
+		$xml_file = $assoc_args['data-xml'];
 		// Path to file output by cmd_dev_helper_get_consolidated_users.
-		$consolidated_user_display_names = include $pos_args[1];
+		$consolidated_user_display_names = [];
+		if ( isset( $pos_args['additional-consolidated-users'] ) ) {
+			$consolidated_user_display_names = include $pos_args['additional-consolidated-users'];
+		}
 
 		// You can provide some specific bylines and how they should be split in a "manual" fashion (for those completely irregular bylines).
 		$bylines_special_cases = [];
