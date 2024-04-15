@@ -241,14 +241,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'additional-consolidated-users-1',
-						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'additional-consolidated-users-2',
+						'name'        => 'additional-consolidated-users',
 						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
 						'optional'    => false,
 						'repeating'   => false,
@@ -1023,7 +1016,6 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 *		set byline users as GAs using CAP
 		 */
 		foreach ( $data as $key_row => $row ) {
-
 			WP_CLI::line( sprintf( '%d/%d post_ID %d', $key_row + 1, count( $data ), $row['post_id'] ) );
 
 			// Get fresh post_author (Embarcadero folks have been updating in the mean time).
@@ -1039,16 +1031,22 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				
 				// Unset all GAs from post.
 				$this->cap->unassign_all_guest_authors_from_post( $row['post_id'] );
-
+				
 				// Check if post_author needs to be updated.
 				$display_name = isset( $additional_consolidated_names[ $row['author_consolidated'] ] ) ? $additional_consolidated_names[ $row['author_consolidated'] ] : $row['author_consolidated'];
+				$display_name = isset( $additional_consolidated_names[ trim( $row['author_consolidated'] ) ] ) ? $additional_consolidated_names[ trim( $row['author_consolidated'] ) ] : $row['author_consolidated'];
+
+				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					// Get current author.
-					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
-					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
-					$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $display_name, $author_id_current, $author_name_current ) );
-					continue;
+					$this->logger->log( $log, sprintf( "author_node_is_author WARNING, post ID %d, author node to post_author '%s' WP_User not found, about to create", $row['post_id'], $display_name ) );
+					// Create WP_User.
+					$author_id = $this->create_wp_user_from_display_name( $display_name, $log );
+					if ( ! $author_id || is_wp_error( $author_id ) ) {
+						$this->logger->log( $log, sprintf( "author_node_is_author ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $display_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+						continue;
+					}
+					$this->logger->log( $log, sprintf( "author_node_is_author CREATED NEW USER, post ID %d, name '%s'", $row['post_id'], $display_name ) );
 				}
 				if ( $row['post_author'] != $author_id ) {
 					// Set wp_posts.post_author to <author> node user.
@@ -1080,15 +1078,19 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Get byline name -- just first element.
 				$byline_names = explode( ',', $row['byline_split_consolidated_csv'] );
 				$display_name = isset( $additional_consolidated_names[ $byline_names[0] ] ) ? $additional_consolidated_names[ $byline_names[0] ] : $byline_names[0];
-				
+				$display_name = isset( $additional_consolidated_names[ trim( $byline_names[0] ) ] ) ? $additional_consolidated_names[ trim( $byline_names[0] ) ] : $byline_names[0];
+
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					// Get current author.
-					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
-					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
-					$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $display_name, $author_id_current, $author_name_current ) );
-					continue;
+					$this->logger->log( $log, sprintf( "byline_one_author WARNING, post ID %d, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $display_name ) );
+					// Create WP_User.
+					$author_id = $this->create_wp_user_from_display_name( $display_name, $log );
+					if ( ! $author_id || is_wp_error( $author_id ) ) {
+						$this->logger->log( $log, sprintf( "byline_one_author ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $display_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+						continue;
+					}
+					$this->logger->log( $log, sprintf( "byline_one_author CREATED NEW USER, post ID %d, '%s'", $row['post_id'], $display_name ) );
 				}
 				if ( $row['post_author'] != $author_id ) {
 					// Set wp_posts.post_author to single byline user.
@@ -1117,15 +1119,19 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Get byline names.
 				$byline_names = explode( ',', $row['byline_split_consolidated_csv'] );
 				$display_name_first = isset( $additional_consolidated_names[ $byline_names[0] ] ) ? $additional_consolidated_names[ $byline_names[0] ] : $byline_names[0];
+				$display_name_first = isset( $additional_consolidated_names[ trim( $byline_names[0] ) ] ) ? $additional_consolidated_names[ trim( $byline_names[0] ) ] : $byline_names[0];
 
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name_first ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
-					// Get current author.
-					$author_id_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $row['post_id'] ) );
-					$author_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $author_id_current ) );
-					$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'. Current post author ID %d name '%s'", $row['post_id'], $display_name_first, $author_id_current, $author_name_current ) );
-					continue;
+					$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $display_name_first ) );
+					// Create WP_User.
+					$author_id = $this->create_wp_user_from_display_name( $display_name_first, $log );
+					if ( ! $author_id || is_wp_error( $author_id ) ) {
+						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $display_name_first, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+						continue;
+					}
+					$this->logger->log( $log, sprintf( "byline_multiple_authors CREATED NEW USER, post ID %d, '%s'", $row['post_id'], $display_name_first ) );
 				}
 				if ( $row['post_author'] != $author_id ) {
 					// Set wp_posts.post_author to first byline user.
@@ -1150,11 +1156,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					$byline_name = isset( $additional_consolidated_names[ $byline_name ] ) ? $additional_consolidated_names[ $byline_name ] : $byline_name;
 					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					if ( ! $author_id ) {
-						// Get current authors.
-						$authors_current = $this->cap->get_all_authors_for_post( $row['post_id'] );
-						$authors_current_names = array_map( fn( $author ) => $author->display_name, $authors_current );
-						$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, not found author name '%s'. Curent GAs '%s'", $row['post_id'], $byline_name, implode( ',', $authors_current_names ) ) );
-						continue;
+						$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d, one of GAs '%s' WP_User not found, about to create", $row['post_id'], $byline_name ) );
+						// Create WP_User.
+						$author_id = $this->create_wp_user_from_display_name( $byline_name, $log );
+						if ( ! $author_id || is_wp_error( $author_id ) ) {
+							$this->logger->log( $log, sprintf( "byline_multiple_authors ERROR, post ID %d, could not create_wp_user_from_display_name('%s'), err.msg.: %s", $row['post_id'], $byline_name, is_wp_error( $author_id ) ? $author_id->get_error_message() : 'n/a' ) );
+							continue;
+						}
+						$this->logger->log( $log, sprintf( "byline_multiple_authors CREATED NEW USER, post ID %d, '%s'", $row['post_id'], $byline_name ) );
 					}
 					$author = get_user_by( 'ID', $author_id );
 					$authors[] = $author;
@@ -1175,10 +1184,10 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		
 		// Arguments.
 		$xml_file = $assoc_args['data-xml'];
-		if ( empty( include( $assoc_args['additional-consolidated-users-1'] ) ) || empty( include( $assoc_args['additional-consolidated-users-2'] ) ) ) {
-			WP_CLI::error( 'Additional consolidated users files are incorrect or empty.' );
+		if ( empty( include( $assoc_args['additional-consolidated-users'] ) ) ) {
+			WP_CLI::error( 'Additional consolidated users file is incorrect or empty.' );
 		}
-		$consolidated_names = array_merge( include( $assoc_args['additional-consolidated-users-1'] ), include( $assoc_args['additional-consolidated-users-2'] ) );
+		$consolidated_names = include( $assoc_args['additional-consolidated-users'] );
 		$ignore_post_ids = explode( ',', $assoc_args['ignore-post-ids-csv'] );
 
 		// Read XML.
