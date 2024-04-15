@@ -73,6 +73,7 @@ PluginSetup::register_migrators(
 		Command\General\BlockTransformerCommand::class,
 		Command\General\PostDateMigrator::class,
 		Command\General\SimplyGuestAuthorNameMigrator::class,
+		Command\General\TagDivThemesPluginsMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
