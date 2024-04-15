@@ -7,6 +7,7 @@ use DOMDocument;
 use Exception;
 use NewspackCustomContentMigrator\Command\General\TaxonomyMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
@@ -1132,6 +1133,38 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'csv-path',
 						'description' => 'Path to the CSV file containing the categories that exist per site.',
+						'optional'    => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-users-on-comments',
+			[ $this, 'cmd_embarcadero_fix_users_on_comments' ],
+			[
+				'shortdesc' => 'Corrects user and comment associations for comments',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'comments-csv-path',
+						'description' => 'Path to the CSV file containing the comments.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'comments-starting-row',
+						'description' => 'Row number to start processing comments from.',
+						'optional'    => 'true',
+						'repeating'   => false,
+						'default'     => 0,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -3990,6 +4023,168 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create term %s: %s', $slug, $term->get_error_message() ), Logger::ERROR );
 			} else {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Created term %s', $slug ), Logger::SUCCESS );
+			}
+		}
+	}
+
+	/**
+	 * This script addresses a post launch issue that was discovered where the initial import incorrectly
+	 * assigned comments to posts based on assumptions made about the import CSVs. With this script, we
+	 * attempt to update in-place existing comments to the correct post, and delete any that weren't
+	 * originally related to a specific story/post.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_fix_users_on_comments( array $args, array $assoc_args ): void {
+		$comments_csv_path     = $assoc_args['comments-csv-path'];
+		$comments_starting_row = $assoc_args['comments-starting-row'];
+		$story_csv_path        = $assoc_args['story-csv-path'];
+
+		/* @var CSVFile $comments_csv */
+		$comments_csv = ( new FileImportFactory() )->get_file( $comments_csv_path )->set_start( $comments_starting_row );
+		/* @var CSVFile $story_csv */
+		$story_csv = ( new FileImportFactory() )->get_file( $story_csv_path );
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$post_ids_by_story_id       = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT meta_value, post_id FROM $wpdb->postmeta WHERE meta_key = %s",
+				self::EMBARCADERO_ORIGINAL_ID_META_KEY
+			),
+			OBJECT_K
+		);
+		$count_post_ids_by_story_id = count( $post_ids_by_story_id );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d post IDs by story ID.', $count_post_ids_by_story_id ), Logger::INFO );
+
+		$story_and_post_ids_by_topic_id = [];
+
+		foreach ( $story_csv->getIterator() as $row ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing Topic ID %d, Story ID %d', $row['topic_id'], $row['story_id'] ), Logger::INFO );
+			if ( ! array_key_exists( $row['topic_id'], $story_and_post_ids_by_topic_id ) ) {
+				$map = [
+					'story_id' => $row['story_id'],
+					'post_id'  => null,
+				];
+
+				if ( array_key_exists( $row['story_id'], $post_ids_by_story_id ) ) {
+					$map['post_id'] = $post_ids_by_story_id[ $row['story_id'] ]->post_id;
+				}
+
+				$story_and_post_ids_by_topic_id[ $row['topic_id'] ] = $map;
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Topic ID %d already exists in the map.', $row['topic_id'] ), Logger::ERROR );
+			}
+		}
+
+		$story_csv_path = str_replace( 'story.csv', 'story_1.csv', $story_csv_path );
+		$story_csv      = ( new FileImportFactory() )->get_file( $story_csv_path );
+
+		foreach ( $story_csv->getIterator() as $row ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing Topic ID %d, Story ID %d', $row['topic_id'], $row['story_id'] ), Logger::INFO );
+			if ( ! array_key_exists( $row['topic_id'], $story_and_post_ids_by_topic_id ) ) {
+				$map = [
+					'story_id' => $row['story_id'],
+					'post_id'  => null,
+				];
+
+				if ( array_key_exists( $row['story_id'], $post_ids_by_story_id ) ) {
+					$map['post_id'] = $post_ids_by_story_id[ $row['story_id'] ]->post_id;
+				}
+
+				$story_and_post_ids_by_topic_id[ $row['topic_id'] ] = $map;
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Topic ID %d already exists in the map.', $row['topic_id'] ), Logger::ERROR );
+			}
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need active handle to file, in order to write data necessary for QA.
+		$qa_csv                = fopen( 'qa.csv', 'w' );
+		$comments_csv_header   = $comments_csv->get_header();
+		$comments_csv_header[] = 'DB_post_ID';
+		$comments_csv_header[] = 'Corresponding_Story_ID';
+		fputcsv( $qa_csv, $comments_csv_header );
+		foreach ( $comments_csv->getIterator() as $row_number => $row ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing CSV Row # %d Comment ID %d Topic ID %d', $row_number, $row['comment_id'], $row['topic_id'] ), Logger::INFO );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$db_comment = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->comments c INNER JOIN $wpdb->commentmeta cm ON c.comment_ID = cm.comment_id WHERE cm.meta_key = %s AND cm.meta_value = %d",
+					self::EMBARCADERO_IMPORTED_COMMENT_META_KEY,
+					$row['comment_id']
+				)
+			);
+
+			if ( ! $db_comment ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find comment with ID %d in the database.', $row['comment_id'] ), Logger::ERROR );
+				continue;
+			}
+
+			$post_id = $story_and_post_ids_by_topic_id[ $row['topic_id'] ]['post_id'] ?? null;
+
+			if ( null === $post_id ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find post ID for Topic ID %d, deleting Comment ID %d', $row['topic_id'], $db_comment->comment_ID ), Logger::ERROR );
+				fputcsv(
+					$qa_csv,
+					array_merge(
+						$row,
+						[
+							$db_comment->comment_post_ID,
+							get_post_meta( $db_comment->comment_post_ID, self::EMBARCADERO_ORIGINAL_ID_META_KEY, true ),
+						]
+					)
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->delete(
+					$wpdb->commentmeta,
+					[
+						'comment_id' => $db_comment->comment_ID,
+					]
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->delete(
+					$wpdb->comments,
+					[
+						'comment_ID' => $db_comment->comment_ID,
+					]
+				);
+				continue;
+			}
+
+			$updates = [];
+
+			if ( $db_comment->comment_post_ID !== $post_id ) {
+				$updates['comment_post_ID'] = $post_id;
+			}
+
+			if ( $db_comment->comment_author !== $row['user_name'] ) {
+				$updates['comment_author'] = $row['user_name'];
+			}
+
+			$row_date = gmdate( 'Y-m-d H:i:s', $row['posted_epoch'] );
+			if ( $db_comment->comment_date !== $row_date ) {
+				$updates['comment_date'] = $row_date;
+			}
+
+			if ( ! empty( $updates ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updating Comment ID %d', $db_comment->comment_ID ), Logger::SUCCESS );
+				foreach ( $updates as $key => $value ) {
+					$this->logger->log( self::LOG_FILE, sprintf( '%s from %s to %s', $key, $db_comment->$key, $value ), Logger::INFO );
+				}
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update(
+					$wpdb->comments,
+					$updates,
+					[
+						'comment_ID' => $db_comment->comment_ID,
+					]
+				);
 			}
 		}
 	}
