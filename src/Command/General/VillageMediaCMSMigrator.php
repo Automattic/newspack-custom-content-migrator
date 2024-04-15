@@ -221,7 +221,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'additional-consolidated-users',
 						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
-						'optional'    => false,
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -243,7 +243,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'additional-consolidated-users',
 						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
-						'optional'    => false,
+						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
