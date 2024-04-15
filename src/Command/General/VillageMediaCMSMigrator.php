@@ -201,7 +201,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			'newspack-content-migrator village-cms-dev-helper-get-consolidated-data-file',
 			[ $this, 'cmd_dev_helper_get_consolidated_data_file' ],
 			[
-				'shortdesc' => 'Composes a usable data file for VillageMedia, containing relevant XML and WP post data, which can be run directly on Atomic (XML memory overflows).',
+				'shortdesc' => 'Composes a custom data file for VillageMedia which contains all relevant XML and WP post data to update authorships. As opposed to feeding an XML file, this file can be run directly on Atomic (XML memory overflows).',
 				]
 			);
 		WP_CLI::add_command(
@@ -213,14 +213,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'data-csv',
-						'description' => 'Path to consolidated data CSV file.',
+						'description' => 'Path to consolidated data CSV file created by cmd_dev_helper_get_consolidated_data_file.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'additional-consolidated-users',
-						'description' => 'Path to PHP file which returns an array of additionally consolidated user display names.',
+						'description' => 'Optional. Path to PHP file which returns an array of additionally consolidated user display names.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -999,7 +999,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		 * current_ga_ids_csv@param [type] $pos_args
 		 */
 		$data = $this->read_csv_file( $assoc_args['data-csv'] );
-		$additional_consolidated_names = $assoc_args['additional-consolidated-users'] ? include $assoc_args['additional-consolidated-users'] : null;
+		$additional_consolidated_names = $assoc_args['additional-consolidated-users'] ? include $assoc_args['additional-consolidated-users'] : [];
 
 		/**
 		 * If there is no byline 
@@ -1196,20 +1196,22 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		
 		// Arguments.
 		$xml_file = $assoc_args['data-xml'];
-		if ( empty( include( $assoc_args['additional-consolidated-users'] ) ) ) {
-			WP_CLI::error( 'Additional consolidated users file is incorrect or empty.' );
-		}
-		$consolidated_names = include( $assoc_args['additional-consolidated-users'] );
-		$ignore_post_ids = explode( ',', $assoc_args['ignore-post-ids-csv'] );
+		$additional_consolidated_names = isset( $assoc_args['additional-consolidated-users'] ) ? include $assoc_args['additional-consolidated-users'] : [];
+		$ignore_post_ids = isset( $assoc_args['ignore-post-ids-csv'] ) ? explode( ',', $assoc_args['ignore-post-ids-csv'] ) : [];
 
-		// Read XML.
+		// Loop through content nodes and compose data.
+		$data = [];
 		$dom = new DOMDocument();
 		$dom->loadXML( file_get_contents( $xml_file ), LIBXML_PARSEHUGE ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		$contents = $dom->getElementsByTagName( 'content' );
+		$not_found_original_article_id = [];
 		foreach ( $contents as $key_content => $content ) {
-			// Get id, author node and attributes.
+			WP_CLI::line( sprintf( '%d/%d', $key_content + 1, $contents->length ) );
+
+			// Get original id, author node and byline attribute.
 			$original_article_id = null;
 			$byline              = null;
+			$byline_attribute    = null;
 			$author_node         = null;
 			foreach ( $content->childNodes as $node ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 				if ( '#text' === $node->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
@@ -1222,87 +1224,122 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 					case 'author':
 						$author_node = $node;
 						break;
+					case 'byline':
+						$byline_node = $node; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+						break;
 					case 'attributes':
 						$attributes = json_decode( $node->nodeValue, true ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 						if ( isset( $attributes['byline'] ) && ! empty( $attributes['byline'] ) ) {
-							$byline = $attributes['byline'];
+							$byline_attribute = $attributes['byline'];
 						}
 						break;
 				}
 			}
-
-			// Get post ID.
-			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
-			if ( in_array( $post_id, $ignore_post_ids ) ) {
-				$this->logger->log( $log, sprintf( 'IGNORING and SKIPPING post_id %d.', $post_id ), 'line', false );
+			if ( ! $original_article_id ) {
+				WP_CLI::error( sprintf( 'ERROR original_article_id not found in key_content %d', $key_content ) );
 				continue;
 			}
-			if ( ! $post_id ) {
-				$this->logger->log( $log, sprintf( 'ERROR Post not found for original_article_id %s', $original_article_id ), 'line', false );
+			if ( ! $byline && ! $author_node ) {
+				WP_CLI::error( sprintf( 'ERROR neither byline nor author_node found in key_content %d', $key_content ) );
 				continue;
 			}
-			// Post data.
-			$post_author_current = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
-			$post_author_display_name_current = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $post_author_current ) );
 
-			// Get author node display name.
+			// Get author data.
 			$author_data = $this->get_author_data_from_author_node( $author_node );
-			$author_display_name = $author_data['first_name'] . ' ' . $author_data['last_name'];
-			$author_display_name_consolidated = isset( $consolidated_names[ $author_display_name ] ) ? $consolidated_names[ $author_display_name ] : $author_display_name;
-			// Get byline names.
-			$byline_split = $byline ? $this->split_byline( $byline ) : [];
-			$byline_split_consolidated = [];
-			foreach ( $byline_split as $byline_split_name ) {
-				$byline_split_consolidated[] = isset( $consolidated_names[ $byline_split_name ] ) ? $consolidated_names[ $byline_split_name ] : $byline_split_name;
-			}	
+			$author_display_name = $author_data['first_name'] . ' '. $author_data['last_name'];
+			$author_display_name_consolidated = isset( $additional_consolidated_names[ $author_display_name ] ) ? $additional_consolidated_names[ $author_display_name ] : $author_display_name;
+			$author_display_name_consolidated = isset( $additional_consolidated_names[ trim( $author_display_name ) ] ) ? $additional_consolidated_names[ trim( $author_display_name ) ] : $author_display_name;
+			
+			// Get bylines split into individual author names.
+			$byline_names_split = [];
+			// There's a byline attribute.
+			if ( $byline_attribute ) {
+				// Get one or multiple author names from byline.
+				$byline_names_split = $this->split_byline( $byline_attribute );
+			} elseif ( $byline_node ) {
+				// Get byline node author name.
+				$byline_node_data = $this->get_author_data_from_author_node( $byline_node );
+				$byline_node_display_name = $byline_node_data['first_name'] . ' '. $byline_node_data['last_name'];
+				$byline_names_split = [ $byline_node_display_name ];
+			}
+			
+			// Get bylines' consolidated names.
+			$byline_names_consolidated = [];
+			foreach ( $byline_names_split as $byline_name ) {
+				$byline_name_consolidated = isset( $additional_consolidated_names[ $byline_name ] ) ? $additional_consolidated_names[ $byline_name ] : $byline_name;
+				$byline_name_consolidated = isset( $additional_consolidated_names[ trim( $byline_name ) ] ) ? $additional_consolidated_names[ trim( $byline_name ) ] : $byline_name;
+				$byline_names_consolidated[] = $byline_name_consolidated;
+			}
 
+
+			// Get post data.
+			$post_id = $wpdb->get_var( $wpdb->prepare( "SELECT wpm.post_id FROM {$wpdb->postmeta} wpm JOIN {$wpdb->posts} wp ON wp.ID = wpm.post_id WHERE wpm.meta_key = 'original_article_id' AND wpm.meta_value = %s AND wp.post_type = 'post'", $original_article_id ) );
+			if ( ! $post_id ) {
+				$this->logger->log( $log, sprintf( 'ERROR Post not found for original_article_id %s', $original_article_id ), $this->logger::ERROR, false );
+				continue;
+			}
+			$this->logger->log( $log, sprintf( 'Found post ID %d', $post_id ) );
+			
+			// Get post author data.
+			$post_author_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_author FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			$post_author_display_name = $wpdb->get_var( $wpdb->prepare( "SELECT display_name FROM {$wpdb->users} WHERE ID = %d", $post_author_id ) );
+
+			// Get post CAP taxonomy data.
+			$cap_taxonomy_results = $wpdb->get_results( $wpdb->prepare( "select wtr.object_id, wtr.term_taxonomy_id from $wpdb->term_relationships wtr join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author' where wtr.object_id = %s;", $post_id ), ARRAY_A );
+			$cap_authors = $this->cap->get_all_authors_for_post( $post_id );
+			$cap_authors_names = array_map( fn( $cap_author ) => $cap_author->display_name, $cap_authors );
+
+
+			/** 
+			 * Validation
+			 */
+			
+			// If there is no byline, author node is used.
 			if ( 0 === count( $byline_split_consolidated ) ) {
 				
-				// Check if wp_posts.post_author is set to <author>.
-				if ( $author_display_name_consolidated != $post_author_display_name_current) {
-					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d, ERROR post_author_display_name_current '%s' != byline_split_consolidated[0] '%s'", $post_id, $post_author_display_name_current, $byline_split_consolidated[0] ), 'line', false );
+				// Validate that wp_posts.post_author is set to <author>.
+				if ( $author_display_name_consolidated != $post_author_display_name ) {
+					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d original_article_id %s, ERROR post_author_display_name '%s' != author_display_name_consolidated '%s'", $post_id, $original_article_id, $post_author_display_name, $author_display_name_consolidated ), 'line', false );
 					continue;
 				}
-
-				// Check that there are no GAs assigned to post.
-				$results = $wpdb->get_results( $wpdb->prepare( "select wtr.object_id, wtr.term_taxonomy_id from $wpdb->term_relationships wtr join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author' where wtr.object_id = %s;", $post_id ), ARRAY_A );
-				if ( ! empty( $results ) ) {
-					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d, ERROR some GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, json_encode( $results ) ), 'line', false );
+				
+				// Validate that there are no GAs assigned to post.
+				if ( ! empty( $cap_taxonomy_results ) || ! empty( $cap_authors ) ) {
+					$this->logger->log( $log, sprintf( "byline_one_author, post ID %d original_article_id %s, ERROR some CAP GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, $original_article_id, json_encode( $cap_taxonomy_results ) ), 'line', false );
 					continue;
 				}
 				
 			} elseif ( 1 === count( $byline_split_consolidated ) ) {
+				// There's just one byline author.
 				
-				// Check if wp_posts.post_author is set to byline single author.
-				if ( $post_author_display_name_current != $byline_split_consolidated[0] ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR post_author_display_name_current '%s' != byline_split_consolidated[0] '%s'", $post_id, $post_author_display_name_current, $byline_split_consolidated[0] ), 'line', false );
+				// Validate that wp_posts.post_author is set to byline single author.
+				if ( $byline_split_consolidated[0] != $post_author_display_name ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR post_author_display_name '%s' != byline_split_consolidated[0] '%s'", $post_id, $original_article_id, $post_author_display_name, $byline_split_consolidated[0] ), 'line', false );
 					continue;
 				}
-
-				// Check that there are no GAs assigned to post.
-				$results = $wpdb->get_results( $wpdb->prepare( "select wtr.object_id, wtr.term_taxonomy_id from $wpdb->term_relationships wtr join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author' where wtr.object_id = %s;", $post_id ), ARRAY_A );
-				if ( ! empty( $results ) ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR some GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, json_encode( $results ) ), 'line', false );
+	
+				// Validate that there are no GAs assigned to post.
+				if ( ! empty( $cap_taxonomy_results ) || ! empty( $cap_authors ) ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR some GAs found on post object_id,wtr.term_taxonomy_id: '%s'", $post_id, $original_article_id, json_encode( $cap_taxonomy_results ) ), 'line', false );
 					continue;
 				}
 				
 			} elseif ( count( $byline_split_consolidated ) > 1 ) {
-
-				// Check if wp_posts.post_author is set to first byline.
-				if ( $post_author_display_name_current != $byline_split_consolidated[0] ) {
-					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR post_author_display_name_current '%s' != byline_split_consolidated[0] '%s'", $post_id, $post_author_display_name_current, $byline_split_consolidated[0] ), 'line', false );
+				// If there are multiple byline authors.
+	
+				// Validate that wp_posts.post_author is set to first byline.
+				if ( $byline_split_consolidated[0] != $post_author_display_name ) {
+					$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR post_author_display_name '%s' != byline_split_consolidated[0] '%s'", $post_id, $original_article_id, $post_author_display_name, $byline_split_consolidated[0] ), 'line', false );
 					continue;
 				}
-
-				// Check if GAs are assigned to post.
-				$authors = $this->cap->get_all_authors_for_post(238248);
-				$authors_names = array_map( fn( $author ) => $author->display_name, $authors );
+	
+				// Validate that GAs are assigned to post.
 				foreach ( $authors as $key_author => $author ) {
 					if ( $byline_split_consolidated[ $key_author ] != $author->display_name ) {
-						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_split '%s', byline_split_consolidated '%s', current_author_names '%s'", $post_id, $key_author, $byline_split_consolidated[ $key_author ], $author->display_name, implode( ',', $byline_split ), implode( ',', $byline_split_consolidated ), implode( ',', $authors_names ) ), 'line', false );
+						$this->logger->log( $log, sprintf( "byline_multiple_authors, post ID %d original_article_id %s, ERROR wrong CAP author key %d byline_name '%s' != CAP author name '%s', byline_split '%s', byline_split_consolidated '%s', current_author_names '%s'", $post_id, $original_article_id, $key_author, $byline_split_consolidated[ $key_author ], $author->display_name, implode( ',', $byline_split ), implode( ',', $byline_split_consolidated ), implode( ',', $authors_names ) ), 'line', false );
 					}
 				}
-
+	
 			}
 
 		}
