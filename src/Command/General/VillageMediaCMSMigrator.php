@@ -1039,6 +1039,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
+					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", trim( $display_name ) ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				}
+				if ( ! $author_id ) {
 					$this->logger->log( $log, sprintf( "author_node_is_author WARNING, post ID %d original_article_id %s, author node to post_author '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $display_name ) );
 					// Create WP_User.
 					$author_id = $this->create_wp_user_from_display_name( trim( $display_name ), $log );
@@ -1083,6 +1086,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
+					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", trim( $display_name ) ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				}
+				if ( ! $author_id ) {
 					$this->logger->log( $log, sprintf( "byline_one_author WARNING, post ID %d original_article_id %s, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $display_name ) );
 					// Create WP_User.
 					$author_id = $this->create_wp_user_from_display_name( trim( $display_name ), $log );
@@ -1124,6 +1130,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				// Check if post_author needs to be updated.
 				$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $display_name_first ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				if ( ! $author_id ) {
+					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", trim( $display_name_first ) ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+				}
+				if ( ! $author_id ) {
 					$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d original_article_id %s, byline single user to post_author '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $display_name_first ) );
 					// Create WP_User.
 					$author_id = $this->create_wp_user_from_display_name( trim( $display_name_first ), $log );
@@ -1155,6 +1164,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 				foreach ( $byline_names as $byline_name ) {
 					$byline_name = isset( $additional_consolidated_names[ $byline_name ] ) ? $additional_consolidated_names[ $byline_name ] : $byline_name;
 					$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", $byline_name ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+					if ( ! $author_id ) {
+						$author_id = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->users} WHERE display_name = %s", trim( $byline_name ) ) ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
+					}
 					if ( ! $author_id ) {
 						$this->logger->log( $log, sprintf( "byline_multiple_authors WARNING, post ID %d original_article_id %s, one of GAs '%s' WP_User not found, about to create", $row['post_id'], $row['original_article_id'], $byline_name ) );
 						// Create WP_User.
