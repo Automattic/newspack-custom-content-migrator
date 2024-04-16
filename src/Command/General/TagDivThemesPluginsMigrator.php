@@ -299,6 +299,11 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 						$this->logger->log( $this->log, 'Using postmeta value.' );
 
+						// Before setting yoast postmeta, add category to post.
+						// note: wp will skip if category/post relationship alredy exists.
+						// append: true.
+						wp_set_post_categories( $post_id, $category->term_id, true );
+
 						return $set_yoast_primary_function( $post_id, $category->term_id );
 
 					} // if category exists.
