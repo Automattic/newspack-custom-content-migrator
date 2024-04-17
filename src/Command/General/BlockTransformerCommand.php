@@ -6,15 +6,16 @@ use NewspackContentConverter\Config;
 use NewspackContentConverter\Installer;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockTransformer;
-use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
+use WP_CLI\ExitException;
 
 class BlockTransformerCommand implements InterfaceCommand {
 
-	private Posts $posts_logic;
+	private Logger $logger;
 
 	private function __construct() {
-		$this->posts_logic = new Posts();
+		$this->logger = new Logger();
 	}
 
 	public static function get_instance(): self {
@@ -111,6 +112,148 @@ class BlockTransformerCommand implements InterfaceCommand {
 		);
 	}
 
+	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
+		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
+		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
+			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
+		}
+
+		$post_range = $this->get_post_id_range( $assoc_args );
+
+		$post_ids_format = implode( ', ', array_fill( 0, count( $post_range ), '%d' ) );
+		global $wpdb;
+
+		// Nudge the posts in the range that might need it.
+		$sql = $wpdb->prepare(
+			"UPDATE {$wpdb->posts} SET post_content = CONCAT(%s, post_content)
+    				WHERE ID IN ($post_ids_format)
+					AND post_content LIKE '<!-- %'",
+			PHP_EOL,
+			...$post_range
+		);
+
+		$posts_nudged = $wpdb->query( $sql );
+		$high         = max( $post_range );
+		$low          = min( $post_range );
+
+		WP_CLI::log( sprintf( 'Nudged %d posts between (and including) %d and %d', $posts_nudged, $low, $high ) );
+
+		if ( $also_kick_ncc ) {
+			WP_CLI::log( PHP_EOL );
+			$this->reset_the_ncc_for_range( $low, $high );
+		}
+	}
+
+
+	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
+		$logfile = sprintf( '%s-%s.log', __FUNCTION__, date( 'Y-m-d-H-i-s' ) );
+
+		$block_transformer = GutenbergBlockTransformer::get_instance();
+
+		$post_id_range         = $this->get_post_id_range( $assoc_args );
+		$post_ids_format = implode( ', ', array_fill( 0, count( $post_id_range ), '%d' ) );
+
+		global $wpdb;
+		$sql = $wpdb->prepare(
+			"SELECT ID, post_content FROM {$wpdb->posts}
+    				WHERE ID IN ($post_ids_format)
+					AND post_content LIKE %s",
+			[ ...$post_id_range, '%' . $wpdb->esc_like( '[BLOCK-TRANSFORMER:') . '%' ]
+		);
+		$posts_to_decode = $wpdb->get_results( $sql );
+
+		$decoded_posts_counter = 0;
+		foreach ( $posts_to_decode as $post ) {
+			$content = $block_transformer->decode_post_content( $post->post_content );
+			if ( $content === $post->post_content ) {
+				// No changes - no more to do here.
+				continue;
+			}
+
+			++$decoded_posts_counter;
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $content,
+				]
+			);
+			$this->logger->log( $logfile, sprintf( 'Decoded blocks in %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
+		}
+
+		$high = max( $post_id_range );
+		$low  = min( $post_id_range );
+		$this->logger->log( $logfile, sprintf( '%d posts between (and including) %d and %d needed decoding', $decoded_posts_counter, $low, $high ), Logger::SUCCESS );
+		wp_cache_flush();
+	}
+
+	/**
+	 * Obfuscate blocks in posts and optionally reset NCC to only work on the posts in the range.
+	 *
+	 * @param array $pos_args The positional arguments passed to the command.
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 *
+	 * @return void
+	 * @throws ExitException
+	 */
+	public function cmd_blocks_encode( array $pos_args, array $assoc_args ): void {
+		$logfile = sprintf( '%s-%s.log', __FUNCTION__, date( 'Y-m-d-H-i-s' ) );
+
+		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
+		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
+			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
+		}
+
+		$block_transformer = GutenbergBlockTransformer::get_instance();
+
+		$post_id_range         = $this->get_post_id_range( $assoc_args );
+		$post_ids_format = implode( ', ', array_fill( 0, count( $post_id_range ), '%d' ) );
+
+		global $wpdb;
+		$sql = $wpdb->prepare(
+			"SELECT ID, post_content FROM {$wpdb->posts}
+    				WHERE ID IN ($post_ids_format)
+					AND post_content LIKE %s",
+			[ ...$post_id_range, $wpdb->esc_like( '<!-- ') . '%' ]
+		);
+		$posts_to_encode = $wpdb->get_results( $sql );
+
+		$encoded_posts_counter = 0;
+		foreach ( $posts_to_encode as $post ) {
+			$content = $block_transformer->encode_post_content( $post->post_content );
+			if ( $content === $post->post_content ) {
+				// No changes - no more to do here.
+				continue;
+			}
+			++$encoded_posts_counter;
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $content,
+				]
+			);
+			$this->logger->log( $logfile, sprintf('Encoded blocks in %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
+		}
+
+		$high = max( $post_id_range );
+		$low  = min( $post_id_range );
+		$this->logger->log( $logfile, sprintf( '%d posts between (and including) %d and %d needed encoding', $encoded_posts_counter, $low, $high ), Logger::SUCCESS );
+		$this->logger->log( $logfile, sprintf( 'To decode the blocks AFTER running the NCC, run this:%s wp newspack-content-migrator transform-blocks-decode --min-post-id=%d --max-post-id=%d', PHP_EOL, $low, $high ), Logger::INFO );
+
+		if ( $also_kick_ncc ) {
+			WP_CLI::log( PHP_EOL );
+			$this->reset_the_ncc_for_range( $low, $high );
+		}
+		wp_cache_flush();
+	}
+
+
+	/**
+	 * Get posts within the range specified in the arguments for the commands in this class.
+	 *
+	 * @param array $assoc_args The associative arguments passed to the command.
+	 *
+	 * @return array of post IDs.
+	 */
 	private function get_post_id_range( array $assoc_args ): array {
 		$post_types = [ 'post' ];
 		if ( ! empty( $assoc_args['post-types'] ) ) {
@@ -147,97 +290,16 @@ class BlockTransformerCommand implements InterfaceCommand {
 		return $post_range;
 	}
 
-	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
-		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
-		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
-			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
-		}
-
-		$post_range = $this->get_post_id_range( $assoc_args );
-
-		$post_ids_format = implode( ', ', array_fill( 0, count( $post_range ), '%d' ) );
-		global $wpdb;
-
-		// Nudge the posts in the range that might need it.
-		$sql = $wpdb->prepare(
-			"UPDATE {$wpdb->posts} SET post_content = CONCAT(%s, post_content)
-    				WHERE ID IN ($post_ids_format)
-					AND post_content LIKE '<!-- %'",
-			PHP_EOL,
-			...$post_range
-		);
-
-		$posts_nudged = $wpdb->query( $sql );
-		$high         = max( $post_range );
-		$low          = min( $post_range );
-
-		WP_CLI::log( sprintf( 'Nudged %d posts between (and including) %d and %d', $posts_nudged, $low, $high ) );
-
-		if ( $also_kick_ncc ) {
-			WP_CLI::log( PHP_EOL );
-			$this->reset_the_ncc_for_range( $low, $high );
-		}
-	}
-
-
-	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
-		$all_posts         = $this->get_all_wp_posts( [ 'publish' ], $assoc_args );
-		$block_transformer = GutenbergBlockTransformer::get_instance();
-
-		foreach ( $all_posts as $post ) {
-			$content = $block_transformer->decode_post_content( $post->post_content );
-			if ( $content === $post->post_content ) {
-				// No changes - no more to do here.
-				continue;
-			}
-
-			wp_update_post(
-				[
-					'ID'           => $post->ID,
-					'post_content' => $content,
-				]
-			);
-			WP_CLI::log( sprintf( 'Decoded blocks in %s', get_permalink( $post->ID ) ) );
-		}
-	}
-
-	public function cmd_blocks_encode( array $pos_args, array $assoc_args ): void {
-		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
-		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
-			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
-		}
-
-		$block_transformer = GutenbergBlockTransformer::get_instance();
-
-		$post_id_range         = $this->get_post_id_range( $assoc_args );
-		$encoded_posts_counter = 0;
-		foreach ( $post_id_range as $post_id ) {
-			$post    = get_post( $post_id );
-			$content = $block_transformer->encode_post_content( $post->post_content );
-			if ( $content === $post->post_content ) {
-				// No changes - no more to do here.
-				continue;
-			}
-			++$encoded_posts_counter;
-			wp_update_post(
-				[
-					'ID'           => $post->ID,
-					'post_content' => $content,
-				]
-			);
-			WP_CLI::log( sprintf( 'Encoded blocks in %s', get_permalink( $post->ID ) ) );
-		}
-
-		$high = max( $post_id_range );
-		$low  = min( $post_id_range );
-		WP_CLI::log( sprintf( '%d posts between (and including) %d and %d needed encoding', $encoded_posts_counter, $low, $high ) );
-
-		if ( $also_kick_ncc ) {
-			WP_CLI::log( PHP_EOL );
-			$this->reset_the_ncc_for_range( $low, $high );
-		}
-	}
-
+	/**
+	 * Reset the NCC to only work on a specific range of posts.
+	 *
+	 * Note that this is rather destructive because it will blow away the "backup" content for posts.
+	 *
+	 * @param int $low The lowest post ID to work on.
+	 * @param int $high The highest post ID to work on.
+	 *
+	 * @throws ExitException
+	 */
 	private function reset_the_ncc_for_range( int $low, int $high ): void {
 		if ( ! $this->is_ncc_installed() ) {
 			WP_CLI::error( "NCC is not active. It's needed to run the reset_the_ncc_for_range function." );
@@ -261,39 +323,13 @@ class BlockTransformerCommand implements InterfaceCommand {
 		WP_CLI::log( sprintf( 'Go to %s and run the NCC while you can remember the range.', admin_url( 'admin.php?page=newspack-content-converter' ) ) );
 	}
 
+	/**
+	 * Is NNC installed and active?
+	 *
+	 * @return bool true if NCC is installed and active.
+	 */
 	private function is_ncc_installed(): bool {
 		return is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' );
 	}
 
-	private function get_all_wp_posts( array $post_statuses, array $assoc_args = [], bool $log_progress = true ): iterable {
-		if ( ! empty( $assoc_args['post-id'] ) ) {
-			$all_ids = [ $assoc_args['post-id'] ];
-		} elseif ( ! empty( $assoc_args['min-post-id'] ) || ! empty( $assoc_args['max-post-id'] ) ) {
-			$low     = $assoc_args['min-post-id'] ?? 0;
-			$high    = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
-			$all_ids = $this->posts_logic->get_post_ids_in_range( $low, $high, [ 'post' ], $post_statuses );
-		} else {
-			$all_ids = $this->posts_logic->get_all_posts_ids( 'post', $post_statuses );
-		}
-		if ( ! empty( $assoc_args['num-items'] ) ) {
-			$all_ids = array_slice( $all_ids, 0, $assoc_args['num-items'] );
-		}
-
-		$total_posts = count( $all_ids );
-		$home_url    = home_url();
-		$counter     = 0;
-		if ( $log_progress ) {
-			WP_CLI::log( sprintf( 'Processing %d posts', count( $all_ids ) ) );
-		}
-
-		foreach ( $all_ids as $post_id ) {
-			$post = get_post( $post_id );
-			if ( $post instanceof \WP_Post ) {
-				if ( $log_progress ) {
-					WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++$counter, $total_posts, "${home_url}?p=${post_id}" ) );
-				}
-				yield $post;
-			}
-		}
-	}
 }
