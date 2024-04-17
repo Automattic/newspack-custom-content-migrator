@@ -2,6 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use NewspackContentConverter\Config;
+use NewspackContentConverter\Installer;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockTransformer;
 use NewspackCustomContentMigrator\Logic\Posts;
@@ -30,7 +32,34 @@ class BlockTransformerCommand implements InterfaceCommand {
 	 */
 	public function register_commands(): void {
 		$generic_args = [
-			'synopsis' => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--min-post-id=<post-id>] [--max-post-id=<post-id>]',
+			'post-id'     => [
+				'type'        => 'assoc',
+				'name'        => 'post-id',
+				'description' => 'The ID of the post to process.',
+				'optional'    => true,
+				'repeating'   => false,
+			],
+			'num-items'   => [
+				'type'        => 'assoc',
+				'name'        => 'num-items',
+				'description' => 'The number of posts to process.',
+				'optional'    => true,
+				'repeating'   => false,
+			],
+			'min-post-id' => [
+				'type'        => 'assoc',
+				'name'        => 'min-post-id',
+				'description' => 'The minimum post ID to process.',
+				'optional'    => true,
+				'repeating'   => false,
+			],
+			'max-post-id' => [
+				'type'        => 'assoc',
+				'name'        => 'max-post-id',
+				'description' => 'The maximum post ID to process.',
+				'optional'    => true,
+				'repeating'   => false,
+			],
 		];
 
 		WP_CLI::add_command(
@@ -38,7 +67,9 @@ class BlockTransformerCommand implements InterfaceCommand {
 			[ $this, 'cmd_blocks_encode' ],
 			[
 				'shortdesc' => '"Obfuscate" blocks in posts by encoding them as base64.',
-				...$generic_args,
+				'synopsis'  => [
+					...$generic_args,
+				]
 			]
 		);
 		WP_CLI::add_command(
@@ -46,9 +77,124 @@ class BlockTransformerCommand implements InterfaceCommand {
 			[ $this, 'cmd_blocks_decode' ],
 			[
 				'shortdesc' => '"Un-obfuscate" blocks in posts by decoding them.',
-				...$generic_args,
+				'synopsis'  => [
+					...$generic_args,
+				]
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator transform-blocks-nudge',
+			[ $this, 'cmd_blocks_nudge' ],
+			[
+				'shortdesc' => '"Nudge" posts so NCC picks them up',
+				'synopsis'  => [
+					...$generic_args,
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-types',
+						'description' => 'Comma-separated list of post types to process. Default is "post".',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'reset-ncc-too',
+						'description' => 'Pass this flag to reset NCC to only work on the post range passed to this command.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+	}
+
+	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
+		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
+		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
+			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
+		}
+
+		$post_types = [ 'post' ];
+		if ( ! empty( $assoc_args['post-types'] ) ) {
+			$post_types = explode( ',', $assoc_args['post-types'] );
+		}
+		global $wpdb;
+
+		if ( ! ( $assoc_args['post-id'] ?? false ) ) {
+			$num_items   = $assoc_args['num-items'] ?? PHP_INT_MAX;
+			$min_post_id = $assoc_args['min-post-id'] ?? 0;
+			$max_post_id = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
+
+			$post_types_format = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
+
+			$post_range = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT ID FROM $wpdb->posts 
+          					WHERE post_type IN ($post_types_format) 
+          					  AND post_status = 'publish'
+          					  AND ID >= %d
+          					  AND ID <= %d
+                        ORDER BY ID DESC 
+                        LIMIT %d",
+					implode( ",", $post_types ),
+					$min_post_id,
+					$max_post_id,
+					$num_items,
+				)
+			);
+		} else {
+			$post_range = [ $assoc_args['post-id'] ];
+		}
+
+		$post_ids_format = implode( ', ', array_fill( 0, count( $post_range ), '%d' ) );
+
+		// Nudge the posts in the range that might need it.
+		$sql = $wpdb->prepare(
+			"UPDATE {$wpdb->posts} SET post_content = CONCAT(%s, post_content)
+    				WHERE ID IN ($post_ids_format)
+					AND post_content LIKE '<!-- %'",
+			PHP_EOL,
+			...$post_range
+		);
+
+		$posts_nudged = $wpdb->query( $sql );
+		$high         = max( $post_range );
+		$low          = min( $post_range );
+
+		WP_CLI::log( sprintf( 'Nudged %d posts between (and including) %d and %d', $posts_nudged, $low, $high ) );
+
+		if ( $also_kick_ncc ) {
+			WP_CLI::log( PHP_EOL );
+			$this->reset_the_ncc_for_range( $low, $high );
+		}
+	}
+
+	private function reset_the_ncc_for_range( int $low, int $high ): void {
+		if ( ! $this->is_ncc_installed() ) {
+			WP_CLI::error( "NCC is not active. It's needed to run the reset_the_ncc_for_range function." );
+		}
+
+		Installer::uninstall_plugin( true );
+		$ncc_table_name = Config::get_instance()->get( 'table_name' );
+		// This is more than a little unholy, but it will trick the NCC to only work on a specific range of posts.
+		add_filter(
+			'query',
+			function ( $query ) use ( $ncc_table_name, $low, $high ) {
+				if ( ! str_starts_with( $query, "INSERT INTO $ncc_table_name" ) ) {
+					return $query;
+				}
+
+				return str_replace( ';', sprintf( ' AND ID BETWEEN %d AND %d;', $low, $high ), $query );
+			}
+		);
+		Installer::install_plugin();
+		WP_CLI::log( sprintf( 'NCC was reset to only work on posts between (and including) %d and %d', $low, $high ) );
+		WP_CLI::log( sprintf( 'Go to %s and run the NCC while you can remember the range.', admin_url( 'admin.php?page=newspack-content-converter' ) ) );
+	}
+
+	private function is_ncc_installed(): bool {
+		return is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' );
 	}
 
 	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
@@ -117,10 +263,11 @@ class BlockTransformerCommand implements InterfaceCommand {
 			$post = get_post( $post_id );
 			if ( $post instanceof \WP_Post ) {
 				if ( $log_progress ) {
-					WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++ $counter, $total_posts, "${home_url}?p=${post_id}" ) );
+					WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++$counter, $total_posts, "${home_url}?p=${post_id}" ) );
 				}
 				yield $post;
 			}
 		}
 	}
+
 }
