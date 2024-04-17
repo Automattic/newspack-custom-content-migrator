@@ -11,7 +11,6 @@ use WP_CLI;
 
 class BlockTransformerCommand implements InterfaceCommand {
 
-
 	private Posts $posts_logic;
 
 	private function __construct() {
@@ -60,6 +59,21 @@ class BlockTransformerCommand implements InterfaceCommand {
 				'optional'    => true,
 				'repeating'   => false,
 			],
+			[
+				'type'        => 'assoc',
+				'name'        => 'post-types',
+				'description' => 'Comma-separated list of post types to process. Default is "post".',
+				'optional'    => true,
+				'repeating'   => false,
+			],
+		];
+
+		$reset_flag = [
+			'type'        => 'flag',
+			'name'        => 'reset-ncc-too',
+			'description' => 'Pass this flag to reset NCC to only work on the post range passed to this command.',
+			'optional'    => true,
+			'repeating'   => false,
 		];
 
 		WP_CLI::add_command(
@@ -69,7 +83,8 @@ class BlockTransformerCommand implements InterfaceCommand {
 				'shortdesc' => '"Obfuscate" blocks in posts by encoding them as base64.',
 				'synopsis'  => [
 					...$generic_args,
-				]
+					$reset_flag,
+				],
 			]
 		);
 		WP_CLI::add_command(
@@ -79,7 +94,7 @@ class BlockTransformerCommand implements InterfaceCommand {
 				'shortdesc' => '"Un-obfuscate" blocks in posts by decoding them.',
 				'synopsis'  => [
 					...$generic_args,
-				]
+				],
 			]
 		);
 
@@ -90,31 +105,13 @@ class BlockTransformerCommand implements InterfaceCommand {
 				'shortdesc' => '"Nudge" posts so NCC picks them up',
 				'synopsis'  => [
 					...$generic_args,
-					[
-						'type'        => 'assoc',
-						'name'        => 'post-types',
-						'description' => 'Comma-separated list of post types to process. Default is "post".',
-						'optional'    => true,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'flag',
-						'name'        => 'reset-ncc-too',
-						'description' => 'Pass this flag to reset NCC to only work on the post range passed to this command.',
-						'optional'    => true,
-						'repeating'   => false,
-					],
+					$reset_flag,
 				],
 			]
 		);
 	}
 
-	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
-		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
-		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
-			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
-		}
-
+	private function get_post_id_range( array $assoc_args ): array {
 		$post_types = [ 'post' ];
 		if ( ! empty( $assoc_args['post-types'] ) ) {
 			$post_types = explode( ',', $assoc_args['post-types'] );
@@ -137,7 +134,7 @@ class BlockTransformerCommand implements InterfaceCommand {
           					  AND ID <= %d
                         ORDER BY ID DESC 
                         LIMIT %d",
-					implode( ",", $post_types ),
+					implode( ',', $post_types ),
 					$min_post_id,
 					$max_post_id,
 					$num_items,
@@ -147,7 +144,19 @@ class BlockTransformerCommand implements InterfaceCommand {
 			$post_range = [ $assoc_args['post-id'] ];
 		}
 
+		return $post_range;
+	}
+
+	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
+		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
+		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
+			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
+		}
+
+		$post_range = $this->get_post_id_range( $assoc_args );
+
 		$post_ids_format = implode( ', ', array_fill( 0, count( $post_range ), '%d' ) );
+		global $wpdb;
 
 		// Nudge the posts in the range that might need it.
 		$sql = $wpdb->prepare(
@@ -163,6 +172,65 @@ class BlockTransformerCommand implements InterfaceCommand {
 		$low          = min( $post_range );
 
 		WP_CLI::log( sprintf( 'Nudged %d posts between (and including) %d and %d', $posts_nudged, $low, $high ) );
+
+		if ( $also_kick_ncc ) {
+			WP_CLI::log( PHP_EOL );
+			$this->reset_the_ncc_for_range( $low, $high );
+		}
+	}
+
+
+	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
+		$all_posts         = $this->get_all_wp_posts( [ 'publish' ], $assoc_args );
+		$block_transformer = GutenbergBlockTransformer::get_instance();
+
+		foreach ( $all_posts as $post ) {
+			$content = $block_transformer->decode_post_content( $post->post_content );
+			if ( $content === $post->post_content ) {
+				// No changes - no more to do here.
+				continue;
+			}
+
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $content,
+				]
+			);
+			WP_CLI::log( sprintf( 'Decoded blocks in %s', get_permalink( $post->ID ) ) );
+		}
+	}
+
+	public function cmd_blocks_encode( array $pos_args, array $assoc_args ): void {
+		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
+		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
+			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
+		}
+
+		$block_transformer = GutenbergBlockTransformer::get_instance();
+
+		$post_id_range         = $this->get_post_id_range( $assoc_args );
+		$encoded_posts_counter = 0;
+		foreach ( $post_id_range as $post_id ) {
+			$post    = get_post( $post_id );
+			$content = $block_transformer->encode_post_content( $post->post_content );
+			if ( $content === $post->post_content ) {
+				// No changes - no more to do here.
+				continue;
+			}
+			++$encoded_posts_counter;
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $content,
+				]
+			);
+			WP_CLI::log( sprintf( 'Encoded blocks in %s', get_permalink( $post->ID ) ) );
+		}
+
+		$high = max( $post_id_range );
+		$low  = min( $post_id_range );
+		WP_CLI::log( sprintf( '%d posts between (and including) %d and %d needed encoding', $encoded_posts_counter, $low, $high ) );
 
 		if ( $also_kick_ncc ) {
 			WP_CLI::log( PHP_EOL );
@@ -197,47 +265,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 		return is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' );
 	}
 
-	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
-		$all_posts         = $this->get_all_wp_posts( [ 'publish' ], $assoc_args );
-		$block_transformer = GutenbergBlockTransformer::get_instance();
-
-		foreach ( $all_posts as $post ) {
-			$content = $block_transformer->decode_post_content( $post->post_content );
-			if ( $content === $post->post_content ) {
-				// No changes - no more to do here.
-				continue;
-			}
-
-			wp_update_post(
-				[
-					'ID'           => $post->ID,
-					'post_content' => $content,
-				]
-			);
-			WP_CLI::log( sprintf( 'Decoded blocks in %s', get_permalink( $post->ID ) ) );
-		}
-	}
-
-	public function cmd_blocks_encode( array $pos_args, array $assoc_args ): void {
-		$all_posts         = $this->get_all_wp_posts( [ 'publish' ], $assoc_args );
-		$block_transformer = GutenbergBlockTransformer::get_instance();
-
-		foreach ( $all_posts as $post ) {
-			$content = $block_transformer->encode_post_content( $post->post_content );
-			if ( $content === $post->post_content ) {
-				// No changes - no more to do here.
-				continue;
-			}
-			wp_update_post(
-				[
-					'ID'           => $post->ID,
-					'post_content' => $content,
-				]
-			);
-			WP_CLI::log( sprintf( 'Encoded blocks in %s', get_permalink( $post->ID ) ) );
-		}
-	}
-
 	private function get_all_wp_posts( array $post_statuses, array $assoc_args = [], bool $log_progress = true ): iterable {
 		if ( ! empty( $assoc_args['post-id'] ) ) {
 			$all_ids = [ $assoc_args['post-id'] ];
@@ -269,5 +296,4 @@ class BlockTransformerCommand implements InterfaceCommand {
 			}
 		}
 	}
-
 }
