@@ -443,8 +443,8 @@ class CoAuthorPlus {
 		// Get all object relationships for this post where taxonomy is 'author'.
 		$results = $wpdb->get_results( $wpdb->prepare(
 			"select wtr.object_id, wtr.term_taxonomy_id
-			from wp_term_relationships wtr
-			join wp_term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author'
+			from $wpdb->term_relationships wtr
+			join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author'
 			where wtr.object_id = %s;",
 			$post_id
 		), ARRAY_A );
