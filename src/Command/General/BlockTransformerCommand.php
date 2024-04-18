@@ -1,4 +1,11 @@
 <?php
+/**
+ * Gutenberg Block Transformer.
+ *
+ * Methods for encoding and decoding blocks in posts as base64 to "hide" them from the NCC.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\General;
 
@@ -112,6 +119,9 @@ class BlockTransformerCommand implements InterfaceCommand {
 		);
 	}
 
+	/**
+	 * @throws ExitException
+	 */
 	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
 		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
 		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
@@ -127,9 +137,12 @@ class BlockTransformerCommand implements InterfaceCommand {
 		$sql = $wpdb->prepare(
 			"UPDATE {$wpdb->posts} SET post_content = CONCAT(%s, post_content)
     				WHERE ID IN ($post_ids_format)
-					AND post_content LIKE '<!-- %'",
-			PHP_EOL,
-			...$post_range
+					AND post_content LIKE %s",
+			[
+				PHP_EOL,
+				...$post_range,
+				$wpdb->esc_like( '<!--' ) . '%',
+			]
 		);
 
 		$posts_nudged = $wpdb->query( $sql );
@@ -146,7 +159,7 @@ class BlockTransformerCommand implements InterfaceCommand {
 
 
 	public function cmd_blocks_decode( array $pos_args, array $assoc_args ): void {
-		$logfile = sprintf( '%s-%s.log', __FUNCTION__, date( 'Y-m-d-H-i-s' ) );
+		$logfile = sprintf( '%s-%s.log', __FUNCTION__, wp_date( 'Y-m-d-H-i-s' ) );
 
 		$block_transformer = GutenbergBlockTransformer::get_instance();
 
@@ -182,10 +195,18 @@ class BlockTransformerCommand implements InterfaceCommand {
 			$this->logger->log( $logfile, sprintf( 'Decoded blocks in ID %d %s', $post->ID, get_permalink( $post->ID ) ), Logger::SUCCESS );
 
 			++$decoded_posts_counter;
-			if ( $decoded_posts_counter % 25 === 0 ) {
+			if ( 0 === $decoded_posts_counter % 25 ) {
 				$spacer = str_repeat( ' ', 10 );
-				WP_CLI::log( sprintf( '%s ==== Decoded %d of %d posts. %d remaining ==== %s', $spacer, $decoded_posts_counter, $num_posts_found,
-					( $num_posts_found - $decoded_posts_counter ), $spacer ) );
+				WP_CLI::log(
+					sprintf(
+						'%s ==== Decoded %d of %d posts. %d remaining ==== %s',
+						$spacer,
+						$decoded_posts_counter,
+						$num_posts_found,
+						( $num_posts_found - $decoded_posts_counter ),
+						$spacer
+					)
+				);
 			}
 		}
 
@@ -203,7 +224,7 @@ class BlockTransformerCommand implements InterfaceCommand {
 	 * @throws ExitException
 	 */
 	public function cmd_blocks_encode( array $pos_args, array $assoc_args ): void {
-		$logfile = sprintf( '%s-%s.log', __FUNCTION__, date( 'Y-m-d-H-i-s' ) );
+		$logfile = sprintf( '%s-%s.log', __FUNCTION__, wp_date( 'Y-m-d-H-i-s' ) );
 
 		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
 		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
@@ -216,13 +237,14 @@ class BlockTransformerCommand implements InterfaceCommand {
 		$post_ids_format = implode( ', ', array_fill( 0, count( $post_id_range ), '%d' ) );
 
 		global $wpdb;
-		$sql             = $wpdb->prepare(
-			"SELECT ID, post_content FROM {$wpdb->posts}
+		$posts_to_encode = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_content FROM {$wpdb->posts}
     				WHERE ID IN ($post_ids_format)
 					AND post_content LIKE %s",
-			[ ...$post_id_range, $wpdb->esc_like( '<!-- ' ) . '%' ]
+				[ ...$post_id_range, $wpdb->esc_like( '<!-- ' ) . '%' ]
+			)
 		);
-		$posts_to_encode = $wpdb->get_results( $sql );
 		$num_posts_found = count( $posts_to_encode );
 		$this->logger->log( $logfile, sprintf( 'Found %d posts to encode', $num_posts_found ), Logger::INFO );
 
@@ -243,10 +265,18 @@ class BlockTransformerCommand implements InterfaceCommand {
 			$this->logger->log( $logfile, sprintf( 'Encoded blocks in post ID %d  %s', $post->ID, get_permalink( $post->ID ) ), Logger::SUCCESS );
 
 			++$encoded_posts_counter;
-			if ( $encoded_posts_counter % 25 === 0 ) {
+			if ( 0 === $encoded_posts_counter % 25 ) {
 				$spacer = str_repeat( ' ', 10 );
-				WP_CLI::log( sprintf( '%s ==== Encoded %d of %d posts. %d remaining ==== %s', $spacer, $encoded_posts_counter, $num_posts_found,
-					( $num_posts_found - $encoded_posts_counter ), $spacer ) );
+				WP_CLI::log(
+					sprintf(
+						'%s ==== Encoded %d of %d posts. %d remaining ==== %s',
+						$spacer,
+						$encoded_posts_counter,
+						$num_posts_found,
+						( $num_posts_found - $encoded_posts_counter ),
+						$spacer
+					)
+				);
 			}
 		}
 
@@ -255,9 +285,12 @@ class BlockTransformerCommand implements InterfaceCommand {
 		} else {
 			$high           = max( $post_id_range );
 			$low            = min( $post_id_range );
-			$decode_command = sprintf( 'To decode the blocks AFTER running the NCC, run this:%s wp newspack-content-migrator transform-blocks-decode --min-post-id=%d --max-post-id=%d',
+			$decode_command = sprintf(
+				'To decode the blocks AFTER running the NCC, run this:%s wp newspack-content-migrator transform-blocks-decode --min-post-id=%d --max-post-id=%d',
 				PHP_EOL,
-				$low, $high );
+				$low,
+				$high
+			);
 		}
 		if ( ( $assoc_args['post-types'] ?? false ) ) {
 			$decode_command .= ' --post-types=' . $assoc_args['post-types'];
@@ -325,7 +358,7 @@ class BlockTransformerCommand implements InterfaceCommand {
 	 *
 	 * @param array $post_ids The post IDs to work on.
 	 *
-	 * @throws ExitException
+	 * @throws ExitException If an error occurs or the NCC is not active.
 	 */
 	private function reset_the_ncc_for_posts( array $post_ids ): void {
 		if ( ! $this->is_ncc_installed() ) {
@@ -358,5 +391,4 @@ class BlockTransformerCommand implements InterfaceCommand {
 	private function is_ncc_installed(): bool {
 		return is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' );
 	}
-
 }
