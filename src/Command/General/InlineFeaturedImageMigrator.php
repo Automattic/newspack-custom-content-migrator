@@ -413,10 +413,39 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					WP_CLI::line( '× skipping, post already has a featured image.' );
 					continue;
 				}   
-			}   
-			
+			}
+
 			// Get content for crawling.
 			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+
+			$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+			$has_set_featured_image_from_blocks = false;
+
+			if ( ! empty( $image_blocks ) ) {
+				WP_CLI::line( '✓ found Gutenberg image blocks.' );
+
+				// Loop through each image block and try to set a thumbnail from the image ID.
+				// Stop when this is successfull.
+				foreach ( $image_blocks as $image_block ) {
+					if ( set_post_thumbnail( $post_id, $image_block['attrs']['id'] ) ) {
+						$has_set_featured_image_from_blocks = true;
+						break;
+					} else {
+						WP_CLI::line( sprintf( '❌ Could not set Featured Image from Block. ID %d', $image_block['attrs']['id'] ) );
+					}
+				}
+			}
+
+			// Check if Featured Image was set from Gutenberg Blocks. If so, continue with the next post
+			if ( $has_set_featured_image_from_blocks ) {
+				WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. Attachment ID %d', $image_block['attrs']['id'] ) );
+				continue;
+			}
+
+			// Reaching here means that either of the following is true:
+			// 1. There aren't image blocks.
+			// 2. There are image blocks, however, we couldn't use them to set the Thumbnail because
+			//    the referenced image in the image block is not actually an uploaded Attachment.
 
 			// Find the first <img>.
 			$this->crawler->clear();
