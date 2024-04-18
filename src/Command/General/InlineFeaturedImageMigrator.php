@@ -418,7 +418,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			// Get content for crawling.
 			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
 
-			$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+			$image_blocks                       = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
 			$has_set_featured_image_from_blocks = false;
 
 			if ( ! empty( $image_blocks ) ) {
@@ -445,7 +445,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			// Reaching here means that either of the following is true:
 			// 1. There aren't image blocks.
 			// 2. There are image blocks, however, we couldn't use them to set the Thumbnail because
-			//    the referenced image in the image block is not actually an uploaded Attachment.
+			// the referenced image in the image block is not actually an uploaded Attachment.
 
 			// Find the first <img>.
 			$this->crawler->clear();
@@ -497,8 +497,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				} else {
 					WP_CLI::line( sprintf( '👍 SUCCESS att.ID %s set as featured image to post ID %s', $att_id, $post_id ) );
 				}
-			}
-
+			}       
 		}
 
 		WP_CLI::line( 'All done! 🙌' );
