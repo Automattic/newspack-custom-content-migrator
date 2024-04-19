@@ -15,6 +15,7 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
+use stdClass;
 use WP;
 use WP_CLI;
 
@@ -1167,6 +1168,38 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'description' => 'Path to the CSV file containing the stories.',
 						'optional'    => false,
 						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-posts-with-missing-post-author',
+			[ $this, 'cmd_embarcadero_fix_posts_with_missing_post_author' ],
+			[
+				'shortdesc' => 'Fixes posts with missing post author.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-dir',
+						'description' => 'Path to folder containing the stories CSVs.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-duplicate-posts',
+			[ $this, 'cmd_embarcadero_fix_duplicate_posts' ],
+			[
+				'shortdesc' => 'Removes duplicate posts based on post_title, post_date, and post_author',
+				'synopsis'  => [
+					[
+						'type'     => 'flag',
+						'name'     => 'dry-run',
+						'optional' => true,
 					],
 				],
 			]
@@ -4187,6 +4220,370 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				);
 			}
 		}
+	}
+
+	/**
+	 * This function attempts to fix posts that were imported from Embarcadero's legacy system that have a missing
+	 * post author. The script will attempt to find the correct author based on the story CSV files provided
+	 * and update the post accordingly.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception
+	 */
+	public function cmd_embarcadero_fix_posts_with_missing_post_author( array $args, array $assoc_args ): void {
+		$story_csv_dir = $assoc_args['story-csv-dir'];
+		$story_csv_dir = untrailingslashit( $story_csv_dir );
+
+		$story_id_author_map = [];
+
+		foreach ( [ 'story.csv', 'story_1.csv' ] as $story_file_name ) {
+			$full_file_path = "$story_csv_dir/$story_file_name";
+			if ( file_exists( $full_file_path ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Processing %s...', $story_file_name ) );
+				foreach ( ( new FileImportFactory() )->get_file( $full_file_path )->getIterator() as $row ) {
+					if ( ! array_key_exists( $row['story_id'], $story_id_author_map ) ) {
+						$story_id_author_map[ $row['story_id'] ] = [
+							'byline'       => $row['byline'],
+							'author_email' => $row['author_email'],
+							'posted_by'    => $row['posted_by'],
+						];
+					}
+				}
+			}
+		}
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_with_missing_post_author       = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT p.ID, p.post_title, p.post_author, pm.meta_value as story_id FROM $wpdb->posts p 
+    				LEFT JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
+                WHERE p.post_author = %d 
+                  AND p.post_status = %s
+                  AND p.post_type = %s 
+                  AND pm.meta_key = %s",
+				0,
+				'publish',
+				'post',
+				self::EMBARCADERO_ORIGINAL_ID_META_KEY
+			)
+		);
+		$count_posts_with_missing_post_author = count( $posts_with_missing_post_author );
+
+		$new_authors = [];
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need active handle to file, in order to write data necessary for QA.
+		$qa_csv         = fopen( 'qa.csv', 'w' );
+		$csv_header_row = [
+			'Post ID',
+			'Post Permalink',
+			'Story ID',
+			'Original Byline',
+			'Original Author Email',
+			'Posted By',
+			'Current Post Author ID',
+			'Current Post Author Nicename',
+			//			'Current Authors (CAP)',
+			'New Author?',
+			'Updated Post Author ID',
+			'Updated Post Author Nicename',
+		];
+		fputcsv( $qa_csv, $csv_header_row );
+		foreach ( $posts_with_missing_post_author as $index => $post ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing post %d of %d. [Post ID: %d Story ID: %d]', $index, $count_posts_with_missing_post_author, $post->ID, $post->story_id ) );
+
+			$row = $story_id_author_map[ $post->story_id ] ?? null;
+
+			if ( ! $row ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find Story ID: %d in the CSV file.', $post->story_id ), Logger::ERROR );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'CSV Byline: %s', $row['byline'] ) );
+			$this->logger->log( self::LOG_FILE, sprintf( 'CSV Author Email: %s', $row['author_email'] ) );
+			$this->logger->log( self::LOG_FILE, sprintf( 'CSV Posted By: %s', $row['posted_by'] ) );
+
+			$qa_row                           = array_fill_keys( $csv_header_row, null );
+			$qa_row['Post ID']                = $post->ID;
+			$qa_row['Post Permalink']         = get_permalink( $post->ID );
+			$qa_row['Story ID']               = $post->story_id;
+			$qa_row['Original Byline']        = $row['byline'];
+			$qa_row['Original Author Email']  = $row['author_email'];
+			$qa_row['Posted By']              = $row['posted_by'];
+			$qa_row['Current Post Author ID'] = $post->post_author;
+			$qa_row['New Author?']            = 'No';
+
+			if ( 0 !== $post->post_author ) {
+				$user = get_user_by( 'id', $post->post_author );
+
+				if ( $user ) {
+					$qa_row['Current post Author Nicename'] = $user->user_nicename;
+				}
+			}
+
+			/*$current_post_authors = $this->coauthorsplus_logic->get_all_authors_for_post( $post->ID );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Current Post Authors %d', count( $current_post_authors ) ) );
+			if ( ! empty( $current_post_authors ) ) {
+				$qa_row['Current Authors (CAP)'] = '';
+
+				foreach ( $current_post_authors as $current_post_author ) {
+					$author_string = sprintf(
+						'Type: %s, ID: %s, Slug: %s',
+						$current_post_author->type,
+						$current_post_author->ID,
+						$current_post_author->user_nicename
+					);
+					$this->logger->log( self::LOG_FILE, $author_string );
+
+					if ( ! empty( $qa_row['Current Authors (CAP)'] ) ) {
+						$qa_row['Current Authors (CAP)'] .= ' <> ';
+					}
+
+					$qa_row['Current Authors (CAP)'] .= $author_string;
+				}
+			}*/
+
+			$author = get_user_by( 'email', $row['author_email'] );
+
+			if ( ! $author ) {
+				$author = get_user_by( 'slug', sanitize_title( $row['byline'] ) );
+			}
+
+			if ( ! $author ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$author_user = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->users WHERE display_name = %s",
+						$row['byline']
+					)
+				);
+
+				if ( $author_user ) {
+					$author = get_user_by( 'id', $author_user->ID );
+				}
+			}
+
+			// At this point we've exhausted all options to find the author. We can assume the following function will create it.
+			if ( ! $author ) {
+				$email = $row['author_email'] ?? '';
+
+				if ( empty( $email ) ) {
+					$email = sanitize_title( $row['byline'] ) . '@newspack.com';
+				}
+
+				$author = $this->get_or_create_user( $row['byline'], $email, 'contributor' );
+
+				if ( is_wp_error( $author ) ) {
+					fputcsv( $qa_csv, array_values( $qa_row ) );
+					continue;
+				}
+
+				$author                     = get_user_by( 'id', $author );
+				$qa_row['New Author?']      = 'Yes';
+				$new_authors[ $author->ID ] = $author->user_nicename;
+			}
+
+			if ( array_key_exists( $author->ID, $new_authors ) || in_array( $author->user_nicename, $new_authors, true ) ) {
+				$qa_row['New Author?'] = 'Yes';
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- wp_update_post affects updated_at timestamp.
+			$update = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_author' => $author->ID,
+				],
+				[
+					'ID' => $post->ID,
+				]
+			);
+
+			if ( $update ) {
+				$qa_row['Updated Post Author ID']       = $author->ID;
+				$qa_row['Updated Post Author Nicename'] = $author->user_nicename;
+			}
+
+			fputcsv( $qa_csv, $qa_row );
+		}
+
+		fclose( $qa_csv );
+	}
+
+	/**
+	 * This script finds posts that have duplicates based on the post title, post date, and post author. It then
+	 * removes the duplicates, keeping the earliest post.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_fix_duplicate_posts( array $args, array $assoc_args ): void {
+		$dry_run = 'true' === $assoc_args['dry-run'];
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$overview_of_duplicate_posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				sub.post_title, 
+    				sub.post_date, 
+    				sub.post_author, 
+    				COUNT( sub.ID ) as counter, 
+    				GROUP_CONCAT( sub.ID ORDER BY sub.ID ASC SEPARATOR '|') AS post_ids 
+				FROM ( 
+					SELECT 
+					    ID, 
+					    post_title, 
+					    DATE( post_date ) as post_date, 
+					    post_author 
+					FROM $wpdb->posts 
+					WHERE post_type = %s 
+					  AND post_status = %s 
+					) as sub 
+				GROUP BY sub.post_title, 
+				         sub.post_date, 
+				         sub.post_author 
+				HAVING counter > 1
+				ORDER BY counter DESC, post_date DESC ",
+				'post',
+				'publish'
+			)
+		);
+		$count_of_duplicate_rows     = count( $overview_of_duplicate_posts );
+		$sum_of_duplicate_post_ids   = array_reduce( $overview_of_duplicate_posts, fn( $carry, $dupe_post ) => $carry + $dupe_post->counter, 0 );
+		$num_of_posts_to_remove      = $sum_of_duplicate_post_ids - $count_of_duplicate_rows;
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Duplicates Identified: %s  Num of Dupes to Remove: %s', number_format( $count_of_duplicate_rows ), number_format( $num_of_posts_to_remove ) ) );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need active handle to file, in order to write data necessary for QA.
+		$overview_qa_csv = fopen( 'overview_dupe_posts_qa.csv', 'w' );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need active handle to file, in order to write data necessary for QA.
+		$detailed_qa_csv = fopen( 'detailed_dupe_posts_qa.csv', 'w' );
+		$header_row      = [
+			'post_title',
+			'post_date',
+			'post_author',
+			'post_id',
+			'deleted',
+			'permalink',
+			'post_name',
+			'import_meta_key',
+			'import_meta_value',
+		];
+		fputcsv(
+			$overview_qa_csv,
+			[
+				'post_title',
+				'post_date',
+				'post_author',
+				'count',
+				'post_ids',
+			]
+		);
+		fputcsv( $detailed_qa_csv, $header_row );
+
+		$progress = WP_CLI\Utils\make_progress_bar( 'Processing', $sum_of_duplicate_post_ids, 1 );
+
+		foreach ( $overview_of_duplicate_posts as $duplicate_post ) {
+			fputcsv(
+				$overview_qa_csv,
+				[
+					$duplicate_post->post_title,
+					$duplicate_post->post_date,
+					$duplicate_post->post_author,
+					$duplicate_post->counter,
+					$duplicate_post->post_ids,
+				]
+			);
+
+			$post_ids = explode( '|', $duplicate_post->post_ids );
+			array_shift( $post_ids );
+			$progress->tick();
+			$post_ids_placeholder = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+
+			// phpcs:disable -- query has been properly prepared and placeholdered.
+			$posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT 
+    					ID, 
+    					post_title, 
+    					post_date, 
+    					post_author, 
+    					post_name 
+					FROM $wpdb->posts
+					WHERE ID IN ( $post_ids_placeholder )",
+					...$post_ids
+				)
+			);
+			// phpcs:enable
+
+			foreach ( $posts as $post ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$import_meta = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT meta_key, meta_value FROM $wpdb->postmeta WHERE post_id = %d AND meta_key IN ( %s, %s)",
+						$post->ID,
+						self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+						'topic_id'
+					)
+				);
+
+				if ( ! $import_meta ) {
+					$import_meta             = new stdClass();
+					$import_meta->meta_key   = null;
+					$import_meta->meta_value = null;
+				}
+
+				$deleted = false;
+				if ( ! $dry_run ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$wpdb->delete(
+						$wpdb->term_relationships,
+						[
+							'object_id' => $post->ID,
+						]
+					);
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$wpdb->delete(
+						$wpdb->postmeta,
+						[
+							'post_id' => $post->ID,
+						]
+					);
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$deleted = (bool) $wpdb->delete(
+						$wpdb->posts,
+						[
+							'ID' => $post->ID,
+						]
+					);
+				}
+
+				fputcsv(
+					$detailed_qa_csv,
+					[
+						$post->post_title,
+						$post->post_date,
+						$post->post_author,
+						$post->ID,
+						$deleted ? 'Yes' : 'No',
+						get_permalink( $post->ID ),
+						$post->post_name,
+						$import_meta->meta_key,
+						$import_meta->meta_value,
+					]
+				);
+				$progress->tick();
+			}
+		}
+		$progress->finish();
 	}
 
 	/**
