@@ -391,7 +391,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			}
 		}
 
-		WP_CLI::warning( 'NOTE -- make sure to run `newspack-content-migrator village-cms-dev-helper-fix-consolidated-users` to assign/fix authors based on following rule: if <attributes byline> string exists in <content> use it for authorship ; otherwise if <byline> node exists in <content> use that for authorship ; lastly if none of the previous exist use <author> node for authorship.' );
+		WP_CLI::warning( 'NOTE -- make sure to run `newspack-content-migrator village-cms-dev-helper-fix-consolidated-users` which assigns and fixes authors based on following rule -- if <attributes byline> string exists in <content> use it for authorship ; otherwise if <byline> node exists in <content> use that for authorship ; lastly if none of the previous exist use <author> node for authorship. If not deciding to run these author fixing commands, double check wp_posts.post_author = 0 entries which if linger will make CAP-set authorship invalid.' );
 	}
 
 	/**
