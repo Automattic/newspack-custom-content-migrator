@@ -170,7 +170,8 @@ class BlockTransformerCommand implements InterfaceCommand {
 		$sql             = $wpdb->prepare(
 			"SELECT ID, post_content FROM {$wpdb->posts}
     				WHERE ID IN ($post_ids_format)
-					AND post_content LIKE %s",
+					AND post_content LIKE %s
+					ORDER BY ID DESC",
 			[ ...$post_id_range, '%' . $wpdb->esc_like( '[BLOCK-TRANSFORMER:' ) . '%' ]
 		);
 		$posts_to_decode = $wpdb->get_results( $sql );
@@ -241,7 +242,8 @@ class BlockTransformerCommand implements InterfaceCommand {
 			$wpdb->prepare(
 				"SELECT ID, post_content FROM {$wpdb->posts}
     				WHERE ID IN ($post_ids_format)
-					AND post_content LIKE %s",
+					AND post_content LIKE %s
+					ORDER BY ID DESC",
 				[ ...$post_id_range, $wpdb->esc_like( '<!-- ' ) . '%' ]
 			)
 		);
@@ -283,13 +285,11 @@ class BlockTransformerCommand implements InterfaceCommand {
 		if ( ( $assoc_args['post-id'] ?? false ) ) {
 			$decode_command = sprintf( 'wp newspack-content-migrator transform-blocks-decode --post-id=%s', $assoc_args['post-id'] );
 		} else {
-			$high           = max( $post_id_range );
-			$low            = min( $post_id_range );
 			$decode_command = sprintf(
 				'To decode the blocks AFTER running the NCC, run this:%s wp newspack-content-migrator transform-blocks-decode --min-post-id=%d --max-post-id=%d',
 				PHP_EOL,
-				$low,
-				$high
+				min( $post_id_range ),
+				max( $post_id_range )
 			);
 		}
 		if ( ( $assoc_args['post-types'] ?? false ) ) {
