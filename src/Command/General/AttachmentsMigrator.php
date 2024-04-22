@@ -256,9 +256,9 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		$total = count( $posts );
 		$this->logger->log( $logfile, sprintf( 'Found %d posts with image blocks', $total ), Logger::INFO );
-
+		$counter = 0;
 		foreach ( $posts as $post ) {
-			WP_CLI::log( sprintf( 'Processing post %d/%d', $post->ID, $total ) );
+			WP_CLI::log( sprintf( 'Processing post ID %d (%d/%d) ', $post->ID, ++$counter, $total ) );
 			$blocks = parse_blocks( $post->post_content );
 			// Target only image blocks with no id and a local image. "Local" is a bit un-scientific here,
 			// but it's fast.
@@ -282,7 +282,13 @@ class AttachmentsMigrator implements InterfaceCommand {
 				if ( ! $attachment_id ) {
 					// If the attachment doesn't exist, import it.
 					$attachment_id = $this->attachment_logic->import_attachment_for_post( $post->ID, $src );
+
+					if ( is_wp_error( $attachment_id ) ) {
+						$this->logger->log( $logfile, sprintf( 'Failed to import attachment for post %d: %s', $post->ID, $attachment_id->get_error_message() ), Logger::ERROR );
+						continue;
+					}
 				}
+
 				$attachment_post = get_post( $attachment_id );
 				if ( ! empty( $doc->find( 'figcaption' )[0] ) ) {
 					// Temporarily set excerpt on the attachment post so the blocks generator
