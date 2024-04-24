@@ -78,6 +78,7 @@ PluginSetup::register_migrators(
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
+		Command\PublisherSpecific\TheParkRecordMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
 		Command\PublisherSpecific\InsightCrimeMigrator::class,
