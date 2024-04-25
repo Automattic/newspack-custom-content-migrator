@@ -13,6 +13,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
+use stdClass;
 use WP_CLI;
 
 /**
@@ -117,6 +118,9 @@ class GhostCMSMigrator implements InterfaceCommand {
 	
 		// Insert category/terms.
 		$tags_to_categories = empty( $json->db[0]->data->tags ) ? array() : $this->insert_tags_to_categories( $json->db[0]->data->tags );
+
+		return;
+
 		$users_to_authors   = empty( $json->db[0]->data->users ) ? array() : $this->insert_users_to_authors( $json->db[0]->data->users );
 		
 		// Insert posts.
@@ -126,6 +130,9 @@ class GhostCMSMigrator implements InterfaceCommand {
 			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility ) {
 				continue;
 			}
+
+
+			// todo: if post exists???
 
 			// Post.
 			$postarr = array(
@@ -175,7 +182,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 			}
 
 			// Fetch "feature_image": "__GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg",
-			// set _thumbnail_id
+			// 		'feature_image_alt'		=> ( $image_id !== 0 && $image_alt ) ? substr( $image_alt, 0, 125 ) : null,
+			// 		'feature_image_caption'	
+			// $image = wp_get_attachment_image_src( $image_id, 'full' );
+			// 		$image_alt = get_post_meta( $image_id, '_wp_attachment_image_alt', true );
+			// 		$image_caption = wp_get_attachment_caption( $image_id );
+			// set meta: _thumbnail_id
+
 			
 			// Fetch images in content.
 
@@ -195,24 +208,42 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$out = [];
 
 		foreach( $tags as $tag ) {
-			
+
 			if( 'public' != $tag->visibility ) continue;
 
-			$term_arr = wp_insert_term( $tag->name, 'category' );
+			$this->logger->log( $this->log, '---- Tag: ' . $tag->name . ' / ' . $tag->slug . ' / ' . $tag->id );
+			
+			$term_arr = term_exists( $tag->name, 'category' );
 
+			// Term does not exist.
 			if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-				$this->logger->log( $this->log, 'Insert term failed for json tag name: ' . $tag->name, $this->logger::WARNING );
-			}
+
+				$this->logger->log( $this->log, 'Inserting new term: ' . $tag->name );
+
+				$term_arr = wp_insert_term( $tag->name, 'category' );
+	
+				if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+
+					$this->logger->log( $this->log, 'Insert term failed: ' . $tag->name, $this->logger::WARNING );
+					continue;
+
+				}
+
+			} // term not exists
 			
 			$term = get_term( $term_arr['term_id'] );
 
 			if( $term->slug != $tag->slug ) {
-				// TODO: add category redirect
+				$this->logger->log( $this->log, 'TODO: term redirect needed.', $this->logger::WARNING );
+				$this->logger->log( $this->log, 'Json term slug: ' . $tag->slug );
+				$this->logger->log( $this->log, 'WP term slug: ' . $term->slug );
 			}
 
 			$out[ $tag->id ] = $term_arr['term_id'];
 
 		}
+
+		$this->logger->log( $this->log, 'Tag to term conversion: ' . print_r( $out, true ) );
 
 		return $out;
 
