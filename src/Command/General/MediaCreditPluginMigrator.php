@@ -280,10 +280,10 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			
 			$new_shortcode_string .= ']';
 			
-			$new_shortcode_string .= $shortcode_match[5]; 
+			$new_shortcode_string .= trim( $shortcode_match[5] );
 
 			if ( ! empty( $media_credit_info[0] ) ) {
-				$new_shortcode_string .= esc_html( $media_credit_info[0] );
+				$new_shortcode_string .= ' ' . esc_html( trim( $media_credit_info[0] ) );
 			}
 			
 			$new_shortcode_string .= '[/caption]';
@@ -351,14 +351,19 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			);
 		}
 
+		$updated_shortcode = $shortcode_match[0];
+
+		// Remove media credit preceeding line break if exists.
+		$updated_shortcode = preg_replace( '/\]\s+\[media-credit/i', '][media-credit', $updated_shortcode );
+
 		// Remove media credit shortcode.
-		$updated_shortcode = str_replace( $media_credit_shortcode_matches[0][0], $media_credit_shortcode_matches[0][5], $shortcode_match[0] );
+		$updated_shortcode = str_replace( $media_credit_shortcode_matches[0][0], trim( $media_credit_shortcode_matches[0][5] ), $updated_shortcode );
 
 		// Add credit into caption if needed.
 		$media_credit_info = $this->process_media_credit_shortcode( $post_id, $media_credit_shortcode_matches[0] );
 
 		if ( ! empty( $media_credit_info ) && is_array( $media_credit_info ) && ! empty( $media_credit_info[0] ) ) {
-			$updated_shortcode = str_replace( '[/caption]', ' (Credit: ' . esc_html( $media_credit_info[0] ) . ')[/caption]', $updated_shortcode );
+			$updated_shortcode = str_replace( '[/caption]', ' (Credit: ' . esc_html( trim( $media_credit_info[0] ) ) . ')[/caption]', $updated_shortcode );
 		}
 
 		return $updated_shortcode;
