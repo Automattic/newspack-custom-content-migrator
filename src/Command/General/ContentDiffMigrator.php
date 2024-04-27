@@ -37,11 +37,11 @@ class ContentDiffMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
-	 * Content Diff logic class.
+	 * Content diff logic.
 	 *
-	 * @var null|ContentDiffMigratorLogic Logic.
+	 * @var ContentDiffMigratorLogic|null $logic Logic instance.
 	 */
-	private static $logic = null;
+	private $logic;
 
 	/**
 	 * Prefix of tables from the live DB, which are imported next to local WP tables.
@@ -106,9 +106,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			global $wpdb;
-
-			self::$logic    = new ContentDiffMigratorLogic( $wpdb );
 			self::$instance = new $class();
 		}
 
@@ -119,6 +116,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public function register_commands() {
+		WP_CLI::add_command(
+			'newspack-content-migrator content-diff-debug',
+			[ $this, 'cmd_debug' ],
+		);
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-search-new-content-on-live',
 			[ $this, 'cmd_search_new_content_on_live' ],
@@ -136,6 +137,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'live-table-prefix',
 						'description' => 'Live site table prefix.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'hostname-source',
+						'description' => "Hostname of the site from which the content is coming from, no subdomains. Valid examples: 'publisher.co.nz', 'publisher-local.com'.",
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -169,6 +177,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'hostname-source',
+						'description' => "Hostname of the site from which the content is coming from, no subdomains. Valid examples: 'publisher.co.nz', 'publisher-local.com'.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -195,6 +210,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'hostname-source',
+						'description' => "Hostname of the site from which the content is coming from, no subdomains. Valid examples: 'publisher.co.nz', 'publisher-local.com'.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'local-hostname-aliases-csv',
 						'description' => "Optional. CSV of image URL hostnames to be used as local hostname aliases when searching for image attachment files. If, for example, the site uses S3, and some images' src hostnames use newspack-pubname.s3.amazonaws.com in URL hostnames, we should add this AWS hostname to the list here, to treat these URLs as local hostnames when searching for the files' attachment IDs in local DB -- in other words, the search for attachment ID will substitute these aliases for actual local hostname e.g. 'host.com' and search by a local URL instead.",
 						'optional'    => true,
@@ -214,6 +236,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'live-table-prefix',
 						'description' => 'Live site table prefix.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'hostname-source',
+						'description' => "Hostname of the site from which the content is coming from, no subdomains. Valid examples: 'publisher.co.nz', 'publisher-local.com'.",
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -263,6 +292,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'hostname-source',
+						'description' => "Hostname of the site from which the content is coming from, no subdomains. Valid examples: 'publisher.co.nz', 'publisher-local.com'.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'skip-tables',
 						'description' => 'Skip checking a particular set of tables from the collation checks.',
 						'optional'    => true,
@@ -295,6 +331,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'hostname-source',
+						'description' => "Hostname of the site from which the content is coming from, no subdomains. Valid examples: 'publisher.co.nz', 'publisher-local.com'.",
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'attachment-ids-json-file',
 						'description' => 'Optional. Path to a JSON encoded array where keys are old attachment IDs and values are new attachment IDs. If provided, will only update these _thumbnail_ids, and only on those posts which were imported by the Content Diff.',
 						'optional'    => true,
@@ -312,6 +355,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 		);
 	}
 
+	public function cmd_debug( $pos_args, $assoc_args ) {
+	}
+
 	/**
 	 * Callable for `newspack-content-migrator content-diff-update-featured-images-ids`.
 	 *
@@ -321,6 +367,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_update_feat_images_ids( $pos_args, $assoc_args ) {
+		global $wpdb;
+
+		// Params.
+		$hostname_source = $wpdb->prepare( '%s', $assoc_args['hostname-source'] );
+
+		// Initialize logic.
+		$this->logic = new ContentDiffMigratorLogic( $wpdb, $hostname_source );
 
 		// Get optional JSON list of "old_attachment_ids"=>"new_attachment_ids"mapping. If not provided, will load from DB, which is recommended.
 		$attachment_ids_map = null;
@@ -346,7 +399,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		// If no attachment IDs map was passed, get it from the DB.
 		if ( is_null( $attachment_ids_map ) ) {
 			// Get all attachment old and new IDs from DB.
-			$attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
+			$attachment_ids_map = $this->logic->get_imported_attachment_id_mapping_from_db();
 
 			if ( ! $attachment_ids_map ) {
 				WP_CLI::warning( 'No attachment IDs found in the DB. No changes made.' );
@@ -360,12 +413,12 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$log_path = $export_dir . '/' . $log;
 		$this->log( $log_path, sprintf( 'Starting %s.', $ts ) );
 
-		// Get local Post IDs which were imported using Content Diff (these posts will have the ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID postmeta).
-		$imported_post_ids_mapping = self::$logic->get_imported_post_id_mapping_from_db();
+		// Get local Post IDs which were imported using Content Diff (these posts will have the `ContentDiffMigratorLogic::get_meta_key_original_id()` postmeta).
+		$imported_post_ids_mapping = $this->logic->get_imported_post_id_mapping_from_db();
 		$imported_post_ids         = array_values( $imported_post_ids_mapping );
 
 		// Update attachment IDs.
-		self::$logic->update_featured_images( $imported_post_ids, $attachment_ids_map, $log_path, $dry_run );
+		$this->logic->update_featured_images( $imported_post_ids, $attachment_ids_map, $log_path, $dry_run );
 
 		wp_cache_flush();
 		WP_CLI::success( sprintf( 'Done. Log saved to %s', $log_path ) );
@@ -378,11 +431,17 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param array $assoc_args CLI assoc args.
 	 */
 	public function cmd_search_new_content_on_live( $args, $assoc_args ) {
+		global $wpdb;
+		
+		// Params.
 		$export_dir        = $assoc_args['export-dir'] ?? false;
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
 		$post_types        = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'attachment' ];
+		$hostname_source   = $assoc_args['hostname-source'] ? $wpdb->prepare( '%s', $assoc_args['hostname-source'] ) : null;
 
-		global $wpdb;
+		// Initialize logic.
+		$this->logic = new ContentDiffMigratorLogic( $wpdb, $hostname_source );
+		
 		try {
 			$this->validate_db_tables( $live_table_prefix, [ 'options' ] );
 		} catch ( \RuntimeException $e ) {
@@ -425,23 +484,23 @@ class ContentDiffMigrator implements InterfaceCommand {
 		WP_CLI::log( sprintf( 'Now searching live DB for new Post types %s ...', implode( ', ', $post_types ) ) );
 		try {
 			WP_CLI::log( sprintf( 'Querying %s types...', implode( ',', $post_types_non_attachments ) ) );
-			$results_live_posts  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
-			$results_local_posts = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+			$results_live_posts  = $this->logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+			$results_local_posts = $this->logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 
 			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_posts ) ) );
-			$new_live_ids = self::$logic->filter_new_live_ids( $results_live_posts, $results_local_posts );
+			$new_live_ids = $this->logic->filter_new_live_ids( $results_live_posts, $results_local_posts );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_ids ) ) );
 
 			WP_CLI::log( 'Searching for records more recently modified on live...' );
-			$modified_live_ids = self::$logic->filter_modified_live_ids( $results_live_posts, $results_local_posts );
+			$modified_live_ids = $this->logic->filter_modified_live_ids( $results_live_posts, $results_local_posts );
 			WP_CLI::success( sprintf( '%d modified IDs found.', count( $modified_live_ids ) ) );
 
 			WP_CLI::log( 'Querying attachments...' );
-			$results_live_attachments  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
-			$results_local_attachments = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
+			$results_live_attachments  = $this->logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
+			$results_local_attachments = $this->logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 
 			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_attachments ) ) );
-			$new_live_attachment_ids = self::$logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
+			$new_live_attachment_ids = $this->logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
 			$new_live_ids            = array_merge( $new_live_ids, $new_live_attachment_ids );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_attachment_ids ) ) );
 
@@ -482,9 +541,16 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param array $assoc_args CLI assoc args.
 	 */
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
-		$import_dir        = $assoc_args['import-dir'] ?? false;
-		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
+		global $wpdb;
 
+		// Params.
+		$import_dir             = $assoc_args['import-dir'] ?? false;
+		$live_table_prefix      = $assoc_args['live-table-prefix'] ?? false;
+		$hostname_source   = $assoc_args['hostname-source'] ? $wpdb->prepare( '%s', $assoc_args['hostname-source'] ) : null;
+
+		// Initialize logic.
+		$this->logic = new ContentDiffMigratorLogic( $wpdb, $hostname_source );
+		
 		// Validate all params.
 		$file_ids_csv      = $import_dir . '/' . self::LOG_IDS_CSV;
 		$file_ids_modified = $import_dir . '/' . self::LOG_IDS_MODIFIED;
@@ -606,7 +672,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// Check if any of the local categories have nonexistent wp_term_taxonomy.parent, and fix those before continuing.
-		$categories = self::$logic->get_categories_with_nonexistent_parents( $wpdb->prefix );
+		$categories = $this->logic->get_categories_with_nonexistent_parents( $wpdb->prefix );
 		if ( ! empty( $categories ) ) {
 			$list              = '';
 			$term_taxonomy_ids = [];
@@ -619,11 +685,11 @@ class ContentDiffMigrator implements InterfaceCommand {
 			WP_CLI::log( $list );
 
 			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
-			self::$logic->reset_categories_parents( $wpdb->prefix, $term_taxonomy_ids );
+			$this->logic->reset_categories_parents( $wpdb->prefix, $term_taxonomy_ids );
 		}
 
 		// Check the same for Live DB's categories, and fix those before continuing.
-		$categories = self::$logic->get_categories_with_nonexistent_parents( $this->live_table_prefix );
+		$categories = $this->logic->get_categories_with_nonexistent_parents( $this->live_table_prefix );
 		if ( ! empty( $categories ) ) {
 			$list              = '';
 			$term_taxonomy_ids = [];
@@ -636,7 +702,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			WP_CLI::log( $list );
 
 			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
-			self::$logic->reset_categories_parents( $this->live_table_prefix, $term_taxonomy_ids );
+			$this->logic->reset_categories_parents( $this->live_table_prefix, $term_taxonomy_ids );
 		}
 	}
 
@@ -649,11 +715,17 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_fix_image_ids_in_post_content( $positional_args, $assoc_args ) {
-		// Params.
 		global $wpdb;
+
+		// Params.
 		$post_id_from                = $assoc_args['post-id-from'] ?? null;
 		$post_id_to                  = $assoc_args['post-id-to'] ?? null;
 		$local_hostnames_aliases_csv = $assoc_args['local-hostname-aliases-csv'] ?? null;
+		$hostname_source   = $assoc_args['hostname-source'] ? $wpdb->prepare( '%s', $assoc_args['hostname-source'] ) : null;
+
+		// Initialize logic.
+		$this->logic = new ContentDiffMigratorLogic( $wpdb, $hostname_source );
+
 		$log_file_path               = 'contentdiff_update_blocks_ids.log';
 		if ( ( ! is_null( $post_id_from ) && is_null( $post_id_to ) ) || ( is_null( $post_id_from ) && ! is_null( $post_id_to ) ) ) {
 			WP_CLI::error( 'Both --post-id-from and --post-id-to must be provided' );
@@ -713,7 +785,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$known_attachment_ids_updates = [];
 		foreach ( $post_ids as $key_post_id => $post_id ) {
 			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_post_id + 1, count( $post_ids ), $post_id ) );
-			self::$logic->update_blocks_ids( [ $post_id ], $known_attachment_ids_updates, $local_hostname_aliases, $log_file_path );
+			$this->logic->update_blocks_ids( [ $post_id ], $known_attachment_ids_updates, $local_hostname_aliases, $log_file_path );
 		}
 
 		wp_cache_flush();
@@ -729,7 +801,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *               categories' term_ids on local (staging).
 	 */
 	public function recreate_categories() {
-		$category_term_id_updates = self::$logic->recreate_categories( $this->live_table_prefix );
+		$category_term_id_updates = $this->logic->recreate_categories( $this->live_table_prefix );
 
 		// Log category term_id updates.
 		$this->log(
@@ -798,18 +870,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// Get and output progress meter by 10%.
 			$last_percent_progress = $percent_progress;
-			self::$logic->get_progress_percentage( count( $post_ids_for_import ), $key_post_id + 1, 10, $percent_progress );
+			$this->logic->get_progress_percentage( count( $post_ids_for_import ), $key_post_id + 1, 10, $percent_progress );
 			if ( $last_percent_progress !== $percent_progress ) {
 				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
 			}
 
 			// Get all Post data from DB.
-			$post_data = self::$logic->get_post_data( (int) $post_id_live, $this->live_table_prefix );
-			$post_type = $post_data[ self::$logic::DATAKEY_POST ]['post_type'];
+			$post_data = $this->logic->get_post_data( (int) $post_id_live, $this->live_table_prefix );
+			$post_type = $post_data[ $this->logic::DATAKEY_POST ]['post_type'];
 
 			// First just insert a new blank `wp_posts` record to get the new ID.
 			try {
-				$post_id_new           = self::$logic->insert_post( $post_data[ self::$logic::DATAKEY_POST ] );
+				$post_id_new           = $this->logic->insert_post( $post_data[ $this->logic::DATAKEY_POST ] );
 				$imported_posts_data[] = [
 					'post_type' => $post_type,
 					'id_old'    => (int) $post_id_live,
@@ -824,7 +896,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			}
 
 			// Now import all related Post data.
-			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
+			$import_errors = $this->logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
 				$msg = sprintf( 'Errors during import post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new );
 				foreach ( $import_errors as $import_error ) {
@@ -847,7 +919,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			);
 
 			// Save some metas.
-			update_post_meta( $post_id_new, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID, $post_id_live );
+			update_post_meta( $post_id_new, $this->logic->get_meta_key_original_id(), $post_id_live );
 		}
 
 		// Flush the cache for `$wpdb::update`s to sink in.
@@ -918,7 +990,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// Get and output progress meter by 10%.
 			$last_percent_progress = $percent_progress;
-			self::$logic->get_progress_percentage( count( $parent_ids_for_update ), $key_id_old + 1, 10, $percent_progress );
+			$this->logic->get_progress_percentage( count( $parent_ids_for_update ), $key_id_old + 1, 10, $percent_progress );
 			if ( $last_percent_progress !== $percent_progress ) {
 				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
 			}
@@ -942,13 +1014,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// It's possible that this $post's post_parent already existed in local DB before the Content Diff import was run, so
 			// it won't be present in the list of the posts we imported. Let's try and search for the new ID directly in DB.
-			// First try searching by postmeta ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID -- in case a previous content diff imported it.
+			// First try searching by postmeta `ContentDiffMigratorLogic::get_meta_key_original_id()` -- in case a previous content diff imported it.
 			if ( is_null( $parent_id_new ) ) {
-				$parent_id_new = self::$logic->get_current_post_id_by_custom_meta( $parent_id_old, ContentDiffMigratorLogic::SAVED_META_LIVE_POST_ID );
+				$parent_id_new = $this->logic->get_current_post_id_by_custom_meta( $parent_id_old, $this->logic->get_meta_key_original_id() );
 			}
 			// Next try searching for the new parent_id by joining local and live DB tables.
 			if ( is_null( $parent_id_new ) ) {
-				$parent_id_new = self::$logic->get_current_post_id_by_comparing_with_live_db( $parent_id_old, $this->live_table_prefix );
+				$parent_id_new = $this->logic->get_current_post_id_by_comparing_with_live_db( $parent_id_old, $this->live_table_prefix );
 			}
 
 			// Warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
@@ -962,7 +1034,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 			// Update.
 			if ( $parent_id_old != $parent_id_new ) {
-				self::$logic->update_post_parent( $id_new, $parent_id_new );
+				$this->logic->update_post_parent( $id_new, $parent_id_new );
 			}
 
 			// Log IDs of the Post.
@@ -1011,12 +1083,12 @@ class ContentDiffMigrator implements InterfaceCommand {
 		 *
 		 * @var array $imported_attachment_ids_map Keys are old Live IDs, values are new local IDs.
 		 */
-		$imported_attachment_ids_map = self::$logic->get_imported_attachment_id_mapping_from_db();
+		$imported_attachment_ids_map = $this->logic->get_imported_attachment_id_mapping_from_db();
 
 		// Get new Post IDs from DB.
 		$new_post_ids = array_values( $imported_post_ids_map );
 
-		self::$logic->update_featured_images( $new_post_ids, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
+		$this->logic->update_featured_images( $new_post_ids, $imported_attachment_ids_map, $this->log_updated_featured_imgs_ids );
 	}
 
 	/**
@@ -1070,7 +1142,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			WP_CLI::log( sprintf( '%s of total %d posts already had their blocks\' IDs updated, continuing from there..', count( $imported_post_ids_map ) - count( $new_post_ids_for_blocks_update ), count( $imported_post_ids_map ) ) );
 		}
 
-		self::$logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, [], $this->log_updated_blocks_ids );
+		$this->logic->update_blocks_ids( $new_post_ids_for_blocks_update, $imported_attachment_ids_map, [], $this->log_updated_blocks_ids );
 	}
 
 	/**
@@ -1080,9 +1152,15 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Optional arguments.
 	 */
 	public function cmd_compare_collations_of_live_and_core_wp_tables( $args, $assoc_args ) {
+		global $wpdb;
+		
 		$live_table_prefix     = $assoc_args['live-table-prefix'];
 		$skip_tables           = [];
 		$different_tables_only = $assoc_args['different-collations-only'] ?? false;
+		$hostname_source   = $assoc_args['hostname-source'] ? $wpdb->prepare( '%s', $assoc_args['hostname-source'] ) : null;
+
+		// Initialize logic.
+		$this->logic = new ContentDiffMigratorLogic( $wpdb, $hostname_source );
 
 		if ( ! empty( $assoc_args['skip-tables'] ) ) {
 			$skip_tables = explode( ',', $assoc_args['skip-tables'] );
@@ -1091,9 +1169,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$tables = [];
 
 		if ( $different_tables_only ) {
-			$tables = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+			$tables = $this->logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
 		} else {
-			$tables = self::$logic->get_collation_comparison_of_live_and_core_wp_tables( $live_table_prefix, $skip_tables );
+			$tables = $this->logic->get_collation_comparison_of_live_and_core_wp_tables( $live_table_prefix, $skip_tables );
 		}
 
 		if ( ! empty( $tables ) ) {
@@ -1111,12 +1189,18 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Optional arguments.
 	 */
 	public function cmd_correct_collations_for_live_wp_tables( $args, $assoc_args ) {
+		global $wpdb;
+
 		$live_table_prefix = $assoc_args['live-table-prefix'];
 		$mode              = $assoc_args['mode'];
 		$backup_prefix     = isset( $assoc_args['backup-table-prefix'] ) ? $assoc_args['backup-table-prefix'] : 'collationbak_';
 		$skip_tables       = isset( $assoc_args['skip-tables'] ) ? explode( ',', $assoc_args['skip-tables'] ) : [];
+		$hostname_source   = $assoc_args['hostname-source'] ? $wpdb->prepare( '%s', $assoc_args['hostname-source'] ) : null;
 
-		$tables_with_differing_collations = self::$logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
+		// Initialize logic.
+		$this->logic = new ContentDiffMigratorLogic( $wpdb, $hostname_source );
+
+		$tables_with_differing_collations = $this->logic->filter_for_different_collated_tables( $live_table_prefix, $skip_tables );
 
 		if ( ! empty( $tables_with_differing_collations ) ) {
 			WP_CLI\Utils\format_items( 'table', $tables_with_differing_collations, array_keys( $tables_with_differing_collations[0] ) );
@@ -1144,7 +1228,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		WP_CLI::log( "Now fixing $live_table_prefix tables collations..." );
 		foreach ( $tables_with_differing_collations as $result ) {
 			WP_CLI::log( 'Addressing ' . $result['table'] . ' table...' );
-			self::$logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
+			$this->logic->copy_table_data_using_proper_collation( $live_table_prefix, $result['table'], $records_per_transaction, $sleep_in_seconds, $backup_prefix );
 		}
 	}
 
@@ -1297,8 +1381,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function validate_db_tables( string $live_table_prefix, array $skip_tables ): void {
-		self::$logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
-		if ( ! self::$logic->are_table_collations_matching( $live_table_prefix, $skip_tables ) ) {
+		$this->logic->validate_core_wp_db_tables_exist_in_db( $live_table_prefix, $skip_tables );
+		if ( ! $this->logic->are_table_collations_matching( $live_table_prefix, $skip_tables ) ) {
 			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
 		}
 	}
