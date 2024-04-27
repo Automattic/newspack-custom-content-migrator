@@ -7,8 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \WP_CLI;
-use \WP_User;
+use WP_CLI;
+use WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
@@ -2688,7 +2688,7 @@ class ContentDiffMigrator {
 			$where_sprintf = '';
 			foreach ( $where_conditions as $column => $value ) {
 				$where_sprintf .= ( ! empty( $where_sprintf ) ? ' AND' : '' )
-								  . ' ' . esc_sql( $column ) . ' = %s';
+									. ' ' . esc_sql( $column ) . ' = %s';
 			}
 			$where_sprintf = ' WHERE' . $where_sprintf;
 			$sql_sprintf   = $sql . $where_sprintf;
@@ -3180,7 +3180,7 @@ class ContentDiffMigrator {
 		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
 		// phpcs:ignore -- query fully sanitized.
 		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
-		$table_columns         = implode( ',', array_map( fn( $column_row) => "`$column_row->Field`", $table_columns_results ) );
+		$table_columns         = implode( ',', array_map( fn( $column_row ) => "`$column_row->Field`", $table_columns_results ) );
 		// phpcs:ignore -- query fully sanitized.
 		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
