@@ -13,7 +13,6 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
-use stdClass;
 use WP_CLI;
 
 /**
@@ -131,14 +130,11 @@ class GhostCMSMigrator implements InterfaceCommand {
 		if( empty( $this->json->db[0]->data->posts ) ) {
 			WP_CLI::error( 'JSON file contained no posts.' );
 		}
-	
-		// $users_to_authors   = empty( $json->db[0]->data->users ) ? array() : $this->insert_users_to_authors( $json->db[0]->data->users );
-		// return;
-		
+			
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
-			// Skip if not post or not published or not visible
+			// Skip if not post, or not published, or not visible
 			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility ) {
 				$this->logger->log( $this->log . '-skips.log', print_r( $json_post, true ) );
 				continue;
@@ -167,8 +163,9 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// update_post_meta( $post_id, 'newspack_ghostcms_json_uuid', $json_post->uuid );
 			// update_post_meta( $post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
 
-			// Tags to categories.
+			// Post tags to categories.
 			$category_ids = $this->post_tags_to_categories( $json_post->id );
+
 			continue;
 
 			if( ! empty( $category_ids ) ) wp_set_post_categories( $post_id, $category_ids );
@@ -234,49 +231,29 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// Each posts_tags relationship.
 		foreach( $this->json->db[0]->data->posts_tags as $json_post_tag ) {
 			
-			// Continue if post id does not match relationship.
+			// Skip if post id does not match relationship.
 			if( $json_post_tag->post_id != $json_post_id ) continue;
 
-			$this->logger->log( $this->log, print_r( $json_post_tag, true ) );
+			// If tag_id wasn't already processed.
+			if( ! isset( $this->tags_to_categories[ $json_post_tag->tag_id ] ) ) {
 
-			// Check if tag_id key already exists in lookup.
-			if( isset( $this->tags_to_categories[ $json_post_tag->tag_id ] ) ) {
+				// Get the json tag object.
+				$json_tag = $this->get_json_tag_by_id( $json_post_tag->tag_id );
 
-				$this->logger->log( $this->log, 'tag_to_category exists: ' . $this->tags_to_categories[ $json_post_tag->tag_id ] );
+				// Verify related tag was found in json.
+				if( empty( $json_tag ) ) continue;
 
-				// Verify lookup value > 0
-				// A value of 0 means json tag did not have visibility of public.
-				// In that case, don't add to return array.
-				if( $this->tags_to_categories[ $json_post_tag->tag_id ] > 0 ) {
-					$out[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
-				}
+				// Attempt insert and save return value into lookup.
+				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->insert_tag_as_category( $json_tag );
 
-				// Look for next post_tag relationship.
-				continue;
 			}
 
-			// Get the tag object.
-			$json_tag = $this->get_json_tag_by_id( $json_post_tag->tag_id );
-
-			$this->logger->log( $this->log, 'tag object' . print_r( $json_tag, true ) );
-
-			if( empty( $json_tag ) ) continue;
-
-			// Attempt insert.
-			$category_id = $this->insert_tag_as_category( $json_tag );
-
-			$this->logger->log( $this->log, 'cat id: ' . $category_id );
-
-			// If any issues with insert (ie: json_tag visibility not public, set category_id to 0)
-			if( ! is_numeric( $category_id ) ) $category_id = 0;
-
-			// Save into lookup.
-			$this->tags_to_categories[ $json_post_tag->tag_id ] = $category_id;
-
-			// Add to output if > 0
+			// Verify lookup value > 0
 			// A value of 0 means json tag did not have visibility of public.
 			// In that case, don't add to return array.
-			if( $category_id > 0 ) $out[] = $category_id;
+			if( $this->tags_to_categories[ $json_post_tag->tag_id ] > 0 ) {
+				$out[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
+			}
 							
 		} // foreach post_tag relationship
 
@@ -300,26 +277,22 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	private function insert_tag_as_category( $json_tag ) {
 
-		if( 'public' != $json_tag->visibility ) return 0;
-
-		$this->logger->log( $this->log, '---- Tag: ' . $json_tag->name . ' / ' . $json_tag->slug . ' / ' . $json_tag->id );
+		// Must have visibility property with value of 'public'.
+		if( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) return 0;
 		
 		// Check if category exists in db.
 		$term_arr = term_exists( $json_tag->name, 'category' );
 
-		// Category does not exist.  Insert it.
+		// Category does not exist.
 		if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
 
-			$this->logger->log( $this->log, 'Inserting new term: ' . $json_tag->name );
-
+			// Insert it.
 			$term_arr = wp_insert_term( $json_tag->name, 'category' );
 
-			if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-
-				$this->logger->log( $this->log, 'Insert term failed: ' . $json_tag->name, $this->logger::WARNING );
-
+			// Log and return 0 if insert failed.
+			if( is_wp_error( $term_arr ) || ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+				$this->logger->log( $this->log, 'WP insert term failed: ' . $json_tag->name, $this->logger::WARNING );
 				return 0;
-
 			}
 
 		}
@@ -329,11 +302,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		// Add redirect if needed.
 		if( $term->slug != $json_tag->slug ) {
-
-			$this->logger->log( $this->log, 'TODO: term redirect needed.', $this->logger::WARNING );
-			$this->logger->log( $this->log, 'Json term slug: ' . $json_tag->slug );
-			$this->logger->log( $this->log, 'WP term slug: ' . $term->slug );
-
+			$this->logger->log( $this->log, 'TODO: term redirect needed: ' . $json_tag->slug . ' => ' . $term->slug, $this->logger::WARNING );
 		}
 
 		return $term_arr['term_id'];
