@@ -81,6 +81,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
+		Command\PublisherSpecific\PCIJMigrator::class,
 		Command\PublisherSpecific\InsightCrimeMigrator::class,
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
