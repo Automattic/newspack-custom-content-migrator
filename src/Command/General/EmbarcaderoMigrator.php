@@ -4,12 +4,18 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DateTimeZone;
 use DOMDocument;
+use Exception;
+use NewspackCustomContentMigrator\Command\General\TaxonomyMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
+use WP;
 use WP_CLI;
 
 /**
@@ -80,105 +86,202 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		'a&e',
 		'alameda county',
 		'alamo',
+		'around the region',
+		'arts',
 		'atherton',
 		'belle haven',
 		'blackhawk',
 		'business',
 		'city government',
+		'city limits',
 		'city politics',
 		'coastside',
-		'community',
+		'coming up',
+		'community kindness',
 		'community leaders',
+		'community',
 		'contra costa county',
 		'courts',
 		'cover story',
 		'covid',
 		'crime',
 		'danville',
+		'diablo',
 		'dublin',
 		'east palo alto',
 		'editorial',
-		'education ',
+		'editorials',
+		'education',
 		'election',
 		'enterprise story',
 		'environment',
 		'family/lifestyle',
+		'feature',
+		'features',
 		'fire/wildfire',
 		'food',
 		'guest opinion',
-		'health',
 		'health care',
+		'health',
+		'home improvement',
+		'home sales',
 		'housing',
 		'investigative story',
 		'ladera',
 		'land use',
+		'letters to the editor',
 		'livermore',
-		'los altos',
 		'los altos hills',
+		'los altos',
+		'meet the artist',
 		'menlo park',
 		'mountain view',
 		'neighborhood',
+		'neighborhoods',
+		'news & events',
+		'news',
 		'north fair oaks',
 		'obituary',
 		'outdoor recreation',
+		'palo alto city',
+		'palo alto news',
+		'palo alto people',
+		'palo alto schools',
 		'palo alto',
 		'peninsula',
+		'pet of the week',
 		'pleasanton',
 		'police',
 		'portola valley',
 		'poverty',
 		'profile',
+		'profile',
 		'real estate',
 		'redwood city',
 		'regional politics',
+		'roundup',
 		'san carlos',
 		'san mateo county',
-		'san ramon',
 		'san ramon valley',
+		'san ramon',
 		'santa clara county',
 		'seniors',
 		'social justice',
 		'social services',
 		'sports',
-		'stanford',
 		'stanford university',
+		'stanford',
 		'state',
 		'sunol',
 		'technology',
+		'top stories',
 		'traffic',
 		'transportation',
 		'tri-valley',
+		'triumph',
 		'video',
+		'walnut creek',
 		'woodside',
 		'youth',
-		'top stories',
-		'palo alto news',
-		'around the region',
-		'palo alto people',
-		'palo alto city',
-		'palo alto schools',
-		'editorials',
-		'guest opinion',
-		'letters to the editor',
-		'news',
-		'roundup',
-		'feature',
-		'profile',
-		'features',
-		'meet the artist',
-		'news & events',
-		'coming up',
-		'arts',
-		'home improvement',
-		'neighborhoods',
-		'home sales',
-		'diablo',
-		'walnut creek',
-		'pet of the week',
-		'community leaders',
-		'city limits',
-		'triumph',
-		'community kindness',
+	];
+
+	const ALLOWED_TAG_LIST = [
+		'a&e - top post - primary',
+		'a&e - top post - secondary',
+		'arts & culture - music',
+		'arts & culture - performing arts',
+		'arts & culture - top post - primary',
+		'arts & culture - top post - secondary',
+		'arts & culture - visual arts',
+		'danvillesanramon - city government',
+		'danvillesanramon - city news',
+		'danvillesanramon - community',
+		'danvillesanramon - education',
+		'danvillesanramon - features',
+		'danvillesanramon - other local news',
+		'danvillesanramon - san mateo county news',
+		'danvillesanramon - top post - primary',
+		'danvillesanramon - top post - secondary',
+		'danvillesanramon - trending',
+		'food - new & trending',
+		'food - openings & closings',
+		'food - top post - primary',
+		'livermore - city government',
+		'livermore - city news',
+		'livermore - community',
+		'livermore - education',
+		'livermore - features',
+		'livermore - other local news',
+		'livermore - san mateo county news',
+		'livermore - top post - primary',
+		'livermore - top post - secondary',
+		'livermore - trending',
+		'menlopark - city government',
+		'menlopark - city news',
+		'menlopark - community',
+		'menlopark - education',
+		'menlopark - features',
+		'menlopark - other local news',
+		'menlopark - san mateo county news',
+		'menlopark - top post - primary',
+		'menlopark - top post - secondary',
+		'menlopark - trending',
+		'mountainview - city government',
+		'mountainview - city news',
+		'mountainview - community',
+		'mountainview - education',
+		'mountainview - features',
+		'mountainview - other local news',
+		'mountainview - san mateo county news',
+		'mountainview - top post - primary',
+		'mountainview - top post - secondary',
+		'mountainview - trending',
+		'paloalto - city government',
+		'paloalto - city news',
+		'paloalto - community',
+		'paloalto - education',
+		'paloalto - features',
+		'paloalto - other local news',
+		'paloalto - san mateo county news',
+		'paloalto - top post - primary',
+		'paloalto - top post - secondary',
+		'paloalto - trending',
+		'playback',
+		'pleasanton - city government',
+		'pleasanton - city news',
+		'pleasanton - community',
+		'pleasanton - education',
+		'pleasanton - features',
+		'pleasanton - other local news',
+		'pleasanton - san mateo county news',
+		'pleasanton - top post - primary',
+		'pleasanton - top post - secondary',
+		'pleasanton - trending',
+		'print ready',
+		'real estate - home & garden',
+		'real estate - neighborhoods',
+		'real estate - top post - primary',
+		'real estate - top post - secondary',
+		'real estate - business',
+		'redwoodcity - city government',
+		'redwoodcity - city news',
+		'redwoodcity - community',
+		'redwoodcity - education',
+		'redwoodcity - features',
+		'redwoodcity - other local news',
+		'redwoodcity - san mateo county news',
+		'redwoodcity - top post - primary',
+		'redwoodcity - top post - secondary',
+		'redwoodcity - trending',
+		'the big picture',
+		'the six fifty',
+		'the six fifty - culture',
+		'the six fifty - food & drink',
+		'the six fifty - neighborhood guide',
+		'the six fifty - outdoors',
+		'the six fifty - things to do',
+		'the six fifty - top post - primary',
+		'trending',
 	];
 
 	/**
@@ -210,6 +313,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private $coauthorsplus_logic;
 
 	/**
+	 * Taxonomy instance.
+	 *
+	 * @var Taxonomy $taxonomy_logic
+	 */
+	private $taxonomy_logic;
+
+	/**
 	 * GutenbergBlockGenerator instance.
 	 *
 	 * @var GutenbergBlockGenerator.
@@ -227,6 +337,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
+		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorPlus();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 
@@ -481,6 +592,34 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-list-posts-from-blog',
+			array( $this, 'cmd_embarcadero_list_posts_from_blog' ),
+			[
+				'shortdesc' => "Helper dev command. Lists post IDs imported from blog CSV. Does content validation and logs debugging info.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'blogs-topics-csv-path',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blogs-photos-csv-path',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blogs-photos-dir-path',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-more-posts-block',
 			array( $this, 'cmd_embarcadero_migrate_more_posts_block' ),
 			[
@@ -498,6 +637,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'name'        => 'story-media-file-path',
 						'description' => 'Path to the CSV file containing the stories\'s media to import.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'target-story-ids',
+						'description' => 'CSV list of target story IDs to re-process the "more posts" block for.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -650,13 +796,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'print-sections-csv-file-path',
-						'description' => 'Path to the CSV file containing print sections to import.',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
 						'name'        => 'print-pdf-dir-path',
 						'description' => 'Path to the directory containing the print issues PDF files to import.',
 						'optional'    => false,
@@ -761,6 +900,21 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-helper-fix-dates-for-blogs-topics',
+			array( $this, 'cmd_fix_post_times_for_blogs_topics' ),
+			[
+				'shortdesc' => 'Fix post dates on separate blogs/topic CSV to match timezone.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'topics-csv-path',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-rearrange-categories',
@@ -856,17 +1010,16 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
-						'name'        => 'batch',
-						'description' => 'Batch to start from.',
-						'optional'    => true,
+						'name'        => 'target',
+						'description' => 'The target of the update operation to fix styling.',
+						'optional'    => false,
 						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'posts-per-batch',
-						'description' => 'Posts to import per batch',
-						'optional'    => true,
-						'repeating'   => false,
+						'default'     => 'content',
+						'options'     => [
+							'content',
+							'excerpt',
+							'meta',
+						],
 					],
 				],
 			]
@@ -927,6 +1080,106 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'story-report-items-dir-path',
 						'description' => 'Path to the CSV file containing the stories\'s report items to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-dupe-sanctioned-list-cats-tags',
+			[ $this, 'cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags' ],
+			[
+				'shortdesc' => 'Merges duplicate categories and tags based on sanctioned list provided by Embarcadero.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-tags-on-posts',
+			[ $this, 'cmd_embarcadero_fix_tags_on_posts' ],
+			[
+				'shortdesc' => 'Fixes category-tag relationships for migrated (initial and refreshed) posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories\'s to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'after-row-number',
+						'description' => 'Starts after this row number.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-delete-disallowed-tags',
+			[ $this, 'cmd_embarcadero_delete_disallowed_tags' ],
+			[
+				'shortdesc' => 'Deletes disallowed tags from the database.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-establish-primary-categories',
+			[ $this, 'cmd_embarcadero_establish_primary_categories' ],
+			[
+				'shortdesc' => 'Establishes primary categories for migrated posts that don\'t already have them.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-create-missing-categories',
+			[ $this, 'cmd_embarcadero_create_missing_categories' ],
+			[
+				'shortdesc' => 'Creates missing categories based from a single curated list.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file containing the categories that exist per site.',
+						'optional'    => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-users-on-comments',
+			[ $this, 'cmd_embarcadero_fix_users_on_comments' ],
+			[
+				'shortdesc' => 'Corrects user and comment associations for comments',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'comments-csv-path',
+						'description' => 'Path to the CSV file containing the comments.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'comments-starting-row',
+						'description' => 'Row number to start processing comments from.',
+						'optional'    => 'true',
+						'repeating'   => false,
+						'default'     => 0,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -1461,6 +1714,92 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Imported tags for post %d with the original ID %d: %s', $wp_post_id, $story_id, implode( ', ', $tags ) ), Logger::SUCCESS );
 		}
 	}
+	
+	/**
+	 * Callable for `newspack-content-migrator embarcadero-list-posts-from-blog`.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 * @return void
+	 */
+	public function cmd_embarcadero_list_posts_from_blog( $args, $assoc_args ) {
+		global $wpdb;
+
+		$topics_csv_file_path  = $assoc_args['blogs-topics-csv-path'];
+		$photos_csv_file_path  = $assoc_args['blogs-photos-csv-path'];
+		$photos_dir            = $assoc_args['blogs-photos-dir-path'];
+
+		$topics = $this->get_data_from_csv_or_tsv( $topics_csv_file_path );
+		$photos = $this->get_data_from_csv_or_tsv( $photos_csv_file_path );
+
+		$post_ids_found = [];
+		$post_ids_not_same = [];
+		$topic_ids_not_found = [];
+		$debug_titles_not_same = [];
+
+		foreach ( $topics as $key_topic => $topic ) {
+			WP_CLI::line( sprintf( '(%d)/(%d) topic_id %d...', $key_topic + 1, count( $topics ), $topic['topic_id'] ) );
+
+			// Find post ID by postmeta original 'topic_id' (self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY is not used for blog stories on Palo Alto).
+			$meta_key = 'topic_id';
+			// Account for duplicates.
+			$post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s", $meta_key, $topic['topic_id'] ) );
+			if ( ! $post_ids || empty( $post_ids ) ) {
+				WP_CLI::line( sprintf( 'WARNING not found post for topic_id %s', $topic['topic_id'] ) );
+				$topic_ids_not_found[] = $topic['topic_id'];
+				continue;
+			}
+
+			foreach ( $post_ids as $post_id ) {
+				// Validate post is the same as topic. Looks like this isn't needed, but just in case since this is retroactive.
+				$post = get_post( $post_id, ARRAY_A );
+				$blog_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
+				$is_same_type = $post['post_type'] == 'post';
+				$is_same_title = $post['post_title'] == $topic["headline"];
+				if ( ! $is_same_title ) {
+					$encoded_title = str_replace( '"', '&quot;', $topic["headline"] );
+					$is_same_title = $post['post_title'] == $encoded_title;
+				}
+				if ( ! $is_same_title ) {
+					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic["headline"] );
+				}
+				// Allow +-1 day for timezone differences.
+				$publish_plus1day = date("Y-m-d", strtotime($post['post_date'] . " +1 day"));
+				$publish_minus1day = date("Y-m-d", strtotime($post['post_date'] . " -1 day"));
+				$is_same_date = ( substr( $post['post_date'], 0, 10 ) == $topic["posted_date"] )
+					|| ( $publish_plus1day == $topic["posted_date"] )
+					|| ( $publish_minus1day == $topic["posted_date"] );
+				$is_same_blog = $blog_id == $topic["blog_id"];
+				if (
+					! $is_same_type ||
+					! $is_same_title ||
+					! $is_same_date || 
+					! $is_same_blog
+				) {
+					WP_CLI::line( sprintf( 'WARNING DEBUG post_id %d is not the same as topic_id %d (type:%s, title:%s, date:%s, blog:%s)', $post_id, $topic['topic_id'], (string) $is_same_type, (string) $is_same_title, (string) $is_same_date, (string) $is_same_blog ) );
+					$post_ids_not_same[] = $post_id;
+					if ( ! $is_same_title ) {
+						$debug_titles_not_same[] = [
+							$topic["headline"],
+							$post['post_title'],
+							'topic_id: ' . $topic['topic_id'], 
+							'post_id: ' . $post_id
+						];
+					}
+					continue;
+				}
+
+				WP_CLI::line( sprintf( 'FOUND post_id %d <= topic_id %d', $post_id, $topic['topic_id'] ) );
+				$post_ids_found[] = $post_id;
+			}
+		}
+
+		file_put_contents( 'cmd_found-post-ids.csv', implode( ",", $post_ids_found ) );
+		file_put_contents( 'cmd_post-ids-not-same.csv', implode( ",", $post_ids_not_same ) );
+		file_put_contents( 'cmd_topic-ids-not-found.csv', implode( ",", $topic_ids_not_found ) );
+		file_put_contents( 'cmd_debug_titles_not_same.json', json_encode( $debug_titles_not_same ) );
+		WP_CLI::line( 'Done, saved CSVs' );
+	}
 
 	/**
 	 * Callable for "newspack-content-migrator embarcadero-migrate-posts-featured-image".
@@ -1550,39 +1889,318 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_fix_post_times( array $args, array $assoc_args ): void {
+		global $wpdb;
+		
 		$story_csv_file_path = $assoc_args['story-csv-file-path'];
 		$index_from          = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
 
-		$posts    = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$log_file = 'fix-post-times.log';
+		// General log.
+		$log_general_file = 'fix-post-times.log';
+		// Detailed log.
+		$log_detailed_csv_file = 'fix-post-times.csv';
+		$changes               = [];
 
+		// Intialize data from detailed log.
+		if ( file_exists( $log_detailed_csv_file ) ) {
+			$previous_changes = $this->get_data_from_csv_or_tsv( $log_detailed_csv_file );
+		} else {
+			$previous_changes = [];
+		}
+
+		// Explain usage and confirm.
+		WP_CLI::warning( "The way to run this command is to feed it story_1.csv first (if it exists), and after that run it the second time with story.csv. That's because story_1.csv might contain newer versions of posts than story.csv so we want to run it first. SECOND IMPORTANT NOTE -- the file $log_detailed_csv_file created by this command is being used to track what has previously been updated, i.e. first importing posts from story_1.csv and second skipping the same story if an older version is found in story.csv. So MAKE SURE TO DELETE $log_detailed_csv_file when you begin to run this command with story_1.csv, and keep $log_detailed_csv_file when running it again with story.csv. Use start/end from index as usual." );
+		WP_CLI::confirm( 'Continue?' );
+		
 		// Get selected posts.
+		$posts = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
 		if ( -1 !== $index_to ) {
 			$posts = array_slice( $posts, $index_from, $index_to - $index_from + 1 );
 		}
 
+		// GMT offset.
+		$gmt_offset = get_option( 'gmt_offset' );
+		
 		$total_posts = count( $posts );
-
 		foreach ( $posts as $post_index => $post ) {
-			$this->logger->log( $log_file, sprintf( 'Fixing timezone for the post %d/%d: %d', $index_from + $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
 
 			$wp_post_id = $this->get_post_id_by_meta( self::EMBARCADERO_ORIGINAL_ID_META_KEY, $post['story_id'] );
-
 			if ( ! $wp_post_id ) {
-				$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Could not find post with the original ID %d', $post['story_id'] ), Logger::WARNING );
+				$this->logger->log( $log_general_file, sprintf( 'ERROR Could not find post with story_id %d', $post['story_id'] ), Logger::WARNING );
 				continue;
 			}
-			$post_data = [
-				'ID'        => $wp_post_id,
-				'post_date' => $this->get_post_date_from_timestamp( $post['date_epoch'] ),
-			];
-			$result    = wp_update_post( $post_data );
-			if ( is_wp_error( $result ) ) {
-				$this->logger->log( $log_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
+
+			$this->logger->log( $log_general_file, sprintf( '%d/%d story_ID %d postID %d', $post_index + 1, $total_posts, $post['story_id'], $wp_post_id ), Logger::LINE );
+
+			// Check if $wp_post_id was already updated in $changes log, and skip if it has.
+			$already_updated = false;
+			foreach ( $previous_changes as $key => $previous_change ) {
+				if ( $wp_post_id == $previous_change['post_id'] ) {
+					$already_updated = true;
+					break;
+				}
 			}
-			$this->logger->log( $log_file, sprintf( 'Fixed date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::LINE );
+			if ( true === $already_updated ) {
+				$this->logger->log( $log_general_file, sprintf( 'Already updated story_id %d postID %d. Skipping.', $post['story_id'], $wp_post_id ), Logger::LINE );
+				continue;
+			}
+
+			// For update.
+			$post_data = [];
+
+			// Current post values.
+			$post_date_current         = get_post_field( 'post_date', $wp_post_id );
+			$post_date_gmt_current     = get_post_field( 'post_date_gmt', $wp_post_id );
+			$post_modified_current     = get_post_field( 'post_modified', $wp_post_id );
+			$post_modified_gmt_current = get_post_field( 'post_modified_gmt', $wp_post_id );
+
+			// Get story published date.
+			$story_date     = $this->get_post_date_from_timestamp( $post['date_epoch'] );
+			$story_date_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $story_date ) - $gmt_offset * HOUR_IN_SECONDS );
+
+			// Get story modified date.
+			if ( isset( $post['date_updated_epoch'] ) && ! empty( $post['date_updated_epoch'] ) && '0' != $post['date_updated_epoch'] ) {
+				$story_modified     = $this->get_post_date_from_timestamp( $post['date_updated_epoch'] );
+				$story_modified_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $story_modified ) - $gmt_offset * HOUR_IN_SECONDS );
+			} else {
+				// If not set, use post_date.
+				$story_modified     = $story_date;
+				$story_modified_gmt = $story_date_gmt;
+			}
+
+			// Add to update.
+			if ( $post_date_current != $story_date ) {
+				$post_data['post_date'] = $story_date;
+			}
+			if ( $post_date_gmt_current != $story_date_gmt ) {
+				$post_data['post_date_gmt'] = $story_date_gmt;
+			}
+			if ( $post_modified_current != $story_modified ) {
+				$post_data['post_modified'] = $story_modified;
+			}
+			if ( $post_modified_gmt_current != $story_modified_gmt ) {
+				$post_data['post_modified_gmt'] = $story_modified_gmt;
+			}
+
+			// Update.
+			if ( ! empty( $post_data ) ) {
+				$result = $wpdb->update( $wpdb->posts, $post_data, [ 'ID' => $wp_post_id ] );
+				if ( false == $result ) {
+					$this->logger->log( $log_general_file, sprintf( 'Failed to fix date on post %d/%d: %d', $post_index + 1, $total_posts, $post['story_id'] ), Logger::ERROR );
+				}
+				$this->logger->log( $log_general_file, sprintf( 'Updated dates on story_id %d postID', $post['story_id'], $wp_post_id ), Logger::LINE );
+			}
+
+			// Detailed log.
+			$changes[ $wp_post_id ] = [
+				'post_date_old'         => $post_date_current,
+				'post_date_new'         => $story_date,
+				'post_date_gmt_old'     => $post_date_gmt_current,
+				'post_date_gmt_new'     => $story_date_gmt,
+				'post_modified_old'     => $post_modified_current,
+				'post_modified_new'     => $story_modified,
+				'post_modified_gmt_old' => $post_modified_gmt_current,
+				'post_modified_gmt_new' => $story_modified_gmt,
+			];
 		}
+
+		// Log detailed changes to CSV.
+		$csv = fopen( $log_detailed_csv_file, 'w' );
+		fputcsv( $csv, [ 'post_id', 'post_date_old', 'post_date_new', 'post_date_gmt_old', 'post_date_gmt_new', 'post_modified_old', 'post_modified_new', 'post_modified_gmt_old', 'post_modified_gmt_new' ] );
+		foreach ( $changes as $post_id => $change ) {
+			fputcsv(
+				$csv,
+				[
+					$post_id,
+					$change['post_date_old'] ?? '',
+					$change['post_date_new'] ?? '',
+					$change['post_date_gmt_old'] ?? '',
+					$change['post_date_gmt_new'] ?? '',
+					$change['post_modified_old'] ?? '',
+					$change['post_modified_new'] ?? '',
+					$change['post_modified_gmt_old'] ?? '',
+					$change['post_modified_gmt_new'] ?? '',
+				] 
+			);
+		}
+		WP_CLI::success( 'Changes saved to ' . $log_detailed_csv_file );
+	}
+
+	/**
+	 * Fixes dates on posts imported from blogs/topics to match the site timezone.
+	 *
+	 * @param array $pos_args   Command positional arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_post_times_for_blogs_topics( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+
+		$topics_csv_file_path  = $assoc_args['topics-csv-path'];
+		$topics = $this->get_data_from_csv_or_tsv( $topics_csv_file_path );
+
+		// GMT offset.
+		$gmt_offset = get_option( 'gmt_offset' );
+
+		$post_ids_found = [];
+		$debug_titles_not_same = [];
+		$changes = [];
+		$log_detailed_changes_csv = 'fix-post-times-blogs-topics.csv';
+
+		// Loop through topics.
+		foreach ( $topics as $key_topic => $topic ) {
+			WP_CLI::line( sprintf( '(%d)/(%d) topic_id %d...', $key_topic + 1, count( $topics ), $topic['topic_id'] ) );
+
+			// Find post ID by postmeta original 'topic_id' (self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY is not used for blog stories on Palo Alto).
+			$meta_key = 'topic_id';
+			$post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s", $meta_key, $topic['topic_id'] ) );
+			if ( ! $post_ids || empty( $post_ids ) ) {
+				WP_CLI::line( sprintf( 'WARNING not found post for topic_id %s', $topic['topic_id'] ) );
+				continue;
+			}
+			// Account for multiple posts for same topic (dupes should not have been imported, but if they exist, we need them to have correct data).
+			foreach ( $post_ids as $key_post_id => $post_id ) {
+				
+				/**
+				 * Validate post is the same as topic. This probably isn't needed, but just in case since this is retroactive.
+				 */
+				$post = get_post( $post_id, ARRAY_A );
+				$blog_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
+				$is_same_type = $post['post_type'] == 'post';
+				$is_same_title = $post['post_title'] == $topic["headline"];
+				if ( ! $is_same_title ) {
+					$encoded_title = str_replace( '"', '&quot;', $topic["headline"] );
+					$is_same_title = $post['post_title'] == $encoded_title;
+				}
+				if ( ! $is_same_title ) {
+					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic["headline"] );
+				}
+				// Allow +-1 day for timezone differences.
+				$publish_plus1day = date("Y-m-d", strtotime($post['post_date'] . " +1 day"));
+				$publish_minus1day = date("Y-m-d", strtotime($post['post_date'] . " -1 day"));
+				$is_same_date = ( substr( $post['post_date'], 0, 10 ) == $topic["posted_date"] )
+					|| ( $publish_plus1day == $topic["posted_date"] )
+					|| ( $publish_minus1day == $topic["posted_date"] );
+				$is_same_blog = $blog_id == $topic["blog_id"];
+				if (
+					! $is_same_type ||
+					! $is_same_title ||
+					! $is_same_date || 
+					! $is_same_blog
+				) {
+					WP_CLI::line( sprintf( 'WARNING DEBUG post_id %d is not the same as topic_id %d (type:%s, title:%s, date:%s, blog:%s)', $post_id, $topic['topic_id'], (string) $is_same_type, (string) $is_same_title, (string) $is_same_date, (string) $is_same_blog ) );
+					if ( ! $is_same_title ) {
+						$debug_titles_not_same[] = [
+							$topic["headline"],
+							$post['post_title'],
+							'topic_id: ' . $topic['topic_id'], 
+							'post_id: ' . $post_id
+						];
+					}
+					continue;
+				}
+
+				WP_CLI::line( sprintf( 'FOUND post_id %d from topic_id %d', $post_id, $topic['topic_id'] ) );
+				$post_ids_found[] = $post_id;
+
+
+				/**
+				 * Update post modified date.
+				 */
+
+				// For update.
+				$post_data = [];
+
+				// Current post values.
+				$post_date_current         = get_post_field( 'post_date', $post_id );
+				$post_date_gmt_current     = get_post_field( 'post_date_gmt', $post_id );
+				$post_modified_current     = get_post_field( 'post_modified', $post_id );
+				$post_modified_gmt_current = get_post_field( 'post_modified_gmt', $post_id );
+
+				// Get topic published date from epoch timestamp.
+				$topic_date_published     = $this->get_post_date_from_timestamp( $topic['posted_epoch'] );
+				$topic_date_published_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $topic_date_published ) - $gmt_offset * HOUR_IN_SECONDS );
+
+				// Get topic modified date from 'YYYY-MM-DD' string.
+				$updated_date = \DateTime::createFromFormat( 'Y-m-d', $topic['updated_date'] );
+				$is_date_yyyy_mm_dd = $updated_date && ( $updated_date->format( 'Y-m-d' ) === $topic['updated_date'] );
+				if ( $is_date_yyyy_mm_dd ) {
+					// Since all we have is a YYYY-MM-DD string, we need to add a time to it.
+					$topic_modified     = $topic['updated_date'] . ' 07:00:00';
+					$topic_modified_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $topic_modified ) - $gmt_offset * HOUR_IN_SECONDS );
+				} else {
+					// If not set, use published date.
+					$topic_modified     = $topic_date_published;
+					$topic_modified_gmt = $topic_date_published_gmt;
+				}
+
+				// Add to update.
+				if ( $topic_date_published != $post_date_current ) {
+					$post_data['post_date'] = $topic_date_published;
+				}
+				if ( $topic_date_published_gmt != $post_date_gmt_current ) {
+					$post_data['post_date_gmt'] = $topic_date_published_gmt;
+				}
+				if ( $topic_modified != $post_modified_current ) {
+					$post_data['post_modified'] = $topic_modified;
+				}
+				if ( $topic_modified_gmt != $post_modified_gmt_current ) {
+					$post_data['post_modified_gmt'] = $topic_modified_gmt;
+				}
+
+				// Update.
+				if ( ! empty( $post_data ) ) {
+					$result = $wpdb->update( $wpdb->posts, $post_data, [ 'ID' => $post_id ] );
+					if ( false == $result ) {
+						WP_CLI::line( sprintf( 'ERROR Failed to fix date on post %d topic_id %s', $post_id, $topic['topic_id'] ) );
+					}
+					WP_CLI::line( sprintf( 'SUCCESS Updated dates on postID %s topic_id %s', $post_id, $topic['topic_id'] ) );
+				}
+
+				// Detailed log.
+				$changes[ $post_id ] = [
+					'topic_id'              => $topic['topic_id'],
+					'post_date_old'         => $post_date_current,
+					'post_date_new'         => $topic_date_published,
+					'post_date_gmt_old'     => $post_date_gmt_current,
+					'post_date_gmt_new'     => $topic_date_published_gmt,
+					'post_modified_old'     => $post_modified_current,
+					'post_modified_new'     => $topic_modified,
+					'post_modified_gmt_old' => $post_modified_gmt_current,
+					'post_modified_gmt_new' => $topic_modified_gmt,
+				];
+
+				$d=1;
+			}
+		}
+
+		// Logs.
+		file_put_contents( 'cmd_found-post-ids.csv', implode( ",", $post_ids_found ) );
+		file_put_contents( 'cmd_debug_titles_not_same.json', json_encode( $debug_titles_not_same ) );
+		// Log detailed changes to CSV.
+		$csv = fopen( $log_detailed_changes_csv, 'w' );
+		fputcsv( $csv, [ 'post_id', 'topic_id', 'post_date_old', 'post_date_new', 'post_date_gmt_old', 'post_date_gmt_new', 'post_modified_old', 'post_modified_new', 'post_modified_gmt_old', 'post_modified_gmt_new' ] );
+		foreach ( $changes as $post_id => $change ) {
+			fputcsv(
+				$csv,
+				[
+					$post_id,
+					$change['topic_id'] ?? '',
+					$change['post_date_old'] ?? '',
+					$change['post_date_new'] ?? '',
+					$change['post_date_gmt_old'] ?? '',
+					$change['post_date_gmt_new'] ?? '',
+					$change['post_modified_old'] ?? '',
+					$change['post_modified_new'] ?? '',
+					$change['post_modified_gmt_old'] ?? '',
+					$change['post_modified_gmt_new'] ?? '',
+				] 
+			);
+		}
+		WP_CLI::success( 'Changes saved to ' . $log_detailed_changes_csv );
+		
+		WP_CLI::line( 'Done, saved CSVs' );
 	}
 
 	/**
@@ -1653,46 +2271,85 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param array $args array Command arguments.
 	 * @param array $assoc_args array Command associative arguments.
 	 */
-	public function cmd_embarcadero_fix_content_styling( $args, $assoc_args ) {
-		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
-		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+	public function cmd_embarcadero_fix_content_styling( $args, $assoc_args ): void {
+		global $wpdb;
 
-		$total_query = new \WP_Query(
-			[
-				'posts_per_page' => -1,
-				'post_type'      => 'post',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-			]
-		);
+		$target = $assoc_args['target'];
 
-		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+		$prepared_query = match ( $target ) {
+			'content' => $wpdb->prepare(
+				"SELECT * FROM $wpdb->posts WHERE post_type = 'post' AND post_content LIKE %s",
+				'%' . $wpdb->esc_like( '==' ) . '%'
+			),
+			'excerpt' => $wpdb->prepare(
+				"SELECT * FROM $wpdb->posts WHERE post_type IN ('post', 'page', 'revision', 'attachment') AND post_excerpt LIKE %s",
+				'%' . $wpdb->esc_like( '==' ) . '%'
+			),
+			'meta' => $wpdb->prepare(
+				"SELECT * FROM $wpdb->postmeta WHERE meta_key IN ('_wp_attachment_image_alt', '_wp_attachment_metadata') AND meta_value LIKE %s",
+				'%' . $wpdb->esc_like( '==' ) . '%'
+			),
+		};
 
-		$query = new \WP_Query(
-			[
-				'post_type'      => 'post',
-				'paged'          => $batch,
-				'posts_per_page' => $posts_per_batch,
-			]
-		);
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.DirectQuery
+		$records       = $wpdb->get_results( $prepared_query );
+		$total_records = count( $records );
 
-		$posts       = $query->get_posts();
-		$total_posts = count( $posts );
+		foreach ( $records as $index => $record ) {
+			$type = match ( $target ) {
+				'content', 'excerpt' => 'Post',
+				'meta' => 'Post Meta'
+			};
 
-		foreach ( $posts as $index => $post ) {
-			\WP_CLI::line( sprintf( 'Post %d/%d (%d)', $index + 1, $total_posts, $post->ID ) );
+			$identifier = match ( $target ) {
+				'content', 'excerpt' => $record->ID,
+				'meta' => $record->meta_id
+			};
 
-			$new_content = $this->migrate_text_styling( $post->post_content );
+			$text = match ( $target ) {
+				'content' => $record->post_content,
+				'excerpt' => $record->post_excerpt,
+				'meta' => $record->meta_value
+			};
+			\WP_CLI::line( sprintf( '%s %d/%d (%d)', $type, $index + 1, $total_records, $identifier ) );
 
-			if ( $new_content !== $post->post_content ) {
-				wp_update_post(
-					[
-						'ID'           => $post->ID,
-						'post_content' => $new_content,
-					]
-				);
+			$new_content = $this->migrate_text_styling( $text );
 
-				$this->logger->log( self::LOG_FILE, sprintf( 'Updated post %d with the ID %d', $index + 1, $post->ID ), Logger::SUCCESS );
+			if ( $new_content !== $text ) {
+
+				$update = false;
+
+				if ( 'meta' === $target ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$update = $wpdb->update(
+						$wpdb->postmeta,
+						[
+							// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+							'meta_value' => $new_content,
+						],
+						[
+							'meta_id' => $identifier,
+						]
+					);
+				} else {
+					$update_column = match ( $target ) {
+						'content' => 'post_content',
+						'excerpt' => 'post_excerpt',
+					};
+
+					$update = wp_update_post(
+						[
+							'ID'           => $identifier,
+							$update_column => $new_content,
+						]
+					);
+				}
+
+				if ( $update ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Updated %s %d with the ID %d', $type, $index + 1, $identifier ), Logger::SUCCESS );
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Failed to update %s %d with the ID %d', $type, $index + 1, $identifier ), Logger::ERROR );
+				}
 			}
 		}
 	}
@@ -2002,20 +2659,36 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	public function cmd_embarcadero_migrate_more_posts_block( $args, $assoc_args ) {
 		$story_csv_file_path       = $assoc_args['story-csv-file-path'];
 		$story_media_csv_file_path = $assoc_args['story-media-file-path'];
+		$target_story_ids          = $assoc_args['target-story-ids'] ?? '';
+		$target_story_ids          = explode( ',', $target_story_ids );
 
-		$posts                 = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
-		$media_list            = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
-		$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+		$posts      = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
+		$media_list = $this->get_data_from_csv_or_tsv( $story_media_csv_file_path );
 
-		// Skip already imported posts.
-		$posts = array_values(
-			array_filter(
-				$posts,
-				function ( $post ) use ( $imported_original_ids ) {
-					return ! in_array( $post['story_id'], $imported_original_ids );
-				}
-			)
-		);
+		if ( ! empty( $target_story_ids ) ) {
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function ( $post ) use ( $target_story_ids ) {
+						// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- don't need strict comparison for this.
+						return in_array( $post['story_id'], $target_story_ids );
+					}
+				)
+			);
+		} else {
+			$imported_original_ids = $this->get_posts_meta_values_by_key( self::EMBARCADERO_IMPORTED_MORE_POSTS_META_KEY );
+
+			// Skip already imported posts.
+			$posts = array_values(
+				array_filter(
+					$posts,
+					function ( $post ) use ( $imported_original_ids ) {
+						// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- don't need strict comparison for this.
+						return ! in_array( $post['story_id'], $imported_original_ids );
+					}
+				)
+			);
+		}
 
 		foreach ( $posts as $post_index => $post ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Importing post %d/%d: %d', $post_index + 1, count( $posts ), $post['story_id'] ), Logger::LINE );
@@ -2411,16 +3084,14 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @param array $assoc_args array Command associative arguments.
 	 */
 	public function cmd_embarcadero_migrate_print_issues( $args, $assoc_args ) {
-		$publication_name             = $assoc_args['publication-name'];
-		$publication_email            = $assoc_args['publication-email'];
-		$pdf_section_suffix           = $assoc_args['pdf-section-suffix'];
-		$print_issues_csv_file_path   = $assoc_args['print-issues-csv-file-path'];
-		$print_sections_csv_file_path = $assoc_args['print-sections-csv-file-path'];
-		$print_pdf_dir_path           = $assoc_args['print-pdf-dir-path'];
-		$print_cover_dir_path         = $assoc_args['print-cover-dir-path'];
+		$publication_name           = $assoc_args['publication-name'];
+		$publication_email          = $assoc_args['publication-email'];
+		$pdf_section_suffix         = $assoc_args['pdf-section-suffix'];
+		$print_issues_csv_file_path = $assoc_args['print-issues-csv-file-path'];
+		$print_pdf_dir_path         = $assoc_args['print-pdf-dir-path'];
+		$print_cover_dir_path       = $assoc_args['print-cover-dir-path'];
 
-		$print_issues   = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
-		$print_sections = $this->get_data_from_csv_or_tsv( $print_sections_csv_file_path );
+		$print_issues = $this->get_data_from_csv_or_tsv( $print_issues_csv_file_path );
 
 		foreach ( $print_issues as $print_issue_index => $print_issue ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating print issue %d/%d: %d (%s)', $print_issue_index + 1, count( $print_issues ), $print_issue['issue_number'], $print_issue['seo_link'] ), Logger::LINE );
@@ -2445,7 +3116,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$pdf_file_path = $print_pdf_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.' . $pdf_section_suffix . '.section' . $i . '.pdf';
 
 				if ( ! file_exists( $pdf_file_path ) ) {
-					break;
+					continue;
 				}
 
 				$pdf_files_paths[] = $pdf_file_path;
@@ -2458,6 +3129,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			// Get author based on the publication name.
 			$author_id = $this->get_or_create_user( $publication_name, $publication_email, 'editor' );
+
+			$post_title = date( 'F d, Y', strtotime( $print_issue['seo_link'] ) );
 
 			// Create a new issue post.
 			$wp_issue_post_id = $this->get_or_create_post(
@@ -2478,19 +3151,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			// Issue section.
-			$section_name  = 'Section ' . $print_issue['sections'];
-			$section_index = array_search( $print_issue['sections'], array_column( $print_sections, 'section_id' ) );
-			if ( false === $section_index ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find section %s for issue %s', $print_issue['sections'], $print_issue['issue_number'] ), Logger::WARNING );
-			} else {
-				$section_name = $print_sections[ $section_index ]['section_title'];
-			}
-
 			$post_content_blocks = [];
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
 				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+				$filename     = basename( $pdf_file_path );
 
 				if ( is_wp_error( $file_post_id ) ) {
 					wp_delete_post( $wp_issue_post_id, true );
@@ -2500,7 +3165,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 				$attachment_post = get_post( $file_post_id );
 
-				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $section_name );
+				$post_content_blocks[] = $this->gutenberg_block_generator->get_file_pdf( $attachment_post, $filename );
 			}
 
 			$post_content = serialize_blocks( $post_content_blocks );
@@ -2508,12 +3173,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			wp_update_post(
 				[
 					'ID'           => $wp_issue_post_id,
+					'post_title'   => $post_title,
 					'post_content' => $post_content,
 				]
 			);
 
 			// Handle post cover.
-			$cover_file_path = $print_cover_dir_path . '/' . $seo_link[0] . '/' . $seo_link[0] . '_' . $seo_link[1] . '_' . $seo_link[2] . '.cover.jpg';
+			$cover_file_path = $print_cover_dir_path . '/' . $year . '/' . $year . '_' . $month . '_' . $day . '.cover.jpg';
 
 			if ( ! is_file( $cover_file_path ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find cover file %s', $cover_file_path ), Logger::WARNING );
@@ -3086,6 +3752,631 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				} else {
 					WP_CLI::line( 'NOT UPDATED' );
 				}
+			}
+		}
+	}
+
+	/**
+	 * This function will go through an Embarcadero sites categories looking for duplicates across tags, and merge them.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags( $args, $assoc_args ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$duplicate_cats_tags       = $wpdb->get_results(
+			"SELECT 
+				sub.slug, 
+				sub.name, 
+				GROUP_CONCAT(sub.taxonomy) as taxonomies, 
+				COUNT(DISTINCT sub.term_taxonomy_id) as counter 
+			FROM (
+				SELECT 
+				    ROW_NUMBER() over ( PARTITION BY t.slug ORDER BY tt.taxonomy ) as row_num,
+					t.term_id, 
+					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name, 
+					t.slug, 
+					tt.taxonomy, 
+					tt.term_taxonomy_id 
+				FROM $wpdb->terms t 
+					LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+				WHERE tt.taxonomy IN ( 'category', 'post_tag' ) 
+				  AND tt.parent = 0
+				ORDER BY FIELD( tt.taxonomy, 'category', 'post_tag' )
+			) as sub 
+			GROUP BY sub.slug 
+			HAVING counter > 1 
+			ORDER BY counter DESC"
+		);
+		$count_duplicate_cats_tags = count( $duplicate_cats_tags );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d duplicate categories and tags.', $count_duplicate_cats_tags ), Logger::INFO );
+
+		foreach ( $duplicate_cats_tags as $duplicate ) {
+			echo "\n\n\n";
+			$duplicate->name = html_entity_decode( $duplicate->name );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Slug: %s, Name: %s, Taxonomies: %s', $duplicate->slug, $duplicate->name, $duplicate->taxonomies ), Logger::INFO );
+
+			// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+			if ( in_array( strtolower( $duplicate->name ), array_merge( self::ALLOWED_CATEGORIES, [ 'tri valley' ] ) ) ) {
+				$this->logger->log( self::LOG_FILE, 'Category is allowed. Proceeding to merge.', Logger::SUCCESS );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$category       = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+    						t.term_id, 
+    						t.name, 
+    						t.slug, 
+    						tt.taxonomy, 
+    						tt.term_taxonomy_id 
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE t.slug = %s 
+						  AND tt.taxonomy = 'category'
+						  AND tt.parent = 0",
+						$duplicate->slug
+					)
+				);
+				$count_category = count( $category );
+
+				if ( $count_category > 1 ) {
+					$this->logger->log( self::LOG_FILE, 'Found more than one category with the same slug. Skipping.', Logger::ERROR );
+					continue;
+				}
+
+				$category       = $category[0];
+				$category->name = html_entity_decode( $category->name );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$tags = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT 
+							t.term_id, 
+							t.name, 
+							t.slug, 
+							tt.taxonomy, 
+							tt.term_taxonomy_id 
+						FROM $wpdb->terms t 
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE t.slug = %s 
+						  AND tt.taxonomy = 'post_tag'",
+						$duplicate->slug
+					)
+				);
+
+				$tag_term_ids = [];
+				foreach ( $tags as $tag ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Merging tag %s (Term_ID: %d) into category %s (Term_ID: %d)', $tag->name, $tag->term_id, $category->name, $category->term_id ), Logger::INFO );
+					$tag_term_ids[] = intval( $tag->term_id );
+				}
+
+				$result = TaxonomyMigrator::get_instance()->merge_terms(
+					$category->term_id,
+					$tag_term_ids,
+					[
+						'category',
+						'post_tag',
+					]
+				);
+
+				if ( is_wp_error( $result ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Error merging terms: %s', $result->get_error_message() ), Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Merged terms successfully.', Logger::SUCCESS );
+				}
+			} else {
+				$this->logger->log( self::LOG_FILE, 'Category is not allowed. Skipping.', Logger::ERROR );
+			}
+		}
+	}
+
+	/**
+	 * This function will go through the posts that were imported as part of the migration and remove any tags that
+	 * aren't part of the sanctioned list of tags.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the CSV file can't be read.
+	 */
+	public function cmd_embarcadero_fix_tags_on_posts( $args, $assoc_args ) {
+		$csv_file = $assoc_args['story-csv-path'];
+		$after_id = $assoc_args['after-row-number'] ?? 0;
+
+		$iterator = ( new FileImportFactory() )->get_file( $csv_file )->set_start( $after_id )->getIterator();
+
+		foreach ( $iterator as $row_number => $row ) {
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing story %d (Row #: %d)', $row['story_id'], $row_number ), Logger::INFO );
+
+			global $wpdb;
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT 
+    					p.* 
+						FROM $wpdb->posts p 
+						    INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
+						WHERE meta_key = %s 
+						  AND meta_value = %d",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					$row['story_id']
+				)
+			);
+
+			if ( ! $post ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find post with the original story ID %d', $row['story_id'] ), Logger::ERROR );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found post %d', $post->ID ), Logger::INFO );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_tags = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT 
+    					t.term_id, 
+    					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+    					t.slug, 
+    					tt.taxonomy, 
+    					tt.term_taxonomy_id 
+					FROM $wpdb->terms t 
+					    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+					    INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
+					WHERE tr.object_id = %d 
+					  AND tt.taxonomy = 'post_tag'",
+					$post->ID
+				)
+			);
+
+			foreach ( $post_tags as $post_tag ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Post tag `%s`', $post_tag->name ), Logger::INFO );
+
+				// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+				if ( ! in_array( html_entity_decode( $post_tag->name ), self::ALLOWED_TAG_LIST ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the allowed tag list. Removing.', $post_tag->name ), Logger::WARNING );
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$result = $wpdb->delete(
+						$wpdb->term_relationships,
+						[
+							'object_id'        => $post->ID,
+							'term_taxonomy_id' => $post_tag->term_taxonomy_id,
+						]
+					);
+
+					if ( false === $result ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Could not remove tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::ERROR );
+					} else {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Removed tag `%s` from post %d', $post_tag->name, $post->ID ), Logger::SUCCESS );
+					}
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is part of the allowed tag list. Keeping.', $post_tag->name ), Logger::SUCCESS );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This function will go through all the tags on an Embarcadero site and delete any tags that aren't part
+	 * of the allowed list of tags specified by the Embarcadero team.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_delete_disallowed_tags(): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$tags = $wpdb->get_results(
+			"SELECT 
+    			t.term_id, 
+    			REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+    			t.slug, 
+    			tt.taxonomy, 
+    			tt.term_taxonomy_id,
+    			tt.description
+			FROM $wpdb->terms t 
+			    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+			WHERE tt.taxonomy = 'post_tag'"
+		);
+
+		foreach ( $tags as $tag ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s`', $tag->name ), Logger::INFO );
+
+			// phpcs:ignore WordPress.PHP.StrictInArray.MissingTrueStrict -- No need to compare types here.
+			if ( ! in_array( strtolower( html_entity_decode( $tag->name ) ), self::ALLOWED_TAG_LIST ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Tag `%s` is not part of the allowed tag list. Removing.', $tag->name ), Logger::WARNING );
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$tag->post_ids = $wpdb->get_col(
+					$wpdb->prepare(
+						"SELECT tr.object_id 
+						FROM $wpdb->term_relationships tr 
+						WHERE tr.term_taxonomy_id = %d",
+						$tag->term_taxonomy_id
+					)
+				);
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+				$wpdb->insert(
+					$wpdb->termmeta,
+					[
+						'term_id'    => $tag->term_id,
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+						'meta_key'   => '_newspack_disallowed_tag',
+						// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+						'meta_value' => wp_json_encode( $tag ),
+					]
+				);
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_rel_rows = $wpdb->delete(
+					$wpdb->term_relationships,
+					[
+						'term_taxonomy_id' => $tag->term_taxonomy_id,
+					]
+				);
+
+				if ( false === $deleted_rel_rows ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove relationships, skipping.', Logger::ERROR );
+					continue;
+				} else {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Removed %d relationships', $deleted_rel_rows ), Logger::SUCCESS );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_taxonomy_row = $wpdb->delete(
+					$wpdb->term_taxonomy,
+					[
+						'term_taxonomy_id' => $tag->term_taxonomy_id,
+					]
+				);
+
+				if ( false === $deleted_taxonomy_row ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove taxonomy row, skipping.', Logger::ERROR );
+					continue;
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Removed taxonomy row', Logger::SUCCESS );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$deleted_term_row = $wpdb->delete(
+					$wpdb->terms,
+					[
+						'term_id' => $tag->term_id,
+					]
+				);
+
+				if ( false === $deleted_term_row ) {
+					$this->logger->log( self::LOG_FILE, 'Could not remove term row, skipping.', Logger::ERROR );
+				} else {
+					$this->logger->log( self::LOG_FILE, 'Removed term row', Logger::SUCCESS );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This script helps establish the primary category for posts that were imported from Embarcadero's legacy system.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_establish_primary_categories(): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_without_primary_category       = $wpdb->get_results(
+			"SELECT 
+    				p.ID 
+				FROM $wpdb->posts p 
+				WHERE p.ID IN (
+				  SELECT post_id 
+				  FROM $wpdb->postmeta 
+				  WHERE meta_key IN ( '_newspack_import_id', 'original_article_id' )
+				  ) 
+				  AND p.ID NOT IN (
+					SELECT post_id 
+					FROM $wpdb->postmeta 
+					WHERE meta_key = '_yoast_wpseo_primary_category' 
+					  AND meta_value <> '' 
+				)"
+		);
+		$posts_without_primary_category_count = count( $posts_without_primary_category );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %s posts without a primary category.', number_format( $posts_without_primary_category_count ) ), Logger::INFO );
+
+		if ( 0 === $posts_without_primary_category_count ) {
+			$this->logger->log( self::LOG_FILE, 'No posts without a primary category found.', Logger::SUCCESS );
+
+			return;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$categories_by_slug = $wpdb->get_results(
+			"SELECT t.slug, t.name, t.term_id FROM $wpdb->terms t LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id WHERE tt.taxonomy = 'category'",
+			OBJECT_K
+		);
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need handle to file to write CSV data.
+		$handle = fopen( 'establish_primary_categories.csv', 'w' );
+		fputcsv(
+			$handle,
+			[
+				'Post ID',
+				'Story ID',
+				'Permalink',
+				'Extracted Category',
+				'Current Categories',
+				'Status',
+			]
+		);
+		foreach ( $posts_without_primary_category as $post ) {
+			$permalink         = get_permalink( $post->ID );
+			$url_path          = wp_parse_url( $permalink, PHP_URL_PATH );
+			$exploded_url_path = array_filter( explode( '/', $url_path ) );
+			$story_id          = get_post_meta( $post->ID, '_newspack_import_id', true );
+			if ( empty( $story_id ) ) {
+				$temp = get_post_meta( $post->ID, 'original_article_id', true );
+				if ( ! empty( $temp ) ) {
+					$story_id = $temp;
+				}
+			}
+
+			$csv_row_data = [
+				'Post ID'            => $post->ID,
+				'Story ID'           => $story_id,
+				'Permalink'          => $permalink,
+				'Extracted Category' => null,
+				'Current Categories' => implode( ' <> ', wp_get_post_terms( $post->ID, 'category', [ 'fields' => 'names' ] ) ),
+				'Status'             => null,
+			];
+
+			if ( empty( $exploded_url_path ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find a category within the slug (Post ID: %d) %s', $post->ID, $permalink ), Logger::ERROR );
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			$first                              = array_shift( $exploded_url_path );
+			$csv_row_data['Extracted Category'] = $first;
+			if ( ! array_key_exists( $first, $categories_by_slug ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Category not found %s', $permalink ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Not Found';
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			if ( 'uncategorized' === $first ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Category is uncategorized, skipping post %d', $post->ID ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Skipped';
+				fputcsv( $handle, array_values( $csv_row_data ) );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Found %s, setting primary category for post %d to %s', $first, $post->ID, $categories_by_slug[ $first ]->name ), Logger::SUCCESS );
+
+			$category = $categories_by_slug[ $first ];
+
+			$update = update_post_meta( $post->ID, '_yoast_wpseo_primary_category', $category->term_id );
+
+			if ( $update ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Primary category set for post %d', $post->ID ), Logger::SUCCESS );
+				$csv_row_data['Status'] = 'Updated';
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not set primary category for post %d', $post->ID ), Logger::ERROR );
+				$csv_row_data['Status'] = 'Failed';
+			}
+
+			fputcsv( $handle, array_values( $csv_row_data ) );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Need to close the file handle.
+		fclose( $handle );
+	}
+
+	/**
+	 * This function uses a pre-defined CSV file that determines which categories and tags are missing from
+	 * each site in the Embarcadero network. Whichever one is missing, the script will create that
+	 * category or tag on the site.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the CSV file can't be read.
+	 */
+	public function cmd_embarcadero_create_missing_categories( $args, $assoc_args ): void {
+		$csv_path = $assoc_args['csv-path'];
+		$csv      = ( new FileImportFactory() )->get_file( $csv_path )->getIterator();
+
+		$site = str_replace( 'https://', '', get_site_url() );
+
+		foreach ( $csv as $row_number => $row ) {
+			$taxonomy = $row['taxonomy'];
+			$slug     = $row['slug'];
+			$create   = 'No' === $row[ $site ];
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing row %d - Tax: %s Slug: %s Exists: %s', $row_number, $taxonomy, $slug, $row[ $site ] ), Logger::INFO );
+
+			if ( ! $create ) {
+				$this->logger->log( self::LOG_FILE, 'Skipping', Logger::INFO );
+				continue;
+			}
+
+			$term = wp_insert_term( $slug, $taxonomy );
+
+			if ( is_wp_error( $term ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create term %s: %s', $slug, $term->get_error_message() ), Logger::ERROR );
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Created term %s', $slug ), Logger::SUCCESS );
+			}
+		}
+	}
+
+	/**
+	 * This script addresses a post launch issue that was discovered where the initial import incorrectly
+	 * assigned comments to posts based on assumptions made about the import CSVs. With this script, we
+	 * attempt to update in-place existing comments to the correct post, and delete any that weren't
+	 * originally related to a specific story/post.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_embarcadero_fix_users_on_comments( array $args, array $assoc_args ): void {
+		$comments_csv_path     = $assoc_args['comments-csv-path'];
+		$comments_starting_row = $assoc_args['comments-starting-row'];
+		$story_csv_path        = $assoc_args['story-csv-path'];
+
+		/* @var CSVFile $comments_csv */
+		$comments_csv = ( new FileImportFactory() )->get_file( $comments_csv_path )->set_start( $comments_starting_row );
+		/* @var CSVFile $story_csv */
+		$story_csv = ( new FileImportFactory() )->get_file( $story_csv_path );
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$post_ids_by_story_id       = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT meta_value, post_id FROM $wpdb->postmeta WHERE meta_key = %s",
+				self::EMBARCADERO_ORIGINAL_ID_META_KEY
+			),
+			OBJECT_K
+		);
+		$count_post_ids_by_story_id = count( $post_ids_by_story_id );
+
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d post IDs by story ID.', $count_post_ids_by_story_id ), Logger::INFO );
+
+		$story_and_post_ids_by_topic_id = [];
+
+		foreach ( $story_csv->getIterator() as $row ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing Topic ID %d, Story ID %d', $row['topic_id'], $row['story_id'] ), Logger::INFO );
+			if ( ! array_key_exists( $row['topic_id'], $story_and_post_ids_by_topic_id ) ) {
+				$map = [
+					'story_id' => $row['story_id'],
+					'post_id'  => null,
+				];
+
+				if ( array_key_exists( $row['story_id'], $post_ids_by_story_id ) ) {
+					$map['post_id'] = $post_ids_by_story_id[ $row['story_id'] ]->post_id;
+				}
+
+				$story_and_post_ids_by_topic_id[ $row['topic_id'] ] = $map;
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Topic ID %d already exists in the map.', $row['topic_id'] ), Logger::ERROR );
+			}
+		}
+
+		$story_csv_path = str_replace( 'story.csv', 'story_1.csv', $story_csv_path );
+		$story_csv      = ( new FileImportFactory() )->get_file( $story_csv_path );
+
+		foreach ( $story_csv->getIterator() as $row ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing Topic ID %d, Story ID %d', $row['topic_id'], $row['story_id'] ), Logger::INFO );
+			if ( ! array_key_exists( $row['topic_id'], $story_and_post_ids_by_topic_id ) ) {
+				$map = [
+					'story_id' => $row['story_id'],
+					'post_id'  => null,
+				];
+
+				if ( array_key_exists( $row['story_id'], $post_ids_by_story_id ) ) {
+					$map['post_id'] = $post_ids_by_story_id[ $row['story_id'] ]->post_id;
+				}
+
+				$story_and_post_ids_by_topic_id[ $row['topic_id'] ] = $map;
+			} else {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Topic ID %d already exists in the map.', $row['topic_id'] ), Logger::ERROR );
+			}
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need active handle to file, in order to write data necessary for QA.
+		$qa_csv                = fopen( 'qa.csv', 'w' );
+		$comments_csv_header   = $comments_csv->get_header();
+		$comments_csv_header[] = 'DB_post_ID';
+		$comments_csv_header[] = 'Corresponding_Story_ID';
+		fputcsv( $qa_csv, $comments_csv_header );
+		foreach ( $comments_csv->getIterator() as $row_number => $row ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing CSV Row # %d Comment ID %d Topic ID %d', $row_number, $row['comment_id'], $row['topic_id'] ), Logger::INFO );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$db_comment = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->comments c INNER JOIN $wpdb->commentmeta cm ON c.comment_ID = cm.comment_id WHERE cm.meta_key = %s AND cm.meta_value = %d",
+					self::EMBARCADERO_IMPORTED_COMMENT_META_KEY,
+					$row['comment_id']
+				)
+			);
+
+			if ( ! $db_comment ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find comment with ID %d in the database.', $row['comment_id'] ), Logger::ERROR );
+				continue;
+			}
+
+			$post_id = $story_and_post_ids_by_topic_id[ $row['topic_id'] ]['post_id'] ?? null;
+
+			if ( null === $post_id ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find post ID for Topic ID %d, deleting Comment ID %d', $row['topic_id'], $db_comment->comment_ID ), Logger::ERROR );
+				fputcsv(
+					$qa_csv,
+					array_merge(
+						$row,
+						[
+							$db_comment->comment_post_ID,
+							get_post_meta( $db_comment->comment_post_ID, self::EMBARCADERO_ORIGINAL_ID_META_KEY, true ),
+						]
+					)
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->delete(
+					$wpdb->commentmeta,
+					[
+						'comment_id' => $db_comment->comment_ID,
+					]
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->delete(
+					$wpdb->comments,
+					[
+						'comment_ID' => $db_comment->comment_ID,
+					]
+				);
+				continue;
+			}
+
+			$updates = [];
+
+			if ( $db_comment->comment_post_ID !== $post_id ) {
+				$updates['comment_post_ID'] = $post_id;
+			}
+
+			if ( $db_comment->comment_author !== $row['user_name'] ) {
+				$updates['comment_author'] = $row['user_name'];
+			}
+
+			$row_date = gmdate( 'Y-m-d H:i:s', $row['posted_epoch'] );
+			if ( $db_comment->comment_date !== $row_date ) {
+				$updates['comment_date'] = $row_date;
+			}
+
+			if ( ! empty( $updates ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Updating Comment ID %d', $db_comment->comment_ID ), Logger::SUCCESS );
+				foreach ( $updates as $key => $value ) {
+					$this->logger->log( self::LOG_FILE, sprintf( '%s from %s to %s', $key, $db_comment->$key, $value ), Logger::INFO );
+				}
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update(
+					$wpdb->comments,
+					$updates,
+					[
+						'comment_ID' => $db_comment->comment_ID,
+					]
+				);
 			}
 		}
 	}

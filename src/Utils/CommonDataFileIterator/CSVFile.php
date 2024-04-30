@@ -80,7 +80,9 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 	 * @throws Exception Exception thrown if file does not exist on system.
 	 */
 	public function get_header(): array {
-		return $this->get_row( rewind( $this->get_handle() ) );
+		rewind( $this->get_handle() );
+
+		return $this->get_row( $this->get_handle() );
 	}
 
 	/**
@@ -90,8 +92,8 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 	 * @throws Exception Exception thrown if file does not exist on system.
 	 */
 	public function getIterator(): Iterator {
+		$header       = $this->get_header();
 		$handle       = $this->get_handle();
-		$header       = $this->get_row( $handle );
 		$header       = array_map( fn( $column ) => trim( $column ), $header );
 		$header_count = count( $header );
 

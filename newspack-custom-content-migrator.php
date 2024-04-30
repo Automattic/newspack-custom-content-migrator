@@ -5,20 +5,19 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.5.2
+ * Version:     1.5.3
  *
  * @package  Newspack_Custom_Content_Migrator
  */
 
 namespace NewspackCustomContentMigrator;
 
-require __DIR__ . '/vendor/autoload.php';
-
 // Don't do anything outside WP CLI.
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
 }
 
+require __DIR__ . '/vendor/autoload.php';
 require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
@@ -71,10 +70,13 @@ PluginSetup::register_migrators(
 		Command\General\MigrationHelper::class,
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
+		Command\General\CreativeCircleMigrator::class,
 		Command\General\BlockTransformerCommand::class,
+		Command\General\PostDateMigrator::class,
+		Command\General\SimplyGuestAuthorNameMigrator::class,
+		Command\General\TagDivThemesPluginsMigrator::class,
 
 		// Publisher specific, remove when launched.
-		Command\PublisherSpecific\RetroReportMigrator::class,
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
@@ -82,11 +84,13 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\PCIJMigrator::class,
 		Command\PublisherSpecific\InsightCrimeMigrator::class,
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
-		Command\PublisherSpecific\TheEmancipatorMigrator::class,
-		Command\PublisherSpecific\HighCountryNewsMigrator2::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
 		Command\PublisherSpecific\WindyCityMigrator::class,
-		Command\PublisherSpecific\InjusticeWatchMigrator::class,
+		Command\PublisherSpecific\TheFriscMigrator::class,
+		Command\PublisherSpecific\CityViewMigrator::class,
+		Command\PublisherSpecific\BigBendSentinelMigrator::class,
+		Command\PublisherSpecific\LAFocusMigrator::class,
+		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 	)
 );
