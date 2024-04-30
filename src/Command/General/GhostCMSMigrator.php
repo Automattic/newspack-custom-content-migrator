@@ -12,6 +12,8 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -21,20 +23,34 @@ use WP_CLI;
 class GhostCMSMigrator implements InterfaceCommand {
 
 	/**
+	 * Lookup to convert json authors to wp objects (WP Users and/or CAP GAs).
+	 * 
+	 * Note: json author_id key may exist, but if json author (user) visibility was not public, value will be 0
+	 *
+	 * @var array $authors_to_wp_objects
+	 */
+	private $authors_to_wp_objects;
+
+	/**
+	 * CoAuthorPlusLogic
+	 * 
+	 * @var CoAuthorPlusLogic 
+	 */
+	private $coauthorsplus_logic;
+
+	/**
+	 * Instance
+	 * 
+	 * @var null|InterfaceCommand Instance.
+	 */
+	private static $instance = null;
+
+	/**
 	 * JSON from file
 	 *
 	 * @var object $json
 	 */
 	private $json;
-
-	/**
-	 * Lookup to convert json tags to wp categories.
-	 * 
-	 * Note: tag_id key may exist, but if tag visibility was not public, value will be 0
-	 *
-	 * @var array $tags_to_categories
-	 */
-	private $tags_to_categories;
 
 	/**
 	 * Log (file path)
@@ -51,17 +67,28 @@ class GhostCMSMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
-	 * Instance
+	 * RedirectionLogic
 	 * 
-	 * @var null|InterfaceCommand Instance.
+	 * @var RedirectionLogic 
 	 */
-	private static $instance = null;
+	private $redirection_logic;
+
+	/**
+	 * Lookup to convert json tags to wp categories.
+	 * 
+	 * Note: json tag_id key may exist, but if tag visibility was not public, value will be 0
+	 *
+	 * @var array $tags_to_categories
+	 */
+	private $tags_to_categories;
 
 	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 		$this->logger              = new Logger();
+		$this->redirection_logic   = new RedirectionLogic();
 	}
 
 	/**
@@ -109,12 +136,18 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_ghost_cms_content( $pos_args, $assoc_args ) {
 
-		global $wpdb;
-
 		if( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
 			WP_CLI::error( 'JSON file not found.' );
 		}
 
+		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
+			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+		}
+
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
+		
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
 		$this->logger->log( $this->log, 'Doing migration.' );
@@ -151,53 +184,23 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// 	'post_status' => 'publish',
 			// );
 
-			// $post_id = wp_insert_post( $postarr );
+			// $wp_post_id = wp_insert_post( $postarr );
 
-			// if( ! ( $post_id > 0 ) ) {
+			// if( ! ( $wp_post_id > 0 ) ) {
 			// 	$this->logger->log( $this->log, 'Could not insert post for json id: ' . $json_post->id, $this->logger::WARNING );
 			// 	continue;
 			// }
 
 			// Meta.
-			// update_post_meta( $post_id, 'newspack_ghostcms_json_id', $json_post->id );
-			// update_post_meta( $post_id, 'newspack_ghostcms_json_uuid', $json_post->uuid );
-			// update_post_meta( $post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
+			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_id', $json_post->id );
+			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_uuid', $json_post->uuid );
+			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
+
+			// Post authors to WP Users/CAP GAs.
+			// $this->post_authors( $wp_post_id, $json_post->id );
 
 			// Post tags to categories.
-			$category_ids = $this->post_tags_to_categories( $json_post->id );
-
-			continue;
-
-			if( ! empty( $category_ids ) ) wp_set_post_categories( $post_id, $category_ids );
-
-						
-			if( ! empty( $json->db[0]->data->posts_tags ) ) {
-				$tags_to_postmeta = array();
-				foreach( $json->db[0]->data->posts_tags as $json_post_tag ) {
-					if( $json_post_tag->post_id == $json_post->id ) {
-						foreach( $json->db[0]->data->tags as $json_tag ) {
-							$tags_to_postmeta[] = array( $json_tag->name, $json_tag->slug );
-						}
-					}
-				}
-				update_post_meta( $post_id, 'newspack_ghostcms_json_tags', $tags_to_postmeta );
-			}
-
-			// Save authors to postmeta.
-			// this code will re-scan the JSON posts_authors and users in an effor to not
-			// add more data to memory.  We could implement a hash table for quicker
-			// lookups if memory usage isn't already overloaded. 
-			if( ! empty( $json->db[0]->data->posts_authors ) ) {
-				$authors_to_postmeta = array();
-				foreach( $json->db[0]->data->posts_authors as $json_post_author ) {
-					if( $json_post_author->post_id == $json_post->id ) {
-						foreach( $json->db[0]->data->users as $json_user ) {
-							// $authors_to_postmeta[] = array( $json_user->name, $json_use;
-						}
-					}
-				}
-				update_post_meta( $post_id, 'newspack_ghostcms_json_authors', $authors_to_postmeta );
-			}
+			// $this->post_tags_to_categories( $wp_post_id, $json_post->id );
 
 
 			// Fetch "feature_image": "__GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg",
@@ -217,16 +220,59 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		}
 
-        
+        print_r($this->authors_to_wp_objects);
+
         $this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
         
 	}
 
-	private function post_tags_to_categories( $json_post_id ) {
+	private function post_authors( $wp_post_id, $json_post_id ) {
+
+		if( empty( $this->json->db[0]->data->posts_authors ) ) return null;
+
+		$wp_objects = [];
+
+		// Each posts_authors relationship.
+		foreach( $this->json->db[0]->data->posts_authors as $json_post_author ) {
+			
+			// Skip if post id does not match relationship.
+			if( $json_post_author->post_id != $json_post_id ) continue;
+
+			// If author_id wasn't already processed.
+			if( ! isset( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
+
+				// Get the json author (user) object.
+				$json_author_user = $this->get_json_author_user_by_id( $json_post_author->author_id );
+
+				// Verify related author (user) was found in json.
+				if( empty( $json_author_user ) ) continue;
+
+				// Attempt insert and save return value into lookup.
+				$this->authors_to_wp_objects[ $json_post_author->author_id ] = $this->insert_json_author_user( $json_author_user );
+
+			}
+
+			// Verify lookup value is an object
+			// A value of 0 means json author (user) did not have visibility of public.
+			// In that case, don't add to return array.
+			if( is_object( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
+				$wp_objects[] = $this->authors_to_wp_objects[ $json_post_author->author_id ];
+			}
+							
+		} // foreach relationship
+
+		if( ! empty( $wp_objects ) ) {
+			// WP Users and/or CAP GAs
+			$this->coauthorsplus_logic->assign_authors_to_post( $wp_objects, $wp_post_id );
+		}
+
+	}
+
+	private function post_tags_to_categories( $wp_post_id, $json_post_id ) {
 
 		if( empty( $this->json->db[0]->data->posts_tags ) ) return null;
 
-		$out = [];
+		$category_ids = [];
 
 		// Each posts_tags relationship.
 		foreach( $this->json->db[0]->data->posts_tags as $json_post_tag ) {
@@ -244,7 +290,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 				if( empty( $json_tag ) ) continue;
 
 				// Attempt insert and save return value into lookup.
-				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->insert_tag_as_category( $json_tag );
+				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->insert_json_tag_as_category( $json_tag );
 
 			}
 
@@ -252,12 +298,12 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// A value of 0 means json tag did not have visibility of public.
 			// In that case, don't add to return array.
 			if( $this->tags_to_categories[ $json_post_tag->tag_id ] > 0 ) {
-				$out[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
+				$category_ids[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
 			}
 							
 		} // foreach post_tag relationship
 
-		return $out;
+		if( ! empty( $category_ids ) ) wp_set_post_categories( $wp_post_id, $category_ids );
 
 	}
 
@@ -275,7 +321,21 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
-	private function insert_tag_as_category( $json_tag ) {
+	private function get_json_author_user_by_id ( $json_author_user_id ) {
+
+		if( empty( $this->json->db[0]->data->users ) ) return null;
+
+		foreach( $this->json->db[0]->data->users as $json_author_user ) {
+
+			if( $json_author_user->id == $json_author_user_id ) return $json_author_user;
+
+		} 
+
+		return null;
+
+	}
+
+	private function insert_json_tag_as_category( $json_tag ) {
 
 		// Must have visibility property with value of 'public'.
 		if( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) return 0;
@@ -303,65 +363,107 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// Add redirect if needed.
 		if( $term->slug != $json_tag->slug ) {
 			$this->logger->log( $this->log, 'TODO: term redirect needed: ' . $json_tag->slug . ' => ' . $term->slug, $this->logger::WARNING );
+			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 		}
 
 		return $term_arr['term_id'];
 
 	}
 
-	private function insert_users_to_authors( $users ) {
+	private function insert_json_author_user( $json_author_user ) {
 
-		$out = [];
+		// Must have visibility property with value of 'public'.
+		if( empty( $json_author_user->visibility ) || 'public' != $json_author_user->visibility ) return 0;
+		
+		// Get existing GA if exists.
+		// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
+		// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
+		// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
+		// Use a more direct approach here.
+		$user_login = sanitize_title( urldecode( $json_author_user->name ) );
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
 
-		foreach( $users as $user ) {
-			
-			if( 'public' != $user->visibility ) continue;
+		// GA Exists.
+		if( is_object( $ga ) ) {
 
-			$this->logger->log( $this->log, '---- User: ' . $user->name . ' / ' . $user->slug . ' / ' . $user->email );
+			// Create redirect if needed
+			if( $ga->user_login != $json_author_user->slug ) {
+				$this->logger->log( $this->log, 'Need GA redirect', $this->logger::WARNING );
+				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+			}
 
-			// Must have posts.
-			// and published....
-			// let's story this info in postmeta, then do these after.
-			// otherwise we have to scan to much of the json...
-			// we already are overloaded in memory with the JSON so try to avoid additional variables in memory
+			return $ga;
+		
+		}
 
+		// Check for WP user
+		$user_query = new \WP_User_Query( array( 
+			'login'    => $user_login,
+			'role__in' => array( 'Administrator', 'Editor', 'Author', 'Contributor' ),
+		));
 
+		foreach ( $user_query->get_results() as $wp_user ) {
 
-			// Look up CAP GA or WP User.
+			// Create redirect if needed
+			if( $wp_user->user_nicename != $json_author_user->slug ) {
+				$this->logger->log( $this->log, 'Need WP USER redirect', $this->logger::WARNING );
+				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+			}
 
-			// don't insert if they have no posts?
-
-				// ---- User: Ghost Concierge / ghost-user / concierge@ghost.org
-
-			// look for wp user:
-
-				// by email:
-					// ---- User: Our Weekly LLC / our / bnorwood@ourweekly.com
-						//  - email exists as admin, but nicename is different and no posts in staging
-
-					// ---- User: Marcellus Cole / mcole / mcole@ourweekly.com
-						// - email match, but no posts in staging
-
-					// ---- User: Caleb Pugh / caleb-pugh / cpugh@ourweekly.com
-				
-				// by slug / name:
-
-					// ---- User: Gregg Reese / gregg-reese
-					// ---- User: Lisa Fitch / lfitch / lfitch@example.com
-					// ---- User: Brandon Norwood / brandon-norwood
-					// ---- User: Our Weekly Staff / adminnewspack
-					// ---- User: Our Weekly LA / our-weekly-la
-
-			// insert GA
-
-			// TODO: add slug redirect if different
-
-			// $out[ $user->id ] = new GA id here...
+			// Return the first user found.
+			return $wp_user;
 
 		}
 
-		return $out;
+		// Create a GA.
+		$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $json_author_user->name ) );
+
+		if ( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
+
+			$this->logger->log( $this->log, 'GA create failed: ' . $json_author_user->name, $this->logger::WARNING );
+			return 0;
+
+		}
+
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
+	
+		if( $ga->user_login != $json_author_user->slug ) {
+			$this->logger->log( $this->log, 'Need new GA redirect', $this->logger::WARNING );
+			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+		}
+
+		return $ga;
 
 	}
 
+	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
+
+		// make sure Redirects plugin is active
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
+		
+		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
+
+			if( $verbose ) WP_CLI::warning( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
+			return;
+
+		}
+
+		if( $verbose ) WP_CLI::line( 'Adding (' . $batch . ') redirect: ' . $url_from . ' to ' . $url_to );
+		
+		$this->redirection_logic->create_redirection_rule(
+			'Old site (' . $batch . ')',
+			$url_from,
+			$url_to
+		);
+
+		return;
+
+	}
+
+
+
 }
+
+
