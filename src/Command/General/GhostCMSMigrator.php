@@ -12,6 +12,7 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -21,6 +22,13 @@ use WP_CLI;
  * Custom migration scripts for Ghost CMS.
  */
 class GhostCMSMigrator implements InterfaceCommand {
+
+	/**
+	 * AttachmentsLogic
+	 * 
+	 * @var AttachmentsLogic 
+	 */
+	private $attachments_logic;
 
 	/**
 	 * Lookup to convert json authors to wp objects (WP Users and/or CAP GAs).
@@ -37,6 +45,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @var CoAuthorPlusLogic 
 	 */
 	private $coauthorsplus_logic;
+
+	/**
+	 * Ghost URL for image downloads.
+	 *
+	 * @var string ghost_url
+	 */
+	private $ghost_url;
 
 	/**
 	 * Instance
@@ -86,6 +101,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->attachments_logic   = new AttachmentsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 		$this->logger              = new Logger();
 		$this->redirection_logic   = new RedirectionLogic();
@@ -123,6 +139,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'ghost-url',
+						'description' => 'Public URL of old/live Ghost Website. (Needed for image downloads). Ex: https://my-website.com',
+						'optional'    => false,
+						'repeating'   => false,
+					),
 				),
 			]
 		);
@@ -136,10 +159,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_ghost_cms_content( $pos_args, $assoc_args ) {
 
-		if( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
-			WP_CLI::error( 'JSON file not found.' );
-		}
-
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
@@ -147,11 +166,22 @@ class GhostCMSMigrator implements InterfaceCommand {
 		if( ! class_exists ( '\Red_Item' ) ) {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
+
+		if( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
+			WP_CLI::error( 'JSON file not found.' );
+		}
+
+		if( ! isset( $assoc_args['ghost-url'] ) || ! preg_match( '#^https?://[^/]+/?$#i', $assoc_args['ghost-url'] ) ) {
+			WP_CLI::error( 'Ghost URL does not match regex: ^https?://[^/]+/?$' );
+		}
+		
+		$this->ghost_url = preg_replace( '#/$#', '', $assoc_args['ghost-url'] );
 		
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 		$this->logger->log( $this->log, '--json-file: ' . $assoc_args['json-file'] );
+		$this->logger->log( $this->log, '--ghost-url: ' . $this->ghost_url );
 		
         $contents = file_get_contents( $assoc_args['json-file'] );
 		$this->json = json_decode( $contents, null, 2147483647 );
@@ -197,19 +227,14 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
 
 			// Post authors to WP Users/CAP GAs.
-			// $this->post_authors( $wp_post_id, $json_post->id );
+			// $this->set_post_authors( $wp_post_id, $json_post->id );
 
 			// Post tags to categories.
-			// $this->post_tags_to_categories( $wp_post_id, $json_post->id );
+			// $this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
 
-
-			// Fetch "feature_image": "__GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg",
-			// 		'feature_image_alt'		=> ( $image_id !== 0 && $image_alt ) ? substr( $image_alt, 0, 125 ) : null,
-			// 		'feature_image_caption'	
-			// $image = wp_get_attachment_image_src( $image_id, 'full' );
-			// 		$image_alt = get_post_meta( $image_id, '_wp_attachment_image_alt', true );
-			// 		$image_caption = wp_get_attachment_caption( $image_id );
-			// set meta: _thumbnail_id
+			// Featured image (with alt and caption).
+			$wp_post_id = null;
+			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
 
 			
 			// Fetch images in content.
@@ -220,13 +245,31 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		}
 
-        print_r($this->authors_to_wp_objects);
-
         $this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
         
 	}
 
-	private function post_authors( $wp_post_id, $json_post_id ) {
+	private function set_post_featured_image( $wp_post_id, $json_post_id, $json_feature_image ) {
+
+		// Example: "feature_image" => "__GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg"
+		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $json_feature_image );
+
+		// Get alt and caption if exists in json meta node.
+		$json_meta = $this->get_json_post_meta ( $json_post_id );
+
+		$old_image_alt = $json_meta->feature_image_alt ?? '';
+		$old_image_caption = $json_meta->feature_image_caption ?? '';
+
+		// get existing or upload new
+		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt );
+
+		if( is_numeric( $featured_image_id ) && $featured_image_id > 0 ) {	
+			update_post_meta( $wp_post_id, '_thumbnail_id', $featured_image_id );
+		}
+
+	}
+
+	private function set_post_authors( $wp_post_id, $json_post_id ) {
 
 		if( empty( $this->json->db[0]->data->posts_authors ) ) return null;
 
@@ -268,7 +311,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
-	private function post_tags_to_categories( $wp_post_id, $json_post_id ) {
+	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
 
 		if( empty( $this->json->db[0]->data->posts_tags ) ) return null;
 
@@ -307,20 +350,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
-	private function get_json_tag_by_id ( $json_tag_id ) {
-
-		if( empty( $this->json->db[0]->data->tags ) ) return null;
-
-		foreach( $this->json->db[0]->data->tags as $json_tag ) {
-
-			if( $json_tag->id == $json_tag_id ) return $json_tag;
-
-		} 
-
-		return null;
-
-	}
-
 	private function get_json_author_user_by_id ( $json_author_user_id ) {
 
 		if( empty( $this->json->db[0]->data->users ) ) return null;
@@ -328,6 +357,34 @@ class GhostCMSMigrator implements InterfaceCommand {
 		foreach( $this->json->db[0]->data->users as $json_author_user ) {
 
 			if( $json_author_user->id == $json_author_user_id ) return $json_author_user;
+
+		} 
+
+		return null;
+
+	}
+
+	private function get_json_post_meta ( $json_post_id ) {
+
+		if( empty( $this->json->db[0]->data->posts_meta ) ) return null;
+
+		foreach( $this->json->db[0]->data->posts_meta as $json_post_meta ) {
+
+			if( $json_post_meta->post_id == $json_post_id ) return $json_post_meta;
+
+		} 
+
+		return null;
+
+	}
+
+	private function get_json_tag_by_id ( $json_tag_id ) {
+
+		if( empty( $this->json->db[0]->data->tags ) ) return null;
+
+		foreach( $this->json->db[0]->data->tags as $json_tag ) {
+
+			if( $json_tag->id == $json_tag_id ) return $json_tag;
 
 		} 
 
@@ -436,6 +493,12 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
+
+
+
+
+
+
 	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
 
 		// make sure Redirects plugin is active
@@ -462,6 +525,23 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
+	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
+
+		global $wpdb;
+
+		// have to check if alredy exists so that multiple calls dont download() files already inserted
+		$attachment_id = $wpdb->get_var( $wpdb->prepare( "
+			SELECT ID
+			FROM {$wpdb->posts}
+			WHERE post_type = 'attachment' and post_title = %s
+		", $title ));
+
+		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) return $attachment_id;
+
+		// this function will check if existing, but only after re-downloading
+		return $this->attachments_logic->import_external_file(  $path, $title, $caption, $description, $alt );
+
+	}
 
 
 }
