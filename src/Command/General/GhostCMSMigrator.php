@@ -197,10 +197,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
-			// Skip if not post, or not published, or not visible
-			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility ) {
-				$this->logger->log( $this->log . '-skips.log', print_r( $json_post, true ) );
+			// Skip if not post, or not published, or not visible, or blank html
+			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility || empty( $json_post->html ) ) {
+				
+				// Save to file, but do not write on console.
+				$this->logger->log( $this->log . '-skips.log', print_r( $json_post, true ), false );
 				continue;
+
 			}
 
 			// todo: if post exists???
@@ -233,11 +236,34 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// $this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
 
 			// Featured image (with alt and caption).
-			$wp_post_id = null;
-			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
+			// if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
 
-			
 			// Fetch images in content.
+			
+			/*
+			// <figure class="kg-card kg-image-card"><img src="__GHOST_URL__/content/images/2023/02/image.jpeg" class="kg-image" alt loading="lazy" width="1023" height="678" srcset="__GHOST_URL__/content/images/size/w600/2023/02/image.jpeg 600w, __GHOST_URL__/content/images/size/w1000/2023/02/image.jpeg 1000w, __GHOST_URL__/content/images/2023/02/image.jpeg 1023w" sizes="(min-width: 720px) 720px"></figure>
+			// <a href="https://ourweekly.com/marietta-retta-sirleaf-9709/" border="0" itemprop="url">
+			// <img data-attachment-id="409709" data-orig-file="https://ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg" 
+			// <img data-attachment-id="409709" data-orig-file="https://ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg" data-orig-size="500,351" data-comments-opened="" data-image-meta="{&quot;aperture&quot;:&quot;0&quot;,&quot;credit&quot;:&quot;&quot;,&quot;camera&quot;:&quot;&quot;,&quot;caption&quot;:&quot;&quot;,&quot;created_timestamp&quot;:&quot;0&quot;,&quot;copyright&quot;:&quot;&quot;,&quot;focal_length&quot;:&quot;0&quot;,&quot;iso&quot;:&quot;0&quot;,&quot;shutter_speed&quot;:&quot;0&quot;,&quot;title&quot;:&quot;&quot;,&quot;orientation&quot;:&quot;0&quot;}" data-image-title="Marietta “Retta” Sirleaf (9709)" data-image-description=" " data-medium-file="https://i0.wp.com/ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg?fit=300%2C211&amp;ssl=1" data-large-file="https://i0.wp.com/ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg?fit=500%2C351&amp;ssl=1" src="https://i0.wp.com/ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg?w=173&amp;h=122&amp;ssl=1" width="173" height="122" data-original-width="173" data-original-height="122" itemprop="http://schema.org/image" title="Marietta &quot;Retta&quot; Sirleaf (9709)" alt="Marietta &quot;Retta&quot; Sirleaf (9709)" style="width: 173px; height: 122px;">
+			// <figure class="wp-block-video"><video controls="" poster="/content/images/wp-content/uploads/2022/02/voicemails_thumbnails_driving-scaled.jpg" src="__GHOST_URL__/content/media/wp-content/uploads/2022/02/branded-myriad-originals-_-voicemails-part-1-bts-with-javon-johnson.mp4" style="width: 100%;"></video>
+
+			// what about hrefs to files or images on the same domain we we need to fetch?
+			// <a href="__GHOST_URL__/content/files/de/04/76fbf27f4f9eb607f2cef48792f9/complaint.pdf">
+			// <a href="__GHOST_URL__/content/files/files/2022/05/analysis-of-pm2.5-related-health-burdens-under-current-and-alternative-naaqs.pdf">
+
+			// what about links:
+			// <a href="__GHOST_URL__/author/merdies-hayes/">
+			// <a href="https://ourweekly.com/michelle-thornhill-9708/" 
+
+			// <p><em>http://www.ourweekly.com/los-angeles/protesters-decry-officer%E2%80%99s-release</em></p>
+			// <p><em>http://www.ourweekly.com/los-angeles/starbucks-share-wealth-urban-league-abyssinian-corp</em></p>
+			// <p><em>http://ourweekly.com/features/black-men-their-moms</em></p>				
+				
+
+			// iframe?
+
+			*/
+
 
 			// Set Yoast primary if needed?
 
@@ -251,7 +277,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	private function set_post_featured_image( $wp_post_id, $json_post_id, $json_feature_image ) {
 
-		// Example: "feature_image" => "__GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg"
+		// Example: feature_image => __GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg
+		// Example: feature_image => https://ourweekly.com/wp-content/uploads/2013/05/Draft_Dodgers.jpg
 		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $json_feature_image );
 
 		// Get alt and caption if exists in json meta node.
