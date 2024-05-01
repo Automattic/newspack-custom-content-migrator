@@ -168,6 +168,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		global $wpdb;
 		
+		// Plugin dependencies.
+
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
@@ -176,9 +178,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 
-		if( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
-			WP_CLI::error( 'JSON file not found.' );
-		}
+		// Argument dependencies.
 
 		if( ! isset( $assoc_args['ghost-url'] ) || ! preg_match( '#^https?://[^/]+/?$#i', $assoc_args['ghost-url'] ) ) {
 			WP_CLI::error( 'Ghost URL does not match regex: ^https?://[^/]+/?$' );
@@ -195,16 +195,16 @@ class GhostCMSMigrator implements InterfaceCommand {
 		if( ! is_a( $default_user, 'WP_User') ) {
 			WP_CLI::error( 'Default user id does not match a wp user.' );
 		}
-		
-		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
-		$this->logger->log( $this->log, 'Doing migration.' );
-		$this->logger->log( $this->log, '--json-file: ' . $assoc_args['json-file'] );
-		$this->logger->log( $this->log, '--ghost-url: ' . $this->ghost_url );
-		$this->logger->log( $this->log, '--default-user-id: ' . $default_user->ID );
+		if( ! $default_user->has_cap( 'publish_posts' ) ) {
+			WP_CLI::error( 'Default user found, but does not have publish posts capability.' );
+		}
 		
-        $contents = file_get_contents( $assoc_args['json-file'] );
-		$this->json = json_decode( $contents, null, 2147483647 );
+		if( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
+			WP_CLI::error( 'JSON file not found.' );
+		}
+
+		$this->json = json_decode( file_get_contents( $assoc_args['json-file'] ), null, 2147483647 );
         
         if( 0 != json_last_error() || 'No error' != json_last_error_msg() ) {
 			WP_CLI::error( 'JSON file could not be parsed.' );
@@ -214,6 +214,15 @@ class GhostCMSMigrator implements InterfaceCommand {
 			WP_CLI::error( 'JSON file contained no posts.' );
 		}
 
+		// Start processing.
+
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+
+		$this->logger->log( $this->log, 'Doing migration.' );
+		$this->logger->log( $this->log, '--json-file: ' . $assoc_args['json-file'] );
+		$this->logger->log( $this->log, '--ghost-url: ' . $this->ghost_url );
+		$this->logger->log( $this->log, '--default-user-id: ' . $default_user->ID );
+		
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
@@ -226,7 +235,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 			}
 
-			// Skip if required value(s) are empty
+			// Skip if any required value(s) are empty
 			if( empty( $json_post->html ) || empty( $json_post->published_at ) || empty( $json_post->title ) ) {
 				
 				// Save to file, but do not write to console.
@@ -273,8 +282,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 			// todo: if post exists but postmeta below wasn't added (ie: the script stopped during import).
 
-			// todo: wp user doesn't have permissions to insert?
-
 			// Post.
 			$postarr = array(
 				'post_author' => $default_user->ID,
@@ -294,10 +301,10 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 			$this->logger->log( $this->log, 'Inserted json id: ' . $json_post->id . ' post id: ' . $wp_post_id );
 			
-			return;
-
 			// Post authors to WP Users/CAP GAs.
 			$this->set_post_authors( $wp_post_id, $json_post->id );
+
+			return;
 
 			// Post tags to categories.
 			$this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
@@ -310,6 +317,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			$wp_post_slug = get_post_field( 'post_name', $wp_post_id );
 			if( $json_post->slug != $wp_post_slug ) {
 				$this->logger->log( $this->log, 'TODO: post redirect needed: ' . $json_post->slug . ' => ' . $wp_post_slug, $this->logger::WARNING );
+				// or save to meta for later CLI?
 				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 			}
 
@@ -510,6 +518,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// Add redirect if needed.
 		if( $term->slug != $json_tag->slug ) {
 			$this->logger->log( $this->log, 'TODO: term redirect needed: ' . $json_tag->slug . ' => ' . $term->slug, $this->logger::WARNING );
+			// or save to meta for later CLI?
 			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 		}
 
@@ -536,6 +545,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// Create redirect if needed
 			if( $ga->user_login != $json_author_user->slug ) {
 				$this->logger->log( $this->log, 'Need GA redirect', $this->logger::WARNING );
+				// or save to meta for later CLI?
 				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 			}
 
@@ -543,7 +553,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		
 		}
 
-		// Check for WP user
+		// Check for WP user with admin access.
 		$user_query = new \WP_User_Query( array( 
 			'login'    => $user_login,
 			'role__in' => array( 'Administrator', 'Editor', 'Author', 'Contributor' ),
@@ -554,6 +564,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// Create redirect if needed
 			if( $wp_user->user_nicename != $json_author_user->slug ) {
 				$this->logger->log( $this->log, 'Need WP USER redirect', $this->logger::WARNING );
+				// or save to meta for later CLI?
 				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 			}
 
@@ -576,6 +587,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	
 		if( $ga->user_login != $json_author_user->slug ) {
 			$this->logger->log( $this->log, 'Need new GA redirect', $this->logger::WARNING );
+			// or save to meta for later CLI?
 			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 		}
 
