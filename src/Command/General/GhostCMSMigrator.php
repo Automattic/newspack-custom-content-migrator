@@ -142,7 +142,14 @@ class GhostCMSMigrator implements InterfaceCommand {
 					array(
 						'type'        => 'assoc',
 						'name'        => 'ghost-url',
-						'description' => 'Public URL of current/live Ghost Website. (Needed for image downloads). Ex: https://mywebsite.com',
+						'description' => 'Public URL of current/live Ghost Website for fetching images. Format: https://mywebsite.com',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'default-user-id',
+						'description' => 'User ID for default "post_author" for wp_insert_post(). Integer.',
 						'optional'    => false,
 						'repeating'   => false,
 					),
@@ -159,6 +166,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 */
 	public function cmd_migrate_ghost_cms_content( $pos_args, $assoc_args ) {
 
+		global $wpdb;
+		
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
@@ -176,12 +185,23 @@ class GhostCMSMigrator implements InterfaceCommand {
 		}
 		
 		$this->ghost_url = preg_replace( '#/$#', '', $assoc_args['ghost-url'] );
+
+		if( ! isset( $assoc_args['default-user-id'] ) || ! is_numeric( $assoc_args['default-user-id'] ) ) {
+			WP_CLI::error( 'Default user id must be integer.' );
+		}
+
+		$default_user = get_user_by( 'ID', $assoc_args['default-user-id'] );
+
+		if( ! is_a( $default_user, 'WP_User') ) {
+			WP_CLI::error( 'Default user id does not match a wp user.' );
+		}
 		
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
 		$this->logger->log( $this->log, 'Doing migration.' );
 		$this->logger->log( $this->log, '--json-file: ' . $assoc_args['json-file'] );
 		$this->logger->log( $this->log, '--ghost-url: ' . $this->ghost_url );
+		$this->logger->log( $this->log, '--default-user-id: ' . $default_user->ID );
 		
         $contents = file_get_contents( $assoc_args['json-file'] );
 		$this->json = json_decode( $contents, null, 2147483647 );
@@ -197,49 +217,34 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
-			// Skip if not post, or not published, or not visible, or blank html
-			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility || empty( $json_post->html ) ) {
+			// Skip if not post, or not published, or not visible
+			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility ) {
 				
-				// Save to file, but do not write on console.
+				// Save to file, but do not write to console.
 				$this->logger->log( $this->log . '-skips.log', print_r( $json_post, true ), false );
 				continue;
 
 			}
 
-			// todo: if post exists???
+			// Skip if required value(s) are empty
+			if( empty( $json_post->html ) || empty( $json_post->published_at ) || empty( $json_post->title ) ) {
+				
+				// Save to file, but do not write to console.
+				$this->logger->log( $this->log . '-empty.log', print_r( $json_post, true ), false );
+				continue;
 
-			// Post.
-			// $postarr = array(
-			// 	'title' => $json_post->title,
-			// 	'post_content' => $json_post->html,
-			// 	'post_date' => $json_post->published_at,
-			// 	'post_excerpt' => $json_post->custom_excerpt,
-			// 	'post_status' => 'publish',
-			// );
+			}
 
-			// $wp_post_id = wp_insert_post( $postarr );
+			// Skip if already imported.
+			if( $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_json_id' AND meta_value = %s", $json_post->id ) ) ) {
+				
+				$this->logger->log( $this->log, 'JSON post already imported: ' . $json_post->id );
+				continue;
 
-			// if( ! ( $wp_post_id > 0 ) ) {
-			// 	$this->logger->log( $this->log, 'Could not insert post for json id: ' . $json_post->id, $this->logger::WARNING );
-			// 	continue;
-			// }
+			}
 
-			// Meta.
-			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_id', $json_post->id );
-			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_uuid', $json_post->uuid );
-			// update_post_meta( $wp_post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
-
-			// Post authors to WP Users/CAP GAs.
-			// $this->set_post_authors( $wp_post_id, $json_post->id );
-
-			// Post tags to categories.
-			// $this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
-
-			// Featured image (with alt and caption). Note: json value does not contain a "d": feature(d)_image
-			$wp_post_id = null;
-			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
-
-			// Fetch images in content.
+			
+			// TODO: Fetch images in content.
 			
 			/*
 			// <figure class="kg-card kg-image-card"><img src="__GHOST_URL__/content/images/2023/02/image.jpeg" class="kg-image" alt loading="lazy" width="1023" height="678" srcset="__GHOST_URL__/content/images/size/w600/2023/02/image.jpeg 600w, __GHOST_URL__/content/images/size/w1000/2023/02/image.jpeg 1000w, __GHOST_URL__/content/images/2023/02/image.jpeg 1023w" sizes="(min-width: 720px) 720px"></figure>
@@ -266,9 +271,55 @@ class GhostCMSMigrator implements InterfaceCommand {
 			*/
 
 
-			// Set Yoast primary if needed?
+			// todo: if post exists but postmeta below wasn't added (ie: the script stopped during import).
 
-			// Set slug redirects if needed?
+			// todo: wp user doesn't have permissions to insert?
+
+			// Post.
+			$postarr = array(
+				'post_author' => $default_user->ID,
+				'post_content' => $json_post->html,
+				'post_date' => $json_post->published_at,
+				'post_excerpt' => $json_post->custom_excerpt ?? '',
+				'post_status' => 'publish',
+				'post_title' => $json_post->title,
+			);
+
+			$wp_post_id = wp_insert_post( $postarr );
+
+			if( ! ( $wp_post_id > 0 ) ) {
+				$this->logger->log( $this->log, 'Could not insert post for json id: ' . $json_post->id, $this->logger::WARNING );
+				continue;
+			}
+
+			$this->logger->log( $this->log, 'Inserted json id: ' . $json_post->id . ' post id: ' . $wp_post_id );
+			
+			return;
+
+			// Post authors to WP Users/CAP GAs.
+			$this->set_post_authors( $wp_post_id, $json_post->id );
+
+			// Post tags to categories.
+			$this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
+
+			// Featured image (with alt and caption).
+			// Note: json value does not contain a "d": feature(d)_image
+			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
+
+			// Set slug redirects if needed.
+			$wp_post_slug = get_post_field( 'post_name', $wp_post_id );
+			if( $json_post->slug != $wp_post_slug ) {
+				$this->logger->log( $this->log, 'TODO: post redirect needed: ' . $json_post->slug . ' => ' . $wp_post_slug, $this->logger::WARNING );
+				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+			}
+
+			// Post meta.
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_checksum', md5( json_encode( $json_post ) ) );
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_json_uuid', $json_post->uuid );
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
+
+			// Insert this one last since it's our key to check if already imported.
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_json_id', $json_post->id );
 
 		}
 
@@ -532,13 +583,31 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
+	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
 
+		global $wpdb;
 
+		// have to check if alredy exists so that multiple calls do not download() files already inserted
+		$attachment_id = $wpdb->get_var( $wpdb->prepare( "
+			SELECT ID
+			FROM {$wpdb->posts}
+			WHERE post_type = 'attachment' and post_title = %s
+		", $title ));
+
+		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) return $attachment_id;
+
+		// this function will check if existing, but only after re-downloading
+		return $this->attachments_logic->import_external_file(  $path, $title, $caption, $description, $alt );
+
+	}
 
 
 
 
 	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
+
+		// todo, change logging.
+
 
 		// make sure Redirects plugin is active
 		if( ! class_exists ( '\Red_Item' ) ) {
@@ -561,24 +630,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 		);
 
 		return;
-
-	}
-
-	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
-
-		global $wpdb;
-
-		// have to check if alredy exists so that multiple calls do not download() files already inserted
-		$attachment_id = $wpdb->get_var( $wpdb->prepare( "
-			SELECT ID
-			FROM {$wpdb->posts}
-			WHERE post_type = 'attachment' and post_title = %s
-		", $title ));
-
-		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) return $attachment_id;
-
-		// this function will check if existing, but only after re-downloading
-		return $this->attachments_logic->import_external_file(  $path, $title, $caption, $description, $alt );
 
 	}
 
