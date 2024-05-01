@@ -142,7 +142,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 					array(
 						'type'        => 'assoc',
 						'name'        => 'ghost-url',
-						'description' => 'Public URL of old/live Ghost Website. (Needed for image downloads). Ex: https://my-website.com',
+						'description' => 'Public URL of current/live Ghost Website. (Needed for image downloads). Ex: https://mywebsite.com',
 						'optional'    => false,
 						'repeating'   => false,
 					),
@@ -193,7 +193,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		if( empty( $this->json->db[0]->data->posts ) ) {
 			WP_CLI::error( 'JSON file contained no posts.' );
 		}
-			
+
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
@@ -235,8 +235,9 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// Post tags to categories.
 			// $this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
 
-			// Featured image (with alt and caption).
-			// if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
+			// Featured image (with alt and caption). Note: json value does not contain a "d": feature(d)_image
+			$wp_post_id = null;
+			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
 
 			// Fetch images in content.
 			
@@ -275,11 +276,11 @@ class GhostCMSMigrator implements InterfaceCommand {
         
 	}
 
-	private function set_post_featured_image( $wp_post_id, $json_post_id, $json_feature_image ) {
+	private function set_post_featured_image( $wp_post_id, $json_post_id, $old_image_url ) {
 
-		// Example: feature_image => __GHOST_URL__/content/images/wp-content/uploads/2022/10/chaka-khan.jpg
-		// Example: feature_image => https://ourweekly.com/wp-content/uploads/2013/05/Draft_Dodgers.jpg
-		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $json_feature_image );
+		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg )
+		// But if not, replace the placeholder ( __GHOST_URL__/.../image.jpg )
+		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $old_image_url );
 
 		// Get alt and caption if exists in json meta node.
 		$json_meta = $this->get_json_post_meta ( $json_post_id );
@@ -290,9 +291,20 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// get existing or upload new
 		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt );
 
-		if( is_numeric( $featured_image_id ) && $featured_image_id > 0 ) {	
-			update_post_meta( $wp_post_id, '_thumbnail_id', $featured_image_id );
+		if( ! is_numeric( $featured_image_id ) || ! ( $featured_image_id > 0 ) ) {
+			
+			$this->logger->log( $this->log, 'Featured image import failed for: ' . $old_image_url, $this->logger::WARNING );
+
+			if( is_wp_error( $featured_image_id ) ) {
+
+				$this->logger->log( $this->log, 'Featured image import wp error: ' . $featured_image_id->get_error_message(), $this->logger::WARNING );
+
+			}
+			
+			return;
 		}
+
+		update_post_meta( $wp_post_id, '_thumbnail_id', $featured_image_id );
 
 	}
 
@@ -556,7 +568,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		global $wpdb;
 
-		// have to check if alredy exists so that multiple calls dont download() files already inserted
+		// have to check if alredy exists so that multiple calls do not download() files already inserted
 		$attachment_id = $wpdb->get_var( $wpdb->prepare( "
 			SELECT ID
 			FROM {$wpdb->posts}
