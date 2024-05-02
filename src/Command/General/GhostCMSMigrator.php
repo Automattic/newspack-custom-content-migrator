@@ -245,10 +245,18 @@ class GhostCMSMigrator implements InterfaceCommand {
 			}
 
 			// Skip if already imported.
-			if( $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_json_id' AND meta_value = %s", $json_post->id ) ) ) {
+			if( $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", $json_post->id ) ) ) {
 				
 				$this->logger->log( $this->log, 'JSON post already imported: ' . $json_post->id );
 				continue;
+
+			}
+
+			// Warn if title and date already existed in wordpress.
+			// from WXR importer: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L659C4-L659C78
+			if( $maybe_post_exists = post_exists( $json_post->title, '', $json_post->published_at, 'post' )) {
+
+				$this->logger->log( $this->log, 'Possible duplicate post: ' . $maybe_post_exists, $this->logger::WARNING );
 
 			}
 
@@ -280,10 +288,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 			*/
 
 
-			// todo: if post exists but postmeta below wasn't added (ie: the script stopped during import).
-
 			// Post.
-			$postarr = array(
+			$args = array(
 				'post_author' => $default_user->ID,
 				'post_content' => $json_post->html,
 				'post_date' => $json_post->published_at,
@@ -292,25 +298,33 @@ class GhostCMSMigrator implements InterfaceCommand {
 				'post_title' => $json_post->title,
 			);
 
-			$wp_post_id = wp_insert_post( $postarr );
+			$wp_post_id = wp_insert_post( $args );
 
 			if( ! ( $wp_post_id > 0 ) ) {
+
 				$this->logger->log( $this->log, 'Could not insert post for json id: ' . $json_post->id, $this->logger::WARNING );
 				continue;
+
 			}
 
-			$this->logger->log( $this->log, 'Inserted json id: ' . $json_post->id . ' post id: ' . $wp_post_id );
-			
-			// Post authors to WP Users/CAP GAs.
-			$this->set_post_authors( $wp_post_id, $json_post->id );
+			$this->logger->log( $this->log, 'Inserted new post: ' . $wp_post_id );
 
 			return;
+
+			// Post meta.
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_id', $json_post->id );
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_uuid', $json_post->uuid );
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_slug', $json_post->slug );
+			update_post_meta( $wp_post_id, 'newspack_ghostcms_checksum', md5( json_encode( $json_post ) ) );			
+
+			// Post authors to WP Users/CAP GAs.
+			$this->set_post_authors( $wp_post_id, $json_post->id );
 
 			// Post tags to categories.
 			$this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
 
 			// Featured image (with alt and caption).
-			// Note: json value does not contain a "d": feature(d)_image
+			// Note: json value does not contain "d": feature(d)_image
 			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
 
 			// Set slug redirects if needed.
@@ -320,14 +334,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 				// or save to meta for later CLI?
 				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
 			}
-
-			// Post meta.
-			update_post_meta( $wp_post_id, 'newspack_ghostcms_checksum', md5( json_encode( $json_post ) ) );
-			update_post_meta( $wp_post_id, 'newspack_ghostcms_json_uuid', $json_post->uuid );
-			update_post_meta( $wp_post_id, 'newspack_ghostcms_json_slug', $json_post->slug );
-
-			// Insert this one last since it's our key to check if already imported.
-			update_post_meta( $wp_post_id, 'newspack_ghostcms_json_id', $json_post->id );
 
 		}
 
