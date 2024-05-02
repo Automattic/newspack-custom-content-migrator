@@ -127,10 +127,10 @@ class GhostCMSMigrator implements InterfaceCommand {
 	public function register_commands() {
 
 		WP_CLI::add_command(
-			'newspack-content-migrator migrate-ghost-cms-content',
-			[ $this, 'cmd_migrate_ghost_cms_content' ],
+			'newspack-content-migrator ghost-cms-import',
+			[ $this, 'cmd_ghost_cms_import' ],
 			[
-				'shortdesc' => 'Migrate Ghost CMS Content using a Ghost JSON export.',
+				'shortdesc' => 'Import content from Ghost JSON export.',
 				'synopsis'  => array(
 					array(
 						'type'        => 'assoc',
@@ -156,15 +156,24 @@ class GhostCMSMigrator implements InterfaceCommand {
 				),
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ghost-cms-redirects',
+			[ $this, 'cmd_ghost_cms_redirects' ],
+			[
+				'shortdesc' => 'Add Redirection (plugin) redirects for posts, categories, and author slugs.',
+			]
+		);
+
 	}
 
 	/**
-	 * Migrate Ghost CMS Content.
+	 * Import Ghost CMS Content from JSON file.
 	 * 
 	 * @param array $pos_args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_migrate_ghost_cms_content( $pos_args, $assoc_args ) {
+	public function cmd_ghost_cms_import( $pos_args, $assoc_args ) {
 
 		global $wpdb;
 		
@@ -172,10 +181,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-		}
-
-		if( ! class_exists ( '\Red_Item' ) ) {
-			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 
 		// Argument parsing.
@@ -332,14 +337,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// Post tags to categories.
 			$this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
 
-			// Set slug redirects if needed.
-			$wp_post_slug = get_post_field( 'post_name', $wp_post_id );
-			if( $json_post->slug != $wp_post_slug ) {
-				$this->logger->log( $this->log, 'TODO: post redirect needed: ' . $json_post->slug . ' => ' . $wp_post_slug, $this->logger::WARNING );
-				// or save to meta for later CLI?
-				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-			}
-
 		}
 
         $this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
@@ -347,326 +344,47 @@ class GhostCMSMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Set post featured image
+	 * Set Redirection (plugin) redirects for posts, categories, and authors slugs.
 	 * 
-	 * Note: json property does not contain "d": feature(d)_image
-	 *
-	 * @param int $wp_post_id
-	 * @param string $json_post_id
-	 * @param string $old_image_url URL scheme with domain.
-	 * @return void
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	private function set_post_featured_image( $wp_post_id, $json_post_id, $old_image_url ) {
+	public function cmd_ghost_cms_redirects( $pos_args, $assoc_args ) {
 
-		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg )
-		// But if not, replace the placeholder ( __GHOST_URL__/.../image.jpg )
-		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $old_image_url );
-
-		// Get alt and caption if exists in json meta node.
-		$json_meta = $this->get_json_post_meta( $json_post_id );
-
-		$old_image_alt = $json_meta->feature_image_alt ?? '';
-		$old_image_caption = $json_meta->feature_image_caption ?? '';
-
-		// get existing or upload new
-		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt );
-
-		if( ! is_numeric( $featured_image_id ) || ! ( $featured_image_id > 0 ) ) {
-			
-			$this->logger->log( $this->log, 'Featured image import failed for: ' . $old_image_url, $this->logger::WARNING );
-
-			if( is_wp_error( $featured_image_id ) ) {
-
-				$this->logger->log( $this->log, 'Featured image import wp error: ' . $featured_image_id->get_error_message(), $this->logger::WARNING );
-
-			}
-			
-			return;
-		}
-
-		update_post_meta( $wp_post_id, '_thumbnail_id', $featured_image_id );
-
-		$this->logger->log( $this->log, 'Set _thumbnail_id: ' . $featured_image_id );
-
-	}
-
-	/**
-	 * Set post authors using JSON relationship(s).
-	 *
-	 * @param int $wp_post_id
-	 * @param string $json_post_id
-	 * @return void
-	 */
-	private function set_post_authors( $wp_post_id, $json_post_id ) {
-
-		if( empty( $this->json->db[0]->data->posts_authors ) ) {
-			
-			$this->logger->log( $this->log, 'JSON has no post author relationships.', $this->logger::WARNING );
-
-			return;
-
-		}
-
-		$wp_objects = [];
-
-		// Each posts_authors relationship.
-		foreach( $this->json->db[0]->data->posts_authors as $json_post_author ) {
-			
-			// Skip if post id does not match relationship.
-			if( $json_post_author->post_id != $json_post_id ) continue;
-
-			// If author_id wasn't already processed.
-			if( ! isset( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
-
-				// Get the json author (user) object.
-				$json_author_user = $this->get_json_author_user_by_id ( $json_post_author->author_id );
-
-				// Verify related author (user) was found in json.
-				if( empty( $json_author_user ) ) {
-
-					$this->logger->log( $this->log, 'JSON author (user) not found: ' . $json_post_author->author_id , $this->logger::WARNING );
-
-					continue;
-
-				}
-
-				// Attempt insert and save return value into lookup.
-				$this->authors_to_wp_objects[ $json_post_author->author_id ] = $this->insert_json_author_user( $json_author_user );
-
-			}
-
-			// Verify lookup value is an object
-			// A value of 0 means json author (user) did not have visibility of public.
-			// In that case, don't add to return array.
-			if( is_object( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
-				$wp_objects[] = $this->authors_to_wp_objects[ $json_post_author->author_id ];
-			}
-							
-		} // foreach relationship
-
-		if( empty( $wp_objects ) ) {
-
-			$this->logger->log( $this->log, 'No authors.' );
-
-			return;
+		global $wpdb;
 		
+		// Plugin dependencies.
+
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 
-		// WP Users and/or CAP GAs
-		$this->coauthorsplus_logic->assign_authors_to_post( $wp_objects, $wp_post_id );
+		// Start processing.
 
-		$this->logger->log( $this->log, 'Assigned authors (wp users and/or cap gas). Count: ' . count( $wp_objects ) );
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
-	}
+		$this->logger->log( $this->log, 'Doing redirects.' );
 
-	/**
-	 * Set post tags (categories) using JSON relationship(s).
-	 *
-	 * @param int $wp_post_id
-	 * @param string $json_post_id
-	 * @return void
-	 */
-	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
+		// Set slug redirects if needed.
+		// update_post_meta( $wp_post_id, 'newspack_ghostcms_slug', $json_post->slug );
+		// if( $json_post->slug != $wp_post_slug ) {
+		// 	$this->logger->log( $this->log, 'TODO: post redirect needed: ' . $json_post->slug . ' => ' . $wp_post_slug, $this->logger::WARNING );
+		// 	// or save to meta for later CLI?
+		// 	// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+		// }
 
-		if( empty( $this->json->db[0]->data->posts_tags ) ) {
-			
-			$this->logger->log( $this->log, 'JSON has no post tags (category) relationships.', $this->logger::WARNING );
+		// Create redirect if needed
+		// if( $ga->user_login != $json_author_user->slug ) {
+		// 	$this->logger->log( $this->log, 'Need GA redirect', $this->logger::WARNING );
+		// 	// or save to meta for later CLI?
+		// 	// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+		// }
 
-			return null;
-		
-		}
+		// update_user_meta( $wp_user->ID, 'newspack_ghostcms_slug', $json_author_user->slug );
+					
+		// update_term_meta( $term_arr['term_id'], 'newspack_ghostcms_slug', $json_author_user->slug );
 
-		$category_ids = [];
-
-		// Each posts_tags relationship.
-		foreach( $this->json->db[0]->data->posts_tags as $json_post_tag ) {
-			
-			// Skip if post id does not match relationship.
-			if( $json_post_tag->post_id != $json_post_id ) continue;
-
-			// If tag_id wasn't already processed.
-			if( ! isset( $this->tags_to_categories[ $json_post_tag->tag_id ] ) ) {
-
-				// Get the json tag object.
-				$json_tag = $this->get_json_tag_by_id( $json_post_tag->tag_id );
-
-				// Verify related tag was found in json.
-				if( empty( $json_tag ) ) {
-				
-					$this->logger->log( $this->log, 'JSON tag not found: ' . $json_post_tag->tag_id, $this->logger::WARNING );
-
-					continue;
-				
-				}
-
-				// Attempt insert and save return value into lookup.
-				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->insert_json_tag_as_category( $json_tag );
-
-			}
-
-			// Verify lookup value > 0
-			// A value of 0 means json tag did not have visibility of public.
-			// In that case, don't add to return array.
-			if( $this->tags_to_categories[ $json_post_tag->tag_id ] > 0 ) {
-				$category_ids[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
-			}
-							
-		} // foreach post_tag relationship
-
-		if( empty( $category_ids ) )  {
-		
-			$this->logger->log( $this->log, 'No categories.' );
-
-			return;
-		
-		}
-		
-		wp_set_post_categories( $wp_post_id, $category_ids );
-
-		$this->logger->log( $this->log, 'Set post categories. Count: ' . count( $category_ids ) );
-
-	}
-
-	/**
-	 * Insert JSON author (user)
-	 *
-	 * @param object $json_author_user
-	 * @return 0|GA|WP_User
-	 */
-	private function insert_json_author_user( $json_author_user ) {
-
-		// Must have visibility property with value of 'public'.
-		if( empty( $json_author_user->visibility ) || 'public' != $json_author_user->visibility ) {
-
-			$this->logger->log( $this->log, 'JSON user not visible. Could not be inserted.', $this->logger::WARNING );
-
-			return 0;
-
-		} 
-		
-		// Get existing GA if exists.
-		// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
-		// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
-		// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
-		// Use a more direct approach here.
-		
-		$user_login = sanitize_title( urldecode( $json_author_user->name ) );
-
-		$this->logger->log( $this->log, 'Get or insert author: ' . $user_login );
-
-		$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
-
-		// GA Exists.
-		if( is_object( $ga ) ) {
-
-
-			$this->logger->log( $this->log, 'Found existing GA.' );
-
-			// Create redirect if needed
-			if( $ga->user_login != $json_author_user->slug ) {
-				$this->logger->log( $this->log, 'Need GA redirect', $this->logger::WARNING );
-				// or save to meta for later CLI?
-				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-			}
-
-			return $ga;
-		
-		}
-
-		// Check for WP user with admin access.
-		$user_query = new \WP_User_Query( array( 
-			'login'    => $user_login,
-			'role__in' => array( 'Administrator', 'Editor', 'Author', 'Contributor' ),
-		));
-
-		foreach ( $user_query->get_results() as $wp_user ) {
-
-			$this->logger->log( $this->log, 'Found existing WP User.' );
-
-			// Create redirect if needed
-			if( $wp_user->user_nicename != $json_author_user->slug ) {
-				$this->logger->log( $this->log, 'Need WP USER redirect', $this->logger::WARNING );
-				// or save to meta for later CLI?
-				// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-			}
-
-			// Return the first user found.
-			return $wp_user;
-
-		}
-
-		// Create a GA.
-		$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $json_author_user->name ) );
-
-		if ( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
-
-			$this->logger->log( $this->log, 'GA create failed: ' . $json_author_user->name, $this->logger::WARNING );
-
-			return 0;
-
-		}
-
-		$this->logger->log( $this->log, 'Created new GA.' );
-
-		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
-	
-		if( $ga->user_login != $json_author_user->slug ) {
-			$this->logger->log( $this->log, 'Need new GA redirect', $this->logger::WARNING );
-			// or save to meta for later CLI?
-			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-		}
-
-		return $ga;
-
-	}
-
-	/**
-	 * Insert JSON tag as category
-	 *
-	 * @param object $json_tag
-	 * @return 0|int
-	 */
-	private function insert_json_tag_as_category( $json_tag ) {
-
-		// Must have visibility property with value of 'public'.
-		if( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) {
-			
-			$this->logger->log( $this->log, 'JSON tag not visible. Could not be inserted.', $this->logger::WARNING );
-
-			return 0;
-
-		} 
-		
-		// Check if category exists in db.
-		$term_arr = term_exists( $json_tag->name, 'category' );
-
-		// Category does not exist.
-		if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-
-			// Insert it.
-			$term_arr = wp_insert_term( $json_tag->name, 'category' );
-
-			// Log and return 0 if insert failed.
-			if( is_wp_error( $term_arr ) || ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-				$this->logger->log( $this->log, 'WP insert term failed: ' . $json_tag->name, $this->logger::WARNING );
-				return 0;
-			}
-
-			$this->logger->log( $this->log, 'Inserted category term: ' . $term_arr['term_id'] );
-
-		}
-		
-		// Get category object from db.
-		$term = get_term( $term_arr['term_id'] );
-
-		// Add redirect if needed.
-		if( $term->slug != $json_tag->slug ) {
-			$this->logger->log( $this->log, 'TODO: term redirect needed: ' . $json_tag->slug . ' => ' . $term->slug, $this->logger::WARNING );
-			// or save to meta for later CLI?
-			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-		}
-
-		return $term_arr['term_id'];
+		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 
 	}
 
@@ -764,29 +482,336 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Insert JSON author (user)
+	 *
+	 * @param object $json_author_user
+	 * @return 0|GA|WP_User
+	 */
+	private function insert_json_author_user( $json_author_user ) {
 
+		// Must have visibility property with value of 'public'.
+		if( empty( $json_author_user->visibility ) || 'public' != $json_author_user->visibility ) {
 
+			$this->logger->log( $this->log, 'JSON user not visible. Could not be inserted.', $this->logger::WARNING );
 
+			return 0;
+
+		} 
+		
+		// Get existing GA if exists.
+		// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
+		// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
+		// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
+		// Use a more direct approach here.
+		
+		$user_login = sanitize_title( urldecode( $json_author_user->name ) );
+
+		$this->logger->log( $this->log, 'Get or insert author: ' . $user_login );
+
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
+
+		// GA Exists.
+		if( is_object( $ga ) ) {
+
+			$this->logger->log( $this->log, 'Found existing GA.' );
+
+			// Save old slug for possible redirect.
+			update_post_meta( $ga->ID, 'newspack_ghostcms_slug', $json_author_user->slug );
+
+			return $ga;
+		
+		}
+
+		// Check for WP user with admin access.
+		$user_query = new \WP_User_Query( array( 
+			'login'    => $user_login,
+			'role__in' => array( 'Administrator', 'Editor', 'Author', 'Contributor' ),
+		));
+
+		foreach ( $user_query->get_results() as $wp_user ) {
+
+			$this->logger->log( $this->log, 'Found existing WP User.' );
+
+			// Save old slug for possible redirect.
+			update_user_meta( $wp_user->ID, 'newspack_ghostcms_slug', $json_author_user->slug );
+
+			// Return the first user found.
+			return $wp_user;
+
+		}
+
+		// Create a GA.
+		$ga_id = $this->coauthorsplus_logic->create_guest_author( array( 'display_name' => $json_author_user->name ) );
+
+		if ( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
+
+			$this->logger->log( $this->log, 'GA create failed: ' . $json_author_user->name, $this->logger::WARNING );
+
+			return 0;
+
+		}
+
+		$this->logger->log( $this->log, 'Created new GA.' );
+
+		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
 	
+		// Save old slug for possible redirect.
+		update_post_meta( $ga->ID, 'newspack_ghostcms_slug', $json_author_user->slug );
 
-	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
+		return $ga;
 
-		// todo, change logging.
+	}
 
+	/**
+	 * Insert JSON tag as category
+	 *
+	 * @param object $json_tag
+	 * @return 0|int
+	 */
+	private function insert_json_tag_as_category( $json_tag ) {
 
-		// make sure Redirects plugin is active
-		if( ! class_exists ( '\Red_Item' ) ) {
-			WP_CLI::error( 'Redirection plugin must be active.' );
+		// Must have visibility property with value of 'public'.
+		if( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) {
+			
+			$this->logger->log( $this->log, 'JSON tag not visible. Could not be inserted.', $this->logger::WARNING );
+
+			return 0;
+
+		} 
+		
+		// Check if category exists in db.
+		$term_arr = term_exists( $json_tag->name, 'category' );
+
+		// Category does not exist.
+		if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+
+			// Insert it.
+			$term_arr = wp_insert_term( $json_tag->name, 'category' );
+
+			// Log and return 0 if insert failed.
+			if( is_wp_error( $term_arr ) || ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+				$this->logger->log( $this->log, 'WP insert term failed: ' . $json_tag->name, $this->logger::WARNING );
+				return 0;
+			}
+
+			$this->logger->log( $this->log, 'Inserted category term: ' . $term_arr['term_id'] );
+
 		}
 		
-		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
+		// Save old slug for possible redirect.
+		update_term_meta( $term_arr['term_id'], 'newspack_ghostcms_slug', $json_tag->slug );
 
-			if( $verbose ) WP_CLI::warning( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
+		return $term_arr['term_id'];
+
+	}
+
+	/**
+	 * Set post authors using JSON relationship(s).
+	 *
+	 * @param int $wp_post_id
+	 * @param string $json_post_id
+	 * @return void
+	 */
+	private function set_post_authors( $wp_post_id, $json_post_id ) {
+
+		if( empty( $this->json->db[0]->data->posts_authors ) ) {
+			
+			$this->logger->log( $this->log, 'JSON has no post author relationships.', $this->logger::WARNING );
+
 			return;
 
 		}
 
-		if( $verbose ) WP_CLI::line( 'Adding (' . $batch . ') redirect: ' . $url_from . ' to ' . $url_to );
+		$wp_objects = [];
+
+		// Each posts_authors relationship.
+		foreach( $this->json->db[0]->data->posts_authors as $json_post_author ) {
+			
+			// Skip if post id does not match relationship.
+			if( $json_post_author->post_id != $json_post_id ) continue;
+
+			$this->logger->log( $this->log, 'Relationship found for author: ' . $json_post_author->author_id );
+
+			// If author_id wasn't already processed.
+			if( ! isset( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
+
+				// Get the json author (user) object.
+				$json_author_user = $this->get_json_author_user_by_id ( $json_post_author->author_id );
+
+				// Verify related author (user) was found in json.
+				if( empty( $json_author_user ) ) {
+
+					$this->logger->log( $this->log, 'JSON author (user) not found: ' . $json_post_author->author_id , $this->logger::WARNING );
+
+					continue;
+
+				}
+
+				// Attempt insert and save return value into lookup.
+				$this->authors_to_wp_objects[ $json_post_author->author_id ] = $this->insert_json_author_user( $json_author_user );
+
+			}
+
+			// Verify lookup value is an object
+			// A value of 0 means json author (user) did not have visibility of public.
+			// In that case, don't add to return array.
+			if( is_object( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
+				$wp_objects[] = $this->authors_to_wp_objects[ $json_post_author->author_id ];
+			}
+							
+		} // foreach relationship
+
+		if( empty( $wp_objects ) ) {
+
+			$this->logger->log( $this->log, 'No authors.' );
+
+			return;
+		
+		}
+
+		// WP Users and/or CAP GAs
+		$this->coauthorsplus_logic->assign_authors_to_post( $wp_objects, $wp_post_id );
+
+		$this->logger->log( $this->log, 'Assigned authors (wp users and/or cap gas). Count: ' . count( $wp_objects ) );
+
+	}
+
+	/**
+	 * Set post featured image
+	 * 
+	 * Note: json property does not contain "d": feature(d)_image
+	 *
+	 * @param int $wp_post_id
+	 * @param string $json_post_id
+	 * @param string $old_image_url URL scheme with domain.
+	 * @return void
+	 */
+	private function set_post_featured_image( $wp_post_id, $json_post_id, $old_image_url ) {
+
+		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg )
+		// But if not, replace the placeholder ( __GHOST_URL__/.../image.jpg )
+		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $old_image_url );
+
+		$this->logger->log( $this->log, 'Featured image fetch url: ' . $old_image_url );
+
+		// Get alt and caption if exists in json meta node.
+		$json_meta = $this->get_json_post_meta( $json_post_id );
+
+		$old_image_alt = $json_meta->feature_image_alt ?? '';
+		$old_image_caption = $json_meta->feature_image_caption ?? '';
+
+		// get existing or upload new
+		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt );
+
+		if( ! is_numeric( $featured_image_id ) || ! ( $featured_image_id > 0 ) ) {
+			
+			$this->logger->log( $this->log, 'Featured image import failed for: ' . $old_image_url, $this->logger::WARNING );
+
+			if( is_wp_error( $featured_image_id ) ) {
+
+				$this->logger->log( $this->log, 'Featured image import wp error: ' . $featured_image_id->get_error_message(), $this->logger::WARNING );
+
+			}
+			
+			return;
+		}
+
+		update_post_meta( $wp_post_id, '_thumbnail_id', $featured_image_id );
+
+		$this->logger->log( $this->log, 'Set _thumbnail_id: ' . $featured_image_id );
+
+	}
+
+	/**
+	 * Set post tags (categories) using JSON relationship(s).
+	 *
+	 * @param int $wp_post_id
+	 * @param string $json_post_id
+	 * @return void
+	 */
+	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
+
+		if( empty( $this->json->db[0]->data->posts_tags ) ) {
+			
+			$this->logger->log( $this->log, 'JSON has no post tags (category) relationships.', $this->logger::WARNING );
+
+			return null;
+		
+		}
+
+		$category_ids = [];
+
+		// Each posts_tags relationship.
+		foreach( $this->json->db[0]->data->posts_tags as $json_post_tag ) {
+			
+			// Skip if post id does not match relationship.
+			if( $json_post_tag->post_id != $json_post_id ) continue;
+
+			$this->logger->log( $this->log, 'Relationship found for tag: ' . $json_post_tag->tag_id );
+
+			// If tag_id wasn't already processed.
+			if( ! isset( $this->tags_to_categories[ $json_post_tag->tag_id ] ) ) {
+
+				// Get the json tag object.
+				$json_tag = $this->get_json_tag_by_id( $json_post_tag->tag_id );
+
+				// Verify related tag was found in json.
+				if( empty( $json_tag ) ) {
+				
+					$this->logger->log( $this->log, 'JSON tag not found: ' . $json_post_tag->tag_id, $this->logger::WARNING );
+
+					continue;
+				
+				}
+
+				// Attempt insert and save return value into lookup.
+				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->insert_json_tag_as_category( $json_tag );
+
+			}
+
+			// Verify lookup value > 0
+			// A value of 0 means json tag did not have visibility of public.
+			// In that case, don't add to return array.
+			if( $this->tags_to_categories[ $json_post_tag->tag_id ] > 0 ) {
+				$category_ids[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
+			}
+							
+		} // foreach post_tag relationship
+
+		if( empty( $category_ids ) )  {
+		
+			$this->logger->log( $this->log, 'No categories.' );
+
+			return;
+		
+		}
+		
+		wp_set_post_categories( $wp_post_id, $category_ids );
+
+		$this->logger->log( $this->log, 'Set post categories. Count: ' . count( $category_ids ) );
+
+	}
+
+	private function set_redirect( $url_from, $url_to, $batch ) {
+
+		// Plugin must be active.
+		if( ! class_exists ( '\Red_Item' ) ) {
+
+			$this->logger->log( $this->log, 'Redirection plugin must be active.', $this->logger::WARNING );
+
+			return;
+
+		}
+		
+		// Already exists.
+		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
+
+			$this->logger->log( $this->log, 'Redirect already set: ' . $url_from . ' => ' . $url_to );
+
+			return;
+
+		}
 		
 		$this->redirection_logic->create_redirection_rule(
 			'Old site (' . $batch . ')',
@@ -794,7 +819,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			$url_to
 		);
 
-		return;
+		$this->logger->log( $this->log, 'Added redirect (' . $batch . '): ' . $url_from . ' => ' . $url_to );
 
 	}
 
