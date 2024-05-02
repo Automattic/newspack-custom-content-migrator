@@ -178,7 +178,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 
-		// Argument dependencies.
+		// Argument parsing.
 
 		if( ! isset( $assoc_args['ghost-url'] ) || ! preg_match( '#^https?://[^/]+/?$#i', $assoc_args['ghost-url'] ) ) {
 			WP_CLI::error( 'Ghost URL does not match regex: ^https?://[^/]+/?$' );
@@ -226,20 +226,18 @@ class GhostCMSMigrator implements InterfaceCommand {
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
+			$this->logger->log( $this->log, '---- json id: ' . $json_post->id );
+
 			// Skip if not post, or not published, or not visible
-			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility ) {
+			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility 
+				|| empty( $json_post->html ) || empty( $json_post->published_at ) || empty( $json_post->title ) 
+			) {
 				
-				// Save to file, but do not write to console.
+				$this->logger->log( $this->log, 'Skip JSON post (review by hand -skips.log)', $this->logger::WARNING );
+
+				// Save to skips file, and do not write to console.
 				$this->logger->log( $this->log . '-skips.log', print_r( $json_post, true ), false );
-				continue;
 
-			}
-
-			// Skip if any required value(s) are empty
-			if( empty( $json_post->html ) || empty( $json_post->published_at ) || empty( $json_post->title ) ) {
-				
-				// Save to file, but do not write to console.
-				$this->logger->log( $this->log . '-empty.log', print_r( $json_post, true ), false );
 				continue;
 
 			}
@@ -247,20 +245,22 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// Skip if already imported.
 			if( $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", $json_post->id ) ) ) {
 				
-				$this->logger->log( $this->log, 'JSON post already imported: ' . $json_post->id );
+				$this->logger->log( $this->log, 'JSON post already imported' );
+
 				continue;
 
 			}
 
 			// Warn if title and date already existed in wordpress.
-			// from WXR importer: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L659C4-L659C78
+			// From WXR importer: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L659C4-L659C78
 			if( $maybe_post_exists = post_exists( $json_post->title, '', $json_post->published_at, 'post' )) {
 
-				$this->logger->log( $this->log, 'Possible duplicate post: ' . $maybe_post_exists, $this->logger::WARNING );
+				$this->logger->log( $this->log, 'Possible duplicate of existing post: ' . $maybe_post_exists, $this->logger::WARNING );
+
+				// continue; no, still insert JSON post.
 
 			}
 
-			
 			// TODO: Fetch images in content.
 			
 			/*
@@ -287,7 +287,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 			*/
 
-
 			// Post.
 			$args = array(
 				'post_author' => $default_user->ID,
@@ -298,18 +297,23 @@ class GhostCMSMigrator implements InterfaceCommand {
 				'post_title' => $json_post->title,
 			);
 
-			$wp_post_id = wp_insert_post( $args );
+			$wp_post_id = wp_insert_post( $args, true );
 
-			if( ! ( $wp_post_id > 0 ) ) {
+			if( is_wp_error( $wp_post_id ) || ! is_numeric( $wp_post_id ) || ! ( $wp_post_id > 0 ) ) {
 
-				$this->logger->log( $this->log, 'Could not insert post for json id: ' . $json_post->id, $this->logger::WARNING );
+				$this->logger->log( $this->log, 'Could not insert post.', $this->logger::WARNING );
+				
+				if( is_wp_error( $wp_post_id ) ) {
+
+					$this->logger->log( $this->log, 'wp error: ' . $wp_post_id->get_error_message(), $this->logger::WARNING );
+	
+				}
+	
 				continue;
 
 			}
 
 			$this->logger->log( $this->log, 'Inserted new post: ' . $wp_post_id );
-
-			return;
 
 			// Post meta.
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_id', $json_post->id );
@@ -317,15 +321,16 @@ class GhostCMSMigrator implements InterfaceCommand {
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_slug', $json_post->slug );
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_checksum', md5( json_encode( $json_post ) ) );			
 
+			// Featured image (with alt and caption).
+			// Note: json value does not contain "d": feature(d)_image
+			if( empty( $json_post->feature_image ) ) $this->logger->log( $this->log, 'No featured image.' );
+			else $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
+
 			// Post authors to WP Users/CAP GAs.
 			$this->set_post_authors( $wp_post_id, $json_post->id );
 
 			// Post tags to categories.
 			$this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
-
-			// Featured image (with alt and caption).
-			// Note: json value does not contain "d": feature(d)_image
-			if( ! empty( $json_post->feature_image ) ) $this->set_post_featured_image( $wp_post_id, $json_post->id, $json_post->feature_image );
 
 			// Set slug redirects if needed.
 			$wp_post_slug = get_post_field( 'post_name', $wp_post_id );
@@ -341,6 +346,16 @@ class GhostCMSMigrator implements InterfaceCommand {
         
 	}
 
+	/**
+	 * Set post featured image
+	 * 
+	 * Note: json property does not contain "d": feature(d)_image
+	 *
+	 * @param int $wp_post_id
+	 * @param string $json_post_id
+	 * @param string $old_image_url URL scheme with domain.
+	 * @return void
+	 */
 	private function set_post_featured_image( $wp_post_id, $json_post_id, $old_image_url ) {
 
 		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg )
@@ -348,7 +363,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $old_image_url );
 
 		// Get alt and caption if exists in json meta node.
-		$json_meta = $this->get_json_post_meta ( $json_post_id );
+		$json_meta = $this->get_json_post_meta( $json_post_id );
 
 		$old_image_alt = $json_meta->feature_image_alt ?? '';
 		$old_image_caption = $json_meta->feature_image_caption ?? '';
@@ -371,11 +386,26 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		update_post_meta( $wp_post_id, '_thumbnail_id', $featured_image_id );
 
+		$this->logger->log( $this->log, 'Set _thumbnail_id: ' . $featured_image_id );
+
 	}
 
+	/**
+	 * Set post authors using JSON relationship(s).
+	 *
+	 * @param int $wp_post_id
+	 * @param string $json_post_id
+	 * @return void
+	 */
 	private function set_post_authors( $wp_post_id, $json_post_id ) {
 
-		if( empty( $this->json->db[0]->data->posts_authors ) ) return null;
+		if( empty( $this->json->db[0]->data->posts_authors ) ) {
+			
+			$this->logger->log( $this->log, 'JSON has no post author relationships.', $this->logger::WARNING );
+
+			return;
+
+		}
 
 		$wp_objects = [];
 
@@ -389,10 +419,16 @@ class GhostCMSMigrator implements InterfaceCommand {
 			if( ! isset( $this->authors_to_wp_objects[ $json_post_author->author_id ] ) ) {
 
 				// Get the json author (user) object.
-				$json_author_user = $this->get_json_author_user_by_id( $json_post_author->author_id );
+				$json_author_user = $this->get_json_author_user_by_id ( $json_post_author->author_id );
 
 				// Verify related author (user) was found in json.
-				if( empty( $json_author_user ) ) continue;
+				if( empty( $json_author_user ) ) {
+
+					$this->logger->log( $this->log, 'JSON author (user) not found: ' . $json_post_author->author_id , $this->logger::WARNING );
+
+					continue;
+
+				}
 
 				// Attempt insert and save return value into lookup.
 				$this->authors_to_wp_objects[ $json_post_author->author_id ] = $this->insert_json_author_user( $json_author_user );
@@ -408,16 +444,37 @@ class GhostCMSMigrator implements InterfaceCommand {
 							
 		} // foreach relationship
 
-		if( ! empty( $wp_objects ) ) {
-			// WP Users and/or CAP GAs
-			$this->coauthorsplus_logic->assign_authors_to_post( $wp_objects, $wp_post_id );
+		if( empty( $wp_objects ) ) {
+
+			$this->logger->log( $this->log, 'No authors.' );
+
+			return;
+		
 		}
+
+		// WP Users and/or CAP GAs
+		$this->coauthorsplus_logic->assign_authors_to_post( $wp_objects, $wp_post_id );
+
+		$this->logger->log( $this->log, 'Assigned authors (wp users and/or cap gas). Count: ' . count( $wp_objects ) );
 
 	}
 
+	/**
+	 * Set post tags (categories) using JSON relationship(s).
+	 *
+	 * @param int $wp_post_id
+	 * @param string $json_post_id
+	 * @return void
+	 */
 	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
 
-		if( empty( $this->json->db[0]->data->posts_tags ) ) return null;
+		if( empty( $this->json->db[0]->data->posts_tags ) ) {
+			
+			$this->logger->log( $this->log, 'JSON has no post tags (category) relationships.', $this->logger::WARNING );
+
+			return null;
+		
+		}
 
 		$category_ids = [];
 
@@ -434,7 +491,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 				$json_tag = $this->get_json_tag_by_id( $json_post_tag->tag_id );
 
 				// Verify related tag was found in json.
-				if( empty( $json_tag ) ) continue;
+				if( empty( $json_tag ) ) {
+				
+					$this->logger->log( $this->log, 'JSON tag not found: ' . $json_post_tag->tag_id, $this->logger::WARNING );
+
+					continue;
+				
+				}
 
 				// Attempt insert and save return value into lookup.
 				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->insert_json_tag_as_category( $json_tag );
@@ -450,103 +513,54 @@ class GhostCMSMigrator implements InterfaceCommand {
 							
 		} // foreach post_tag relationship
 
-		if( ! empty( $category_ids ) ) wp_set_post_categories( $wp_post_id, $category_ids );
-
-	}
-
-	private function get_json_author_user_by_id ( $json_author_user_id ) {
-
-		if( empty( $this->json->db[0]->data->users ) ) return null;
-
-		foreach( $this->json->db[0]->data->users as $json_author_user ) {
-
-			if( $json_author_user->id == $json_author_user_id ) return $json_author_user;
-
-		} 
-
-		return null;
-
-	}
-
-	private function get_json_post_meta ( $json_post_id ) {
-
-		if( empty( $this->json->db[0]->data->posts_meta ) ) return null;
-
-		foreach( $this->json->db[0]->data->posts_meta as $json_post_meta ) {
-
-			if( $json_post_meta->post_id == $json_post_id ) return $json_post_meta;
-
-		} 
-
-		return null;
-
-	}
-
-	private function get_json_tag_by_id ( $json_tag_id ) {
-
-		if( empty( $this->json->db[0]->data->tags ) ) return null;
-
-		foreach( $this->json->db[0]->data->tags as $json_tag ) {
-
-			if( $json_tag->id == $json_tag_id ) return $json_tag;
-
-		} 
-
-		return null;
-
-	}
-
-	private function insert_json_tag_as_category( $json_tag ) {
-
-		// Must have visibility property with value of 'public'.
-		if( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) return 0;
+		if( empty( $category_ids ) )  {
 		
-		// Check if category exists in db.
-		$term_arr = term_exists( $json_tag->name, 'category' );
+			$this->logger->log( $this->log, 'No categories.' );
 
-		// Category does not exist.
-		if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-
-			// Insert it.
-			$term_arr = wp_insert_term( $json_tag->name, 'category' );
-
-			// Log and return 0 if insert failed.
-			if( is_wp_error( $term_arr ) || ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-				$this->logger->log( $this->log, 'WP insert term failed: ' . $json_tag->name, $this->logger::WARNING );
-				return 0;
-			}
-
+			return;
+		
 		}
 		
-		// Get category object from db.
-		$term = get_term( $term_arr['term_id'] );
+		wp_set_post_categories( $wp_post_id, $category_ids );
 
-		// Add redirect if needed.
-		if( $term->slug != $json_tag->slug ) {
-			$this->logger->log( $this->log, 'TODO: term redirect needed: ' . $json_tag->slug . ' => ' . $term->slug, $this->logger::WARNING );
-			// or save to meta for later CLI?
-			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-		}
-
-		return $term_arr['term_id'];
+		$this->logger->log( $this->log, 'Set post categories. Count: ' . count( $category_ids ) );
 
 	}
 
+	/**
+	 * Insert JSON author (user)
+	 *
+	 * @param object $json_author_user
+	 * @return 0|GA|WP_User
+	 */
 	private function insert_json_author_user( $json_author_user ) {
 
 		// Must have visibility property with value of 'public'.
-		if( empty( $json_author_user->visibility ) || 'public' != $json_author_user->visibility ) return 0;
+		if( empty( $json_author_user->visibility ) || 'public' != $json_author_user->visibility ) {
+
+			$this->logger->log( $this->log, 'JSON user not visible. Could not be inserted.', $this->logger::WARNING );
+
+			return 0;
+
+		} 
 		
 		// Get existing GA if exists.
 		// As of 2024-03-19 the use of 'coauthorsplus_logic->create_guest_author()' to return existing match
 		// may return an error. WP Error occures if existing database GA is "Jon A. Doe" but new GA is "Jon A Doe".
 		// New GA will not match on display name, but will fail on create when existing sanitized slug is found.
 		// Use a more direct approach here.
+		
 		$user_login = sanitize_title( urldecode( $json_author_user->name ) );
+
+		$this->logger->log( $this->log, 'Get or insert author: ' . $user_login );
+
 		$ga = $this->coauthorsplus_logic->get_guest_author_by_user_login( $user_login );
 
 		// GA Exists.
 		if( is_object( $ga ) ) {
+
+
+			$this->logger->log( $this->log, 'Found existing GA.' );
 
 			// Create redirect if needed
 			if( $ga->user_login != $json_author_user->slug ) {
@@ -567,6 +581,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		foreach ( $user_query->get_results() as $wp_user ) {
 
+			$this->logger->log( $this->log, 'Found existing WP User.' );
+
 			// Create redirect if needed
 			if( $wp_user->user_nicename != $json_author_user->slug ) {
 				$this->logger->log( $this->log, 'Need WP USER redirect', $this->logger::WARNING );
@@ -585,9 +601,12 @@ class GhostCMSMigrator implements InterfaceCommand {
 		if ( is_wp_error( $ga_id ) || ! is_numeric( $ga_id ) || ! ( $ga_id > 0 ) ) {
 
 			$this->logger->log( $this->log, 'GA create failed: ' . $json_author_user->name, $this->logger::WARNING );
+
 			return 0;
 
 		}
+
+		$this->logger->log( $this->log, 'Created new GA.' );
 
 		$ga = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
 	
@@ -601,6 +620,126 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 	}
 
+	/**
+	 * Insert JSON tag as category
+	 *
+	 * @param object $json_tag
+	 * @return 0|int
+	 */
+	private function insert_json_tag_as_category( $json_tag ) {
+
+		// Must have visibility property with value of 'public'.
+		if( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) {
+			
+			$this->logger->log( $this->log, 'JSON tag not visible. Could not be inserted.', $this->logger::WARNING );
+
+			return 0;
+
+		} 
+		
+		// Check if category exists in db.
+		$term_arr = term_exists( $json_tag->name, 'category' );
+
+		// Category does not exist.
+		if( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+
+			// Insert it.
+			$term_arr = wp_insert_term( $json_tag->name, 'category' );
+
+			// Log and return 0 if insert failed.
+			if( is_wp_error( $term_arr ) || ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+				$this->logger->log( $this->log, 'WP insert term failed: ' . $json_tag->name, $this->logger::WARNING );
+				return 0;
+			}
+
+			$this->logger->log( $this->log, 'Inserted category term: ' . $term_arr['term_id'] );
+
+		}
+		
+		// Get category object from db.
+		$term = get_term( $term_arr['term_id'] );
+
+		// Add redirect if needed.
+		if( $term->slug != $json_tag->slug ) {
+			$this->logger->log( $this->log, 'TODO: term redirect needed: ' . $json_tag->slug . ' => ' . $term->slug, $this->logger::WARNING );
+			// or save to meta for later CLI?
+			// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
+		}
+
+		return $term_arr['term_id'];
+
+	}
+
+	/**
+	 * Get JSON author (user) object from data array.
+	 *
+	 * @param string $json_author_user_id
+	 * @return null|Object
+	 */
+	private function get_json_author_user_by_id ( $json_author_user_id ) {
+
+		if( empty( $this->json->db[0]->data->users ) ) return null;
+
+		foreach( $this->json->db[0]->data->users as $json_author_user ) {
+
+			if( $json_author_user->id == $json_author_user_id ) return $json_author_user;
+
+		} 
+
+		return null;
+
+	}
+
+	/**
+	 * Get JSON meta object from data array.
+	 *
+	 * @param string $json_post_id
+	 * @return null|Object
+	 */
+	private function get_json_post_meta ( $json_post_id ) {
+
+		if( empty( $this->json->db[0]->data->posts_meta ) ) return null;
+
+		foreach( $this->json->db[0]->data->posts_meta as $json_post_meta ) {
+
+			if( $json_post_meta->post_id == $json_post_id ) return $json_post_meta;
+
+		} 
+
+		return null;
+
+	}
+
+	/**
+	 * Get JSON tag object from data array.
+	 *
+	 * @param string $json_tag_id
+	 * @return null|Object
+	 */
+	private function get_json_tag_by_id ( $json_tag_id ) {
+
+		if( empty( $this->json->db[0]->data->tags ) ) return null;
+
+		foreach( $this->json->db[0]->data->tags as $json_tag ) {
+
+			if( $json_tag->id == $json_tag_id ) return $json_tag;
+
+		} 
+
+		return null;
+
+	}
+
+	/**
+	 * Get attachment (based on URL) from database else import external file from URL
+	 *
+	 * @param string $path URL
+	 * @param string $title URL or title string.
+	 * @param string $caption
+	 * @param string $description
+	 * @param string $alt
+	 * @return int|WP_Error $attachment_id
+	 */
 	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
 
 		global $wpdb;
@@ -612,7 +751,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 			WHERE post_type = 'attachment' and post_title = %s
 		", $title ));
 
-		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) return $attachment_id;
+		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) {
+			
+			$this->logger->log( $this->log, 'Image already exists: ' . $attachment_id );
+
+			return $attachment_id;
+
+		}
 
 		// this function will check if existing, but only after re-downloading
 		return $this->attachments_logic->import_external_file(  $path, $title, $caption, $description, $alt );
@@ -621,6 +766,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 
 
+
+	
 
 	private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
 
