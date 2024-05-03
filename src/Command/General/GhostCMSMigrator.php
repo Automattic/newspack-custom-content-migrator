@@ -142,7 +142,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 					array(
 						'type'        => 'assoc',
 						'name'        => 'ghost-url',
-						'description' => 'Public URL of current/live Ghost Website for fetching images. Format: https://mywebsite.com',
+						'description' => 'Public URL of current/live Ghost Website for fetching media. Format: https://mywebsite.com',
 						'optional'    => false,
 						'repeating'   => false,
 					),
@@ -295,12 +295,14 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// Post.
 			$args = array(
 				'post_author' => $default_user->ID,
-				'post_content' => $json_post->html,
+				'post_content' => $this->media_parse_content( $json_post->html ),
 				'post_date' => $json_post->published_at,
 				'post_excerpt' => $json_post->custom_excerpt ?? '',
 				'post_status' => 'publish',
 				'post_title' => $json_post->title,
 			);
+
+continue;
 
 			$wp_post_id = wp_insert_post( $args, true );
 
@@ -603,6 +605,141 @@ class GhostCMSMigrator implements InterfaceCommand {
 		update_term_meta( $term_arr['term_id'], 'newspack_ghostcms_slug', $json_tag->slug );
 
 		return $term_arr['term_id'];
+
+	}
+
+	private function media_parse_content( $content ) {
+
+		// parse and import images and files (PDF) in body content <img and <a href=...PDF
+		
+		/*
+		preg_match_all( '/<(a|img) [^>]*?>/i', $content, $elements )
+		*/
+
+
+		preg_match_all( '/<(\w+) ([^>]*?)>/i', $content, $elements, PREG_SET_ORDER );
+
+		foreach( $elements as $element ) {
+			// $this->logger->log( $this->log . '-html-' . $element[1] . '.log', str_replace( PHP_EOL, 'RGC_PHP_EOL', $element[2] ) );
+		}
+		// print_r( $elements );
+
+		return;
+
+
+		foreach( $elements[0] as $element ) {
+			
+
+
+			$attr = '';
+
+			if( preg_match( '/^<a /', $element ) ) $attr = 'href'; 
+			else if( preg_match( '/^<img /', $element ) ) $attr = 'src';
+			else continue;
+
+			$content = $this->media_parse_element( $element, $attr, $content );
+
+		}
+
+		return $content;
+
+	}
+
+	private function media_parse_element( $element, $attr, $content ) {
+
+		$link = $this->media_parse_link( $element, $attr );
+		if( empty( $link ) ) return $content;
+
+		$this->mylog( $attr . ' link found in element', $link );
+
+		// get existing or upload new
+		$attachment_id = $this->get_or_import_url( $link, $link );
+
+		if( ! is_numeric( $attachment_id ) || ! ( $attachment_id > 0 ) ) {
+	
+			$this->mylog( $attr . ' import external file failed', $link, $this->logger::WARNING );
+			return $content;
+
+		}
+		
+		$content = str_replace( $link, wp_get_attachment_url( $attachment_id ), $content );
+
+		$this->mylog( $attr . ' link replaced in element', $link );
+
+		return $content;
+
+
+	}
+
+	private function media_parse_link( $element, $attr ) {
+
+		// test (and temporarily fix) ill formatted elements
+		$had_line_break = false;
+		if( preg_match( '/\n/', $element ) ) {
+			$element = preg_replace('/\n/', '', $element );
+			$had_line_break = true;
+		}
+
+		// parse URL from the element
+		if( ! preg_match( '/' . $attr . '=[\'"](.+?)[\'"]/', $element, $url_matches ) ) {
+			$this->mylog( $attr . ' null link found in element', $element, $this->logger::WARNING );
+			return;
+		}
+
+		// set easy to use variable
+		$url = $url_matches[1];
+
+		// test (and temporarily fix) ill formatted links
+		$had_leading_whitespace = false;
+		if( preg_match( '/^\s+/', $url ) ) {
+			$url = preg_replace('/^\s+/', '', $url );
+			$had_leading_whitespace = true;
+		}
+
+		// test (and temporarily fix) ill formatted links
+		$had_trailing_whitespace = false;
+		if( preg_match( '/\s+$/', $url ) ) {
+			$url = preg_replace('/\s+$/', '', $url );
+			$had_trailing_whitespace = true;
+		}
+
+		// skip known off-site urls and other anomalies
+		$skips = array(
+			'https?:\/\/(docs.google.com|player.vimeo.com|w.soundcloud.com|www.youtube.com)',
+			'mailto',
+		);
+		
+		if( preg_match( '/^(' . implode( '|', $skips ) . ')/', $url ) ) return;
+
+		// we're only looking for media (must have an extension), else skip
+		if( ! preg_match( '/\.([A-Za-z0-9]{3,4})$/', $url, $ext_matches ) ) return;
+
+		// ignore certain extensions that are not media files
+		if( in_array( $ext_matches[1], array( 'asp', 'aspx', 'com', 'edu', 'htm', 'html', 'net', 'news', 'org', 'php' ) ) ) return;
+
+		// must start with http(s)://
+		if( ! preg_match( '/^https?:\/\//', $url ) ) {
+			$this->mylog( $attr . ' non-https link found in element', $element, $this->logger::WARNING );
+			return;
+		}
+		
+		// only match certain domains
+		$keep_domains = [
+			'uploads-ssl.webflow.com',
+		];
+
+		if( ! preg_match('/^https?:\/\/(' . implode( '|', $keep_domains ) . ')/', $url ) ) {
+			// $this->mylog( $attr . ' off domain link found in element', $element, $this->logger::WARNING );
+			return;
+		}
+
+		// todo: handle issues previously bypassed
+		if( $had_line_break || $had_leading_whitespace || $had_trailing_whitespace ) {
+			$this->mylog( $attr . ' whitespace found in element', $element, $this->logger::WARNING );
+			return;
+		}
+
+		return $url;
 
 	}
 
