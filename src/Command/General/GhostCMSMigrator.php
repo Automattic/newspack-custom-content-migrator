@@ -247,6 +247,9 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 			}
 
+			$this->logger->log( $this->log, 'Title/Slug: ' . $json_post->title . ' / ' . $json_post->slug );
+			$this->logger->log( $this->log, 'Created/Published: ' . $json_post->created_at . ' / ' . $json_post->published_at );
+
 			// Skip if already imported.
 			if( $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", $json_post->id ) ) ) {
 				
@@ -260,11 +263,17 @@ class GhostCMSMigrator implements InterfaceCommand {
 			// From WXR importer: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L659C4-L659C78
 			if( $maybe_post_exists = post_exists( $json_post->title, '', $json_post->published_at, 'post' )) {
 
-				$this->logger->log( $this->log, 'Possible duplicate of existing post: ' . $maybe_post_exists, $this->logger::WARNING );
-
-				// continue; no, still insert JSON post.
+				$this->logger->log( $this->log, 'Possible duplicate (title and date) of existing post: ' . $maybe_post_exists, $this->logger::WARNING );
 
 			}
+
+			// Warn if post_name / slug exists.
+			if( $maybe_post_exists = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_type = 'post' and post_name = %s", $json_post->slug ) ) ){
+
+				$this->logger->log( $this->log, 'Possible duplicate (slug) of existing post: ' . $maybe_post_exists, $this->logger::WARNING );
+
+			}
+
 
 			// TODO: Fetch images in content.
 			
