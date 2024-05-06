@@ -938,16 +938,17 @@ class CCMMigrator implements InterfaceCommand {
 
 		foreach ( $posts as $post ) {
 			// Get brands from meta.
-			$brands    = get_post_meta( $post->ID, '_newspack_post_brands', true );
-			$brand_ids = array_map(
-				function ( $brand ) {
-					$term = get_term_by( 'name', $brand, 'brand' );
-					return $term ? $term->term_id : null;
-				},
-				$brands
-			);
+			$brands = get_post_meta( $post->ID, '_newspack_post_brands', true );
 
 			if ( $brands ) {
+				$brand_ids = array_map(
+					function ( $brand ) {
+						$term = get_term_by( 'name', $brand, 'brand' );
+						return $term ? $term->term_id : null;
+					},
+					$brands
+				);
+
 				// Set post brands.
 				wp_set_post_terms( $post->ID, $brand_ids, 'brand' );
 
