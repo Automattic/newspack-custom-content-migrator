@@ -220,6 +220,54 @@ class CCMMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ccm-generate-meta-brands-from-taxonomy',
+			[ $this, 'cmd_generate_meta_brands_from_taxonomy' ],
+			[
+				'shortdesc' => 'Generate meta brands from taxonomy.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ccm-revert-meta-brands-to-taxonomy',
+			[ $this, 'cmd_revert_meta_brands_to_taxonomy' ],
+			[
+				'shortdesc' => 'Revert meta brands to taxonomy.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -775,6 +823,153 @@ class CCMMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator ccm-generate-meta-brands-from-taxonomy`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_generate_meta_brands_from_taxonomy( $args, $assoc_args ) {
+		$log_file = 'ccm_generate_meta_brands_from_taxonomy.log';
+
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$meta_query      = [
+			[
+				'key'     => '_newspack_post_brands',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			// Get the post brand taxonomy.
+			$brands      = wp_get_post_terms( $post->ID, 'brand' );
+			$brand_names = array_map(
+				function ( $brand ) {
+					return $brand->name;
+				},
+				$brands
+			);
+
+			// Set post meta.
+			update_post_meta( $post->ID, '_newspack_post_brands', $brand_names );
+			$this->logger->log( $log_file, sprintf( 'Setting brands for the post %d: %s', $post->ID, implode( ', ', $brand_names ) ) );
+
+			// Get the primary brand.
+			$primary_brand      = get_post_meta( $post->ID, '_primary_brand', true );
+			$primary_brand_tax  = get_term_by( 'id', $primary_brand, 'brand' );
+			$primary_brand_name = $primary_brand_tax ? $primary_brand_tax->name : '';
+
+			// Set post meta.
+			update_post_meta( $post->ID, '_newspack_post_primary_brand', $primary_brand_name );
+			$this->logger->log( $log_file, sprintf( 'Setting primary brand for the post %d: %s', $post->ID, $primary_brand_name ) );
+		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator ccm-revert-meta-brands-to-taxonomy`.
+	 *
+	 * @param array $args CLI args.
+	 * @param array $assoc_args CLI args.
+	 */
+	public function cmd_revert_meta_brands_to_taxonomy( $args, $assoc_args ) {
+		$log_file = 'ccm_generate_meta_brands_from_taxonomy.log';
+
+		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
+		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
+		$meta_query      = [
+			[
+				'key'     => '_newspack_post_brands',
+				'compare' => 'EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post ) {
+			// Get brands from meta.
+			$brands    = get_post_meta( $post->ID, '_newspack_post_brands', true );
+			$brand_ids = array_map(
+				function ( $brand ) {
+					$term = get_term_by( 'name', $brand, 'brand' );
+					return $term ? $term->term_id : null;
+				},
+				$brands
+			);
+
+			if ( $brands ) {
+				// Set post brands.
+				wp_set_post_terms( $post->ID, $brand_ids, 'brand' );
+
+				$this->logger->log( $log_file, sprintf( 'Setting brands for the post %d: %s', $post->ID, implode( ', ', $brands ) ) );
+			}
+
+			// Get primary brand from meta.
+			$primary_brand = get_post_meta( $post->ID, '_newspack_post_primary_brand', true );
+
+			if ( $primary_brand ) {
+				// Set post primary brand.
+				$term = get_term_by( 'name', $primary_brand, 'brand' );
+				if ( $term ) {
+					update_post_meta( $post->ID, '_primary_brand', $term->term_id );
+					$this->logger->log( $log_file, sprintf( 'Setting primary brand for the post %d: %s', $post->ID, $primary_brand ) );
+				}
+			}
+
+			// delete migration metas.
+			delete_post_meta( $post->ID, '_newspack_post_brands' );
+			delete_post_meta( $post->ID, '_newspack_post_primary_brand' );
+		}
 	}
 
 	/**
