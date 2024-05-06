@@ -823,15 +823,17 @@ class WindyCityMigrator implements InterfaceCommand {
 			$post_data = [
 				'post_title'     => $entry['TITLE'],
 				'post_content'   => $entry['BODY'],
-				'post_excerpt'   => $entry['SUMMARY'],
+//				'post_excerpt'   => $entry['SUMMARY'], Uncommented because not in content refresh data
 				'post_status'    => 'publish',
 				'post_type'      => 'post',
 				'post_author'    => $author_id,
-				'comment_status' => 'yes' === $entry['ACOMMENTS'] ? 'open' : 'closed',
+				// The data before content refresh had this key as "ACOMMENTS"
+				'comment_status' => 'yes' === $entry['COMMENTS'] ? 'open' : 'closed',
 			];
 
 			// Dates are in Central Time and should be converted to UTC.
-			$gmt_date = new \DateTime( $entry['DATE'], new \DateTimeZone( 'America/Chicago' ) );
+			// The data before content refresh had this as "DATE"
+			$gmt_date = new \DateTime( $entry['ACTUALDATE'], new \DateTimeZone( 'America/Chicago' ) );
 			$gmt_date->setTimezone( new \DateTimeZone( 'UTC' ) );
 			$post_data['post_date_gmt'] = $gmt_date->format( 'Y-m-d H:i:s' );
 
@@ -856,7 +858,10 @@ class WindyCityMigrator implements InterfaceCommand {
 			$post_content = $entry['BODY'];
 
 			// Galleries.
-			$gallery_content = $entry['MORE_IMAGES'];
+			$gallery_content = '';
+			if ( ! empty( $entry['MORE_IMAGES'] ) && 'NULL' !== $entry['MORE_IMAGES'] ) {
+				$gallery_content = $entry['MORE_IMAGES'];
+			}
 			// Gallery data is in the entry attributes GALLERY1...GALLERY8.
 			for ( $i = 1; $i <= 8; $i++ ) {
 				if ( ! empty( $entry[ 'GALLERY' . $i ] ) ) {
@@ -912,7 +917,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			wp_set_post_categories( $post_id, $catgories_ids );
 
 			// Featured Image.
-			if ( ! empty( $entry['FEATURED'] ) ) {
+			if ( ! empty( $entry['FEATURED'] ) && 'NULL' !== $entry['FEATURED'] ) {
 				$attachment_id = $this->attachments_logic->import_external_file( $entry['FEATURED'], $entry['TITLE'], $entry['FEATURED_CAPTION'], null, null, $post_id );
 
 				if ( is_wp_error( $attachment_id ) ) {
@@ -1070,7 +1075,10 @@ class WindyCityMigrator implements InterfaceCommand {
 			return $post_content;
 		}
 
-		$gallery_images = explode( ';', $gallery );
+		$gallery = trim( $gallery );
+		$gallery = trim( $gallery, ':' );
+		// The data before content refresh had this as ':'
+		$gallery_images = explode( ' : ', $gallery );
 		$gallery_images = array_map( 'trim', $gallery_images );
 
 		$gallery_image_ids = [];
