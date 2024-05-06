@@ -2,14 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 
 /**
  * Custom migration scripts for Saporta News.
@@ -680,7 +680,7 @@ class CCMMigrator implements InterfaceCommand {
 
 			$cleaned_co_authors = array_filter(
 				array_map(
-					function( $co_author ) {
+					function ( $co_author ) {
 						$co_author = trim( $co_author );
 						// Remove "By By:" prefix.
 						$co_author = preg_replace( '/^By By:\s*/', '', $co_author );
