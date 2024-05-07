@@ -76,14 +76,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 			],
 		];
 
-		$reset_flag = [
-			'type'        => 'flag',
-			'name'        => 'reset-ncc-too',
-			'description' => 'Pass this flag to reset NCC to only work on the post range passed to this command.',
-			'optional'    => true,
-			'repeating'   => false,
-		];
-
 		WP_CLI::add_command(
 			'newspack-content-migrator transform-blocks-encode',
 			[ $this, 'cmd_blocks_encode' ],
@@ -91,7 +83,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 				'shortdesc' => '"Obfuscate" blocks in posts by encoding them as base64.',
 				'synopsis'  => [
 					...$generic_args,
-					$reset_flag,
 				],
 			]
 		);
@@ -113,7 +104,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 				'shortdesc' => '"Nudge" posts so NCC picks them up',
 				'synopsis'  => [
 					...$generic_args,
-					$reset_flag,
 				],
 			]
 		);
@@ -123,11 +113,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 	 * @throws ExitException
 	 */
 	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
-		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
-		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
-			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
-		}
-
 		$post_range = $this->get_post_id_range( $assoc_args );
 
 		$post_ids_format = implode( ', ', array_fill( 0, count( $post_range ), '%d' ) );
@@ -150,11 +135,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 		$low          = min( $post_range );
 
 		WP_CLI::log( sprintf( 'Nudged %d posts between (and including) %d and %d ID', $posts_nudged, $low, $high ) );
-
-		if ( $also_kick_ncc ) {
-			WP_CLI::log( PHP_EOL );
-			$this->reset_the_ncc_for_posts( $post_range );
-		}
 	}
 
 
@@ -227,11 +207,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 	public function cmd_blocks_encode( array $pos_args, array $assoc_args ): void {
 		$logfile = sprintf( '%s-%s.log', __FUNCTION__, wp_date( 'Y-m-d-H-i-s' ) );
 
-		$also_kick_ncc = WP_CLI\Utils\get_flag_value( $assoc_args, 'reset-ncc-too' );
-		if ( $also_kick_ncc && ! $this->is_ncc_installed() ) {
-			WP_CLI::error( 'NCC is not active. Please activate it before running this command if you use the reset flag.' );
-		}
-
 		$block_transformer = GutenbergBlockTransformer::get_instance();
 
 		$post_id_range   = $this->get_post_id_range( $assoc_args );
@@ -298,10 +273,6 @@ class BlockTransformerCommand implements InterfaceCommand {
 		$this->logger->log( $logfile, sprintf( '%d posts needed encoding', $encoded_posts_counter ), Logger::SUCCESS );
 		$this->logger->log( $logfile, sprintf( 'To decode the blocks AFTER running the NCC, run this:%s %s', PHP_EOL, $decode_command ), Logger::INFO );
 
-		if ( $also_kick_ncc ) {
-			WP_CLI::log( PHP_EOL );
-			$this->reset_the_ncc_for_posts( $post_id_range );
-		}
 		wp_cache_flush();
 	}
 
@@ -324,6 +295,9 @@ class BlockTransformerCommand implements InterfaceCommand {
 			$num_items   = $assoc_args['num-items'] ?? PHP_INT_MAX;
 			$min_post_id = $assoc_args['min-post-id'] ?? 0;
 			$max_post_id = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
+			if ($min_post_id > $max_post_id ) {
+				WP_CLI::error( 'min-post-id must be less than or equal to max-post-id' );
+			}
 
 			$post_types_format = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
 
@@ -351,44 +325,4 @@ class BlockTransformerCommand implements InterfaceCommand {
 		return $post_range;
 	}
 
-	/**
-	 * Reset the NCC to only work on a specific range of posts.
-	 *
-	 * Note that this is rather destructive because it will blow away the "backup" content for posts.
-	 *
-	 * @param array $post_ids The post IDs to work on.
-	 *
-	 * @throws ExitException If an error occurs or the NCC is not active.
-	 */
-	private function reset_the_ncc_for_posts( array $post_ids ): void {
-		if ( ! $this->is_ncc_installed() ) {
-			WP_CLI::error( "NCC is not active. It's needed to run the reset_the_ncc_for_range function." );
-		}
-
-		Installer::uninstall_plugin( true );
-		$ncc_table_name = Config::get_instance()->get( 'table_name' );
-		// This is more than a little unholy, but it will trick the NCC to only work on a specific range of posts.
-		add_filter(
-			'query',
-			function ( $query ) use ( $ncc_table_name, $post_ids ) {
-				if ( ! str_starts_with( $query, "INSERT INTO $ncc_table_name" ) ) {
-					return $query;
-				}
-
-				return str_replace( ';', sprintf( ' AND ID IN(%s);', implode( ',', $post_ids ) ), $query );
-			}
-		);
-		Installer::install_plugin();
-		WP_CLI::log( sprintf( 'NCC was reset to only work on %d posts', count( $post_ids ) ) );
-		WP_CLI::log( sprintf( 'Go to %s and run the NCC now.', admin_url( 'admin.php?page=newspack-content-converter' ) ) );
-	}
-
-	/**
-	 * Is NNC installed and active?
-	 *
-	 * @return bool true if NCC is installed and active.
-	 */
-	private function is_ncc_installed(): bool {
-		return is_plugin_active( 'newspack-content-converter/newspack-content-converter.php' );
-	}
 }
