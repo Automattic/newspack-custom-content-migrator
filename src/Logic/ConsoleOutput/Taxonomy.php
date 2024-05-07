@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Logic\ConsoleOutput;
 
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
+use stdClass;
 
 /**
  * Logic mixed with Console Output for Taxonomy.
@@ -20,7 +21,7 @@ class Taxonomy {
 	 * @param string $slug The slug.
 	 * @param int    $ignore_term_id A specific term_id to ignore. Use this if you want to ensure no other terms with the same slug exist, except for this one.
 	 *
-	 * @return array
+	 * @return stdClass[]
 	 */
 	public function get_term_by_slug( string $slug, int $ignore_term_id = 0 ): array {
 		global $wpdb;
