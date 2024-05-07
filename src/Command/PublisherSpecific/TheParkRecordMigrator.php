@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DOMDocument;
 use DOMNode;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use stdClass;
@@ -26,6 +27,13 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	private static $instance;
 
 	/**
+	 * CoAuthorPlus instance.
+	 *
+	 * @var CoAuthorPlus $co_author_plus
+	 */
+	private CoAuthorPlus $co_author_plus;
+
+	/**
 	 * TheParkRecordMigrator constructor.
 	 */
 	private function __construct() {
@@ -39,7 +47,8 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class();
+			self::$instance                 = new $class();
+			self::$instance->co_author_plus = new CoAuthorPlus();
 		}
 
 		return self::$instance;
@@ -70,10 +79,10 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Custom command to scrape guest authors from The Park Record's current site.
 	 *
-	 *
-	 * @param array $args
-	 * @param array $assoc_args
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
@@ -96,16 +105,35 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
 
+		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
 
 		foreach ( $posts_channel_children as $child ) {
+			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 			if ( 'item' === $child->nodeName ) {
 				$post = WordPressXMLHandler::get_parsed_data( $child, [] )['post'];
 
-				ConsoleColor::white( 'Processing Post ID: ' )->bright_blue( $post['ID'] )->output();
+				$console = ConsoleColor::white( 'Processing Post ID: ' );
 
-				if ( array_key_exists( $post['ID'], $processed_ids ) ) {
-					ConsoleColor::white( "Post ID {$post['ID']} already processed." )->output();
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$new_post_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %d",
+						'original_post_id',
+						$post['ID']
+					)
+				);
+
+				if ( ! empty( $new_post_id ) ) {
+					$console->blue( $post['ID'] )->bright_white( '->' );
+				} else {
+					$new_post_id = $post['ID'];
+				}
+
+				$console->bright_blue( $new_post_id )->output();
+
+				if ( array_key_exists( $new_post_id, $processed_ids ) ) {
+					ConsoleColor::white( "Post ID {$new_post_id} already processed." )->output();
 					continue;
 				}
 
@@ -123,7 +151,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 				if ( empty( $url ) ) {
 					ConsoleColor::bright_yellow( 'Unable to find permalink.' )->output();
-					update_post_meta( $post['ID'], self::GUEST_AUTHOR_SCRAPE_META, 'no_url' );
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'no_url' );
 					continue;
 				}
 
@@ -134,7 +162,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 				if ( 200 !== $response_code ) {
 					ConsoleColor::red( "Error fetching URL. Status Code ({$response_code})" )->output();
-					update_post_meta( $post['ID'], self::GUEST_AUTHOR_SCRAPE_META, 'error_fetching_url' );
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_fetching_url' );
 					continue;
 				}
 
@@ -142,50 +170,13 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 				if ( is_wp_error( $body ) ) {
 					ConsoleColor::red( 'Error fetching URL.' )->output();
-					update_post_meta( $post['ID'], self::GUEST_AUTHOR_SCRAPE_META, 'error_fetching_url' );
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_fetching_url' );
 					continue;
 				}
 
 				$html = new DOMDocument();
+				// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- I need this to run a first pass, then I will check for errors.
 				@$html->loadHTML( $body );
-
-				/*$address = $html->getElementsByTagName( 'address' )->item( 0 );
-
-				if ( ! $address || empty( $address->textContent ) ) {
-
-					//#article-byline > div > div.col > div.editor-name > h6 > a:nth-child(1)
-					////*[@id="article-byline"]/div/div[1]/div[2]/h6/a[1]
-
-					$byline = $html->getElementById( 'article-byline' );
-
-					if ( ! $byline || empty( trim( $byline->textContent ) ) ) {
-						ConsoleColor::yellow( 'No address nor byline found.' )->output();
-						update_post_meta( $post['ID'], self::GUEST_AUTHOR_SCRAPE_META, 'no_address' );
-						continue;
-					}
-
-					$author_name  = '';
-					$author_email = '';
-
-					$link_elements = $html->getElementsByTagName( 'a' );
-
-					foreach ( $link_elements as $link_element ) {
-						if ( 'author' !== $link_element->getAttribute( 'rel' ) ) {
-							continue;
-						}
-
-						if ( is_email( $link_element->textContent ) ) {
-							$author_email = $link_element->textContent;
-						} elseif ( empty( $author_name ) ) {
-							$author_name = $link_element->textContent;
-						}
-					}
-
-					ConsoleColor::green( 'Author Name:' )->bright_green( $author_name )->green( 'Author Email:' )->bright_green( $author_email )->output();
-					continue;
-				}
-
-				ConsoleColor::green( $html->saveHTML( $address ) )->output();*/
 
 				$author = $this->find_address_tag( $html );
 
@@ -195,7 +186,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 				if ( false === $author ) {
 					ConsoleColor::yellow( 'No address nor byline found.' )->output();
-					update_post_meta( $post['ID'], self::GUEST_AUTHOR_SCRAPE_META, 'no_address' );
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'no_address' );
 					continue;
 				}
 
@@ -218,17 +209,116 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 				$console->output();
 
-				$db_post     = get_post( $post['ID'] );
+				$db_post     = get_post( $new_post_id );
 				$post_author = get_user_by( 'id', $db_post->post_author );
 
 				// If we just have a name, add the author as a coauthor.
+				if ( empty( $author->email ) ) {
+					$maybe_guest_author_id = $this->co_author_plus->create_guest_author( [ 'display_name' => $author->name ] );
+
+					if ( is_wp_error( $maybe_guest_author_id ) ) {
+						ConsoleColor::red( 'Error creating guest author.' )->output();
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_creating_guest_author' );
+						continue;
+					}
+
+					$this->co_author_plus->coauthors_plus->add_coauthors( $new_post_id, $maybe_guest_author_id, false, 'id' );
+
+					$author_terms = wp_get_post_terms( $new_post_id, 'author', [ 'fields' => 'names' ] );
+
+					if ( 1 !== count( $author_terms ) ) {
+						ConsoleColor::red( 'Error adding guest author.' )->output();
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_adding_guest_author' );
+						continue;
+					}
+
+					ConsoleColor::green( 'Guest Author Added:' )->bright_green( $author_terms[0] )->output();
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'guest_author_created' );
+					continue;
+				}
 
 				// If we have an email, and it matches the post, just check the display name to see if it needs updating.
-				// if we have an email, and it doesn't match the post, then we need to see if user exists
-				// If the user exists, check if the display name needs updating
-				// if the user exists, and the display name is the same, update the post author.
-				// if the user doesn't exist, create the user and update the post author.
+				if ( $author->email === $post_author->user_email ) {
+					if ( $author->name === $post_author->display_name ) {
+						ConsoleColor::green( 'Author already set.' )->output();
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_already_set' );
+						continue;
+					}
 
+					$update = wp_update_user(
+						[
+							'ID'           => $post_author->ID,
+							'display_name' => $author->name,
+						]
+					);
+
+					if ( is_wp_error( $update ) ) {
+						ConsoleColor::red( 'Error updating author.' )->output();
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author' );
+						continue;
+					}
+
+					ConsoleColor::green( 'Author Updated:' )->bright_green( $author->name )->output();
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_updated' );
+				} else {
+					// if we have an email, and it doesn't match the post, then we need to see if user exists.
+					$user = get_user_by( 'email', $author->email );
+
+					// if the user doesn't exist, create the user and update the post author.
+					if ( ! $user ) {
+						$maybe_user_id = wp_insert_user(
+							[
+								'user_email'   => $author->email,
+								'user_login'   => substr( $author->email, 0, strpos( $author->email, '@' ) ),
+								'display_name' => $author->name,
+							]
+						);
+
+						if ( is_wp_error( $maybe_user_id ) ) {
+							ConsoleColor::red( 'Error creating user.' )->output();
+							update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_creating_user_2' );
+							continue;
+						}
+
+						$user = get_user_by( 'id', $maybe_user_id );
+					} else { // phpcs:ignore Universal.ControlStructures.DisallowLonelyIf.Found -- I don't want to potentially immediately update a user that's just been properly created.
+						// If the user exists, check if the display name needs updating.
+						if ( $author->name !== $user->display_name ) {
+							$update = wp_update_user(
+								[
+									'ID'           => $user->ID,
+									'display_name' => $author->name,
+								]
+							);
+
+							if ( is_wp_error( $update ) ) {
+								ConsoleColor::red( 'Error updating author.' )->output();
+								update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author_2_1' );
+								continue;
+							}
+
+							ConsoleColor::green( 'Author Updated:' )->bright_green( $user->display_name )->output();
+							update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_updated_2_1' );
+						}
+					}
+
+					// if the user exists, and the display name is the same, update the post author.
+					$update = wp_update_post(
+						[
+							'ID'          => $new_post_id,
+							'post_author' => $user->ID,
+						]
+					);
+
+					if ( is_wp_error( $update ) ) {
+						ConsoleColor::red( 'Error updating author.' )->output();
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author_2_2' );
+						continue;
+					}
+
+					ConsoleColor::green( 'Author Updated:' )->bright_green( $user->display_name )->output();
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_updated_2_2' );
+				}
 			}
 		}
 	}
