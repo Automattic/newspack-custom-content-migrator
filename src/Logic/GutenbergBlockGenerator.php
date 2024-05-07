@@ -262,7 +262,7 @@ class GutenbergBlockGenerator {
 
 		$caption_tag   = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
 		$image_alt     = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
-		$image_url     = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$image_url     = Attachments::get_attachment_image_src( $attachment_post->ID, $size )[0];
 		$attachment_id = intval( $attachment_post->ID );
 
 		$attrs = [
@@ -340,6 +340,7 @@ VIDEO;
 			'href'           => $attachment_url,
 			'displayPreview' => true,
 			'previewHeight'  => $height,
+			'showDownloadButton'   => $show_download_button,
 		];
 
 		$download_button = $show_download_button ? '<a href="' . $attachment_url . '" class="wp-block-file__button wp-element-button" download aria-describedby="wp-block-file--media-' . $uuid . '">Download</a>' : '';
@@ -795,15 +796,23 @@ VIDEO;
 		return $this->get_core_embed( $src, $caption );
 	}
 
-	/**
-	 * Generate a Vimeo block -- uses core/embed.
-	 *
-	 * @param string $src     Vimeo src.
-	 * @param string $caption Optional.
-	 *
-	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
-	 */
-	public function get_twitter( $src, $caption = '' ) {
+	public function get_twitter( string $src, string $caption = '' ): array {
+		$class_names   = implode(
+			' ',
+			[
+				'wp-block-embed',
+				'is-type-rich',
+				'is-provider-twitter',
+				'wp-block-embed-twitter',
+				'nccm-twitter-embed',
+			]
+		);
+		$block_content = <<<HTML
+<figure class="$class_names"><div class="wp-block-embed__wrapper">
+$src
+</div></figure>
+HTML;
+
 		return [
 			'blockName'    => 'core/embed',
 			'attrs'        => [
@@ -811,12 +820,11 @@ VIDEO;
 				'type'             => 'rich',
 				'providerNameSlug' => 'twitter',
 				'responsive'       => true,
+				'className'        => $class_names
 			],
 			'innerBlocks'  => [],
-			'innerHTML'    => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
-			'innerContent' => [
-				0 => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
-			],
+			'innerHTML'    => $block_content,
+			'innerContent' => [ $block_content ],
 		];
 	}
 
