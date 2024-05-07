@@ -127,7 +127,7 @@ class CoAuthorPlusDataFixer {
 	 *
 	 * @return int|WP_Error
 	 */
-	public function attempt_to_relate_standalone_guest_author_and_term( int $guest_author_id, int $term_id ): int|object {
+	public function attempt_to_relate_standalone_guest_author_and_term( int $guest_author_id, int $term_id ): int|WP_Error {
 		wp_cache_flush();
 
 		return $this->insert_guest_author_taxonomy(
@@ -155,7 +155,7 @@ class CoAuthorPlusDataFixer {
 	 *
 	 * @return int|WP_Error
 	 */
-	public function insert_guest_author_taxonomy( object $author, int $term_id ): int|object {
+	public function insert_guest_author_taxonomy( object $author, int $term_id ): int|WP_Error {
 		$coauthor_slug = $author->user_nicename;
 
 		if ( ! str_starts_with( $coauthor_slug, 'cap-' ) ) {
@@ -224,7 +224,7 @@ class CoAuthorPlusDataFixer {
 
 		$this->taxonomy_console_output_logic->insert_relationship_if_not_exists( $author->ID, $insert );
 
-		return $this->get_guest_author_taxonomy( $term_id )[0]->term_taxonomy_id;
+		return intval( $this->get_guest_author_taxonomy( $term_id )[0]->term_taxonomy_id );
 	}
 
 	/**
@@ -397,7 +397,7 @@ class CoAuthorPlusDataFixer {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$results = $wpdb->get_results(
+		return $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT 
     				meta_id, 
@@ -409,19 +409,7 @@ class CoAuthorPlusDataFixer {
 				$guest_author_post_id,
 				$wpdb->esc_like( 'cap-' ) . '%'
 			),
-		);
-
-		return array_map(
-			function ( $result ) {
-				// phpcs:disable
-				return [
-					'meta_id'    => $result->meta_id,
-					'meta_key'   => $result->meta_key,
-					'meta_value' => $result->meta_value,
-				];
-				//phpcs:enable
-			},
-			$results
+			ARRAY_A
 		);
 	}
 
