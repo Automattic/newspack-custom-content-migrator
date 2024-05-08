@@ -83,7 +83,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
 		Command\PublisherSpecific\PCIJMigrator::class,
-		Command\PublisherSpecific\InsightCrimeMigrator::class,
+		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\DallasExaminerMigrator::class,
 		Command\PublisherSpecific\TheCityMigrator::class,
 		Command\PublisherSpecific\LinkNYCMigrator::class,
