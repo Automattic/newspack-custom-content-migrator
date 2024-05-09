@@ -27,6 +27,8 @@ use WP_CLI;
  */
 class MediaCreditPluginMigrator implements InterfaceCommand {
 
+	const POSTMETA_KEY_OTHER_CREDITS = 'newspack_media_credit_other_credits';
+
 	/**
 	 * Dry Run
 	 *
@@ -53,7 +55,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	 *
 	 * @var array $report
 	 */
-	private $report;
+	private $report = array();
 
 	/**
 	 * Instance
@@ -490,13 +492,17 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, 'Different HTML vs DB credits', $this->logger::WARNING );
 
 		if ( $this->dry_run ) {
+
 			$this->report( $post_id, $attachment_id, 'different', $img_postmeta, $atts['name'] );
+
+		} else {
+
+			// Save these differences to postmeta so Publisher can hand-review and pick the one they want.
+			// muliple postmeta can be saved per attachment_id. (unique = false).
+			add_post_meta( $attachment_id, self::POSTMETA_KEY_OTHER_CREDITS, $atts['name'], false );
+
 		}
 
-		// Return the shortcode credit name.
-		// NO: just share this in output report instead: return array( $atts['name'], $atts, $attachment_id );
-		// Otherwise, once the [caption] is convert to Blocks, then Newspack Plugin will tack on the media-credit
-		// causing a double credit.
 		return array( null, $atts, $attachment_id );
 	}
 
