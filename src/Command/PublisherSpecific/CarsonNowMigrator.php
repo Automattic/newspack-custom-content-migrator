@@ -4,7 +4,6 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use Newspack_Content_Byline;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
@@ -212,19 +211,19 @@ class CarsonNowMigrator implements InterfaceCommand {
 			}
 
 			$post_blocks = parse_blocks( $post->post_content );
-			if ( GutenbergBlockManipulator::find_blocks_with_class( Newspack_Content_Byline::BYLINE_BLOCK_CLASS_NAME, $post_blocks ) ) {
+			if ( GutenbergBlockManipulator::find_blocks_with_class( \Newspack_Content_Byline::BYLINE_BLOCK_CLASS_NAME, $post_blocks ) ) {
 				// Remove existing byline blocks if any.
-				$post_blocks = GutenbergBlockManipulator::remove_blocks_with_class( Newspack_Content_Byline::BYLINE_BLOCK_CLASS_NAME, $post->post_content );
+				$post_blocks = GutenbergBlockManipulator::remove_blocks_with_class( \Newspack_Content_Byline::BYLINE_BLOCK_CLASS_NAME, $post->post_content );
 			}
 			// Add the byline block to the beginning of the content.
-			array_unshift( $post_blocks, Newspack_Content_Byline::get_post_meta_bound_byline_block() );
+			array_unshift( $post_blocks, \Newspack_Content_Byline::get_post_meta_bound_byline_block() );
 
 			wp_update_post( [
 				'ID'           => $post->ID,
 				'post_content' => serialize_blocks( $post_blocks ),
 			] );
 			// Set the byline as metadata too.
-			update_post_meta( $post->ID, Newspack_Content_Byline::BYLINE_META_KEY, $drupal_byline );
+			update_post_meta( $post->ID, \Newspack_Content_Byline::BYLINE_META_KEY, $drupal_byline );
 
 			$this->logger->log( $log_file, sprintf( '%d Added a byline "%s" in %s', $post->ID, $drupal_byline, get_permalink( $post ) ) );
 			MigrationMeta::update( $post->ID, $command_meta_key, 'post', $command_meta_version );
