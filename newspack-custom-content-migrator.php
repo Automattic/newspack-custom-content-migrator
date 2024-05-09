@@ -74,6 +74,7 @@ PluginSetup::register_migrators(
 		Command\General\CreativeCircleMigrator::class,
 		Command\General\BlockTransformerCommand::class,
 		Command\General\PostDateMigrator::class,
+		Command\General\MediaCreditPluginMigrator::class,
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
 
