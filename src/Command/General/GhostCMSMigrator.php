@@ -153,6 +153,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 						'optional'    => false,
 						'repeating'   => false,
 					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'created-after',
+						'description' => 'Datetime cut-off to only import posts AFTER this date. (Must be parseable by strtotime).',
+						'optional'    => true,
+						'repeating'   => false,
+					),
 				),
 			]
 		);
@@ -185,12 +192,16 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		// Argument parsing.
 
-		if( ! isset( $assoc_args['ghost-url'] ) || ! preg_match( '#^https?://[^/]+/?$#i', $assoc_args['ghost-url'] ) ) {
-			WP_CLI::error( 'Ghost URL does not match regex: ^https?://[^/]+/?$' );
+		// --created-after.
+		$created_after = null;
+		if( isset( $assoc_args['created-after'] ) ) {
+			$created_after = strtotime( $assoc_args['created-after'] );
+			if( false === $created_after ) {
+				WP_CLI::error( '--created-after date was not parseable by strtotime().' );
+			}
 		}
-		
-		// Remove trailing slash.
-		$this->ghost_url = preg_replace( '#/$#', '', $assoc_args['ghost-url'] );
+
+		// --default-user-id.
 
 		if( ! isset( $assoc_args['default-user-id'] ) || ! is_numeric( $assoc_args['default-user-id'] ) ) {
 			WP_CLI::error( 'Default user id must be integer.' );
@@ -206,6 +217,16 @@ class GhostCMSMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Default user found, but does not have publish posts capability.' );
 		}
 		
+		// --ghost-url.
+
+		if( ! isset( $assoc_args['ghost-url'] ) || ! preg_match( '#^https?://[^/]+/?$#i', $assoc_args['ghost-url'] ) ) {
+			WP_CLI::error( 'Ghost URL does not match regex: ^https?://[^/]+/?$' );
+		}
+
+		$this->ghost_url = preg_replace( '#/$#', '', $assoc_args['ghost-url'] );
+
+		// --json-file.
+
 		if( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
 			WP_CLI::error( 'JSON file not found.' );
 		}
@@ -229,11 +250,23 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, '--ghost-url: ' . $this->ghost_url );
 		$this->logger->log( $this->log, '--default-user-id: ' . $default_user->ID );
 		
+		if( $created_after ) $this->logger->log( $this->log, '--created-after: ' . date("Y-m-d H:i:s", $created_after ) );
+		
 		// Insert posts.
 		foreach( $this->json->db[0]->data->posts as $json_post ) {
 
 			$this->logger->log( $this->log, '---- json id: ' . $json_post->id );
+			$this->logger->log( $this->log, 'Title/Slug: ' . $json_post->title . ' / ' . $json_post->slug );
+			$this->logger->log( $this->log, 'Created/Published: ' . $json_post->created_at . ' / ' . $json_post->published_at );
 
+			// Date cut-off.
+			if( $created_after && strtotime( $json_post->created_at ) <= $created_after ) {
+
+				$this->logger->log( $this->log, 'Created before cut-off date.', $this->logger::WARNING );
+				continue;
+
+			}
+			
 			// Check for skips, log, and continue.
 			$skip_reason = $this->skip( $json_post );
 			if( ! empty( $skip_reason ) ) {
@@ -246,9 +279,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 				continue;
 
 			}
-
-			$this->logger->log( $this->log, 'Title/Slug: ' . $json_post->title . ' / ' . $json_post->slug );
-			$this->logger->log( $this->log, 'Created/Published: ' . $json_post->created_at . ' / ' . $json_post->published_at );
 
 			// Post.
 			$args = array(
