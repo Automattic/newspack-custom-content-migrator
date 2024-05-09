@@ -142,7 +142,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 					array(
 						'type'        => 'assoc',
 						'name'        => 'ghost-url',
-						'description' => 'Public URL of current/live Ghost Website for fetching media. Format: https://mywebsite.com',
+						'description' => 'Public URL of current/live Ghost Website. Scheme with domain: https://www.mywebsite.com',
 						'optional'    => false,
 						'repeating'   => false,
 					),
@@ -161,7 +161,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			'newspack-content-migrator ghost-cms-redirects',
 			[ $this, 'cmd_ghost_cms_redirects' ],
 			[
-				'shortdesc' => 'Add Redirection (plugin) redirects for posts, categories, and author slugs.',
+				'shortdesc' => 'Process Redirection (plugin) redirects for posts, categories, and author slugs.',
 			]
 		);
 
@@ -189,6 +189,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Ghost URL does not match regex: ^https?://[^/]+/?$' );
 		}
 		
+		// Remove trailing slash.
 		$this->ghost_url = preg_replace( '#/$#', '', $assoc_args['ghost-url'] );
 
 		if( ! isset( $assoc_args['default-user-id'] ) || ! is_numeric( $assoc_args['default-user-id'] ) ) {
@@ -233,15 +234,14 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 			$this->logger->log( $this->log, '---- json id: ' . $json_post->id );
 
-			// Skip if not post, or not published, or not visible
-			if( 'post' != $json_post->type || 'published' != $json_post->status || 'public' != $json_post->visibility 
-				|| empty( $json_post->html ) || empty( $json_post->published_at ) || empty( $json_post->title ) 
-			) {
-				
-				$this->logger->log( $this->log, 'Skip JSON post (review by hand -skips.log)', $this->logger::WARNING );
+			// Check for skips, log, and continue.
+			$skip_reason = $this->skip( $json_post );
+			if( ! empty( $skip_reason ) ) {
+			
+				$this->logger->log( $this->log, 'Skip JSON post (review by hand -skips.log): ' . $skip_reason, $this->logger::WARNING );
 
 				// Save to skips file, and do not write to console.
-				$this->logger->log( $this->log . '-skips.log', print_r( $json_post, true ), false );
+				$this->logger->log( $this->log . '-skips.log', json_encode( array( $skip_reason, $json_post ) ), false );
 
 				continue;
 
@@ -250,83 +250,24 @@ class GhostCMSMigrator implements InterfaceCommand {
 			$this->logger->log( $this->log, 'Title/Slug: ' . $json_post->title . ' / ' . $json_post->slug );
 			$this->logger->log( $this->log, 'Created/Published: ' . $json_post->created_at . ' / ' . $json_post->published_at );
 
-			// Skip if already imported.
-			if( $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", $json_post->id ) ) ) {
-				
-				$this->logger->log( $this->log, 'JSON post already imported' );
-
-				continue;
-
-			}
-
-			// Warn if title and date already existed in wordpress.
-			// From WXR importer: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L659C4-L659C78
-			if( $maybe_post_exists = post_exists( $json_post->title, '', $json_post->published_at, 'post' )) {
-
-				$this->logger->log( $this->log, 'Possible duplicate (title and date) of existing post: ' . $maybe_post_exists, $this->logger::WARNING );
-
-			}
-
-			// Warn if post_name / slug exists.
-			if( $maybe_post_exists = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_type = 'post' and post_name = %s", $json_post->slug ) ) ){
-
-				$this->logger->log( $this->log, 'Possible duplicate (slug) of existing post: ' . $maybe_post_exists, $this->logger::WARNING );
-
-			}
-
-
-			// TODO: Fetch images in content.
-			
-			/*
-			// <figure class="kg-card kg-image-card"><img src="__GHOST_URL__/content/images/2023/02/image.jpeg" class="kg-image" alt loading="lazy" width="1023" height="678" srcset="__GHOST_URL__/content/images/size/w600/2023/02/image.jpeg 600w, __GHOST_URL__/content/images/size/w1000/2023/02/image.jpeg 1000w, __GHOST_URL__/content/images/2023/02/image.jpeg 1023w" sizes="(min-width: 720px) 720px"></figure>
-			// <a href="https://ourweekly.com/marietta-retta-sirleaf-9709/" border="0" itemprop="url">
-			// <img data-attachment-id="409709" data-orig-file="https://ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg" 
-			// <img data-attachment-id="409709" data-orig-file="https://ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg" data-orig-size="500,351" data-comments-opened="" data-image-meta="{&quot;aperture&quot;:&quot;0&quot;,&quot;credit&quot;:&quot;&quot;,&quot;camera&quot;:&quot;&quot;,&quot;caption&quot;:&quot;&quot;,&quot;created_timestamp&quot;:&quot;0&quot;,&quot;copyright&quot;:&quot;&quot;,&quot;focal_length&quot;:&quot;0&quot;,&quot;iso&quot;:&quot;0&quot;,&quot;shutter_speed&quot;:&quot;0&quot;,&quot;title&quot;:&quot;&quot;,&quot;orientation&quot;:&quot;0&quot;}" data-image-title="Marietta “Retta” Sirleaf (9709)" data-image-description=" " data-medium-file="https://i0.wp.com/ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg?fit=300%2C211&amp;ssl=1" data-large-file="https://i0.wp.com/ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg?fit=500%2C351&amp;ssl=1" src="https://i0.wp.com/ourweekly.com/wp-content/uploads/2013/05/Marietta_Sirleaf_Retta.jpg?w=173&amp;h=122&amp;ssl=1" width="173" height="122" data-original-width="173" data-original-height="122" itemprop="http://schema.org/image" title="Marietta &quot;Retta&quot; Sirleaf (9709)" alt="Marietta &quot;Retta&quot; Sirleaf (9709)" style="width: 173px; height: 122px;">
-			// <figure class="wp-block-video"><video controls="" poster="/content/images/wp-content/uploads/2022/02/voicemails_thumbnails_driving-scaled.jpg" src="__GHOST_URL__/content/media/wp-content/uploads/2022/02/branded-myriad-originals-_-voicemails-part-1-bts-with-javon-johnson.mp4" style="width: 100%;"></video>
-
-			// what about hrefs to files or images on the same domain we we need to fetch?
-			// <a href="__GHOST_URL__/content/files/de/04/76fbf27f4f9eb607f2cef48792f9/complaint.pdf">
-			// <a href="__GHOST_URL__/content/files/files/2022/05/analysis-of-pm2.5-related-health-burdens-under-current-and-alternative-naaqs.pdf">
-
-			// what about links:
-			// <a href="__GHOST_URL__/author/merdies-hayes/">
-			// <a href="https://ourweekly.com/michelle-thornhill-9708/" 
-
-			// <p><em>http://www.ourweekly.com/los-angeles/protesters-decry-officer%E2%80%99s-release</em></p>
-			// <p><em>http://www.ourweekly.com/los-angeles/starbucks-share-wealth-urban-league-abyssinian-corp</em></p>
-			// <p><em>http://ourweekly.com/features/black-men-their-moms</em></p>				
-				
-
-			// iframe?
-
-			*/
-
 			// Post.
 			$args = array(
 				'post_author' => $default_user->ID,
-				'post_content' => $this->media_parse_content( $json_post->html ),
+				'post_content' => str_replace( '__GHOST_URL__', $this->ghost_url, $json_post->html ),
 				'post_date' => $json_post->published_at,
 				'post_excerpt' => $json_post->custom_excerpt ?? '',
 				'post_status' => 'publish',
 				'post_title' => $json_post->title,
 			);
 
-continue;
-
 			$wp_post_id = wp_insert_post( $args, true );
 
 			if( is_wp_error( $wp_post_id ) || ! is_numeric( $wp_post_id ) || ! ( $wp_post_id > 0 ) ) {
-
-				$this->logger->log( $this->log, 'Could not insert post.', $this->logger::WARNING );
-				
+				$this->logger->log( $this->log, 'Could not insert post.', $this->logger::ERROR, false );
 				if( is_wp_error( $wp_post_id ) ) {
-
-					$this->logger->log( $this->log, 'wp error: ' . $wp_post_id->get_error_message(), $this->logger::WARNING );
-	
+					$this->logger->log( $this->log, 'Insert Post Error: ' . $wp_post_id->get_error_message(), $this->logger::ERROR, false );
 				}
-	
 				continue;
-
 			}
 
 			$this->logger->log( $this->log, 'Inserted new post: ' . $wp_post_id );
@@ -617,141 +558,6 @@ continue;
 
 	}
 
-	private function media_parse_content( $content ) {
-
-		// parse and import images and files (PDF) in body content <img and <a href=...PDF
-		
-		/*
-		preg_match_all( '/<(a|img) [^>]*?>/i', $content, $elements )
-		*/
-
-
-		preg_match_all( '/<(\w+) ([^>]*?)>/i', $content, $elements, PREG_SET_ORDER );
-
-		foreach( $elements as $element ) {
-			// $this->logger->log( $this->log . '-html-' . $element[1] . '.log', str_replace( PHP_EOL, 'RGC_PHP_EOL', $element[2] ) );
-		}
-		// print_r( $elements );
-
-		return;
-
-
-		foreach( $elements[0] as $element ) {
-			
-
-
-			$attr = '';
-
-			if( preg_match( '/^<a /', $element ) ) $attr = 'href'; 
-			else if( preg_match( '/^<img /', $element ) ) $attr = 'src';
-			else continue;
-
-			$content = $this->media_parse_element( $element, $attr, $content );
-
-		}
-
-		return $content;
-
-	}
-
-	private function media_parse_element( $element, $attr, $content ) {
-
-		$link = $this->media_parse_link( $element, $attr );
-		if( empty( $link ) ) return $content;
-
-		$this->mylog( $attr . ' link found in element', $link );
-
-		// get existing or upload new
-		$attachment_id = $this->get_or_import_url( $link, $link );
-
-		if( ! is_numeric( $attachment_id ) || ! ( $attachment_id > 0 ) ) {
-	
-			$this->mylog( $attr . ' import external file failed', $link, $this->logger::WARNING );
-			return $content;
-
-		}
-		
-		$content = str_replace( $link, wp_get_attachment_url( $attachment_id ), $content );
-
-		$this->mylog( $attr . ' link replaced in element', $link );
-
-		return $content;
-
-
-	}
-
-	private function media_parse_link( $element, $attr ) {
-
-		// test (and temporarily fix) ill formatted elements
-		$had_line_break = false;
-		if( preg_match( '/\n/', $element ) ) {
-			$element = preg_replace('/\n/', '', $element );
-			$had_line_break = true;
-		}
-
-		// parse URL from the element
-		if( ! preg_match( '/' . $attr . '=[\'"](.+?)[\'"]/', $element, $url_matches ) ) {
-			$this->mylog( $attr . ' null link found in element', $element, $this->logger::WARNING );
-			return;
-		}
-
-		// set easy to use variable
-		$url = $url_matches[1];
-
-		// test (and temporarily fix) ill formatted links
-		$had_leading_whitespace = false;
-		if( preg_match( '/^\s+/', $url ) ) {
-			$url = preg_replace('/^\s+/', '', $url );
-			$had_leading_whitespace = true;
-		}
-
-		// test (and temporarily fix) ill formatted links
-		$had_trailing_whitespace = false;
-		if( preg_match( '/\s+$/', $url ) ) {
-			$url = preg_replace('/\s+$/', '', $url );
-			$had_trailing_whitespace = true;
-		}
-
-		// skip known off-site urls and other anomalies
-		$skips = array(
-			'https?:\/\/(docs.google.com|player.vimeo.com|w.soundcloud.com|www.youtube.com)',
-			'mailto',
-		);
-		
-		if( preg_match( '/^(' . implode( '|', $skips ) . ')/', $url ) ) return;
-
-		// we're only looking for media (must have an extension), else skip
-		if( ! preg_match( '/\.([A-Za-z0-9]{3,4})$/', $url, $ext_matches ) ) return;
-
-		// ignore certain extensions that are not media files
-		if( in_array( $ext_matches[1], array( 'asp', 'aspx', 'com', 'edu', 'htm', 'html', 'net', 'news', 'org', 'php' ) ) ) return;
-
-		// must start with http(s)://
-		if( ! preg_match( '/^https?:\/\//', $url ) ) {
-			$this->mylog( $attr . ' non-https link found in element', $element, $this->logger::WARNING );
-			return;
-		}
-		
-		// only match certain domains
-		$keep_domains = [
-			'uploads-ssl.webflow.com',
-		];
-
-		if( ! preg_match('/^https?:\/\/(' . implode( '|', $keep_domains ) . ')/', $url ) ) {
-			// $this->mylog( $attr . ' off domain link found in element', $element, $this->logger::WARNING );
-			return;
-		}
-
-		// todo: handle issues previously bypassed
-		if( $had_line_break || $had_leading_whitespace || $had_trailing_whitespace ) {
-			$this->mylog( $attr . ' whitespace found in element', $element, $this->logger::WARNING );
-			return;
-		}
-
-		return $url;
-
-	}
-
 	/**
 	 * Set post authors using JSON relationship(s).
 	 *
@@ -969,6 +775,42 @@ continue;
 
 	}
 
+	/**
+	 * Check if need to skip this JSON post.
+	 *
+	 * @param object $json_post
+	 * @return string|null
+	 */
+	private function skip( $json_post ) {
+
+		global $wpdb;
+
+		// JSON properites.
+		if ( 'post'      != $json_post->type       ) return 'not_post';
+		if ( 'published' != $json_post->status     ) return 'not_published';
+		if ( 'public'    != $json_post->visibility ) return 'not_public';
+
+		// Empty properties.
+		if ( empty( $json_post->html )         ) return 'empty_html';
+		if ( empty( $json_post->published_at ) ) return 'empty_published_at';
+		if ( empty( $json_post->title )        ) return 'empty_title';
+		
+		// WP Lookups
+		if ( $wpdb->get_var( $wpdb->prepare( 
+			"SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", 
+			$json_post->id ) ) ) return 'post_already_imported';
+
+		// Title and date already existed in wordpress. (from WXR Importer).
+		if( post_exists( $json_post->title, '', $json_post->published_at, 'post' ) ) return 'post_exists_title_date';
+
+		// If post_name / slug exists.
+		if( $wpdb->get_var( $wpdb->prepare( 
+			"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' and post_name = %s", 
+			$json_post->slug ) ) ) return 'post_exists_slug';
+			
+		return null;
+
+	}
 
 }
 
