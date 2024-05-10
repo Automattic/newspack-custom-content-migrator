@@ -22,10 +22,10 @@ use WP_CLI;
  */
 class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
-	const TD_POST_THEME_SETTINGS = 'td_post_theme_settings';
+	const TD_POST_THEME_SETTINGS             = 'td_post_theme_settings';
+	const TD_POST_THEME_SETTINGS_SOURCE      = 'td_source';
+	const TD_POST_THEME_SETTINGS_PRIMARY_CAT = 'td_primary_cat';
 
-	const TD_POST_THEME_SETTINGS_SOURCE = 'td_source';
-	
 	/**
 	 * CoAuthorPlusLogic
 	 * 
@@ -99,6 +99,23 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 						'type'        => 'flag',
 						'name'        => 'overwrite-post-gas',
 						'description' => 'Overwrite GAs if they already exist on the post.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator migrate-tagdiv-primary-categories',
+			[ $this, 'cmd_migrate_tagdiv_primary_categories' ],
+			[
+				'shortdesc' => 'Migrate TagDiv Primary Categories to Yoast.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'No updates.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -216,6 +233,95 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 			1,
 			100
 		);
+
+		wp_cache_flush();
+
+		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
+	}
+
+	/**
+	 * Migrate TagDiv Primary Categories to Yoast.
+	 * 
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_migrate_tagdiv_primary_categories( $pos_args, $assoc_args ) {
+
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+
+		$this->logger->log( $this->log, 'Doing migration.' );
+
+		$dry_run = false;
+		if ( isset( $assoc_args['dry-run'] ) ) {
+			$dry_run = true;
+			$this->logger->log( $this->log, '--dry-run.' );
+		}
+
+		// Reusable function.
+		$set_yoast_primary_function = function ( $post_id, $category_id ) use ( $dry_run ) {
+			if ( $dry_run ) {
+				$this->logger->log( $this->log, '(dry-run) Update yoast primary: ' . $category_id );
+			} else {
+				$this->logger->log( $this->log, 'Update yoast primary: ' . $category_id );
+				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_id );
+			}
+		};
+
+		$args = array(
+			'post_type'   => 'post',
+			'post_status' => array( 'publish' ),
+			'fields'      => 'ids',
+			// Order by date for better logging in order.
+			'orderby'     => 'date',
+			'order'       => 'DESC',
+		);
+
+		$this->posts_logic->throttled_posts_loop( 
+			$args,
+			function ( $post_id ) use ( $set_yoast_primary_function ) {
+
+				$this->logger->log( $this->log, '---- Post id: ' . $post_id );
+
+				// Get postmeta: 'td_post_theme_settings' => 'a:3:{s:14:\"td_primary_cat\";s:2:\"36\";...}'.
+				$postmeta = get_post_meta( $post_id, self::TD_POST_THEME_SETTINGS, true );
+
+				// If primary category key ('td_primary_cat') exists in postmeta array (unserialized).
+				if ( isset( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] ) 
+					&& is_numeric( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] ) 
+					&& ( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] > 0 )
+				) {
+
+					// Verify category id is real category.
+					$category = get_category( $postmeta[ self::TD_POST_THEME_SETTINGS_PRIMARY_CAT ] );
+
+					// If exists, set it to yoast.
+					if ( ! is_wp_error( $category ) && is_object( $category ) && property_exists( $category, 'term_id' ) ) {
+
+						$this->logger->log( $this->log, 'Using postmeta value.' );
+
+						// Before setting yoast postmeta, add category to post.
+						// note: wp will skip if category/post relationship alredy exists.
+						// append: true.
+						wp_set_post_categories( $post_id, $category->term_id, true );
+
+						return $set_yoast_primary_function( $post_id, $category->term_id );
+
+					} // if category exists.
+
+				} // postmeta array key exists.
+
+				// If postmeta didn't work, then TagDiv's "Auto select primary category" will default to the first category.
+				$categories = wp_get_post_categories( $post_id );
+
+				if ( is_array( $categories ) && ! empty( $categories[0] ) ) {
+
+					$this->logger->log( $this->log, 'Using first category.' );
+
+					return $set_yoast_primary_function( $post_id, $categories[0] );
+
+				} // first post category.
+			} // callback function.
+		); // loop.
 
 		wp_cache_flush();
 

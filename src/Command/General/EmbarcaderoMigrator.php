@@ -901,6 +901,21 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-helper-fix-dates-for-blogs-topics',
+			array( $this, 'cmd_fix_post_times_for_blogs_topics' ),
+			[
+				'shortdesc' => 'Fix post dates on separate blogs/topic CSV to match timezone.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'topics-csv-path',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-rearrange-categories',
@@ -2042,6 +2057,183 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			);
 		}
 		WP_CLI::success( 'Changes saved to ' . $log_detailed_csv_file );
+	}
+
+	/**
+	 * Fixes dates on posts imported from blogs/topics to match the site timezone.
+	 *
+	 * @param array $pos_args   Command positional arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_fix_post_times_for_blogs_topics( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+
+		$topics_csv_file_path  = $assoc_args['topics-csv-path'];
+		$topics = $this->get_data_from_csv_or_tsv( $topics_csv_file_path );
+
+		// GMT offset.
+		$gmt_offset = get_option( 'gmt_offset' );
+
+		$post_ids_found = [];
+		$debug_titles_not_same = [];
+		$changes = [];
+		$log_detailed_changes_csv = 'fix-post-times-blogs-topics.csv';
+
+		// Loop through topics.
+		foreach ( $topics as $key_topic => $topic ) {
+			WP_CLI::line( sprintf( '(%d)/(%d) topic_id %d...', $key_topic + 1, count( $topics ), $topic['topic_id'] ) );
+
+			// Find post ID by postmeta original 'topic_id' (self::EMBARCADERO_ORIGINAL_TOPIC_ID_META_KEY is not used for blog stories on Palo Alto).
+			$meta_key = 'topic_id';
+			$post_ids = $wpdb->get_col( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s", $meta_key, $topic['topic_id'] ) );
+			if ( ! $post_ids || empty( $post_ids ) ) {
+				WP_CLI::line( sprintf( 'WARNING not found post for topic_id %s', $topic['topic_id'] ) );
+				continue;
+			}
+			// Account for multiple posts for same topic (dupes should not have been imported, but if they exist, we need them to have correct data).
+			foreach ( $post_ids as $key_post_id => $post_id ) {
+				
+				/**
+				 * Validate post is the same as topic. This probably isn't needed, but just in case since this is retroactive.
+				 */
+				$post = get_post( $post_id, ARRAY_A );
+				$blog_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
+				$is_same_type = $post['post_type'] == 'post';
+				$is_same_title = $post['post_title'] == $topic["headline"];
+				if ( ! $is_same_title ) {
+					$encoded_title = str_replace( '"', '&quot;', $topic["headline"] );
+					$is_same_title = $post['post_title'] == $encoded_title;
+				}
+				if ( ! $is_same_title ) {
+					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic["headline"] );
+				}
+				// Allow +-1 day for timezone differences.
+				$publish_plus1day = date("Y-m-d", strtotime($post['post_date'] . " +1 day"));
+				$publish_minus1day = date("Y-m-d", strtotime($post['post_date'] . " -1 day"));
+				$is_same_date = ( substr( $post['post_date'], 0, 10 ) == $topic["posted_date"] )
+					|| ( $publish_plus1day == $topic["posted_date"] )
+					|| ( $publish_minus1day == $topic["posted_date"] );
+				$is_same_blog = $blog_id == $topic["blog_id"];
+				if (
+					! $is_same_type ||
+					! $is_same_title ||
+					! $is_same_date || 
+					! $is_same_blog
+				) {
+					WP_CLI::line( sprintf( 'WARNING DEBUG post_id %d is not the same as topic_id %d (type:%s, title:%s, date:%s, blog:%s)', $post_id, $topic['topic_id'], (string) $is_same_type, (string) $is_same_title, (string) $is_same_date, (string) $is_same_blog ) );
+					if ( ! $is_same_title ) {
+						$debug_titles_not_same[] = [
+							$topic["headline"],
+							$post['post_title'],
+							'topic_id: ' . $topic['topic_id'], 
+							'post_id: ' . $post_id
+						];
+					}
+					continue;
+				}
+
+				WP_CLI::line( sprintf( 'FOUND post_id %d from topic_id %d', $post_id, $topic['topic_id'] ) );
+				$post_ids_found[] = $post_id;
+
+
+				/**
+				 * Update post modified date.
+				 */
+
+				// For update.
+				$post_data = [];
+
+				// Current post values.
+				$post_date_current         = get_post_field( 'post_date', $post_id );
+				$post_date_gmt_current     = get_post_field( 'post_date_gmt', $post_id );
+				$post_modified_current     = get_post_field( 'post_modified', $post_id );
+				$post_modified_gmt_current = get_post_field( 'post_modified_gmt', $post_id );
+
+				// Get topic published date from epoch timestamp.
+				$topic_date_published     = $this->get_post_date_from_timestamp( $topic['posted_epoch'] );
+				$topic_date_published_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $topic_date_published ) - $gmt_offset * HOUR_IN_SECONDS );
+
+				// Get topic modified date from 'YYYY-MM-DD' string.
+				$updated_date = \DateTime::createFromFormat( 'Y-m-d', $topic['updated_date'] );
+				$is_date_yyyy_mm_dd = $updated_date && ( $updated_date->format( 'Y-m-d' ) === $topic['updated_date'] );
+				if ( $is_date_yyyy_mm_dd ) {
+					// Since all we have is a YYYY-MM-DD string, we need to add a time to it.
+					$topic_modified     = $topic['updated_date'] . ' 07:00:00';
+					$topic_modified_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $topic_modified ) - $gmt_offset * HOUR_IN_SECONDS );
+				} else {
+					// If not set, use published date.
+					$topic_modified     = $topic_date_published;
+					$topic_modified_gmt = $topic_date_published_gmt;
+				}
+
+				// Add to update.
+				if ( $topic_date_published != $post_date_current ) {
+					$post_data['post_date'] = $topic_date_published;
+				}
+				if ( $topic_date_published_gmt != $post_date_gmt_current ) {
+					$post_data['post_date_gmt'] = $topic_date_published_gmt;
+				}
+				if ( $topic_modified != $post_modified_current ) {
+					$post_data['post_modified'] = $topic_modified;
+				}
+				if ( $topic_modified_gmt != $post_modified_gmt_current ) {
+					$post_data['post_modified_gmt'] = $topic_modified_gmt;
+				}
+
+				// Update.
+				if ( ! empty( $post_data ) ) {
+					$result = $wpdb->update( $wpdb->posts, $post_data, [ 'ID' => $post_id ] );
+					if ( false == $result ) {
+						WP_CLI::line( sprintf( 'ERROR Failed to fix date on post %d topic_id %s', $post_id, $topic['topic_id'] ) );
+					}
+					WP_CLI::line( sprintf( 'SUCCESS Updated dates on postID %s topic_id %s', $post_id, $topic['topic_id'] ) );
+				}
+
+				// Detailed log.
+				$changes[ $post_id ] = [
+					'topic_id'              => $topic['topic_id'],
+					'post_date_old'         => $post_date_current,
+					'post_date_new'         => $topic_date_published,
+					'post_date_gmt_old'     => $post_date_gmt_current,
+					'post_date_gmt_new'     => $topic_date_published_gmt,
+					'post_modified_old'     => $post_modified_current,
+					'post_modified_new'     => $topic_modified,
+					'post_modified_gmt_old' => $post_modified_gmt_current,
+					'post_modified_gmt_new' => $topic_modified_gmt,
+				];
+
+				$d=1;
+			}
+		}
+
+		// Logs.
+		file_put_contents( 'cmd_found-post-ids.csv', implode( ",", $post_ids_found ) );
+		file_put_contents( 'cmd_debug_titles_not_same.json', json_encode( $debug_titles_not_same ) );
+		// Log detailed changes to CSV.
+		$csv = fopen( $log_detailed_changes_csv, 'w' );
+		fputcsv( $csv, [ 'post_id', 'topic_id', 'post_date_old', 'post_date_new', 'post_date_gmt_old', 'post_date_gmt_new', 'post_modified_old', 'post_modified_new', 'post_modified_gmt_old', 'post_modified_gmt_new' ] );
+		foreach ( $changes as $post_id => $change ) {
+			fputcsv(
+				$csv,
+				[
+					$post_id,
+					$change['topic_id'] ?? '',
+					$change['post_date_old'] ?? '',
+					$change['post_date_new'] ?? '',
+					$change['post_date_gmt_old'] ?? '',
+					$change['post_date_gmt_new'] ?? '',
+					$change['post_modified_old'] ?? '',
+					$change['post_modified_new'] ?? '',
+					$change['post_modified_gmt_old'] ?? '',
+					$change['post_modified_gmt_new'] ?? '',
+				] 
+			);
+		}
+		WP_CLI::success( 'Changes saved to ' . $log_detailed_changes_csv );
+		
+		WP_CLI::line( 'Done, saved CSVs' );
 	}
 
 	/**
