@@ -107,8 +107,13 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
+		$count_of_posts_channel_children = count( $posts_channel_children );
 
-		foreach ( $posts_channel_children as $child ) {
+		foreach ( $posts_channel_children as $index => $child ) {
+			ConsoleColor::white( $index + 1 . '/' . $count_of_posts_channel_children )
+						->bright_white(
+							round( ( ( $index + 1 ) / $count_of_posts_channel_children ) * 100, 2 ) . '%%'
+						)->output();
 			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 			if ( 'item' === $child->nodeName ) {
 				$post = WordPressXMLHandler::get_parsed_data( $child, [] )['post'];
@@ -124,13 +129,14 @@ class TheParkRecordMigrator implements InterfaceCommand {
 					)
 				);
 
-				if ( ! empty( $new_post_id ) ) {
-					$console->blue( $post['ID'] )->bright_white( '->' );
+				if ( ! empty( $new_post_id ) && $new_post_id !== $post['ID'] ) {
+					$console->cyan( $post['ID'] )->bright_white( '→' );
 				} else {
 					$new_post_id = $post['ID'];
 				}
 
-				$console->bright_blue( $new_post_id )->output();
+				echo "\n";
+				$console->underlined_cyan( $new_post_id )->output();
 
 				if ( array_key_exists( $new_post_id, $processed_ids ) ) {
 					ConsoleColor::white( "Post ID {$new_post_id} already processed." )->output();
@@ -216,13 +222,17 @@ class TheParkRecordMigrator implements InterfaceCommand {
 				if ( empty( $author->email ) ) {
 					$maybe_guest_author_id = $this->co_author_plus->create_guest_author( [ 'display_name' => $author->name ] );
 
+					if ( is_wp_error( $maybe_guest_author_id ) && 'duplicate-field' === $maybe_guest_author_id->get_error_code() ) {
+						$maybe_guest_author_id = $this->co_author_plus->coauthors_plus->get_coauthor_by( 'user_login', sanitize_title( $author->name ) );
+					}
+
 					if ( is_wp_error( $maybe_guest_author_id ) ) {
-						ConsoleColor::red( 'Error creating guest author.' )->output();
+						ConsoleColor::red( 'Error creating guest author:' )->underlined_red( $maybe_guest_author_id->get_error_message() )->output();
 						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_creating_guest_author' );
 						continue;
 					}
 
-					$this->co_author_plus->coauthors_plus->add_coauthors( $new_post_id, $maybe_guest_author_id, false, 'id' );
+					$this->co_author_plus->coauthors_plus->add_coauthors( $new_post_id, [ $maybe_guest_author_id ], false, 'id' );
 
 					$author_terms = wp_get_post_terms( $new_post_id, 'author', [ 'fields' => 'names' ] );
 
@@ -249,33 +259,41 @@ class TheParkRecordMigrator implements InterfaceCommand {
 						[
 							'ID'           => $post_author->ID,
 							'display_name' => $author->name,
+							'user_pass' => '',
 						]
 					);
 
 					if ( is_wp_error( $update ) ) {
 						ConsoleColor::red( 'Error updating author.' )->output();
-						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author' );
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author_display_name_1' );
 						continue;
 					}
 
-					ConsoleColor::green( 'Author Updated:' )->bright_green( $author->name )->output();
+					ConsoleColor::green( 'Only display name update required:' )->bright_green( $author->name )->output();
 					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_updated' );
 				} else {
 					// if we have an email, and it doesn't match the post, then we need to see if user exists.
 					$user = get_user_by( 'email', $author->email );
+
+					$user_login = substr( $author->email, 0, strpos( $author->email, '@' ) );
+
+					if ( ! $user ) {
+						$user = get_user_by( 'login', $user_login );
+					}
 
 					// if the user doesn't exist, create the user and update the post author.
 					if ( ! $user ) {
 						$maybe_user_id = wp_insert_user(
 							[
 								'user_email'   => $author->email,
-								'user_login'   => substr( $author->email, 0, strpos( $author->email, '@' ) ),
+								'user_login' => $user_login,
+								'user_pass'  => wp_generate_password(),
 								'display_name' => $author->name,
 							]
 						);
 
 						if ( is_wp_error( $maybe_user_id ) ) {
-							ConsoleColor::red( 'Error creating user.' )->output();
+							ConsoleColor::red( 'Error creating user:' )->underlined_red( $maybe_user_id->get_error_message() )->output();
 							update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_creating_user_2' );
 							continue;
 						}
@@ -288,17 +306,17 @@ class TheParkRecordMigrator implements InterfaceCommand {
 								[
 									'ID'           => $user->ID,
 									'display_name' => $author->name,
+									'user_pass' => '',
 								]
 							);
 
 							if ( is_wp_error( $update ) ) {
-								ConsoleColor::red( 'Error updating author.' )->output();
-								update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author_2_1' );
+								ConsoleColor::red( 'Error updating author:' )->underlined_red( $update->get_error_message() )->output();
+								update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author_display_name_2' );
 								continue;
 							}
 
-							ConsoleColor::green( 'Author Updated:' )->bright_green( $user->display_name )->output();
-							update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_updated_2_1' );
+							ConsoleColor::green( 'Author Display Name Updated:' )->bright_green( $user->display_name )->output();
 						}
 					}
 
@@ -312,12 +330,12 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 					if ( is_wp_error( $update ) ) {
 						ConsoleColor::red( 'Error updating author.' )->output();
-						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_author_2_2' );
+						update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'error_updating_post_author' );
 						continue;
 					}
 
-					ConsoleColor::green( 'Author Updated:' )->bright_green( $user->display_name )->output();
-					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'author_updated_2_2' );
+					ConsoleColor::green( 'Post Author Updated:' )->bright_green( $user->display_name )->output();
+					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'post_author_updated' );
 				}
 			}
 		}
