@@ -17,7 +17,7 @@ use WP_CLI;
 class TheParkRecordMigrator implements InterfaceCommand {
 
 	const GUEST_AUTHOR_SCRAPE_META = 'newspack_guest_author_scrape_done';
-	const API_URL_POST = 'https://www.parkrecord.com/wp-json/wp/v2/posts';
+	const API_URL_POST             = 'https://www.parkrecord.com/wp-json/wp/v2/posts';
 
 	/**
 	 * TheParkRecordMigrator Instance.
@@ -106,7 +106,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
 
 		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-		$posts_channel_children = $rss->childNodes->item( 1 )->childNodes;
+		$posts_channel_children          = $rss->childNodes->item( 1 )->childNodes;
 		$count_of_posts_channel_children = count( $posts_channel_children );
 
 		foreach ( $posts_channel_children as $index => $child ) {
@@ -263,7 +263,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 						[
 							'ID'           => $post_author->ID,
 							'display_name' => $author->name,
-							'user_pass' => '',
+							'user_pass'    => '',
 						]
 					);
 
@@ -290,8 +290,8 @@ class TheParkRecordMigrator implements InterfaceCommand {
 						$maybe_user_id = wp_insert_user(
 							[
 								'user_email'   => $author->email,
-								'user_login' => $user_login,
-								'user_pass'  => wp_generate_password(),
+								'user_login'   => $user_login,
+								'user_pass'    => wp_generate_password(),
 								'display_name' => $author->name,
 							]
 						);
@@ -310,7 +310,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 								[
 									'ID'           => $user->ID,
 									'display_name' => $author->name,
-									'user_pass' => '',
+									'user_pass'    => '',
 								]
 							);
 
@@ -378,23 +378,21 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		}
 
 		$author           = new stdClass();
-		$author->original = $address->ownerDocument->saveHTML( $address );
+		$author->original = $address->ownerDocument->saveHTML( $address ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 		$author->source   = 'address';
 		$author->name     = '';
 		$author->email    = '';
 
-		foreach ( $address->childNodes as $child ) {
-			if ( '#text' === $child->nodeName ) {
-				$text_content = trim( $child->textContent );
+		foreach ( $address->childNodes as $child ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			if ( '#text' === $child->nodeName ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+				$text_content = trim( $child->textContent ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 
 				if ( is_email( $text_content ) ) {
 					$author->email = $text_content;
-				} else {
-					if ( empty( $author->name ) ) {
+				} elseif ( empty( $author->name ) ) {
 						$author->name = $text_content;
-					} else {
-						$author->name .= " $text_content";
-					}
+				} else {
+					$author->name .= " $text_content";
 				}
 			}
 		}
@@ -418,7 +416,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		}
 
 		$author           = new stdClass();
-		$author->original = $byline->ownerDocument->saveHTML( $byline );
+		$author->original = $byline->ownerDocument->saveHTML( $byline ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 		$author->source   = 'byline';
 		$author->name     = '';
 		$author->email    = '';
