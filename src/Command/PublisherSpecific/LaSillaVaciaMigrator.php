@@ -5637,11 +5637,16 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				$user_nicename = $this->obtain_unique_user_field(
 					'user_nicename',
 					$user_nicename_first_attempt,
-					function ( $value ) use ( $no_of_similar_nicenames ) {
-						$no_of_similar_nicenames++;
-						return $value . '-' . ( $no_of_similar_nicenames );
+					function ( $value ) use ( &$no_of_similar_nicenames ) {
+						++$no_of_similar_nicenames;
+
+						echo preg_replace( '/-\d+$/', '', $value ) . '-' . ( $no_of_similar_nicenames ) . "\n";
+
+						return preg_replace( '/-\d+$/', '', $value ) . '-' . ( $no_of_similar_nicenames );
 					},
-					$exclude_user_id
+					$exclude_user_id,
+					1,
+					7
 				);
 
 				if ( null === $user_nicename ) {
