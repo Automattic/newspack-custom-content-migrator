@@ -1216,6 +1216,13 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'name'     => 'dry-run',
 						'optional' => true,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'staff-account-email',
+						'description' => 'Email of the staff account.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -4307,7 +4314,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 		}
 
-		$story_csv_path = str_replace( 'story.csv', 'story_1.csv', $story_csv_path );
+		/*$story_csv_path = str_replace( 'story.csv', 'story_1.csv', $story_csv_path );
 		$story_csv      = ( new FileImportFactory() )->get_file( $story_csv_path );
 
 		foreach ( $story_csv->getIterator() as $row ) {
@@ -4326,7 +4333,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			} else {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Topic ID %d already exists in the map.', $row['topic_id'] ), Logger::ERROR );
 			}
-		}
+		}*/
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Need active handle to file, in order to write data necessary for QA.
 		$qa_csv                = fopen( 'qa.csv', 'w' );
@@ -4614,7 +4621,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_embarcadero_fix_duplicate_posts( array $args, array $assoc_args ): void {
-		$dry_run = 'true' === $assoc_args['dry-run'];
+		$dry_run                     = isset( $assoc_args['dry-run'] ) && true === $assoc_args['dry-run'];
+		$staff_account_email_address = $assoc_args['staff-account-email'];
 
 		global $wpdb;
 
@@ -4626,16 +4634,17 @@ class EmbarcaderoMigrator implements InterfaceCommand {
     				sub.post_date, 
     				sub.post_author, 
     				COUNT( sub.ID ) as counter, 
-    				GROUP_CONCAT( sub.ID ORDER BY sub.ID ASC SEPARATOR '|') AS post_ids 
+    				GROUP_CONCAT( sub.ID ORDER BY LENGTH(sub.post_content) DESC, sub.post_date DESC SEPARATOR '|') AS post_ids 
 				FROM ( 
 					SELECT 
 					    ID, 
 					    post_title, 
 					    DATE( post_date ) as post_date, 
-					    post_author 
+					    post_author,
+					    post_content
 					FROM $wpdb->posts 
 					WHERE post_type = %s 
-					  AND post_status = %s 
+					  AND post_status IN ( %s, %s ) 
 					) as sub 
 				GROUP BY sub.post_title, 
 				         sub.post_date, 
@@ -4643,7 +4652,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				HAVING counter > 1
 				ORDER BY counter DESC, post_date DESC ",
 				'post',
-				'publish'
+				'publish',
+				'private'
 			)
 		);
 		$count_of_duplicate_rows     = count( $overview_of_duplicate_posts );
@@ -4661,9 +4671,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			'post_date',
 			'post_author',
 			'post_id',
-			'deleted',
+			'drafted',
 			'permalink',
 			'post_name',
+			'clashing_post_names',
+			'post_name_swapped',
+			'comments_moved',
 			'import_meta_key',
 			'import_meta_value',
 		];
@@ -4675,38 +4688,154 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				'post_author',
 				'count',
 				'post_ids',
+				'skipped',
 			]
 		);
 		fputcsv( $detailed_qa_csv, $header_row );
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$staff_account_id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT ID FROM $wpdb->users WHERE user_email = %s",
+				$staff_account_email_address
+			)
+		);
+
+		if ( ! $staff_account_id ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Could not find staff account with email address %s', $staff_account_email_address ), Logger::WARNING );
+		}
+
+		$staff_account_id = intval( $staff_account_id );
+
 		$progress = WP_CLI\Utils\make_progress_bar( 'Processing', $sum_of_duplicate_post_ids, 1 );
 
 		foreach ( $overview_of_duplicate_posts as $duplicate_post ) {
-			fputcsv(
-				$overview_qa_csv,
-				[
-					$duplicate_post->post_title,
-					$duplicate_post->post_date,
-					$duplicate_post->post_author,
-					$duplicate_post->counter,
-					$duplicate_post->post_ids,
-				]
+			$overview_row = [
+				'post_title'  => $duplicate_post->post_title,
+				'post_date'   => $duplicate_post->post_date,
+				'post_author' => $duplicate_post->post_author,
+				'count'       => $duplicate_post->counter,
+				'post_ids'    => $duplicate_post->post_ids,
+				'skipped'     => 'No',
+			];
+
+			if ( intval( $duplicate_post->post_author ) === $staff_account_id ) {
+				$overview_row['skipped'] = 'Yes';
+				fputcsv( $overview_qa_csv, array_values( $overview_row ) );
+				continue;
+			}
+
+			fputcsv( $overview_qa_csv, array_values( $overview_row ) );
+			$post_ids                       = explode( '|', $duplicate_post->post_ids );
+			$post_id_with_most_post_content = $post_ids[0];
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_id_with_most_post_content_post_name = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT REGEXP_REPLACE( post_name, '(-[0-9]+)$', '' ) as post_name FROM $wpdb->posts WHERE ID = %d",
+					$post_id_with_most_post_content
+				)
 			);
 
-			$post_ids = explode( '|', $duplicate_post->post_ids );
-			array_shift( $post_ids );
 			$progress->tick();
-			$post_ids_placeholder = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
 
+			$post_ids_placeholder = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
 			// phpcs:disable -- query has been properly prepared and placeholdered.
-			$posts = $wpdb->get_results(
+			$additional_dupes = $wpdb->get_results(
 				$wpdb->prepare(
 					"SELECT 
     					ID, 
     					post_title, 
-    					post_date, 
-    					post_author, 
-    					post_name 
+    					post_name, 
+    					post_date 
+					FROM $wpdb->posts 
+					WHERE post_title = %s 
+					  AND post_name LIKE ( %s ) 
+					  AND DATE( post_date ) 
+					      BETWEEN 
+					      	DATE( 
+					      		DATE_SUB( 
+					      			( SELECT post_date FROM $wpdb->posts WHERE ID = %d ), 
+					      			INTERVAL 2 DAY 
+					      		) 
+					      	) 
+					  		AND 
+					      	DATE( 
+					      		DATE_ADD( 
+					      			( SELECT post_date FROM $wpdb->posts WHERE ID = %d ), 
+					      			INTERVAL 2 DAY 
+					      		) 
+					      	) 
+					  AND ID NOT IN ( $post_ids_placeholder )",
+					$duplicate_post->post_title,
+					$wpdb->esc_like( $post_id_with_most_post_content_post_name ) . '%',
+					$post_id_with_most_post_content,
+					$post_id_with_most_post_content,
+					...$post_ids
+				)
+			);
+			// phpcs:enable
+
+			if ( ! empty( $additional_dupes ) ) {
+				$post_ids = array_merge( $post_ids, array_map( fn( $dupe ) => $dupe->ID, $additional_dupes ) );
+			}
+
+			// Remove the post with the most post content from the list of post IDs.
+			$post_ids = array_filter(
+				$post_ids,
+				fn( $id ) => $id !== $post_id_with_most_post_content
+			);
+
+			$post_ids_placeholder = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+
+			// phpcs:disable -- query has been properly prepared and placeholdered.
+			$clashing_post_names = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT ID, post_name FROM $wpdb->posts WHERE post_name = %s AND ID IN ( $post_ids_placeholder )",
+					$post_id_with_most_post_content_post_name,
+					...$post_ids
+				)
+			);
+			// phpcs:enable
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_name' => $post_id_with_most_post_content_post_name,
+				],
+				[
+					'ID' => $post_id_with_most_post_content,
+				]
+			);
+
+			$post_id_of_swapped_post_name = 0;
+			$count_of_clashing_post_names = count( $clashing_post_names );
+			if ( 1 === $count_of_clashing_post_names ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$update = $wpdb->update(
+					$wpdb->posts,
+					[
+						'post_name' => $post_id_with_most_post_content_post_name . '-' . $post_id_with_most_post_content,
+					],
+					[
+						'ID' => $clashing_post_names[0]->ID,
+					]
+				);
+
+				if ( $update ) {
+					$post_id_of_swapped_post_name = intval( $clashing_post_names[0]->ID );
+				}
+			}
+
+			// phpcs:disable -- query has been properly prepared and placeholdered.
+			$posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT
+						ID,
+						post_title,
+						post_date,
+						post_author,
+						post_name
 					FROM $wpdb->posts
 					WHERE ID IN ( $post_ids_placeholder )",
 					...$post_ids
@@ -4731,27 +4860,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$import_meta->meta_value = null;
 				}
 
-				$deleted = false;
-				if ( ! $dry_run ) {
+				$drafted        = false;
+				$comments_moved = 0;
+				if ( $post_id_with_most_post_content !== $post->ID && ! $dry_run ) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-					$wpdb->delete(
-						$wpdb->term_relationships,
+					$comments_update = $wpdb->update(
+						$wpdb->comments,
 						[
-							'object_id' => $post->ID,
+							'comment_post_ID' => $post_id_with_most_post_content,
+						],
+						[
+							'comment_post_ID' => $post->ID,
 						]
 					);
 
-					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-					$wpdb->delete(
-						$wpdb->postmeta,
-						[
-							'post_id' => $post->ID,
-						]
-					);
+					if ( $comments_update ) {
+						$comments_moved = $comments_update;
+					}
 
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-					$deleted = (bool) $wpdb->delete(
+					$drafted = (bool) $wpdb->update(
 						$wpdb->posts,
+						[
+							'post_status' => 'draft',
+						],
 						[
 							'ID' => $post->ID,
 						]
@@ -4765,13 +4897,17 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$post->post_date,
 						$post->post_author,
 						$post->ID,
-						$deleted ? 'Yes' : 'No',
+						$drafted ? 'Yes' : 'No',
 						get_permalink( $post->ID ),
 						$post->post_name,
+						$count_of_clashing_post_names,
+						1 === $count_of_clashing_post_names && $post->ID === $post_id_of_swapped_post_name ? 'Yes' : '',
+						$comments_moved,
 						$import_meta->meta_key,
 						$import_meta->meta_value,
 					]
 				);
+
 				$progress->tick();
 			}
 		}
