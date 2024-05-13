@@ -224,6 +224,10 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 					if ( is_wp_error( $maybe_guest_author_id ) && 'duplicate-field' === $maybe_guest_author_id->get_error_code() ) {
 						$maybe_guest_author_id = $this->co_author_plus->coauthors_plus->get_coauthor_by( 'user_login', sanitize_title( $author->name ) );
+
+						if ( ! is_wp_error( $maybe_guest_author_id ) ) {
+							$maybe_guest_author_id = $maybe_guest_author_id->ID;
+						}
 					}
 
 					if ( is_wp_error( $maybe_guest_author_id ) ) {
