@@ -250,6 +250,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, '--default-user-id: ' . $default_user->ID );
 		
 		if ( $created_after ) {
+			// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date
 			$this->logger->log( $this->log, '--created-after: ' . date( 'Y-m-d H:i:s', $created_after ) );
 		}
 		
@@ -310,7 +311,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_checksum', md5( json_encode( $json_post ) ) );            
 
 			// Featured image (with alt and caption).
-			// Note: json value does not contain "d": feature(d)_image
+			// Note: json value does not contain "d": feature(d)_image.
 			if ( empty( $json_post->feature_image ) ) {
 				$this->logger->log( $this->log, 'No featured image.' );
 			} else {
@@ -375,7 +376,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Get JSON author (user) object from data array.
 	 *
-	 * @param string $json_author_user_id
+	 * @param string $json_author_user_id JSON author id.
 	 * @return null|Object
 	 */
 	private function get_json_author_user_by_id( $json_author_user_id ) {
@@ -397,7 +398,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Get JSON meta object from data array.
 	 *
-	 * @param string $json_post_id
+	 * @param string $json_post_id JSON post id.
 	 * @return null|Object
 	 */
 	private function get_json_post_meta( $json_post_id ) {
@@ -419,7 +420,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Get JSON tag object from data array.
 	 *
-	 * @param string $json_tag_id
+	 * @param string $json_tag_id JSON tag id.
 	 * @return null|Object
 	 */
 	private function get_json_tag_by_id( $json_tag_id ) {
@@ -441,18 +442,18 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Get attachment (based on URL) from database else import external file from URL
 	 *
-	 * @param string $path URL
+	 * @param string $path URL.
 	 * @param string $title URL or title string.
-	 * @param string $caption
-	 * @param string $description
-	 * @param string $alt
+	 * @param string $caption Image caption (optional).
+	 * @param string $description Image desc (optional).
+	 * @param string $alt Image alt (optional).
 	 * @return int|WP_Error $attachment_id
 	 */
 	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
 
 		global $wpdb;
 
-		// have to check if alredy exists so that multiple calls do not download() files already inserted
+		// have to check if alredy exists so that multiple calls do not download() files already inserted.
 		$attachment_id = $wpdb->get_var(
 			$wpdb->prepare(
 				"
@@ -479,7 +480,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Insert JSON author (user)
 	 *
-	 * @param object $json_author_user
+	 * @param object $json_author_user json author (user) object.
 	 * @return 0|GA|WP_User
 	 */
 	private function insert_json_author_user( $json_author_user ) {
@@ -561,7 +562,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Insert JSON tag as category
 	 *
-	 * @param object $json_tag
+	 * @param object $json_tag json tag object.
 	 * @return 0|int
 	 */
 	private function insert_json_tag_as_category( $json_tag ) {
@@ -603,8 +604,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Set post authors using JSON relationship(s).
 	 *
-	 * @param int    $wp_post_id
-	 * @param string $json_post_id
+	 * @param int    $wp_post_id wp_posts id.
+	 * @param string $json_post_id json post id.
 	 * @return void
 	 */
 	private function set_post_authors( $wp_post_id, $json_post_id ) {
@@ -665,7 +666,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		
 		}
 
-		// WP Users and/or CAP GAs
+		// WP Users and/or CAP GAs.
 		$this->coauthorsplus_logic->assign_authors_to_post( $wp_objects, $wp_post_id );
 
 		$this->logger->log( $this->log, 'Assigned authors (wp users and/or cap gas). Count: ' . count( $wp_objects ) );
@@ -676,15 +677,15 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * 
 	 * Note: json property does not contain "d": feature(d)_image
 	 *
-	 * @param int    $wp_post_id
-	 * @param string $json_post_id
+	 * @param int    $wp_post_id wp_posts ID.
+	 * @param string $json_post_id json post id.
 	 * @param string $old_image_url URL scheme with domain.
 	 * @return void
 	 */
 	private function set_post_featured_image( $wp_post_id, $json_post_id, $old_image_url ) {
 
-		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg )
-		// But if not, replace the placeholder ( __GHOST_URL__/.../image.jpg )
+		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg ).
+		// But if not, replace the placeholder ( __GHOST_URL__/.../image.jpg ).
 		$old_image_url = preg_replace( '#^__GHOST_URL__#', $this->ghost_url, $old_image_url );
 
 		$this->logger->log( $this->log, 'Featured image fetch url: ' . $old_image_url );
@@ -695,7 +696,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$old_image_alt     = $json_meta->feature_image_alt ?? '';
 		$old_image_caption = $json_meta->feature_image_caption ?? '';
 
-		// get existing or upload new
+		// get existing or upload new.
 		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt );
 
 		if ( ! is_numeric( $featured_image_id ) || ! ( $featured_image_id > 0 ) ) {
@@ -719,9 +720,9 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Set post tags (categories) using JSON relationship(s).
 	 *
-	 * @param int    $wp_post_id
-	 * @param string $json_post_id
-	 * @return void
+	 * @param int    $wp_post_id wp_posts ID.
+	 * @param string $json_post_id json post id.
+	 * @return null
 	 */
 	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
 
@@ -777,7 +778,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		
 			$this->logger->log( $this->log, 'No categories.' );
 
-			return;
+			return null;
 		
 		}
 		
@@ -818,7 +819,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	/**
 	 * Check if need to skip this JSON post.
 	 *
-	 * @param object $json_post
+	 * @param object $json_post JSON post object.
 	 * @return string|null
 	 */
 	private function skip( $json_post ) {
@@ -847,7 +848,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 			return 'empty_title';
 		}
 		
-		// WP Lookups
+		// WP Lookups.
 		if ( $wpdb->get_var(
 			$wpdb->prepare( 
 				"SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", 
