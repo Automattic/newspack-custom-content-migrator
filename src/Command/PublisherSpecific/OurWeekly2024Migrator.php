@@ -210,28 +210,35 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 	private function media_parse_content( $content ) {
 
-		// parse and import images and files (PDF) in body content <img and <a href=...PDF
+		// parse and import images and files body content <img src/srcset, <a href=...PDF, <iframe src
+		preg_match_all( '/<(a|iframe|img) ([^>]+)>/i', $content, $elements, PREG_SET_ORDER );
+
+		// foreach( $elements as $element ) {
+		// 	$this->logger->log( $this->log . '-html-' . $element[1], $element[2] );
+		// }
+		// return;
+
+		// a href= https://www.ourweekly.com/
+
+		// need to list img urls and srcsets
 		
-		// AND SRCSET!
-		
-		preg_match_all( '/<(a|img) ([^>]+)>/i', $content, $elements,  PREG_SET_ORDER );
-
-		foreach( $elements as $match ) {
-			$this->logger->log( $this->log . '-html-' . $match[1], $match[0] );
-		}
-		return;
-		exit();
+		// exit();
 
 
-		foreach( $elements[0] as $element ) {
-			
-			$attr = '';
 
-			if( preg_match( '/^<a /', $element ) ) $attr = 'href'; 
-			else if( preg_match( '/^<img /', $element ) ) $attr = 'src';
-			else continue;
+		foreach( $elements as $element ) {
 
-			$content = $this->media_parse_element( $element, $attr, $content );
+			if( preg_match( '/^<a /', $element[0] ) ) {
+				$content = $this->media_parse_element( $element[0], 'href', $content );
+			}
+			else if( preg_match( '/^<img /', $element[0] ) ) {
+				$content = $this->media_parse_element( $element[0], 'src', $content );
+				// get srcsets??
+				// $content = $this->media_parse_element( $element[0], 'srcset', $content );
+			}
+			else if( preg_match( '/^<iframe /', $element[0] ) ) {
+				$content = $this->media_parse_element( $element[0], 'src', $content );
+			}
 
 		}
 
