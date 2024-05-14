@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
 
@@ -17,6 +18,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 	private $attachments_logic;
 	private $logger;
+	private $posts_logic;
 	private $redirection_logic;
 
 	private $log;
@@ -28,6 +30,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 	private function __construct() {
 		$this->attachments_logic   = new AttachmentsLogic();
 		$this->logger              = new Logger();
+		$this->posts_logic         = new PostsLogic();
 		$this->redirection_logic   = new RedirectionLogic();
 	}
 
@@ -58,13 +61,22 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator ourweekly2024-redirects',
+			[ $this, 'cmd_ourweekly2024_redirects' ],
+			[
+				'shortdesc' => 'Set redirects as needed.',
+			]
+		);
+
 		// WP_CLI::add_command(
-		// 	'newspack-content-migrator ourweekly2024-redirects',
-		// 	[ $this, 'cmd_ourweekly2024_redirects' ],
+		// 	'newspack-content-migrator ourweekly2024-categories',
+		// 	[ $this, 'cmd_ourweekly2024_categories' ],
 		// 	[
-		// 		'shortdesc' => 'Set redirects as needed.',
+		// 		'shortdesc' => 'Fix category mixup.',
 		// 	]
 		// );
+
 
 	}
 
@@ -74,29 +86,74 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 		$this->mylog( 'Starting ...' );
 
-		// get all posts that have the ghost id postmeta
-		// loop and replace media
-		// $this->media_parse_content( $post_content ),
+		$args = array(
+			// Must be newly imported post
+			'meta_key'    => 'newspack_ghostcms_id',
+		);
 
-		WP_CLI::success( "Done." );
+		// get all posts that have the ghost id postmeta
+		$this->posts_logic->throttled_posts_loop( $args, function( $post ) {
+			
+			$this->logger->log( $this->log, '-------- post id: ' . $post->ID );
+			$this->logger->log( $this->log, 'ghost id: ' . get_post_meta( $post->ID, 'newspack_ghostcms_id', true ) );
+
+
+			// loop and replace media
+			$post_content = $this->media_parse_content( $post->post_content );
+
+		});
+
+		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
 	}
 
+	public function cmd_ourweekly2024_redirects( $pos_args, $assoc_args ) {
+		
+		if( ! class_exists ( '\Red_Item' ) ) {
+			WP_CLI::error( 'Redirection plugin must be active.' );
+		}
 
-	// redirect function here
-	// $old_permalink = '/reporting/' . $columns['Slug'] . '/';
-	// $new_permalink = str_replace( get_site_url() , '', get_permalink( $post_id ) );
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
-	// if( $old_permalink != $new_permalink ) {
-	// 	$this->set_redirect( $old_permalink, $new_permalink, 'posts' );
-	// }
+		$this->mylog( 'Starting ...' );
 
-	// if( $cat_slug != $term->slug ) $this->set_redirect( '/category/' . $cat_slug, '/category/' . $term->slug, 'categories' );
+		$args = array(
+			// Must be newly imported post
+			'meta_key'    => 'newspack_ghostcms_slug',
+		);
+
+		// get all posts that have the ghost id postmeta
+		$this->posts_logic->throttled_posts_loop( $args, function( $post ) {
+			
+			$ghost_slug = get_post_meta( $post->ID, 'newspack_ghostcms_slug', true );
+
+			if( $ghost_slug == $post->post_name ) return;
+
+			$date_string = preg_replace( '/^(\d{4})-(\d{2})-(\d{2}).*/', '/${1}/${2}/${3}/', $post->post_date );
+			$old = $date_string . $ghost_slug;
+			$new = '/?name=' . $post->post_name;
+
+			$this->logger->log( $this->log, '-------- post id: ' . $post->ID );
+			$this->logger->log( $this->log, 'old: ' . $old );
+			$this->logger->log( $this->log, 'new: ' . $new );
+
+			// $this->set_redirect( $url_from, $url_to, $batch, true );
 
 
+		});
 
+		// $old_permalink = '/reporting/' . $columns['Slug'] . '/';
+		// $new_permalink = str_replace( get_site_url() , '', get_permalink( $post_id ) );
 
+		// if( $old_permalink != $new_permalink ) {
+		// 	$this->set_redirect( $old_permalink, $new_permalink, 'posts' );
+		// }
 
+		// if( $cat_slug != $term->slug ) $this->set_redirect( '/category/' . $cat_slug, '/category/' . $term->slug, 'categories' );
+		
+		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
+
+	}
 
 	/**
 	 * REDIRECTION FUNCTIONS
@@ -111,12 +168,12 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		
 		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
 
-			if( $verbose ) WP_CLI::warning( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
+			if( $verbose ) $this->mylog( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
 			return;
 
 		}
 
-		if( $verbose ) WP_CLI::line( 'Adding (' . $batch . ') redirect: ' . $url_from . ' to ' . $url_to );
+		if( $verbose ) $this->mylog( 'Adding (' . $batch . ') redirect: ' . $url_from . ' to ' . $url_to );
 		
 		$this->redirection_logic->create_redirection_rule(
 			'Old site (' . $batch . ')',
@@ -154,7 +211,17 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 	private function media_parse_content( $content ) {
 
 		// parse and import images and files (PDF) in body content <img and <a href=...PDF
-		preg_match_all( '/<(a|img) [^>]*?>/i', $content, $elements );
+		
+		// AND SRCSET!
+		
+		preg_match_all( '/<(a|img) ([^>]+)>/i', $content, $elements,  PREG_SET_ORDER );
+
+		foreach( $elements as $match ) {
+			$this->logger->log( $this->log . '-html-' . $match[1], $match[0] );
+		}
+		return;
+		exit();
+
 
 		foreach( $elements[0] as $element ) {
 			
