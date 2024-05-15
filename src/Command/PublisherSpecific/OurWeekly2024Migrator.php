@@ -8,6 +8,7 @@ use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use \Symfony\Component\DomCrawler\Crawler;
 
 /**
  * Custom migration scripts for Our Weekly (in 2024 from Ghost CMS).
@@ -17,6 +18,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 	private static $instance = null;
 
 	private $attachments_logic;
+	private $crawler;
 	private $logger;
 	private $posts_logic;
 	private $redirection_logic;
@@ -29,6 +31,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->attachments_logic   = new AttachmentsLogic();
+		$this->crawler             = new Crawler();
 		$this->logger              = new Logger();
 		$this->posts_logic         = new PostsLogic();
 		$this->redirection_logic   = new RedirectionLogic();
@@ -97,11 +100,77 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			$this->logger->log( $this->log, '-------- post id: ' . $post->ID );
 			$this->logger->log( $this->log, 'ghost id: ' . get_post_meta( $post->ID, 'newspack_ghostcms_id', true ) );
 
+			// HTML nodes
+			$this->crawler->clear();
+			$this->crawler->add( $post->post_content );
 
-			// loop and replace media
-			$post_content = $this->media_parse_content( $post->post_content );
+			// log these for by-hand review
+			foreach ( $this->crawler->filterXPath( '//a/@href' ) as $node ) {
+				$this->logger->log( $this->log . '-links-a.log', $node->value, false );
+			} 
 
-		});
+			// log these for by-hand review
+			foreach ( $this->crawler->filterXPath( '//iframe/@src' ) as $node ) {
+				$this->logger->log( $this->log . '-links-iframe.log', $node->value, false );
+			}
+
+			// src and srcset
+			$links = $this->attachments_logic->get_images_sources_from_content( $post->post_content );
+
+			if( 0 == count( $links ) ) {
+				$this->logger->log( $this->log, 'No links found.' );
+				return;
+			}
+
+			// log links to a file for review
+			$this->logger->log( $this->log . '-links-img.log', implode( "\n", $links ), false );
+
+			// filter by domain
+			$links = array_filter( $links, function( $link ) {		
+				if( preg_match( '#^https://www.ourweekly.com/#i', $link ) ) return true;
+			});
+
+			if( 0 == count( $links ) ) {
+				$this->logger->log( $this->log, 'No domain links found.' );
+				return;
+			}
+
+			// uniques
+			$links = array_unique( $links );
+
+			// sort by length so longest is replaced first incase "string in string".
+			usort( $links, function ( $a, $b ) { return strlen( $b ) - strlen( $a ); } );
+
+			// Fetch and replace links in content.
+			$new_post_content = $post->post_content;			
+			foreach( $links as $link ) {
+				$new_post_content = $this->fetch_and_replace_link_in_content( $link, $new_post_content );
+			}
+			
+			// Error if replacments were not successful ( new == old ).
+			if ( $new_post_content == $post->post_content ) {
+
+				$this->logger->log(
+					$this->log,
+					'New content is the same as old content.',
+					$this->logger::ERROR
+				);
+
+				return;
+
+			}
+				
+			// Update post.
+			$this->logger->log( $this->log, 'WP update post.' );
+
+			wp_update_post(
+				array(
+					'ID'           => $post->ID,
+					'post_content' => $new_post_content,
+				)
+			);
+			
+		}); // throttled posts
 
 		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
@@ -204,145 +273,6 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		$report[$key]++;
 	}
 	
-	/**
-	 * MEDIA PARSING
-	 */
-
-	private function media_parse_content( $content ) {
-
-		// parse and import images and files body content <img src/srcset, <a href=...PDF, <iframe src
-		preg_match_all( '/<(a|iframe|img) ([^>]+)>/i', $content, $elements, PREG_SET_ORDER );
-
-		// foreach( $elements as $element ) {
-		// 	$this->logger->log( $this->log . '-html-' . $element[1], $element[2] );
-		// }
-		// return;
-
-		// a href= https://www.ourweekly.com/
-
-		// need to list img urls and srcsets
-		
-		// exit();
-
-
-
-		foreach( $elements as $element ) {
-
-			if( preg_match( '/^<a /', $element[0] ) ) {
-				$content = $this->media_parse_element( $element[0], 'href', $content );
-			}
-			else if( preg_match( '/^<img /', $element[0] ) ) {
-				$content = $this->media_parse_element( $element[0], 'src', $content );
-				// get srcsets??
-				// $content = $this->media_parse_element( $element[0], 'srcset', $content );
-			}
-			else if( preg_match( '/^<iframe /', $element[0] ) ) {
-				$content = $this->media_parse_element( $element[0], 'src', $content );
-			}
-
-		}
-
-		return $content;
-
-	}
-
-	private function media_parse_element( $element, $attr, $content ) {
-
-		$link = $this->media_parse_link( $element, $attr );
-		if( empty( $link ) ) return $content;
-
-		$this->mylog( $attr . ' link found in element', $link );
-
-		// get existing or upload new
-		$attachment_id = $this->get_or_import_url( $link, $link );
-
-		if( ! is_numeric( $attachment_id ) || ! ( $attachment_id > 0 ) ) {
-	
-			$this->mylog( $attr . ' import external file failed', $link, $this->logger::WARNING );
-			return $content;
-
-		}
-		
-		$content = str_replace( $link, wp_get_attachment_url( $attachment_id ), $content );
-
-		$this->mylog( $attr . ' link replaced in element', $link );
-
-		return $content;
-
-
-	}
-
-	private function media_parse_link( $element, $attr ) {
-
-		// test (and temporarily fix) ill formatted elements
-		$had_line_break = false;
-		if( preg_match( '/\n/', $element ) ) {
-			$element = preg_replace('/\n/', '', $element );
-			$had_line_break = true;
-		}
-
-		// parse URL from the element
-		if( ! preg_match( '/' . $attr . '=[\'"](.+?)[\'"]/', $element, $url_matches ) ) {
-			$this->mylog( $attr . ' null link found in element', $element, $this->logger::WARNING );
-			return;
-		}
-
-		// set easy to use variable
-		$url = $url_matches[1];
-
-		// test (and temporarily fix) ill formatted links
-		$had_leading_whitespace = false;
-		if( preg_match( '/^\s+/', $url ) ) {
-			$url = preg_replace('/^\s+/', '', $url );
-			$had_leading_whitespace = true;
-		}
-
-		// test (and temporarily fix) ill formatted links
-		$had_trailing_whitespace = false;
-		if( preg_match( '/\s+$/', $url ) ) {
-			$url = preg_replace('/\s+$/', '', $url );
-			$had_trailing_whitespace = true;
-		}
-
-		// skip known off-site urls and other anomalies
-		$skips = array(
-			'https?:\/\/(docs.google.com|player.vimeo.com|w.soundcloud.com|www.youtube.com)',
-			'mailto',
-		);
-		
-		if( preg_match( '/^(' . implode( '|', $skips ) . ')/', $url ) ) return;
-
-		// we're only looking for media (must have an extension), else skip
-		if( ! preg_match( '/\.([A-Za-z0-9]{3,4})$/', $url, $ext_matches ) ) return;
-
-		// ignore certain extensions that are not media files
-		if( in_array( $ext_matches[1], array( 'asp', 'aspx', 'com', 'edu', 'htm', 'html', 'net', 'news', 'org', 'php' ) ) ) return;
-
-		// must start with http(s)://
-		if( ! preg_match( '/^https?:\/\//', $url ) ) {
-			$this->mylog( $attr . ' non-https link found in element', $element, $this->logger::WARNING );
-			return;
-		}
-		
-		// only match certain domains
-		$keep_domains = [
-			'uploads-ssl.webflow.com',
-		];
-
-		if( ! preg_match('/^https?:\/\/(' . implode( '|', $keep_domains ) . ')/', $url ) ) {
-			// $this->mylog( $attr . ' off domain link found in element', $element, $this->logger::WARNING );
-			return;
-		}
-
-		// todo: handle issues previously bypassed
-		if( $had_line_break || $had_leading_whitespace || $had_trailing_whitespace ) {
-			$this->mylog( $attr . ' whitespace found in element', $element, $this->logger::WARNING );
-			return;
-		}
-
-		return $url;
-
-	}
 
 	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
 
@@ -355,10 +285,34 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			WHERE post_type = 'attachment' and post_title = %s
 		", $title ));
 
-		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) return $attachment_id;
+		if( is_numeric( $attachment_id ) && $attachment_id > 0 ) {
+			$this->logger->log( $this->log, 'Found existing image.' );
+			return $attachment_id;
+		}
 
 		// this function will check if existing, but only after re-downloading
 		return $this->attachments_logic->import_external_file(  $path, $title, $caption, $description, $alt );
+
+	}
+
+	private function fetch_and_replace_link_in_content( $link, $post_content ) {
+
+		$this->logger->log( $this->log, 'Replacing link: ' . $link );
+
+		$attachment_id = $this->get_or_import_url( $link, $link );
+
+		if( ! is_numeric( $attachment_id ) || ! ( $attachment_id > 0 ) ) {
+	
+			$this->logger->log( $this->log, 'Import external file failed.  Did not replace.', $this->logger::WARNING );
+			return $post_content;
+
+		}
+			
+		$post_content = str_replace( $link, wp_get_attachment_url( $attachment_id ), $post_content );
+	
+		$this->logger->log( $this->log, 'Link replaced.' );
+	
+		return $post_content;
 
 	}
 
