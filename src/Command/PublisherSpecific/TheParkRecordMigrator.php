@@ -17,6 +17,7 @@ use WP_CLI;
 class TheParkRecordMigrator implements InterfaceCommand {
 
 	const GUEST_AUTHOR_SCRAPE_META = 'newspack_guest_author_scrape_done';
+	const ORIGINAL_POST_ID_META    = 'original_post_id';
 	const API_URL_POST             = 'https://www.parkrecord.com/wp-json/wp/v2/posts';
 
 	/**
@@ -65,6 +66,23 @@ class TheParkRecordMigrator implements InterfaceCommand {
 			[ $this, 'cmd_guest_author_scrape' ],
 			[
 				'shortdesc' => 'Scrape guest authors from The Park Record.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'xml-path',
+						'description' => 'The path to XML files containing imported posts',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator the-park-record-handle-missing-import-posts',
+			[ $this, 'cmd_missing_import_posts' ],
+			[
+				'shortdesc' => 'The XML import discarded some posts. This command will attempt to handle them',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -340,6 +358,204 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 					ConsoleColor::green( 'Post Author Updated:' )->bright_green( $user->display_name )->output();
 					update_post_meta( $new_post_id, self::GUEST_AUTHOR_SCRAPE_META, 'post_author_updated' );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This function is necessary to handle a situation created by the standard WordPress XML importer where some
+	 * posts are not imported because there is a post with the same title and post_date already.
+	 *
+	 * @param array $args The positional arguments.
+	 * @param array $assoc_args The associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_missing_import_posts( array $args, array $assoc_args ): void {
+		$xml_path = $assoc_args['xml-path'];
+
+		$xml = new DOMDocument();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$xml->loadXML( file_get_contents( $xml_path ), LIBXML_PARSEHUGE | LIBXML_BIGLINES );
+
+		$rss = $xml->getElementsByTagName( 'rss' )->item( 0 );
+
+		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		$posts_channel_children          = $rss->childNodes->item( 1 )->childNodes;
+		$count_of_posts_channel_children = count( $posts_channel_children );
+
+		global $wpdb;
+
+		$post_columns         = [
+			'ID',
+			'post_author',
+			'post_date',
+			'post_date_gmt',
+			'post_content',
+			'post_title',
+			'post_excerpt',
+			'post_status',
+			'comment_status',
+			'ping_status',
+			'post_password',
+			'post_name',
+			'to_ping',
+			'pinged',
+			'post_modified',
+			'post_modified_gmt',
+			'post_content_filtered',
+			'post_parent',
+			'guid',
+			'menu_order',
+			'post_type',
+			'post_mime_type',
+			'comment_count',
+		];
+		$flipped_post_columns = array_flip( $post_columns );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$authors_by_login = $wpdb->get_results(
+			"SELECT user_login, ID FROM $wpdb->users",
+			OBJECT_K
+		);
+
+		foreach ( $posts_channel_children as $index => $child ) {
+			ConsoleColor::white( $index + 1 . '/' . $count_of_posts_channel_children )
+						->bright_white(
+							round( ( ( $index + 1 ) / $count_of_posts_channel_children ) * 100, 2 ) . '%%'
+						)->output();
+			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			if ( 'item' === $child->nodeName ) {
+				$post = WordPressXMLHandler::get_parsed_data( $child, $authors_by_login )['post'];
+				unset( $post['guid'] );
+
+				$console = ConsoleColor::white( 'Post ID:' )->bright_white( $post['ID'] );
+
+				if ( 'draft' === $post['post_status'] ) {
+					$console->white( 'Post Status:' )->bright_yellow( 'DRAFT' )->output();
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$imported_post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT p.post_name, p.post_title, p.post_date, pm.meta_id, pm.post_id as post_meta_post_id FROM $wpdb->posts p INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id WHERE pm.meta_key = %s AND pm.meta_value = %d",
+						self::ORIGINAL_POST_ID_META,
+						$post['ID']
+					)
+				);
+
+				if ( $imported_post ) {
+					$checks    = [
+						'post_name'  => $imported_post->post_name === $post['post_name'],
+						'post_title' => $imported_post->post_title === $post['post_title'],
+						'post_date'  => $imported_post->post_date === $post['post_date'],
+					];
+					$check_sum = array_reduce(
+						$checks,
+						fn( $carry, $item ) => $carry && $item,
+						true
+					);
+
+					if ( $check_sum ) {
+						$console->green( 'OK' )->output();
+						continue;
+					}
+
+					// HERE we need to handle importing the post, and updating the incorrect meta.
+					// Does Post ID already exist?
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$post_id = $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT ID FROM $wpdb->posts WHERE ID = %d",
+							$post['ID']
+						)
+					);
+
+					if ( $post_id ) {
+						unset( $post['ID'] );
+					}
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$maybe_inserted = $wpdb->insert(
+						$wpdb->posts,
+						array_intersect_key( $post, $flipped_post_columns )
+					);
+
+					if ( ! $maybe_inserted ) {
+						$console->red( 'Error importing post 1:' )->output();
+						continue;
+					}
+
+					$inserted_post_id = $wpdb->insert_id;
+
+					$console->green( 'Post imported:' )->bright_green( $inserted_post_id )->output();
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$wpdb->update(
+						$wpdb->postmeta,
+						[
+							'post_id' => $inserted_post_id,
+						],
+						[
+							'meta_id' => $imported_post->meta_id,
+						]
+					);
+
+					foreach ( $post['meta'] as $meta ) {
+						add_post_meta( $inserted_post_id, $meta['meta_key'], $meta['meta_value'] );
+					}
+
+					// Afterwards we should continue.
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$imported_post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT ID, post_name, post_title, post_date FROM $wpdb->posts WHERE post_title = %s AND post_date = %s",
+						$post['post_title'],
+						$post['post_date']
+					)
+				);
+
+				if ( $imported_post ) {
+					$console->yellow( 'Post already exists:' )->bright_yellow( $imported_post->ID )->output();
+					add_post_meta( $imported_post->ID, self::ORIGINAL_POST_ID_META, $post['ID'] );
+					continue;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT ID FROM $wpdb->posts WHERE ID = %d",
+						$post['ID']
+					)
+				);
+
+				if ( $post_id ) {
+					unset( $post['ID'] );
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$maybe_inserted = $wpdb->insert(
+					$wpdb->posts,
+					array_intersect_key( $post, $flipped_post_columns )
+				);
+
+				if ( ! $maybe_inserted ) {
+					$console->red( 'Error importing post 2' )->output();
+					continue;
+				}
+
+				$inserted_post_id = $wpdb->insert_id;
+
+				$console->green( 'Post imported 2:' )->bright_green( $inserted_post_id )->output();
+				add_post_meta( $inserted_post_id, self::ORIGINAL_POST_ID_META, $post['ID'] );
+
+				foreach ( $post['meta'] as $meta ) {
+					add_post_meta( $inserted_post_id, $meta['meta_key'], $meta['meta_value'] );
 				}
 			}
 		}
