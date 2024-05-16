@@ -57,6 +57,14 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 	public function register_commands() {
 
 		WP_CLI::add_command(
+			'newspack-content-migrator ourweekly2024-categories',
+			[ $this, 'cmd_ourweekly2024_categories' ],
+			[
+				'shortdesc' => 'Fix category mixup.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator ourweekly2024-post-content',
 			[ $this, 'cmd_ourweekly2024_post_content' ],
 			[
@@ -64,19 +72,11 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command(
-			'newspack-content-migrator ourweekly2024-redirects',
-			[ $this, 'cmd_ourweekly2024_redirects' ],
-			[
-				'shortdesc' => 'Set redirects as needed.',
-			]
-		);
-
 		// WP_CLI::add_command(
-		// 	'newspack-content-migrator ourweekly2024-categories',
-		// 	[ $this, 'cmd_ourweekly2024_categories' ],
+		// 	'newspack-content-migrator ourweekly2024-redirects',
+		// 	[ $this, 'cmd_ourweekly2024_redirects' ],
 		// 	[
-		// 		'shortdesc' => 'Fix category mixup.',
+		// 		'shortdesc' => 'Set redirects as needed.',
 		// 	]
 		// );
 
@@ -186,6 +186,8 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 		$this->mylog( 'Starting ...' );
 
+		// -- POSTS:
+
 		$args = array(
 			// Must be newly imported post
 			'meta_key'    => 'newspack_ghostcms_slug',
@@ -194,31 +196,31 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		// get all posts that have the ghost id postmeta
 		$this->posts_logic->throttled_posts_loop( $args, function( $post ) {
 			
+			$this->logger->log( $this->log, '-------- post id: ' . $post->ID );
+			$this->logger->log( $this->log, 'ghost id: ' . get_post_meta( $post->ID, 'newspack_ghostcms_id', true ) );
+
 			$ghost_slug = get_post_meta( $post->ID, 'newspack_ghostcms_slug', true );
 
-			if( $ghost_slug == $post->post_name ) return;
+			if( $ghost_slug == $post->post_name ) {
+				$this->logger->log( $this->log, 'ghost slug is same as post name' );
+				return;
+			}
 
-			$date_string = preg_replace( '/^(\d{4})-(\d{2})-(\d{2}).*/', '/${1}/${2}/${3}/', $post->post_date );
-			$old = $date_string . $ghost_slug;
-			$new = '/?name=' . $post->post_name;
+			$url_from = preg_replace( '/^(\d{4})-(\d{2})-(\d{2}).*/', '/${1}/${2}/${3}/', $post->post_date ) . $ghost_slug;
+			$url_to = '/?name=' . $post->post_name;
 
-			$this->logger->log( $this->log, '-------- post id: ' . $post->ID );
-			$this->logger->log( $this->log, 'old: ' . $old );
-			$this->logger->log( $this->log, 'new: ' . $new );
+			$this->logger->log( $this->log, 'url_from: ' . $url_from );
+			$this->logger->log( $this->log, 'url_to: ' . $url_to );
 
-			// $this->set_redirect( $url_from, $url_to, $batch, true );
-
+			$this->set_redirect( $url_from, $url_to, 'posts', true );
 
 		});
 
-		// $old_permalink = '/reporting/' . $columns['Slug'] . '/';
-		// $new_permalink = str_replace( get_site_url() , '', get_permalink( $post_id ) );
+		// -- WP USERS
 
-		// if( $old_permalink != $new_permalink ) {
-		// 	$this->set_redirect( $old_permalink, $new_permalink, 'posts' );
-		// }
+		// -- CAP GAs
 
-		// if( $cat_slug != $term->slug ) $this->set_redirect( '/category/' . $cat_slug, '/category/' . $term->slug, 'categories' );
+		// -- Categories
 		
 		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
@@ -230,12 +232,26 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 	 private function set_redirect( $url_from, $url_to, $batch, $verbose = false ) {
 
+		global $wpdb;
+
 		// make sure Redirects plugin is active
 		if( ! class_exists ( '\Red_Item' ) ) {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 		
-		if( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
+		// This function returns strange "regex" matches that aren't matches!
+		// $matches = \Red_Item::get_for_matched_url( $url_from );
+		// instead, do directly.
+		$exists = $wpdb->get_var( $wpdb->prepare( "
+			SELECT 1
+			FROM {$wpdb->prefix}redirection_items
+			WHERE match_url = %s
+			AND status='enabled'
+			LIMIT 1",
+			$url_from
+		));
+
+		if( ! empty( $exists  ) ) {
 
 			if( $verbose ) $this->mylog( 'Skipping redirect (exists): ' . $url_from . ' to ' . $url_to );
 			return;
