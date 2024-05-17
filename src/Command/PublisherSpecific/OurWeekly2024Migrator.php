@@ -88,13 +88,13 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			]
 		);
 
-		// WP_CLI::add_command(
-		// 	'newspack-content-migrator ourweekly2024-redirects',
-		// 	[ $this, 'cmd_ourweekly2024_redirects' ],
-		// 	[
-		// 		'shortdesc' => 'Set redirects as needed.',
-		// 	]
-		// );
+		WP_CLI::add_command(
+			'newspack-content-migrator ourweekly2024-redirects',
+			[ $this, 'cmd_ourweekly2024_redirects' ],
+			[
+				'shortdesc' => 'Set redirects as needed.',
+			]
+		);
 
 	}
 
@@ -294,7 +294,10 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 				return;
 			}
 
+			// old format:
 			$url_from = preg_replace( '/^(\d{4})-(\d{2})-(\d{2}).*/', '/${1}/${2}/${3}/', $post->post_date ) . $ghost_slug;
+
+			// shortcut to new url:
 			$url_to = '/?name=' . $post->post_name;
 
 			$this->logger->log( $this->log, 'url_from: ' . $url_from );
@@ -304,11 +307,38 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 		});
 
+		// -- Tags to Categories
+
+/*
+select *
+from wp_termmeta tm
+join wp_terms t on t.term_id = tm.term_id
+where tm.meta_key = 'newspack_ghostcms_slug'
+order by meta_value
+*/
+
 		// -- WP USERS
+
+/*
+select *
+from wp_usermeta um
+join wp_users u on u.ID = um.user_id
+where um.meta_key = 'newspack_ghostcms_slug'
+and um.meta_value <> u.user_nicename
+order by meta_value
+*/
 
 		// -- CAP GAs
 
-		// -- Categories
+/*
+select distinct pm.meta_value, p.post_name, pm2.meta_value
+from wp_postmeta pm
+join wp_posts p on p.ID = pm.post_id and p.post_type = 'guest-author'
+join wp_postmeta pm2 on pm2.post_id = p.ID and pm2.meta_key = 'cap-user_login'
+where pm.meta_key = 'newspack_ghostcms_slug'
+;
+
+*/
 		
 		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
@@ -327,7 +357,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
 		
-		// This function returns strange "regex" matches that aren't matches!
+		// The function (get_for_matched_url) returns strange "regex" matches that aren't matches!
 		// $matches = \Red_Item::get_for_matched_url( $url_from );
 		// instead, do directly.
 		$exists = $wpdb->get_var( $wpdb->prepare( "
