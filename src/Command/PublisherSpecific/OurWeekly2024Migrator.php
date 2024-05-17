@@ -61,6 +61,22 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			[ $this, 'cmd_ourweekly2024_categories' ],
 			[
 				'shortdesc' => 'Fix category mixup.',
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'previous-log-file',
+						'description' => 'Path to previous ghost migration LOG.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+					array(
+						'type'        => 'assoc',
+						'name'        => 'tags-file',
+						'description' => 'Path to tags from ghost .',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+				),
 			]
 		);
 
@@ -80,8 +96,64 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		// 	]
 		// );
 
+	}
+
+	public function cmd_ourweekly2024_categories( $pos_args, $assoc_args ) {
+		
+		if( ! isset( $assoc_args['previous-log-file'] ) || ! file_exists( $assoc_args['previous-log-file'] ) ) {
+			WP_CLI::error( 'Previous ghost migration log file not found.' );
+		}
+
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+
+		$this->logger->log( $this->log, 'Starting.' );
+		$this->logger->log( $this->log, '--previous-log-file: ' . $assoc_args['previous-log-file'] );
+		
+        $lines = file( $assoc_args['previous-log-file'] );
+
+		$post_id = 0;
+		$categories = array();
+
+		foreach( $lines as $line ) {
+
+			if( preg_match( '/^Inserted new post: (\d+)$/i', trim( $line ), $matches ) ) {
+
+				// Start fresh
+				$post_id = $matches[1];
+				$categories = array();
+
+			}
+
+			// append catetgories to array.
+			if( preg_match( '/^Relationship found for tag: (\w+)$/i', trim( $line ), $matches ) ) {
+
+				$categories[] = $matches[1];
+
+			}
+
+			// apply to post
+			if( preg_match( '/^Set post categories. Count: (\d+)$/i', trim( $line ), $matches ) ) {
+				
+				if( $matches[1] != count( $categories ) ) {
+
+					$this->logger->log( $this->log, 'Incorrect category count.', $this->logger::ERROR );
+
+				} else {
+				
+					// Apply correct categories.
+					wp_set_post_categories( $post_id, $categories );
+
+				}
+
+			}
+			
+		}
+
+		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
 	}
+
+
 
 	public function cmd_ourweekly2024_post_content( $pos_args, $assoc_args ) {
 		
