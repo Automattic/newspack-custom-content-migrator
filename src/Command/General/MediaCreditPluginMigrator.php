@@ -9,7 +9,9 @@
  * Media Credit Plugin also allowed Admins to add freeform text by using a [media-credit] 
  * shortcode within posts' post_content.
  * 
- * The command(s) below can be used to process posts with this shortcode.
+ * The main command below can be used to remove the old shortcode (while saving freeform text
+ * into postmeta), then a secondary command can be used to export the saved postmeta into SQL
+ * for visual review/clean-up and phpmyadmin execution.
  * 
  * @link: https://wordpress.org/plugins/media-credit/
  *
@@ -104,6 +106,14 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator review-media-credit-plugin-other-credits',
+			[ $this, 'cmd_review_media_credit_plugin_other_credits' ],
+			[
+				'shortdesc' => 'Review Media Credit Plugin other credits that are saved in postmeta.',
 			]
 		);
 	}
@@ -204,6 +214,61 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		}
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
+	}
+
+	/**
+	 * Review Media Credit Plugin other credits saved in postmeta. Log a list of SQL
+	 * for visual review and execution.
+	 * 
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_review_media_credit_plugin_other_credits( $pos_args, $assoc_args ) {
+
+		global $wpdb;
+
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+
+		$this->logger->log( $this->log, 'Review "other credits", choose a single SQL line per attachment (or none), then run remaining SQL.' );
+
+		// Get attachments that have required postmeta
+		$args = array(
+			'post_type'      => 'attachment',
+			'meta_key'       => self::POSTMETA_KEY_OTHER_CREDITS,
+			'fields'         => 'ids',
+			'orderby'        => 'date',
+			'order'          => 'DESC',
+		);
+
+		$attachment_ids = get_posts( $args );
+
+		foreach ( $attachment_ids as $attachment_id ) {
+			
+			// Log the existing media credit value.
+			$this->logger->log( $this->log, '' );
+			$this->logger->log( $this->log, '-- Attachment ID: ' . $attachment_id . ' / Current media credit: ' . get_post_meta( $attachment_id, '_media_credit', true ) );
+			$this->logger->log( $this->log, '' );
+
+			// Get "other credits" (multiple rows may exist (single = false)).
+			$other_credits = get_post_meta( $attachment_id, self::POSTMETA_KEY_OTHER_CREDITS, false );
+			
+			// Log SQL statements for review and run.
+			foreach( $other_credits as $other_credit ) {
+				
+				$sql = $wpdb->prepare( "
+					UPDATE $wpdb->postmeta set meta_value = %s where meta_key = %s and post_id = %d
+					", $other_credit, '_media_credit', $attachment_id );
+
+				$this->logger->log( $this->log, trim( $sql ) );
+
+			} // each "other credit"
+
+		} // each attachment
+
+		$this->logger->log( $this->log, '' );
+
+		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
+		
 	}
 
 	/**
