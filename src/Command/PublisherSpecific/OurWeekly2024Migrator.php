@@ -72,7 +72,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 					array(
 						'type'        => 'assoc',
 						'name'        => 'tags-file',
-						'description' => 'Path to tags from ghost .',
+						'description' => 'Path to tags node from ghost.',
 						'optional'    => false,
 						'repeating'   => false,
 					),
@@ -104,11 +104,27 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			WP_CLI::error( 'Previous ghost migration log file not found.' );
 		}
 
+		if( ! isset( $assoc_args['tags-file'] ) || ! file_exists( $assoc_args['tags-file'] ) ) {
+			WP_CLI::error( 'Ghost tags file not found.' );
+		}
+
+		$json_tags = json_decode( file_get_contents( $assoc_args['tags-file'] ), null, 2147483647 );
+
+		if ( 0 != json_last_error() || 'No error' != json_last_error_msg() ) {
+			WP_CLI::error( 'Tags JSON file could not be parsed.' );
+		}
+
+		print_r($json_tags);
+		exit();
+
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
 
 		$this->logger->log( $this->log, 'Starting.' );
 		$this->logger->log( $this->log, '--previous-log-file: ' . $assoc_args['previous-log-file'] );
+		$this->logger->log( $this->log, '--tags-file: ' . $assoc_args['tags-file'] );
 		
+
+
         $lines = file( $assoc_args['previous-log-file'] );
 
 		$post_id = 0;
