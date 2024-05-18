@@ -113,7 +113,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			'newspack-content-migrator review-media-credit-plugin-other-credits',
 			[ $this, 'cmd_review_media_credit_plugin_other_credits' ],
 			[
-				'shortdesc' => 'Review Media Credit Plugin other credits that are saved in postmeta.',
+				'shortdesc' => 'Review Media Credit Plugin "other credits" that are saved in postmeta. Log will contain possible SQL to run.',
 			]
 		);
 	}
@@ -231,13 +231,13 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		$this->logger->log( $this->log, 'Review "other credits", choose a single SQL line per attachment (or none), then run remaining SQL.' );
 
-		// Get attachments that have required postmeta
+		// Get attachments that have required postmeta.
 		$args = array(
-			'post_type'      => 'attachment',
-			'meta_key'       => self::POSTMETA_KEY_OTHER_CREDITS,
-			'fields'         => 'ids',
-			'orderby'        => 'date',
-			'order'          => 'DESC',
+			'post_type' => 'attachment',
+			'meta_key'  => self::POSTMETA_KEY_OTHER_CREDITS,
+			'fields'    => 'ids',
+			'orderby'   => 'date',
+			'order'     => 'DESC',
 		);
 
 		$attachment_ids = get_posts( $args );
@@ -253,11 +253,16 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			$other_credits = get_post_meta( $attachment_id, self::POSTMETA_KEY_OTHER_CREDITS, false );
 			
 			// Log SQL statements for review and run.
-			foreach( $other_credits as $other_credit ) {
+			foreach ( $other_credits as $other_credit ) {
 				
-				$sql = $wpdb->prepare( "
+				$sql = $wpdb->prepare(
+					"
 					UPDATE $wpdb->postmeta set meta_value = %s where meta_key = %s and post_id = %d
-					", $other_credit, '_media_credit', $attachment_id );
+					",
+					$other_credit,
+					'_media_credit',
+					$attachment_id
+				);
 
 				$this->logger->log( $this->log, trim( $sql ) );
 
@@ -268,7 +273,6 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		$this->logger->log( $this->log, '' );
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
-		
 	}
 
 	/**
