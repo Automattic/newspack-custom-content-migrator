@@ -257,7 +257,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 				
 				$sql = $wpdb->prepare(
 					"
-					UPDATE $wpdb->postmeta set meta_value = %s where meta_key = %s and post_id = %d
+					UPDATE $wpdb->postmeta set meta_value = %s where meta_key = %s and post_id = %d;
 					",
 					$other_credit,
 					'_media_credit',
