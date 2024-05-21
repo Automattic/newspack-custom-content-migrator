@@ -252,7 +252,9 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 			// Get "other credits" (multiple rows may exist (single = false)).
 			$other_credits = get_post_meta( $attachment_id, self::POSTMETA_KEY_OTHER_CREDITS, false );
 			
-			// Log SQL statements for review and run.
+			// Log SQL statements to a file for human-review.
+			// SQL updates in this loop are NOT executed, they are only logged.
+			// They must be run by-hand (phpmyadmin) later if requested by human-reviewer.
 			foreach ( $other_credits as $other_credit ) {
 				
 				$sql = $wpdb->prepare(
@@ -567,7 +569,8 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 		} else {
 
 			// Save these differences to postmeta so Publisher can hand-review and pick the one they want.
-			// muliple postmeta can be saved per attachment_id. (unique = false).
+			// Since there may be multiple media credits per attachment_id we want to save each one.
+			// Use "add post meta" with argument "$unique = false" so multiple values can be saved.
 			add_post_meta( $attachment_id, self::POSTMETA_KEY_OTHER_CREDITS, $atts['name'], false );
 
 		}
