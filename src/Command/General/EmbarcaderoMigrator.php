@@ -4523,28 +4523,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				}
 			}
 
-			/*$current_post_authors = $this->coauthorsplus_logic->get_all_authors_for_post( $post->ID );
-			$this->logger->log( self::LOG_FILE, sprintf( 'Current Post Authors %d', count( $current_post_authors ) ) );
-			if ( ! empty( $current_post_authors ) ) {
-				$qa_row['Current Authors (CAP)'] = '';
-
-				foreach ( $current_post_authors as $current_post_author ) {
-					$author_string = sprintf(
-						'Type: %s, ID: %s, Slug: %s',
-						$current_post_author->type,
-						$current_post_author->ID,
-						$current_post_author->user_nicename
-					);
-					$this->logger->log( self::LOG_FILE, $author_string );
-
-					if ( ! empty( $qa_row['Current Authors (CAP)'] ) ) {
-						$qa_row['Current Authors (CAP)'] .= ' <> ';
-					}
-
-					$qa_row['Current Authors (CAP)'] .= $author_string;
-				}
-			}*/
-
 			$author = get_user_by( 'email', $row['author_email'] );
 
 			if ( ! $author ) {
@@ -4703,6 +4681,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		if ( ! $staff_account_id ) {
 			$this->logger->log( self::LOG_FILE, sprintf( 'Could not find staff account with email address %s', $staff_account_email_address ), Logger::WARNING );
+			$staff_account_id = 1;
 		}
 
 		$staff_account_id = intval( $staff_account_id );
