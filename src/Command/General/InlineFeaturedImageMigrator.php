@@ -616,13 +616,15 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 				$file_to_check = get_attached_file( get_post_thumbnail_id( $post_id ) );
 
-				if ( file_exists( $file_to_check ) ) return;
+				// If file exists, no further action is needed.
+				if ( file_exists( $file_to_check ) ) {
+					return;
+				}
 
-				// Remove since the file does not exist.
+				// Remove post meta since the file was not found on the hard drive.
 				delete_post_meta( $post_id, '_thumbnail_id' );
 
 				$this->logger->log( $log_file, sprintf( 'Featured image removed for post %d due to missing file: %s ', $post_id, $file_to_check ) );
-
 			}
 		);
 
