@@ -114,6 +114,11 @@ class BlockTransformerCommand implements InterfaceCommand {
 	 */
 	public function cmd_blocks_nudge( array $pos_args, array $assoc_args ): void {
 		$post_range = $this->get_post_id_range( $assoc_args );
+		if ( empty( $post_range ) ) {
+			WP_CLI::log( 'No posts to nudge. Try a bigger range of post ids maybe?' );
+
+			return;
+		}
 
 		$post_ids_format = implode( ', ', array_fill( 0, count( $post_range ), '%d' ) );
 		global $wpdb;
@@ -167,15 +172,19 @@ class BlockTransformerCommand implements InterfaceCommand {
 				continue;
 			}
 
-			wp_update_post(
+			$updated = wp_update_post(
 				[
 					'ID'           => $post->ID,
 					'post_content' => $content,
 				]
 			);
-			$this->logger->log( $logfile, sprintf( 'Decoded blocks in ID %d %s', $post->ID, get_permalink( $post->ID ) ), Logger::SUCCESS );
+			if ( 0 === $updated || is_wp_error( $updated ) ) {
+				$this->logger->log( $logfile, sprintf( 'Could not decode blocks in ID %d %s', $post->ID, get_permalink( $post->ID ) ), Logger::ERROR );
+			} else {
+				$this->logger->log( $logfile, sprintf( 'Decoded blocks in ID %d %s', $post->ID, get_permalink( $post->ID ) ), Logger::SUCCESS );
+				++$decoded_posts_counter;
+			}
 
-			++$decoded_posts_counter;
 			if ( 0 === $decoded_posts_counter % 25 ) {
 				$spacer = str_repeat( ' ', 10 );
 				WP_CLI::log(
@@ -233,15 +242,21 @@ class BlockTransformerCommand implements InterfaceCommand {
 				continue;
 			}
 
-			wp_update_post(
+			$updated = wp_update_post(
 				[
 					'ID'           => $post->ID,
 					'post_content' => $content,
 				]
 			);
-			$this->logger->log( $logfile, sprintf( 'Encoded blocks in post ID %d  %s', $post->ID, get_permalink( $post->ID ) ), Logger::SUCCESS );
+			if ( 0 === $updated || is_wp_error( $updated ) ) {
+				$this->logger->log( $logfile, sprintf( 'Could not encode blocks in post ID %d %s', $post->ID, get_permalink( $post->ID ) ), Logger::ERROR );
+				continue;
+			} else {
+				$this->logger->log( $logfile, sprintf( 'Encoded blocks in post ID %d  %s', $post->ID, get_permalink( $post->ID ) ), Logger::SUCCESS );
 
-			++$encoded_posts_counter;
+				++$encoded_posts_counter;
+			}
+
 			if ( 0 === $encoded_posts_counter % 25 ) {
 				$spacer = str_repeat( ' ', 10 );
 				WP_CLI::log(
