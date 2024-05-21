@@ -94,6 +94,15 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				],
 			]
 		);
+		
+		WP_CLI::add_command(
+			'newspack-content-migrator remove-featured-images-if-file-is-missing',
+			[ $this, 'cmd_remove_featured_images_if_file_is_missing' ],
+			[
+				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured images if the physical hard drive image file is missing.',
+			]
+		);
+		
 		WP_CLI::add_command(
 			'newspack-content-migrator set-first-image-from-content-as-featured-image',
 			[ $this, 'cmd_set_first_image_from_content_as_featured_image' ],
@@ -572,6 +581,54 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Finished. See %s/ folder for logs.', $log_dir ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator remove-featured-images-if-file-is-missing`.
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args      Associative arguments.
+	 * @return void
+	 */
+	public function cmd_remove_featured_images_if_file_is_missing( $positional_args, $assoc_args ) {
+		
+		$log_file = 'cmd_remove_featured_images_if_file_is_missing.log';
+
+		$this->logger->log( $log_file, 'Starting...' );
+
+		// Posts with a featured image.
+		$query_args = [
+			'post_type'   => 'post',
+			'post_status' => 'any',
+			'fields'      => 'ids',
+			'meta_query'  => [
+				[
+					'key'     => '_thumbnail_id',
+					'value'   => '',
+					'compare' => '!=',
+				],
+			],
+		];
+
+		$this->post_logic->throttled_posts_loop(
+			$query_args, 
+			function ( $post_id ) use( $log_file ) {
+
+				$file_to_check = get_attached_file( get_post_thumbnail_id( $post_id ) );
+
+				if ( file_exists( $file_to_check ) ) return;
+
+				// Remove since the file does not exist.
+				delete_post_meta( $post_id, '_thumbnail_id' );
+
+				$this->logger->log( $log_file, sprintf( 'Featured image removed for post %d due to missing file: %s ', $post_id, $file_to_check ) );
+
+			}
+		);
+
+		wp_cache_flush();
+
+		$this->logger->log( $log_file, 'Done', $this->logger::SUCCESS );
 	}
 
 	/**
