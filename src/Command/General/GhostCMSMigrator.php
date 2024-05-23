@@ -577,17 +577,18 @@ class GhostCMSMigrator implements InterfaceCommand {
 		} 
 		
 		// Check if category exists in db.
-		$term_arr = term_exists( $json_tag->name, 'category' );
+		// Logic: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L784-L801
+		$term_arr = term_exists( $json_tag->slug, 'category' );
 
 		// Category does not exist.
-		if ( ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
+		if ( ! $term_arr ) {
 
 			// Insert it.
-			$term_arr = wp_insert_term( $json_tag->name, 'category' );
+			$term_arr = wp_insert_term( $json_tag->name, 'category', array( 'slug' => $json_tag->slug ) );
 
 			// Log and return 0 if insert failed.
-			if ( is_wp_error( $term_arr ) || ! is_array( $term_arr ) || empty( $term_arr['term_id'] ) ) {
-				$this->logger->log( $this->log, 'WP insert term failed: ' . $json_tag->name, $this->logger::WARNING );
+			if ( is_wp_error( $term_arr ) ) {
+				$this->logger->log( $this->log, 'Insert term failed (' . $json_tag->slug . ') ' . $term_arr->get_error_message(), $this->logger::WARNING );
 				return 0;
 			}
 
