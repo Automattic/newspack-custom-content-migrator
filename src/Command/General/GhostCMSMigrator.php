@@ -14,7 +14,6 @@ namespace NewspackCustomContentMigrator\Command\General;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -82,13 +81,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
-	 * RedirectionLogic
-	 * 
-	 * @var RedirectionLogic 
-	 */
-	private $redirection_logic;
-
-	/**
 	 * Lookup to convert json tags to wp categories.
 	 * 
 	 * Note: json tag_id key may exist, but if tag visibility was not public, value will be 0
@@ -104,7 +96,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$this->attachments_logic   = new AttachmentsLogic();
 		$this->coauthorsplus_logic = new CoAuthorPlusLogic();
 		$this->logger              = new Logger();
-		$this->redirection_logic   = new RedirectionLogic();
 	}
 
 	/**
@@ -164,13 +155,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 			]
 		);
 
-		WP_CLI::add_command(
-			'newspack-content-migrator ghost-cms-redirects',
-			[ $this, 'cmd_ghost_cms_redirects' ],
-			[
-				'shortdesc' => 'Process Redirection (plugin) redirects for posts, categories, and author slugs.',
-			]
-		);
 	}
 
 	/**
@@ -325,50 +309,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 			$this->set_post_tags_to_categories( $wp_post_id, $json_post->id );
 
 		}
-
-		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
-	}
-
-	/**
-	 * Set Redirection (plugin) redirects for posts, categories, and authors slugs.
-	 * 
-	 * @param array $pos_args Positional arguments.
-	 * @param array $assoc_args Associative arguments.
-	 */
-	public function cmd_ghost_cms_redirects( $pos_args, $assoc_args ) {
-
-		global $wpdb;
-		
-		// Plugin dependencies.
-
-		if ( ! class_exists( '\Red_Item' ) ) {
-			WP_CLI::error( 'Redirection plugin must be active.' );
-		}
-
-		// Start processing.
-
-		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
-
-		$this->logger->log( $this->log, 'Doing redirects.' );
-
-		// Set slug redirects if needed.
-		// update_post_meta( $wp_post_id, 'newspack_ghostcms_slug', $json_post->slug );
-		// if( $json_post->slug != $wp_post_slug ) {
-		// $this->logger->log( $this->log, 'TODO: post redirect needed: ' . $json_post->slug . ' => ' . $wp_post_slug, $this->logger::WARNING );
-		// or save to meta for later CLI?
-		// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-		// }
-
-		// Create redirect if needed
-		// if( $ga->user_login != $json_author_user->slug ) {
-		// $this->logger->log( $this->log, 'Need GA redirect', $this->logger::WARNING );
-		// or save to meta for later CLI?
-		// $this->set_redirect( '/people/' . $person->slug, '/author/' . $ga_obj->user_login, 'people' );
-		// }
-
-		// update_user_meta( $wp_user->ID, 'newspack_ghostcms_slug', $json_author_user->slug );
-					
-		// update_term_meta( $term_arr['term_id'], 'newspack_ghostcms_slug', $json_author_user->slug );
 
 		$this->logger->log( $this->log, 'Done.', $this->logger::SUCCESS );
 	}
@@ -786,35 +726,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 		wp_set_post_categories( $wp_post_id, $category_ids );
 
 		$this->logger->log( $this->log, 'Set post categories. Count: ' . count( $category_ids ) );
-	}
-
-	private function set_redirect( $url_from, $url_to, $batch ) {
-
-		// Plugin must be active.
-		if ( ! class_exists( '\Red_Item' ) ) {
-
-			$this->logger->log( $this->log, 'Redirection plugin must be active.', $this->logger::WARNING );
-
-			return;
-
-		}
-		
-		// Already exists.
-		if ( ! empty( \Red_Item::get_for_matched_url( $url_from ) ) ) {
-
-			$this->logger->log( $this->log, 'Redirect already set: ' . $url_from . ' => ' . $url_to );
-
-			return;
-
-		}
-		
-		$this->redirection_logic->create_redirection_rule(
-			'Old site (' . $batch . ')',
-			$url_from,
-			$url_to
-		);
-
-		$this->logger->log( $this->log, 'Added redirect (' . $batch . '): ' . $url_from . ' => ' . $url_to );
 	}
 
 	/**
