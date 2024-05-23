@@ -154,7 +154,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 				),
 			]
 		);
-
 	}
 
 	/**
@@ -260,6 +259,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 				$this->logger->log( $this->log, 'Skip JSON post (review by hand -skips.log): ' . $skip_reason, $this->logger::WARNING );
 
 				// Save to skips file, and do not write to console.
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode
 				$this->logger->log( $this->log . '-skips.log', json_encode( array( $skip_reason, $json_post ) ), false );
 
 				continue;
@@ -292,6 +292,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_id', $json_post->id );
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_uuid', $json_post->uuid );
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_slug', $json_post->slug );
+			
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode
 			update_post_meta( $wp_post_id, 'newspack_ghostcms_checksum', md5( json_encode( $json_post ) ) );            
 
 			// Featured image (with alt and caption).
@@ -394,13 +396,10 @@ class GhostCMSMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// have to check if alredy exists so that multiple calls do not download() files already inserted.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$attachment_id = $wpdb->get_var(
 			$wpdb->prepare(
-				"
-			SELECT ID
-			FROM {$wpdb->posts}
-			WHERE post_type = 'attachment' and post_title = %s
-		",
+				"SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment' and post_title = %s",
 				$title 
 			)
 		);
@@ -413,7 +412,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 
 		}
 
-		// this function will check if existing, but only after re-downloading
+		// this function will check if existing, but only after re-downloading.
 		return $this->attachments_logic->import_external_file( $path, $title, $caption, $description, $alt );
 	}
 
@@ -517,7 +516,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 		} 
 		
 		// Check if category exists in db.
-		// Logic: https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L784-L801
+		// Logic from https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L784-L801 .
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.term_exists_term_exists
 		$term_arr = term_exists( $json_tag->slug, 'category' );
 
 		// Category does not exist.
@@ -739,6 +739,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		// JSON properites.
+
 		if ( 'post' != $json_post->type ) {
 			return 'not_post';
 		}
@@ -750,6 +751,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		}
 
 		// Empty properties.
+
 		if ( empty( $json_post->html ) ) {
 			return 'empty_html';
 		}
@@ -761,6 +763,8 @@ class GhostCMSMigrator implements InterfaceCommand {
 		}
 		
 		// WP Lookups.
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		if ( $wpdb->get_var(
 			$wpdb->prepare( 
 				"SELECT 1 FROM $wpdb->postmeta WHERE meta_key = 'newspack_ghostcms_id' AND meta_value = %s", 
@@ -776,6 +780,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		}
 
 		// If post_name / slug exists.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		if ( $wpdb->get_var(
 			$wpdb->prepare( 
 				"SELECT ID FROM $wpdb->posts WHERE post_type = 'post' and post_name = %s", 
