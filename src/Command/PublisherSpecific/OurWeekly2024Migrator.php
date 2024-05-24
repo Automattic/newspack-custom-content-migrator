@@ -17,14 +17,22 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 	private static $instance = null;
 
+	// Logic
 	private $attachments_logic;
 	private $crawler;
 	private $logger;
 	private $posts_logic;
 	private $redirection_logic;
 
+	// Logging and Output
 	private $log;
+	private $dry_run;
 	private $report = [];
+
+	// Vars
+	private $json;
+	private $tags_to_categories;
+
 	
 	/**
 	 * Constructor.
@@ -62,19 +70,21 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			[
 				'shortdesc' => 'Fix category mixup.',
 				'synopsis'  => array(
-					array(
-						'type'        => 'assoc',
-						'name'        => 'previous-log-file',
-						'description' => 'Path to previous ghost migration LOG.',
-						'optional'    => false,
-						'repeating'   => false,
-					),
-					array(
-						'type'        => 'assoc',
-						'name'        => 'tags-file',
-						'description' => 'Path to tags node from ghost.',
-						'optional'    => false,
-						'repeating'   => false,
+					'synopsis'  => array(
+						array(
+							'type'        => 'assoc',
+							'name'        => 'json-file',
+							'description' => 'Path to Ghost JSON export file.',
+							'optional'    => false,
+							'repeating'   => false,
+						),
+						array(
+							'type'        => 'flag',
+							'name'        => 'dry-run',
+							'description' => 'No updates.',
+							'optional'    => true,
+							'repeating'   => false,
+						),
 					),
 				),
 			]
@@ -98,76 +108,195 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 	}
 
+
+
+	/**
+	 * CATEGORIES
+	 * 
+	 */
+
 	public function cmd_ourweekly2024_categories( $pos_args, $assoc_args ) {
 		
-		if( ! isset( $assoc_args['previous-log-file'] ) || ! file_exists( $assoc_args['previous-log-file'] ) ) {
-			WP_CLI::error( 'Previous ghost migration log file not found.' );
+		global $wpdb;
+
+		// --dry-run
+
+		$this->dry_run = ( isset( $assoc_args['dry-run'] ) ) ? true : false;
+
+		// --json-file.
+
+		if ( ! isset( $assoc_args['json-file'] ) || ! file_exists( $assoc_args['json-file'] ) ) {
+			WP_CLI::error( 'JSON file not found.' );
 		}
 
-		if( ! isset( $assoc_args['tags-file'] ) || ! file_exists( $assoc_args['tags-file'] ) ) {
-			WP_CLI::error( 'Ghost tags file not found.' );
-		}
-
-		$json_tags = json_decode( file_get_contents( $assoc_args['tags-file'] ), null, 2147483647 );
+		$this->json = json_decode( file_get_contents( $assoc_args['json-file'] ), null, 2147483647 );
 
 		if ( 0 != json_last_error() || 'No error' != json_last_error_msg() ) {
-			WP_CLI::error( 'Tags JSON file could not be parsed.' );
+			WP_CLI::error( 'JSON file could not be parsed.' );
 		}
 
-		print_r($json_tags);
-		exit();
+		if ( empty( $this->json->db[0]->data->posts ) ) {
+			WP_CLI::error( 'JSON file contained no posts.' );
+		}
 
+		// Start processing.
 		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
-
-		$this->logger->log( $this->log, 'Starting.' );
-		$this->logger->log( $this->log, '--previous-log-file: ' . $assoc_args['previous-log-file'] );
-		$this->logger->log( $this->log, '--tags-file: ' . $assoc_args['tags-file'] );
 		
+		$this->logger->log( $this->log, 'Starting.' );
+		$this->logger->log( $this->log, '--json-file: ' . $assoc_args['json-file'] );
+		
+		if( $this->dry_run ) $this->logger->log( $this->log, '--dry-run' );
+		
+		// Posts that need their categories reset
+		$results = $wpdb->get_results("
+			select distinct pm.post_id, pm.meta_value
+			from wp_postmeta pm
+			join wp_term_relationships tr on tr.object_id = pm.post_id
+			join wp_term_taxonomy tt on tt.term_taxonomy_id = tr.term_taxonomy_id and tt.taxonomy = 'category'
+			join wp_terms t on t.term_id = tt.term_id and t.slug in( 'politics', 'government', 'local-ow', 'local', 'our-opinion', 'opinion' )
+			where pm.meta_key = 'newspack_ghostcms_id'
+		");
 
+		foreach( $results as $row ) {
 
-        $lines = file( $assoc_args['previous-log-file'] );
-
-		$post_id = 0;
-		$categories = array();
-
-		foreach( $lines as $line ) {
-
-			if( preg_match( '/^Inserted new post: (\d+)$/i', trim( $line ), $matches ) ) {
-
-				// Start fresh
-				$post_id = $matches[1];
-				$categories = array();
-
-			}
-
-			// append catetgories to array.
-			if( preg_match( '/^Relationship found for tag: (\w+)$/i', trim( $line ), $matches ) ) {
-
-				$categories[] = $matches[1];
-
-			}
-
-			// apply to post
-			if( preg_match( '/^Set post categories. Count: (\d+)$/i', trim( $line ), $matches ) ) {
-				
-				if( $matches[1] != count( $categories ) ) {
-
-					$this->logger->log( $this->log, 'Incorrect category count.', $this->logger::ERROR );
-
-				} else {
-				
-					// Apply correct categories.
-					wp_set_post_categories( $post_id, $categories );
-
-				}
-
-			}
-			
+			$this->set_post_tags_to_categories( $row->post_id, $row->meta_value );
+		
 		}
+
+		$this->logger->log( $this->log, print_r( $this->report, true ) );
 
 		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
 	}
+
+	private function get_json_tag_by_id( $json_tag_id ) {
+
+		if ( empty( $this->json->db[0]->data->tags ) ) {
+			return null;
+		}
+
+		foreach ( $this->json->db[0]->data->tags as $json_tag ) {
+
+			if ( $json_tag->id == $json_tag_id ) {
+				return $json_tag;
+			}       
+		} 
+
+		return null;
+	}
+
+	private function get_json_tag_as_category( $json_tag ) {
+
+		// Must have visibility property with value of 'public'.
+		if ( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) {
+
+			$this->logger->log( $this->log, 'JSON tag not visible. Could not be inserted.', $this->logger::WARNING );
+
+			return 0;
+
+		} 
+
+		// Check if category exists in db.
+		// Logic from https://github.com/WordPress/wordpress-importer/blob/71bdd41a2aa2c6a0967995ee48021037b39a1097/src/class-wp-import.php#L784-L801 .
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.term_exists_term_exists
+		$term_arr = term_exists( $json_tag->slug, 'category' );
+
+		// Category does not exist.
+		if ( ! $term_arr || ! isset( $term_arr['term_id'] ) ) {
+
+			$this->logger->log( $this->log, 'WP Category not found (' . $json_tag->slug . ') ', $this->logger::WARNING );
+			return 0;
+
+		}
+
+		$this->logger->log( $this->log, 'Existing WP Category found for slug: ' . $json_tag->slug );
+
+		return $term_arr['term_id'];
+
+	}
+
+	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
+
+		if ( empty( $this->json->db[0]->data->posts_tags ) ) {
+
+			$this->logger->log( $this->log, 'JSON has no post tags (category) relationships.', $this->logger::WARNING );
+
+			return null;
+
+		}
+
+		$category_ids = [];
+
+		// Each posts_tags relationship.
+		foreach ( $this->json->db[0]->data->posts_tags as $json_post_tag ) {
+
+			// Skip if post id does not match relationship.
+			if ( $json_post_tag->post_id != $json_post_id ) {
+				continue;
+			}
+
+			$this->logger->log( $this->log, 'Relationship found for tag: ' . $json_post_tag->tag_id );
+
+			// If tag_id wasn't already processed.
+			if ( ! isset( $this->tags_to_categories[ $json_post_tag->tag_id ] ) ) {
+
+				// Get the json tag object.
+				$json_tag = $this->get_json_tag_by_id( $json_post_tag->tag_id );
+
+				// Verify related tag was found in json.
+				if ( empty( $json_tag ) ) {
+
+					$this->logger->log( $this->log, 'JSON tag not found: ' . $json_post_tag->tag_id, $this->logger::WARNING );
+
+					continue;
+
+				}
+
+				// Attempt insert and save return value into lookup.
+				$this->tags_to_categories[ $json_post_tag->tag_id ] = $this->get_json_tag_as_category( $json_tag );
+
+			}
+
+			// Verify lookup value > 0
+			// A value of 0 means json tag did not have visibility of public.
+			// In that case, don't add to return array.
+			if ( $this->tags_to_categories[ $json_post_tag->tag_id ] > 0 ) {
+				$category_ids[] = $this->tags_to_categories[ $json_post_tag->tag_id ];
+			}       
+
+		} // foreach post_tag relationship
+
+		if ( empty( $category_ids ) ) {
+
+			$this->logger->log( $this->log, 'No categories.' );
+
+			return null;
+
+		}
+
+		$this->logger->log( $this->log, print_r( $category_ids, true ) );
+
+		array_walk( $category_ids, array($this, 'report') );
+
+		if( ! $this->dry_run ) {
+			
+			wp_set_post_categories( $wp_post_id, $category_ids );
+			$this->logger->log( $this->log, 'Set post categories. Count: ' . count( $category_ids ) );
+		
+		}
+
+
+	}
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -449,6 +578,32 @@ where pm.meta_key = 'newspack_ghostcms_slug'
 		return $post_content;
 
 	}
+
+
+
+
+
+	/**
+	 * LOGGGING
+	 */
+
+
+
+	private function report( $key ) {
+
+		if ( ! isset( $this->report[ $key ] ) ) {
+			$this->report[ $key ] = 0;
+		}
+
+		$this->report[ $key ]++;
+
+	}
+
+
+
+
+
+
 
 }
 
