@@ -99,6 +99,14 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator ourweekly2024-post-content-checker',
+			[ $this, 'cmd_ourweekly2024_post_content_checker' ],
+			[
+				'shortdesc' => 'Check all content html.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator ourweekly2024-redirects',
 			[ $this, 'cmd_ourweekly2024_redirects' ],
 			[
@@ -383,6 +391,77 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		}); // throttled posts
 
 		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
+
+	}
+
+	public function cmd_ourweekly2024_post_content_checker( $pos_args, $assoc_args ) {
+		
+		$this->log = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . __FUNCTION__ . '.log';
+
+		$this->mylog( 'Starting ...' );
+
+		$args = array(
+			// Must be newly imported post
+			'meta_key'    => 'newspack_ghostcms_id',
+		);
+
+		// get all posts that have the ghost id postmeta
+		$this->posts_logic->throttled_posts_loop( $args, function( $post ) {
+			
+			// $this->logger->log( $this->log, '-------- post id: ' . $post->ID );
+			// $this->logger->log( $this->log, 'ghost id: ' . get_post_meta( $post->ID, 'newspack_ghostcms_id', true ) );
+
+			// $this->logger->log( $this->log, $post->post_content );
+			
+			// HTML nodes
+			$this->crawler->clear();
+			$this->crawler->add( $post->post_content );
+
+			$this->recursive_nodes( $this->crawler );
+
+			// exit();
+			
+			
+		}); // throttled posts
+
+		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
+
+	}
+
+	private function recursive_nodes( $nodes, $level = 0 ) {
+				
+		$prefix = ''; // str_repeat( '-', $level );
+		$next_level = $level + 1;
+
+		$node_out = function( $node ) use ( $prefix ) {
+
+			// $this->logger->log( $this->log, $prefix . 'nodeName: ' . $node->nodeName );
+			// $this->logger->log( $this->log, $prefix . 'nodeValue: ' . $node->nodeValue );
+
+			if( $node->textContent != $node->nodeValue ) {
+				// $this->logger->log( $this->log, $prefix . 'textContent: ' . $node->textContent );
+			}
+
+			if( $node->attributes ) {
+				foreach ( $node->attributes as $attribute ) {					
+					// $this->logger->log( $this->log, $prefix . 'attr: ' . $attribute->name . ' = ' . $attribute->value );
+					$this->logger->log( $this->log, $prefix . $node->nodeName . ': ' . $attribute->name . ' = ' . $attribute->value );
+				}
+			}
+
+		};
+
+		foreach ($nodes as $node) {
+		
+			// remove nodeName = #text
+			if ( empty ( $node->localName ) ) continue;
+
+			// don't print html nor body
+			if ( ! preg_match( '/^(html|body|br|p|h[\d]{1}|strong|em)$/', $node->nodeName ) ) $node_out( $node );
+
+			if( ! empty( $node->childNodes ) ) $this->recursive_nodes( $node->childNodes, $next_level );
+			
+		}
 
 	}
 
