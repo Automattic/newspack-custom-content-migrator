@@ -289,16 +289,9 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 	}
 
 
-
-
-
-
-
-
-
-
-
-
+	/**
+	 * POST CONTENT
+	 */
 
 	public function cmd_ourweekly2024_post_content( $pos_args, $assoc_args ) {
 		
@@ -335,7 +328,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			$links = $this->attachments_logic->get_images_sources_from_content( $post->post_content );
 
 			if( 0 == count( $links ) ) {
-				$this->logger->log( $this->log, 'No links found.' );
+				$this->logger->log( $this->log, 'No image links found in post content.' );
 				return;
 			}
 
@@ -348,7 +341,7 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 			});
 
 			if( 0 == count( $links ) ) {
-				$this->logger->log( $this->log, 'No domain links found.' );
+				$this->logger->log( $this->log, 'No our weekly domain links found.' );
 				return;
 			}
 
