@@ -21,6 +21,13 @@ class CreativeCircleMigrator implements InterfaceCommand {
 		],
 		[
 			'type'        => 'assoc',
+			'name'        => 'content-type',
+			'description' => 'Content type to scrape. Default is "stories".',
+			'optional'    => true,
+			'repeating'   => false,
+		],
+		[
+			'type'        => 'assoc',
 			'name'        => 'xajaxr-param',
 			'description' => 'xajaxr parameter.',
 			'optional'    => false,
@@ -125,8 +132,9 @@ class CreativeCircleMigrator implements InterfaceCommand {
 		$xajaxr_param      = $assoc_args['xajaxr-param'];
 		$page_from         = intval( $assoc_args['page-from'] ?? 1 );
 		$page_to           = isset( $assoc_args['page-to'] ) ? intval( $assoc_args['page-to'] ) : null;
+		$content_type      = $assoc_args['content-type'] ?? 'stories';
 
-		Newspack_Scraper_Migrator_Creative_Circle_Scraper::get_instance()->process( $subdomain, $xajaxr_param, $mediasiteq_cookie, $page_from, $page_to );
+		Newspack_Scraper_Migrator_Creative_Circle_Scraper::get_instance()->process( $subdomain, $content_type, $xajaxr_param, $mediasiteq_cookie, $page_from, $page_to );
 		WP_CLI::success( 'Completed.' );
 	}
 
