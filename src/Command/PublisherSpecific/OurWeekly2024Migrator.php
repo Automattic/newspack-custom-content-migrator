@@ -555,27 +555,10 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		}
 
 		// -- WP USERS
-
-/*
-select *
-from wp_usermeta um
-join wp_users u on u.ID = um.user_id
-where um.meta_key = 'newspack_ghostcms_slug'
-and um.meta_value <> u.user_nicename
-order by meta_value
-*/
-
+		// moved to biz file for post run review.
+		
 		// -- CAP GAs
-
-/*
-select distinct pm.meta_value, p.post_name, pm2.meta_value
-from wp_postmeta pm
-join wp_posts p on p.ID = pm.post_id and p.post_type = 'guest-author'
-join wp_postmeta pm2 on pm2.post_id = p.ID and pm2.meta_key = 'cap-user_login'
-where pm.meta_key = 'newspack_ghostcms_slug'
-;
-
-*/
+		// moved to biz file for post run review.
 		
 		$this->logger->log( $this->log, 'Done', $this->logger::SUCCESS );
 
