@@ -115,13 +115,6 @@ class MediumMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
-					[
-						'type'        => 'flag',
-						'name'        => 'ignore-broken-images',
-						'description' => 'Only pass this flag if you are OK with getting images imported wrong.',
-						'optional'    => true,
-						'repeating'   => false,
-					],
 				],
 			]
 		);
@@ -137,10 +130,6 @@ class MediumMigrator implements InterfaceCommand {
 		if ( ! $this->simple_local_avatars_logic->is_sla_plugin_active() ) {
 			WP_CLI::error( 'Simple Local Avatars not found. Install and activate it before using this command.' );
 		}
-
-		// if ( ! WP_CLI\Utils\get_flag_value($assoc_args, 'ignore-broken-images', false ) ) {
-		// 	WP_CLI::error( 'You must pass the --ignore-broken-images flag to use this command. Ideally the image importer should be fixed before running. See TODO comment in import_post_images().' );
-		// }
 
 		$articles_csv_file_path = $assoc_args['zip-archive'];
 		$refresh_content        = isset( $assoc_args['refresh-content'] ) ? true : false;
