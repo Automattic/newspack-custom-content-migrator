@@ -467,6 +467,8 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 	public function cmd_ourweekly2024_redirects( $pos_args, $assoc_args ) {
 		
+		global $wpdb;
+
 		if( ! class_exists ( '\Red_Item' ) ) {
 			WP_CLI::error( 'Redirection plugin must be active.' );
 		}
@@ -476,6 +478,8 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 		$this->mylog( 'Starting ...' );
 
 		// -- POSTS:
+
+		$this->mylog( 'Doing Posts ...' );
 
 		$args = array(
 			// Must be newly imported post
@@ -510,13 +514,45 @@ class OurWeekly2024Migrator implements InterfaceCommand {
 
 		// -- Tags to Categories
 
-/*
-select *
-from wp_termmeta tm
-join wp_terms t on t.term_id = tm.term_id
-where tm.meta_key = 'newspack_ghostcms_slug'
-order by meta_value
-*/
+		$this->mylog( 'Doing Categories ...' );
+
+		// fix incorrect slugs from before...
+		update_term_meta( 1508, 'newspack_ghostcms_slug', 'government', 'politics' );
+		update_term_meta( 96,   'newspack_ghostcms_slug', 'local',      'local-ow' );
+		update_term_meta( 117,  'newspack_ghostcms_slug', 'local-ow' );
+		update_term_meta( 108,  'newspack_ghostcms_slug', 'our-opinion' );			
+		update_term_meta( 119,  'newspack_ghostcms_slug', 'politics' );
+
+		$results = $wpdb->get_results("
+			select t.term_id, t.slug, tm.meta_value
+			from wp_termmeta tm
+			join wp_terms t on t.term_id = tm.term_id
+			where tm.meta_key = 'newspack_ghostcms_slug'
+			order by t.slug
+		");
+
+		foreach( $results as $row ) {
+
+			// Check if an existing tag is already at that url:
+			if( get_term_by( 'slug', $row->slug, 'post_tag' ) ) {
+				
+				$this->logger->log( $this->log, 'Tag already exists for: ' . $row->slug, $this->logger::WARNING );
+				continue;
+
+			}
+
+			// Print out a possible redirect
+			$this->logger->log( $this->log, 'Possible "by-hand" redirect for: ' . $row->slug );
+
+			$url_from = '/tag/' . $row->meta_value;
+			$url_to = '/?cat=' . $row->term_id;
+
+			$this->logger->log( $this->log, 'url_from: ' . $url_from );
+			$this->logger->log( $this->log, 'url_to: ' . $url_to );
+
+			// $this->set_redirect( $url_from, $url_to, 'tags-to-cats', true );
+					
+		}
 
 		// -- WP USERS
 
