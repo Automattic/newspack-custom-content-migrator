@@ -261,17 +261,18 @@ class MediumMigrator implements InterfaceCommand {
 			// Download or import the image file.
 			WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
 			$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
-
-			// Replace the URI in Post content with the new one.
-			$img_uri_new          = wp_get_attachment_url( $attachment_id );
-
+			
 			if ( $figure->count() > 0 ) {
+				$image_block = $this->block_generator->get_image( get_post( $attachment_id ), 'full', false );
+
 				$post_content_updated = str_replace(
 					$figure->outerHtml(),
-					serialize_blocks( [ $this->block_generator->get_image( get_post( $attachment_id ), 'full', false ) ] ),
+					serialize_block( $image_block ),
 					$post_content_updated
 				);
 			} else {
+				// Replace the URI in Post content with the new one.
+				$img_uri_new          = wp_get_attachment_url( $attachment_id );
 				$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
 			}
 		});
