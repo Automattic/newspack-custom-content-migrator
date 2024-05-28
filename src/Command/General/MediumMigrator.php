@@ -2,14 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Medium;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Migrates Medium archive.
@@ -229,53 +229,55 @@ class MediumMigrator implements InterfaceCommand {
 		}
 
 		$post_content_updated = $post_content;
-		$images->each(function ( $img ) use ( $post_id, &$post_content_updated ) {
-			$src = $img->attr('src');
-			$title = $img->attr('title');
-			$alt = $img->attr('alt');
-			$caption = null;
+		$images->each(
+			function ( $img ) use ( $post_id, &$post_content_updated ) {
+				$src     = $img->attr( 'src' );
+				$title   = $img->attr( 'title' );
+				$alt     = $img->attr( 'alt' );
+				$caption = null;
 
-			// Find Caption, if available
-			$figure = $img->ancestors()->filter( 'figure' );
-			if ( $figure->count() > 0 ) {
-				$figcaption = $figure->filter( 'figcaption' );
+				// Find Caption, if available
+				$figure = $img->ancestors()->filter( 'figure' );
+				if ( $figure->count() > 0 ) {
+					$figcaption = $figure->filter( 'figcaption' );
 
-				if ( $figcaption->count() > 0 ) {
-					$caption = $figcaption->text();
+					if ( $figcaption->count() > 0 ) {
+						$caption = $figcaption->text();
+					}
+				}
+
+				// Check if the local image file exists, which will decide whether the image will be imported form file or downloaded.
+				$is_src_absolute = ( 0 === strpos( strtolower( $src ), 'http' ) );
+
+				if ( ! $is_src_absolute ) {
+					WP_CLI::warning( sprintf( '❗ Image src is not absolute: %s', $src ) );
+					return;
+				}
+
+				// If the `<img>` `title` and `alt` are still empty, let's use the image file name without the extension.
+				$filename_wo_extension = str_replace( '.' . pathinfo( $src, PATHINFO_EXTENSION ), '', pathinfo( $src, PATHINFO_FILENAME ) );
+				$title                 = empty( $title ) ? $filename_wo_extension : $title;
+				$alt                   = empty( $alt ) ? $filename_wo_extension : $alt;
+
+				// Download or import the image file.
+				WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
+				$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
+			
+				if ( $figure->count() > 0 ) {
+					$image_block = $this->block_generator->get_image( get_post( $attachment_id ), 'full', false );
+
+					$post_content_updated = str_replace(
+						$figure->outerHtml(),
+						serialize_block( $image_block ),
+						$post_content_updated
+					);
+				} else {
+					// Replace the URI in Post content with the new one.
+					$img_uri_new          = wp_get_attachment_url( $attachment_id );
+					$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
 				}
 			}
-
-			// Check if the local image file exists, which will decide whether the image will be imported form file or downloaded.
-			$is_src_absolute = ( 0 === strpos( strtolower( $src ), 'http' ) );
-
-			if ( ! $is_src_absolute ) {
-				WP_CLI::warning( sprintf( '❗ Image src is not absolute: %s', $src ) );
-				return;
-			}
-
-			// If the `<img>` `title` and `alt` are still empty, let's use the image file name without the extension.
-			$filename_wo_extension = str_replace( '.' . pathinfo( $src, PATHINFO_EXTENSION ), '', pathinfo( $src, PATHINFO_FILENAME ) );
-			$title                 = empty( $title ) ? $filename_wo_extension : $title;
-			$alt                   = empty( $alt ) ? $filename_wo_extension : $alt;
-
-			// Download or import the image file.
-			WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
-			$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
-			
-			if ( $figure->count() > 0 ) {
-				$image_block = $this->block_generator->get_image( get_post( $attachment_id ), 'full', false );
-
-				$post_content_updated = str_replace(
-					$figure->outerHtml(),
-					serialize_block( $image_block ),
-					$post_content_updated
-				);
-			} else {
-				// Replace the URI in Post content with the new one.
-				$img_uri_new          = wp_get_attachment_url( $attachment_id );
-				$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
-			}
-		});
+		);
 
 		return $post_content_updated;
 	}
@@ -306,7 +308,7 @@ class MediumMigrator implements InterfaceCommand {
 
 		$existing_post_id = $refresh_content ? $this->get_post_id_by_meta( $article['original_id'] ) : null;
 
-		$data = 	[
+		$data = [
 			'post_title'     => $article['title'],
 			'post_name'      => $article['original_slug'] ?? '',
 			'post_content'   => $article['content'],
@@ -318,7 +320,7 @@ class MediumMigrator implements InterfaceCommand {
 			'post_author'    => $author_id,
 		];
 		if ( $existing_post_id ) {
-			$post_id = $existing_post_id;
+			$post_id    = $existing_post_id;
 			$data['ID'] = $post_id;
 			wp_update_post( $data );
 		} else {
@@ -348,8 +350,14 @@ class MediumMigrator implements InterfaceCommand {
 
 		// Set the featured image.
 		if ( ! empty( $article['featured_image'] ) ) {
-			$featured_image_id = $this->attachments->import_external_file( $article['featured_image']['url'], $article['title'], $article['featured_image']['caption'], null, null,
-				$post_id );
+			$featured_image_id = $this->attachments->import_external_file(
+				$article['featured_image']['url'],
+				$article['title'],
+				$article['featured_image']['caption'],
+				null,
+				null,
+				$post_id 
+			);
 			if ( is_wp_error( $featured_image_id ) ) {
 				$this->logger->log( 'featured-images-import-fail.log', ' -- Error ' . $verb . ' featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
 			} else {
