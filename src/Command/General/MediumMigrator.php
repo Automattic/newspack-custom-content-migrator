@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
@@ -59,6 +60,13 @@ class MediumMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
+	 * GutenbergBlockGenerator instance.
+	 *
+	 * @var GutenbergBlockGenerator.
+	 */
+	private $block_generator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -66,6 +74,7 @@ class MediumMigrator implements InterfaceCommand {
 		$this->attachments                = new Attachments();
 		$this->simple_local_avatars_logic = new SimpleLocalAvatars();
 		$this->logger                     = new Logger();
+		$this->block_generator            = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -129,9 +138,9 @@ class MediumMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Simple Local Avatars not found. Install and activate it before using this command.' );
 		}
 
-		if ( ! WP_CLI\Utils\get_flag_value($assoc_args, 'ignore-broken-images', false ) ) {
-			WP_CLI::error( 'You must pass the --ignore-broken-images flag to use this command. Ideally the image importer should be fixed before running. See TODO comment in import_post_images().' );
-		}
+		// if ( ! WP_CLI\Utils\get_flag_value($assoc_args, 'ignore-broken-images', false ) ) {
+		// 	WP_CLI::error( 'You must pass the --ignore-broken-images flag to use this command. Ideally the image importer should be fixed before running. See TODO comment in import_post_images().' );
+		// }
 
 		$articles_csv_file_path = $assoc_args['zip-archive'];
 		$refresh_content        = isset( $assoc_args['refresh-content'] ) ? true : false;
@@ -224,24 +233,35 @@ class MediumMigrator implements InterfaceCommand {
 	 */
 	private function import_post_images( $post_content, $post_id ) {
 		// Extract attributes from all the `<img>`s.
-		$img_data = ( new Crawler( $post_content ) )->filterXpath( '//img' )->extract( array( 'src', 'title', 'alt' ) );
+		$images = ( new Crawler( $post_content ) )->filterXpath( '//img' );
 
-		if ( empty( $img_data ) ) {
+		if ( $images->count() === 0 ) {
 			return $post_content;
 		}
 
 		$post_content_updated = $post_content;
-		foreach ( $img_data as $img_datum ) {
-			$src   = trim( $img_datum[0] );
-			$title = $img_datum[1];
-			$alt   = $img_datum[2];
+		$images->each(function ( $img ) use ( $post_id, &$post_content_updated ) {
+			$src = $img->attr('src');
+			$title = $img->attr('title');
+			$alt = $img->attr('alt');
+			$caption = null;
+
+			// Find Caption, if available
+			$figure = $img->ancestors()->filter( 'figure' );
+			if ( $figure->count() > 0 ) {
+				$figcaption = $figure->filter( 'figcaption' );
+
+				if ( $figcaption->count() > 0 ) {
+					$caption = $figcaption->text();
+				}
+			}
 
 			// Check if the local image file exists, which will decide whether the image will be imported form file or downloaded.
 			$is_src_absolute = ( 0 === strpos( strtolower( $src ), 'http' ) );
 
 			if ( ! $is_src_absolute ) {
 				WP_CLI::warning( sprintf( '❗ Image src is not absolute: %s', $src ) );
-				continue;
+				return;
 			}
 
 			// If the `<img>` `title` and `alt` are still empty, let's use the image file name without the extension.
@@ -251,14 +271,21 @@ class MediumMigrator implements InterfaceCommand {
 
 			// Download or import the image file.
 			WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
-			$attachment_id = $this->attachments->import_external_file( $src, $title, null, null, $alt, $post_id );
+			$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
 
 			// Replace the URI in Post content with the new one.
 			$img_uri_new          = wp_get_attachment_url( $attachment_id );
-			// TODO. We need to do more than update the src. If the image has height and width attributes, we need to
-			// remove those - or even better: use an image block.
-			$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
-		}
+
+			if ( $figure->count() > 0 ) {
+				$post_content_updated = str_replace(
+					$figure->outerHtml(),
+					serialize_blocks( [ $this->block_generator->get_image( get_post( $attachment_id ), 'full', false ) ] ),
+					$post_content_updated
+				);
+			} else {
+				$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
+			}
+		});
 
 		return $post_content_updated;
 	}
