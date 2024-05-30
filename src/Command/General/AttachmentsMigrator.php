@@ -9,7 +9,10 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Utils\BatchLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
+use simplehtmldom\HtmlDocument;
 use \WP_CLI;
 
 /**
@@ -37,11 +40,17 @@ class AttachmentsMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
+	 * @var GutenbergBlockGenerator
+	 */
+	private GutenbergBlockGenerator $block_generator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->attachment_logic = new AttachmentsLogic();
 		$this->logger           = new Logger();
+		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -221,9 +230,92 @@ class AttachmentsMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+		WP_CLI::add_command(
+			'newspack-content-migrator attachments-repair-img-blocks-w-no-id',
+			[ $this, 'cmd_repair_img_blocks_w_no_id' ],
+			[
+				'shortdesc' => 'Repair image blocks with local images that have no ID and therefore are harder to edit for the user.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+				],
+			],
+		);
 	}
 
-	/**
+	public function cmd_repair_img_blocks_w_no_id( array $pos_args, array $assoc_args ): void {
+		$logfile = __FUNCTION__ . '.log';
+
+		global $wpdb;
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_content FROM wp_posts WHERE post_content LIKE %s AND post_status = 'publish' AND post_type = 'post' ORDER BY ID LIMIT %d",
+				'%' . $wpdb->esc_like( '<!-- wp:image' ) . '%',
+				$assoc_args[ BatchLogic::$num_items['name'] ] ?? PHP_INT_MAX
+			)
+		);
+
+		$total = count( $posts );
+		$this->logger->log( $logfile, sprintf( 'Found %d posts with image blocks', $total ), Logger::INFO );
+		$counter = 0;
+		foreach ( $posts as $post ) {
+			WP_CLI::log( sprintf( 'Processing post ID %d (%d/%d) ', $post->ID, ++$counter, $total ) );
+			$blocks = parse_blocks( $post->post_content );
+			// Target only image blocks with no id and a local image. "Local" is a bit un-scientific here,
+			// but it's fast.
+			$target_blocks = array_filter( $blocks, function ( $block ) {
+				return 'core/image' === $block['blockName'] && empty( $block['attrs']['id'] ) && str_contains( $block['innerHTML'], '/wp-content/uploads/' );
+			} );
+			if ( empty( $target_blocks ) ) {
+				continue;
+			}
+
+			foreach ( $target_blocks as $idx => $block ) {
+				$doc = new HtmlDocument( $block['innerHTML'] );
+				$img = $doc->find( 'img' );
+				if ( empty( $img[0] ) ) {
+					continue; // Not much we can do.
+				}
+				$src           = $img[0]->getAttribute( 'src' );
+				$relative_url  = strstr( wp_parse_url( $src, PHP_URL_PATH ), '/wp-content' );
+				$url           = get_site_url() . $relative_url;
+				$attachment_id = attachment_url_to_postid( $url );
+				if ( ! $attachment_id ) {
+					// If the attachment doesn't exist, import it.
+					$attachment_id = $this->attachment_logic->import_attachment_for_post( $post->ID, $src );
+
+					if ( is_wp_error( $attachment_id ) ) {
+						$this->logger->log( $logfile, sprintf( 'Failed to import attachment for post %d: %s', $post->ID, $attachment_id->get_error_message() ), Logger::ERROR );
+						continue;
+					}
+				}
+
+				$attachment_post = get_post( $attachment_id );
+				if ( ! empty( $doc->find( 'figcaption' )[0] ) ) {
+					// Temporarily set excerpt on the attachment post so the blocks generator
+					// is tricked into using that as caption.
+					$attachment_post->post_excerpt = $doc->find( 'figcaption' )[0]->innertext();
+				}
+				$repaired_block = $this->block_generator->get_image(
+					$attachment_post,
+					'full',
+					false,
+					'',
+					$block['attrs']['align'] ?? 'center'
+				);
+				$blocks[ $idx ] = $repaired_block;
+			}
+
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => serialize_blocks( $blocks ),
+				]
+			);
+			$this->logger->log( $logfile, sprintf( 'Updated post %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
+		}
+	}
+
+		/**
 	 * Gets a list of attachment IDs by years for those attachments which have files on local in (/wp-content/uploads).
 	 *
 	 * @param array $pos_args   Positional arguments.

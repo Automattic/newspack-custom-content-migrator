@@ -121,7 +121,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-scraper-migrator.git",
-                "reference": "8c7188dac6f0a55527471525acbf690849dc2f0a"
+                "reference": "b1605ca6ae041ecd4e0f50d70bff54dd2b7f259d"
             },
             "require": {
                 "paquettg/php-html-parser": "^3.0.0",
@@ -141,7 +141,7 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Plugin that migrates a site by scraping the frontend content.",
-            "time": "2024-03-12T13:24:54+00:00"
+            "time": "2024-05-29T09:38:24+00:00"
         },
         {
             "name": "brainmaestro/composer-git-hooks",
