@@ -272,6 +272,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 				'post_content' => str_replace( '__GHOST_URL__', $this->ghost_url, $json_post->html ),
 				'post_date'    => $json_post->published_at,
 				'post_excerpt' => $json_post->custom_excerpt ?? '',
+				'post_name'    => $json_post->slug,
 				'post_status'  => 'publish',
 				'post_title'   => $json_post->title,
 			);
