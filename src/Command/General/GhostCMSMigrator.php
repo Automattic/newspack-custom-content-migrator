@@ -36,7 +36,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 *
 	 * @var array $authors_to_wp_objects
 	 */
-	private $authors_to_wp_objects;
+	private array $authors_to_wp_objects;
 
 	/**
 	 * CoAuthorPlusLogic
@@ -50,7 +50,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 *
 	 * @var string ghost_url
 	 */
-	private $ghost_url;
+	private string $ghost_url;
 
 	/**
 	 * Instance
@@ -64,14 +64,14 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 *
 	 * @var object $json
 	 */
-	private $json;
+	private object $json;
 
 	/**
 	 * Log (file path)
 	 *
 	 * @var string $log
 	 */
-	private $log;
+	private string $log;
 
 	/**
 	 * Logger
@@ -87,7 +87,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 *
 	 * @var array $tags_to_categories
 	 */
-	private $tags_to_categories;
+	private array $tags_to_categories;
 
 	/**
 	 * Constructor.
@@ -162,7 +162,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param array $pos_args Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_ghost_cms_import( $pos_args, $assoc_args ) {
+	public function cmd_ghost_cms_import( array $pos_args, array $assoc_args ): void {
 
 		global $wpdb;
 		
@@ -322,7 +322,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param string $json_author_user_id JSON author id.
 	 * @return null|Object
 	 */
-	private function get_json_author_user_by_id( $json_author_user_id ) {
+	private function get_json_author_user_by_id( string $json_author_user_id ): ?object {
 
 		if ( empty( $this->json->db[0]->data->users ) ) {
 			return null;
@@ -344,7 +344,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param string $json_post_id JSON post id.
 	 * @return null|Object
 	 */
-	private function get_json_post_meta( $json_post_id ) {
+	private function get_json_post_meta( string $json_post_id ): ?object {
 
 		if ( empty( $this->json->db[0]->data->posts_meta ) ) {
 			return null;
@@ -366,7 +366,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param string $json_tag_id JSON tag id.
 	 * @return null|Object
 	 */
-	private function get_json_tag_by_id( $json_tag_id ) {
+	private function get_json_tag_by_id( string $json_tag_id ): ?object {
 
 		if ( empty( $this->json->db[0]->data->tags ) ) {
 			return null;
@@ -393,7 +393,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param int    $post_id Post ID (optional).
 	 * @return int|WP_Error $attachment_id
 	 */
-	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null, $post_id = 0 ) {
+	private function get_or_import_url( string $path, string $title, string $caption = null, string $description = null, string $alt = null, int $post_id = 0 ): mixed {
 
 		global $wpdb;
 
@@ -424,7 +424,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param object $json_author_user json author (user) object.
 	 * @return 0|GA|WP_User
 	 */
-	private function insert_json_author_user( $json_author_user ) {
+	private function insert_json_author_user( object $json_author_user ): mixed {
 
 		// Must have visibility property with value of 'public'.
 		if ( empty( $json_author_user->visibility ) || 'public' != $json_author_user->visibility ) {
@@ -506,7 +506,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param object $json_tag json tag object.
 	 * @return 0|int
 	 */
-	private function insert_json_tag_as_category( $json_tag ) {
+	private function insert_json_tag_as_category( object $json_tag ): int {
 
 		// Must have visibility property with value of 'public'.
 		if ( empty( $json_tag->visibility ) || 'public' != $json_tag->visibility ) {
@@ -551,7 +551,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param string $json_post_id json post id.
 	 * @return void
 	 */
-	private function set_post_authors( $wp_post_id, $json_post_id ) {
+	private function set_post_authors( int $wp_post_id, string $json_post_id ): void {
 
 		if ( empty( $this->json->db[0]->data->posts_authors ) ) {
 			
@@ -625,7 +625,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param string $old_image_url URL scheme with domain.
 	 * @return void
 	 */
-	private function set_post_featured_image( $wp_post_id, $json_post_id, $old_image_url ) {
+	private function set_post_featured_image( int $wp_post_id, string $json_post_id, string $old_image_url ): void {
 
 		// The old image url may already contain the domain name ( https://mywebsite.com/.../image.jpg ).
 		// But if not, replace the placeholder ( __GHOST_URL__/.../image.jpg ).
@@ -665,15 +665,15 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 *
 	 * @param int    $wp_post_id wp_posts ID.
 	 * @param string $json_post_id json post id.
-	 * @return null
+	 * @return void
 	 */
-	private function set_post_tags_to_categories( $wp_post_id, $json_post_id ) {
+	private function set_post_tags_to_categories( int $wp_post_id, string $json_post_id ): void {
 
 		if ( empty( $this->json->db[0]->data->posts_tags ) ) {
 			
 			$this->logger->log( $this->log, 'JSON has no post tags (category) relationships.', $this->logger::WARNING );
 
-			return null;
+			return;
 		
 		}
 
@@ -721,7 +721,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		
 			$this->logger->log( $this->log, 'No categories.' );
 
-			return null;
+			return;
 		
 		}
 		
@@ -736,7 +736,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param object $json_post JSON post object.
 	 * @return string|null
 	 */
-	private function skip( $json_post ) {
+	private function skip( object $json_post ): ?string {
 
 		global $wpdb;
 
