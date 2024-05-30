@@ -390,9 +390,10 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param string $caption Image caption (optional).
 	 * @param string $description Image desc (optional).
 	 * @param string $alt Image alt (optional).
+	 * @param int    $post_id Post ID (optional).
 	 * @return int|WP_Error $attachment_id
 	 */
-	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null ) {
+	private function get_or_import_url( $path, $title, $caption = null, $description = null, $alt = null, $post_id = 0 ) {
 
 		global $wpdb;
 
@@ -414,7 +415,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		}
 
 		// this function will check if existing, but only after re-downloading.
-		return $this->attachments_logic->import_external_file( $path, $title, $caption, $description, $alt );
+		return $this->attachments_logic->import_external_file( $path, $title, $caption, $description, $alt, $post_id );
 	}
 
 	/**
@@ -639,7 +640,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 		$old_image_caption = $json_meta->feature_image_caption ?? '';
 
 		// get existing or upload new.
-		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt );
+		$featured_image_id = $this->get_or_import_url( $old_image_url, $old_image_url, $old_image_caption, $old_image_caption, $old_image_alt, $wp_post_id );
 
 		if ( ! is_numeric( $featured_image_id ) || ! ( $featured_image_id > 0 ) ) {
 			
