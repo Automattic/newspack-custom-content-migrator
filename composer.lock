@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ba927ee3149f687c3ba46c96e2a2a9ea",
+    "content-hash": "95f212e287b86f9d84964dfbb9973e09",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -40,6 +40,34 @@
             ],
             "description": "Plugin that enables mass conversion of pre-Gutenberg post content to the Gutenberg Blocks content.",
             "time": "2023-10-25T09:16:00+00:00"
+        },
+        {
+            "name": "automattic/newspack-migration-tools",
+            "version": "dev-trunk",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/Automattic/newspack-migration-tools.git",
+                "reference": "f61c7e0e804be24f63e3dc4e927fc21aa3218135"
+            },
+            "require-dev": {
+                "automattic/vipwpcs": "^3.0",
+                "phpcompatibility/phpcompatibility-wp": "*",
+                "phpunit/phpunit": "^9.6",
+                "wp-coding-standards/wpcs": "^3.0",
+                "yoast/phpunit-polyfills": "^2.0"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Newspack\\MigrationTools\\": "src/"
+                }
+            },
+            "license": [
+                "GPL-3.0-or-later"
+            ],
+            "description": "A set of tools to help migration to WordPress.",
+            "time": "2024-05-29T15:30:47+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
@@ -4817,7 +4845,8 @@
         "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-content-converter": 20,
         "simplehtmldom/simplehtmldom": 5,
-        "automattic/newspack-scraper-migrator": 20
+        "automattic/newspack-scraper-migrator": 20,
+        "automattic/newspack-migration-tools": 20
     },
     "prefer-stable": false,
     "prefer-lowest": false,
