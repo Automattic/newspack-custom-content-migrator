@@ -107,6 +107,8 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 		foreach ( $issues_source_ids as $index => $issue_source_id ) {
 			$this->logger->log( $log, sprintf( 'Processing Post #%d', $issue_source_id ) );
 
+			$issue_source_post = get_post( $issue_source_id );
+
 			$status = '';
 
 			// 1. Search for a Post with the meta.
@@ -122,17 +124,36 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 			);
 
 			if ( count( $issue_posts ) > 0 ) {
-				// 1.1. Post already exists.
-				$this->logger->log( $log, 'Post already exists. Skipping...' );
+				$issue_post = $issue_posts[0];
+				$post_id = $issue_post->ID;
 
-				$status = 'EXISTS';
+				if ( empty( $issue_post->post_content ) ) {
+					// 1.1. Post already exists, but content needs population.
+					$this->logger->log( $log, 'Post already exists. Updating content...' );
 
-				$post_id = $issue_posts[0]->ID;
+					$status = 'UPDATED';
+
+					$issue_post_content_updated = $this->get_generated_issue_post_content( [
+						'title' => get_post_meta( $issue_source_id, 'title', true ),
+						'release_date' => get_post_meta( $issue_source_id, 'release_date', true ),
+						'volume' => get_post_meta( $issue_source_id, 'issue_volume', true ),
+						'number' => get_post_meta( $issue_source_id, 'issue_number', true ),
+						'url' => get_post_meta( $issue_source_id, 'digital_edition_url', true ),
+					] );
+
+					wp_update_post( [
+						'ID' => $post_id,
+						'post_content' => $issue_post_content_updated,
+					] );
+				} else {
+					// 1.2. Post already exists.
+					$this->logger->log( $log, 'Post already exists. Skipping...' );
+
+					$status = 'EXISTS';
+				}
 			} else {
-				// 1.2. Post doesn't exist.
+				// 1.3. Post doesn't exist.
 				$this->logger->log( $log, 'Post doesn\'t exist. Trying to insert...' );
-
-				$issue_source_post = get_post( $issue_source_id );
 
 				$post_id = wp_insert_post(
 					[
@@ -236,6 +257,8 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 			$this->logger->log( $log, sprintf( 'Processing Attachment #%d', $attachment_id ) );
 
 			if ( get_post_meta( $attachment_id, 'newspack_metas_updated_media_credits', true ) === 'yes' ) {
+				$progress_bar->tick( 1, sprintf( '[Memory: %s]', size_format( memory_get_usage( true ) ) ) );
+
 				continue;
 			}
 
@@ -345,5 +368,64 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 		return term_exists( 'Issues', 'category' )
 			? get_cat_ID( 'Issues' )
 			: wp_create_category( 'Issues' );
+	}
+
+	/**
+	 * Get a generated Block Pattern for Issue Post Content.
+	 */
+	private function get_generated_issue_post_content( array $args ): string {
+		$issue_sequence = [];
+
+		if ( ! empty( $args['volume'] ) ) {
+			$issue_sequence[] = sprintf( 'Volume %s', $args['volume'] );
+		}
+
+		if ( ! empty( $args['number'] ) ) {
+			$issue_sequence[] = sprintf( 'No %s', $args['number'] );
+		}
+
+		ob_start();
+		?>
+
+		<!-- wp:group {"layout":{"type":"flex","orientation":"vertical","justifyContent":"center"}} -->
+		<div class="wp-block-group">
+			<?php if ( $args['title'] ) : ?>
+				<!-- wp:heading {"textAlign":"center","level":4} -->
+				<h4 class="wp-block-heading has-text-align-center"><?php echo esc_html( $args['title'] ); ?></h4>
+				<!-- /wp:heading -->
+			<?php endif; ?>
+		
+			<?php if ( $args['release_date'] ) : ?>
+				<!-- wp:paragraph {"align":"center"} -->
+				<p class="has-text-align-center"><?php echo date( 'F j, Y', strtotime( $args['release_date'] ) ); ?></p>
+				<!-- /wp:paragraph -->
+			<?php endif; ?>
+		
+			<!-- wp:separator -->
+			<hr class="wp-block-separator has-alpha-channel-opacity"/>
+			<!-- /wp:separator -->
+		
+			<?php if ( ! empty( $issue_sequence ) ) : ?>
+				<!-- wp:heading {"textAlign":"center","level":5} -->
+				<h5 class="wp-block-heading has-text-align-center"><?php echo implode( ' » ', $issue_sequence ); ?></h5>
+				<!-- /wp:heading -->
+			<?php endif; ?>
+		
+			<?php if ( ! empty( $args['url'] ) ) : ?>
+				<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} -->
+				<div class="wp-block-buttons">
+					<!-- wp:button {"textAlign":"center","backgroundColor":"light-gray","textColor":"medium-gray","style":{"spacing":{"padding":{"left":"16px","right":"16px","top":"8px","bottom":"8px"}},"elements":{"link":{"color":{"text":"var:preset|color|medium-gray"}}}}} -->
+					<div class="wp-block-button">
+						<a class="wp-block-button__link has-medium-gray-color has-light-gray-background-color has-text-color has-background has-link-color has-text-align-center wp-element-button" href="<?php echo esc_url( $args['url'] ); ?>" target="_blank" style="padding-top:8px;padding-right:16px;padding-bottom:8px;padding-left:16px">Read the print version</a>
+					</div>
+					<!-- /wp:button -->
+				</div>
+				<!-- /wp:buttons -->
+			<?php endif; ?>
+		</div>
+		<!-- /wp:group -->
+
+		<?php
+		return ob_get_clean();
 	}
 }
