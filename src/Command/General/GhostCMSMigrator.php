@@ -16,6 +16,7 @@ use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
+use WP_Error;
 
 /**
  * Custom migration scripts for Ghost CMS.
@@ -393,7 +394,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @param int    $post_id Post ID (optional).
 	 * @return int|WP_Error $attachment_id
 	 */
-	private function get_or_import_url( string $path, string $title, string $caption = null, string $description = null, string $alt = null, int $post_id = 0 ): mixed {
+	private function get_or_import_url( string $path, string $title, string $caption = null, string $description = null, string $alt = null, int $post_id = 0 ): int|WP_Error {
 
 		global $wpdb;
 
@@ -422,7 +423,7 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * Insert JSON author (user)
 	 *
 	 * @param object $json_author_user json author (user) object.
-	 * @return 0|GA|WP_User
+	 * @return int|object|WP_User Return of integer 0 means not inserted, otherwise generic "Guest Author" object or WP_User is returned.
 	 */
 	private function insert_json_author_user( object $json_author_user ): mixed {
 
