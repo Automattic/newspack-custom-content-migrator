@@ -95,5 +95,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 		Command\PublisherSpecific\LAFocusMigrator::class,
 		Command\PublisherSpecific\TheFifthEstateMigrator::class,
+		Command\PublisherSpecific\FeetIn2WorldsMigrator::class,
 	)
 );
